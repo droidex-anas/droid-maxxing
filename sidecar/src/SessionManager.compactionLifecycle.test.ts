@@ -4,7 +4,7 @@ import test from 'node:test';
 import { ContextStatsAccuracy } from '@factory/droid-sdk';
 
 import { FakeFactorySession, type RecordedCall } from './testing/fakeFactoryRuntime.js';
-import { writeProviderSessionStart } from './testing/historyCharacterizationSupport.js';
+import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 import type { ServerEvent } from './protocol.js';
 import {
@@ -444,7 +444,7 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
     };
     h.provider.session('provider-1').nextCloseError = new Error('old provider close failed');
     const resumed = new FakeFactorySession('provider-7', {}, h.calls);
-    writeProviderSessionStart(h.home, 'provider-7', 'C7 compacted');
+    writeProviderConversation(h.home, 'provider-7', 'C7 compacted');
     h.runtime.loadQueue.set('provider-7', [
       new Error('first adoption failed'),
       new Error('second adoption failed'),

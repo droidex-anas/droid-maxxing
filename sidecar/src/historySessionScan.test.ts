@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-session-scan-home-'));
@@ -22,12 +23,12 @@ function writeSession(id: string, title: string): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, `${id}.jsonl`),
-    `${JSON.stringify({
+    providerSessionJsonl({
       type: 'session_start',
       cwd: '',
       sessionTitle: title,
       settings: { interactionMode: 'auto' },
-    })}\n`,
+    }),
   );
 }
 

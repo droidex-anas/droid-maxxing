@@ -6,7 +6,7 @@ import test from 'node:test';
 import { DecompSessionType } from '@factory/droid-sdk';
 
 import type { SessionSummary } from './protocol.js';
-import { writeProviderSessionStart } from './testing/historyCharacterizationSupport.js';
+import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import { assistantTextDelta, FakeFactorySession } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 
@@ -215,7 +215,7 @@ test(
         h.calls.some((call) => call.target === 'history' && call.method === 'syncSummaries'),
         false,
       );
-      writeProviderSessionStart(h.home, 'provider-5', 'Historical app-5');
+      writeProviderConversation(h.home, 'provider-5', 'Historical app-5');
       h.runtime.loadQueue.set('provider-5', [new FakeFactorySession('provider-5', {}, h.calls)]);
       await h.handle({ type: 'session.resume', appSessionId: 'app-5' });
 
@@ -243,7 +243,7 @@ test(
       h.fixture.seedHistorySummaries([
         { ...summary('app-agi-chat', 'provider-agi-chat'), interactionMode: 'agi' },
       ]);
-      writeProviderSessionStart(h.home, 'provider-agi-chat', 'AGI chat');
+      writeProviderConversation(h.home, 'provider-agi-chat', 'AGI chat');
       h.runtime.loadQueue.set('provider-agi-chat', [
         new FakeFactorySession('provider-agi-chat', {}, h.calls, {
           settings: { interactionMode: 'agi' },
@@ -279,7 +279,7 @@ test('[L6] Send lazily resumes a historical session', { concurrency: false }, as
       h.calls.some((call) => call.target === 'history' && call.method === 'syncSummaries'),
       false,
     );
-    writeProviderSessionStart(h.home, 'provider-6', 'Historical app-6');
+    writeProviderConversation(h.home, 'provider-6', 'Historical app-6');
     h.runtime.loadQueue.set('provider-6', [new FakeFactorySession('provider-6', {}, h.calls)]);
     await h.handle({ type: 'session.send', appSessionId: 'app-6', text: 'once' });
 
@@ -298,7 +298,7 @@ test(
 
     try {
       h.fixture.seedHistorySummaries([summary('app-alias', 'provider-alias')]);
-      writeProviderSessionStart(h.home, 'provider-alias', 'Alias');
+      writeProviderConversation(h.home, 'provider-alias', 'Alias');
       const provider = new FakeFactorySession('provider-alias', {}, h.calls);
       provider.queueStreamEvents([assistantTextDelta('first answer', 'first-message')]);
       provider.queueStreamEvents([assistantTextDelta('second answer', 'second-message')]);
@@ -339,7 +339,7 @@ test(
           modelId: 'model-old',
         },
       ]);
-      writeProviderSessionStart(h.home, providerSessionId, 'Pending alias');
+      writeProviderConversation(h.home, providerSessionId, 'Pending alias');
       await h.handle({
         type: 'settings.agent.update',
         appSessionId: providerSessionId,

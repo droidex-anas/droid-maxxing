@@ -9,7 +9,7 @@ import {
 } from '@factory/droid-sdk';
 
 import type { SessionSummary, ServerEvent } from './protocol.js';
-import { writeProviderSessionStart } from './testing/historyCharacterizationSupport.js';
+import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import type { RecordedCall } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 
@@ -160,7 +160,7 @@ test(
 
     try {
       h.fixture.seedHistorySummaries([historicalSummary('app-p1', 'provider-p1')]);
-      writeProviderSessionStart(h.home, 'provider-p1', 'Historical app-p1');
+      writeProviderConversation(h.home, 'provider-p1', 'Historical app-p1');
       await h.handle({ type: 'session.resume', appSessionId: 'app-p1' });
 
       const handler = h.provider.session('provider-p1').handlers.permissionHandler;

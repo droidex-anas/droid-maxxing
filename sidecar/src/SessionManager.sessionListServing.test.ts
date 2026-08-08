@@ -5,20 +5,32 @@ import test from 'node:test';
 
 import type { SessionFileWatcherOptions } from './sessionFileWatcher.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import {
+  providerSessionJsonl,
+  type ProviderMessageRole,
+} from './testing/providerSessionFixtures.js';
 
 // Writes a session file with no app involvement, like a Droid CLI run or a
 // parallel app instance would.
-function writeExternalSession(home: string, id: string, cwd: string): void {
+function writeExternalSession(
+  home: string,
+  id: string,
+  cwd: string,
+  messageRoles: ProviderMessageRole[] = ['user', 'assistant'],
+): void {
   const dir = join(home, '.factory', 'sessions', '2026', '08');
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, `${id}.jsonl`),
-    `${JSON.stringify({
-      type: 'session_start',
-      cwd,
-      sessionTitle: 'External CLI session',
-      settings: { interactionMode: 'auto' },
-    })}\n`,
+    providerSessionJsonl(
+      {
+        type: 'session_start',
+        cwd,
+        sessionTitle: 'External CLI session',
+        settings: { interactionMode: 'auto' },
+      },
+      messageRoles,
+    ),
   );
 }
 
@@ -73,6 +85,68 @@ test('sessions created outside the app are republished live when the watcher fir
     await ctx.dispose();
   }
   assert.equal(watcherClosed, true, 'watcher closes on shutdown');
+});
+
+test('metadata-only sessions created outside the app never become sidebar rows', async () => {
+  let watcherOptions: SessionFileWatcherOptions | undefined;
+  const ctx = createSessionManagerTestContext({
+    startSessionFileWatcher: (options) => {
+      watcherOptions = options;
+      return { consumeLiveSessionFile: () => undefined, close: () => {} };
+    },
+  });
+  try {
+    await ctx.handle({ type: 'sessions.list' });
+    writeExternalSession(ctx.home, 'empty-external-session', '/tmp/external-workspace', []);
+    const sessionFile = join(
+      ctx.home,
+      '.factory',
+      'sessions',
+      '2026',
+      '08',
+      'empty-external-session.jsonl',
+    );
+
+    watcherOptions?.onExternalChange([
+      { providerSessionId: 'empty-external-session', path: sessionFile },
+    ]);
+
+    const list = ctx.events.filter((event) => event.type === 'sessions.list').at(-1);
+    assert.ok(list?.type === 'sessions.list');
+    assert.equal(
+      list.sessions.some((session) => session.appSessionId === 'empty-external-session'),
+      false,
+    );
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test('a live first turn stays visible before the provider writes its response', async () => {
+  const ctx = createSessionManagerTestContext();
+  try {
+    await ctx.create({
+      cwd: '/tmp/live-first-turn',
+      sessionPurpose: 'chat',
+      clientRef: 'live-first-turn',
+      title: 'Live first turn',
+      goal: 'hello',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+
+    await ctx.handle({ type: 'sessions.list', workspaceCwds: ['/tmp/live-first-turn'] });
+
+    const created = ctx.events.find((event) => event.type === 'session.created');
+    const list = ctx.events.filter((event) => event.type === 'sessions.list').at(-1);
+    assert.ok(created?.type === 'session.created');
+    assert.ok(list?.type === 'sessions.list');
+    assert.ok(
+      list.sessions.some((session) => session.appSessionId === created.session.appSessionId),
+    );
+  } finally {
+    await ctx.dispose();
+  }
 });
 
 test('unexplained watcher events fall back to a full reconcile before republishing', async () => {
