@@ -11,6 +11,13 @@ import type {
   PullRequest,
 } from '../types/vcs';
 
+export function isGithubAuthCodeCopied(
+  authCode: string | null,
+  copiedCode: string | null,
+): boolean {
+  return authCode !== null && authCode === copiedCode;
+}
+
 function githubApi() {
   return typeof window === 'undefined' ? undefined : window.droidControl;
 }

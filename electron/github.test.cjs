@@ -436,6 +436,41 @@ test('cancelling browser authentication terminates its child process', async () 
   });
 });
 
+test('cancelling during final authentication verification cannot report success', async () => {
+  const child = fakeChild();
+  let verificationStarted;
+  const started = new Promise((resolve) => {
+    verificationStarted = resolve;
+  });
+  let finishVerification;
+  const pending = authenticate({
+    resolveGh: async () => '/opt/homebrew/bin/gh',
+    spawnProcess: () => {
+      queueMicrotask(() => {
+        child.stderr.write('https://github.com/login/device\n');
+        child.emit('close', 0, null);
+      });
+      return child;
+    },
+    verifyAuth: async () => {
+      verificationStarted();
+      return new Promise((resolve) => {
+        finishVerification = resolve;
+      });
+    },
+  });
+
+  await started;
+  cancelSetup();
+  finishVerification(true);
+
+  assert.deepEqual(await pending, {
+    ok: false,
+    reason: 'cancelled',
+    message: 'GitHub sign-in was cancelled.',
+  });
+});
+
 test('PR selectors accept only bare positive digit strings', () => {
   assert.equal(prSelector(78), '78');
   assert.equal(prSelector('078'), '078');

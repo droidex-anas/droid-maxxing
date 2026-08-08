@@ -108,6 +108,10 @@ test('GitHub setup handlers require the trusted renderer and teardown their proc
   assert.match(authenticateHandler, /event\.sender\.send\('github-auth-code', \{ code \}\)/);
 
   assert.match(mainSource, /app\.on\('before-quit',[\s\S]*?githubVcs\.cancelSetup\(\)/);
+  const windowClosedStart = mainSource.indexOf("mainWindow.on('closed'");
+  const windowClosedEnd = mainSource.indexOf('\n  });', windowClosedStart);
+  assert.notEqual(windowClosedStart, -1);
+  assert.match(mainSource.slice(windowClosedStart, windowClosedEnd), /githubVcs\.cancelSetup\(\)/);
   assert.match(
     mainSource,
     /const cleanupForRendererReplacement = \(\) => \{[\s\S]*?githubVcs\.cancelSetup\(\)/,

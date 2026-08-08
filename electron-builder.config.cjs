@@ -45,8 +45,9 @@ if (isReleaseBuild || isUnsignedReleaseBuild) {
   try {
     const parsedSentryDsn = new URL(sentryDsn);
     isCanonicalSentryProject =
-      parsedSentryDsn.protocol === 'https:' &&
-      parsedSentryDsn.hostname === 'o4511166732304384.ingest.de.sentry.io' &&
+      parsedSentryDsn.origin === 'https://o4511166732304384.ingest.de.sentry.io' &&
+      parsedSentryDsn.username.length > 0 &&
+      parsedSentryDsn.password === '' &&
       parsedSentryDsn.pathname === '/4511850999185488';
   } catch {
     // The closed release validation below owns the user-facing error.

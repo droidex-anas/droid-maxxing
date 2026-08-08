@@ -2,12 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import {
-  SessionRow,
-  UnreadFilterActions,
-  areSessionRowPropsEqual,
-  type SessionRowProps,
-} from './Sidebar';
+import { SessionRow, areSessionRowPropsEqual, type SessionRowProps } from './Sidebar';
+import { UnreadFilterActions } from './UnreadFilterActions';
 import type { SessionSummary } from '../types/bridge';
 
 function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {

@@ -122,6 +122,10 @@ export function shouldRefreshGithubOnVisibility(
   return state.manualGuideOpened && !isHidden;
 }
 
+export function shouldResetGithubSetupForRepository(state: GithubSetupState): boolean {
+  return state.action !== 'authenticating';
+}
+
 export interface GithubSetupController {
   availability: GithubAvailability | null;
   action: GithubSetupAction;
@@ -160,19 +164,19 @@ export function useGithubSetup(enabled: boolean, repositoryKey: string): GithubS
   }, [probe]);
 
   useEffect(() => {
+    if (!shouldResetGithubSetupForRepository(stateRef.current)) return;
     const requestId = ++requestIdRef.current;
     dispatch({ type: 'reset', requestId });
     probe(requestId);
   }, [enabled, repositoryKey, probe]);
 
   useEffect(() => {
-    if (!enabled) return;
     return onGithubAuthCode((code) => {
       const current = stateRef.current;
       if (current.action !== 'authenticating') return;
       dispatch({ type: 'auth-code-received', requestId: current.requestId, code });
     });
-  }, [enabled]);
+  }, []);
 
   const finishOperation = useCallback(
     (requestId: number, result: GithubSetupResult) => {

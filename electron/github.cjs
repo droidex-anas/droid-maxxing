@@ -1,14 +1,12 @@
 // GitHub pull-request integration for the Context panel, driven by the `gh`
 // CLI so it reuses the user's existing authentication and works on every OS.
 // Every method degrades gracefully when `gh` is missing or unauthenticated.
-const { execFile } = require('node:child_process');
-const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { resolveExecutable, runFile } = require('./executable.cjs');
 const githubSetup = require('./githubSetup.cjs');
 
 const DEFAULT_TIMEOUT = 15000;
-const MAX_BUFFER = 16 * 1024 * 1024;
 const COMMON_GH_PATHS = ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/opt/local/bin/gh'];
 
 let cachedGhExecutablePromise;
@@ -20,57 +18,8 @@ function expandHome(value) {
   return str;
 }
 
-function runFile(file, args, { cwd, timeout = DEFAULT_TIMEOUT } = {}) {
-  return new Promise((resolve) => {
-    execFile(
-      file,
-      args,
-      { ...(cwd ? { cwd } : {}), timeout, maxBuffer: MAX_BUFFER },
-      (err, stdout, stderr) => {
-        resolve({
-          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-          stdout: String(stdout || ''),
-          stderr: String(stderr || ''),
-          spawnFailed: !!err && err.code === 'ENOENT',
-        });
-      },
-    );
-  });
-}
-
-async function resolveGhExecutable(options = {}) {
-  const env = options.env || process.env;
-  const access =
-    options.access || ((candidate) => fs.promises.access(candidate, fs.constants.X_OK));
-  const execute = options.runFile || runFile;
-  const pathCandidates = String(env.PATH || '')
-    .split(path.delimiter)
-    .filter(Boolean)
-    .map((directory) => path.join(directory, 'gh'));
-  const candidates = [...new Set([...pathCandidates, ...COMMON_GH_PATHS])];
-
-  const validate = async (candidate) => {
-    try {
-      await access(candidate);
-      const version = await execute(candidate, ['--version'], { timeout: 5_000 });
-      return version.code === 0 ? candidate : null;
-    } catch {
-      return null;
-    }
-  };
-
-  for (const candidate of candidates) {
-    const valid = await validate(candidate);
-    if (valid) return valid;
-  }
-
-  const shell = String(env.SHELL || '').trim();
-  if (!shell) return null;
-  const lookup = await execute(shell, ['-lc', 'command -v gh'], { timeout: 5_000 });
-  if (lookup.code !== 0) return null;
-  const shellCandidate = lookup.stdout.trim().split(/\r?\n/, 1)[0];
-  if (!path.isAbsolute(shellCandidate)) return null;
-  return validate(shellCandidate);
+function resolveGhExecutable(options = {}) {
+  return resolveExecutable({ binaryName: 'gh', commonPaths: COMMON_GH_PATHS }, options);
 }
 
 async function cachedGhExecutable() {

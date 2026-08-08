@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { notify, requestNotificationPermission } from './desktop';
+import { notify } from './desktop';
 
 function replaceGlobal(name: string, value: unknown): () => void {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -23,34 +23,13 @@ test('notify returns the desktop bridge delivery result', async () => {
   }
 });
 
-test('requestNotificationPermission returns denied from the browser permission prompt', async () => {
-  const restore = replaceGlobal('Notification', {
-    permission: 'default',
-    requestPermission: async () => 'denied',
-  });
+test('notify reports unsupported when the desktop bridge is absent', async () => {
+  const restore = replaceGlobal('window', undefined);
   try {
-    assert.equal(await requestNotificationPermission(), 'denied');
-  } finally {
-    restore();
-  }
-});
-
-test('requestNotificationPermission preserves a dismissed browser permission prompt', async () => {
-  const restore = replaceGlobal('Notification', {
-    permission: 'default',
-    requestPermission: async () => 'default',
-  });
-  try {
-    assert.equal(await requestNotificationPermission(), 'default');
-  } finally {
-    restore();
-  }
-});
-
-test('requestNotificationPermission reports unsupported when the API is absent', async () => {
-  const restore = replaceGlobal('Notification', undefined);
-  try {
-    assert.equal(await requestNotificationPermission(), 'unsupported');
+    assert.deepEqual(await notify('DROIDEX', 'Finished'), {
+      shown: false,
+      reason: 'unsupported',
+    });
   } finally {
     restore();
   }

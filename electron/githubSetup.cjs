@@ -1,12 +1,10 @@
 // GitHub CLI installation and browser authentication for the Context panel.
 // This module owns the single active setup process and never exposes command
 // output or credentials outside Electron.
-const { execFile, spawn } = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { resolveExecutable, runFile } = require('./executable.cjs');
 
 const DEFAULT_TIMEOUT = 15000;
-const MAX_BUFFER = 16 * 1024 * 1024;
 const COMMON_BREW_PATHS = ['/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
 const INSTALL_TIMEOUT = 10 * 60 * 1000;
 const AUTH_TIMEOUT = 10 * 60 * 1000;
@@ -15,52 +13,8 @@ const MAX_AUTH_OUTPUT = 16 * 1024;
 let cachedBrewExecutablePromise;
 let activeSetup = null;
 
-function runFile(file, args, { timeout = DEFAULT_TIMEOUT } = {}) {
-  return new Promise((resolve) => {
-    execFile(file, args, { timeout, maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
-      resolve({
-        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-        stdout: String(stdout || ''),
-        stderr: String(stderr || ''),
-        spawnFailed: !!err && err.code === 'ENOENT',
-      });
-    });
-  });
-}
-
-async function resolveBrewExecutable(options = {}) {
-  const env = options.env || process.env;
-  const access =
-    options.access || ((candidate) => fs.promises.access(candidate, fs.constants.X_OK));
-  const execute = options.runFile || runFile;
-  const pathCandidates = String(env.PATH || '')
-    .split(path.delimiter)
-    .filter(Boolean)
-    .map((directory) => path.join(directory, 'brew'));
-  const candidates = [...new Set([...pathCandidates, ...COMMON_BREW_PATHS])];
-
-  const validate = async (candidate) => {
-    try {
-      await access(candidate);
-      const version = await execute(candidate, ['--version'], { timeout: 5_000 });
-      return version.code === 0 ? candidate : null;
-    } catch {
-      return null;
-    }
-  };
-
-  for (const candidate of candidates) {
-    const valid = await validate(candidate);
-    if (valid) return valid;
-  }
-
-  const shell = String(env.SHELL || '').trim();
-  if (!shell) return null;
-  const lookup = await execute(shell, ['-lc', 'command -v brew'], { timeout: 5_000 });
-  if (lookup.code !== 0) return null;
-  const shellCandidate = lookup.stdout.trim().split(/\r?\n/, 1)[0];
-  if (!path.isAbsolute(shellCandidate)) return null;
-  return validate(shellCandidate);
+function resolveBrewExecutable(options = {}) {
+  return resolveExecutable({ binaryName: 'brew', commonPaths: COMMON_BREW_PATHS }, options);
 }
 
 async function cachedBrewExecutable() {
@@ -304,6 +258,10 @@ function runAuthenticationProcess(executable, operation, options = {}) {
         return;
       }
       const authenticated = await verifyAuth();
+      if (operation.cancelled) {
+        finish({ ok: false, reason: 'cancelled', message: 'GitHub sign-in was cancelled.' });
+        return;
+      }
       if (!authenticated) {
         finish({
           ok: false,

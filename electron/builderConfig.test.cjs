@@ -170,6 +170,8 @@ test('release builds reject a Sentry DSN for another host or project', () => {
   for (const dsn of [
     'https://public@example.invalid/4511850999185488',
     'https://public@o4511166732304384.ingest.de.sentry.io/999',
+    'https://o4511166732304384.ingest.de.sentry.io/4511850999185488',
+    'https://public@o4511166732304384.ingest.de.sentry.io:444/4511850999185488',
   ]) {
     assert.throws(
       () => loadConfig({ ...releaseEnvironment, SENTRY_DSN: dsn }),

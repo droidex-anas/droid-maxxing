@@ -47,6 +47,21 @@ test('repository reset clears setup state under a new request identity', async (
   assert.deepEqual(reset, { ...initialGithubSetupState, requestId: 5 });
 });
 
+test('repository changes preserve an active device authentication', async () => {
+  const { shouldResetGithubSetupForRepository, initialGithubSetupState } = await loadSetupModule();
+
+  assert.equal(
+    shouldResetGithubSetupForRepository({
+      ...initialGithubSetupState,
+      action: 'authenticating',
+      authCode: 'ABCD-7HJK',
+      isAuthPopoverOpen: true,
+    }),
+    false,
+  );
+  assert.equal(shouldResetGithubSetupForRepository(initialGithubSetupState), true);
+});
+
 test('stale probe and action results cannot update the current repository', async () => {
   const { githubSetupReducer, initialGithubSetupState } = await loadSetupModule();
   const current = { ...initialGithubSetupState, requestId: 8 };

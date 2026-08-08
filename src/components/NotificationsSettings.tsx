@@ -1,10 +1,9 @@
 import { useState } from 'react';
+import { notify, type NotifyResult } from '../lib/desktop';
 import {
-  notify,
   requestNotificationPermission,
   type NotificationPermissionResult,
-  type NotifyResult,
-} from '../lib/desktop';
+} from '../lib/notificationPermission';
 import {
   FINISH_NOTIFICATION_TEST_ACTION,
   FINISH_NOTIFICATION_TOGGLES,

@@ -10,7 +10,14 @@ interface SetupExports {
   authenticateGithubCli?: () => Promise<GithubSetupResult>;
   cancelGithubSetup?: () => Promise<void>;
   onGithubAuthCode?: (handler: (code: string) => void) => () => void;
+  isGithubAuthCodeCopied?: (authCode: string | null, copiedCode: string | null) => boolean;
 }
+
+test('copy acknowledgement belongs only to the code that was copied', () => {
+  assert.equal(setup.isGithubAuthCodeCopied?.('ABCD-7HJK', 'ABCD-7HJK'), true);
+  assert.equal(setup.isGithubAuthCodeCopied?.('WXYZ-1234', 'ABCD-7HJK'), false);
+  assert.equal(setup.isGithubAuthCodeCopied?.(null, 'ABCD-7HJK'), false);
+});
 
 const setup = github as SetupExports;
 

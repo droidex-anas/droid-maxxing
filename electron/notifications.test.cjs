@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { showDesktopNotification } = require('./notifications.cjs');
+const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 
 class FakeNotification extends EventEmitter {
   static latest = null;
@@ -18,6 +18,11 @@ class FakeNotification extends EventEmitter {
   }
 
   show() {}
+
+  close() {
+    this.closed = true;
+    this.emit('close');
+  }
 }
 
 function payload(overrides = {}) {
@@ -35,6 +40,18 @@ test('resolves shown only after Electron emits show', async () => {
   const pending = showDesktopNotification(FakeNotification, payload());
   FakeNotification.latest.emit('show');
   assert.deepEqual(await pending, { shown: true });
+  FakeNotification.latest.emit('close');
+});
+
+test('shown notifications remain owned until they close', async () => {
+  const pending = showDesktopNotification(FakeNotification, payload());
+  const shown = FakeNotification.latest;
+  shown.emit('show');
+  await pending;
+
+  closeAllDesktopNotifications();
+
+  assert.equal(shown.closed, true);
 });
 
 test('returns the failed event message instead of claiming success', async () => {

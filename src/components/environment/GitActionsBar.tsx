@@ -5,9 +5,8 @@ import { CommitSheet } from './CommitSheet';
 import { CreatePrSheet } from './CreatePrSheet';
 import { gitPush } from '../../lib/git';
 import { toast } from '../../lib/toast';
+import { canRenderPrSheet, type GitActionSheet } from '../../lib/gitActionVisibility';
 import type { GitBranchList, GitEnvironment } from '../../types/vcs';
-
-type Sheet = 'none' | 'commit' | 'pr';
 
 function ActionButton({
   icon,
@@ -58,10 +57,10 @@ export function GitActionsBar({
   onChanged: () => void;
   onPrCreated?: () => void;
 }) {
-  const [sheet, setSheet] = useState<Sheet>('none');
+  const [sheet, setSheet] = useState<GitActionSheet>('none');
   const [pushing, setPushing] = useState(false);
 
-  const toggle = (next: Sheet) => {
+  const toggle = (next: GitActionSheet) => {
     setSheet((cur) => (cur === next ? 'none' : next));
   };
 
@@ -131,7 +130,7 @@ export function GitActionsBar({
           />
         </div>
       )}
-      {sheet === 'pr' && (
+      {canRenderPrSheet(sheet, isGitHub, githubReady, hasPr, !!env?.detached) && (
         <div className="pt-1.5">
           <CreatePrSheet
             cwd={cwd}

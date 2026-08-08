@@ -11,6 +11,7 @@ import {
 
 import type { GithubAvailability } from '../../types/vcs';
 import type { GithubSetupAction } from '../../hooks/useGithubSetup';
+import { isGithubAuthCodeCopied } from '../../lib/github';
 import { Popover } from './Popover';
 
 export interface GithubSetupCardProps {
@@ -156,10 +157,11 @@ export function GithubSetupCard({
   onCancelAuthentication,
 }: GithubSetupCardProps) {
   const actionRef = useRef<HTMLButtonElement>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   if (!availability || (availability.installed && availability.authenticated)) return null;
 
   const isBusy = action !== 'idle' && !authCode;
+  const copied = isGithubAuthCodeCopied(authCode, copiedCode);
   const content = setupContent(availability, action, manualGuideOpened, authCode);
 
   const copyCode = () => {
@@ -167,10 +169,10 @@ export function GithubSetupCard({
     void navigator.clipboard
       .writeText(authCode)
       .then(() => {
-        setCopied(true);
+        setCopiedCode(authCode);
       })
       .catch(() => {
-        setCopied(false);
+        setCopiedCode(null);
       });
   };
 

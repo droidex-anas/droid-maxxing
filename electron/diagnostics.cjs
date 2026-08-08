@@ -107,7 +107,6 @@ function createDiagnostics(options) {
       timestamp: (options.now?.() ?? new Date()).toISOString(),
       message: normalized.description,
       level: 'error',
-      exception: manualFeedbackException(normalized.description),
       platform: 'javascript',
       release: `droidex@${options.app.getVersion()}`,
       environment: options.app.isPackaged ? 'production' : 'development',
@@ -437,17 +436,17 @@ async function deliverFeedbackEvent(event, options) {
       signal: controller.signal,
     });
   } catch (error) {
+    clearTimeout(timeout);
     if (controller.signal.aborted) {
       throw new Error('Feedback delivery timed out. Check your connection and try again.');
     }
     throw new Error('Feedback delivery failed. Check your connection and try again.', {
       cause: error,
     });
-  } finally {
-    clearTimeout(timeout);
   }
 
   if (!response.ok) {
+    clearTimeout(timeout);
     throw new Error(
       `Feedback delivery was rejected by Sentry (${String(response.status)}). Try again.`,
     );
@@ -455,10 +454,24 @@ async function deliverFeedbackEvent(event, options) {
 
   let acknowledgment;
   try {
-    acknowledgment = await response.json();
+    acknowledgment = await Promise.race([
+      response.json(),
+      new Promise((_, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(new Error('Feedback delivery timed out.')),
+          { once: true },
+        );
+      }),
+    ]);
   } catch {
+    clearTimeout(timeout);
+    if (controller.signal.aborted) {
+      throw new Error('Feedback delivery timed out. Check your connection and try again.');
+    }
     throw new Error('Sentry did not acknowledge this report. Try again.');
   }
+  clearTimeout(timeout);
   const acknowledgedEventId = acknowledgment?.id;
   if (
     typeof acknowledgedEventId !== 'string' ||

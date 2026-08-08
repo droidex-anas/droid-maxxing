@@ -1,3 +1,23 @@
+const activeNotifications = new Map();
+
+function retainNotification(note, activate) {
+  const release = () => {
+    note.removeListener('click', activate);
+    note.removeListener('action', activate);
+    note.removeListener('close', release);
+    activeNotifications.delete(note);
+  };
+  activeNotifications.set(note, release);
+  note.once('close', release);
+}
+
+function closeAllDesktopNotifications() {
+  for (const [note, release] of activeNotifications) {
+    release();
+    note.close();
+  }
+}
+
 function errorMessage(error) {
   if (typeof error === 'string') return error.trim();
   if (error && typeof error.message === 'string') return error.message.trim();
@@ -35,7 +55,10 @@ function showDesktopNotification(NotificationClass, payload, dependencies = {}) 
       cleanupSettlementListeners();
       resolve(result);
     };
-    const onShow = () => settle({ shown: true });
+    const onShow = () => {
+      retainNotification(note, activate);
+      settle({ shown: true });
+    };
     const onFailed = (_event, error) => {
       const message = errorMessage(error);
       settle({
@@ -72,4 +95,4 @@ function showDesktopNotification(NotificationClass, payload, dependencies = {}) 
   });
 }
 
-module.exports = { showDesktopNotification };
+module.exports = { closeAllDesktopNotifications, showDesktopNotification };

@@ -35,7 +35,7 @@ const { autoUpdater } = require('electron-updater');
 const { createAppUpdater } = require('./appUpdater.cjs');
 const Sentry = require('@sentry/electron/main');
 const { createDiagnostics } = require('./diagnostics.cjs');
-const { showDesktopNotification } = require('./notifications.cjs');
+const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 const APP_NAME = 'DROIDEX';
 const buildMetadata = readBuildMetadata();
 const terminalManager = createTerminalManager();
@@ -124,6 +124,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   sidecarSupervisor.stop();
   githubVcs.cancelSetup();
+  closeAllDesktopNotifications();
   terminalManager.closeAll();
   terminalSubscriptions.clear();
   filesRootAccess.clear();
@@ -188,6 +189,7 @@ function createMainWindow() {
   });
 
   mainWindow.on('closed', () => {
+    githubVcs.cancelSetup();
     closeAllNativeBrowsers();
     terminalManager.closeAll();
     terminalSubscriptions.clear();

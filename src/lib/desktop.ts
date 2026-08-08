@@ -150,8 +150,6 @@ export type NotifyResult =
       message?: string;
     };
 
-export type NotificationPermissionResult = 'granted' | 'denied' | 'default' | 'unsupported';
-
 interface DroidControlApi {
   bridgeInfo: () => Promise<BridgeInfo>;
   pickDirectory: () => Promise<string | null>;
@@ -338,19 +336,6 @@ export async function notify(
   const api = desktopApi();
   if (!api) return { shown: false, reason: 'unsupported' };
   return api.notify(title, body, options);
-}
-
-export async function requestNotificationPermission(): Promise<NotificationPermissionResult> {
-  if (typeof Notification === 'undefined') return 'unsupported';
-  if (Notification.permission === 'granted') return 'granted';
-  if (Notification.permission === 'denied') return 'denied';
-  try {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted' || permission === 'denied') return permission;
-    return 'default';
-  } catch {
-    return 'unsupported';
-  }
 }
 
 /** Subscribe to notification clicks that should open a specific chat. */

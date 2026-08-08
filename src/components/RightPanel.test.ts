@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -7,8 +6,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { initialState, StoreContext, type AppState } from '../hooks/useStore.js';
 import type { ModelInfo, ReasoningEffort, SessionSummary } from '../types/bridge.js';
 import RightPanel from './RightPanel.js';
-
-const rightPanelSource = readFileSync(new URL('./RightPanel.tsx', import.meta.url), 'utf8');
+import { githubContextIntegration } from '../lib/githubContext.js';
+import type { GithubSetupController } from '../hooks/useGithubSetup.js';
+import { EnvironmentSection } from './environment/EnvironmentSection.js';
+import type { GitEnvironment } from '../types/vcs.js';
 
 const session = (overrides: Partial<SessionSummary>): SessionSummary => ({
   appSessionId: 's1',
@@ -95,8 +96,71 @@ test('model row keeps the pill while the model list has not loaded', () => {
 });
 
 test('PR detection and Context setup share authenticated GitHub readiness', () => {
-  assert.match(rightPanelSource, /useGithubSetup\(isGitHub,/);
-  assert.match(rightPanelSource, /enabled: isGitHub && githubSetup\.isReady/);
-  assert.match(rightPanelSource, /githubAvailability=\{githubSetup\.availability\}/);
-  assert.match(rightPanelSource, /onGithubSetupAction=\{githubSetup\.runPrimaryAction\}/);
+  const action = () => undefined;
+  const setup: GithubSetupController = {
+    availability: { installed: true, authenticated: false, installMethod: null },
+    action: 'idle',
+    error: null,
+    manualGuideOpened: false,
+    authCode: null,
+    isAuthPopoverOpen: false,
+    isReady: false,
+    refresh: action,
+    runPrimaryAction: action,
+    showAuthPrompt: action,
+    closeAuthPrompt: action,
+    cancelAuthentication: action,
+  };
+
+  const blocked = githubContextIntegration(true, setup);
+  assert.equal(blocked.pullRequestEnabled, false);
+  assert.equal(blocked.environmentProps.githubReady, false);
+  assert.equal(blocked.environmentProps.githubAvailability, setup.availability);
+  assert.equal(blocked.environmentProps.onGithubSetupAction, setup.runPrimaryAction);
+  const env: GitEnvironment = {
+    isRepo: true,
+    isGitHub: true,
+    branch: 'hotfix/review',
+    detached: false,
+    ahead: 0,
+  };
+  const renderEnvironment = (integration: ReturnType<typeof githubContextIntegration>) =>
+    renderToStaticMarkup(
+      createElement(
+        StoreContext.Provider,
+        { value: { state: initialState, dispatch: action } },
+        createElement(EnvironmentSection, {
+          cwd: '/workspace',
+          env,
+          branches: null,
+          worktrees: [],
+          diffStat: null,
+          diffMode: 'worktree',
+          onDiffModeChange: action,
+          refresh: action,
+          live: false,
+          ...integration.environmentProps,
+          pr: null,
+          onOpenPr: action,
+          onOpenReview: action,
+        }),
+      ),
+    );
+  const blockedHtml = renderEnvironment(blocked);
+  assert.match(blockedHtml, /Connect GitHub/);
+  assert.doesNotMatch(blockedHtml, />Open PR</);
+
+  const ready = githubContextIntegration(true, {
+    ...setup,
+    availability: { installed: true, authenticated: true, installMethod: null },
+    isReady: true,
+  });
+  assert.equal(ready.pullRequestEnabled, true);
+  assert.equal(ready.environmentProps.githubReady, true);
+  assert.match(renderEnvironment(ready), />Open PR</);
+
+  assert.equal(
+    githubContextIntegration(false, { ...setup, isReady: true }).pullRequestEnabled,
+    false,
+  );
 });
