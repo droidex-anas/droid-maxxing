@@ -128,6 +128,7 @@ export class SessionCompactionExecution {
     const replacement = await this.dependencies.runtime.loadSession(providerSessionId, {
       permissionHandler: this.dependencies.makePermissionHandler(ref),
       askUserHandler: this.dependencies.makeAskUserHandler(ref),
+      cwd: liveSession.summary.cwd,
       mcpServers: liveSession.mcpConfigs,
     });
     liveSession.session = replacement;

@@ -39,6 +39,7 @@ function createHarness(
         reasoningEffort: ReasoningEffort.Medium,
       },
     }),
+    mcpConfigs: [],
   };
   const policy = new MissionControlPolicy({
     registry: {

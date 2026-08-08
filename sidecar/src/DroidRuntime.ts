@@ -74,6 +74,10 @@ type FactorySessionMethods = Pick<
   | 'listSkills'
   | 'listMcpServers'
   | 'listMcpTools'
+  | 'addMcpServer'
+  | 'removeMcpServer'
+  | 'toggleMcpServer'
+  | 'authenticateMcpServer'
 >;
 
 export type FactorySession = FactorySessionMethods & {

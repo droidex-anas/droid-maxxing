@@ -72,7 +72,7 @@ export interface SessionLifecycleDependencies {
   ensureConnected: () => void;
   getFactoryDefaults: () => Promise<FactoryDefaultSettings>;
   maxContextTokensForModel: (modelId?: string) => number | undefined;
-  startLocalMcpServers: (ref: { id: string }) => Promise<StartedLocalMcpResources>;
+  startLocalMcpServers: (ref: { id: string }, cwd?: string) => Promise<StartedLocalMcpResources>;
   makePermissionHandler: (ref: { id: string }) => PermissionHandler;
   makeAskUserHandler: (ref: { id: string }) => AskUserHandler;
   compaction: Pick<
@@ -132,7 +132,7 @@ export class SessionLifecycle {
         defaults,
       });
       this.requireOpenAdmission();
-      const mcp = await d.startLocalMcpServers(ref);
+      const mcp = await d.startLocalMcpServers(ref, appCwd);
       pendingMcpServers = mcp.servers;
       const runtimeOptions = buildCreateRuntimeOptions({
         command,
@@ -234,13 +234,13 @@ export class SessionLifecycle {
     let pendingSession: FactorySession | undefined;
     let pendingLiveSession: LiveSession | undefined;
     try {
-      const mcp = await d.startLocalMcpServers(ref);
+      const mcp = await d.startLocalMcpServers(ref, historical?.cwd);
       pendingMcpServers = mcp.servers;
       const session = await d.runtime.loadSession(providerSessionId, {
         permissionHandler: d.makePermissionHandler(ref),
         askUserHandler: d.makeAskUserHandler(ref),
-        mcpServers: mcp.configs,
         cwd: historical?.cwd,
+        mcpServers: mcp.configs,
       });
       pendingSession = session;
       const defaults = await d.getFactoryDefaults();

@@ -429,6 +429,8 @@ export class ChildSessions {
       const load = this.d.runtime.loadSession(child.providerSessionId, {
         permissionHandler: this.d.interactions.makePermissionHandler(ref),
         askUserHandler: this.d.interactions.makeAskUserHandler(ref),
+        cwd: parent.lease.summary.cwd,
+        mcpServers: parent.lease.mcpConfigs,
       });
       const result = await this.awaitOpenStep(attempt, load, (late) =>
         late.close().catch(ignoreError),
