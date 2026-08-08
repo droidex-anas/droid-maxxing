@@ -1342,9 +1342,10 @@ export default function SettingsPanel() {
   };
   const q = query.trim();
   const hits = q ? searchSettings(q) : [];
-  const mcpCwd =
-    (state.activeAppSessionId ? state.sessions[state.activeAppSessionId].cwd : undefined) ??
-    state.workspaceCwds[0];
+  const activeSession = state.activeAppSessionId
+    ? state.sessions[state.activeAppSessionId]
+    : undefined;
+  const mcpCwd = activeSession?.cwd ?? state.workspaceCwds[0];
 
   let content: React.ReactNode;
   switch (active) {

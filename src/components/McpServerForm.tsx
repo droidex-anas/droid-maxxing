@@ -54,6 +54,7 @@ export function AddMcpServerDialog({
   }, [disabled, onCancel]);
 
   const submit = () => {
+    setError(undefined);
     try {
       const pairs = parseMcpVariables(variablesText);
       if (!name.trim() || !location.trim()) throw new Error('Name and connection are required.');
@@ -119,108 +120,114 @@ export function AddMcpServerDialog({
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         className="max-h-[calc(100vh-2rem)] w-full max-w-[620px] overflow-y-auto rounded-2xl border border-droid-border bg-droid-surface shadow-[0_28px_90px_rgba(0,0,0,0.58)]"
       >
-        <header className="flex items-start justify-between gap-5 px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
-          <div>
-            <h2
-              id="add-mcp-title"
-              className="text-[18px] font-semibold tracking-[-0.015em] text-droid-text"
-            >
-              Add MCP server
-            </h2>
-            <p
-              id="add-mcp-description"
-              className="mt-1 max-w-md text-[12px] leading-5 text-droid-text-secondary"
-            >
-              Saved to your Droid CLI user configuration and available to new DROIDEX sessions.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={disabled}
-            aria-label="Close add MCP server"
-            className="rounded-lg p-2 text-droid-text-secondary transition-all duration-150 hover:bg-droid-elevated hover:text-droid-text active:scale-[0.96] disabled:opacity-40"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </header>
-
-        <div className="border-y border-droid-border/70 px-5 py-5 sm:px-6">
-          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
-            <Field
-              inputRef={nameRef}
-              label="Name"
-              value={name}
-              onChange={setName}
-              placeholder="sentry"
-            />
-            <label className="block text-[11.5px] font-medium text-droid-text-secondary">
-              Type
-              <select
-                value={serverType}
-                onChange={(event) => {
-                  setServerType(serverTypeFromValue(event.target.value));
-                }}
-                className="mt-1.5 h-10 w-full rounded-xl border border-droid-border bg-droid-field px-3 text-[13px] text-droid-text outline-none transition-colors focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <header className="flex items-start justify-between gap-5 px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
+            <div>
+              <h2
+                id="add-mcp-title"
+                className="text-[18px] font-semibold tracking-[-0.015em] text-droid-text"
               >
-                <option value="http">HTTP</option>
-                <option value="sse">SSE</option>
-                <option value="stdio">Local command</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="mt-4">
-            <Field
-              label={serverType === 'stdio' ? 'Command' : 'URL'}
-              value={location}
-              onChange={setLocation}
-              placeholder={serverType === 'stdio' ? 'npx' : 'https://mcp.example.com/mcp'}
-            />
-          </div>
-
-          {serverType === 'stdio' && (
-            <TextAreaField
-              label="Arguments"
-              hint="One argument per line"
-              value={argumentsText}
-              onChange={setArgumentsText}
-              placeholder={'-y\n@example/mcp'}
-            />
-          )}
-
-          <TextAreaField
-            label={serverType === 'stdio' ? 'Environment' : 'Headers'}
-            hint="One KEY=VALUE per line"
-            value={variablesText}
-            onChange={setVariablesText}
-          />
-
-          {(error ?? serverError) && (
-            <div role="alert" className="mt-3 text-[11.5px] text-droid-orange">
-              {error ?? serverError}
+                Add MCP server
+              </h2>
+              <p
+                id="add-mcp-description"
+                className="mt-1 max-w-md text-[12px] leading-5 text-droid-text-secondary"
+              >
+                Saved to your Droid CLI user configuration and available to new DROIDEX sessions.
+              </p>
             </div>
-          )}
-        </div>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={disabled}
+              aria-label="Close add MCP server"
+              className="rounded-lg p-2 text-droid-text-secondary transition-all duration-150 hover:bg-droid-elevated hover:text-droid-text active:scale-[0.96] disabled:opacity-40"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </header>
 
-        <footer className="flex items-center justify-end gap-2 bg-droid-bg/30 px-5 py-4 sm:px-6">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={disabled}
-            className="rounded-lg px-3.5 py-2 text-[12px] font-medium text-droid-text-secondary transition-all duration-150 hover:bg-droid-elevated/70 hover:text-droid-text active:scale-[0.97] disabled:opacity-40"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={submit}
-            className="min-w-[104px] rounded-lg bg-droid-accent px-4 py-2 text-[12px] font-semibold text-droid-bg transition-all duration-150 hover:opacity-90 active:scale-[0.97] disabled:opacity-40"
-          >
-            {disabled ? 'Adding…' : 'Add server'}
-          </button>
-        </footer>
+          <div className="border-y border-droid-border/70 px-5 py-5 sm:px-6">
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+              <Field
+                inputRef={nameRef}
+                label="Name"
+                value={name}
+                onChange={setName}
+                placeholder="sentry"
+              />
+              <label className="block text-[11.5px] font-medium text-droid-text-secondary">
+                Type
+                <select
+                  value={serverType}
+                  onChange={(event) => {
+                    setServerType(serverTypeFromValue(event.target.value));
+                  }}
+                  className="mt-1.5 h-10 w-full rounded-xl border border-droid-border bg-droid-field px-3 text-[13px] text-droid-text outline-none transition-colors focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
+                >
+                  <option value="http">HTTP</option>
+                  <option value="sse">SSE</option>
+                  <option value="stdio">Local command</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4">
+              <Field
+                label={serverType === 'stdio' ? 'Command' : 'URL'}
+                value={location}
+                onChange={setLocation}
+                placeholder={serverType === 'stdio' ? 'npx' : 'https://mcp.example.com/mcp'}
+              />
+            </div>
+
+            {serverType === 'stdio' && (
+              <TextAreaField
+                label="Arguments"
+                hint="One argument per line"
+                value={argumentsText}
+                onChange={setArgumentsText}
+                placeholder={'-y\n@example/mcp'}
+              />
+            )}
+
+            <TextAreaField
+              label={serverType === 'stdio' ? 'Environment' : 'Headers'}
+              hint="One KEY=VALUE per line"
+              value={variablesText}
+              onChange={setVariablesText}
+            />
+
+            {(error ?? serverError) && (
+              <div role="alert" className="mt-3 text-[11.5px] text-droid-orange">
+                {error ?? serverError}
+              </div>
+            )}
+          </div>
+
+          <footer className="flex items-center justify-end gap-2 bg-droid-bg/30 px-5 py-4 sm:px-6">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={disabled}
+              className="rounded-lg px-3.5 py-2 text-[12px] font-medium text-droid-text-secondary transition-all duration-150 hover:bg-droid-elevated/70 hover:text-droid-text active:scale-[0.97] disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={disabled}
+              className="min-w-[104px] rounded-lg bg-droid-accent px-4 py-2 text-[12px] font-semibold text-droid-bg transition-all duration-150 hover:opacity-90 active:scale-[0.97] disabled:opacity-40"
+            >
+              {disabled ? 'Adding…' : 'Add server'}
+            </button>
+          </footer>
+        </form>
       </motion.div>
     </motion.div>,
     document.body,

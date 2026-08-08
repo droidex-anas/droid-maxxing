@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { initialState, reducer, StoreContext, type AppState } from '../hooks/useStore.js';
 import type { AppIconMode } from '../lib/appIcon.js';
-import { AppearanceSection } from './SettingsPanel.js';
+import SettingsPanel, { AppearanceSection } from './SettingsPanel.js';
 
 const ICON_MODES: readonly [AppIconMode, string][] = [
   ['system', 'System'],
@@ -93,4 +93,23 @@ test('selecting an app icon mode persists appIconMode through SET_THEME', () => 
     if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
     else delete (globalThis as { localStorage?: Storage }).localStorage;
   }
+});
+
+test('settings renders when the persisted active session is absent from the snapshot', () => {
+  const state: AppState = {
+    ...initialState,
+    activeAppSessionId: 'missing-session',
+    sessions: {},
+    workspaceCwds: ['/workspace'],
+  };
+
+  assert.doesNotThrow(() =>
+    renderToStaticMarkup(
+      createElement(
+        StoreContext.Provider,
+        { value: { state, dispatch: () => undefined } },
+        createElement(SettingsPanel),
+      ),
+    ),
+  );
 });
