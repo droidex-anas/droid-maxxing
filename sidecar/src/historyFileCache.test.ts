@@ -172,6 +172,52 @@ test('sessions without a model response never become historical sidebar rows', (
   }
 });
 
+test('internal llm_only context cannot admit a session without a real user turn', () => {
+  const freshHome = mkdtempSync(join(tmpdir(), 'droid-history-llm-only-'));
+  const previousHome = process.env.HOME;
+  process.env.HOME = freshHome;
+  try {
+    const workspace = join(freshHome, 'workspace-llm-only');
+    const path = writeEmptySession(freshHome, 'llm-only-session', workspace);
+    writeFileSync(
+      path,
+      `${[
+        {
+          type: 'session_start',
+          cwd: workspace,
+          sessionTitle: 'New Session',
+          settings: { interactionMode: 'auto' },
+        },
+        {
+          type: 'message',
+          message: {
+            role: 'user',
+            visibility: 'llm_only',
+            content: [{ type: 'text', text: 'internal context' }],
+          },
+        },
+        {
+          type: 'message',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'response' }] },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n')}\n`,
+    );
+
+    const index = new HistoryIndex();
+    try {
+      assert.equal(index.reconcileSessionFiles(), 1);
+      assert.equal(index.listHistoricalSessions({ workspaceCwds: [workspace] }).length, 0);
+    } finally {
+      index.close();
+    }
+  } finally {
+    process.env.HOME = previousHome;
+    rmSync(freshHome, { recursive: true, force: true });
+  }
+});
+
 test('opening a 1.0.3 session index adds the file cache without losing persisted sessions', () => {
   const upgradeHome = mkdtempSync(join(tmpdir(), 'droid-history-cache-upgrade-'));
   const previousHome = process.env.HOME;
@@ -315,6 +361,23 @@ test('a corrupt cache row is dropped and rebuilt on the next boot', () => {
       assert.ok(rows.some((row) => row.summary.appSessionId === 'corrupt-row'));
     } finally {
       second.close();
+    }
+
+    const nullSummary = new DatabaseSync(dbPath);
+    try {
+      nullSummary
+        .prepare('UPDATE session_file_cache SET summary_json = ? WHERE provider_session_id = ?')
+        .run(JSON.stringify({ cacheVersion: 1, summary: null }), 'corrupt-row');
+    } finally {
+      nullSummary.close();
+    }
+
+    const rebuilt = new HistoryIndex();
+    try {
+      assert.equal(rebuilt.sessionFileCacheSize, 0, 'a null summary is rejected intentionally');
+      assert.equal(rebuilt.reconcileSessionFiles(), 1);
+    } finally {
+      rebuilt.close();
     }
   } finally {
     process.env.HOME = previousHome;

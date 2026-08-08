@@ -10,7 +10,7 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 import type { SessionSummary } from './protocol.js';
-import { numberValue, stringValue } from './values.js';
+import { numberValue, objectValue, stringValue } from './values.js';
 
 export interface SessionFileStat {
   path: string;
@@ -80,21 +80,23 @@ function matchesFreshnessKey(cached: CachedSessionFile, file: SessionFileStat): 
   );
 }
 
-// Returns the cached summary, null for a known non-top-level file, or
-// undefined when the stored JSON does not hold a summary shape and the row
+// Returns the cached summary, null for a scanned file not admitted to durable
+// top-level history, or undefined when the stored JSON is invalid and the row
 // must be rebuilt.
 function parseCachedSessionSummary(raw: unknown): SessionSummary | null | undefined {
   const text = stringValue(raw);
   if (text === undefined) return null;
   try {
     const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== 'object' || parsed === null) return undefined;
-    const cached = parsed as Partial<PersistedSessionFileSummary>;
+    const cached = objectValue(parsed);
+    if (!cached) return undefined;
     if (cached.cacheVersion !== SESSION_FILE_SUMMARY_CACHE_VERSION) return undefined;
-    const summary = cached.summary;
-    if (typeof summary !== 'object') return undefined;
-    if (typeof summary.cwd !== 'string') return undefined;
-    return summary;
+    const summary: unknown = cached.summary;
+    const summaryRecord = objectValue(summary);
+    if (!summaryRecord || typeof summaryRecord.cwd !== 'string') return undefined;
+    // This versioned envelope is written only from SessionSummary; keep the
+    // narrow assertion at that trusted cache seam after rejecting invalid rows.
+    return summary as SessionSummary;
   } catch {
     return undefined;
   }

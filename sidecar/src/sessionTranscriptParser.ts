@@ -12,6 +12,10 @@ import type { SessionRole, TranscriptEvent } from './protocol.js';
 
 const MAX_TEXT_CHARS = 12_000;
 
+export function isLlmOnlyMessage(message: unknown): boolean {
+  return objectValue(message)?.visibility === 'llm_only';
+}
+
 export interface StoredMessageLine {
   type?: string;
   id?: string;
@@ -168,7 +172,7 @@ export function parseSessionLineEvents(
   if (line.type !== 'message' || !('message' in line)) return [];
   const message = line.message;
   // Internal orchestration context is model-visible, not a user conversation turn.
-  if (message?.visibility === 'llm_only') return [];
+  if (isLlmOnlyMessage(message)) return [];
   const content = Array.isArray(message?.content) ? message.content : [];
   const ts = dateMs(line.timestamp) || Date.now();
   const base: EventBase = {

@@ -1,6 +1,7 @@
 import { closeSync, openSync, readSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 
+import { isLlmOnlyMessage } from './sessionTranscriptParser.js';
 import { objectValue } from './values.js';
 
 const SCAN_CHUNK_BYTES = 64 * 1024;
@@ -41,7 +42,9 @@ function storedMessageRole(line: string): 'user' | 'assistant' | undefined {
     const parsed: unknown = JSON.parse(line);
     const record = objectValue(parsed);
     if (record?.type !== 'message') return undefined;
-    const role = objectValue(record.message)?.role;
+    const message = objectValue(record.message);
+    if (isLlmOnlyMessage(message)) return undefined;
+    const role = message?.role;
     return role === 'user' || role === 'assistant' ? role : undefined;
   } catch {
     return undefined;
