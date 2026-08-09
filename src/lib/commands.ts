@@ -207,11 +207,19 @@ export const exportSessionMarkdown = (appSessionId: string, title: string): Prom
     const unsubscribe = bridge.subscribe((event) => {
       // A sidecar older than this renderer answers unknown commands with
       // bridge.unsupported_command instead of the awaited reply; fail the
-      // export immediately rather than waiting out the timeout.
-      if (event.type === 'error' && event.code === 'bridge.unsupported_command') {
+      // export immediately rather than waiting out the timeout. Only the
+      // event echoing this request's id is ours — a foreign unsupported
+      // command failing concurrently must not reject this export.
+      if (
+        event.type === 'error' &&
+        event.code === 'bridge.unsupported_command' &&
+        event.requestId === requestId
+      ) {
         globalThis.clearTimeout(timeout);
         unsubscribe();
-        reject(new Error(event.message));
+        // The code rides along so the caller can skip its own toast: the
+        // global bridge subscriber already surfaced the skew error.
+        reject(Object.assign(new Error(event.message), { code: event.code }));
         return;
       }
       if (event.type !== 'session.markdownExported' || event.requestId !== requestId) return;

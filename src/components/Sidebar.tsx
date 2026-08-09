@@ -78,6 +78,15 @@ function copyChatAsMarkdown(appSessionId: string, title: string): void {
     .then((markdown) => navigator.clipboard.writeText(markdown))
     .then(() => toast.success('Chat copied as Markdown.'))
     .catch((error: unknown) => {
+      // Version-skew rejections were already toasted by the global bridge
+      // subscriber; showing the same message again would double-notify.
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'bridge.unsupported_command'
+      ) {
+        return;
+      }
       toast.error(error instanceof Error ? error.message : 'Could not export this chat.');
     });
 }

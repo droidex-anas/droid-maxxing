@@ -25,6 +25,26 @@ test('an unknown command fails fast with a bridge.unsupported_command error', as
   }
 });
 
+test('the unsupported-command error echoes the offending request id', async () => {
+  // Requesters correlate on requestId; without the echo, a foreign
+  // unsupported command failing concurrently would reject an unrelated
+  // in-flight request (e.g. a markdown export waiting on its reply).
+  const ctx = createSessionManagerTestContext();
+  try {
+    const skewed = {
+      type: 'session.someFutureCommand',
+      requestId: 'req-7',
+    } as unknown as ClientCommand;
+    await ctx.handle(skewed);
+
+    const error = ctx.events.find((event) => event.type === 'error');
+    assert.ok(error?.type === 'error');
+    assert.equal(error.requestId, 'req-7');
+  } finally {
+    await ctx.dispose();
+  }
+});
+
 test('a known command does not hit the unsupported-command fallback', async () => {
   const ctx = createSessionManagerTestContext();
   try {

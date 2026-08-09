@@ -725,11 +725,15 @@ export class SessionManager {
         // kept running across a sidecar rebuild) can send a command this
         // build does not know. Fail visibly instead of falling through
         // silently while the caller waits out its timeout.
-        const unknown = cmd as { type?: unknown };
+        const unknown = cmd as { type?: unknown; requestId?: unknown };
         const commandType = typeof unknown.type === 'string' ? unknown.type : 'unknown';
+        // Echo the command's requestId so a waiter rejects only for its own
+        // unsupported command, not a foreign one failing concurrently.
+        const requestId = typeof unknown.requestId === 'string' ? unknown.requestId : undefined;
         this.emit({
           type: 'error',
           code: 'bridge.unsupported_command',
+          ...(requestId !== undefined ? { requestId } : {}),
           message: `This DROIDEX build does not support the "${commandType}" command. Restart the app to pick up the current sidecar.`,
         });
         return;

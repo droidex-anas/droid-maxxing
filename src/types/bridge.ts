@@ -719,8 +719,7 @@ export type ClientCommand =
       instruction: string;
       referenceIds: string[];
     }
-  | { type: 'browser.native.result'; result: BrowserNativeResult }
-  | { type: 'spec.read'; appSessionId: string; path: string };
+  | { type: 'browser.native.result'; result: BrowserNativeResult };
 
 export type ChildUpdatedEvent =
   | {
@@ -822,6 +821,9 @@ export type ServerEvent =
       type: 'error';
       code?: string;
       clientRef?: string;
+      // Echoed from the offending command when it carried one, so requesters
+      // can tell their own failure apart from a foreign command's.
+      requestId?: string;
       appSessionId?: string;
       providerSessionId?: string;
       message: string;
