@@ -172,6 +172,7 @@ function runAuthenticationProcess(executable, operation, options = {}) {
   const scheduleTimeout = options.setTimer || setTimeout;
   const cancelTimeout = options.clearTimer || clearTimeout;
   const timeoutMs = options.authTimeoutMs || AUTH_TIMEOUT;
+  const terminationGraceMs = options.terminationGraceMs ?? 5_000;
 
   return new Promise((resolve) => {
     let child;
@@ -182,9 +183,11 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     let timedOut = false;
     let settled = false;
     let timer;
+    let forceKillTimer;
 
     const cleanup = () => {
       if (timer) cancelTimeout(timer);
+      if (forceKillTimer) cancelTimeout(forceKillTimer);
       child?.stdout?.removeListener('data', onOutput);
       child?.stderr?.removeListener('data', onOutput);
       child?.removeListener('error', onError);
@@ -309,6 +312,10 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     timer = scheduleTimeout(() => {
       timedOut = true;
       child.kill();
+      forceKillTimer = scheduleTimeout(() => {
+        if (!settled) child.kill('SIGKILL');
+      }, terminationGraceMs);
+      forceKillTimer.unref?.();
     }, timeoutMs);
     timer.unref?.();
     if (operation.cancelled) child.kill();

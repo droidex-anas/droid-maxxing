@@ -37,7 +37,14 @@ function payload(overrides = {}) {
 }
 
 test('resolves shown only after Electron emits show', async () => {
+  let resolved = false;
   const pending = showDesktopNotification(FakeNotification, payload());
+  pending.then(() => {
+    resolved = true;
+  });
+  await Promise.resolve();
+
+  assert.equal(resolved, false);
   FakeNotification.latest.emit('show');
   assert.deepEqual(await pending, { shown: true });
   FakeNotification.latest.emit('close');

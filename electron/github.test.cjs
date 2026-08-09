@@ -464,8 +464,8 @@ test('browser authentication times out and terminates its child', async () => {
     verifyAuth: async () => true,
     authTimeoutMs: 25,
     setTimer: (callback, timeoutMs) => {
-      assert.equal(timeoutMs, 25);
-      callback();
+      assert.ok(timeoutMs === 25 || timeoutMs === 5_000);
+      if (timeoutMs === 25) queueMicrotask(callback);
       return { unref() {} };
     },
     clearTimer: () => undefined,
@@ -473,6 +473,49 @@ test('browser authentication times out and terminates its child', async () => {
 
   assert.equal(child.killed, true);
   assert.deepEqual(result, {
+    ok: false,
+    reason: 'timeout',
+    message: 'GitHub sign-in timed out.',
+  });
+});
+
+test('timed-out browser authentication escalates when its child ignores SIGTERM', async () => {
+  const child = fakeChild();
+  const killSignals = [];
+  const timers = [];
+  child.kill = (signal) => {
+    const normalizedSignal = signal ?? 'SIGTERM';
+    killSignals.push(normalizedSignal);
+    if (normalizedSignal === 'SIGKILL') {
+      queueMicrotask(() => child.emit('close', null, normalizedSignal));
+    }
+    return true;
+  };
+
+  const pending = authenticate({
+    resolveGh: async () => '/opt/homebrew/bin/gh',
+    spawnProcess: () => child,
+    verifyAuth: async () => true,
+    authTimeoutMs: 100,
+    terminationGraceMs: 25,
+    setTimer: (callback, timeoutMs) => {
+      const timer = { callback, timeoutMs, unref() {} };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer: () => undefined,
+  });
+  await Promise.resolve();
+
+  assert.equal(timers[0].timeoutMs, 100);
+  timers[0].callback();
+  await Promise.resolve();
+  assert.deepEqual(killSignals, ['SIGTERM']);
+
+  assert.equal(timers[1].timeoutMs, 25);
+  timers[1].callback();
+  assert.deepEqual(killSignals, ['SIGTERM', 'SIGKILL']);
+  assert.deepEqual(await pending, {
     ok: false,
     reason: 'timeout',
     message: 'GitHub sign-in timed out.',
