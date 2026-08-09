@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Pipette } from 'lucide-react';
+import { pushEscapeLayer } from './environment/usePopover';
 
 /* ── color math ── */
 interface HSV {
@@ -231,14 +232,15 @@ export function ColorPopover({
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node) && e.target !== anchor) onClose();
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+    // Escape goes through the shared LIFO layer stack (see usePopover.ts) so a
+    // single keystroke closes only this innermost popover — a per-instance
+    // window listener would race the theme editor's own Escape handler (which
+    // registered first) and cancel the whole editor, discarding every edit.
+    const pop = pushEscapeLayer(onClose);
     window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
+      pop();
     };
   }, [anchor, onClose]);
 
@@ -246,6 +248,9 @@ export function ColorPopover({
   return createPortal(
     <div
       ref={ref}
+      // Portaled to <body>, so modal hosts (the theme editor's Tab trap)
+      // recognize focus inside it via this attribute instead of containment.
+      data-color-popover=""
       className="fixed z-[70] p-3 rounded-xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/60"
       style={{ top: pos.top, left: pos.left }}
     >

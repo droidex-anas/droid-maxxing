@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
+import { pushEscapeLayer } from './environment/usePopover';
 
 export function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -63,15 +64,20 @@ export function Dropdown({
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
+    // Escape goes through the shared LIFO layer stack (see usePopover.ts) so a
+    // single keystroke closes only this innermost popup, never the settings
+    // panel or theme editor behind it.
+    const pop = pushEscapeLayer(() => {
+      setOpen(false);
+      triggerRef.current?.focus();
+    });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        triggerRef.current?.focus();
-        return;
-      }
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      // Only navigate when focus is actually inside the listbox — otherwise
+      // we'd hijack arrow keys from sliders/inputs the user tabbed to.
+      if (!menu?.contains(document.activeElement)) return;
       e.preventDefault();
-      const items = Array.from(menu?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+      const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="option"]'));
       if (items.length === 0) return;
       const index = items.indexOf(document.activeElement as HTMLElement);
       const next =
@@ -85,6 +91,7 @@ export function Dropdown({
     return () => {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
+      pop();
     };
   }, [open]);
 
