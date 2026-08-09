@@ -48,14 +48,37 @@ export function Dropdown({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    // Keyboard/screen-reader contract of a listbox popup: focus lands on the
+    // selected option, arrows move between options, Escape returns focus to
+    // the trigger.
+    const menu = ref.current?.querySelector<HTMLElement>('[role="listbox"]');
+    const selected =
+      menu?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]') ??
+      menu?.querySelector<HTMLElement>('[role="option"]');
+    selected?.focus();
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      const items = Array.from(menu?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+      if (items.length === 0) return;
+      const index = items.indexOf(document.activeElement as HTMLElement);
+      const next =
+        e.key === 'ArrowDown'
+          ? items[(index + 1) % items.length]
+          : items[(index - 1 + items.length) % items.length];
+      next.focus();
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
@@ -70,6 +93,9 @@ export function Dropdown({
   return (
     <div className={`relative ${width === 'w-full' ? 'w-full' : 'shrink-0'}`} ref={ref}>
       <button
+        ref={triggerRef}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => {
           setOpen((v) => !v);
         }}
@@ -92,15 +118,18 @@ export function Dropdown({
         <div
           className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1.5 min-w-full rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50`}
         >
-          <div className="max-h-72 overflow-y-auto space-y-0.5">
+          <div className="max-h-72 overflow-y-auto space-y-0.5" role="listbox">
             {options.map((o) => {
               const active = o.value === value;
               return (
                 <button
                   key={o.value}
+                  role="option"
+                  aria-selected={active}
                   onClick={() => {
                     onChange(o.value);
                     setOpen(false);
+                    triggerRef.current?.focus();
                   }}
                   className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
                     active ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'

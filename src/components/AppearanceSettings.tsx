@@ -108,6 +108,10 @@ function Toggle({
         {sub && <div className="text-[11px] text-droid-text-muted">{sub}</div>}
       </div>
       <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
         onClick={() => {
           onChange(!checked);
         }}

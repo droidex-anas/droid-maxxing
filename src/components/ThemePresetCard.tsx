@@ -346,26 +346,31 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
             <div className="text-[11px] text-droid-text-muted">One-tap accent colors</div>
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
-            {QUICK_ACCENTS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                title={c}
-                onClick={() => {
-                  updateColors({ accent: c });
-                }}
-                className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
-                  theme.accent.toLowerCase() === c.toLowerCase()
-                    ? 'border-droid-text'
-                    : 'border-transparent'
-                }`}
-                style={{ backgroundColor: c }}
-              >
-                {theme.accent.toLowerCase() === c.toLowerCase() && (
-                  <Check className="w-3 h-3 text-white mx-auto" strokeWidth={3} />
-                )}
-              </button>
-            ))}
+            {QUICK_ACCENTS.map((c) => {
+              const selected = theme.accent.toLowerCase() === c.toLowerCase();
+              // The check sits on the swatch itself, so pick its ink by
+              // contrast (a white check vanishes on the near-white accent).
+              const ink =
+                contrastRatio(c, '#101010') >= contrastRatio(c, '#f7f7f7') ? '#101010' : '#f7f7f7';
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  title={c}
+                  onClick={() => {
+                    updateColors({ accent: c });
+                  }}
+                  className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
+                    selected ? 'border-droid-text' : 'border-transparent'
+                  }`}
+                  style={{ backgroundColor: c }}
+                >
+                  {selected && (
+                    <Check className="w-3 h-3 mx-auto" style={{ color: ink }} strokeWidth={3} />
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
