@@ -87,7 +87,7 @@ export function Dropdown({
         e.key === 'ArrowDown'
           ? items[(index + 1) % items.length]
           : items[(index - 1 + items.length) % items.length];
-      next.focus();
+      next?.focus();
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);

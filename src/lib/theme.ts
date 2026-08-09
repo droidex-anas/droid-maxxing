@@ -51,7 +51,8 @@ export const DEFAULT_THEME_ID = 'droid';
 // warm foreground instead of a harsh neutral, so the whole scale sits gently
 // on the eye — pure-white backgrounds and black text are tiring and flatten
 // every border.
-export const BUILT_IN_THEMES: ThemePreset[] = [
+// Non-empty tuple so the default entry (index 0) is statically defined.
+export const BUILT_IN_THEMES: [ThemePreset, ...ThemePreset[]] = [
   {
     id: DEFAULT_THEME_ID,
     name: 'Default',
@@ -291,11 +292,11 @@ function readColors(value: unknown): ThemeColors | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   const colors = {
-    bg: raw.bg,
-    fg: raw.fg,
-    surface: raw.surface,
-    border: raw.border,
-    accent: raw.accent,
+    bg: raw['bg'],
+    fg: raw['fg'],
+    surface: raw['surface'],
+    border: raw['border'],
+    accent: raw['accent'],
   };
   for (const v of Object.values(colors)) {
     if (typeof v !== 'string' || !HEX_COLOR.test(v)) return null;
@@ -506,7 +507,7 @@ function adjustColor(hex: string, lighten: number): string {
 
 // Blend `hex` toward `target` by t (0..1).
 function mixHex(hex: string, target: string, t: number): string {
-  const parse = (h: string) => [
+  const parse = (h: string): [number, number, number] => [
     parseInt(h.slice(1, 3), 16),
     parseInt(h.slice(3, 5), 16),
     parseInt(h.slice(5, 7), 16),
