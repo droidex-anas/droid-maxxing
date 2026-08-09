@@ -1,8 +1,8 @@
-import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { realpath } from 'node:fs/promises';
+import { droidexUserDataDir } from '../droidexPaths.js';
 
-export function browserDataRoot(baseDir = defaultBrowserDataRoot()): string {
+export function browserDataRoot(baseDir = droidexUserDataDir()): string {
   return baseDir;
 }
 
@@ -25,13 +25,6 @@ export async function resolveBrowserAssetPath(
     realpath(filePath),
   ]);
   return target === root || target.startsWith(`${root}${sep}`) ? target : null;
-}
-
-function defaultBrowserDataRoot(): string {
-  return (
-    process.env.DROIDEX_USER_DATA_DIR ??
-    join(homedir(), 'Library', 'Application Support', 'DROIDEX')
-  );
 }
 
 function sanitizeSegment(value: string): string {
