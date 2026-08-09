@@ -78,6 +78,21 @@ describe('BUILT_IN_THEMES', () => {
       }
     }
   });
+
+  it('keeps accent-colored text at WCAG AA on every variant', () => {
+    // Accents appear as text (links, active labels), so each must reach 4.5:1
+    // for normal text on both the canvas and raised surfaces of its variant.
+    for (const preset of BUILT_IN_THEMES) {
+      for (const variant of [preset.light, preset.dark]) {
+        for (const surface of [variant.bg, variant.surface]) {
+          assert.ok(
+            contrastRatio(variant.accent, surface) >= 4.5,
+            `${preset.id} accent ${variant.accent} on ${surface} should reach 4.5:1`,
+          );
+        }
+      }
+    }
+  });
 });
 
 describe('findPreset', () => {

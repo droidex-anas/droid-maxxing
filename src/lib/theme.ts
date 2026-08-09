@@ -54,7 +54,7 @@ export const DEFAULT_THEME_ID = 'droid';
 export const BUILT_IN_THEMES: ThemePreset[] = [
   {
     id: DEFAULT_THEME_ID,
-    name: 'Droid',
+    name: 'Default',
     dark: {
       bg: '#0a0a0a',
       fg: '#ededed',
@@ -163,7 +163,8 @@ export const BUILT_IN_THEMES: ThemePreset[] = [
       accent: '#a84a28',
     },
   },
-  // VS Code Dark+/Light+: the familiar editor greys with the status-bar blue.
+  // VS Code Dark+/Light+: the familiar editor greys with the status-bar blue,
+  // lightened/darkened per variant so accent text keeps >=4.5:1 on its canvas.
   {
     id: 'vscode',
     name: 'VS Code',
@@ -172,14 +173,14 @@ export const BUILT_IN_THEMES: ThemePreset[] = [
       fg: '#d4d4d4',
       surface: '#252526',
       border: '#3c3c3c',
-      accent: '#007acc',
+      accent: '#3794ff',
     },
     light: {
       bg: '#ecedf0',
       fg: '#1f1f1f',
       surface: '#f8f9fb',
       border: '#d6d8de',
-      accent: '#007acc',
+      accent: '#0066aa',
     },
   },
   // ChatGPT/Codex: strictly monochrome mid-greys; the accent is the send-button
@@ -223,6 +224,7 @@ export const BUILT_IN_THEMES: ThemePreset[] = [
     },
   },
   // Tokyo Night (Night/Day): deep blue-grey canvas with the signature blue.
+  // The Day accent is darkened so accent text keeps >=4.5:1 on its canvas.
   {
     id: 'tokyo-night',
     name: 'Tokyo Night',
@@ -238,7 +240,7 @@ export const BUILT_IN_THEMES: ThemePreset[] = [
       fg: '#343b58',
       surface: '#eceef3',
       border: '#c4c8d4',
-      accent: '#2e7de9',
+      accent: '#0066aa',
     },
   },
 ];
