@@ -16,21 +16,6 @@ function WorkingSpinner() {
   );
 }
 
-// Typing-style ellipsis shown in place of the timestamp while the model works.
-function WorkingDots() {
-  return (
-    <span className="flex items-center gap-[3px]" aria-label="working">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="dot-pulse rounded-full bg-current"
-          style={{ width: 3, height: 3, animationDelay: `${String(i * 0.16)}s` }}
-        />
-      ))}
-    </span>
-  );
-}
-
 export interface SessionRowProps {
   session: SessionSummary;
   // Effective title: the app-level rename override when set, else the
@@ -209,22 +194,14 @@ export const SessionRow = memo(function SessionRow({
             {title}
           </span>
         </span>
-        {running ? (
-          // Dots replace the timestamp while the model works; they hide on
-          // hover like the timestamp so the "..." trigger stays reachable.
-          <span className="shrink-0 text-droid-text-secondary group-hover:invisible group-focus-within:invisible">
-            <WorkingDots />
+        {timeLabel && (
+          <span
+            className={`shrink-0 text-[10.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
+              unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
+            }`}
+          >
+            {timeLabel}
           </span>
-        ) : (
-          timeLabel && (
-            <span
-              className={`shrink-0 text-[10.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
-                unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
-              }`}
-            >
-              {timeLabel}
-            </span>
-          )
         )}
       </button>
       {/* On hover the timestamp becomes the "..." menu trigger (rename, pin,

@@ -159,13 +159,10 @@ test('SessionRow: the active row exposes aria-current, an unread row exposes a h
   assert.doesNotMatch(render(makeProps({ unread: false })), /Unread:/);
 });
 
-test('SessionRow: a running row shows the spinner and pulsing dots instead of the timestamp', () => {
-  // Matches the pre-extraction behavior: while the model works, the timestamp
-  // slot shows pulsing dots; the relative time returns once the row is idle.
+test('SessionRow: a running row shows the spinner alongside the timestamp', () => {
   const html = render(makeProps({ running: true, now: 60_000 }));
   assert.match(html, /animate-spin/);
-  assert.match(html, /dot-pulse/);
-  assert.doesNotMatch(html, />now</);
+  assert.match(html, />now</);
 });
 
 test('SessionRow: an idle row shows the relative timestamp and no spinner', () => {
