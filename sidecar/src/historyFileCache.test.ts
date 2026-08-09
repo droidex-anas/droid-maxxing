@@ -7,6 +7,10 @@ import { DatabaseSync } from 'node:sqlite';
 import type * as Protocol from './protocol.js';
 import { SessionFileCache, type SessionFileStat } from './sessionFileCache.js';
 import { SessionManager } from './SessionManager.js';
+import {
+  providerSessionJsonl,
+  type ProviderMessageRole,
+} from './testing/providerSessionFixtures.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-cache-home-'));
@@ -32,21 +36,29 @@ function writeSession(
   id: string,
   cwd: string,
   extra: Record<string, unknown> = {},
+  messageRoles: ProviderMessageRole[] = ['user', 'assistant'],
 ): string {
   const dir = join(root, '.factory', 'sessions');
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${id}.jsonl`);
   writeFileSync(
     path,
-    `${JSON.stringify({
-      type: 'session_start',
-      cwd,
-      sessionTitle: `Chat ${id}`,
-      settings: { interactionMode: 'auto' },
-      ...extra,
-    })}\n`,
+    providerSessionJsonl(
+      {
+        type: 'session_start',
+        cwd,
+        sessionTitle: `Chat ${id}`,
+        settings: { interactionMode: 'auto' },
+        ...extra,
+      },
+      messageRoles,
+    ),
   );
   return path;
+}
+
+function writeEmptySession(root: string, id: string, cwd: string): string {
+  return writeSession(root, id, cwd, { sessionTitle: 'New Session' }, []);
 }
 
 function patchFor(appSessionId: string, cwd: string): Protocol.SessionSummary {
@@ -107,6 +119,102 @@ test('reconcile populates the cache and the cached list matches the uncached sca
     );
   } finally {
     index.close();
+  }
+});
+
+test('metadata-only session files never become historical sidebar rows', () => {
+  const freshHome = mkdtempSync(join(tmpdir(), 'droid-history-empty-session-'));
+  const previousHome = process.env.HOME;
+  process.env.HOME = freshHome;
+  try {
+    const workspace = join(freshHome, 'workspace-empty');
+    writeEmptySession(freshHome, 'empty-session', workspace);
+    const index = new HistoryIndex();
+    try {
+      assert.equal(index.reconcileSessionFiles(), 1);
+      assert.equal(
+        index
+          .listHistoricalSessions({ workspaceCwds: [workspace] })
+          .some((row) => row.summary.appSessionId === 'empty-session'),
+        false,
+      );
+    } finally {
+      index.close();
+    }
+  } finally {
+    process.env.HOME = previousHome;
+    rmSync(freshHome, { recursive: true, force: true });
+  }
+});
+
+test('sessions without a model response never become historical sidebar rows', () => {
+  const freshHome = mkdtempSync(join(tmpdir(), 'droid-history-no-response-'));
+  const previousHome = process.env.HOME;
+  process.env.HOME = freshHome;
+  try {
+    const workspace = join(freshHome, 'workspace-no-response');
+    writeSession(freshHome, 'no-response-session', workspace, {}, ['user']);
+    const index = new HistoryIndex();
+    try {
+      assert.equal(index.reconcileSessionFiles(), 1);
+      assert.equal(
+        index
+          .listHistoricalSessions({ workspaceCwds: [workspace] })
+          .some((row) => row.summary.appSessionId === 'no-response-session'),
+        false,
+      );
+    } finally {
+      index.close();
+    }
+  } finally {
+    process.env.HOME = previousHome;
+    rmSync(freshHome, { recursive: true, force: true });
+  }
+});
+
+test('internal llm_only context cannot admit a session without a real user turn', () => {
+  const freshHome = mkdtempSync(join(tmpdir(), 'droid-history-llm-only-'));
+  const previousHome = process.env.HOME;
+  process.env.HOME = freshHome;
+  try {
+    const workspace = join(freshHome, 'workspace-llm-only');
+    const path = writeEmptySession(freshHome, 'llm-only-session', workspace);
+    writeFileSync(
+      path,
+      `${[
+        {
+          type: 'session_start',
+          cwd: workspace,
+          sessionTitle: 'New Session',
+          settings: { interactionMode: 'auto' },
+        },
+        {
+          type: 'message',
+          message: {
+            role: 'user',
+            visibility: 'llm_only',
+            content: [{ type: 'text', text: 'internal context' }],
+          },
+        },
+        {
+          type: 'message',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'response' }] },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n')}\n`,
+    );
+
+    const index = new HistoryIndex();
+    try {
+      assert.equal(index.reconcileSessionFiles(), 1);
+      assert.equal(index.listHistoricalSessions({ workspaceCwds: [workspace] }).length, 0);
+    } finally {
+      index.close();
+    }
+  } finally {
+    process.env.HOME = previousHome;
+    rmSync(freshHome, { recursive: true, force: true });
   }
 });
 
@@ -251,6 +359,63 @@ test('a corrupt cache row is dropped and rebuilt on the next boot', () => {
       assert.equal(second.reconcileSessionFiles(), 1);
       const rows = second.listHistoricalSessions();
       assert.ok(rows.some((row) => row.summary.appSessionId === 'corrupt-row'));
+    } finally {
+      second.close();
+    }
+
+    const nullSummary = new DatabaseSync(dbPath);
+    try {
+      nullSummary
+        .prepare('UPDATE session_file_cache SET summary_json = ? WHERE provider_session_id = ?')
+        .run(JSON.stringify({ cacheVersion: 1, summary: null }), 'corrupt-row');
+    } finally {
+      nullSummary.close();
+    }
+
+    const rebuilt = new HistoryIndex();
+    try {
+      assert.equal(rebuilt.sessionFileCacheSize, 0, 'a null summary is rejected intentionally');
+      assert.equal(rebuilt.reconcileSessionFiles(), 1);
+    } finally {
+      rebuilt.close();
+    }
+  } finally {
+    process.env.HOME = previousHome;
+    rmSync(freshHome, { recursive: true, force: true });
+  }
+});
+
+test('pre-classification cache rows are discarded so empty sessions are re-evaluated', () => {
+  const freshHome = mkdtempSync(join(tmpdir(), 'droid-history-cache-version-'));
+  const previousHome = process.env.HOME;
+  process.env.HOME = freshHome;
+  try {
+    writeEmptySession(freshHome, 'previously-cached-empty', join(freshHome, 'workspace'));
+    const dbPath = join(freshHome, '.factory', 'droidex', SESSION_INDEX_FILENAME);
+    const first = new HistoryIndex();
+    try {
+      assert.equal(first.reconcileSessionFiles(), 1);
+    } finally {
+      first.close();
+    }
+
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.prepare(
+        'UPDATE session_file_cache SET summary_json = ? WHERE provider_session_id = ?',
+      ).run(
+        JSON.stringify(patchFor('previously-cached-empty', join(freshHome, 'workspace'))),
+        'previously-cached-empty',
+      );
+    } finally {
+      db.close();
+    }
+
+    const second = new HistoryIndex();
+    try {
+      assert.equal(second.sessionFileCacheSize, 0, 'the superseded cache shape is rejected');
+      assert.equal(second.reconcileSessionFiles(), 1);
+      assert.equal(second.listHistoricalSessions().length, 0);
     } finally {
       second.close();
     }

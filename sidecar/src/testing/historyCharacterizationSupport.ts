@@ -12,6 +12,7 @@ import {
 } from '../history.js';
 import { filterSessionListSummaries } from '../sessionListFilter.js';
 import type { RecordedCall } from './fakeFactoryRuntime.js';
+import { providerSessionJsonl } from './providerSessionFixtures.js';
 
 type SessionHistoryDependencies = SessionManagerDependencies['history'];
 
@@ -185,7 +186,7 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
   }
 }
 
-export function writeProviderSessionStart(
+export function writeProviderConversation(
   home: string,
   sessionId: string,
   sessionTitle: string,
@@ -194,7 +195,7 @@ export function writeProviderSessionStart(
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(
     file,
-    `${JSON.stringify({ type: 'session_start', sessionId, sessionTitle, cwd: '' })}\n`,
+    providerSessionJsonl({ type: 'session_start', sessionId, sessionTitle, cwd: '' }),
   );
 }
 

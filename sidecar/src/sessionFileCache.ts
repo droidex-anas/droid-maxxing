@@ -10,7 +10,7 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 import type { SessionSummary } from './protocol.js';
-import { numberValue, stringValue } from './values.js';
+import { numberValue, objectValue, stringValue } from './values.js';
 
 export interface SessionFileStat {
   path: string;
@@ -31,10 +31,17 @@ export interface SessionFileScan {
 
 interface CachedSessionFile extends SessionFileStat {
   providerSessionId: string;
-  // Null marks a file that was scanned and classified as worker/validator/
-  // Task-child history, so reconciles skip it without re-reading its head.
+  // Null marks a scanned file that was not admitted to durable top-level
+  // history, so reconciles skip it until its freshness key changes.
   summary: SessionSummary | null;
 }
+
+interface PersistedSessionFileSummary {
+  cacheVersion: 1;
+  summary: SessionSummary;
+}
+
+const SESSION_FILE_SUMMARY_CACHE_VERSION = 1;
 
 // One cached session file as transcript content search needs it: identity,
 // location, and the freshness key, plus the base summary for the caller's
@@ -73,21 +80,35 @@ function matchesFreshnessKey(cached: CachedSessionFile, file: SessionFileStat): 
   );
 }
 
-// Returns the cached summary, null for a known non-top-level file, or
-// undefined when the stored JSON does not hold a summary shape and the row
+// Returns the cached summary, null for a scanned file not admitted to durable
+// top-level history, or undefined when the stored JSON is invalid and the row
 // must be rebuilt.
 function parseCachedSessionSummary(raw: unknown): SessionSummary | null | undefined {
   const text = stringValue(raw);
   if (text === undefined) return null;
   try {
     const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== 'object' || parsed === null) return undefined;
-    const summary = parsed as SessionSummary;
-    if (typeof summary.cwd !== 'string') return undefined;
-    return summary;
+    const cached = objectValue(parsed);
+    if (!cached) return undefined;
+    if (cached.cacheVersion !== SESSION_FILE_SUMMARY_CACHE_VERSION) return undefined;
+    const summary: unknown = cached.summary;
+    const summaryRecord = objectValue(summary);
+    if (!summaryRecord || typeof summaryRecord.cwd !== 'string') return undefined;
+    // This versioned envelope is written only from SessionSummary; keep the
+    // narrow assertion at that trusted cache seam after rejecting invalid rows.
+    return summary as SessionSummary;
   } catch {
     return undefined;
   }
+}
+
+function serializeCachedSessionSummary(summary: SessionSummary | null): string | null {
+  if (summary === null) return null;
+  const cached: PersistedSessionFileSummary = {
+    cacheVersion: SESSION_FILE_SUMMARY_CACHE_VERSION,
+    summary,
+  };
+  return JSON.stringify(cached);
 }
 
 export class SessionFileCache {
@@ -169,46 +190,72 @@ export class SessionFileCache {
   // entries written or removed.
   reconcile(): number {
     const { files: onDisk, isComplete } = this.scanFiles();
-    let changed = 0;
     const upsert = this.db.prepare(UPSERT_SESSION_FILE);
     const remove = this.db.prepare(REMOVE_SESSION_FILE);
+    const removals = this.collectRemovals(onDisk, isComplete);
+    const candidates = this.collectCandidates(onDisk);
+    if (removals.length === 0 && candidates.length === 0) return 0;
+
+    const persisted: CachedSessionFile[] = [];
+    this.db.exec('BEGIN');
+    try {
+      for (const id of removals) remove.run(id);
+      for (const candidate of candidates) {
+        try {
+          upsert.run(
+            candidate.providerSessionId,
+            candidate.path,
+            candidate.birthtimeMs,
+            candidate.mtimeMs,
+            candidate.sizeBytes,
+            candidate.settingsMtimeMs,
+            serializeCachedSessionSummary(candidate.summary),
+          );
+          persisted.push(candidate);
+        } catch {
+          // Preserve per-file resilience: one failed upsert must not prevent
+          // other independently summarized files from entering the cache.
+        }
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Preserve the original SQLite failure.
+      }
+      throw error;
+    }
+
+    for (const id of removals) this.files.delete(id);
+    for (const candidate of persisted) {
+      this.files.set(candidate.providerSessionId, candidate);
+    }
+    return removals.length + persisted.length;
+  }
+
+  private collectRemovals(onDisk: Map<string, SessionFileStat>, isComplete: boolean): string[] {
     // A partial scan cannot distinguish a deleted file from a temporarily
     // unreadable subtree. Preserve unmatched rows until a complete scan can
     // authoritatively remove them.
-    if (isComplete) {
-      for (const id of [...this.files.keys()]) {
-        if (!onDisk.has(id)) {
-          remove.run(id);
-          this.files.delete(id);
-          changed += 1;
-        }
-      }
-    }
+    if (!isComplete) return [];
+    return [...this.files.keys()].filter((id) => !onDisk.has(id));
+  }
+
+  private collectCandidates(onDisk: Map<string, SessionFileStat>): CachedSessionFile[] {
+    const candidates: CachedSessionFile[] = [];
     for (const [id, file] of onDisk) {
       const cached = this.files.get(id);
       if (cached && matchesFreshnessKey(cached, file)) continue;
       try {
         const summary = this.summarizeFile(id, file);
-        // Persist before mutating the in-memory cache so a SQLite write
-        // failure cannot leave the cache holding a row the database never
-        // got: the cache must mirror the database across the process life.
-        upsert.run(
-          id,
-          file.path,
-          file.birthtimeMs,
-          file.mtimeMs,
-          file.sizeBytes,
-          file.settingsMtimeMs,
-          summary === null ? null : JSON.stringify(summary),
-        );
-        this.files.set(id, { providerSessionId: id, ...file, summary });
-        changed += 1;
+        candidates.push({ providerSessionId: id, ...file, summary });
       } catch {
         // The file was deleted or rotated between the scan and the read;
         // the next watcher event or boot reconcile retries it.
       }
     }
-    return changed;
+    return candidates;
   }
 
   // Reconcile exactly the session files a watcher event reported, so live
@@ -243,7 +290,7 @@ export class SessionFileCache {
           file.mtimeMs,
           file.sizeBytes,
           file.settingsMtimeMs,
-          summary === null ? null : JSON.stringify(summary),
+          serializeCachedSessionSummary(summary),
         );
         this.files.set(providerSessionId, { providerSessionId, ...file, summary });
         changed += 1;
@@ -265,6 +312,7 @@ export class SessionFileCache {
     const removeCorrupt = this.db.prepare(
       'DELETE FROM session_file_cache WHERE provider_session_id = ?',
     );
+    const invalidIds: string[] = [];
     for (const row of rows) {
       if (typeof row !== 'object' || row === null) continue;
       const record = row as Record<string, unknown>;
@@ -274,7 +322,7 @@ export class SessionFileCache {
       const summary = parseCachedSessionSummary(record.summary_json);
       if (summary === undefined) {
         // An unparseable row is dropped so the next reconcile rebuilds it.
-        removeCorrupt.run(id);
+        invalidIds.push(id);
         continue;
       }
       this.files.set(id, {
@@ -286,6 +334,20 @@ export class SessionFileCache {
         settingsMtimeMs: numberValue(record.settings_mtime_ms) ?? null,
         summary,
       });
+    }
+    if (invalidIds.length === 0) return;
+
+    this.db.exec('BEGIN');
+    try {
+      for (const id of invalidIds) removeCorrupt.run(id);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Preserve the original SQLite failure.
+      }
+      throw error;
     }
   }
 }
