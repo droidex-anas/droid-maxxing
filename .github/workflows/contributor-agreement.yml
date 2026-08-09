@@ -19,13 +19,13 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          if ! grep -Fq -- '- [x] I have read and accept the DROIDEX Contributor Copyright Assignment' <<< "$PR_BODY"; then
+          if ! grep -Eiq -- '^[[:space:]]*-[[:space:]]*\[x\][[:space:]]+I have read and accept the DROIDEX Contributor Copyright Assignment' <<< "$PR_BODY"; then
             echo 'Check the Contributor Agreement box in the pull request description.' >&2
             exit 1
           fi
 
           legal_name=$(sed -n 's/^Legal name:[[:space:]]*//p' <<< "$PR_BODY" | head -n 1)
-          legal_name=${legal_name%%<!--*}
+          legal_name=$(sed -E 's/<!--[^>]*-->//g' <<< "$legal_name")
           if [[ -z "${legal_name//[[:space:]]/}" ]]; then
             echo 'Enter your full legal name in the pull request description.' >&2
             exit 1
