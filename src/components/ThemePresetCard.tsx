@@ -155,6 +155,8 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [themeError, setThemeError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  // Element that opened the editor; focus returns here when it closes.
+  const openerRef = useRef<HTMLElement | null>(null);
 
   const activePreset = findPreset(theme.presetId, customThemes);
   const activeIsCustom = activePreset ? customThemes.some((p) => p.id === activePreset.id) : false;
@@ -187,8 +189,22 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
   });
 
   /* ── editor flows ── */
+  const openEditor = (next: EditorState) => {
+    // Capture the opener BEFORE the dialog mounts (the editor auto-focuses its
+    // name field, so reading activeElement after mount would capture the
+    // dialog itself), and drop any stale error — a fresh flow must not show a
+    // previous import/save failure; only a failed save retry sets it again.
+    openerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setThemeError(null);
+    setEditor(next);
+  };
+  const closeEditor = () => {
+    setEditor(null);
+    openerRef.current?.focus();
+  };
   const openNewTheme = () => {
-    setEditor({
+    openEditor({
       kind: 'create',
       draft: { name: '', light: { ...previewPreset.light }, dark: { ...previewPreset.dark } },
     });
@@ -200,16 +216,16 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
       dark: { ...previewPreset.dark },
     };
     draft[resolvedScheme] = currentColors();
-    setEditor({ kind: 'create', draft });
+    openEditor({ kind: 'create', draft });
   };
   const openDuplicate = (p: ThemePreset) => {
-    setEditor({
+    openEditor({
       kind: 'create',
       draft: { name: `${p.name} copy`, light: { ...p.light }, dark: { ...p.dark } },
     });
   };
   const openEdit = (p: ThemePreset) => {
-    setEditor({
+    openEditor({
       kind: 'edit',
       id: p.id,
       draft: { name: p.name, light: { ...p.light }, dark: { ...p.dark } },
@@ -230,7 +246,7 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
     }
   };
 
-  const handleSave = (draft: ThemeDraft) => {
+  const handleSave = (draft: ThemeDraft): boolean => {
     const id = editor?.kind === 'edit' ? editor.id : newCustomThemeId();
     const preset: ThemePreset = { id, name: draft.name, light: draft.light, dark: draft.dark };
     if (
@@ -239,10 +255,11 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
         'Could not save the theme — browser storage is unavailable. Fix that and try again.',
       )
     )
-      return;
+      return false;
     dispatch({ type: 'SAVE_CUSTOM_THEME', preset });
     updateTheme({ presetId: id, ...resolveVariant(preset, theme.mode) });
-    setEditor(null);
+    closeEditor();
+    return true;
   };
 
   const handleDelete = (p: ThemePreset) => {
@@ -295,9 +312,8 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
         setThemeError('That file is not a valid theme export.');
         return;
       }
-      setThemeError(null);
       // Open the editor so the import is previewed and named before saving.
-      setEditor({ kind: 'create', draft: parsed });
+      openEditor({ kind: 'create', draft: parsed });
     } catch {
       setThemeError('Could not read that file — expected a JSON theme export.');
     }
@@ -473,9 +489,7 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
           initial={editor.draft}
           error={themeError}
           onSave={handleSave}
-          onCancel={() => {
-            setEditor(null);
-          }}
+          onCancel={closeEditor}
         />
       )}
     </div>

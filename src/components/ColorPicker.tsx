@@ -228,21 +228,31 @@ export function ColorPopover({
     setPos({ top: Math.max(8, top), left: Math.max(8, left) });
   }, [anchor]);
 
+  // The layer must not be re-pushed on parent re-renders (effects flush
+  // child-first, so re-pushing would drop this popover BELOW the theme
+  // editor's layer and let Escape cancel the editor). Push once per anchor
+  // and read the latest onClose through a ref.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node) && e.target !== anchor) onClose();
+      if (ref.current && !ref.current.contains(e.target as Node) && e.target !== anchor)
+        onCloseRef.current();
     };
     // Escape goes through the shared LIFO layer stack (see usePopover.ts) so a
     // single keystroke closes only this innermost popover — a per-instance
     // window listener would race the theme editor's own Escape handler (which
     // registered first) and cancel the whole editor, discarding every edit.
-    const pop = pushEscapeLayer(onClose);
+    const pop = pushEscapeLayer(() => {
+      onCloseRef.current();
+    });
     window.addEventListener('mousedown', onDown);
     return () => {
       window.removeEventListener('mousedown', onDown);
       pop();
     };
-  }, [anchor, onClose]);
+  }, [anchor]);
 
   if (!pos) return null;
   return createPortal(

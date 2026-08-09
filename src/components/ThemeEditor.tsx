@@ -36,7 +36,10 @@ export function ThemeEditor({
   /** Save/persistence failure from the parent; the dialog stays open so the
    * user can retry. */
   error?: string | null;
-  onSave: (draft: ThemeDraft) => void;
+  /** Returns true when the draft was persisted; false keeps the dialog open
+   * (and cancelable with rollback) so the preview is never mistaken for a
+   * saved theme. */
+  onSave: (draft: ThemeDraft) => boolean;
   onCancel: () => void;
 }) {
   const { state } = useStore();
@@ -72,8 +75,20 @@ export function ThemeEditor({
 
   // Cancel is an Escape layer (shared LIFO stack, see usePopover.ts): color
   // popovers opened from this dialog push above it, so Escape always closes
-  // only the innermost layer instead of discarding every edit at once.
-  useEffect(() => pushEscapeLayer(onCancel), [onCancel]);
+  // only the innermost layer instead of discarding every edit at once. The
+  // layer is pushed ONCE with a stable callback reading the latest onCancel —
+  // keying the effect on the (inline) onCancel would re-push on every parent
+  // re-render, and effects flush child-first, so the editor would end up
+  // ABOVE an open picker's layer and Escape would cancel the editor.
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+  useEffect(
+    () =>
+      pushEscapeLayer(() => {
+        onCancelRef.current();
+      }),
+    [],
+  );
 
   // While the app is in System mode, keep the edited variant on the one the OS
   // actually shows; otherwise a scheme flip mid-edit leaves the preview on
@@ -91,34 +106,36 @@ export function ThemeEditor({
     };
   }, [state.theme.mode]);
 
-  // aria-modal contract: Tab must cycle inside the dialog and focus returns
-  // to the element that opened it. Same focusable-element query and wrap
-  // logic the environment Popover uses for its Tab trap; the color popover
-  // portals to <body>, so it counts as inside via its data attribute.
+  // aria-modal contract: Tab must cycle inside the dialog. Same
+  // focusable-element query and wrap logic the environment Popover uses for
+  // its Tab trap. The color popover portals to <body>, so its controls are
+  // enumerated too — otherwise Tab from the picker's last control would walk
+  // out to whatever sits behind the modal. Focus restoration is the parent's
+  // job (it captures the opener before this dialog mounts; the auto-focused
+  // name field would otherwise win that read).
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const containsFocus = (node: HTMLElement | null) => {
-      if (!node) return false;
-      if (dialogRef.current?.contains(node)) return true;
-      return document.querySelector('[data-color-popover]')?.contains(node) ?? false;
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return;
       const dialog = dialogRef.current;
       if (!dialog) return;
-      const focusables = dialog.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      const roots = [dialog, ...document.querySelectorAll<HTMLElement>('[data-color-popover]')];
+      const focusables = roots.flatMap((root) =>
+        Array.from(
+          root.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ),
       );
       if (focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement as HTMLElement | null;
-      if (e.shiftKey && (active === first || !containsFocus(active))) {
+      const inside = active !== null && roots.some((root) => root.contains(active));
+      if (e.shiftKey && (active === first || !inside)) {
         e.preventDefault();
         last.focus();
-      } else if (!e.shiftKey && (active === last || !containsFocus(active))) {
+      } else if (!e.shiftKey && (active === last || !inside)) {
         e.preventDefault();
         first.focus();
       }
@@ -126,7 +143,6 @@ export function ThemeEditor({
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
-      previouslyFocused?.focus();
     };
   }, []);
 
@@ -137,8 +153,10 @@ export function ThemeEditor({
   const name = draft.name.trim();
   const save = () => {
     if (!name) return;
-    savedRef.current = true;
-    onSave({ ...draft, name });
+    // Latch "saved" only when the parent confirms persistence — otherwise a
+    // failed save followed by Cancel would skip the rollback and leave the
+    // unsaved preview palette applied with no state behind it.
+    if (onSave({ ...draft, name })) savedRef.current = true;
   };
 
   return (
