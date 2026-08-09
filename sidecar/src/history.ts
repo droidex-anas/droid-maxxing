@@ -170,7 +170,7 @@ export function loadMissionControlSessions(
   const workspaceCwds = options.workspaceCwds
     ? new Set(options.workspaceCwds.filter(Boolean))
     : null;
-  if (workspaceCwds && workspaceCwds.size === 0 && !options.includePlainChats) return [];
+  if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
   const rows = missionDirs()
     .filter((dir) => {
       if (!workspaceCwds && !options.includePlainChats) return true;
@@ -197,7 +197,7 @@ export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): H
   const workspaceCwds = options.workspaceCwds
     ? new Set(options.workspaceCwds.filter(Boolean))
     : null;
-  if (workspaceCwds && workspaceCwds.size === 0 && !options.includePlainChats) return [];
+  if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
   for (const [providerSessionId, file] of scanSessionFiles()) {
     const summary = summarizeSessionFile(providerSessionId, file);
     if (!summary) continue;
@@ -220,6 +220,28 @@ export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): H
   );
 }
 
+// The CLI stores a skill or slash-command invocation as the session title
+// verbatim ("/review src", "/btw …"), which reads as chrome in the sidebar
+// instead of a name. Present it as the humanized command: "Review: src",
+// "Btw". Titles that are not a bare command pass through untouched.
+function presentStoredTitle(title: string | undefined): string | undefined {
+  const trimmed = title?.trim();
+  if (!trimmed) return undefined;
+  const command = /^\/\s*([\w-]+)(?:\s+(.*))?$/.exec(trimmed);
+  if (!command) return title;
+  // exec types groups as plain strings, but the optional args group is
+  // undefined at runtime for a bare command like "/review".
+  const name: string = command[1];
+  const rawArgs: string | undefined = command[2];
+  const label = name.charAt(0).toUpperCase() + name.slice(1);
+  const args = rawArgs?.trim();
+  return args ? `${label}: ${args}` : label;
+}
+
+function sessionTitleFromStored(title: string | undefined, providerSessionId: string): string {
+  return presentStoredTitle(title) ?? `Session ${providerSessionId.slice(0, 8)}`;
+}
+
 export function loadSessionHistory(): SessionHistoryEntry[] {
   const rows: SessionHistoryEntry[] = [];
   for (const [providerSessionId, path] of buildSessionIndex()) {
@@ -227,7 +249,7 @@ export function loadSessionHistory(): SessionHistoryEntry[] {
     const stat = statSync(path);
     rows.push({
       providerSessionId,
-      title: start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`,
+      title: sessionTitleFromStored(start.sessionTitle || start.title, providerSessionId),
       cwd: start.cwd,
       modifiedTime: stat.mtimeMs,
       createdTime: stat.birthtimeMs,
@@ -796,7 +818,7 @@ function hasPrimaryKey(
 
 function tableInfo(db: DatabaseSync, table: string): Record<string, unknown>[] {
   if (!/^[a-z_]+$/.test(table)) return [];
-  return db.prepare(`PRAGMA table_info(${table})`).all() as Record<string, unknown>[];
+  return db.prepare(`PRAGMA table_info(${table})`).all();
 }
 
 function hasPartialUniqueIndex(
@@ -986,7 +1008,9 @@ function summaryPatchesFromRows(
       compactedFromProviderSessionIds: jsonStringArray(row.compacted_from_provider_session_ids),
       sessionPurpose: sessionPurpose(stringValue(row.session_purpose)),
       interactionMode: sessionInteractionModeValue(stringValue(row.interaction_mode)),
-      title: stringValue(row.title),
+      // Cached titles predate presentation rules, so the slash-command
+      // cleanup runs here too instead of only at summarization time.
+      title: presentStoredTitle(stringValue(row.title)),
       cwd: stringValue(row.cwd),
       workspaceKind: workspaceKind(stringValue(row.workspace_kind)),
       modelId: stringValue(row.model_id),
@@ -1046,9 +1070,7 @@ export function applyCachedSummary(
 }
 
 function definedPatch(patch: Partial<SessionSummary>): Partial<SessionSummary> {
-  return Object.fromEntries(
-    Object.entries(patch).filter(([, value]) => value !== undefined),
-  ) as Partial<SessionSummary>;
+  return Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
 }
 
 export function hydrateHistoricalSession(
@@ -1116,7 +1138,7 @@ export function resolveSessionChain(appSessionId: string, providerSessionId: str
   );
 }
 
-function dedupeStrings(values: Array<string | undefined>): string[] {
+function dedupeStrings(values: (string | undefined)[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
@@ -1145,8 +1167,7 @@ function transcriptReaderFor(
   const stat = statSync(path);
   const cached = transcriptReaders.get(path);
   if (
-    cached &&
-    cached.mtimeMs === stat.mtimeMs &&
+    cached?.mtimeMs === stat.mtimeMs &&
     cached.sizeBytes === stat.size &&
     cached.appSessionId === appSessionId
   ) {
@@ -1665,7 +1686,7 @@ function summarizeSessionFile(
   // become permanent sidebar rows. Live sessions are registered separately,
   // so this historical-only check cannot hide a first turn while it is running.
   if (!hasCompletedConversation(file.path, file.sizeBytes)) return null;
-  const title = start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`;
+  const title = sessionTitleFromStored(start.sessionTitle || start.title, providerSessionId);
   const settings = readSessionModelSettings(start, file.path);
   return {
     appSessionId: providerSessionId,
