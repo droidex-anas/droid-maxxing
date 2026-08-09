@@ -106,9 +106,25 @@ export function SessionContextMenuPanel({
   }, [onClose]);
 
   // Keyboard access: focus the first item on open, arrows walk the items, and
-  // Enter/Space activate the focused button natively.
+  // Enter/Space activate the focused button natively. On close, focus returns
+  // to the element that opened the menu (WAI-ARIA menu pattern) unless the
+  // user already moved it — e.g. the rename flow's autofocused input, or a
+  // click that focused another control.
   useEffect(() => {
+    const opener = document.activeElement;
     panelRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => {
+      const focusDiedWithMenu =
+        document.activeElement === null || document.activeElement === document.body;
+      if (
+        opener instanceof HTMLElement &&
+        opener !== document.body &&
+        opener.isConnected &&
+        focusDiedWithMenu
+      ) {
+        opener.focus();
+      }
+    };
   }, []);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -128,17 +144,27 @@ export function SessionContextMenuPanel({
 
   // Clamp to the viewport so the menu never opens partly off-screen. The
   // height estimate counts the rows actually rendered so a short menu doesn't
-  // jump away from the pointer near the bottom edge.
+  // jump away from the pointer near the bottom edge. SSR (the panel's tests
+  // render with renderToStaticMarkup) has no viewport, so it renders
+  // unclamped; the clamp applies on the client where a window exists.
+  const viewportWidth = typeof window === 'undefined' ? undefined : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? undefined : window.innerHeight;
   const rowCount = 4 + (cwd ? 1 : 0) + (providerSessionId ? 2 : 0);
   const estimatedMenuHeight = MENU_CHROME_PX + rowCount * MENU_ROW_PX;
-  const left = Math.min(
-    Math.max(MENU_MARGIN, x),
-    Math.max(MENU_MARGIN, window.innerWidth - SESSION_MENU_WIDTH - MENU_MARGIN),
-  );
-  const top = Math.min(
-    Math.max(MENU_MARGIN, y),
-    Math.max(MENU_MARGIN, window.innerHeight - estimatedMenuHeight - MENU_MARGIN),
-  );
+  const left =
+    viewportWidth === undefined
+      ? Math.max(MENU_MARGIN, x)
+      : Math.min(
+          Math.max(MENU_MARGIN, x),
+          Math.max(MENU_MARGIN, viewportWidth - SESSION_MENU_WIDTH - MENU_MARGIN),
+        );
+  const top =
+    viewportHeight === undefined
+      ? Math.max(MENU_MARGIN, y)
+      : Math.min(
+          Math.max(MENU_MARGIN, y),
+          Math.max(MENU_MARGIN, viewportHeight - estimatedMenuHeight - MENU_MARGIN),
+        );
 
   const copyAndClose = (text: string, message: string) => {
     copyText(text, message);

@@ -134,7 +134,14 @@ function withMetadata(
     meta.pinnedAt !== undefined ||
     meta.archivedAt !== undefined ||
     meta.deletedAt !== undefined;
-  return hasContent ? { ...rest, [appSessionId]: meta } : rest;
+  const next = hasContent ? { ...rest, [appSessionId]: meta } : rest;
+  // The same bound loadChatMetadata enforces on read, applied here so runtime
+  // updates cannot grow storage past it between restarts. The touched id is
+  // reinserted last, so insertion order is recency and the oldest drop first.
+  const entries = Object.entries(next);
+  return entries.length > MAX_TRACKED_CHATS
+    ? Object.fromEntries(entries.slice(entries.length - MAX_TRACKED_CHATS))
+    : next;
 }
 
 // The transforms below return null when nothing would change so the reducer
@@ -201,9 +208,9 @@ export function restoreChat(map: ChatMetadataMap, appSessionId: string): ChatMet
   const byId: Partial<ChatMetadataMap> = map;
   const meta = byId[appSessionId];
   if (meta?.archivedAt === undefined) return null;
+  // archiveChat drops pinnedAt, so an archived chat never has a pin to carry.
   const next: ChatMetadata = {};
   if (meta.displayTitle !== undefined) next.displayTitle = meta.displayTitle;
-  if (meta.pinnedAt !== undefined) next.pinnedAt = meta.pinnedAt;
   if (meta.deletedAt !== undefined) next.deletedAt = meta.deletedAt;
   return withMetadata(map, appSessionId, next);
 }

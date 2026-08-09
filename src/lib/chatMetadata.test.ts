@@ -209,6 +209,26 @@ test('loadChatMetadata caps the payload at MAX_TRACKED_CHATS entries', () => {
   assert.equal(loaded.s1000, undefined);
 });
 
+test('runtime updates cap the map at MAX_TRACKED_CHATS, dropping the oldest', () => {
+  // The load-time cap alone left a gap: metadata created after startup grew
+  // the map (and the stored payload) past the bound until the next restart.
+  let map: ChatMetadataMap = {};
+  for (let i = 0; i < 1000; i += 1) map = pinChat(map, `s${String(i)}`, i) ?? map;
+  assert.equal(Object.keys(map).length, 1000);
+
+  const next = pinChat(map, 's1000', 1000) ?? {};
+  assert.equal(Object.keys(next).length, 1000);
+  // The touched id is reinserted as most recent, so the oldest entry drops.
+  assert.equal(next.s0, undefined);
+  assert.equal(next.s1?.pinnedAt, 1);
+  assert.equal(next.s1000?.pinnedAt, 1000);
+
+  // Updating an existing id reorders instead of growing, so it survives too.
+  const renamed = renameChat(next, 's1', 'still here') ?? {};
+  assert.equal(Object.keys(renamed).length, 1000);
+  assert.equal(renamed.s1?.displayTitle, 'still here');
+});
+
 test('loadChatMetadata sanitizes corrupt payloads', () => {
   const data = fakeStorage();
   data.set(

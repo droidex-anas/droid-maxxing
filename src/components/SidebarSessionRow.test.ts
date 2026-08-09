@@ -161,7 +161,8 @@ test('SessionRow: the active row exposes aria-current, an unread row exposes a h
 
 test('SessionRow: a running row shows the spinner alongside the timestamp', () => {
   const html = render(makeProps({ running: true, now: 60_000 }));
-  assert.match(html, /animate-spin/);
+  // motion-safe keeps the spinner still for reduced-motion users.
+  assert.match(html, /motion-safe:animate-spin/);
   assert.match(html, />now</);
 });
 

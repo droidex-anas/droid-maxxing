@@ -4,17 +4,10 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SessionContextMenuPanel, type SessionContextMenuProps } from './SessionContextMenu';
 
-// The panel clamps to the viewport during render, so the SSR test needs a
-// minimal window global. (The portal wrapper stays untestable in SSR —
-// portals reject fake document.body containers — hence rendering the panel.)
-const g = globalThis as { window?: unknown };
-g.window ??= {
-  innerWidth: 1280,
-  innerHeight: 800,
-  addEventListener: () => undefined,
-  removeEventListener: () => undefined,
-};
-
+// The panel must SSR without any browser global: with no window the viewport
+// clamp is skipped and coordinates pass through raw. (The portal wrapper
+// stays untestable in SSR — portals reject fake document.body containers —
+// hence rendering the panel.)
 function render(props: Partial<SessionContextMenuProps> = {}): string {
   return renderToStaticMarkup(
     createElement(SessionContextMenuPanel, {
@@ -31,6 +24,24 @@ function render(props: Partial<SessionContextMenuProps> = {}): string {
       ...props,
     }),
   );
+}
+
+// Renders with a minimal window stub so the viewport clamp engages.
+function renderWithWindow(props: Partial<SessionContextMenuProps> = {}): string {
+  const g = globalThis as { window?: unknown };
+  const previous = g.window;
+  g.window = {
+    innerWidth: 1280,
+    innerHeight: 800,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  };
+  try {
+    return render(props);
+  } finally {
+    if (previous === undefined) delete g.window;
+    else g.window = previous;
+  }
 }
 
 test('SessionContextMenu lists organization actions first, then the copy actions', () => {
@@ -67,9 +78,19 @@ test('SessionContextMenu hides the working-directory row for an empty cwd too', 
   assert.doesNotMatch(html, /Copy Working Directory/);
 });
 
+test('SessionContextMenu renders without a window global and skips the clamp', () => {
+  // Regression: the clamp used to dereference window during render, making the
+  // panel unrenderable in SSR without a fake browser global.
+  assert.equal(typeof window, 'undefined');
+  const html = render({ x: 2, y: 790 });
+  // No viewport: raw coordinates pass through (only the margin floor applies).
+  assert.match(html, /top:\s*790px/);
+  assert.match(html, /left:\s*8px/);
+});
+
 test('SessionContextMenu clamps to the viewport bottom using the rendered row count', () => {
   // Full menu (cwd + provider id => 7 rows): 18 chrome + 7*30 = 228px tall.
-  const html = render({ y: 790 });
+  const html = renderWithWindow({ y: 790 });
   const top = /top:\s*([\d.]+)px/.exec(html);
   assert.ok(top, 'expected an inline top style');
   // 800 - 228 - 8 margin = 564.

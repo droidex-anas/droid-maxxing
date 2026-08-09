@@ -26,18 +26,17 @@ export default function Toaster() {
 
   // Anchored bottom-right, clear of the centered composer and the status bar so
   // notifications stay fully visible. Newest sits closest to the corner. Sits
-  // above popovers and modals (z-[1300]) so feedback is never hidden. The
-  // container is a polite live region so messages are announced as they arrive.
+  // above popovers and modals (z-[1300]) so feedback is never hidden. Each
+  // toast is its own polite live region: putting role="status" on the shared
+  // container would imply aria-atomic and re-announce every stacked toast
+  // whenever one arrives.
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="pointer-events-none fixed bottom-11 right-4 z-[1300] flex flex-col items-end gap-2"
-    >
+    <div className="pointer-events-none fixed bottom-11 right-4 z-[1300] flex flex-col items-end gap-2">
       <AnimatePresence initial={false}>
         {toasts.map((t) => (
           <motion.div
             key={t.id}
+            role="status"
             layout
             initial={{ opacity: 0, y: 10, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -63,6 +62,7 @@ export default function Toaster() {
                 onClick={() => {
                   dismissToast(t.id);
                 }}
+                aria-label="Dismiss"
                 className="-mr-1 shrink-0 rounded-md p-1 text-droid-text-muted opacity-0 transition-all hover:bg-droid-surface hover:text-droid-text group-hover:opacity-100"
                 title="Dismiss"
               >

@@ -9,7 +9,7 @@
 // modules. Reviewed ceiling: ~700 lines; extract the workspace section if it
 // grows past that.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useStore } from '../hooks/useStore';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { pickDirectory } from '../lib/desktop';
@@ -93,8 +93,11 @@ function rowMenuTarget(
   return sessions[rowMenu.appSessionId];
 }
 
-// Animated expand/collapse for sidebar sections, no chrome.
+// Animated expand/collapse for sidebar sections, no chrome. Reduced-motion
+// users get an instantaneous toggle (zero-duration transitions, same pattern
+// as SubagentsDock).
 function Expand({ open, children }: { open: boolean; children: ReactNode }) {
+  const reduceMotion = useReducedMotion();
   return (
     <AnimatePresence initial={false}>
       {open && (
@@ -102,7 +105,7 @@ function Expand({ open, children }: { open: boolean; children: ReactNode }) {
           initial={{ height: 0, opacity: 0 }}
           animate={{ height: 'auto', opacity: 1 }}
           exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: 0.2, ease: EASE }}
+          transition={{ duration: reduceMotion ? 0 : 0.2, ease: EASE }}
           className="overflow-hidden"
         >
           {children}
@@ -115,13 +118,15 @@ function Expand({ open, children }: { open: boolean; children: ReactNode }) {
 // The workspace folder glyph doubles as the collapse indicator: closed while
 // the workspace is collapsed, open while expanded, crossfading between states.
 function WorkspaceFolderIcon({ open }: { open: boolean }) {
+  const reduceMotion = useReducedMotion();
+  const duration = reduceMotion ? 0 : 0.15;
   return (
     <span className="relative block w-4 h-4 shrink-0 text-droid-text-muted">
       <motion.span
         className="absolute inset-0 flex items-center justify-center"
         initial={false}
         animate={{ opacity: open ? 0 : 1 }}
-        transition={{ duration: 0.15, ease: EASE }}
+        transition={{ duration, ease: EASE }}
       >
         <Folder className="w-4 h-4" />
       </motion.span>
@@ -129,7 +134,7 @@ function WorkspaceFolderIcon({ open }: { open: boolean }) {
         className="absolute inset-0 flex items-center justify-center"
         initial={false}
         animate={{ opacity: open ? 1 : 0 }}
-        transition={{ duration: 0.15, ease: EASE }}
+        transition={{ duration, ease: EASE }}
       >
         <FolderOpen className="w-4 h-4" />
       </motion.span>
@@ -496,6 +501,7 @@ export default function Sidebar() {
                     onClick={() => {
                       toggleCollapse('__pinned__');
                     }}
+                    aria-expanded={open}
                     className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-droid-elevated/40 transition-colors"
                   >
                     <ChevronRight
@@ -523,6 +529,7 @@ export default function Sidebar() {
                   onClick={() => {
                     toggleCollapse('__workspaces__');
                   }}
+                  aria-expanded={open}
                   className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-droid-elevated/40 transition-colors"
                 >
                   <ChevronRight
@@ -605,6 +612,7 @@ export default function Sidebar() {
                   onClick={() => {
                     toggleCollapse('__chats__');
                   }}
+                  aria-expanded={open}
                   className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-droid-elevated/40 transition-colors"
                 >
                   <ChevronRight

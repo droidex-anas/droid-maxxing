@@ -5,11 +5,12 @@ import { formatRelativeTime } from '../lib/time';
 import { SESSION_MENU_WIDTH } from './SessionContextMenu';
 import type { SessionSummary } from '../types/bridge';
 
-// Simple, smooth ring spinner shown on the left of a row while its model works.
+// Simple, smooth ring spinner shown on the left of a row while its model
+// works. motion-safe keeps it static for reduced-motion users.
 function WorkingSpinner() {
   return (
     <span
-      className="w-3 h-3 rounded-full border-[1.5px] border-droid-text-muted/30 border-t-droid-text animate-spin"
+      className="w-3 h-3 rounded-full border-[1.5px] border-droid-text-muted/30 border-t-droid-text motion-safe:animate-spin"
       style={{ animationDuration: '1.5s' }}
       aria-label="working"
     />
