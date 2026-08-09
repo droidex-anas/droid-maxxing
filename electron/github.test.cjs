@@ -352,6 +352,49 @@ test('timed-out installation stays active until the child exits and escalates te
   assert.equal(operation.child, null);
 });
 
+test('cancelling installation escalates when Homebrew ignores SIGTERM', async () => {
+  const child = new EventEmitter();
+  const killSignals = [];
+  const timers = [];
+  child.kill = (signal) => {
+    const normalizedSignal = signal ?? 'SIGTERM';
+    killSignals.push(normalizedSignal);
+    if (normalizedSignal === 'SIGKILL') {
+      queueMicrotask(() => child.emit('close', null, normalizedSignal));
+    }
+    return true;
+  };
+  const pending = install({
+    resolveBrew: async () => '/opt/homebrew/bin/brew',
+    execute: (file, args, options) =>
+      runSetupFile(file, args, {
+        ...options,
+        terminationGraceMs: 25,
+        spawnProcess: () => child,
+        setTimer: (callback, timeoutMs) => {
+          const timer = { callback, timeoutMs, unref() {} };
+          timers.push(timer);
+          return timer;
+        },
+        clearTimer: () => undefined,
+      }),
+    resolveGh: async () => '/opt/homebrew/bin/gh',
+  });
+  await Promise.resolve();
+
+  cancelSetup();
+  assert.deepEqual(killSignals, ['SIGTERM']);
+  assert.equal(timers[1].timeoutMs, 25);
+  timers[1].callback();
+
+  assert.deepEqual(killSignals, ['SIGTERM', 'SIGKILL']);
+  assert.deepEqual(await pending, {
+    ok: false,
+    reason: 'cancelled',
+    message: 'GitHub CLI installation was cancelled.',
+  });
+});
+
 test('only one GitHub setup operation runs at a time', async () => {
   let finishInstall;
   const first = install({
@@ -481,6 +524,30 @@ test('browser authentication requires final gh auth verification', async () => {
   });
 });
 
+test('browser authentication handles verification rejection and releases the setup lock', async () => {
+  const child = fakeChild();
+  const result = await authenticate({
+    resolveGh: async () => '/opt/homebrew/bin/gh',
+    spawnProcess: () => {
+      queueMicrotask(() => {
+        child.stderr.write('https://github.com/login/device\n');
+        child.emit('close', 0, null);
+      });
+      return child;
+    },
+    verifyAuth: async () => {
+      throw new Error('verification failed');
+    },
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'auth_failed',
+    message: 'GitHub CLI could not verify the signed-in account.',
+  });
+  assert.notEqual((await authenticate({ resolveGh: async () => null })).reason, 'busy');
+});
+
 test('browser authentication times out and terminates its child', async () => {
   const child = fakeChild();
   const result = await authenticate({
@@ -562,6 +629,46 @@ test('cancelling browser authentication terminates its child process', async () 
   cancelSetup();
 
   assert.equal(child.killed, true);
+  assert.deepEqual(await pending, {
+    ok: false,
+    reason: 'cancelled',
+    message: 'GitHub sign-in was cancelled.',
+  });
+});
+
+test('cancelling browser authentication escalates when its child ignores SIGTERM', async () => {
+  const child = fakeChild();
+  const killSignals = [];
+  const timers = [];
+  child.kill = (signal) => {
+    const normalizedSignal = signal ?? 'SIGTERM';
+    killSignals.push(normalizedSignal);
+    if (normalizedSignal === 'SIGKILL') {
+      queueMicrotask(() => child.emit('close', null, normalizedSignal));
+    }
+    return true;
+  };
+  const pending = authenticate({
+    resolveGh: async () => '/opt/homebrew/bin/gh',
+    spawnProcess: () => child,
+    verifyAuth: async () => true,
+    authTimeoutMs: 1_000,
+    terminationGraceMs: 25,
+    setTimer: (callback, timeoutMs) => {
+      const timer = { callback, timeoutMs, unref() {} };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer: () => undefined,
+  });
+  await Promise.resolve();
+
+  cancelSetup();
+  assert.deepEqual(killSignals, ['SIGTERM']);
+  assert.equal(timers[1].timeoutMs, 25);
+  timers[1].callback();
+
+  assert.deepEqual(killSignals, ['SIGTERM', 'SIGKILL']);
   assert.deepEqual(await pending, {
     ok: false,
     reason: 'cancelled',

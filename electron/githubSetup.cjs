@@ -29,23 +29,32 @@ function scheduleBoundedTermination(
   { timeoutMs, terminationGraceMs, setTimer, clearTimer, onTimeout },
 ) {
   let disposed = false;
+  let terminationStarted = false;
   let forceKillTimer;
-  const timeoutTimer = setTimer(() => {
-    if (disposed) return;
-    onTimeout();
+  const terminate = () => {
+    if (disposed || terminationStarted) return;
+    terminationStarted = true;
     child.kill();
     if (disposed) return;
     forceKillTimer = setTimer(() => {
       if (!disposed) child.kill('SIGKILL');
     }, terminationGraceMs);
     forceKillTimer.unref?.();
+  };
+  const timeoutTimer = setTimer(() => {
+    if (disposed) return;
+    onTimeout();
+    terminate();
   }, timeoutMs);
   timeoutTimer.unref?.();
 
-  return () => {
-    disposed = true;
-    clearTimer(timeoutTimer);
-    if (forceKillTimer) clearTimer(forceKillTimer);
+  return {
+    terminate,
+    dispose() {
+      disposed = true;
+      clearTimer(timeoutTimer);
+      if (forceKillTimer) clearTimer(forceKillTimer);
+    },
   };
 }
 
@@ -63,15 +72,18 @@ function runSetupFile(
 ) {
   return new Promise((resolve) => {
     let child;
-    let stopTermination;
+    let termination;
     let timedOut = false;
     let settled = false;
 
     const finish = (result) => {
       if (settled) return;
       settled = true;
-      stopTermination?.();
-      if (operation.child === child) operation.child = null;
+      termination?.dispose();
+      if (operation.child === child) {
+        operation.child = null;
+        operation.terminate = null;
+      }
       child?.removeAllListeners();
       resolve(result);
     };
@@ -86,7 +98,7 @@ function runSetupFile(
     operation.child = child;
     child.once('error', () => finish({ code: 1, timedOut }));
     child.once('close', (code) => finish({ code: typeof code === 'number' ? code : 1, timedOut }));
-    stopTermination = scheduleBoundedTermination(child, {
+    termination = scheduleBoundedTermination(child, {
       timeoutMs: timeout,
       terminationGraceMs,
       setTimer,
@@ -95,7 +107,8 @@ function runSetupFile(
         timedOut = true;
       },
     });
-    if (operation.cancelled) child.kill();
+    operation.terminate = termination.terminate;
+    if (operation.cancelled) termination.terminate();
   });
 }
 
@@ -104,7 +117,7 @@ async function install(options = {}) {
     return { ok: false, reason: 'busy', message: 'GitHub setup is already running.' };
   }
 
-  const operation = { kind: 'install', cancelled: false, child: null };
+  const operation = { kind: 'install', cancelled: false, child: null, terminate: null };
   activeSetup = operation;
   const resolveBrew = options.resolveBrew || cachedBrewExecutable;
   const execute = options.execute || runSetupFile;
@@ -162,7 +175,7 @@ async function install(options = {}) {
 function cancelSetup() {
   if (!activeSetup) return;
   activeSetup.cancelled = true;
-  activeSetup.child?.kill();
+  activeSetup.terminate?.();
 }
 
 function isGithubDeviceUrl(value) {
@@ -209,15 +222,18 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     let rejectedUrl = false;
     let timedOut = false;
     let settled = false;
-    let stopTermination;
+    let termination;
 
     const cleanup = () => {
-      stopTermination?.();
+      termination?.dispose();
       child?.stdout?.removeListener('data', onOutput);
       child?.stderr?.removeListener('data', onOutput);
       child?.removeListener('error', onError);
       child?.removeListener('close', onClose);
-      if (operation.child === child) operation.child = null;
+      if (operation.child === child) {
+        operation.child = null;
+        operation.terminate = null;
+      }
     };
     const finish = (result) => {
       if (settled) return;
@@ -288,7 +304,12 @@ function runAuthenticationProcess(executable, operation, options = {}) {
         });
         return;
       }
-      const authenticated = await verifyAuth();
+      let authenticated = false;
+      try {
+        authenticated = await verifyAuth();
+      } catch {
+        // Verification failure follows the same closed result as a signed-out account.
+      }
       if (operation.cancelled) {
         finish({ ok: false, reason: 'cancelled', message: 'GitHub sign-in was cancelled.' });
         return;
@@ -334,7 +355,7 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     child.stderr.on('data', onOutput);
     child.once('error', onError);
     child.once('close', onClose);
-    stopTermination = scheduleBoundedTermination(child, {
+    termination = scheduleBoundedTermination(child, {
       timeoutMs,
       terminationGraceMs,
       setTimer: scheduleTimeout,
@@ -343,7 +364,8 @@ function runAuthenticationProcess(executable, operation, options = {}) {
         timedOut = true;
       },
     });
-    if (operation.cancelled) child.kill();
+    operation.terminate = termination.terminate;
+    if (operation.cancelled) termination.terminate();
   });
 }
 
@@ -352,7 +374,7 @@ async function authenticate(options = {}) {
     return { ok: false, reason: 'busy', message: 'GitHub setup is already running.' };
   }
 
-  const operation = { kind: 'authenticate', cancelled: false, child: null };
+  const operation = { kind: 'authenticate', cancelled: false, child: null, terminate: null };
   activeSetup = operation;
   const resolveGh = options.resolveGh || (async () => null);
   try {
