@@ -96,7 +96,7 @@ export function ThemeEditor({
         </div>
 
         <div className="px-5 pb-4">
-          {/* Live preview: wireframe plus the theme's aurora spheres */}
+          {/* Live preview: wireframe plus the theme's icon glyph */}
           <div className="relative h-44 overflow-hidden rounded-xl border border-droid-border">
             <MiniAppFrame colors={draft[editing]} />
             <div className="pointer-events-none absolute bottom-3 right-3 rounded-xl border border-droid-border bg-droid-bg/70 p-3 backdrop-blur-sm">
@@ -107,7 +107,7 @@ export function ThemeEditor({
                   light: draft.light,
                   dark: draft.dark,
                 }}
-                activeScheme={editing}
+                scheme={editing}
                 size={36}
               />
             </div>

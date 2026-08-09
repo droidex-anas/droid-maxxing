@@ -1,5 +1,5 @@
 // Theme visualizations for the Appearance settings: a miniature app wireframe
-// and the dual-sphere theme swatches. Everything paints with explicit palette
+// and the icon-sized theme glyphs. Everything paints with explicit palette
 // colors (never the live CSS variables) so cards can preview themes and schemes
 // that are not currently applied.
 
@@ -105,52 +105,51 @@ export function SchemePreview({
   );
 }
 
-function sphereBackground(colors: ThemeColors): string {
-  // Aurora orb: a crisp-edged sphere lit from inside — a pale surface sheen on
-  // the upper left, the theme accent blooming from the lower right, over the
-  // deep canvas. No blur filter on purpose: blurring smeared the stops into a
-  // muddy blob and made color edits invisible.
-  return [
-    `radial-gradient(80% 80% at 30% 25%, ${colors.surface} 0%, transparent 55%)`,
-    `radial-gradient(95% 95% at 68% 70%, ${colors.accent} 12%, transparent 70%)`,
-    colors.bg,
-  ].join(', ');
-}
-
-/** The two variant spheres of a theme (light left, dark right). */
+/**
+ * The theme's palette as a small app-icon glyph: the MiniAppFrame wireframe
+ * (sidebar, chat lines, input bar with an accent send dot) rendered at icon
+ * size in a rounded square. Pure CSS, so it stays crisp at any size, and it
+ * shows how the palette actually distributes across the app instead of
+ * abstracting it into a shape.
+ */
 export function ThemeSwatches({
   preset,
-  activeScheme,
-  size = 40,
+  scheme,
+  size = 44,
 }: {
   preset: ThemePreset;
-  activeScheme?: 'light' | 'dark';
+  scheme: 'light' | 'dark';
   size?: number;
 }) {
-  const sphere = (scheme: 'light' | 'dark') => {
-    const colors = preset[scheme];
-    const active = activeScheme === scheme;
-    // A soft aura in the theme accent supplies the glow; the orb edge itself
-    // stays sharp so the colors read clearly at small sizes.
-    const aura = `0 0 ${Math.max(6, Math.round(size / 2.5))}px ${colors.accent}59`;
-    return (
-      <span
-        className="rounded-full transition-shadow"
-        style={{
-          width: size,
-          height: size,
-          background: sphereBackground(colors),
-          boxShadow: active
-            ? `inset 0 0 0 1px ${colors.border}, ${aura}, 0 0 0 2px var(--droid-bg), 0 0 0 4px var(--droid-accent)`
-            : `inset 0 0 0 1px ${colors.border}, ${aura}`,
-        }}
-      />
-    );
-  };
+  const colors = preset[scheme];
+  // A soft aura in the theme accent supplies the glow; the glyph edge itself
+  // stays sharp so the colors read clearly at small sizes.
+  const aura = `0 0 ${Math.max(6, Math.round(size / 2.5))}px ${colors.accent}59`;
+  // MiniAppFrame is laid out with fixed px details, so paint it at a design
+  // size and scale the box down — the wireframe keeps its proportions instead
+  // of collapsing at icon size, and pure CSS stays crisp at any scale.
+  const designSize = 120;
   return (
-    <span className="flex items-center" style={{ gap: size * 0.45 }}>
-      {sphere('light')}
-      {sphere('dark')}
+    <span
+      className="block overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.max(8, Math.round(size * 0.24)),
+        boxShadow: `inset 0 0 0 1px ${colors.border}, ${aura}`,
+      }}
+    >
+      <span
+        className="block"
+        style={{
+          width: designSize,
+          height: designSize,
+          transform: `scale(${size / designSize})`,
+          transformOrigin: 'top left',
+        }}
+      >
+        <MiniAppFrame colors={colors} />
+      </span>
     </span>
   );
 }
