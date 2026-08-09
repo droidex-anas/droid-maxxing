@@ -220,6 +220,7 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     let sawDeviceUrl = false;
     let deviceCode = null;
     let rejectedUrl = false;
+    let browserFailureMessage = null;
     let timedOut = false;
     let settled = false;
     let termination;
@@ -242,8 +243,8 @@ function runAuthenticationProcess(executable, operation, options = {}) {
       resolve(result);
     };
     const failBrowser = (message) => {
-      child?.kill();
-      finish({ ok: false, reason: 'browser_failed', message });
+      browserFailureMessage = message;
+      termination.terminate();
     };
     const inspectOutput = (text) => {
       if (settled || rejectedUrl) return;
@@ -278,12 +279,17 @@ function runAuthenticationProcess(executable, operation, options = {}) {
       inspectOutput(complete);
     };
     const onError = () => {
+      if (browserFailureMessage) return;
       finish({ ok: false, reason: 'auth_failed', message: 'GitHub sign-in could not start.' });
     };
     const onClose = async (code) => {
       if (settled) return;
       if (!sawDeviceUrl && !rejectedUrl && output) inspectOutput(output);
       if (settled) return;
+      if (browserFailureMessage) {
+        finish({ ok: false, reason: 'browser_failed', message: browserFailureMessage });
+        return;
+      }
       if (operation.cancelled) {
         finish({ ok: false, reason: 'cancelled', message: 'GitHub sign-in was cancelled.' });
         return;
@@ -351,8 +357,6 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     }
 
     operation.child = child;
-    child.stdout.on('data', onOutput);
-    child.stderr.on('data', onOutput);
     child.once('error', onError);
     child.once('close', onClose);
     termination = scheduleBoundedTermination(child, {
@@ -365,6 +369,8 @@ function runAuthenticationProcess(executable, operation, options = {}) {
       },
     });
     operation.terminate = termination.terminate;
+    child.stdout.on('data', onOutput);
+    child.stderr.on('data', onOutput);
     if (operation.cancelled) termination.terminate();
   });
 }

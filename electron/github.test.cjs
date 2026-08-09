@@ -503,6 +503,53 @@ test('browser authentication rejects a non-GitHub verification URL', async () =>
   });
 });
 
+test('browser URL rejection stays owned until bounded termination closes the child', async () => {
+  const child = fakeChild();
+  const killSignals = [];
+  const timers = [];
+  child.kill = (signal) => {
+    const normalizedSignal = signal ?? 'SIGTERM';
+    killSignals.push(normalizedSignal);
+    if (normalizedSignal === 'SIGKILL') {
+      queueMicrotask(() => child.emit('close', null, normalizedSignal));
+    }
+    return true;
+  };
+  let settled = false;
+  const pending = authenticate({
+    resolveGh: async () => '/opt/homebrew/bin/gh',
+    spawnProcess: () => child,
+    verifyAuth: async () => true,
+    authTimeoutMs: 1_000,
+    terminationGraceMs: 25,
+    setTimer: (callback, timeoutMs) => {
+      const timer = { callback, timeoutMs, unref() {} };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer: () => undefined,
+  }).then((result) => {
+    settled = true;
+    return result;
+  });
+  await Promise.resolve();
+
+  child.stderr.write('Open this URL: https://github.com.evil.test/login/device\n');
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(settled, false);
+  assert.deepEqual(killSignals, ['SIGTERM']);
+  assert.equal(timers[1].timeoutMs, 25);
+  timers[1].callback();
+
+  assert.deepEqual(killSignals, ['SIGTERM', 'SIGKILL']);
+  assert.deepEqual(await pending, {
+    ok: false,
+    reason: 'browser_failed',
+    message: 'GitHub CLI did not provide a trusted sign-in page.',
+  });
+});
+
 test('browser authentication requires final gh auth verification', async () => {
   const child = fakeChild();
   const result = await authenticate({
