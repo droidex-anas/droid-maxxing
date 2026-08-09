@@ -45,6 +45,16 @@ test('[L1] Ordinary create', { concurrency: false }, async () => {
     assert.ok(options);
     assert.equal(options.interactionMode, 'auto');
     assert.equal(options.autonomyLevel, 'low');
+    assert.deepEqual(
+      options.mcpServers?.map((server) => server.name),
+      ['test-cli', 'test-browser'],
+      'the effective CLI MCP config and DROIDEX browser MCP must initialize together',
+    );
+    assert.equal(
+      h.calls.some((call) => call.target === 'provider' && call.method === 'addMcpServer'),
+      false,
+      'DROIDEX-owned runtime servers must never be persisted into Droid user config',
+    );
     assert.equal(
       h.events.find((event) => event.type === 'session.created')?.session.sessionPurpose,
       'chat',

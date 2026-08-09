@@ -36,6 +36,12 @@ const LOCAL_MCP_CONFIG = McpServerConfigSchema.parse({
   url: 'http://127.0.0.1/test',
 });
 
+const CLI_MCP_CONFIG = McpServerConfigSchema.parse({
+  type: 'http',
+  name: 'test-cli',
+  url: 'https://mcp.example.test/mcp',
+});
+
 export interface SessionManagerTestContext {
   readonly events: Protocol.ServerEvent[];
   readonly calls: RecordedCall[];
@@ -95,6 +101,17 @@ export function createSessionManagerTestContext(
     history,
     browsers,
     createLocalMcpResource: () => new FakeLocalMcpResource(calls),
+    loadConfiguredMcpServers: () => [CLI_MCP_CONFIG],
+    mcpConfiguration: {
+      add: (server, cwd) => {
+        calls.push({ target: 'runtime', method: 'mcp.addConfigured', args: [server, cwd] });
+        return Promise.resolve();
+      },
+      remove: (serverName, cwd) => {
+        calls.push({ target: 'runtime', method: 'mcp.removeConfigured', args: [serverName, cwd] });
+        return Promise.resolve();
+      },
+    },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
     ...(options.getFactoryDefaults ? { getFactoryDefaults: options.getFactoryDefaults } : {}),
     ...(options.startSessionFileWatcher

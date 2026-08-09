@@ -189,6 +189,7 @@ function parentLease(appSessionId: string, calls: RecordedCall[]): ChildParentLe
   return {
     summary: summary(appSessionId),
     session: new FakeFactorySession(`${appSessionId}-provider`, {}, calls),
+    mcpConfigs: [],
   };
 }
 

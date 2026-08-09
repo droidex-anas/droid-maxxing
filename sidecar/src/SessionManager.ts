@@ -1,6 +1,6 @@
 import { DroidInteractionMode, type McpServerConfig } from '@factory/droid-sdk';
 import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import type {
   Autonomy,
   BrowserNativeRequest,
@@ -74,6 +74,9 @@ import type { ChildSettings } from './ChildSessionState.js';
 import { MissionControlPolicy } from './MissionControlPolicy.js';
 import type { SessionListFilterOptions } from './sessionListFilter.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
+import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfiguration.js';
+import { McpSettings } from './McpSettings.js';
+import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 
 type Emit = (event: ServerEvent) => void;
 
@@ -121,6 +124,8 @@ export interface SessionManagerDependencies {
   history: SessionHistory;
   browsers: SessionBrowsers;
   createLocalMcpResource: (appSessionId: () => string) => StartableLocalMcpResource;
+  mcpConfiguration: McpConfiguration;
+  loadConfiguredMcpServers: (cwd: string) => McpServerConfig[];
   getFactoryDefaults?: () => Promise<FactoryDefaultSettings>;
   nextChildSessionId?: () => string;
   // Injectable so tests can capture the republish callback instead of
@@ -203,6 +208,9 @@ export class SessionManager {
   private readonly pendingNativeBrowserRequests = new Map<string, PendingNativeBrowserRequest>();
   private readonly browsers: SessionBrowsers;
   private readonly createLocalMcpResource: SessionManagerDependencies['createLocalMcpResource'];
+  private readonly mcpConfiguration: McpConfiguration;
+  private readonly loadConfiguredMcpServers: SessionManagerDependencies['loadConfiguredMcpServers'];
+  private readonly mcpSettings: McpSettings;
   private readonly factoryDefaultsOverride: SessionManagerDependencies['getFactoryDefaults'];
   private readonly nextChildSessionId: () => string;
 
@@ -215,6 +223,8 @@ export class SessionManager {
       this.history = options.dependencies.history;
       this.browsers = options.dependencies.browsers;
       this.createLocalMcpResource = options.dependencies.createLocalMcpResource;
+      this.mcpConfiguration = options.dependencies.mcpConfiguration;
+      this.loadConfiguredMcpServers = options.dependencies.loadConfiguredMcpServers;
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
       this.nextChildSessionId = options.dependencies.nextChildSessionId ?? nextChildSessionId;
       this.startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
@@ -238,11 +248,28 @@ export class SessionManager {
       this.browsers = browsers;
       this.createLocalMcpResource = (appSessionId) =>
         createBrowserMcpServer(browsers, appSessionId);
+      this.mcpConfiguration = new DroidMcpConfiguration();
+      this.loadConfiguredMcpServers = loadFactoryMcpServers;
       this.factoryDefaultsOverride = undefined;
       this.nextChildSessionId = nextChildSessionId;
       this.startWatcher = startSessionFileWatcher;
     }
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
+    this.mcpSettings = new McpSettings(
+      (cwd) => {
+        const sessionCwd = cwd ?? tmpdir();
+        return this.runtime.createSession({
+          cwd: sessionCwd,
+          interactionMode: 'auto',
+          autonomyLevel: 'low',
+          mcpServers: this.loadConfiguredMcpServers(sessionCwd),
+        });
+      },
+      this.mcpConfiguration,
+      (event) => {
+        this.emit(event);
+      },
+    );
     this.registry = new SessionRegistry({
       history: this.history,
       loadOrdinarySessions: (options) => this.history.listHistoricalSessions(options),
@@ -352,7 +379,7 @@ export class SessionManager {
       },
       getFactoryDefaults: () => this.getFactoryDefaults(),
       maxContextTokensForModel: (modelId) => this.maxContextTokensForModel(modelId),
-      startLocalMcpServers: (ref) => this.startLocalMcpServers(ref),
+      startLocalMcpServers: (ref, cwd) => this.startLocalMcpServers(ref, cwd),
       makePermissionHandler: (ref) => this.interactions.makePermissionHandler(ref),
       makeAskUserHandler: (ref) => this.interactions.makeAskUserHandler(ref),
       compaction: this.compaction,
@@ -440,8 +467,13 @@ export class SessionManager {
       case 'catalog.skills':
         await this.emitSkillCatalog(cmd.providerSessionId);
         return;
-      case 'catalog.mcp':
-        await this.emitMcpCatalog(cmd.providerSessionId);
+      case 'mcp.list':
+      case 'mcp.add':
+      case 'mcp.remove':
+      case 'mcp.toggle':
+      case 'mcp.authenticate':
+        if (!this.ready) this.connect();
+        await this.mcpSettings.handle(cmd);
         return;
       case 'settings.defaults':
         this.emitFactoryDefaults();
@@ -761,11 +793,26 @@ export class SessionManager {
     this.emit({ type: 'settings.defaults', defaults: startupFactoryDefaults(defaults, models) });
   }
 
-  private async startLocalMcpServers(ref: { id: string }): Promise<StartedLocalMcpResources> {
+  private async startLocalMcpServers(
+    ref: { id: string },
+    cwd?: string,
+  ): Promise<StartedLocalMcpResources> {
     const servers = [this.createLocalMcpResource(() => ref.id)];
-    const configs: StartedLocalMcpResources['configs'] = [];
+    const configuredCwd = cwd?.trim();
+    const configured = this.loadConfiguredMcpServers(
+      configuredCwd === undefined || configuredCwd.length === 0 ? homedir() : configuredCwd,
+    );
+    const configs: StartedLocalMcpResources['configs'] = [...configured];
     try {
-      for (const server of servers) configs.push(await server.start());
+      for (const server of servers) {
+        const config = await server.start();
+        if (configured.some((candidate) => candidate.name === config.name)) {
+          throw new Error(
+            `Droid MCP server name "${config.name}" is reserved by DROIDEX. Rename it in your Droid MCP configuration.`,
+          );
+        }
+        configs.push(config);
+      }
       return { servers, configs };
     } catch (err) {
       await Promise.all(servers.map((server) => server.close().catch(ignoreError)));
@@ -1534,17 +1581,6 @@ export class SessionManager {
         items: arrayItems(result, 'skills'),
         providerSessionId: providerSessionId ?? null,
       });
-    } finally {
-      await close();
-    }
-  }
-
-  private async emitMcpCatalog(providerSessionId?: string): Promise<void> {
-    const { session, close } = await this.catalogSession(providerSessionId);
-    try {
-      const servers = await session.listMcpServers();
-      const tools = await session.listMcpTools();
-      this.emit({ type: 'catalog.updated', catalog: 'mcp', items: [{ servers, tools }] });
     } finally {
       await close();
     }

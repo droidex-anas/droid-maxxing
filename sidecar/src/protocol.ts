@@ -1,6 +1,17 @@
 // Bridge protocol shared between the Node sidecar and the React frontend.
 // The frontend keeps a mirror copy at src/types/bridge.ts — keep them in sync.
 
+import type { McpClientCommand, McpServerEvent } from './mcpProtocol.js';
+export type {
+  McpServerInfo,
+  McpServerInput,
+  McpServerSource,
+  McpServerStatus,
+  McpServerType,
+  McpStatusSummary,
+  McpToolInfo,
+} from './mcpProtocol.js';
+
 export type SessionPhase =
   | 'intake'
   | 'planning'
@@ -526,6 +537,7 @@ export type PermissionOutcome =
 
 // ── Frontend -> Sidecar ──────────────────────────────────────────────
 export type ClientCommand =
+  | McpClientCommand
   | { type: 'connect'; apiKey?: string }
   | { type: 'runtime.status' }
   | { type: 'auth.status' }
@@ -535,7 +547,6 @@ export type ClientCommand =
   | { type: 'catalog.models' }
   | { type: 'catalog.tools'; providerSessionId?: string }
   | { type: 'catalog.skills'; providerSessionId?: string }
-  | { type: 'catalog.mcp'; providerSessionId?: string }
   | { type: 'settings.defaults' }
   | {
       type: 'session.create';
@@ -729,6 +740,7 @@ export interface ChildErrorEvent {
 
 // ── Sidecar -> Frontend ──────────────────────────────────────────────
 export type ServerEvent =
+  | McpServerEvent
   | { type: 'connection'; status: 'connected' | 'error'; message?: string }
   | {
       type: 'runtime.updated';
@@ -767,15 +779,8 @@ export type ServerEvent =
       breakdown?: unknown;
     }
   | {
-      type: 'mcp.authRequested';
-      providerSessionId: string;
-      serverName?: string;
-      authUrl?: string;
-      message?: string;
-    }
-  | {
       type: 'catalog.updated';
-      catalog: 'models' | 'tools' | 'skills' | 'mcp';
+      catalog: 'models' | 'tools' | 'skills';
       items: unknown[];
       providerSessionId?: string | null;
     }

@@ -18,6 +18,7 @@ import { getAppVersion, type AppUpdateInfo } from '../lib/onboarding';
 import { refreshAppUpdate, startAppUpdate } from '../lib/appUpdate';
 import { applyTheme, paletteForMode, UI_FONTS, PRESET_THEMES } from '../lib/theme';
 import { DiagnosticsSettings } from './DiagnosticsSettings';
+import { McpServersSettings } from './McpServersSettings';
 import { NotificationsSettings } from './NotificationsSettings';
 import { WorktreesSettings } from './WorktreesSettings';
 import {
@@ -1341,6 +1342,10 @@ export default function SettingsPanel() {
   };
   const q = query.trim();
   const hits = q ? searchSettings(q) : [];
+  const activeSession = state.activeAppSessionId
+    ? state.sessions[state.activeAppSessionId]
+    : undefined;
+  const mcpCwd = activeSession?.cwd ?? state.workspaceCwds[0];
 
   let content: React.ReactNode;
   switch (active) {
@@ -1364,6 +1369,9 @@ export default function SettingsPanel() {
       break;
     case 'Privacy & diagnostics':
       content = <DiagnosticsSettings />;
+      break;
+    case 'MCP servers':
+      content = <McpServersSettings cwd={mcpCwd} />;
       break;
     default:
       content = <PlaceholderSection title={active} />;

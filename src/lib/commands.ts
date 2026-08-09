@@ -8,6 +8,7 @@ import type {
   ConfigurableSessionRole,
   DesignReference,
   InstallChannel,
+  McpServerInput,
   PermissionOutcome,
   ReasoningEffort,
   SessionInteractionMode,
@@ -71,6 +72,26 @@ export const listModels = () => {
 };
 export const listSkills = (providerSessionId?: string) => {
   bridge.send({ type: 'catalog.skills', providerSessionId });
+};
+export const listMcpServers = (requestId: string, cwd?: string) => {
+  bridge.send({ type: 'mcp.list', requestId, ...(cwd ? { cwd } : {}) });
+};
+export const addMcpServer = (requestId: string, server: McpServerInput, cwd?: string) => {
+  bridge.send({ type: 'mcp.add', requestId, server, ...(cwd ? { cwd } : {}) });
+};
+export const removeMcpServer = (requestId: string, serverName: string, cwd?: string) => {
+  bridge.send({ type: 'mcp.remove', requestId, serverName, ...(cwd ? { cwd } : {}) });
+};
+export const toggleMcpServer = (
+  requestId: string,
+  serverName: string,
+  enabled: boolean,
+  cwd?: string,
+) => {
+  bridge.send({ type: 'mcp.toggle', requestId, serverName, enabled, ...(cwd ? { cwd } : {}) });
+};
+export const authenticateMcpServer = (requestId: string, serverName: string, cwd?: string) => {
+  bridge.send({ type: 'mcp.authenticate', requestId, serverName, ...(cwd ? { cwd } : {}) });
 };
 export const listFactoryDefaults = () => {
   bridge.send({ type: 'settings.defaults' });

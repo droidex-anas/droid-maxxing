@@ -70,6 +70,11 @@ export class FakeFactorySession implements FactorySession {
   nextCloseError?: Error;
   nextContextStats?: Awaited<ReturnType<FactorySession['getContextStats']>>;
   nextContextStatsError?: Error;
+  nextMcpServers: Awaited<ReturnType<FactorySession['listMcpServers']>> = {
+    servers: [],
+    summary: { total: 0, connected: 0, connecting: 0, failed: 0, disabled: 0 },
+  };
+  nextMcpTools: Awaited<ReturnType<FactorySession['listMcpTools']>> = { tools: [] };
   readonly notifications = new Set<NotificationListener>();
   initResult: FactorySession['initResult'];
 
@@ -307,11 +312,55 @@ export class FakeFactorySession implements FactorySession {
 
   readonly listSkills: FactorySession['listSkills'] = () => unsupportedSessionMethod('listSkills');
 
-  readonly listMcpServers: FactorySession['listMcpServers'] = () =>
-    unsupportedSessionMethod('listMcpServers');
+  listMcpServers(): ReturnType<FactorySession['listMcpServers']> {
+    this.calls.push({ target: 'provider', method: 'listMcpServers', args: [this.sessionId] });
+    return Promise.resolve(this.nextMcpServers);
+  }
 
-  readonly listMcpTools: FactorySession['listMcpTools'] = () =>
-    unsupportedSessionMethod('listMcpTools');
+  listMcpTools(): ReturnType<FactorySession['listMcpTools']> {
+    this.calls.push({ target: 'provider', method: 'listMcpTools', args: [this.sessionId] });
+    return Promise.resolve(this.nextMcpTools);
+  }
+
+  addMcpServer(
+    params: Parameters<FactorySession['addMcpServer']>[0],
+  ): ReturnType<FactorySession['addMcpServer']> {
+    this.calls.push({ target: 'provider', method: 'addMcpServer', args: [this.sessionId, params] });
+    return Promise.resolve({ success: true });
+  }
+
+  removeMcpServer(
+    params: Parameters<FactorySession['removeMcpServer']>[0],
+  ): ReturnType<FactorySession['removeMcpServer']> {
+    this.calls.push({
+      target: 'provider',
+      method: 'removeMcpServer',
+      args: [this.sessionId, params],
+    });
+    return Promise.resolve({ success: true });
+  }
+
+  toggleMcpServer(
+    params: Parameters<FactorySession['toggleMcpServer']>[0],
+  ): ReturnType<FactorySession['toggleMcpServer']> {
+    this.calls.push({
+      target: 'provider',
+      method: 'toggleMcpServer',
+      args: [this.sessionId, params],
+    });
+    return Promise.resolve({ success: true });
+  }
+
+  authenticateMcpServer(
+    params: Parameters<FactorySession['authenticateMcpServer']>[0],
+  ): ReturnType<FactorySession['authenticateMcpServer']> {
+    this.calls.push({
+      target: 'provider',
+      method: 'authenticateMcpServer',
+      args: [this.sessionId, params],
+    });
+    return Promise.resolve({ success: true });
+  }
 
   private defer(gates?: DeferredStream[]): DeferredStream {
     let settle = (): void => undefined;

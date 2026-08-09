@@ -20,3 +20,11 @@ test('disabled switches cannot change while preferences are saving', () => {
   assert.match(renderSwitch(true), /disabled=""/);
   assert.doesNotMatch(renderSwitch(false), /disabled=""/);
 });
+
+test('enabled switches keep the thumb visible against the accent track', () => {
+  const html = renderSwitch(false);
+
+  assert.match(html, /bg-droid-accent/);
+  assert.match(html, /bg-droid-bg/);
+  assert.doesNotMatch(html, /bg-white/);
+});
