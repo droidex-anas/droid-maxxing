@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react';
 import { useStore } from '../hooks/useStore';
 import { bridge } from '../lib/bridge';
 import { searchSessions } from '../lib/commands';
+import { chatDisplayTitle, isChatHidden } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
 import type { SessionSearchMatch, SessionSummary } from '../types/bridge';
 import PaletteShell from './PaletteShell';
@@ -83,11 +84,19 @@ export default function SidebarSearch({
 
   // Merge title hits and content hits into one recency-ordered list. Content
   // hits for sessions outside the current sidebar list are dropped: opening
-  // a row must land on a session the store can activate.
+  // a row must land on a session the store can activate. Archived/deleted
+  // chats stay hidden here too — they are managed from Settings > Archived.
   const entries = useMemo<SearchEntry[]>(() => {
     const sessions = state.sessionOrder
       .map((id) => state.sessions[id])
       .filter((s): s is SessionSummary => Boolean(s))
+      .filter((s) => !isChatHidden(state.chatMetadata[s.appSessionId]))
+      // Match and display the effective title: a user rename is what the rest
+      // of the UI shows, so it is what search should find.
+      .map((s) => {
+        const title = chatDisplayTitle(s, state.chatMetadata[s.appSessionId]);
+        return title === s.title ? s : { ...s, title };
+      })
       .sort((a, b) => b.updatedAt - a.updatedAt);
     const trimmed = query.trim().toLowerCase();
     if (!trimmed) {
@@ -103,7 +112,7 @@ export default function SidebarSearch({
     // byId iterates in insertion order, which already follows the recency
     // sort applied to sessions above — no second sort needed.
     return [...byId.values()].slice(0, MAX_ENTRIES);
-  }, [query, state.sessionOrder, state.sessions, contentResults]);
+  }, [query, state.sessionOrder, state.sessions, state.chatMetadata, contentResults]);
 
   const open = (entry: SearchEntry) => {
     onOpen(entry.session.appSessionId);

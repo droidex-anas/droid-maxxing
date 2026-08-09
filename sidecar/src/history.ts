@@ -170,7 +170,7 @@ export function loadMissionControlSessions(
   const workspaceCwds = options.workspaceCwds
     ? new Set(options.workspaceCwds.filter(Boolean))
     : null;
-  if (workspaceCwds && workspaceCwds.size === 0 && !options.includePlainChats) return [];
+  if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
   const rows = missionDirs()
     .filter((dir) => {
       if (!workspaceCwds && !options.includePlainChats) return true;
@@ -197,7 +197,7 @@ export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): H
   const workspaceCwds = options.workspaceCwds
     ? new Set(options.workspaceCwds.filter(Boolean))
     : null;
-  if (workspaceCwds && workspaceCwds.size === 0 && !options.includePlainChats) return [];
+  if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
   for (const [providerSessionId, file] of scanSessionFiles()) {
     const summary = summarizeSessionFile(providerSessionId, file);
     if (!summary) continue;
@@ -796,7 +796,7 @@ function hasPrimaryKey(
 
 function tableInfo(db: DatabaseSync, table: string): Record<string, unknown>[] {
   if (!/^[a-z_]+$/.test(table)) return [];
-  return db.prepare(`PRAGMA table_info(${table})`).all() as Record<string, unknown>[];
+  return db.prepare(`PRAGMA table_info(${table})`).all();
 }
 
 function hasPartialUniqueIndex(
@@ -1046,9 +1046,7 @@ export function applyCachedSummary(
 }
 
 function definedPatch(patch: Partial<SessionSummary>): Partial<SessionSummary> {
-  return Object.fromEntries(
-    Object.entries(patch).filter(([, value]) => value !== undefined),
-  ) as Partial<SessionSummary>;
+  return Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
 }
 
 export function hydrateHistoricalSession(
@@ -1116,7 +1114,7 @@ export function resolveSessionChain(appSessionId: string, providerSessionId: str
   );
 }
 
-function dedupeStrings(values: Array<string | undefined>): string[] {
+function dedupeStrings(values: (string | undefined)[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
@@ -1145,8 +1143,7 @@ function transcriptReaderFor(
   const stat = statSync(path);
   const cached = transcriptReaders.get(path);
   if (
-    cached &&
-    cached.mtimeMs === stat.mtimeMs &&
+    cached?.mtimeMs === stat.mtimeMs &&
     cached.sizeBytes === stat.size &&
     cached.appSessionId === appSessionId
   ) {

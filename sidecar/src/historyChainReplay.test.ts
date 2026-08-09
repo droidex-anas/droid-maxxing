@@ -255,6 +255,42 @@ test('resolveSessionChain rebuilds the chain from the persisted app-session row'
   );
 });
 
+test('export path replays the whole compaction chain in a single window', () => {
+  // Regression: "Copy as Markdown" originally parsed only the CURRENT backing
+  // file, silently dropping every pre-compaction message. The export path
+  // (resolveSessionChain + one big window) must contain all segments.
+  writeSession('app9', [assistant('orig')]);
+  writeSession('mid9', [compactionState(2), assistant('mid')]);
+  writeSession('cur9', [compactionState(3), assistant('latest')]);
+  const index = new HistoryIndex();
+  index.syncSummaries([historicalSummary('app9', 'cur9', ['app9', 'mid9'])]);
+  index.close();
+
+  const chain = resolveSessionChain('app9', 'cur9');
+  const { events } = loadSessionTranscriptWindow('app9', chain, { limit: 100_000 });
+  assert.deepEqual(
+    events.filter((e) => e.kind === 'text').map((e) => e.text),
+    ['orig', 'mid', 'latest'],
+    'export must include the pre-compaction segments, not just the current backing file',
+  );
+  assert.equal(events.filter((e) => e.kind === 'compaction').length, 2);
+});
+
+test('an oversized segment surfaces its trim notice instead of being silently head-trimmed', () => {
+  // Regression: the oversized-file head-trim marker is a `status` event, which
+  // the Markdown conversion used to drop — exporting a >5MB chat looked
+  // complete while its oldest messages were missing. The event must survive
+  // so the exporter can surface it.
+  const huge = 'x'.repeat(6_000_000);
+  writeSession('bigexport', [assistant(huge), assistant('tail-message')]);
+
+  const chain = resolveSessionChain('bigexport', 'bigexport');
+  const { events } = loadSessionTranscriptWindow('bigexport', chain, { limit: 100_000 });
+  const notice = events.find((e) => e.kind === 'status' && e.text?.includes('oversized session'));
+  assert.ok(notice, 'expected the oversized-trim status event to reach the exporter');
+  assert.ok(events.some((e) => e.text === 'tail-message'));
+});
+
 function historicalSummary(
   appSessionId: string,
   providerSessionId: string,

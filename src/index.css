@@ -175,22 +175,6 @@
     animation: caret-blink 1s ease-in-out infinite;
   }
 
-  @keyframes dot-pulse {
-    0%,
-    100% {
-      opacity: 0.25;
-      transform: translateY(1px);
-    }
-    50% {
-      opacity: 1;
-      transform: translateY(-1.5px);
-    }
-  }
-
-  .dot-pulse {
-    animation: dot-pulse 0.9s ease-in-out infinite;
-  }
-
   /* Subagent avatar pixels: a diagonal shimmer sweep while the agent works.
      Per-pixel animation-delay (set inline) moves the wave across the creature. */
   @keyframes agent-pixel-shimmer {
@@ -210,9 +194,37 @@
   /* Infinite status indicators must respect reduced-motion preferences. */
   @media (prefers-reduced-motion: reduce) {
     .caret-blink,
-    .dot-pulse,
     .shimmer-text,
     .agent-avatar-pixel {
+      animation: none;
+    }
+  }
+
+  /* Sidebar titles longer than the row rest truncated; on hover the title
+     sweeps left to reveal the full name, holds, then slides back. Travel
+     distance and duration are per-row CSS vars set on mouseenter. */
+  @keyframes title-marquee {
+    0%,
+    12% {
+      transform: translateX(0);
+    }
+    44%,
+    56% {
+      transform: translateX(var(--title-marquee-x, 0px));
+    }
+    88%,
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  .title-marquee {
+    animation: title-marquee var(--title-marquee-duration, 4s) ease-in-out infinite;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .title-marquee {
       animation: none;
     }
   }

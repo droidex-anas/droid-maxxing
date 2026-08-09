@@ -36,9 +36,12 @@ import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInst
 import {
   HistoryIndex,
   loadMissionControlSessions,
+  loadSessionTranscriptWindow,
   readFactoryDefaults,
+  resolveSessionChain,
   warmSessionIndex,
 } from './history.js';
+import { transcriptToMarkdown } from './sessionMarkdown.js';
 import {
   startSessionFileWatcher,
   type SessionFileWatcher,
@@ -535,6 +538,9 @@ export class SessionManager {
       case 'session.rename':
         await this.renameSession(cmd.appSessionId, cmd.title);
         return;
+      case 'session.exportMarkdown':
+        this.exportSessionMarkdown(cmd);
+        return;
       case 'sessions.reanchorCwd':
         try {
           const sessions = this.registry.reanchorHistoricalCwd(cmd.fromCwd, cmd.toCwd);
@@ -713,6 +719,25 @@ export class SessionManager {
       case 'browser.native.result':
         this.resolveNativeBrowserRequest(cmd.result);
         return;
+      default: {
+        // Wire commands are JSON-parsed without runtime validation, so a
+        // renderer running newer code than this sidecar (e.g. a dev app that
+        // kept running across a sidecar rebuild) can send a command this
+        // build does not know. Fail visibly instead of falling through
+        // silently while the caller waits out its timeout.
+        const unknown = cmd as { type?: unknown; requestId?: unknown };
+        const commandType = typeof unknown.type === 'string' ? unknown.type : 'unknown';
+        // Echo the command's requestId so a waiter rejects only for its own
+        // unsupported command, not a foreign one failing concurrently.
+        const requestId = typeof unknown.requestId === 'string' ? unknown.requestId : undefined;
+        this.emit({
+          type: 'error',
+          code: 'bridge.unsupported_command',
+          ...(requestId !== undefined ? { requestId } : {}),
+          message: `This DROIDEX build does not support the "${commandType}" command. Restart the app to pick up the current sidecar.`,
+        });
+        return;
+      }
     }
   }
 
@@ -1521,11 +1546,67 @@ export class SessionManager {
   }
 
   private async renameSession(requestedAppSessionId: string, title: string): Promise<void> {
-    await this.withSession(requestedAppSessionId, (session) => session.renameSession({ title }));
+    // Renderer metadata caps titles at 200 chars (MAX_CHAT_TITLE_LENGTH); the
+    // bridge is the trusted boundary, so clamp here too before forwarding to
+    // the harness.
+    const safeTitle = title.trim().slice(0, 200);
+    await this.withSession(requestedAppSessionId, (session) =>
+      session.renameSession({ title: safeTitle }),
+    );
     const appSessionId =
       this.registry.getLive(requestedAppSessionId)?.summary.appSessionId ??
       this.registry.resolveSummary(requestedAppSessionId)?.appSessionId;
-    if (appSessionId) this.registry.updateSummary(appSessionId, { title });
+    if (appSessionId) this.registry.updateSummary(appSessionId, { title: safeTitle });
+  }
+
+  // Reads the stored .jsonl files straight from disk, so the export is
+  // complete even for a chat the renderer never opened (its transcript is not
+  // in memory). Compaction rekeys the backing session, so the full chain must
+  // be replayed like the chat scrollback — otherwise pre-compaction messages
+  // silently vanish from the export.
+  private exportSessionMarkdown(cmd: {
+    appSessionId: string;
+    requestId: string;
+    title?: string;
+  }): void {
+    try {
+      const summary = this.registry.resolveSummary(cmd.appSessionId);
+      const providerSessionId = summary?.providerSessionId ?? cmd.appSessionId;
+      const appSessionId = summary?.appSessionId ?? cmd.appSessionId;
+      const chain = resolveSessionChain(appSessionId, providerSessionId);
+      const { events, olderCursor } = loadSessionTranscriptWindow(appSessionId, chain, {
+        limit: 100_000,
+      });
+      if (events.length === 0) throw new Error('No stored transcript for this chat.');
+      const markdown = transcriptToMarkdown(events, {
+        title: cmd.title ?? summary?.title ?? 'Chat export',
+        providerSessionId,
+        cwd: summary?.cwd,
+        // The window caps at 100k events; an export missing older turns must
+        // say so rather than read as the complete chat.
+        ...(olderCursor !== undefined
+          ? {
+              note: 'This chat exceeds the 100,000-event export limit; only the most recent events are included.',
+            }
+          : {}),
+      });
+      this.emit({
+        type: 'session.markdownExported',
+        requestId: cmd.requestId,
+        ok: true,
+        markdown,
+      });
+    } catch (error) {
+      // The raw error can carry internal paths; the renderer shows a generic
+      // failure toast while the detail stays in the sidecar log.
+      console.error(`Markdown export failed: ${errMsg(error)}`);
+      this.emit({
+        type: 'session.markdownExported',
+        requestId: cmd.requestId,
+        ok: false,
+        message: 'Could not export this chat.',
+      });
+    }
   }
 
   private async withSession<T>(

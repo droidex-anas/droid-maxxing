@@ -1079,18 +1079,13 @@ test('appendedFeedItemKeys animates only genuinely appended tail items', () => {
   );
 });
 
-// The infinite status indicators (caret blink, typing dots) must honor
+// The infinite status indicators (caret blink, shimmer) must honor
 // prefers-reduced-motion so the UI stays usable for motion-sensitive users.
-test('caret-blink and dot-pulse are neutralized under prefers-reduced-motion', () => {
+test('caret-blink is neutralized under prefers-reduced-motion', () => {
   const cssPath = fileURLToPath(new URL('../index.css', import.meta.url));
   const css = readFileSync(cssPath, 'utf8');
   const reducedMotionBlocks =
     css.match(/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{[^}]*\}/g) ?? [];
-  const coversBoth = reducedMotionBlocks.some(
-    (block) => /\.caret-blink\b/.test(block) && /\.dot-pulse\b/.test(block),
-  );
-  assert.ok(
-    coversBoth,
-    'a prefers-reduced-motion block must disable both .caret-blink and .dot-pulse',
-  );
+  const coversCaretBlink = reducedMotionBlocks.some((block) => /\.caret-blink\b/.test(block));
+  assert.ok(coversCaretBlink, 'a prefers-reduced-motion block must disable .caret-blink');
 });

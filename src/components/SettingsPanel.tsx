@@ -22,6 +22,7 @@ import { McpServersSettings } from './McpServersSettings';
 import { NotificationsSettings } from './NotificationsSettings';
 import { WorktreesSettings } from './WorktreesSettings';
 import { Dropdown, GroupLabel, SectionTitle } from './settingsKit';
+import { ArchivedChatsSettings } from './ArchivedChatsSettings';
 import {
   bestTabForQuery,
   searchSettings,
@@ -867,6 +868,9 @@ export default function SettingsPanel() {
       break;
     case 'MCP servers':
       content = <McpServersSettings cwd={mcpCwd} />;
+      break;
+    case 'Archived chats':
+      content = <ArchivedChatsSettings />;
       break;
     default:
       content = <PlaceholderSection title={active} />;
