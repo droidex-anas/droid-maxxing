@@ -36,9 +36,12 @@ import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInst
 import {
   HistoryIndex,
   loadMissionControlSessions,
+  loadSessionTranscriptWindow,
   readFactoryDefaults,
+  resolveSessionChain,
   warmSessionIndex,
 } from './history.js';
+import { transcriptToMarkdown } from './sessionMarkdown.js';
 import {
   startSessionFileWatcher,
   type SessionFileWatcher,
@@ -534,6 +537,9 @@ export class SessionManager {
         return;
       case 'session.rename':
         await this.renameSession(cmd.appSessionId, cmd.title);
+        return;
+      case 'session.exportMarkdown':
+        this.exportSessionMarkdown(cmd);
         return;
       case 'sessions.reanchorCwd':
         try {
@@ -1521,11 +1527,57 @@ export class SessionManager {
   }
 
   private async renameSession(requestedAppSessionId: string, title: string): Promise<void> {
-    await this.withSession(requestedAppSessionId, (session) => session.renameSession({ title }));
+    // Renderer metadata caps titles at 200 chars (MAX_CHAT_TITLE_LENGTH); the
+    // bridge is the trusted boundary, so clamp here too before forwarding to
+    // the harness.
+    const safeTitle = title.trim().slice(0, 200);
+    await this.withSession(requestedAppSessionId, (session) =>
+      session.renameSession({ title: safeTitle }),
+    );
     const appSessionId =
       this.registry.getLive(requestedAppSessionId)?.summary.appSessionId ??
       this.registry.resolveSummary(requestedAppSessionId)?.appSessionId;
-    if (appSessionId) this.registry.updateSummary(appSessionId, { title });
+    if (appSessionId) this.registry.updateSummary(appSessionId, { title: safeTitle });
+  }
+
+  // Reads the stored .jsonl files straight from disk, so the export is
+  // complete even for a chat the renderer never opened (its transcript is not
+  // in memory). Compaction rekeys the backing session, so the full chain must
+  // be replayed like the chat scrollback — otherwise pre-compaction messages
+  // silently vanish from the export.
+  private exportSessionMarkdown(cmd: {
+    appSessionId: string;
+    requestId: string;
+    title?: string;
+  }): void {
+    try {
+      const summary = this.registry.resolveSummary(cmd.appSessionId);
+      const providerSessionId = summary?.providerSessionId ?? cmd.appSessionId;
+      const appSessionId = summary?.appSessionId ?? cmd.appSessionId;
+      const chain = resolveSessionChain(appSessionId, providerSessionId);
+      const { events } = loadSessionTranscriptWindow(appSessionId, chain, { limit: 100_000 });
+      if (events.length === 0) throw new Error('No stored transcript for this chat.');
+      const markdown = transcriptToMarkdown(events, {
+        title: cmd.title ?? summary?.title ?? 'Chat export',
+        providerSessionId,
+        cwd: summary?.cwd,
+      });
+      this.emit({
+        type: 'session.markdownExported',
+        requestId: cmd.requestId,
+        ok: true,
+        markdown,
+      });
+    } catch {
+      // The raw error can carry internal paths; the renderer shows a generic
+      // failure toast and the detail stays in the sidecar log.
+      this.emit({
+        type: 'session.markdownExported',
+        requestId: cmd.requestId,
+        ok: false,
+        message: 'Could not export this chat.',
+      });
+    }
   }
 
   private async withSession<T>(

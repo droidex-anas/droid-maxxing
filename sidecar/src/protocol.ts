@@ -583,6 +583,14 @@ export type ClientCommand =
   | { type: 'session.compact'; appSessionId: string; customInstructions?: string }
   | { type: 'session.fork'; appSessionId: string }
   | { type: 'session.rename'; appSessionId: string; title: string }
+  | {
+      // Full-transcript Markdown export ("Copy as Markdown"). `title` is the
+      // renderer's effective (possibly user-renamed) title for the header.
+      type: 'session.exportMarkdown';
+      appSessionId: string;
+      requestId: string;
+      title?: string;
+    }
   | { type: 'sessions.reanchorCwd'; requestId: string; fromCwd: string; toCwd: string }
   | { type: 'session.rewindInfo'; appSessionId: string }
   | { type: 'session.rewind'; appSessionId: string; rewindId?: string }
@@ -762,6 +770,13 @@ export type ServerEvent =
       requestId: string;
       ok: boolean;
       count: number;
+      message?: string;
+    }
+  | {
+      type: 'session.markdownExported';
+      requestId: string;
+      ok: boolean;
+      markdown?: string;
       message?: string;
     }
   | ChildUpdatedEvent
