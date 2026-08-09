@@ -1,5 +1,15 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { AnimatePresence } from 'framer-motion';
+// File-size exception (AGENTS.md): this file is the sidebar's single
+// composition root — brand header, tool buttons, workspace/chat/pinned section
+// wiring, unread/search chrome, update prompt, and the row menu/rename glue
+// handlers. ~650 lines. The interactive row (SessionRow, marquee, inline
+// rename) already lives in SidebarSessionRow.tsx; further splitting was
+// rejected because the remaining handlers are composition glue that fail the
+// deletion test (extracting them would only forward store state), and the
+// Expand/WorkspaceFolderIcon primitives are too small to justify their own
+// modules. Reviewed ceiling: ~700 lines; extract the workspace section if it
+// grows past that.
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '../hooks/useStore';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { pickDirectory } from '../lib/desktop';
@@ -9,7 +19,7 @@ import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import {
   Folder,
-  FolderPlus,
+  FolderOpen,
   Plus,
   Search,
   Settings,
@@ -24,9 +34,13 @@ import {
   resolveNewChatCwd,
   SIDEBAR_VISIBLE_SESSION_LIMIT,
 } from '../lib/workspaces';
+import { chatDisplayTitle, isChatHidden, isChatPinned, pinnedChats } from '../lib/chatMetadata';
+import { exportSessionMarkdown, renameSession } from '../lib/commands';
+import { toast } from '../lib/toast';
+import { SessionContextMenu } from './SessionContextMenu';
+import { SessionRow } from './SidebarSessionRow';
 import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
 import { useAppUpdate } from '../lib/appUpdate';
-import { formatRelativeTime } from '../lib/time';
 import type { SessionSummary } from '../types/bridge';
 
 // Blue download glyph docked beside Settings when a newer DROIDEX build is
@@ -54,111 +68,74 @@ function UpdateButton() {
   );
 }
 
-// Simple, smooth ring spinner shown on the left of a row while its model works.
-function WorkingSpinner() {
+const EASE = [0.16, 1, 0.3, 1] as const;
+
+// "Copy as Markdown" flow: the sidecar renders the full transcript from the
+// stored session file (works for chats never opened this run); here we only
+// move the result onto the clipboard and report via toast.
+function copyChatAsMarkdown(appSessionId: string, title: string): void {
+  exportSessionMarkdown(appSessionId, title)
+    .then((markdown) => navigator.clipboard.writeText(markdown))
+    .then(() => toast.success('Chat copied as Markdown.'))
+    .catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'Could not export this chat.');
+    });
+}
+
+// Nullable on purpose: the menu's target session can vanish between the click
+// and render (archive from another surface); a cleanup effect in the component
+// closes the menu a frame later.
+function rowMenuTarget(
+  sessions: Record<string, SessionSummary>,
+  rowMenu: { appSessionId: string } | null,
+): SessionSummary | null {
+  if (!rowMenu || !Object.hasOwn(sessions, rowMenu.appSessionId)) return null;
+  return sessions[rowMenu.appSessionId];
+}
+
+// Animated expand/collapse for sidebar sections, no chrome.
+function Expand({ open, children }: { open: boolean; children: ReactNode }) {
   return (
-    <span
-      className="w-3 h-3 rounded-full border-[1.5px] border-droid-text-muted/30 border-t-droid-text animate-spin"
-      style={{ animationDuration: '1.5s' }}
-      aria-label="working"
-    />
+    <AnimatePresence initial={false}>
+      {open && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.2, ease: EASE }}
+          className="overflow-hidden"
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
-// Typing-style ellipsis shown in place of the timestamp while the model works.
-function WorkingDots() {
+// The workspace folder glyph doubles as the collapse indicator: closed while
+// the workspace is collapsed, open while expanded, crossfading between states.
+function WorkspaceFolderIcon({ open }: { open: boolean }) {
   return (
-    <span className="flex items-center gap-[3px]" aria-label="working">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="dot-pulse rounded-full bg-current"
-          style={{ width: 3, height: 3, animationDelay: `${String(i * 0.16)}s` }}
-        />
-      ))}
+    <span className="relative block w-4 h-4 shrink-0 text-droid-text-muted">
+      <motion.span
+        className="absolute inset-0 flex items-center justify-center"
+        initial={false}
+        animate={{ opacity: open ? 0 : 1 }}
+        transition={{ duration: 0.15, ease: EASE }}
+      >
+        <Folder className="w-4 h-4" />
+      </motion.span>
+      <motion.span
+        className="absolute inset-0 flex items-center justify-center"
+        initial={false}
+        animate={{ opacity: open ? 1 : 0 }}
+        transition={{ duration: 0.15, ease: EASE }}
+      >
+        <FolderOpen className="w-4 h-4" />
+      </motion.span>
     </span>
   );
 }
-
-export interface SessionRowProps {
-  session: SessionSummary;
-  active: boolean;
-  unread: boolean;
-  running: boolean;
-  now: number;
-  onSelect: (appSessionId: string) => void;
-}
-
-export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowProps): boolean {
-  return (
-    prev.session.appSessionId === next.session.appSessionId &&
-    prev.session.title === next.session.title &&
-    prev.session.updatedAt === next.session.updatedAt &&
-    prev.active === next.active &&
-    prev.unread === next.unread &&
-    prev.running === next.running &&
-    prev.now === next.now &&
-    prev.onSelect === next.onSelect
-  );
-}
-
-// `running` is derived by the parent so this row can skip unrelated store updates.
-export const SessionRow = memo(function SessionRow({
-  session,
-  active,
-  unread,
-  running,
-  now,
-  onSelect,
-}: SessionRowProps) {
-  const timeLabel = formatRelativeTime(session.updatedAt, now);
-  return (
-    <div>
-      <button
-        data-testid="top-level-session-row"
-        data-app-session-id={session.appSessionId}
-        onClick={() => {
-          onSelect(session.appSessionId);
-        }}
-        className={`group w-full flex items-center gap-2.5 pl-3 pr-2 py-1.5 rounded-xl text-left transition-colors ${
-          active ? 'bg-droid-active' : 'hover:bg-droid-elevated/40'
-        }`}
-      >
-        <span
-          className={`w-3 flex items-center justify-center shrink-0 ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
-        >
-          {running && <WorkingSpinner />}
-        </span>
-        <span
-          className={`min-w-0 flex-1 truncate text-[13px] ${
-            active
-              ? 'text-droid-text'
-              : unread
-                ? 'text-droid-text font-semibold'
-                : 'text-droid-text-secondary group-hover:text-droid-text'
-          }`}
-        >
-          {session.title}
-        </span>
-        {running ? (
-          <span className="shrink-0 text-droid-text-secondary">
-            <WorkingDots />
-          </span>
-        ) : (
-          timeLabel && (
-            <span
-              className={`shrink-0 text-[10.5px] tabular-nums ${
-                unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
-              }`}
-            >
-              {timeLabel}
-            </span>
-          )
-        )}
-      </button>
-    </div>
-  );
-}, areSessionRowPropsEqual);
 
 export default function Sidebar() {
   const { state, dispatch } = useStore();
@@ -171,6 +148,12 @@ export default function Sidebar() {
   // Per-section count of rows to show; grows by SIDEBAR_VISIBLE_SESSION_LIMIT on
   // each "Show more" so long lists page in (5 + 5 + 5...) rather than loading all.
   const [shownCount, setShownCount] = useState<Map<string, number>>(new Map());
+  // Target of the chat row action menu (opened by right-click or the hover
+  // "..." button) and the row currently being renamed inline.
+  const [rowMenu, setRowMenu] = useState<{ appSessionId: string; x: number; y: number } | null>(
+    null,
+  );
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   const documentVisible = useDocumentVisible();
   const [now, setNow] = useState(() => Date.now());
@@ -213,6 +196,7 @@ export default function Sidebar() {
 
   const activeId = state.activeAppSessionId;
   const lastSeen = state.sessionLastSeen;
+  const chatMetadata = state.chatMetadata;
   const isUnread = useCallback(
     (m: SessionSummary) => sessionIsUnread(m, activeId, lastSeen[m.appSessionId]),
     [activeId, lastSeen],
@@ -223,8 +207,9 @@ export default function Sidebar() {
       state.sessionOrder
         .map((id) => state.sessions[id])
         .filter(Boolean)
+        .filter((m) => !isChatHidden(chatMetadata[m.appSessionId]))
         .filter(isUnread).length,
-    [state.sessionOrder, state.sessions, isUnread],
+    [state.sessionOrder, state.sessions, chatMetadata, isUnread],
   );
 
   const markAllSessionsRead = useCallback(() => {
@@ -260,25 +245,56 @@ export default function Sidebar() {
     dismissSidebarCard(SIDEBAR_WELCOME_CARD_ID);
   };
 
-  // The sidecar publishes top-level sessions only; children live in the right panel.
+  // The sidecar publishes top-level sessions only; children live in the right
+  // panel. Pinned chats live in their own section; archived/deleted chats stay
+  // out of the normal lists.
+  const isListedNormally = useCallback(
+    (m: SessionSummary) => {
+      const meta = chatMetadata[m.appSessionId];
+      return !isChatHidden(meta) && !isChatPinned(meta);
+    },
+    [chatMetadata],
+  );
+
   const chatSessions = useMemo<SessionSummary[]>(() => {
     const rows = state.sessionOrder
       .map((id) => state.sessions[id])
       .filter(Boolean)
-      .filter((m) => !m.cwd);
+      .filter((m) => !m.cwd)
+      .filter(isListedNormally);
     const visible = unreadOnly ? rows.filter(isUnread) : rows;
     return visible.sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [state.sessionOrder, state.sessions, unreadOnly, isUnread]);
+  }, [state.sessionOrder, state.sessions, unreadOnly, isUnread, isListedNormally]);
+
+  // Pinned section: every pinned chat regardless of workspace, latest activity
+  // first. Empty section hides itself.
+  const pinnedSessions = useMemo<SessionSummary[]>(() => {
+    const rows = pinnedChats(
+      state.sessionOrder.map((id) => state.sessions[id]).filter(Boolean),
+      chatMetadata,
+    ).sort((a, b) => b.updatedAt - a.updatedAt);
+    return unreadOnly ? rows.filter(isUnread) : rows;
+  }, [state.sessionOrder, state.sessions, chatMetadata, unreadOnly, isUnread]);
 
   const workspaces = useMemo(() => {
-    const sessions = state.sessionOrder.map((id) => state.sessions[id]).filter(Boolean);
+    const sessions = state.sessionOrder
+      .map((id) => state.sessions[id])
+      .filter(Boolean)
+      .filter(isListedNormally);
     const sections = buildWorkspaceSections(state.workspaceCwds, sessions);
     // In unread-only mode, drop read sessions and workspaces left empty.
     if (!unreadOnly) return sections;
     return sections
       .map((ws) => ({ ...ws, sessions: ws.sessions.filter(isUnread) }))
       .filter((ws) => ws.sessions.length > 0);
-  }, [state.sessionOrder, state.sessions, state.workspaceCwds, unreadOnly, isUnread]);
+  }, [
+    state.sessionOrder,
+    state.sessions,
+    state.workspaceCwds,
+    unreadOnly,
+    isUnread,
+    isListedNormally,
+  ]);
 
   const handleSelectSession = useCallback(
     (appSessionId: string) => {
@@ -292,15 +308,75 @@ export default function Sidebar() {
     [dispatch, unreadOnly],
   );
 
+  const handleRowMenu = useCallback((appSessionId: string, position: { x: number; y: number }) => {
+    setRowMenu({ appSessionId, x: position.x, y: position.y });
+  }, []);
+
+  // Stable identity so SessionContextMenu's escape-layer/listener effect does
+  // not re-register on every sidebar render.
+  const closeRowMenu = useCallback(() => {
+    setRowMenu(null);
+  }, []);
+
+  // If the menu's (or rename editor's) target chat disappears mid-interaction
+  // — archived from another surface or pruned by a session-list update —
+  // close the UI instead of acting on a ghost.
+  useEffect(() => {
+    if (rowMenu) {
+      const gone =
+        !Object.hasOwn(state.sessions, rowMenu.appSessionId) ||
+        isChatHidden(chatMetadata[rowMenu.appSessionId]);
+      if (gone) setRowMenu(null);
+    }
+    if (renamingId) {
+      const gone =
+        !Object.hasOwn(state.sessions, renamingId) || isChatHidden(chatMetadata[renamingId]);
+      if (gone) setRenamingId(null);
+    }
+  }, [rowMenu, renamingId, state.sessions, chatMetadata]);
+
+  // The stored displayTitle is the UI source of truth; the native harness
+  // rename is a best-effort sync so other clients see the new title too. A
+  // blank title means "revert to the generated title" and stays local-only.
+  const handleRenameCommit = useCallback(
+    (appSessionId: string, title: string) => {
+      setRenamingId(null);
+      dispatch({ type: 'RENAME_CHAT', appSessionId, title });
+      const trimmed = title.trim();
+      if (trimmed) renameSession(appSessionId, trimmed);
+    },
+    [dispatch],
+  );
+
+  const handleRenameCancel = useCallback(() => {
+    setRenamingId(null);
+  }, []);
+
+  const rowMenuSession = rowMenuTarget(state.sessions, rowMenu);
+
+  const handleCopyMarkdown = useCallback(
+    (appSessionId: string) => {
+      if (!Object.hasOwn(state.sessions, appSessionId)) return;
+      const session = state.sessions[appSessionId];
+      copyChatAsMarkdown(appSessionId, chatDisplayTitle(session, chatMetadata[appSessionId]));
+    },
+    [state.sessions, chatMetadata],
+  );
+
   const renderRow = (m: SessionSummary) => (
     <SessionRow
       key={m.appSessionId}
       session={m}
+      title={chatDisplayTitle(m, chatMetadata[m.appSessionId])}
       active={state.activeAppSessionId === m.appSessionId}
       unread={isUnread(m)}
       running={sessionIsLive(m)}
+      renaming={renamingId === m.appSessionId}
       now={now}
       onSelect={handleSelectSession}
+      onMenu={handleRowMenu}
+      onRenameCommit={handleRenameCommit}
+      onRenameCancel={handleRenameCancel}
     />
   );
 
@@ -409,6 +485,32 @@ export default function Sidebar() {
             No unread sessions.
           </div>
         )}
+        {/* Pinned — every pinned chat across workspaces, hidden while empty */}
+        {pinnedSessions.length > 0 &&
+          (() => {
+            const open = !collapsed.has('__pinned__');
+            return (
+              <div>
+                <div className="group/header flex items-center gap-1 px-1 pt-1 pb-1.5">
+                  <button
+                    onClick={() => {
+                      toggleCollapse('__pinned__');
+                    }}
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-droid-elevated/40 transition-colors"
+                  >
+                    <ChevronRight
+                      className={`w-3 h-3 text-droid-text-muted/70 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+                    />
+                    <span className="text-[11px] font-medium tracking-wide text-droid-text-muted">
+                      Pinned
+                    </span>
+                  </button>
+                </div>
+                <Expand open={open}>{renderSessionList('__pinned__', pinnedSessions)}</Expand>
+              </div>
+            );
+          })()}
+
         {/* Workspaces — folder-scoped, where sessions run (main area) */}
         {(() => {
           // Unread-only mode hides sections that have no unread rows left.
@@ -441,7 +543,7 @@ export default function Sidebar() {
                 </button>
               </div>
 
-              {open && (
+              <Expand open={open}>
                 <div className="space-y-2.5">
                   {workspaces.map((ws) => {
                     const wsOpen = !collapsed.has(ws.cwd);
@@ -452,12 +554,10 @@ export default function Sidebar() {
                             onClick={() => {
                               toggleCollapse(ws.cwd);
                             }}
+                            aria-expanded={wsOpen}
                             className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-droid-elevated/40 transition-colors"
                           >
-                            <ChevronRight
-                              className={`w-3 h-3 text-droid-text-muted/70 shrink-0 transition-transform ${wsOpen ? 'rotate-90' : ''}`}
-                            />
-                            <Folder className="w-4 h-4 text-droid-text-muted shrink-0" />
+                            <WorkspaceFolderIcon open={wsOpen} />
                             <span className="min-w-0 flex-1 truncate text-[13.5px] text-droid-text">
                               {ws.name}
                             </span>
@@ -472,7 +572,7 @@ export default function Sidebar() {
                             <Plus className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                        {wsOpen && renderSessionList(ws.cwd, ws.sessions)}
+                        <Expand open={wsOpen}>{renderSessionList(ws.cwd, ws.sessions)}</Expand>
                       </div>
                     );
                   })}
@@ -484,12 +584,12 @@ export default function Sidebar() {
                       }}
                       className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/40 transition-colors"
                     >
-                      <FolderPlus className="w-4 h-4 shrink-0" />
+                      <FolderOpen className="w-4 h-4 shrink-0" />
                       <span className="text-[13.5px]">Open workspace</span>
                     </button>
                   )}
                 </div>
-              )}
+              </Expand>
             </div>
           );
         })()}
@@ -515,14 +615,15 @@ export default function Sidebar() {
                   </span>
                 </button>
               </div>
-              {open &&
-                (chatSessions.length === 0 ? (
+              <Expand open={open}>
+                {chatSessions.length === 0 ? (
                   <div className="mt-0.5 px-3 py-2 text-[12px] text-droid-text-muted">
                     No chats yet.
                   </div>
                 ) : (
                   renderSessionList('__chats__', chatSessions)
-                ))}
+                )}
+              </Expand>
             </div>
           );
         })()}
@@ -566,6 +667,32 @@ export default function Sidebar() {
           />
         )}
       </AnimatePresence>
+
+      {rowMenu && (
+        <SessionContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          pinned={isChatPinned(chatMetadata[rowMenu.appSessionId])}
+          cwd={rowMenuSession?.cwd}
+          providerSessionId={rowMenuSession?.providerSessionId}
+          onRename={() => {
+            setRenamingId(rowMenu.appSessionId);
+          }}
+          onTogglePin={() => {
+            dispatch({
+              type: isChatPinned(chatMetadata[rowMenu.appSessionId]) ? 'UNPIN_CHAT' : 'PIN_CHAT',
+              appSessionId: rowMenu.appSessionId,
+            });
+          }}
+          onArchive={() => {
+            dispatch({ type: 'ARCHIVE_CHAT', appSessionId: rowMenu.appSessionId });
+          }}
+          onCopyMarkdown={() => {
+            handleCopyMarkdown(rowMenu.appSessionId);
+          }}
+          onClose={closeRowMenu}
+        />
+      )}
     </aside>
   );
 }

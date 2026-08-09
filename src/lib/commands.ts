@@ -187,6 +187,40 @@ export const closeSession = (appSessionId: string) => {
   bridge.send({ type: 'session.close', appSessionId });
 };
 
+// Best-effort sync of a chat rename to the harness's own session title. The
+// app-level displayTitle (lib/chatMetadata) stays the UI source of truth, so
+// a failure here only means other clients keep the generated title.
+export const renameSession = (appSessionId: string, title: string) => {
+  bridge.send({ type: 'session.rename', appSessionId, title });
+};
+
+// Full chat transcript rendered as Markdown by the sidecar, which reads the
+// stored session file from disk — so the export is complete even for a chat
+// that was never opened in this app run.
+export const exportSessionMarkdown = (appSessionId: string, title: string): Promise<string> => {
+  const requestId = newClientRef();
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      unsubscribe();
+      reject(new Error('Timed out while exporting the chat.'));
+    }, 10_000);
+    const unsubscribe = bridge.subscribe((event) => {
+      if (event.type !== 'session.markdownExported' || event.requestId !== requestId) return;
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      if (event.ok && event.markdown !== undefined) resolve(event.markdown);
+      else reject(new Error(event.message ?? 'Could not export this chat.'));
+    });
+    if (
+      !bridge.sendIfConnected({ type: 'session.exportMarkdown', appSessionId, requestId, title })
+    ) {
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      reject(new Error('Reconnect to DROIDEX before exporting a chat.'));
+    }
+  });
+};
+
 export const reanchorSessionsForWorktreeRemoval = (
   fromCwd: string,
   toCwd: string,

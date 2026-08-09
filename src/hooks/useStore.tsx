@@ -57,6 +57,17 @@ import {
   saveSessionNotes,
   type SessionNotesMap,
 } from '../lib/sessionNotes';
+import {
+  archiveChat,
+  deleteChat,
+  loadChatMetadata,
+  pinChat,
+  renameChat,
+  restoreChat,
+  saveChatMetadata,
+  unpinChat,
+  type ChatMetadataMap,
+} from '../lib/chatMetadata';
 import { createSnapshotScheduler, loadSessionSnapshot } from '../lib/sessionSnapshot';
 import { toast } from '../lib/toast';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
@@ -171,6 +182,9 @@ export interface AppState {
   // its updatedAt (latest model activity) is newer than this. Internal only:
   // surfaced as a bold row in the sidebar, never shown as a timestamp.
   sessionLastSeen: Record<string, number>;
+  // App-level pin/archive/delete organization per chat. Pure renderer metadata,
+  // persisted in localStorage; the harness session data is never touched.
+  chatMetadata: ChatMetadataMap;
   transcripts: Record<string, TranscriptEvent[]>;
   progress: Record<string, ProgressEntry[]>;
   childSessions: Record<string, Record<string, ChildSessionInfo>>;
@@ -314,6 +328,14 @@ type Action =
     }
   | { type: 'SESSION_UPDATED'; session: SessionSummary }
   | { type: 'SESSION_CLOSED'; appSessionId: string }
+  // App-level chat organization (rename/pin/archive/delete); see lib/chatMetadata.
+  // A blank RENAME_CHAT title clears the override back to the generated title.
+  | { type: 'RENAME_CHAT'; appSessionId: string; title: string }
+  | { type: 'PIN_CHAT'; appSessionId: string }
+  | { type: 'UNPIN_CHAT'; appSessionId: string }
+  | { type: 'ARCHIVE_CHAT'; appSessionId: string }
+  | { type: 'RESTORE_CHAT'; appSessionId: string }
+  | { type: 'DELETE_CHAT'; appSessionId: string }
   | { type: 'SESSION_FEATURES'; appSessionId: string; features: SessionSummary['features'] }
   | { type: 'SESSION_PROGRESS'; appSessionId: string; entries: ProgressEntry[] }
   | {
@@ -952,6 +974,7 @@ export const initialState: AppState = {
   listConfirmedSessionIds: sessionSnapshot?.sessionOrder ?? null,
   activeAppSessionId: persistedUiState.activeAppSessionId ?? null,
   sessionLastSeen: loadSessionLastSeen(),
+  chatMetadata: loadChatMetadata(),
   transcripts: sessionSnapshot?.transcript
     ? { [sessionSnapshot.transcript.appSessionId]: sessionSnapshot.transcript.events }
     : {},
@@ -1373,6 +1396,38 @@ function baseReducer(state: AppState, action: Action): AppState {
             ? null
             : state.selectedChild,
       };
+    }
+
+    // Chat organization transforms return null for no-ops so these cases keep
+    // the current state untouched (no re-render, no storage write).
+    case 'RENAME_CHAT': {
+      const chatMetadata = renameChat(state.chatMetadata, action.appSessionId, action.title);
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'PIN_CHAT': {
+      const chatMetadata = pinChat(state.chatMetadata, action.appSessionId, Date.now());
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'UNPIN_CHAT': {
+      const chatMetadata = unpinChat(state.chatMetadata, action.appSessionId);
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'ARCHIVE_CHAT': {
+      const chatMetadata = archiveChat(state.chatMetadata, action.appSessionId, Date.now());
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'RESTORE_CHAT': {
+      const chatMetadata = restoreChat(state.chatMetadata, action.appSessionId);
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'DELETE_CHAT': {
+      const chatMetadata = deleteChat(state.chatMetadata, action.appSessionId, Date.now());
+      return chatMetadata ? { ...state, chatMetadata } : state;
     }
 
     case 'SESSION_FEATURES': {
@@ -1801,11 +1856,25 @@ function baseReducer(state: AppState, action: Action): AppState {
         state.activeAppSessionId !== null && mapById[state.activeAppSessionId] !== undefined
           ? state.activeAppSessionId
           : null;
+      // Prune pin/archive metadata for the same confirmed-gone rows so
+      // localStorage does not accumulate orphans. Metadata for rows added
+      // locally this run (not yet list-confirmed) survives.
+      let chatMetadata = state.chatMetadata;
+      const orphaned = Object.keys(chatMetadata).filter(
+        (id) => confirmed?.includes(id) && !incoming.has(id),
+      );
+      if (orphaned.length > 0) {
+        const drop = new Set(orphaned);
+        chatMetadata = Object.fromEntries(
+          Object.entries(chatMetadata).filter(([id]) => !drop.has(id)),
+        );
+      }
       return {
         ...state,
         sessions: map,
         sessionOrder: order,
         sessionLastSeen: seededLastSeen,
+        chatMetadata,
         listConfirmedSessionIds: action.sessions.map((m) => m.appSessionId),
         activeAppSessionId,
       };
@@ -2949,9 +3018,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     savePersistedUiState(state);
     saveSessionLastSeen(state.sessionLastSeen);
     saveSessionNotes(state.sessionNotes);
+    saveChatMetadata(state.chatMetadata);
   }, [
     state.sessionLastSeen,
     state.sessionNotes,
+    state.chatMetadata,
     state.activeAppSessionId,
     state.browserOpenKeys,
     state.browsers,

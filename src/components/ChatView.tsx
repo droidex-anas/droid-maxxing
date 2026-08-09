@@ -14,6 +14,7 @@ import {
 } from './chat';
 import { readFile } from '../lib/desktop';
 import { interruptChild, loadSessionHistory } from '../lib/commands';
+import { chatDisplayTitle } from '../lib/chatMetadata';
 import {
   childSessionActivityForTarget,
   childSessionLabel,
@@ -41,7 +42,7 @@ function RestoringState() {
 function RestoreFailedState({ message, onRetry }: { message?: string; onRetry: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
-      <span className="text-[13px] text-droid-text">Couldn't restore this conversation</span>
+      <span className="text-[13px] text-droid-text">Couldn&apos;t restore this conversation</span>
       {message && <span className="max-w-md text-[12px] text-droid-text-muted">{message}</span>}
       <button
         type="button"
@@ -173,6 +174,15 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   const selectedChildMeta = selectedChildSession
     ? childSessionMeta(selectedChildSession, selectedChildModel)
     : undefined;
+  // childAccess is typed Record-of-Records but keys can be absent at runtime;
+  // guard each lookup so a missing entry simply reads as not-opening.
+  const selectedChildOpening = Boolean(
+    activeSession &&
+    selectedChildSessionId &&
+    Object.hasOwn(state.childAccess, activeSession.appSessionId) &&
+    Object.hasOwn(state.childAccess[activeSession.appSessionId], selectedChildSessionId) &&
+    state.childAccess[activeSession.appSessionId][selectedChildSessionId].state === 'opening',
+  );
 
   // Click a spawn name to switch the main chat view to that exact child transcript.
   const openChildSession = useCallback(
@@ -193,11 +203,15 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   // Open the Review pane scoped to the agent's last turn and jump to the clicked
   // file, reused by both the per-turn changes summary and inline diff cards.
   const openReviewFile = useCallback(
-    (path: string) => dispatch({ type: 'OPEN_REVIEW_AT', scope: 'last_turn', path }),
+    (path: string) => {
+      dispatch({ type: 'OPEN_REVIEW_AT', scope: 'last_turn', path });
+    },
     [dispatch],
   );
   const openDiff = useCallback(
-    (change: FileChange) => openReviewFile(change.path),
+    (change: FileChange) => {
+      openReviewFile(change.path);
+    },
     [openReviewFile],
   );
 
@@ -328,7 +342,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     for (let i = allTranscript.length - 1; i >= 0; i--) {
       const t = allTranscript[i];
       const hay = `${t.text ?? ''} ${t.toolArgs ? JSON.stringify(t.toolArgs) : ''}`;
-      const m = hay.match(re);
+      const m = re.exec(hay);
       if (m) return m[1];
     }
     return null;
@@ -340,7 +354,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   useEffect(() => {
     if (!specPath) return;
     let cancelled = false;
-    readFile(specPath).then((content) => {
+    void readFile(specPath).then((content) => {
       if (!cancelled && content) setFileSpec({ path: specPath, content });
     });
     return () => {
@@ -356,7 +370,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   const specContent = useMemo(() => {
     if (!hadSpec) return '';
     // 1) The saved spec file (full doc with diagrams/tables) is the best source.
-    if (hasFileSpec) return fileSpec!.content;
+    if (hasFileSpec) return fileSpec.content;
     // 2) The plan the agent submitted via ExitSpecMode.
     if (capturedPlan) return capturedPlan;
     // 3) Previously persisted spec (e.g. after switching sessions and back).
@@ -368,10 +382,10 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   // button survive exiting spec mode and switching between sessions.
   useEffect(() => {
     if (!activeAppSessionId || !specContent) return;
-    const title = specContent.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim() ?? 'Specification';
+    const title = /^#{1,3}\s+(.+)$/m.exec(specContent)?.[1]?.trim() ?? 'Specification';
     // Preserve the existing file path when the current source is not file-backed
     // (e.g. a captured plan), so the store never loses a known path on refresh.
-    const path = hasFileSpec ? fileSpec!.path : storedSpec?.path;
+    const path = hasFileSpec ? fileSpec.path : storedSpec?.path;
     dispatch({
       type: 'SPEC_SET',
       appSessionId: activeAppSessionId,
@@ -432,7 +446,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     <div data-testid="chat-view" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
       {activeSession && (
         <ChatHeader
-          title={activeSession.title}
+          title={chatDisplayTitle(activeSession, state.chatMetadata[activeSession.appSessionId])}
           live={live}
           sub={
             viewingChildSession
@@ -440,14 +454,17 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
                   label: selectedChildLabel,
                   meta: selectedChildMeta,
                   running: live,
-                  onBack: () => dispatch({ type: 'SELECT_CHILD', selection: null }),
+                  onBack: () => {
+                    dispatch({ type: 'SELECT_CHILD', selection: null });
+                  },
                   onStop:
                     visibleTarget.kind === 'child' && visibleTarget.canInterrupt
-                      ? () =>
+                      ? () => {
                           interruptChild(
                             visibleTarget.parentAppSessionId,
                             visibleTarget.childSessionId,
-                          )
+                          );
+                        }
                       : undefined,
                 }
               : undefined
@@ -524,9 +541,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
                   label={`${selectedChildLabel} is working`}
                   startTs={visibleTarget.child.startedAt}
                 />
-              ) : selectedChildSessionId &&
-                state.childAccess[activeSession.appSessionId]?.[selectedChildSessionId]?.state ===
-                  'opening' ? (
+              ) : selectedChildOpening ? (
                 <WorkingIndicator label={`Loading ${selectedChildLabel} activity`} />
               ) : (
                 <span className="text-[13px] text-droid-text-muted">
