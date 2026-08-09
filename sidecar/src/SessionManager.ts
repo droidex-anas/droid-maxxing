@@ -1570,12 +1570,21 @@ export class SessionManager {
       const providerSessionId = summary?.providerSessionId ?? cmd.appSessionId;
       const appSessionId = summary?.appSessionId ?? cmd.appSessionId;
       const chain = resolveSessionChain(appSessionId, providerSessionId);
-      const { events } = loadSessionTranscriptWindow(appSessionId, chain, { limit: 100_000 });
+      const { events, olderCursor } = loadSessionTranscriptWindow(appSessionId, chain, {
+        limit: 100_000,
+      });
       if (events.length === 0) throw new Error('No stored transcript for this chat.');
       const markdown = transcriptToMarkdown(events, {
         title: cmd.title ?? summary?.title ?? 'Chat export',
         providerSessionId,
         cwd: summary?.cwd,
+        // The window caps at 100k events; an export missing older turns must
+        // say so rather than read as the complete chat.
+        ...(olderCursor !== undefined
+          ? {
+              note: 'This chat exceeds the 100,000-event export limit; only the most recent events are included.',
+            }
+          : {}),
       });
       this.emit({
         type: 'session.markdownExported',
@@ -1583,9 +1592,10 @@ export class SessionManager {
         ok: true,
         markdown,
       });
-    } catch {
+    } catch (error) {
       // The raw error can carry internal paths; the renderer shows a generic
-      // failure toast and the detail stays in the sidecar log.
+      // failure toast while the detail stays in the sidecar log.
+      console.error(`Markdown export failed: ${errMsg(error)}`);
       this.emit({
         type: 'session.markdownExported',
         requestId: cmd.requestId,

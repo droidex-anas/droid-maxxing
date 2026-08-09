@@ -12,6 +12,8 @@ export interface SessionMarkdownMeta {
   title: string;
   providerSessionId: string;
   cwd?: string;
+  // Caveat shown right under the header, e.g. when the export is truncated.
+  note?: string;
   // Injectable for deterministic tests.
   exportedAt?: Date;
 }
@@ -86,5 +88,5 @@ export function transcriptToMarkdown(events: TranscriptEvent[], meta: SessionMar
     `- **Exported:** ${exportedAt.toISOString()}`,
   ].join('\n');
   const blocks = events.map(blockFor).filter((block): block is string => block !== null);
-  return [header, ...blocks].join('\n\n');
+  return [header, ...(meta.note ? [`> **Note:** ${meta.note}`] : []), ...blocks].join('\n\n');
 }

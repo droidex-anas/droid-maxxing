@@ -217,8 +217,8 @@ export const exportSessionMarkdown = (appSessionId: string, title: string): Prom
       if (event.type !== 'session.markdownExported' || event.requestId !== requestId) return;
       globalThis.clearTimeout(timeout);
       unsubscribe();
-      if (event.ok && event.markdown !== undefined) resolve(event.markdown);
-      else reject(new Error(event.message ?? 'Could not export this chat.'));
+      if (event.ok) resolve(event.markdown);
+      else reject(new Error(event.message));
     });
     if (
       !bridge.sendIfConnected({ type: 'session.exportMarkdown', appSessionId, requestId, title })

@@ -784,12 +784,18 @@ export type ServerEvent =
       count: number;
       message?: string;
     }
+  // "Copy as Markdown" reply: success and failure carry disjoint payloads.
   | {
       type: 'session.markdownExported';
       requestId: string;
-      ok: boolean;
-      markdown?: string;
-      message?: string;
+      ok: true;
+      markdown: string;
+    }
+  | {
+      type: 'session.markdownExported';
+      requestId: string;
+      ok: false;
+      message: string;
     }
   | ChildUpdatedEvent
   | ChildErrorEvent

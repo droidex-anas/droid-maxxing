@@ -34,6 +34,19 @@ test('header omits the directory line when the session has no cwd', () => {
   assert.doesNotMatch(md, /Directory/);
 });
 
+test('a meta note renders as a caveat right under the header', () => {
+  // The export limit note must sit between the header and the conversation so
+  // a truncated export cannot be mistaken for the complete chat.
+  const md = transcriptToMarkdown([ev({ kind: 'text', text: 'tail turn' })], {
+    ...META,
+    note: 'Only the most recent events are included.',
+  });
+  const headerEnd = md.indexOf('- **Exported:**');
+  const note = md.indexOf('> **Note:** Only the most recent events are included.');
+  const turn = md.indexOf('## Droid\n\ntail turn');
+  assert.ok(headerEnd > -1 && note > headerEnd && turn > note);
+});
+
 test('user and assistant text become labeled sections in order', () => {
   const md = transcriptToMarkdown(
     [ev({ kind: 'text', author: 'user', text: 'hello there' }), ev({ kind: 'text', text: 'hi!' })],
