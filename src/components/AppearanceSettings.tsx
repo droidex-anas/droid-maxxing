@@ -1,77 +1,23 @@
-// Appearance settings: color-scheme cards with live wireframe previews, a grid
-// of built-in + custom theme presets, and a custom-theme editor. Manual color
-// edits still work directly; they become an unsaved "custom" look until saved
-// as a theme.
+// Appearance settings composition: color-scheme cards with live wireframe
+// previews, the theme preset card (see ThemePresetCard.tsx), the app icon
+// selector, and the typography/behavior card. Manual color edits still work
+// directly; they become an unsaved "custom" look until saved as a theme.
 
-import { useEffect, useRef, useState } from 'react';
-import {
-  Check,
-  Copy,
-  Download,
-  Monitor,
-  Moon,
-  Pencil,
-  Plus,
-  Sun,
-  Trash2,
-  Upload,
-} from 'lucide-react';
+import { Check, Monitor, Moon, Sun } from 'lucide-react';
 import { useStore, type ThemeConfig } from '../hooks/useStore';
 import {
   applyTheme,
-  BUILT_IN_THEMES,
-  CUSTOM_THEME_ID,
   DEFAULT_THEME,
   findPreset,
-  newCustomThemeId,
-  parseThemePresetImport,
   resolveVariant,
   UI_FONTS,
-  type ThemeColors,
   type ThemeMode,
-  type ThemePreset,
 } from '../lib/theme';
-import { ColorField } from './ColorPicker';
 import { Dropdown, GroupLabel, SectionTitle } from './settingsKit';
-import { ThemeEditor, type ThemeDraft } from './ThemeEditor';
-import { SchemePreview, ThemeSwatches } from './ThemePreview';
-
-const PRESET_ACCENTS = [
-  '#ee6018',
-  '#ef6f2e',
-  '#d15010',
-  '#e8a838',
-  '#4a9e7a',
-  '#4ecdc4',
-  '#7a8aaa',
-  '#a78bfa',
-  '#f87171',
-  '#fcfcfc',
-];
+import { ThemePresetCard } from './ThemePresetCard';
+import { SchemePreview } from './ThemePreview';
 
 /* ── shared controls ── */
-function ColorSwatch({
-  color,
-  active,
-  onClick,
-}: {
-  color: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
-        active ? 'border-droid-text' : 'border-transparent'
-      }`}
-      style={{ backgroundColor: color }}
-    >
-      {active && <Check className="w-3 h-3 text-white mx-auto" strokeWidth={3} />}
-    </button>
-  );
-}
-
 function ModeButton({
   active,
   onClick,
@@ -210,127 +156,12 @@ function SchemeCard({
   );
 }
 
-/* ── theme preset card ── */
-function CardAction({
-  title,
-  danger = false,
-  onClick,
-  children,
-}: {
-  title: string;
-  danger?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className={`rounded-md p-1 transition-colors ${
-        danger
-          ? 'text-droid-red hover:bg-droid-red/10'
-          : 'text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ThemeCard({
-  preset,
-  active,
-  activeScheme,
-  isCustom,
-  deleteArmed,
-  onSelect,
-  onDuplicate,
-  onEdit,
-  onExport,
-  onDelete,
-}: {
-  preset: ThemePreset;
-  active: boolean;
-  activeScheme: 'light' | 'dark';
-  isCustom: boolean;
-  deleteArmed: boolean;
-  onSelect: () => void;
-  onDuplicate: () => void;
-  onEdit?: () => void;
-  onExport?: () => void;
-  onDelete?: () => void;
-}) {
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-pressed={active}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      className={`cursor-pointer rounded-xl border p-3.5 transition-colors ${
-        active ? 'border-droid-accent' : 'border-droid-border hover:border-droid-border-hover'
-      }`}
-      style={active ? { boxShadow: '0 0 0 1px var(--droid-accent)' } : undefined}
-    >
-      <div className="flex justify-center py-2">
-        <ThemeSwatches preset={preset} activeScheme={active ? activeScheme : undefined} />
-      </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-[12.5px] text-droid-text">{preset.name}</span>
-        <span className="flex shrink-0 items-center gap-0.5">
-          <CardAction title={`Duplicate ${preset.name}`} onClick={onDuplicate}>
-            <Copy className="h-3.5 w-3.5" />
-          </CardAction>
-          {isCustom && onEdit && (
-            <CardAction title={`Edit ${preset.name}`} onClick={onEdit}>
-              <Pencil className="h-3.5 w-3.5" />
-            </CardAction>
-          )}
-          {isCustom && onExport && (
-            <CardAction title={`Export ${preset.name}`} onClick={onExport}>
-              <Download className="h-3.5 w-3.5" />
-            </CardAction>
-          )}
-          {isCustom && onDelete && (
-            <CardAction
-              title={deleteArmed ? 'Click again to delete' : `Delete ${preset.name}`}
-              danger={deleteArmed}
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </CardAction>
-          )}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-type EditorState =
-  | { kind: 'create'; draft: ThemeDraft }
-  | { kind: 'edit'; id: string; draft: ThemeDraft };
-
 /* ── appearance content ── */
 export function AppearanceSection() {
   const { state, dispatch } = useStore();
   const theme = state.theme;
-  const customThemes = state.customThemes;
-  const [editor, setEditor] = useState<EditorState | null>(null);
-  const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
 
-  const activePreset = findPreset(theme.presetId, customThemes);
+  const activePreset = findPreset(theme.presetId, state.customThemes);
   // Palette behind the scheme cards: the active preset, or the default when
   // the current colors are hand-edited and match no preset.
   const previewPreset = activePreset ?? DEFAULT_THEME;
@@ -351,113 +182,6 @@ export function AppearanceSection() {
   // (custom) colors have no second variant, so they stay as they are.
   const selectScheme = (mode: ThemeMode) => {
     updateTheme({ mode, ...(activePreset ? resolveVariant(activePreset, mode) : {}) });
-  };
-
-  const selectTheme = (preset: ThemePreset) => {
-    updateTheme({ presetId: preset.id, ...resolveVariant(preset, theme.mode) });
-  };
-
-  // Manual color edits detach from the preset: the look becomes unsaved custom
-  // colors until the user saves them as a theme.
-  const updateColors = (patch: Partial<ThemeColors>) => {
-    updateTheme({ ...patch, presetId: CUSTOM_THEME_ID });
-  };
-
-  const currentColors = (): ThemeColors => ({
-    bg: theme.bg,
-    fg: theme.fg,
-    surface: theme.surface,
-    border: theme.border,
-    accent: theme.accent,
-  });
-
-  /* ── editor flows ── */
-  const openNewTheme = () => {
-    setEditor({
-      kind: 'create',
-      draft: { name: '', light: { ...previewPreset.light }, dark: { ...previewPreset.dark } },
-    });
-  };
-  const openSaveCurrentAs = () => {
-    const draft: ThemeDraft = {
-      name: '',
-      light: { ...previewPreset.light },
-      dark: { ...previewPreset.dark },
-    };
-    draft[resolvedScheme] = currentColors();
-    setEditor({ kind: 'create', draft });
-  };
-  const openDuplicate = (p: ThemePreset) => {
-    setEditor({
-      kind: 'create',
-      draft: { name: `${p.name} copy`, light: { ...p.light }, dark: { ...p.dark } },
-    });
-  };
-  const openEdit = (p: ThemePreset) => {
-    setEditor({
-      kind: 'edit',
-      id: p.id,
-      draft: { name: p.name, light: { ...p.light }, dark: { ...p.dark } },
-    });
-  };
-
-  const handleSave = (draft: ThemeDraft) => {
-    const id = editor?.kind === 'edit' ? editor.id : newCustomThemeId();
-    const preset: ThemePreset = { id, name: draft.name, light: draft.light, dark: draft.dark };
-    dispatch({ type: 'SAVE_CUSTOM_THEME', preset });
-    updateTheme({ presetId: id, ...resolveVariant(preset, theme.mode) });
-    setEditor(null);
-  };
-
-  const handleDelete = (p: ThemePreset) => {
-    dispatch({ type: 'DELETE_CUSTOM_THEME', id: p.id });
-    // Deleting the active theme falls back to the default so presetId never
-    // dangles.
-    if (theme.presetId === p.id) {
-      updateTheme({ presetId: DEFAULT_THEME.id, ...resolveVariant(DEFAULT_THEME, theme.mode) });
-    }
-  };
-
-  // Delete is a two-click confirm: the first click arms the button for a few
-  // seconds, the second actually deletes.
-  useEffect(() => {
-    if (!armedDeleteId) return;
-    const timer = window.setTimeout(() => {
-      setArmedDeleteId(null);
-    }, 3000);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [armedDeleteId]);
-
-  /* ── export / import ── */
-  const exportTheme = (p: ThemePreset) => {
-    const payload = { name: p.name, light: p.light, dark: p.dark };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'theme'}.theme.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const parsed = parseThemePresetImport(JSON.parse(await file.text()));
-      if (!parsed) {
-        setImportError('That file is not a valid theme export.');
-        return;
-      }
-      setImportError(null);
-      // Open the editor so the import is previewed and named before saving.
-      setEditor({ kind: 'create', draft: parsed });
-    } catch {
-      setImportError('Could not read that file — expected a JSON theme export.');
-    }
   };
 
   const schemes = [
@@ -491,75 +215,8 @@ export function AppearanceSection() {
       </div>
 
       {/* Themes */}
-      <div className="flex items-start justify-between gap-3">
-        <GroupLabel>Themes</GroupLabel>
-        <button
-          type="button"
-          onClick={() => {
-            importInputRef.current?.click();
-          }}
-          className="flex items-center gap-1.5 rounded-md border border-droid-border px-2 py-1 text-[11px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text"
-        >
-          <Upload className="h-3 w-3" />
-          Import
-        </button>
-      </div>
-      {importError && <p className="mb-2 text-[11px] text-droid-red">{importError}</p>}
-      <div className="grid grid-cols-2 gap-3 mb-8">
-        {[...BUILT_IN_THEMES, ...customThemes].map((preset) => {
-          const isCustom = customThemes.some((p) => p.id === preset.id);
-          return (
-            <ThemeCard
-              key={preset.id}
-              preset={preset}
-              active={theme.presetId === preset.id}
-              activeScheme={resolvedScheme}
-              isCustom={isCustom}
-              deleteArmed={armedDeleteId === preset.id}
-              onSelect={() => {
-                selectTheme(preset);
-              }}
-              onDuplicate={() => {
-                openDuplicate(preset);
-              }}
-              onEdit={
-                isCustom
-                  ? () => {
-                      openEdit(preset);
-                    }
-                  : undefined
-              }
-              onExport={
-                isCustom
-                  ? () => {
-                      exportTheme(preset);
-                    }
-                  : undefined
-              }
-              onDelete={
-                isCustom
-                  ? () => {
-                      if (armedDeleteId !== preset.id) {
-                        setArmedDeleteId(preset.id);
-                        return;
-                      }
-                      setArmedDeleteId(null);
-                      handleDelete(preset);
-                    }
-                  : undefined
-              }
-            />
-          );
-        })}
-        <button
-          type="button"
-          onClick={openNewTheme}
-          className="flex min-h-[104px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-droid-border text-droid-text-muted transition-colors hover:border-droid-border-hover hover:text-droid-text"
-        >
-          <Plus className="h-4 w-4" />
-          <span className="text-[12px]">New theme</span>
-        </button>
-      </div>
+      <GroupLabel>Themes</GroupLabel>
+      <ThemePresetCard resolvedScheme={resolvedScheme} />
 
       {/* App icon */}
       <div className="rounded-xl border border-droid-border bg-droid-surface p-4 mb-6">
@@ -596,82 +253,6 @@ export function AppearanceSection() {
               label="System"
             />
           </div>
-        </div>
-      </div>
-
-      {/* Colors */}
-      <GroupLabel>Colors</GroupLabel>
-      <div className="rounded-xl border border-droid-border bg-droid-surface p-4 mb-6">
-        <div className="space-y-3">
-          <ColorField
-            label="Accent"
-            description="Highlights, active states, send button & design-mode controls"
-            value={theme.accent}
-            onChange={(v) => {
-              updateColors({ accent: v });
-            }}
-          />
-          <ColorField
-            label="App background"
-            description="The main window behind everything"
-            value={theme.bg}
-            onChange={(v) => {
-              updateColors({ bg: v });
-            }}
-          />
-          <ColorField
-            label="Text color"
-            description="Default color for all text"
-            value={theme.fg}
-            onChange={(v) => {
-              updateColors({ fg: v });
-            }}
-          />
-          <ColorField
-            label="Panel background"
-            description="Sidebar, cards and raised surfaces"
-            value={theme.surface}
-            onChange={(v) => {
-              updateColors({ surface: v });
-            }}
-          />
-          <ColorField
-            label="Borders"
-            description="Dividers and outlines between sections"
-            value={theme.border}
-            onChange={(v) => {
-              updateColors({ border: v });
-            }}
-          />
-        </div>
-        <div className="mt-3.5 pt-3.5 border-t border-droid-border">
-          <div className="text-[10.5px] text-droid-text-muted mb-2">Quick accents</div>
-          <div className="flex flex-wrap gap-1.5">
-            {PRESET_ACCENTS.map((c) => (
-              <ColorSwatch
-                key={c}
-                color={c}
-                active={theme.accent.toLowerCase() === c.toLowerCase()}
-                onClick={() => {
-                  updateColors({ accent: c });
-                }}
-              />
-            ))}
-          </div>
-        </div>
-        <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-droid-border pt-3.5">
-          <div className="text-[10.5px] text-droid-text-muted">
-            {theme.presetId === CUSTOM_THEME_ID
-              ? 'These hand-tuned colors are an unsaved custom look.'
-              : 'Tune any color, then keep it as your own theme.'}
-          </div>
-          <button
-            type="button"
-            onClick={openSaveCurrentAs}
-            className="shrink-0 rounded-md border border-droid-border px-2 py-1 text-[11px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text"
-          >
-            Save as theme…
-          </button>
         </div>
       </div>
 
@@ -735,26 +316,6 @@ export function AppearanceSection() {
           }}
         />
       </div>
-
-      <input
-        ref={importInputRef}
-        type="file"
-        accept="application/json,.json"
-        className="hidden"
-        onChange={(e) => {
-          void handleImportFile(e);
-        }}
-      />
-      {editor && (
-        <ThemeEditor
-          title={editor.kind === 'edit' ? 'Edit theme' : 'New theme'}
-          initial={editor.draft}
-          onSave={handleSave}
-          onCancel={() => {
-            setEditor(null);
-          }}
-        />
-      )}
     </div>
   );
 }

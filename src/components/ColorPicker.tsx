@@ -204,7 +204,7 @@ export function ColorPicker({
 }
 
 /* ── popover positioned near an anchor ── */
-function ColorPopover({
+export function ColorPopover({
   anchor,
   onClose,
   children,

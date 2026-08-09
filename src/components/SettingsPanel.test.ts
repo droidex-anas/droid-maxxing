@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { initialState, reducer, StoreContext, type AppState } from '../hooks/useStore.js';
 import type { AppIconMode } from '../lib/appIcon.js';
+import { CUSTOM_THEME_ID } from '../lib/theme.js';
 import { AppearanceSection } from './AppearanceSettings.js';
 import SettingsPanel from './SettingsPanel.js';
 
@@ -61,6 +62,32 @@ for (const [mode, label] of ICON_MODES) {
     }
   });
 }
+
+// Hand-tuned colors that match no preset must surface as an explicit
+// "Custom (unsaved)" entry so the theme dropdown always reflects the screen.
+test('theme dropdown lists an unsaved custom entry for hand-tuned colors', () => {
+  const state: AppState = {
+    ...initialState,
+    theme: {
+      ...initialState.theme,
+      presetId: CUSTOM_THEME_ID,
+      bg: '#123456',
+    },
+  };
+  const html = renderToStaticMarkup(
+    createElement(
+      StoreContext.Provider,
+      { value: { state, dispatch: () => undefined } },
+      createElement(AppearanceSection),
+    ),
+  );
+  assert.ok(html.includes('Custom (unsaved)'), 'unsaved custom entry is missing');
+});
+
+test('theme dropdown has no unsaved entry when a preset is active', () => {
+  const html = renderAppearance('system');
+  assert.ok(!html.includes('Custom (unsaved)'), 'unsaved entry should be hidden for presets');
+});
 
 test('selecting an app icon mode persists appIconMode through SET_THEME', () => {
   const values = new Map<string, string>();
