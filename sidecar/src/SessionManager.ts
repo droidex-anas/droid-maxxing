@@ -719,6 +719,21 @@ export class SessionManager {
       case 'browser.native.result':
         this.resolveNativeBrowserRequest(cmd.result);
         return;
+      default: {
+        // Wire commands are JSON-parsed without runtime validation, so a
+        // renderer running newer code than this sidecar (e.g. a dev app that
+        // kept running across a sidecar rebuild) can send a command this
+        // build does not know. Fail visibly instead of falling through
+        // silently while the caller waits out its timeout.
+        const unknown = cmd as { type?: unknown };
+        const commandType = typeof unknown.type === 'string' ? unknown.type : 'unknown';
+        this.emit({
+          type: 'error',
+          code: 'bridge.unsupported_command',
+          message: `This DROIDEX build does not support the "${commandType}" command. Restart the app to pick up the current sidecar.`,
+        });
+        return;
+      }
     }
   }
 

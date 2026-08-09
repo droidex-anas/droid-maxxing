@@ -162,3 +162,16 @@ test('a recoverable parent error stays out of reducer state', () => {
   });
   assert.equal(action, null);
 });
+
+test('an unsupported-command error toasts its restart guidance', () => {
+  // Bridge version skew (e.g. a dev app running across a sidecar rebuild)
+  // surfaces as bridge.unsupported_command; the message must reach the user
+  // instead of a silent hang.
+  const skew = {
+    type: 'error' as const,
+    code: 'bridge.unsupported_command',
+    message:
+      'This DROIDEX build does not support the "session.exportMarkdown" command. Restart the app to pick up the current sidecar.',
+  };
+  assert.equal(toastMessageForEvent(skew), skew.message);
+});

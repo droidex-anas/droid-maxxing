@@ -205,6 +205,15 @@ export const exportSessionMarkdown = (appSessionId: string, title: string): Prom
       reject(new Error('Timed out while exporting the chat.'));
     }, 10_000);
     const unsubscribe = bridge.subscribe((event) => {
+      // A sidecar older than this renderer answers unknown commands with
+      // bridge.unsupported_command instead of the awaited reply; fail the
+      // export immediately rather than waiting out the timeout.
+      if (event.type === 'error' && event.code === 'bridge.unsupported_command') {
+        globalThis.clearTimeout(timeout);
+        unsubscribe();
+        reject(new Error(event.message));
+        return;
+      }
       if (event.type !== 'session.markdownExported' || event.requestId !== requestId) return;
       globalThis.clearTimeout(timeout);
       unsubscribe();

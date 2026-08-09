@@ -2857,6 +2857,7 @@ function finiteNumber(value: unknown): number | undefined {
 
 /* ── Bridge event adapter ── */
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
+  if (ev.type === 'error' && ev.code === 'bridge.unsupported_command') return ev.message;
   if (
     ev.type === 'error' &&
     (ev.code === 'session.autonomy_update_failed' || ev.code === 'session.create_failed')
