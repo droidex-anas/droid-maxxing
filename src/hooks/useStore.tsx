@@ -1221,6 +1221,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 // carry only some fields. Replacing wholesale would drop earlier-streamed
 // fields, so shallow-merge when both are objects (latest field value wins) and
 // only fall back to a non-object/absent delta when there is nothing to merge.
+// Protocol mirror: sidecar/src/SessionTimeline.ts merges pre-coalesced
+// tool_call deltas with the same rule; keep both sides synchronized.
 function mergeToolArgs(prev: unknown, next: unknown): unknown {
   if (isPlainRecord(prev) && isPlainRecord(next)) return { ...prev, ...next };
   return next ?? prev;
@@ -1656,6 +1658,8 @@ function baseReducer(state: AppState, action: Action): AppState {
 
       // Delta merging: if the last event has the same kind + sourceSessionId, append text
       // Only merge backend streaming deltas (author is absent); do NOT merge explicit user echoes
+      // Protocol mirror: the sidecar pre-coalesces delta runs with the same
+      // rules (sidecar/src/SessionTimeline.ts); keep both sides synchronized.
       const last = prev[prev.length - 1];
       if (
         last &&
@@ -1668,7 +1672,11 @@ function baseReducer(state: AppState, action: Action): AppState {
         !ev.toolName
       ) {
         const merged = [...prev];
-        merged[merged.length - 1] = { ...last, text: (last.text ?? '') + ev.text, endTs: ev.ts };
+        merged[merged.length - 1] = {
+          ...last,
+          text: (last.text ?? '') + ev.text,
+          endTs: ev.endTs ?? ev.ts,
+        };
         return { ...state, transcripts: { ...state.transcripts, [mid]: merged } };
       }
 
@@ -1691,7 +1699,7 @@ function baseReducer(state: AppState, action: Action): AppState {
           ...last,
           toolName: ev.toolName ?? last.toolName,
           toolArgs: mergeToolArgs(last.toolArgs, ev.toolArgs),
-          endTs: ev.ts,
+          endTs: ev.endTs ?? ev.ts,
         };
         return { ...state, transcripts: { ...state.transcripts, [mid]: merged } };
       }
@@ -3098,6 +3106,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    // Concurrent streams can deliver many bridge events per frame (token
+    // deltas, usage and context telemetry, child updates), and every dispatch
+    // re-renders all store consumers. Batch per frame with a leading edge: the
+    // first event after an idle gap dispatches immediately (interactive
+    // round-trips stay instant), followers arriving within the same 16ms
+    // window flush together as one render. Order is preserved either way.
+    let queued: Action[] = [];
+    let flushTimer: number | null = null;
+    const flushQueued = () => {
+      flushTimer = null;
+      if (queued.length === 0) return;
+      const actions = queued;
+      queued = [];
+      for (const action of actions) dispatch(action);
+    };
     const unsub = bridge.subscribe((ev) => {
       // Verbose per-event logging runs on every streaming token and eagerly
       // deep-clones + redacts the whole event, so keep it to dev builds only;
@@ -3106,10 +3129,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const toastMessage = toastMessageForEvent(ev);
       if (toastMessage !== undefined) toast.error(toastMessage);
       const action = adaptEvent(ev);
-      if (action) dispatch(action);
+      if (!action) return;
+      if (flushTimer === null) {
+        dispatch(action);
+        flushTimer = window.setTimeout(flushQueued, 16);
+        return;
+      }
+      queued.push(action);
     });
     return () => {
       unsub();
+      if (flushTimer !== null) window.clearTimeout(flushTimer);
+      // StrictMode remounts this effect in dev; deliver anything in flight so
+      // no event is lost across the resubscribe.
+      flushQueued();
     };
   }, []);
 

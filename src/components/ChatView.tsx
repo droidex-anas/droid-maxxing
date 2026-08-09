@@ -259,7 +259,9 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   // Anchor captured when an older page is requested, used to keep the viewport
   // visually fixed once the prepended messages grow the scroll height.
   const prependAnchor = useRef<{ height: number; top: number } | null>(null);
-  const PREFETCH_PX = 800;
+  // Roughly three viewports: far enough ahead that even a fast fling toward
+  // the top lands on already-loaded messages instead of a visible loader.
+  const PREFETCH_PX = 2400;
   // Auto-page older history until the conversation timeline has at least this
   // many anchors (or the chain ends); the rest fills in as the user scrolls up.
   const TIMELINE_TARGET_ANCHORS = 12;

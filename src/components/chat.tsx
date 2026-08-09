@@ -2529,6 +2529,18 @@ export function appendedFeedItemKeys(
   return appended;
 }
 
+// Offscreen feed rows skip layout and paint entirely (content-visibility) so
+// long transcripts scroll and chat switches render at the cost of the visible
+// screen only. The browser keeps DOM, component state, and animation timelines
+// alive: a row scrolling back in repaints the same frame with its shimmer or
+// caret exactly where the shared timeline puts it, so nothing ever looks
+// paused. The intrinsic-size hint sizes never-rendered rows for the scrollbar;
+// 'auto' remembers each row's real height once it has been rendered.
+const FEED_ROW_RENDER_STYLE = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 96px',
+} as const;
+
 /* ── The activity feed (list only; parent owns the scroll container) ── */
 export function MessageFeed({
   events,
@@ -2708,6 +2720,7 @@ export function MessageFeed({
           <Fragment key={item.key}>
             <motion.div
               {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
+              style={FEED_ROW_RENDER_STYLE}
               initial={isNewItem ? { opacity: 0, y: 4 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, ease: EASE }}
