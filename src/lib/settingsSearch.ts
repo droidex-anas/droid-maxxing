@@ -32,9 +32,18 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   ]),
 
   // ── Appearance ───────────────────────────────────────────────────────────
-  e('Appearance', 'Theme', ['light', 'dark', 'system', 'look', 'mode', 'appearance']),
+  e('Appearance', 'Color scheme', ['light', 'dark', 'system', 'look', 'mode', 'appearance']),
   e('Appearance', 'App icon', ['icon', 'dock', 'light icon', 'dark icon']),
-  e('Appearance', 'Presets', ['preset theme', 'palette', 'preset']),
+  e('Appearance', 'Themes', [
+    'preset theme',
+    'palette',
+    'preset',
+    'custom theme',
+    'new theme',
+    'import theme',
+    'export theme',
+  ]),
+  e('Appearance', 'Save as theme', ['save colors', 'make your own', 'custom colors']),
   e('Appearance', 'Accent', ['color', 'colour', 'accent color']),
   e('Appearance', 'App background', ['background color', 'bg']),
   e('Appearance', 'Text color', ['foreground', 'font color']),

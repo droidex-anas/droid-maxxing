@@ -33,7 +33,7 @@ import { useRepoStatus } from './hooks/useRepoStatus';
 import { useDocumentVisible } from './hooks/useDocumentVisible';
 import CommandPalette from './components/CommandPalette';
 import SettingsPanel from './components/SettingsPanel';
-import { applyTheme, paletteForMode } from './lib/theme';
+import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import AskUserModal from './components/AskUserModal';
 import SpecWikiModal from './components/SpecWikiModal';
 import { BrowserFocusWorkspace } from './components/browser/BrowserFocusWorkspace';
@@ -214,13 +214,16 @@ export default function App() {
     if (state.theme.mode !== 'system') return;
     const mq = window.matchMedia('(prefers-color-scheme: light)');
     const onChange = () => {
-      dispatch({ type: 'SET_THEME', theme: paletteForMode('system') });
+      // Follow the OS scheme with the active preset's matching variant.
+      // Hand-edited (custom) colors have no second variant, so they stay put.
+      const preset = findPreset(state.theme.presetId, state.customThemes);
+      if (preset) dispatch({ type: 'SET_THEME', theme: resolveVariant(preset, 'system') });
     };
     mq.addEventListener('change', onChange);
     return () => {
       mq.removeEventListener('change', onChange);
     };
-  }, [state.theme.mode, dispatch]);
+  }, [state.theme.mode, state.theme.presetId, state.customThemes, dispatch]);
 
   useEffect(() => {
     if (embedded) return;

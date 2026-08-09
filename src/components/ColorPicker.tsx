@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Pipette } from 'lucide-react';
+import { pushEscapeLayer } from './environment/usePopover';
 
 /* ── color math ── */
 interface HSV {
@@ -204,7 +205,7 @@ export function ColorPicker({
 }
 
 /* ── popover positioned near an anchor ── */
-function ColorPopover({
+export function ColorPopover({
   anchor,
   onClose,
   children,
@@ -227,25 +228,41 @@ function ColorPopover({
     setPos({ top: Math.max(8, top), left: Math.max(8, left) });
   }, [anchor]);
 
+  // The layer must not be re-pushed on parent re-renders (effects flush
+  // child-first, so re-pushing would drop this popover BELOW the theme
+  // editor's layer and let Escape cancel the editor). Push once per anchor
+  // and read the latest onClose through a ref.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node) && e.target !== anchor) onClose();
+      if (ref.current && !ref.current.contains(e.target as Node) && e.target !== anchor)
+        onCloseRef.current();
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+    // Escape goes through the shared LIFO layer stack (see usePopover.ts) so a
+    // single keystroke closes only this innermost popover — a per-instance
+    // window listener would race the theme editor's own Escape handler (which
+    // registered first) and cancel the whole editor, discarding every edit.
+    const pop = pushEscapeLayer(() => {
+      onCloseRef.current();
+    });
     window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
+      pop();
     };
-  }, [anchor, onClose]);
+  }, [anchor]);
 
   if (!pos) return null;
   return createPortal(
     <div
       ref={ref}
+      // Portaled to <body>, so modal hosts (the theme editor's Tab trap)
+      // recognize focus inside it via this attribute instead of containment.
+      data-color-popover=""
       className="fixed z-[70] p-3 rounded-xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/60"
       style={{ top: pos.top, left: pos.left }}
     >
@@ -291,7 +308,7 @@ export function ColorField({
         <button
           ref={swatchRef}
           onClick={() => setOpen((o) => !o)}
-          className="w-5 h-5 rounded border border-droid-border cursor-pointer hover:border-droid-border-hover transition-colors"
+          className="w-8 h-8 rounded-lg border border-droid-border cursor-pointer hover:border-droid-border-hover transition-colors"
           style={{ backgroundColor: value }}
           title="Pick color"
         />
@@ -299,7 +316,8 @@ export function ColorField({
           type="text"
           value={draft}
           onChange={(e) => commit(e.target.value)}
-          className="w-16 bg-droid-elevated border border-droid-border rounded px-1.5 py-0.5 font-mono text-[10px] text-droid-text-secondary focus:outline-none focus:border-droid-border-hover"
+          spellCheck={false}
+          className="w-24 bg-droid-elevated border border-droid-border rounded-lg px-2 py-1.5 font-mono text-[11px] text-droid-text-secondary focus:outline-none focus:border-droid-border-hover"
         />
         {open && (
           <ColorPopover anchor={swatchRef.current} onClose={() => setOpen(false)}>

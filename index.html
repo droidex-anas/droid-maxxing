@@ -11,6 +11,29 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Silkscreen:wght@400;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // Pre-paint boot theme: without this the page paints the hardcoded dark
+      // defaults from index.css while the bundle loads, then snaps to the
+      // persisted theme (a flash for light/custom themes). The persisted theme
+      // stores fully-resolved colors, so this shim only seeds the canvas +
+      // text variables that the empty pre-bundle frame uses; applyTheme()
+      // (main.tsx, before first React paint) derives the full palette right
+      // after. Deliberately duplicated minimal logic — keep it tiny.
+      try {
+        var t = JSON.parse(localStorage.getItem('droid-theme') || 'null');
+        var hex = function (v) {
+          return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
+        };
+        if (t && hex(t.bg) && hex(t.fg)) {
+          var s = document.documentElement.style;
+          s.setProperty('--droid-bg', t.bg);
+          s.setProperty('--droid-text', t.fg);
+          if (hex(t.surface)) s.setProperty('--droid-surface', t.surface);
+        }
+      } catch (e) {
+        /* corrupted storage: fall back to the CSS defaults */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
