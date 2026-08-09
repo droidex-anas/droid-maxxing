@@ -23,7 +23,7 @@ export interface ChildSessionsDependencies {
     HistoryIndex,
     'childSessions' | 'childSession' | 'sessionLaunchSettings' | 'upsertChildSession'
   >;
-  timeline: Pick<SessionTimeline, 'append' | 'appendStatus' | 'replayChild'>;
+  timeline: Pick<SessionTimeline, 'append' | 'appendStatus' | 'replayChild' | 'flushStreaming'>;
   eventFlow: Pick<SessionEventFlow, 'beginTurn' | 'applyNotification' | 'applyStreamEvent'>;
   interactions: Pick<SessionInteractions, 'makePermissionHandler' | 'makeAskUserHandler'>;
   context: Pick<SessionContext, 'forgetChild' | 'refresh' | 'startPolling' | 'stopPolling'>;

@@ -8,7 +8,7 @@ import {
   readdirSync,
   statSync,
 } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { dateMs, numberValue, objectValue, stringValue } from './values.js';
@@ -259,6 +259,9 @@ export function loadSessionPage(
 export class HistoryIndex {
   private db: DatabaseSync;
   private readonly sessionFiles: SessionFileCache;
+  // Statements on the live streaming path, prepared once instead of per call.
+  private recordEventStatement: StatementSync | undefined;
+  private syncSummaryStatement: StatementSync | undefined;
 
   constructor() {
     const dir = join(homedir(), '.factory', 'droidex');
@@ -491,7 +494,7 @@ export class HistoryIndex {
   }
 
   syncSummaries(summaries: SessionSummary[]): void {
-    const stmt = this.db.prepare(`
+    this.syncSummaryStatement ??= this.db.prepare(`
       INSERT INTO app_sessions (
         app_session_id,
         provider_session_id,
@@ -547,7 +550,7 @@ export class HistoryIndex {
         auto_compactions = excluded.auto_compactions
     `);
     for (const summary of summaries) {
-      stmt.run(
+      this.syncSummaryStatement.run(
         summary.appSessionId,
         summary.providerSessionId ?? summary.appSessionId,
         JSON.stringify(summary.compactedFromProviderSessionIds ?? []),
@@ -592,14 +595,17 @@ export class HistoryIndex {
   }
 
   recordEvent(event: TranscriptEvent): void {
-    this.db
-      .prepare(
-        `
+    this.recordEventStatement ??= this.db.prepare(`
       INSERT OR IGNORE INTO events (id, source_session_id, app_session_id, kind, ts)
       VALUES (?, ?, ?, ?, ?)
-    `,
-      )
-      .run(event.id, event.sourceSessionId, event.appSessionId, event.kind, event.ts);
+    `);
+    this.recordEventStatement.run(
+      event.id,
+      event.sourceSessionId,
+      event.appSessionId,
+      event.kind,
+      event.ts,
+    );
   }
 
   upsertChildSession(child: PersistedChildSession): void {

@@ -685,6 +685,8 @@ export class ChildSessions {
     runtime: ChildRuntimeState,
     turnGeneration: number,
   ): Promise<void> {
+    // Deliver any buffered streaming tail before the turn reads as settled.
+    this.d.timeline.flushStreaming();
     this.d.context.stopPolling(this.contextTarget(parent, child, runtime));
     if (!this.isCurrentTurn(parent, child, runtime, turnGeneration)) return;
     child.turn.interruptingForSteer = false;

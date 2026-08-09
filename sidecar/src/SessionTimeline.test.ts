@@ -21,6 +21,7 @@ interface HarnessOptions {
   loaders?: Partial<SessionTimelineLoaders>;
   now?: () => number;
   onRecordEvent?: (event: TranscriptEvent) => void;
+  streamingCoalesceMs?: number;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -67,6 +68,9 @@ function createHarness(options: HarnessOptions = {}) {
     },
     loaders,
     ...(options.now ? { now: options.now } : {}),
+    ...(options.streamingCoalesceMs !== undefined
+      ? { streamingCoalesceMs: options.streamingCoalesceMs }
+      : {}),
   });
   return { emitted, errors, recorded, timeline, trace };
 }
@@ -134,6 +138,136 @@ function historyEntry(providerSessionId: string, modifiedTime: number): SessionH
     messageCount: 1,
   };
 }
+
+function delta(
+  id: string,
+  overrides: Partial<TranscriptEvent> & { appSessionId?: string } = {},
+): TranscriptEvent {
+  return {
+    id,
+    appSessionId: 'app-1',
+    sourceSessionId: 'source-1',
+    role: 'primary',
+    ts: 1,
+    kind: 'text',
+    text: id,
+    ...overrides,
+  };
+}
+
+test('streaming text deltas coalesce into one event flushed by the timer', async () => {
+  const { emitted, recorded, timeline } = createHarness({ streamingCoalesceMs: 5 });
+
+  timeline.appendStreaming(delta('a', { text: 'Hel', ts: 10 }));
+  timeline.appendStreaming(delta('b', { text: 'lo', ts: 12 }));
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(recorded, []);
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.equal(recorded.length, 1);
+  assert.deepEqual(recorded[0], delta('a', { text: 'Hello', ts: 10, endTs: 12 }));
+  assert.deepEqual(emitted, [{ type: 'event.appended', event: recorded[0] }]);
+});
+
+test('non-mergeable streaming events flush the buffer and keep order', () => {
+  const { recorded, timeline, trace } = createHarness({ streamingCoalesceMs: 1000 });
+
+  timeline.appendStreaming(delta('a', { text: 'thought ', kind: 'thinking' }));
+  timeline.appendStreaming(delta('b', { text: 'stream', kind: 'thinking' }));
+  timeline.appendStreaming(delta('echo', { author: 'user' }));
+
+  assert.deepEqual(trace, [
+    'record:a',
+    'emit:event.appended',
+    'record:echo',
+    'emit:event.appended',
+  ]);
+  assert.equal(recorded[0]?.text, 'thought stream');
+  timeline.flushStreaming();
+  assert.equal(recorded.length, 2);
+});
+
+test('a kind or source change starts a new buffered run instead of merging', () => {
+  const { recorded, timeline } = createHarness({ streamingCoalesceMs: 1000 });
+
+  timeline.appendStreaming(delta('a', { kind: 'thinking' }));
+  timeline.appendStreaming(delta('b', { kind: 'text' }));
+  timeline.appendStreaming(delta('c', { kind: 'text', sourceSessionId: 'source-2' }));
+  timeline.flushStreaming();
+
+  assert.deepEqual(
+    recorded.map((event) => event.id),
+    ['a', 'b', 'c'],
+  );
+});
+
+test('tool_call deltas of one toolUseId collapse onto the latest snapshot', () => {
+  const { recorded, timeline } = createHarness({ streamingCoalesceMs: 1000 });
+
+  timeline.appendStreaming(
+    delta('a', { kind: 'tool_call', text: undefined, toolUseId: 'tool-1', ts: 10 }),
+  );
+  timeline.appendStreaming(
+    delta('b', {
+      kind: 'tool_call',
+      text: undefined,
+      toolName: 'Edit',
+      toolUseId: 'tool-1',
+      toolArgs: { path: '/tmp/file' },
+      ts: 12,
+    }),
+  );
+  timeline.appendStreaming(
+    delta('c', {
+      kind: 'tool_call',
+      text: undefined,
+      toolUseId: 'tool-1',
+      toolArgs: { content: 'body' },
+      ts: 14,
+    }),
+  );
+  timeline.appendStreaming(
+    delta('d', { kind: 'tool_call', text: undefined, toolUseId: 'tool-2', ts: 16 }),
+  );
+  timeline.flushStreaming();
+
+  assert.deepEqual(
+    recorded.map((event) => [event.id, event.toolName, event.toolArgs, event.endTs]),
+    [
+      ['a', 'Edit', { path: '/tmp/file', content: 'body' }, 14],
+      ['d', undefined, undefined, undefined],
+    ],
+  );
+});
+
+test('plain append flushes the buffered run first and flush is idempotent', () => {
+  const { timeline, trace } = createHarness({ streamingCoalesceMs: 1000 });
+
+  timeline.appendStreaming(delta('buffered'));
+  timeline.append(delta('status-line', { kind: 'status', author: 'user' }));
+  timeline.flushStreaming();
+  timeline.flushStreaming();
+
+  assert.deepEqual(trace, [
+    'record:buffered',
+    'emit:event.appended',
+    'record:status-line',
+    'emit:event.appended',
+  ]);
+});
+
+test('coalescing disabled records and emits every delta immediately', () => {
+  const { recorded, timeline } = createHarness({ streamingCoalesceMs: 0 });
+
+  timeline.appendStreaming(delta('a'));
+  timeline.appendStreaming(delta('b'));
+
+  assert.deepEqual(
+    recorded.map((event) => event.id),
+    ['a', 'b'],
+  );
+});
 
 test('append records before emitting exactly one live transcript event', () => {
   const { emitted, recorded, timeline, trace } = createHarness();

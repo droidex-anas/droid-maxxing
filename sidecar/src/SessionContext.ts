@@ -109,6 +109,22 @@ export class SessionContext {
       sourceSessionId === stableAppSessionId &&
       !this.pendingCompactionResets.has(primaryResourceKey(stableAppSessionId));
     const currentContextTokens = canPublishContext ? usage.contextTokens : undefined;
+
+    // Providers repeat identical usage many times per turn. Re-publishing an
+    // unchanged reading would persist and broadcast a no-op summary update, so
+    // settle for the reading already on record.
+    const summaryBefore = liveSession.summary;
+    const contextUnchanged =
+      currentContextTokens === undefined ||
+      (currentContextTokens === summaryBefore.contextTokens &&
+        (currentContextTokens <= 0 || summaryBefore.contextAccuracy === 'exact'));
+    if (
+      nextSummary.tokensIn === summaryBefore.tokensIn &&
+      nextSummary.tokensOut === summaryBefore.tokensOut &&
+      contextUnchanged
+    )
+      return;
+
     if (currentContextTokens !== undefined) {
       nextSummary.contextTokens = currentContextTokens;
       if (currentContextTokens > 0) {
@@ -354,6 +370,10 @@ export class SessionContext {
       : applyExactUsage(normalizedProviderSnapshot, liveSession.summary);
 
     if (!target.isCurrent()) return;
+    // The in-turn poller repeats the same provider reading every tick; an
+    // unchanged snapshot would only fan out no-op renders. Settlement refreshes
+    // (persist !== false) always publish so summaries settle authoritatively.
+    if (options.persist === false && sameContextReading(this.snapshots.get(key), snapshot)) return;
     // Do NOT clear pendingCompactionResets here: a late pre-compaction usage
     // event delivered after this provider reading could resurrect the old meter.
     // The guard is cleared at the stream-settlement boundary (beginTurn) instead.
@@ -414,6 +434,7 @@ export class SessionContext {
       updatedAt: new Date().toISOString(),
       breakdown,
     };
+    if (sameContextReading(previous, snapshot)) return;
     this.snapshots.set(resourceKey, snapshot);
     this.dependencies.emit({
       type: 'context.updated',
@@ -494,4 +515,16 @@ function contextResourceKey(target: ContextOperationTarget): string {
 function compactionRetryKey(target: ContextOperationTarget): string {
   const providerSessionId = target.providerSessionId;
   return `${contextResourceKey(target)}:provider:${String(providerSessionId.length)}:${providerSessionId}`;
+}
+
+// Same context reading in every observable field; only updatedAt (stamped per
+// emission) is ignored, so a repeated reading is a publishable no-op.
+function sameContextReading(
+  previous: ContextStatsSnapshot | undefined,
+  next: ContextStatsSnapshot,
+): boolean {
+  if (!previous) return false;
+  const { updatedAt: _previousAt, ...previousRest } = previous;
+  const { updatedAt: _nextAt, ...nextRest } = next;
+  return JSON.stringify(previousRest) === JSON.stringify(nextRest);
 }

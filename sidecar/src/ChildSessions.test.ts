@@ -74,6 +74,7 @@ function createHarness(
       appendStatus: (...args) => {
         calls.push({ target: 'protocol', method: 'timeline.status', args });
       },
+      flushStreaming: () => undefined,
       replayChild: (...args) => {
         if (missReplayChildOnce) {
           missReplayChildOnce = false;

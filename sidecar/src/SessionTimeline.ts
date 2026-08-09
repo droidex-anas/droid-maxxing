@@ -41,6 +41,9 @@ export interface SessionTimelineDependencies {
   emitError: (error: TimelineError) => void;
   now?: () => number;
   loaders?: SessionTimelineLoaders;
+  // Streaming deltas buffered longer than this are flushed as one event.
+  // 0 disables coalescing (every delta records and emits immediately).
+  streamingCoalesceMs?: number;
 }
 
 interface SessionHistoryPage {
@@ -60,9 +63,18 @@ function legacyCursorOptions(cursor: string | undefined): { cursor?: string } {
   return options;
 }
 
+const DEFAULT_STREAMING_COALESCE_MS = 40;
+
 export class SessionTimeline {
   private statusSeq = 0;
   private readonly loaders: SessionTimelineLoaders;
+  private readonly streamingCoalesceMs: number;
+  // At most one buffered run: the most recent streaming delta and everything
+  // merged into it. A single slot mirrors the renderer reducer, which only
+  // merges into the *last* transcript event, so interleaved sources flush each
+  // other and ordering is preserved exactly.
+  private streamingBuffer: { event: TranscriptEvent; timer: ReturnType<typeof setTimeout> } | null =
+    null;
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
     this.loaders = dependencies.loaders ?? {
@@ -72,6 +84,7 @@ export class SessionTimeline {
       resolveChain: resolveSessionChain,
       transcriptWindow: loadSessionTranscriptWindow,
     };
+    this.streamingCoalesceMs = dependencies.streamingCoalesceMs ?? DEFAULT_STREAMING_COALESCE_MS;
   }
 
   list(): void {
@@ -179,6 +192,55 @@ export class SessionTimeline {
   }
 
   append(event: TranscriptEvent): void {
+    // Non-streaming appends (status lines, compaction dividers, replay) must
+    // never overtake a buffered delta run, so the buffer flushes first.
+    this.flushStreaming();
+    this.recordAndEmit(event);
+  }
+
+  // Live provider stream deltas arrive per token. Emitting each one costs a
+  // history insert, a JSON serialization, and a full renderer re-render, so
+  // consecutive deltas of one run coalesce into a single event flushed after
+  // at most `streamingCoalesceMs`. The merge mirrors the renderer reducer's
+  // delta merging exactly (same shape either way), so live UI output is
+  // unchanged; only the message rate drops.
+  appendStreaming(event: TranscriptEvent): void {
+    if (this.streamingCoalesceMs <= 0) {
+      this.append(event);
+      return;
+    }
+    const buffer = this.streamingBuffer;
+    if (buffer) {
+      const merged = mergeStreamingDelta(buffer.event, event);
+      if (merged) {
+        buffer.event = merged;
+        return;
+      }
+    }
+    this.flushStreaming();
+    if (isCoalescableDelta(event)) {
+      const timer = setTimeout(() => {
+        this.flushStreaming();
+      }, this.streamingCoalesceMs);
+      timer.unref();
+      this.streamingBuffer = { event, timer };
+      return;
+    }
+    this.recordAndEmit(event);
+  }
+
+  // Emits any buffered delta run immediately. Called at turn settlement so the
+  // final text lands before the turn reads as settled, and by every
+  // non-streaming append to preserve transcript ordering.
+  flushStreaming(): void {
+    const buffer = this.streamingBuffer;
+    if (!buffer) return;
+    this.streamingBuffer = null;
+    clearTimeout(buffer.timer);
+    this.recordAndEmit(buffer.event);
+  }
+
+  private recordAndEmit(event: TranscriptEvent): void {
     this.dependencies.history.recordEvent(event);
     this.dependencies.emit({ type: 'event.appended', event });
   }
@@ -258,4 +320,69 @@ export class SessionTimeline {
   private record(events: TranscriptEvent[]): void {
     for (const event of events) this.dependencies.history.recordEvent(event);
   }
+}
+
+/* ── Streaming delta coalescing ──
+   Mirrors the renderer's SESSION_TRANSCRIPT delta merging (src/hooks/
+   useStore.tsx): text/thinking runs concatenate, tool_call partials collapse
+   onto one event per toolUseId. Keep both sides synchronized in the same
+   change, or live rendering and replay drift apart. */
+
+function isTextDelta(event: TranscriptEvent): boolean {
+  return (
+    (event.kind === 'text' || event.kind === 'thinking') &&
+    !event.author &&
+    !!event.text &&
+    !event.toolName &&
+    !event.toolUseId
+  );
+}
+
+function isToolCallDelta(event: TranscriptEvent): boolean {
+  return event.kind === 'tool_call' && !event.author && !!event.toolUseId;
+}
+
+function isCoalescableDelta(event: TranscriptEvent): boolean {
+  return isTextDelta(event) || isToolCallDelta(event);
+}
+
+function sameDeltaRun(previous: TranscriptEvent, next: TranscriptEvent): boolean {
+  return (
+    previous.appSessionId === next.appSessionId &&
+    previous.sourceSessionId === next.sourceSessionId &&
+    previous.role === next.role
+  );
+}
+
+// Protocol mirror of the renderer's mergeToolArgs (src/hooks/useStore.tsx).
+function mergeToolArgs(previous: unknown, next: unknown): unknown {
+  if (isPlainRecord(previous) && isPlainRecord(next)) return { ...previous, ...next };
+  return next ?? previous;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function mergeStreamingDelta(
+  previous: TranscriptEvent,
+  next: TranscriptEvent,
+): TranscriptEvent | null {
+  if (!sameDeltaRun(previous, next)) return null;
+  if (isTextDelta(previous) && isTextDelta(next) && previous.kind === next.kind) {
+    return {
+      ...previous,
+      text: (previous.text ?? '') + (next.text ?? ''),
+      endTs: next.endTs ?? next.ts,
+    };
+  }
+  if (isToolCallDelta(previous) && isToolCallDelta(next) && previous.toolUseId === next.toolUseId) {
+    return {
+      ...previous,
+      toolName: next.toolName ?? previous.toolName,
+      toolArgs: mergeToolArgs(previous.toolArgs, next.toolArgs),
+      endTs: next.endTs ?? next.ts,
+    };
+  }
+  return null;
 }

@@ -136,6 +136,10 @@ export interface SessionManagerDependencies {
   // watching the real sessions directory. Defaults to a no-op when other
   // dependencies are faked.
   startSessionFileWatcher?: (options: SessionFileWatcherOptions) => SessionFileWatcher | null;
+  // Injectable so integration tests can disable (0) the timer-based streaming
+  // delta coalescing and assert appended events synchronously; the merge
+  // behavior itself is covered by SessionTimeline unit tests.
+  streamingCoalesceMs?: number;
 }
 
 export interface SessionManagerOptions {
@@ -306,6 +310,9 @@ export class SessionManager {
         this.emitError(error);
       },
       now: Date.now,
+      ...(options.dependencies?.streamingCoalesceMs !== undefined
+        ? { streamingCoalesceMs: options.dependencies.streamingCoalesceMs }
+        : {}),
     });
     this.interactions = new SessionInteractions({
       getLiveSession: (id) => this.registry.getLive(id),
@@ -347,7 +354,7 @@ export class SessionManager {
     });
     this.eventFlow = new SessionEventFlow({
       appendTranscript: (event) => {
-        this.timeline.append(event);
+        this.timeline.appendStreaming(event);
       },
       applySideEffects: (appSessionId, sideEffects) => {
         this.applyEventSideEffects(appSessionId, sideEffects);
@@ -1173,6 +1180,8 @@ export class SessionManager {
         this.registry.updateSummary(appSessionId, { phase: 'failed' });
       }
     } finally {
+      // Deliver any buffered streaming tail before the turn reads as settled.
+      this.timeline.flushStreaming();
       this.context.stopPolling(contextTarget);
       // Keep streaming=true while the context refresh is in flight so concurrent
       // sends queue instead of racing a second lifecycle turn.

@@ -113,6 +113,9 @@ export function createSessionManagerTestContext(
       },
     },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
+    // Integration assertions read appended events synchronously; the timer
+    // coalescing behavior is covered by SessionTimeline unit tests.
+    streamingCoalesceMs: 0,
     ...(options.getFactoryDefaults ? { getFactoryDefaults: options.getFactoryDefaults } : {}),
     ...(options.startSessionFileWatcher
       ? { startSessionFileWatcher: options.startSessionFileWatcher }
