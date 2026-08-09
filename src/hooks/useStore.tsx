@@ -556,12 +556,11 @@ function loadCustomThemes(): ThemePreset[] {
   }
 }
 
+// Throws on write failure (quota, restricted storage): the reducers persist
+// before returning new state, so a failed write aborts the action instead of
+// reporting success in live state and silently losing presets on restart.
 function persistCustomThemes(presets: ThemePreset[]): void {
-  try {
-    getLocalStorage()?.setItem(CUSTOM_THEMES_STORAGE_KEY, JSON.stringify(presets));
-  } catch {
-    /* ignore */
-  }
+  getLocalStorage()?.setItem(CUSTOM_THEMES_STORAGE_KEY, JSON.stringify(presets));
 }
 
 // Loaded once at module scope so the theme loader can match saved colors
@@ -621,6 +620,13 @@ function loadTheme(customThemes: ThemePreset[]): ThemeConfig {
         : { ...defaultTheme };
     theme.diffStyle = normalizeDiffStyle(theme.diffStyle);
     theme.appIconMode = normalizeAppIconMode(theme.appIconMode);
+    // Migrations run BEFORE preset detection: a legacy palette migrated onto
+    // the default variant must come out with the default's presetId, not
+    // 'custom' — otherwise Dark/System can never resolve its other variant.
+    if (storage) {
+      migrateLegacyAccent(storage, saved, theme);
+      migrateLegacyLight(storage, saved, theme);
+    }
     // Themes saved before presets existed have no presetId: recover it by
     // matching the saved colors against known variants, else label them custom.
     const savedPresetId = (parsed as { presetId?: unknown } | null)?.presetId;
@@ -628,10 +634,6 @@ function loadTheme(customThemes: ThemePreset[]): ThemeConfig {
       typeof savedPresetId === 'string' && savedPresetId
         ? savedPresetId
         : detectPresetId(theme, customThemes);
-    if (storage) {
-      migrateLegacyAccent(storage, saved, theme);
-      migrateLegacyLight(storage, saved, theme);
-    }
     return theme;
   } catch {
     /* ignore */

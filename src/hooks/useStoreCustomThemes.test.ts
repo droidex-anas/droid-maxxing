@@ -71,6 +71,25 @@ test('DELETE_CUSTOM_THEME removes the preset and persists the list', () => {
   });
 });
 
+// A failed write must abort the action (the reducer throws before returning)
+// instead of reporting success in live state and losing the preset on restart.
+test('SAVE_CUSTOM_THEME propagates storage failure instead of faking success', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const throwing = {
+    getItem: () => null,
+    setItem: () => {
+      throw new Error('quota exceeded');
+    },
+  } as unknown as Storage;
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: throwing });
+  try {
+    assert.throws(() => reducer(initialState, { type: 'SAVE_CUSTOM_THEME', preset: PRESET }));
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete (globalThis as { localStorage?: Storage }).localStorage;
+  }
+});
+
 test('SET_THEME persists presetId with the rest of the theme', () => {
   withLocalStorage(() => {
     const next = reducer(initialState, {
