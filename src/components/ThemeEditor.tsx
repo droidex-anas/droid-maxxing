@@ -7,6 +7,7 @@ import { Moon, Sun, X } from 'lucide-react';
 import { useStore } from '../hooks/useStore';
 import { applyTheme, type ThemeColors } from '../lib/theme';
 import { ColorField } from './ColorPicker';
+import { pushEscapeLayer } from './environment/usePopover';
 import { MiniAppFrame, ThemeSwatches } from './ThemePreview';
 
 export interface ThemeDraft {
@@ -26,11 +27,15 @@ const COLOR_FIELDS: { key: keyof ThemeColors; label: string; description: string
 export function ThemeEditor({
   title,
   initial,
+  error,
   onSave,
   onCancel,
 }: {
   title: string;
   initial: ThemeDraft;
+  /** Save/persistence failure from the parent; the dialog stays open so the
+   * user can retry. */
+  error?: string | null;
   onSave: (draft: ThemeDraft) => void;
   onCancel: () => void;
 }) {
@@ -65,15 +70,65 @@ export function ThemeEditor({
     };
   }, []);
 
+  // Cancel is an Escape layer (shared LIFO stack, see usePopover.ts): color
+  // popovers opened from this dialog push above it, so Escape always closes
+  // only the innermost layer instead of discarding every edit at once.
+  useEffect(() => pushEscapeLayer(onCancel), [onCancel]);
+
+  // While the app is in System mode, keep the edited variant on the one the OS
+  // actually shows; otherwise a scheme flip mid-edit leaves the preview on
+  // stale colors (App dispatches the new variant, but draft[editing] would
+  // keep overriding it with the variant selected at open time).
   useEffect(() => {
+    if (state.theme.mode !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => {
+      setEditing(mq.matches ? 'light' : 'dark');
+    };
+    mq.addEventListener('change', onChange);
+    return () => {
+      mq.removeEventListener('change', onChange);
+    };
+  }, [state.theme.mode]);
+
+  // aria-modal contract: Tab must cycle inside the dialog and focus returns
+  // to the element that opened it. Same focusable-element query and wrap
+  // logic the environment Popover uses for its Tab trap; the color popover
+  // portals to <body>, so it counts as inside via its data attribute.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const containsFocus = (node: HTMLElement | null) => {
+      if (!node) return false;
+      if (dialogRef.current?.contains(node)) return true;
+      return document.querySelector('[data-color-popover]')?.contains(node) ?? false;
+    };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
+      if (e.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || !containsFocus(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !containsFocus(active))) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
+      previouslyFocused?.focus();
     };
-  }, [onCancel]);
+  }, []);
 
   const setColor = (key: keyof ThemeColors, value: string) => {
     setDraft((d) => ({ ...d, [editing]: { ...d[editing], [key]: value } }));
@@ -94,6 +149,7 @@ export function ThemeEditor({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="theme-editor-title"
@@ -199,6 +255,11 @@ export function ThemeEditor({
           </div>
         </div>
 
+        {error && (
+          <p role="alert" className="px-5 pb-2 text-[11.5px] text-droid-red">
+            {error}
+          </p>
+        )}
         <div className="flex items-center justify-end gap-2 border-t border-droid-border px-5 py-3">
           <button
             onClick={onCancel}
