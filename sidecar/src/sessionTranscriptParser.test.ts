@@ -77,6 +77,67 @@ test('llm_only user messages stay hidden (filtering lives in the parser)', () =>
   assert.deepEqual(hidden, []);
 });
 
+test('internal skill notifications never replay as user-authored chat', () => {
+  const line = JSON.parse(
+    messageLine({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: ` <system-notification>
+Skills provide specialized capabilities and domain knowledge.
+<skill filePath="builtin:review">
+<name>review</name>
+Full private skill instructions
+</skill>
+</system-notification>`,
+        },
+      ],
+    }),
+  );
+
+  assert.deepEqual(parseSessionLineEvents('app', 'provider', 'primary', line), []);
+});
+
+test('user-only skill activation restores the prompt and harness acknowledgement separately', () => {
+  const line = JSON.parse(
+    messageLine({
+      role: 'user',
+      visibility: 'user_only',
+      content: [{ type: 'text', text: 'Skill "review" activated: PR #100' }],
+    }),
+  );
+
+  const events = parseSessionLineEvents('app', 'provider', 'primary', line);
+  assert.equal(events.length, 2);
+  assert.deepEqual(
+    {
+      sourceSessionId: events[0].sourceSessionId,
+      author: events[0].author,
+      text: events[0].text,
+      skills: events[0].skills,
+    },
+    {
+      sourceSessionId: 'user',
+      author: 'user',
+      text: 'PR #100',
+      skills: ['review'],
+    },
+  );
+  assert.deepEqual(
+    {
+      sourceSessionId: events[1].sourceSessionId,
+      author: events[1].author,
+      text: events[1].text,
+    },
+    {
+      sourceSessionId: 'primary',
+      author: undefined,
+      text: 'Skill "review" activated: PR #100',
+    },
+  );
+});
+
 test('a mid-file compaction_state record replays as a divider event', () => {
   const line = JSON.parse(
     JSON.stringify({

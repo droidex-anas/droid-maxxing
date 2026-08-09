@@ -415,7 +415,7 @@ test('#29 a replace supersedes a skill/file echo whose persisted prompt is compo
     skills: ['debugger'],
     files: ['src/a.ts'],
   };
-  const composed = 'Use the "debugger" skill.\n\nfix the bug\n\n@src/a.ts';
+  const composed = '/debugger fix the bug\n\n@src/a.ts';
   const seeded = {
     ...initialState,
     transcripts: { m1: [echo] },

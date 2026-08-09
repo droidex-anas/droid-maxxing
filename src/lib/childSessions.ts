@@ -358,12 +358,11 @@ function pendingChildSession(spawn: ChildSessionSpawnRef, live: boolean): ChildS
     parentAppSessionId: spawn.appSessionId,
     childSessionId: `pending-${toolUseId}`,
     role: 'worker',
-    // An issued spawn is working: its store record can lag the entire run,
-    // because a background Task only registers once its provider session id is
-    // observed. The tool call's own end says nothing (a background Task
-    // acknowledges its launch immediately), so endTs only settles a replayed
-    // spawn, after its turn is over.
-    status: live ? 'running' : spawn.endTs ? 'completed' : 'pending',
+    // Until the provider session registers, its lifecycle is unknown. Parent
+    // activity cannot prove that this child started or is working. The
+    // tool call's own end says nothing while live (a background Task
+    // acknowledges its launch immediately), but it settles replayed history.
+    status: !live && spawn.endTs ? 'completed' : 'pending',
     label: info.label ?? 'Subagent',
     prompt: info.description,
     modelId: '',

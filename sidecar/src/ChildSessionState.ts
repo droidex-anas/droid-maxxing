@@ -20,6 +20,8 @@ export interface ChildSpawnObservation {
   spawnLink?: PersistedChildSession['spawnLink'];
   label?: string;
   prompt?: string;
+  modelId?: string;
+  reasoningEffort?: ReasoningEffort;
   done?: boolean;
   // Latest activity observed for this child (a poll's status, plus the last line
   // it had produced). Live-only: never persisted, since it describes a moment
@@ -137,6 +139,49 @@ export function childStateFromRecord(record: PersistedChildSession): ChildSessio
     },
     closeWhenIdle: false,
   };
+}
+
+export function newChildState(input: {
+  parentAppSessionId: string;
+  childSessionId: string;
+  role: PersistedChildSession['role'];
+  spawnLink?: PersistedChildSpawnLink;
+  launchSettings: ChildSettings;
+  defaultSettings: ChildSettings;
+  updatedAt: number;
+}): ChildSessionState {
+  // Factory Task children choose their model outside DROIDEX. Their exact
+  // provider-session launch settings are mandatory; using parent/catalog
+  // defaults here would manufacture the wrong identity for custom agents.
+  const settings =
+    input.spawnLink?.kind === 'tool-use'
+      ? input.launchSettings
+      : { ...input.defaultSettings, ...input.launchSettings };
+  if (!settings.modelId) {
+    const subject = input.spawnLink?.kind === 'tool-use' ? 'Task child launch' : input.role;
+    throw new Error(`Exact model settings are unavailable for ${subject}.`);
+  }
+  return childStateFromRecord({
+    parentAppSessionId: input.parentAppSessionId,
+    childSessionId: input.childSessionId,
+    role: input.role,
+    status: 'pending',
+    modelId: settings.modelId,
+    reasoningEffort: settings.reasoningEffort,
+    ...(input.spawnLink ? { spawnLink: input.spawnLink } : {}),
+    transcriptAvailable: false,
+    updatedAt: input.updatedAt,
+  });
+}
+
+export function applyChildLaunchSettings(child: ChildSessionState, settings: ChildSettings): void {
+  if (settings.modelId && child.modelId !== settings.modelId) {
+    child.modelId = settings.modelId;
+    child.reasoningEffort = settings.reasoningEffort;
+    child.configurationGeneration += 1;
+  } else if (settings.reasoningEffort !== undefined) {
+    child.reasoningEffort = settings.reasoningEffort;
+  }
 }
 
 export function persistedChild(child: ChildSessionState): PersistedChildSession {

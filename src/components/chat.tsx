@@ -12,6 +12,7 @@ import {
   PenLine,
   Globe,
   AlertTriangle,
+  Hexagon,
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
@@ -1820,7 +1821,7 @@ export function UserBubble({
   const skills = event.skills ?? [];
   const files = event.files ?? [];
   const browserRefs = event.browserRefs ?? [];
-  const hasChips = skills.length > 0 || files.length > 0 || browserRefs.length > 0;
+  const hasAttachments = files.length > 0 || browserRefs.length > 0;
   return (
     <div className="flex flex-col items-end gap-1.5 py-1">
       {event.steered && (
@@ -1839,7 +1840,7 @@ export function UserBubble({
           Steered the conversation
         </span>
       )}
-      {hasChips && (
+      {hasAttachments && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
           {browserRefs.map((reference) => (
             <BrowserReferenceChip key={`${reference.kind}:${reference.id}`} reference={reference} />
@@ -1854,20 +1855,23 @@ export function UserBubble({
               {baseName(f)}
             </span>
           ))}
-          {skills.map((s) => (
-            <span
-              key={s}
-              title={`Skill: ${s}`}
-              className="flex items-center rounded-lg bg-violet-500/15 px-2 py-1 text-[11px] font-medium text-violet-300 ring-1 ring-inset ring-violet-500/30"
-            >
-              {s}
-            </span>
-          ))}
         </div>
       )}
-      {event.text && (
-        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-relaxed text-droid-text whitespace-pre-wrap break-words">
-          {event.text}
+      {(event.text || skills.length > 0) && (
+        <div className="flex max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-relaxed text-droid-text">
+          {skills.map((skill) => (
+            <span
+              key={skill}
+              title={`Skill: ${skill}`}
+              className="inline-flex items-center gap-1.5 font-medium text-droid-accent"
+            >
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-droid-text">
+                <Hexagon className="h-2.5 w-2.5 fill-droid-accent text-droid-accent" />
+              </span>
+              {skill}
+            </span>
+          ))}
+          {event.text && <span className="whitespace-pre-wrap break-words">{event.text}</span>}
         </div>
       )}
     </div>

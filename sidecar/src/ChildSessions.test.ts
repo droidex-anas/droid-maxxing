@@ -395,6 +395,8 @@ test('result-only completion admits the exact pending spawn as historical', () =
     parentAppSessionId: h.parentId,
     providerSessionId: 'provider-child-current',
     role: 'worker',
+    modelId: 'model-default',
+    reasoningEffort: ReasoningEffort.Low,
     spawnLink: { kind: 'tool-use', id: 'tool-current' },
     done: true,
   });
@@ -430,6 +432,8 @@ test('poll observations never rekey a child away from its spawn link', () => {
     parentAppSessionId: h.parentId,
     providerSessionId: 'provider-child',
     role: 'worker',
+    modelId: 'model-default',
+    reasoningEffort: ReasoningEffort.Low,
     spawnLink: { kind: 'tool-use', id: 'tool-spawn' },
   });
 
@@ -466,6 +470,16 @@ test('opening a child the harness is still driving keeps it running', async () =
   assert.equal(h.owner.list(h.parentId)[0]?.status, 'running');
 
   await h.open(record);
+
+  const replayIndex = h.calls.findIndex(
+    (call) => call.target === 'protocol' && call.method === 'timeline.replayChild',
+  );
+  const loadIndex = h.calls.findIndex(
+    (call) => call.target === 'runtime' && call.method === 'loadSession',
+  );
+  assert.ok(replayIndex >= 0);
+  assert.ok(loadIndex >= 0);
+  assert.ok(replayIndex < loadIndex, 'cached history must render before provider hydration');
 
   assert.equal(
     h.events.some(
@@ -529,20 +543,15 @@ test('completed child under a live parent opens only as history', async () => {
   );
 });
 
-test('post-install open failure closes the runtime and reports the exact request', async () => {
+test('history replay failure stops before provider hydration and reports the exact request', async () => {
   const record = childRecord('child', 'provider');
   const h = createHarness([record], { failReplayChild: true });
   const failedRuntime = await h.open(record);
 
   assert.equal(h.owner.compactionRetuneTargets().length, 0);
   assert.equal(
-    h.calls.filter(
-      (call) =>
-        call.target === 'cleanup' &&
-        call.method === 'session.close' &&
-        call.args[0] === record.providerSessionId,
-    ).length,
-    1,
+    h.calls.some((call) => call.target === 'runtime' && call.method === 'loadSession'),
+    false,
   );
   assert.equal(
     h.events.some(

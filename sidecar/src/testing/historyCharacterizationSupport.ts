@@ -49,6 +49,10 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
   nextSyncError?: Error;
   private readonly summariesByAppId = new Map<string, PersistedSummaryPatch>();
   private readonly childrenByParent = new Map<string, Map<string, PersistedChildSession>>();
+  private readonly launchSettingsByProvider = new Map<
+    string,
+    Pick<Protocol.FactoryDefaultSettings, 'modelId' | 'reasoningEffort'>
+  >();
 
   constructor(private readonly calls: RecordedCall[]) {}
 
@@ -69,6 +73,20 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
 
   seedChildSessions(children: PersistedChildSession[]): void {
     for (const child of children) this.upsertChildSession(child);
+  }
+
+  seedSessionLaunchSettings(
+    providerSessionId: string,
+    settings: Pick<Protocol.FactoryDefaultSettings, 'modelId' | 'reasoningEffort'>,
+  ): void {
+    this.launchSettingsByProvider.set(providerSessionId, structuredClone(settings));
+  }
+
+  sessionLaunchSettings(
+    providerSessionId: string,
+  ): Pick<Protocol.FactoryDefaultSettings, 'modelId' | 'reasoningEffort'> | undefined {
+    const settings = this.launchSettingsByProvider.get(providerSessionId);
+    return structuredClone(settings ?? { modelId: 'model-default' });
   }
 
   summaryPatchesAndHidden(): {

@@ -89,6 +89,7 @@ type SessionHistory = Pick<
   | 'reconcileSessionFiles'
   | 'reconcileSessionFilePaths'
   | 'sessionFileCacheSize'
+  | 'sessionLaunchSettings'
   | 'childSessions'
   | 'childSession'
   | 'upsertChildSession'
@@ -331,6 +332,14 @@ export class SessionManager {
       resolveAutomaticTarget: (key) => this.resolveAutomaticCompactionTarget(key),
       settleAutomatic: (settlement) => {
         this.settleAutomaticCompaction(settlement);
+      },
+      onPrimaryNotification: (target, notification) => {
+        this.eventFlow.applyNotification(
+          target.appSessionId,
+          target.providerSessionId,
+          'primary',
+          notification,
+        );
       },
     });
     this.eventFlow = new SessionEventFlow({
@@ -1252,10 +1261,14 @@ export class SessionManager {
     this.missionControlPolicy.apply(appSessionId, n);
     if (n.childSession) {
       const { toolUseId, ...childSession } = n.childSession;
+      const launchSettings = childSession.providerSessionId
+        ? this.history.sessionLaunchSettings(childSession.providerSessionId)
+        : undefined;
       this.childSessions.admitChildObservation({
         parentAppSessionId: appSessionId,
         role: 'worker',
         ...childSession,
+        ...launchSettings,
         ...(toolUseId ? { spawnLink: { kind: 'tool-use', id: toolUseId } } : {}),
       });
     }

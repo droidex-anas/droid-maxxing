@@ -215,17 +215,23 @@ test('the card reads as status pills plus a completion summary', () => {
   assert.ok(text.includes('25%'));
 });
 
-test('a live wave reads as working and never claims Done from the spawn call ending', () => {
+test('an unresolved live spawn reports unknown status and never infers lifecycle', () => {
   // A background Task acknowledges its launch immediately, so the spawn call
   // already carries an endTs while the subagent is only starting up.
-  const launched = { ...spawn('t1', 'explorer'), endTs: 2_000 };
+  const launched = {
+    ...spawn('t1', 'explorer'),
+    ts: Date.now() - 60_000,
+    endTs: Date.now() - 59_000,
+  };
   const wave = resolveWaveSessions([launched], [], true);
-  assert.equal(wave[0].status, 'running');
+  assert.equal(wave[0].status, 'pending');
   const text = textOf(
     renderToStaticMarkup(createElement(SubagentsDock, { sessions: wave, models: [], live: true })),
   );
-  assert.ok(text.includes('1 Running'));
-  assert.ok(text.includes('0 of 1 subagent finished'));
+  assert.ok(text.includes('1 Awaiting status'));
+  assert.ok(text.includes('Awaiting status for 1 subagent'));
+  assert.ok(!text.includes('Starting'));
+  assert.ok(!text.includes('1m'));
   assert.ok(!text.includes('Done'));
 
   // Once the turn ends, the same spawn is settled rather than eternally running.
@@ -247,11 +253,11 @@ test('the dock renders instantly from spawn events, before sessions register', (
   // No resolved sessions yet: a placeholder stands in so the card never flashes
   // per-spawn lines while the store catches up.
   assert.ok(text.includes('Subagents'));
-  assert.ok(text.includes('1 Running'));
+  assert.ok(text.includes('1 Awaiting status'));
   assert.ok(!text.includes('Spawned'));
 });
 
-test('a wave stays live once later items follow it in the same turn', () => {
+test('an unresolved wave stays unknown once later items follow it in the same turn', () => {
   // The parent keeps talking (plan updates, narration) while its subagents work,
   // so "is this wave live" cannot be "is this the last feed item".
   const events = [userMsg('go'), spawn('t1', 'explorer'), assistantMsg('spawned the explorer')];
@@ -265,7 +271,7 @@ test('a wave stays live once later items follow it in the same turn', () => {
       }),
     ),
   );
-  assert.ok(text.includes('1 Running'));
+  assert.ok(text.includes('1 Awaiting status'));
   assert.ok(!text.includes('Never started'));
 });
 
@@ -562,7 +568,7 @@ test('a registered row keeps the spawn event time as its true start', () => {
   assert.equal(resolveWaveSessions([spawnEvent], [early])[0].startedAt, 4_000);
 });
 
-test('a replayed spawn that already ended does not sit on Queued forever', () => {
+test('a replayed spawn that already ended does not sit on Awaiting status forever', () => {
   const finished = { ...spawn('t1', 'explorer'), endTs: 2_000 };
   const wave = resolveWaveSessions([finished], []);
   assert.equal(wave[0].status, 'completed');

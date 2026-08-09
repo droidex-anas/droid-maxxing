@@ -8,6 +8,7 @@
 // shares.
 import { dateMs, numberValue, objectValue, safeStringify, stringValue } from './values.js';
 import { designPromptDisplayFromText } from './browser/designPromptDisplay.js';
+import { parseSkillActivation } from './skillSignals.js';
 import type { SessionRole, TranscriptEvent } from './protocol.js';
 
 const MAX_TEXT_CHARS = 12_000;
@@ -180,6 +181,21 @@ export function parseSessionLineEvents(
   };
   const messageRole = message?.role;
 
+  const activation =
+    messageRole === 'user' && message?.visibility === 'user_only'
+      ? skillActivationFromContent(content)
+      : undefined;
+  if (activation) {
+    return [
+      event({ ...base, sourceProviderSessionId: 'user', role: 'primary' }, 0, 'text', {
+        text: activation.prompt,
+        author: 'user',
+        skills: [activation.skillName],
+      }),
+      event(base, 1, 'text', { text: activation.message }),
+    ];
+  }
+
   const events: TranscriptEvent[] = [];
   content.forEach((item, index) => {
     const block = objectValue(item);
@@ -191,6 +207,15 @@ export function parseSessionLineEvents(
     if (parsed) events.push(parsed);
   });
   return events;
+}
+
+function skillActivationFromContent(content: unknown[]) {
+  if (content.length !== 1) return undefined;
+  const block = objectValue(content[0]);
+  if (stringValue(block?.type) !== 'text') return undefined;
+  const text = stringValue(block?.text);
+  if (!text) return undefined;
+  return parseSkillActivation(text);
 }
 
 function stringifyToolResult(value: unknown): string {
@@ -214,5 +239,9 @@ function trimText(text: string): string {
 
 function isSystemText(text: string): boolean {
   const trimmed = text.trimStart();
-  return trimmed.startsWith('<system-reminder>') || trimmed.startsWith('IMPORTANT:');
+  return (
+    trimmed.startsWith('<system-reminder>') ||
+    trimmed.startsWith('<system-notification>') ||
+    trimmed.startsWith('IMPORTANT:')
+  );
 }

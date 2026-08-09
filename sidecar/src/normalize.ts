@@ -17,12 +17,14 @@ import type {
 import { trimmedString as str } from './values.js';
 import {
   detectChildSession,
+  backgroundTaskCompletionProviderSessionId,
   isTaskToolName,
   slimChildSessionArgs,
   taskPrompt,
   taskResultChildUpdate,
   type ChildSessionSignal,
 } from './subagentSignals.js';
+import { parseSkillActivation, type SkillActivation } from './skillSignals.js';
 
 let seq = 0;
 const nextId = () => `${Date.now().toString(36)}-${(seq++).toString(36)}`;
@@ -320,6 +322,25 @@ export function normalizeNotification(
   notification: Record<string, unknown>,
 ): NormalizedEvent[] {
   const raw = extractNotification(notification);
+  const backgroundTaskProviderSessionId = backgroundTaskCompletionProviderSessionIdFrom(raw);
+  if (backgroundTaskProviderSessionId)
+    return [
+      {
+        childSession: {
+          providerSessionId: backgroundTaskProviderSessionId,
+          done: true,
+        },
+      },
+    ];
+  const skillActivation = skillActivationFromNotification(raw);
+  if (skillActivation)
+    return [
+      {
+        transcript: transcript(appSessionId, sourceProviderSessionId, role, 'text', {
+          text: skillActivation.message,
+        }),
+      },
+    ];
   const converted = convertNotificationToStreamMessage(raw);
   const messages = Array.isArray(converted) ? converted : converted ? [converted] : [];
   return messages
@@ -332,6 +353,44 @@ export function normalizeNotification(
       ),
     )
     .filter((event): event is NormalizedEvent => event !== null);
+}
+
+function skillActivationFromNotification(raw: unknown): SkillActivation | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const notification = raw as Record<string, unknown>;
+  if (notification.type !== 'create_message') return undefined;
+  const message = notification.message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
+  const record = message as Record<string, unknown>;
+  if (record.role !== 'user' || record.visibility !== 'user_only') return undefined;
+  const content = record.content;
+  if (!Array.isArray(content) || content.length !== 1) return undefined;
+  const block = content[0];
+  if (!block || typeof block !== 'object' || Array.isArray(block)) return undefined;
+  const text = (block as Record<string, unknown>).text;
+  return typeof text === 'string' ? parseSkillActivation(text) : undefined;
+}
+
+function backgroundTaskCompletionProviderSessionIdFrom(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const notification = raw as Record<string, unknown>;
+  if (notification.type !== 'create_message') return undefined;
+  const message = notification.message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
+  const content = (message as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .filter(
+      (block): block is { type: 'text'; text: string } =>
+        !!block &&
+        typeof block === 'object' &&
+        !Array.isArray(block) &&
+        (block as Record<string, unknown>).type === 'text' &&
+        typeof (block as Record<string, unknown>).text === 'string',
+    )
+    .map((block) => block.text)
+    .join('\n');
+  return backgroundTaskCompletionProviderSessionId(text);
 }
 
 function extractNotification(notification: Record<string, unknown>): unknown {

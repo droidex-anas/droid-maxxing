@@ -178,6 +178,54 @@ test('LLM-only user messages stay hidden in eager and paged transcript replay', 
   }
 });
 
+test('system notifications stay hidden in eager and paged transcript replay', () => {
+  const path = writeSession([
+    userMessage('/review PR #100'),
+    userMessage(
+      '<system-notification>\n<skill filePath="builtin:review">private instructions</skill>\n</system-notification>',
+    ),
+    assistant('Review started'),
+  ]);
+
+  for (const events of [
+    collectAll(path, 1),
+    parseFullSessionTranscript('app', 'provider', path, 'primary'),
+  ]) {
+    assert.deepEqual(
+      events.map((event) => event.text),
+      ['/review PR #100', 'Review started'],
+    );
+  }
+});
+
+test('skill activation restores as a styled user prompt followed by harness acknowledgement', () => {
+  const path = writeSession([
+    userMessage('Skill "review" activated: PR #100', 'user_only'),
+    userMessage(
+      '<system-notification>\n<skill filePath="builtin:review">private instructions</skill>\n</system-notification>',
+    ),
+    assistant('Review started'),
+  ]);
+
+  for (const events of [
+    collectAll(path, 1),
+    parseFullSessionTranscript('app', 'provider', path, 'primary'),
+  ]) {
+    assert.deepEqual(
+      events.map((event) => ({ text: event.text, author: event.author, skills: event.skills })),
+      [
+        { text: 'PR #100', author: 'user', skills: ['review'] },
+        {
+          text: 'Skill "review" activated: PR #100',
+          author: undefined,
+          skills: undefined,
+        },
+        { text: 'Review started', author: undefined, skills: undefined },
+      ],
+    );
+  }
+});
+
 test('a leading compaction_state surfaces exactly one divider at the very top', () => {
   const path = writeSession([compactionState(9), assistant('after-1'), assistant('after-2')]);
   const r = reader(path);

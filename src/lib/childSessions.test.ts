@@ -236,7 +236,7 @@ test('spawned sessions cover a spawn the store has not registered yet', () => {
   assert.equal(pending.length, 1);
   assert.equal(pending[0].label, 'explorer');
   assert.equal(pending[0].prompt, 'read the code');
-  assert.equal(pending[0].status, 'running');
+  assert.equal(pending[0].status, 'pending');
   assert.ok(isPendingChildPlaceholder(pending[0]));
 
   // Once the session registers, the same spawn resolves to it — same row key, so

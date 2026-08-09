@@ -115,6 +115,7 @@ function createHarness(
         if (next !== undefined) trace.push(`drive:${id}:${next}`);
       }
     },
+    onPrimaryNotification: () => undefined,
   });
   return { calls, compaction, generations, targets, children, trace };
 }

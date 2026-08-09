@@ -141,7 +141,6 @@ test('terminal results quarantine only later generation from the same turn', asy
     await provider.waitForPrompts(1);
     await context.waitForIdle();
     context.events.length = 0;
-
     provider.queueStreamEvents([
       assistantTextDelta('final answer'),
       successfulResultEvent('provider-1'),
@@ -325,7 +324,6 @@ test('current SDK Task result persists and opens the exact completed child', asy
     await provider.waitForPrompts(1);
     await context.waitForIdle();
     context.events.length = 0;
-
     provider.queueStreamEvents([
       {
         type: 'tool_call',
@@ -376,6 +374,94 @@ test('current SDK Task result persists and opens the exact completed child', asy
           event.parentAppSessionId === 'provider-1' &&
           event.childSessionId === 'child-1' &&
           event.requestId === 'open-current-child',
+      ),
+      true,
+    );
+  } finally {
+    await context.dispose();
+  }
+});
+
+test('background Task completion notification settles a child without TaskOutput', async () => {
+  const context = createSessionManagerTestContext();
+  try {
+    await context.create({
+      sessionPurpose: 'chat',
+      clientRef: 'event-background-task-completion',
+      title: 'Background task completion',
+      goal: 'initial',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+    const provider = context.provider.session('provider-1');
+    await provider.waitForPrompts(1);
+    await context.waitForIdle();
+    context.events.length = 0;
+    context.history.seedSessionLaunchSettings('provider-child-background', {
+      modelId: 'custom:glm-5.2',
+      reasoningEffort: 'max',
+    });
+
+    provider.queueStreamEvents([
+      {
+        type: 'tool_call',
+        toolUse: {
+          type: 'tool_use',
+          id: 'task-background',
+          name: 'Task',
+          input: { subagent_type: 'worker-2', description: 'background work' },
+        },
+      },
+      {
+        type: 'tool_result',
+        toolName: 'Task',
+        toolUseId: 'task-background',
+        content:
+          'Task launched in background.\ntask_id: provider-child-background\nsession_id: provider-child-background',
+        isError: false,
+      },
+    ]);
+    await context.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: 'launch background worker',
+    });
+
+    const launched = context.history.childSessions('provider-1')[0];
+    assert.equal(launched?.status, 'running');
+    assert.equal(launched?.label, 'worker-2');
+    assert.equal(launched?.modelId, 'custom:glm-5.2');
+    assert.equal(launched?.reasoningEffort, 'max');
+
+    context.provider.emitNotification('provider-1', {
+      jsonrpc: '2.0',
+      method: 'droid.session_notification',
+      params: {
+        notification: {
+          type: 'create_message',
+          message: {
+            id: 'background-completion-message',
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Background task completed.\ntask_id: provider-child-background\noutput: done',
+              },
+            ],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        },
+      },
+    });
+
+    assert.equal(context.history.childSessions('provider-1')[0]?.status, 'completed');
+    assert.equal(
+      context.events.some(
+        (event) =>
+          event.type === 'session.child' &&
+          event.child.childSessionId === 'child-1' &&
+          event.child.status === 'completed',
       ),
       true,
     );

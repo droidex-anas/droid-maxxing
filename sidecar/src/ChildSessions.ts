@@ -17,14 +17,17 @@ import {
   childSettingsFromInit,
   childStateFromRecord,
   childSummary,
+  applyChildLaunchSettings,
   findChildByProvider,
   findChildBySpawn,
+  newChildState,
   persistedChild,
   restoredChildStatus,
   type ChildIdentity,
   type ChildOpenAttempt,
   type ChildRuntimeState,
   type ChildRuntimeTarget,
+  type ChildSettings,
   type ChildSessionState,
   type ChildSpawnObservation,
   type ParentChildSessions,
@@ -111,7 +114,12 @@ export class ChildSessions {
     if (spawnChild && providerChild && spawnChild !== providerChild) return undefined;
     if (spawnKey) parent.pendingSpawns.delete(spawnKey);
     const child =
-      spawnChild ?? providerChild ?? this.createChild(parent, observation.role, spawnLink);
+      spawnChild ??
+      providerChild ??
+      this.createChild(parent, observation.role, spawnLink, {
+        modelId: observation.modelId,
+        reasoningEffort: observation.reasoningEffort,
+      });
     // Poll-style observations (TaskOutput) carry their own call's tool_use id,
     // not the spawn's; only a link that matched an observed spawn call (pending)
     // may key a child that already has one. Trusting the poll's id would rekey
@@ -136,6 +144,7 @@ export class ChildSessions {
       }
       child.providerSessionId = providerSessionId;
       child.status = 'running';
+      applyChildLaunchSettings(child, observation);
       // First label wins: the spawn call's label is set at admission, and
       // later poll observations echo the same metadata with different casing.
       child.label ??= observation.label ?? pending?.label;
@@ -419,6 +428,10 @@ export class ChildSessions {
     const attempt = this.beginOpenAttempt(parent, childSessionId);
     let loaded: FactorySession | undefined;
     try {
+      // Paint persisted history immediately. Provider loading and compaction
+      // setup may take noticeable time, but neither is required to read the
+      // child's existing transcript.
+      this.d.timeline.replayChild(parentAppSessionId, childSessionId, child.providerSessionId);
       const admitted = await this.awaitOpenStep(
         attempt,
         this.reserveCapacity(parent, child, operation, requestId),
@@ -507,7 +520,6 @@ export class ChildSessions {
         );
       });
       this.persist(child);
-      this.d.timeline.replayChild(parentAppSessionId, childSessionId, loaded.sessionId);
       this.publish(child);
       // Seed child context telemetry immediately so compaction policy can learn
       // a provider-reported model window before the first turn settles.
@@ -719,22 +731,19 @@ export class ChildSessions {
     parent: ParentChildSessions,
     role: PersistedChildSession['role'],
     spawnLink?: PersistedChildSpawnLink,
+    launchSettings: ChildSettings = {},
   ): ChildSessionState {
-    const defaults = this.d.resolveDefaultSettings(
-      parent.lease.summary,
-      parent.lease.session.initResult,
-      role,
-    );
-    if (!defaults.modelId) throw new Error(`No accepted model is available for ${role}.`);
-    const child = childStateFromRecord({
+    const child = newChildState({
       parentAppSessionId: parent.parentAppSessionId,
       childSessionId: this.d.nextChildSessionId(),
       role,
-      status: 'pending',
-      modelId: defaults.modelId,
-      reasoningEffort: defaults.reasoningEffort,
-      ...(spawnLink ? { spawnLink } : {}),
-      transcriptAvailable: false,
+      spawnLink,
+      launchSettings,
+      defaultSettings: this.d.resolveDefaultSettings(
+        parent.lease.summary,
+        parent.lease.session.initResult,
+        role,
+      ),
       updatedAt: this.d.now(),
     });
     parent.children.set(child.identity.childSessionId, child);

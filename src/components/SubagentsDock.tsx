@@ -51,7 +51,7 @@ const STATUS_ORDER: readonly ChildStatus[] = ['running', 'paused', 'pending', 'c
 const STATUS_META: Record<ChildStatus, { label: string; className: string }> = {
   running: { label: 'Running', className: 'bg-droid-green/15 text-droid-green' },
   paused: { label: 'Idle', className: 'bg-droid-orange/15 text-droid-orange' },
-  pending: { label: 'Queued', className: 'bg-droid-border/40 text-droid-text-secondary' },
+  pending: { label: 'Awaiting status', className: 'bg-droid-border/40 text-droid-text-secondary' },
   completed: {
     label: 'Done',
     className: 'border border-droid-border text-droid-text-muted',
@@ -154,7 +154,7 @@ function useRowDurationMs(rows: SubagentRow[], now: number, live: boolean): (num
   return rows.map((row) => {
     if (row.startedAt == null) return undefined;
     // A subagent that never started has no run to time; showing one next to
-    // "Queued" would claim work that never happened.
+    // A starting child has no confirmed run to time yet.
     if (row.status === 'pending') return undefined;
     if (row.status === 'completed' || !live) {
       const entry = timings.get(rowKey(row));
@@ -198,8 +198,9 @@ export function SubagentsDock({
 
   const rows = buildRows(sessions, activity);
   const counts = countSubagentStatuses(rows.map((row) => row.status));
-  const working = counts.running + counts.pending;
-  const now = useNow(live && working > 0);
+  const unsettled = counts.running + counts.pending;
+  const hasConfirmedRunning = counts.running > 0;
+  const now = useNow(live && hasConfirmedRunning);
   const durationMs = useRowDurationMs(rows, now, live);
 
   if (rows.length === 0) return null;
@@ -207,7 +208,7 @@ export function SubagentsDock({
   const allDone = counts.completed === rows.length;
   // Work is only *in flight* while the turn streams; afterwards the card is a
   // settled record, so nothing animates and nothing counts up.
-  const inFlight = live && working > 0;
+  const inFlight = live && unsettled > 0;
   const started = rows.map((row) => row.startedAt).filter((t): t is number => t != null);
   const firstStartedAt = started.length > 0 ? Math.min(...started) : undefined;
   const lastSettledAt = rows.reduce<number | undefined>((last, row, i) => {
@@ -220,7 +221,7 @@ export function SubagentsDock({
   // first spawn to the last subagent settling. Summing the runs would invent
   // time a parallel wave never took.
   const timeMs =
-    firstStartedAt == null
+    firstStartedAt == null || (inFlight && !hasConfirmedRunning)
       ? undefined
       : inFlight
         ? Math.max(0, now - firstStartedAt)
@@ -232,7 +233,7 @@ export function SubagentsDock({
   const headerMeta = allDone
     ? `All ${String(rows.length)} ${plural} finished`
     : inFlight && counts.running === 0
-      ? `Spawning ${String(counts.pending)} ${counts.pending === 1 ? 'subagent' : 'subagents'}`
+      ? `Awaiting status for ${String(counts.pending)} ${counts.pending === 1 ? 'subagent' : 'subagents'}`
       : `${String(counts.completed)} of ${String(rows.length)} ${plural} finished`;
 
   const bodyTransition = reduceMotion
@@ -321,7 +322,11 @@ export function SubagentsDock({
                 const model = models.find((m) => m.id === row.child.modelId);
                 // Placeholder rows carry no model yet, so there is nothing honest
                 // to reveal on hover until the child session registers.
-                const modelLine = model?.displayName ?? row.child.modelId;
+                const modelLine = row.child.modelId
+                  ? model?.displayName
+                    ? `${model.displayName} (${row.child.modelId})`
+                    : row.child.modelId
+                  : '';
                 // Rows without a live activity line (autonomous subagents report
                 // no per-event transcript) still show what they were asked to do.
                 const settledRow = row.status === 'completed' || !live;
@@ -339,9 +344,7 @@ export function SubagentsDock({
                     : {
                         head:
                           row.status === 'pending'
-                            ? live
-                              ? 'Spawning…'
-                              : 'Never started'
+                            ? 'Awaiting runtime status'
                             : row.status === 'completed'
                               ? 'No activity captured'
                               : settledRow
@@ -364,41 +367,21 @@ export function SubagentsDock({
                       // Placeholder rows have no registered session to open yet.
                       disabled={!row.target || !onOpen || isPendingChildPlaceholder(row.child)}
                       onClick={() => row.target && onOpen?.(row.target)}
-                      title={`Open ${name} session`}
+                      title={`Open ${name} session\nChild ID: ${row.child.childSessionId}`}
                       className="group/row flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-droid-active/40 disabled:cursor-default disabled:hover:bg-transparent"
                     >
                       <span className="flex w-48 shrink-0 items-center gap-2.5">
                         <ModelIcon provider={providerOf(model, row.child.modelId)} size={16} />
-                        {/* The name slot is too narrow for both the agent name and
-                            its model, so hovering the row rolls one out and the
-                            other in. Without a known model there is nothing to
-                            reveal and the name simply stays put. */}
-                        {modelLine ? (
-                          <span className="relative block h-[18px] min-w-0 flex-1 overflow-hidden">
-                            <span
-                              className={`block truncate text-[13px] font-medium leading-[18px] text-droid-text ${
-                                reduceMotion
-                                  ? 'group-hover/row:hidden'
-                                  : 'transition-transform duration-200 ease-out group-hover/row:-translate-y-[18px]'
-                              }`}
-                            >
-                              {name}
-                            </span>
-                            <span
-                              className={`block truncate text-[12px] leading-[18px] text-droid-text-secondary ${
-                                reduceMotion
-                                  ? 'hidden group-hover/row:block'
-                                  : 'transition-transform duration-200 ease-out group-hover/row:-translate-y-[18px]'
-                              }`}
-                            >
-                              {modelLine}
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="truncate text-[13px] font-medium text-droid-text">
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate text-[13px] font-medium leading-4 text-droid-text">
                             {name}
                           </span>
-                        )}
+                          {modelLine && (
+                            <span className="truncate text-[11px] leading-4 text-droid-text-muted">
+                              {modelLine}
+                            </span>
+                          )}
+                        </span>
                         {row.child.reasoningEffort && (
                           <span className="shrink-0 rounded-md bg-droid-accent/15 px-1.5 py-0.5 text-[10px] font-medium capitalize text-droid-accent">
                             {row.child.reasoningEffort}

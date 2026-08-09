@@ -139,6 +139,7 @@ function createHarness() {
     maxContextTokensForModel: () => 1_000,
     resolveAutomaticTarget: () => undefined,
     settleAutomatic: () => undefined,
+    onPrimaryNotification: () => undefined,
   });
   return {
     calls,
