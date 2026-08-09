@@ -419,6 +419,76 @@ test('result-only completion admits the exact pending spawn as historical', () =
   assert.equal(h.history.childSessions(h.parentId)[0]?.providerSessionId, 'provider-child-current');
 });
 
+test('missing Task settings defer exact admission and preserve provider-only completion', () => {
+  const h = createHarness([]);
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    role: 'worker',
+    spawnLink: { kind: 'tool-use', id: 'tool-deferred' },
+    label: 'worker-2',
+    requiresExactLaunchSettings: true,
+  });
+
+  assert.doesNotThrow(() =>
+    h.owner.admitChildObservation({
+      parentAppSessionId: h.parentId,
+      providerSessionId: 'provider-deferred',
+      role: 'worker',
+      spawnLink: { kind: 'tool-use', id: 'tool-deferred' },
+      requiresExactLaunchSettings: true,
+    }),
+  );
+  assert.deepEqual(h.owner.list(h.parentId), []);
+
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    providerSessionId: 'provider-deferred',
+    role: 'worker',
+    requiresExactLaunchSettings: true,
+    done: true,
+  });
+  assert.deepEqual(h.owner.list(h.parentId), []);
+
+  h.history.seedSessionLaunchSettings('provider-deferred', {
+    modelId: 'custom:glm-5.2',
+    reasoningEffort: ReasoningEffort.High,
+  });
+  h.owner.retryPendingLaunchSettings(['provider-deferred']);
+
+  assert.deepEqual(h.owner.list(h.parentId), [
+    {
+      parentAppSessionId: h.parentId,
+      childSessionId: 'generated-child',
+      role: 'worker',
+      status: 'completed',
+      label: 'worker-2',
+      modelId: 'custom:glm-5.2',
+      reasoningEffort: ReasoningEffort.High,
+      spawnLink: { kind: 'tool-use', id: 'tool-deferred' },
+      transcriptAvailable: true,
+      startedAt: 100,
+    },
+  ]);
+});
+
+test('exact launch settings replace stale reasoning as one snapshot', () => {
+  const record = {
+    ...childRecord('child', 'provider'),
+    reasoningEffort: ReasoningEffort.High,
+  };
+  const h = createHarness([record]);
+
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    providerSessionId: record.providerSessionId,
+    role: 'worker',
+    spawnLink: record.spawnLink,
+    modelId: record.modelId,
+  });
+
+  assert.equal(h.owner.list(h.parentId)[0]?.reasoningEffort, undefined);
+});
+
 test('poll observations never rekey a child away from its spawn link', () => {
   const h = createHarness([]);
   h.owner.admitChildObservation({

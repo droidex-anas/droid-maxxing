@@ -1077,8 +1077,7 @@ export class SessionManager {
         // tree and its own emit is authoritative, so a change seen here is
         // already covered by it. After boot, the cache is fresh and events
         // reconcile and republish normally.
-        if (this.shutdownPromise || !this.lastSessionListOptions || this.sessionsBootReconcile)
-          return;
+        if (this.shutdownPromise || this.sessionsBootReconcile) return;
         try {
           // A targeted change list reconciles exactly the reported files;
           // null means the watcher saw unexplained events and only a full
@@ -1089,12 +1088,16 @@ export class SessionManager {
           console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
           return;
         }
-        this.emitSessionList(this.lastSessionListOptions);
+        this.childSessions.retryPendingLaunchSettings(
+          changes?.map(({ providerSessionId }) => providerSessionId),
+        );
+        if (this.lastSessionListOptions) this.emitSessionList(this.lastSessionListOptions);
       },
     });
     if (this.history.sessionFileCacheSize === 0) {
       try {
         this.history.reconcileSessionFiles();
+        this.childSessions.retryPendingLaunchSettings();
       } catch (error) {
         console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
       }
@@ -1105,6 +1108,7 @@ export class SessionManager {
         if (!this.shutdownPromise) {
           try {
             this.history.reconcileSessionFiles();
+            this.childSessions.retryPendingLaunchSettings();
           } catch (error) {
             console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
           }
@@ -1261,14 +1265,11 @@ export class SessionManager {
     this.missionControlPolicy.apply(appSessionId, n);
     if (n.childSession) {
       const { toolUseId, ...childSession } = n.childSession;
-      const launchSettings = childSession.providerSessionId
-        ? this.history.sessionLaunchSettings(childSession.providerSessionId)
-        : undefined;
       this.childSessions.admitChildObservation({
         parentAppSessionId: appSessionId,
         role: 'worker',
         ...childSession,
-        ...launchSettings,
+        requiresExactLaunchSettings: true,
         ...(toolUseId ? { spawnLink: { kind: 'tool-use', id: toolUseId } } : {}),
       });
     }

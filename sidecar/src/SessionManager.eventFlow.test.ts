@@ -140,6 +140,7 @@ test('terminal results quarantine only later generation from the same turn', asy
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
     await context.waitForIdle();
+    context.history.seedSessionLaunchSettings('worker-1', { modelId: 'model-default' });
     context.events.length = 0;
     provider.queueStreamEvents([
       assistantTextDelta('final answer'),
@@ -230,6 +231,9 @@ test('terminal enforcement is scoped to each provider and includes notification 
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
+    context.history.seedSessionLaunchSettings('worker-logical', {
+      modelId: 'model-default',
+    });
     const primary = context.provider.session('provider-1');
     primary.queueStreamEvents([
       {
@@ -323,6 +327,9 @@ test('current SDK Task result persists and opens the exact completed child', asy
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
     await context.waitForIdle();
+    context.history.seedSessionLaunchSettings('provider-child-current', {
+      modelId: 'model-default',
+    });
     context.events.length = 0;
     provider.queueStreamEvents([
       {
@@ -560,6 +567,9 @@ test('loaded child context follows its parent-scoped logical identity', async ()
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
+    context.history.seedSessionLaunchSettings('worker-history-id', {
+      modelId: 'model-default',
+    });
 
     const primary = context.provider.session('provider-1');
     primary.queueStreamEvents([

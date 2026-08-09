@@ -223,7 +223,7 @@ test('an unresolved live spawn reports unknown status and never infers lifecycle
     ts: Date.now() - 60_000,
     endTs: Date.now() - 59_000,
   };
-  const wave = resolveWaveSessions([launched], [], true);
+  const wave = resolveWaveSessions([launched], []);
   assert.equal(wave[0].status, 'pending');
   const text = textOf(
     renderToStaticMarkup(createElement(SubagentsDock, { sessions: wave, models: [], live: true })),
@@ -234,8 +234,8 @@ test('an unresolved live spawn reports unknown status and never infers lifecycle
   assert.ok(!text.includes('1m'));
   assert.ok(!text.includes('Done'));
 
-  // Once the turn ends, the same spawn is settled rather than eternally running.
-  assert.equal(resolveWaveSessions([launched], [], false)[0].status, 'completed');
+  // Ending the parent turn still says nothing about the child's lifecycle.
+  assert.equal(resolveWaveSessions([launched], [])[0].status, 'pending');
 });
 
 test('the dock renders instantly from spawn events, before sessions register', () => {
@@ -487,7 +487,7 @@ test('a row is timed from its spawn, not from when the store caught up', () => {
   // The store stamps startedAt at admission, long after a background Task was
   // issued; timing from it would under-report the run by the whole lag.
   const late = { ...childSession('explorer', 't1', 'running'), startedAt: Date.now() - 5_000 };
-  const wave = resolveWaveSessions([spawnEvent], [late], true);
+  const wave = resolveWaveSessions([spawnEvent], [late]);
   const text = textOf(
     renderToStaticMarkup(
       createElement(SubagentsDock, {
@@ -568,8 +568,8 @@ test('a registered row keeps the spawn event time as its true start', () => {
   assert.equal(resolveWaveSessions([spawnEvent], [early])[0].startedAt, 4_000);
 });
 
-test('a replayed spawn that already ended does not sit on Awaiting status forever', () => {
+test('a replayed spawn stays neutral until exact child status is known', () => {
   const finished = { ...spawn('t1', 'explorer'), endTs: 2_000 };
   const wave = resolveWaveSessions([finished], []);
-  assert.equal(wave[0].status, 'completed');
+  assert.equal(wave[0].status, 'pending');
 });

@@ -86,7 +86,7 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
     providerSessionId: string,
   ): Pick<Protocol.FactoryDefaultSettings, 'modelId' | 'reasoningEffort'> | undefined {
     const settings = this.launchSettingsByProvider.get(providerSessionId);
-    return structuredClone(settings ?? { modelId: 'model-default' });
+    return settings ? structuredClone(settings) : undefined;
   }
 
   summaryPatchesAndHidden(): {

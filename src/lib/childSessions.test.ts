@@ -232,7 +232,7 @@ test('spawned sessions cover a spawn the store has not registered yet', () => {
     startedAt: 50,
   };
 
-  const pending = spawnedChildSessions([spawnA, spawnADelta], [], true);
+  const pending = spawnedChildSessions([spawnA, spawnADelta], []);
   assert.equal(pending.length, 1);
   assert.equal(pending[0].label, 'explorer');
   assert.equal(pending[0].prompt, 'read the code');
@@ -241,7 +241,7 @@ test('spawned sessions cover a spawn the store has not registered yet', () => {
 
   // Once the session registers, the same spawn resolves to it — same row key, so
   // the panel swaps the row's contents instead of replacing the row.
-  const resolved = spawnedChildSessions([spawnA], [registered], true);
+  const resolved = spawnedChildSessions([spawnA], [registered]);
   assert.deepEqual(
     resolved.map((child) => child.childSessionId),
     ['child-a'],
@@ -263,7 +263,7 @@ test('spawned sessions keep a child whose spawn is outside the loaded transcript
     startedAt: 5,
   };
   assert.deepEqual(
-    spawnedChildSessions([], [restored], false).map((child) => child.childSessionId),
+    spawnedChildSessions([], [restored]).map((child) => child.childSessionId),
     ['child-old'],
   );
 });

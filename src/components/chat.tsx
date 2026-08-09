@@ -2060,8 +2060,8 @@ const ChildSessionsWave = memo(
     // Wave-scoped: resolve only this run's spawns so the card shows this
     // turn's agents, not the session's cumulative list.
     const sessions = useMemo(
-      () => resolveWaveSessions(item.events, dock.sessions, live),
-      [item.events, dock.sessions, live],
+      () => resolveWaveSessions(item.events, dock.sessions),
+      [item.events, dock.sessions],
     );
     return (
       <SubagentsDock
