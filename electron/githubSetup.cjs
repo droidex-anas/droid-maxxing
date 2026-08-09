@@ -24,6 +24,31 @@ async function cachedBrewExecutable() {
   return executable;
 }
 
+function scheduleBoundedTermination(
+  child,
+  { timeoutMs, terminationGraceMs, setTimer, clearTimer, onTimeout },
+) {
+  let disposed = false;
+  let forceKillTimer;
+  const timeoutTimer = setTimer(() => {
+    if (disposed) return;
+    onTimeout();
+    child.kill();
+    if (disposed) return;
+    forceKillTimer = setTimer(() => {
+      if (!disposed) child.kill('SIGKILL');
+    }, terminationGraceMs);
+    forceKillTimer.unref?.();
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+
+  return () => {
+    disposed = true;
+    clearTimer(timeoutTimer);
+    if (forceKillTimer) clearTimer(forceKillTimer);
+  };
+}
+
 function runSetupFile(
   file,
   args,
@@ -38,16 +63,14 @@ function runSetupFile(
 ) {
   return new Promise((resolve) => {
     let child;
-    let timer;
-    let forceKillTimer;
+    let stopTermination;
     let timedOut = false;
     let settled = false;
 
     const finish = (result) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimer(timer);
-      if (forceKillTimer) clearTimer(forceKillTimer);
+      stopTermination?.();
       if (operation.child === child) operation.child = null;
       child?.removeAllListeners();
       resolve(result);
@@ -63,15 +86,15 @@ function runSetupFile(
     operation.child = child;
     child.once('error', () => finish({ code: 1, timedOut }));
     child.once('close', (code) => finish({ code: typeof code === 'number' ? code : 1, timedOut }));
-    timer = setTimer(() => {
-      timedOut = true;
-      child.kill();
-      forceKillTimer = setTimer(() => {
-        if (!settled) child.kill('SIGKILL');
-      }, terminationGraceMs);
-      forceKillTimer.unref?.();
-    }, timeout);
-    timer.unref?.();
+    stopTermination = scheduleBoundedTermination(child, {
+      timeoutMs: timeout,
+      terminationGraceMs,
+      setTimer,
+      clearTimer,
+      onTimeout: () => {
+        timedOut = true;
+      },
+    });
     if (operation.cancelled) child.kill();
   });
 }
@@ -113,7 +136,11 @@ async function install(options = {}) {
       };
     }
     options.invalidateGh?.();
-    if (!(await resolveGh())) {
+    const gh = await resolveGh();
+    if (operation.cancelled) {
+      return { ok: false, reason: 'cancelled', message: 'GitHub CLI installation was cancelled.' };
+    }
+    if (!gh) {
       return {
         ok: false,
         reason: 'verification_failed',
@@ -182,12 +209,10 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     let rejectedUrl = false;
     let timedOut = false;
     let settled = false;
-    let timer;
-    let forceKillTimer;
+    let stopTermination;
 
     const cleanup = () => {
-      if (timer) cancelTimeout(timer);
-      if (forceKillTimer) cancelTimeout(forceKillTimer);
+      stopTermination?.();
       child?.stdout?.removeListener('data', onOutput);
       child?.stderr?.removeListener('data', onOutput);
       child?.removeListener('error', onError);
@@ -309,15 +334,15 @@ function runAuthenticationProcess(executable, operation, options = {}) {
     child.stderr.on('data', onOutput);
     child.once('error', onError);
     child.once('close', onClose);
-    timer = scheduleTimeout(() => {
-      timedOut = true;
-      child.kill();
-      forceKillTimer = scheduleTimeout(() => {
-        if (!settled) child.kill('SIGKILL');
-      }, terminationGraceMs);
-      forceKillTimer.unref?.();
-    }, timeoutMs);
-    timer.unref?.();
+    stopTermination = scheduleBoundedTermination(child, {
+      timeoutMs,
+      terminationGraceMs,
+      setTimer: scheduleTimeout,
+      clearTimer: cancelTimeout,
+      onTimeout: () => {
+        timedOut = true;
+      },
+    });
     if (operation.cancelled) child.kill();
   });
 }

@@ -258,6 +258,34 @@ test('installation verifies gh even when Homebrew exits successfully', async () 
   });
 });
 
+test('cancelling during post-install verification cannot report success', async () => {
+  let verificationStarted;
+  const started = new Promise((resolve) => {
+    verificationStarted = resolve;
+  });
+  let finishVerification;
+  const pending = install({
+    resolveBrew: async () => '/opt/homebrew/bin/brew',
+    execute: async () => ({ code: 0, timedOut: false }),
+    resolveGh: async () => {
+      verificationStarted();
+      return new Promise((resolve) => {
+        finishVerification = resolve;
+      });
+    },
+  });
+  await started;
+
+  cancelSetup();
+  finishVerification('/opt/homebrew/bin/gh');
+
+  assert.deepEqual(await pending, {
+    ok: false,
+    reason: 'cancelled',
+    message: 'GitHub CLI installation was cancelled.',
+  });
+});
+
 test('installation reports Homebrew failure and timeout without raw output', async () => {
   const failed = await install({
     resolveBrew: async () => '/opt/homebrew/bin/brew',
