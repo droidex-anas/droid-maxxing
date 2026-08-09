@@ -1,0 +1,32 @@
+name: Contributor agreement
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  accepted:
+    name: Contributor agreement accepted
+    if: >-
+      github.event.pull_request.user.login != github.repository_owner &&
+      github.event.pull_request.user.login != 'evilfps'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify acknowledgement
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if ! grep -Eiq -- '^[[:space:]]*-[[:space:]]*\[x\][[:space:]]+I have read and accept the DROIDEX Contributor Copyright Assignment' <<< "$PR_BODY"; then
+            echo 'Check the Contributor Agreement box in the pull request description.' >&2
+            exit 1
+          fi
+
+          legal_name=$(sed -n 's/^Legal name:[[:space:]]*//p' <<< "$PR_BODY" | head -n 1)
+          legal_name=$(sed -E 's/<!--[^>]*-->//g' <<< "$legal_name")
+          if [[ -z "${legal_name//[[:space:]]/}" ]]; then
+            echo 'Enter your full legal name in the pull request description.' >&2
+            exit 1
+          fi

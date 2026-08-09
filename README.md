@@ -5,6 +5,16 @@ projects, terminals, browser sessions, and agent work together in one app.
 
 Website: [droidex.vercel.app](https://droidex.vercel.app)
 
+## License and contributions
+
+DROIDEX is proprietary source-available software, not open-source software.
+You may inspect the code and create a fork solely to propose contributions to
+this repository. Reuse, redistribution, deployment as another project, and
+claims of ownership are prohibited without written permission. See
+[LICENSE](LICENSE) for the complete terms. Contributions are welcome under the
+process in [CONTRIBUTING.md](CONTRIBUTING.md) and the copyright-assignment terms
+in [CLA.md](CLA.md).
+
 ## Run it locally
 
 You need Node.js 22, npm, and the Factory Droid CLI. DROIDEX can install the
