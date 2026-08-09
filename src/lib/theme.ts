@@ -498,7 +498,7 @@ function mixHex(hex: string, target: string, t: number): string {
 }
 
 // sRGB channel -> linear-light value, for WCAG contrast checks.
-export function linearChannel(hexPair: string): number {
+function linearChannel(hexPair: string): number {
   const c = parseInt(hexPair, 16) / 255;
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
