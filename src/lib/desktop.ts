@@ -35,6 +35,7 @@ import type {
   GitEnvironment,
   GitWorktree,
   GithubAvailability,
+  GithubSetupResult,
   PostCommentResult,
   PrChecksResult,
   PrCommentsResult,
@@ -141,13 +142,21 @@ export interface NotifyOptions {
   appSessionId?: string;
 }
 
+export type NotifyResult =
+  | { shown: true }
+  | {
+      shown: false;
+      reason: 'unsupported' | 'permission_denied' | 'failed' | 'timeout';
+      message?: string;
+    };
+
 interface DroidControlApi {
   bridgeInfo: () => Promise<BridgeInfo>;
   pickDirectory: () => Promise<string | null>;
   pickFiles: () => Promise<string[]>;
   saveImage: (dataUrl: string) => Promise<string>;
   discardImage: (path: string) => Promise<void>;
-  notify: (title: string, body: string, options?: NotifyOptions) => Promise<void>;
+  notify: (title: string, body: string, options?: NotifyOptions) => Promise<NotifyResult>;
   onNotificationActivate: (handler: (payload: { appSessionId: string }) => void) => () => void;
   takePendingNotificationSession: () => Promise<{ appSessionId: string } | null>;
   ackNotificationActivate: (appSessionId: string) => Promise<{ ok: boolean }>;
@@ -189,6 +198,10 @@ interface DroidControlApi {
   gitPush: (dir: string, options: PushOptions) => Promise<GitActionResult>;
   gitFetch: (dir: string) => Promise<GitActionResult>;
   githubAvailable: () => Promise<GithubAvailability>;
+  githubInstall: () => Promise<GithubSetupResult>;
+  githubAuthenticate: () => Promise<GithubSetupResult>;
+  githubCancelSetup: () => Promise<{ ok: true }>;
+  onGithubAuthCode: (handler: (payload: unknown) => void) => () => void;
   githubDetectPr: (dir: string, options: { branch?: string }) => Promise<DetectPrResult>;
   githubPrChecks: (dir: string, options: { prNumber: number }) => Promise<PrChecksResult>;
   githubPrComments: (dir: string, options: { prNumber: number }) => Promise<PrCommentsResult>;
@@ -319,10 +332,10 @@ export async function notify(
   title: string,
   body: string,
   options: NotifyOptions = {},
-): Promise<void> {
+): Promise<NotifyResult> {
   const api = desktopApi();
-  if (!api) return;
-  await api.notify(title, body, options);
+  if (!api) return { shown: false, reason: 'unsupported' };
+  return api.notify(title, body, options);
 }
 
 /** Subscribe to notification clicks that should open a specific chat. */

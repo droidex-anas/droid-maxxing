@@ -8,7 +8,6 @@ import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCar
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import {
-  Bell,
   Folder,
   FolderPlus,
   Plus,
@@ -19,6 +18,7 @@ import {
   Loader2,
   SquarePen,
 } from 'lucide-react';
+import { UnreadFilterActions } from './UnreadFilterActions';
 import {
   buildWorkspaceSections,
   resolveNewChatCwd,
@@ -73,7 +73,7 @@ function WorkingDots() {
         <span
           key={i}
           className="dot-pulse rounded-full bg-current"
-          style={{ width: 3, height: 3, animationDelay: `${i * 0.16}s` }}
+          style={{ width: 3, height: 3, animationDelay: `${String(i * 0.16)}s` }}
         />
       ))}
     </span>
@@ -227,6 +227,11 @@ export default function Sidebar() {
     [state.sessionOrder, state.sessions, isUnread],
   );
 
+  const markAllSessionsRead = useCallback(() => {
+    dispatch({ type: 'MARK_ALL_SESSIONS_READ', seenAt: Date.now() });
+    setUnreadOnly(false);
+  }, [dispatch]);
+
   const startChat = (cwd: string) => {
     dispatch({ type: 'START_CHAT', cwd });
   };
@@ -377,24 +382,14 @@ export default function Sidebar() {
           >
             <Search className="w-4 h-4" strokeWidth={1.75} />
           </button>
-          <button
-            onClick={() => {
-              setUnreadOnly((v) => !v);
+          <UnreadFilterActions
+            unreadOnly={unreadOnly}
+            unreadCount={unreadCount}
+            onToggleUnread={() => {
+              setUnreadOnly((value) => !value);
             }}
-            title={unreadOnly ? 'Show all sessions' : 'Show unread only'}
-            aria-label={unreadOnly ? 'Show all sessions' : 'Show unread only'}
-            aria-pressed={unreadOnly}
-            className={`relative rounded-md p-1.5 transition-colors hover:bg-droid-elevated ${
-              unreadOnly ? 'text-droid-accent' : 'text-droid-text-muted hover:text-droid-text'
-            }`}
-          >
-            <Bell className="w-4 h-4" strokeWidth={1.75} />
-            {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-droid-accent px-0.5 text-[8px] font-semibold tabular-nums text-droid-bg">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            )}
-          </button>
+            onMarkAllRead={markAllSessionsRead}
+          />
         </div>
       </div>
 

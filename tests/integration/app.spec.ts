@@ -38,7 +38,7 @@ test('slash feedback returns a durable copyable report receipt', async ({ page, 
   await details.fill('The update button stopped responding after download.');
   await page.getByRole('button', { name: 'Submit report' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Report sent' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Report accepted' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Report ID' })).toHaveValue(
     'RPT-20260804-A1B2C3D4E5F6',
   );

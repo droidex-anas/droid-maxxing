@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2, Upload } from 'lucide-react';
 import { GitCommitIcon, GitPullRequestIcon } from './GithubIcons';
 import { CommitSheet } from './CommitSheet';
 import { CreatePrSheet } from './CreatePrSheet';
 import { gitPush } from '../../lib/git';
 import { toast } from '../../lib/toast';
+import {
+  canRenderPrSheet,
+  reconcileGitActionSheet,
+  type GitActionSheet,
+} from '../../lib/gitActionVisibility';
 import type { GitBranchList, GitEnvironment } from '../../types/vcs';
-
-type Sheet = 'none' | 'commit' | 'pr';
 
 function ActionButton({
   icon,
@@ -44,6 +47,7 @@ export function GitActionsBar({
   env,
   branches,
   isGitHub,
+  githubReady,
   hasPr,
   onChanged,
   onPrCreated,
@@ -52,14 +56,23 @@ export function GitActionsBar({
   env: GitEnvironment | null;
   branches: GitBranchList | null;
   isGitHub: boolean;
+  githubReady: boolean;
   hasPr: boolean;
   onChanged: () => void;
   onPrCreated?: () => void;
 }) {
-  const [sheet, setSheet] = useState<Sheet>('none');
+  const [sheet, setSheet] = useState<GitActionSheet>('none');
   const [pushing, setPushing] = useState(false);
 
-  const toggle = (next: Sheet) => setSheet((cur) => (cur === next ? 'none' : next));
+  useEffect(() => {
+    setSheet((current) =>
+      reconcileGitActionSheet(current, isGitHub, githubReady, hasPr, !!env?.detached),
+    );
+  }, [isGitHub, githubReady, hasPr, env?.detached]);
+
+  const toggle = (next: GitActionSheet) => {
+    setSheet((cur) => (cur === next ? 'none' : next));
+  };
 
   const doPush = async () => {
     if (pushing) return;
@@ -68,7 +81,7 @@ export function GitActionsBar({
       const res = await gitPush(cwd, { setUpstream: !env?.upstream });
       if (res.ok) toast.success('Pushed to remote');
       else if (res.reason === 'detached') toast.error('Detached HEAD — checkout a branch first');
-      else toast.error(res.message || 'Push failed');
+      else toast.error(res.message ?? 'Push failed');
       onChanged();
     } catch {
       toast.error('Push failed');
@@ -88,7 +101,9 @@ export function GitActionsBar({
           icon={<GitCommitIcon size={14} />}
           label="Commit"
           active={sheet === 'commit'}
-          onClick={() => toggle('commit')}
+          onClick={() => {
+            toggle('commit');
+          }}
         />
         <ActionButton
           icon={
@@ -98,16 +113,18 @@ export function GitActionsBar({
               <Upload className="h-3.5 w-3.5" />
             )
           }
-          label={aheadCount > 0 ? `Push ↑${aheadCount}` : 'Push'}
+          label={aheadCount > 0 ? `Push ↑${String(aheadCount)}` : 'Push'}
           disabled={pushing || !!env?.detached}
           onClick={() => void doPush()}
         />
-        {isGitHub && !hasPr && !env?.detached && (
+        {isGitHub && githubReady && !hasPr && !env?.detached && (
           <ActionButton
             icon={<GitPullRequestIcon size={14} />}
             label="Open PR"
             active={sheet === 'pr'}
-            onClick={() => toggle('pr')}
+            onClick={() => {
+              toggle('pr');
+            }}
           />
         )}
       </div>
@@ -123,7 +140,7 @@ export function GitActionsBar({
           />
         </div>
       )}
-      {sheet === 'pr' && (
+      {canRenderPrSheet(sheet, isGitHub, githubReady, hasPr, !!env?.detached) && (
         <div className="pt-1.5">
           <CreatePrSheet
             cwd={cwd}

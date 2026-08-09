@@ -6,6 +6,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { initialState, StoreContext, type AppState } from '../hooks/useStore.js';
 import type { ModelInfo, ReasoningEffort, SessionSummary } from '../types/bridge.js';
 import RightPanel from './RightPanel.js';
+import { EnvironmentSection } from './environment/EnvironmentSection.js';
+import type { GithubAvailability, GitEnvironment } from '../types/vcs.js';
 
 const session = (overrides: Partial<SessionSummary>): SessionSummary => ({
   appSessionId: 's1',
@@ -89,4 +91,61 @@ test('model row hides the pill for a known model without reasoning support', () 
 test('model row keeps the pill while the model list has not loaded', () => {
   const html = renderPanel({ reasoningEffort: 'xhigh', modelId: 'unlisted' }, []);
   assert.match(html, />xhigh</);
+});
+
+test('PR detection and Context setup share authenticated GitHub readiness', () => {
+  const action = () => undefined;
+  const env: GitEnvironment = {
+    isRepo: true,
+    isGitHub: true,
+    branch: 'hotfix/review',
+    detached: false,
+    ahead: 0,
+  };
+  const renderEnvironment = (githubReady: boolean, availability: GithubAvailability) =>
+    renderToStaticMarkup(
+      createElement(
+        StoreContext.Provider,
+        { value: { state: initialState, dispatch: action } },
+        createElement(EnvironmentSection, {
+          cwd: '/workspace',
+          env,
+          branches: null,
+          worktrees: [],
+          diffStat: null,
+          diffMode: 'worktree',
+          onDiffModeChange: action,
+          refresh: action,
+          live: false,
+          githubAvailability: availability,
+          githubAction: 'idle',
+          githubError: null,
+          githubManualGuideOpened: false,
+          githubAuthCode: null,
+          githubAuthPopoverOpen: false,
+          githubReady,
+          onGithubSetupAction: action,
+          onShowGithubAuthPrompt: action,
+          onCloseGithubAuthPrompt: action,
+          onCancelGithubAuthentication: action,
+          pr: null,
+          onOpenPr: action,
+          onOpenReview: action,
+        }),
+      ),
+    );
+  const blockedHtml = renderEnvironment(false, {
+    installed: true,
+    authenticated: false,
+    installMethod: null,
+  });
+  assert.match(blockedHtml, /Connect GitHub/);
+  assert.doesNotMatch(blockedHtml, />Open PR</);
+
+  const readyHtml = renderEnvironment(true, {
+    installed: true,
+    authenticated: true,
+    installMethod: null,
+  });
+  assert.match(readyHtml, />Open PR</);
 });

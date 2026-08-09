@@ -1,0 +1,106 @@
+const activeNotifications = new Map();
+const MAX_RETAINED_NOTIFICATIONS = 32;
+
+function retainNotification(note, activate) {
+  if (activeNotifications.size >= MAX_RETAINED_NOTIFICATIONS) {
+    const [oldestNote, releaseOldest] = activeNotifications.entries().next().value;
+    releaseOldest();
+    oldestNote.close();
+  }
+  const release = () => {
+    note.removeListener('click', activate);
+    note.removeListener('action', activate);
+    note.removeListener('close', release);
+    activeNotifications.delete(note);
+  };
+  activeNotifications.set(note, release);
+  note.once('close', release);
+}
+
+function closeAllDesktopNotifications() {
+  for (const [note, release] of activeNotifications) {
+    release();
+    note.close();
+  }
+}
+
+function errorMessage(error) {
+  if (typeof error === 'string') return error.trim();
+  if (error && typeof error.message === 'string') return error.message.trim();
+  return '';
+}
+
+function showDesktopNotification(NotificationClass, payload, dependencies = {}) {
+  if (typeof NotificationClass?.isSupported === 'function' && !NotificationClass.isSupported()) {
+    return Promise.resolve({ shown: false, reason: 'unsupported' });
+  }
+
+  const setTimer = dependencies.setTimer || setTimeout;
+  const clearTimer = dependencies.clearTimer || clearTimeout;
+
+  return new Promise((resolve) => {
+    let note;
+    let settled = false;
+    let activated = false;
+    let timer;
+
+    const activate = () => {
+      if (activated) return;
+      activated = true;
+      payload.onActivate?.();
+    };
+    const cleanupSettlementListeners = () => {
+      if (!note) return;
+      note.removeListener('show', onShow);
+      note.removeListener('failed', onFailed);
+    };
+    const settle = (result, { keepSettlementListeners = false } = {}) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimer(timer);
+      if (!keepSettlementListeners) cleanupSettlementListeners();
+      resolve(result);
+    };
+    const onShow = () => {
+      retainNotification(note, activate);
+      cleanupSettlementListeners();
+      settle({ shown: true });
+    };
+    const onFailed = (_event, error) => {
+      const message = errorMessage(error);
+      cleanupSettlementListeners();
+      settle({
+        shown: false,
+        reason: 'failed',
+        ...(message ? { message } : {}),
+      });
+    };
+
+    try {
+      note = new NotificationClass({
+        title: payload.title,
+        body: payload.body,
+        silent: payload.silent === true,
+        ...(payload.icon ? { icon: payload.icon } : {}),
+      });
+      note.on('show', onShow);
+      note.on('failed', onFailed);
+      note.on('click', activate);
+      note.on('action', activate);
+      timer = setTimer(
+        () => settle({ shown: false, reason: 'timeout' }, { keepSettlementListeners: true }),
+        payload.timeoutMs || 5_000,
+      );
+      note.show();
+    } catch (error) {
+      const message = errorMessage(error);
+      settle({
+        shown: false,
+        reason: 'failed',
+        ...(message ? { message } : {}),
+      });
+    }
+  });
+}
+
+module.exports = { closeAllDesktopNotifications, showDesktopNotification };
