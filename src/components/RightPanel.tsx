@@ -5,7 +5,6 @@ import { useGitEnvironment } from '../hooks/useGitEnvironment';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
 import { usePullRequest } from '../hooks/usePullRequest';
 import { useGithubSetup } from '../hooks/useGithubSetup';
-import { githubContextIntegration } from '../lib/githubContext';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Loader2, ChevronRight, FileText } from 'lucide-react';
@@ -33,9 +32,8 @@ export default function RightPanel() {
   const git = useGitEnvironment(cwd, diffMode);
   const isGitHub = !!git.env?.isGitHub;
   const githubSetup = useGithubSetup(isGitHub, git.env?.repoRoot ?? cwd);
-  const githubContext = githubContextIntegration(isGitHub, githubSetup);
   const pr = usePullRequest(cwd, git.env?.branch ?? null, {
-    enabled: githubContext.pullRequestEnabled,
+    enabled: isGitHub && githubSetup.isReady,
     active: view === 'pr',
   });
 
@@ -147,7 +145,17 @@ export default function RightPanel() {
                   onDiffModeChange={setDiffMode}
                   refresh={git.refresh}
                   live={working || childSessionsRunning}
-                  {...githubContext.environmentProps}
+                  githubAvailability={githubSetup.availability}
+                  githubAction={githubSetup.action}
+                  githubError={githubSetup.error}
+                  githubManualGuideOpened={githubSetup.manualGuideOpened}
+                  githubAuthCode={githubSetup.authCode}
+                  githubAuthPopoverOpen={githubSetup.isAuthPopoverOpen}
+                  githubReady={githubSetup.isReady}
+                  onGithubSetupAction={githubSetup.runPrimaryAction}
+                  onShowGithubAuthPrompt={githubSetup.showAuthPrompt}
+                  onCloseGithubAuthPrompt={githubSetup.closeAuthPrompt}
+                  onCancelGithubAuthentication={githubSetup.cancelAuthentication}
                   pr={pr.pr}
                   onOpenPr={() => {
                     setView('pr');

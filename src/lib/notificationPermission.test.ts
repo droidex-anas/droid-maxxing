@@ -66,3 +66,17 @@ test('reports unsupported when the API is absent', async () => {
     restore();
   }
 });
+
+test('reports unsupported when requesting notification permission rejects', async () => {
+  const restore = replaceNotification({
+    permission: 'default',
+    requestPermission: async () => {
+      throw new Error('permission request failed');
+    },
+  });
+  try {
+    assert.equal(await requestNotificationPermission(), 'unsupported');
+  } finally {
+    restore();
+  }
+});

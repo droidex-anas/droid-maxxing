@@ -25,6 +25,7 @@ function runFile(file, args, { cwd, timeout = DEFAULT_TIMEOUT } = {}) {
 
 async function resolveExecutable({ binaryName, commonPaths }, options = {}) {
   const env = options.env || process.env;
+  const platform = options.platform || process.platform;
   const access =
     options.access || ((candidate) => fs.promises.access(candidate, fs.constants.X_OK));
   const execute = options.runFile || runFile;
@@ -49,7 +50,7 @@ async function resolveExecutable({ binaryName, commonPaths }, options = {}) {
     if (valid) return valid;
   }
 
-  const shell = String(env.SHELL || '').trim();
+  const shell = String(env.SHELL || '').trim() || (platform === 'darwin' ? '/bin/zsh' : '');
   if (!shell) return null;
   const lookup = await execute(shell, ['-lc', `command -v ${binaryName}`], { timeout: 5_000 });
   if (lookup.code !== 0) return null;

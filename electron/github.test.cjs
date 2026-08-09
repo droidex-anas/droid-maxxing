@@ -107,6 +107,25 @@ test('discovers gh from the configured login shell after common paths fail', asy
   assert.equal(executable, '/custom/login/bin/gh');
 });
 
+test('discovers gh through the macOS login shell when Finder omits SHELL', async () => {
+  const executable = await resolveGhExecutable({
+    platform: 'darwin',
+    env: { PATH: '/usr/bin:/bin' },
+    access: async (candidate) => {
+      if (candidate !== '/custom/login/bin/gh') throw new Error('missing');
+    },
+    runFile: async (file, args) => {
+      if (file === '/bin/zsh') {
+        assert.deepEqual(args, ['-lc', 'command -v gh']);
+        return ghResult({ stdout: '/custom/login/bin/gh\n' });
+      }
+      return ghResult({ stdout: 'gh version 2.78.0' });
+    },
+  });
+
+  assert.equal(executable, '/custom/login/bin/gh');
+});
+
 test('availability reports the supported recovery path when gh is missing', async () => {
   const homebrew = await available({
     runGh: async () => ghResult({ code: 1, spawnFailed: true }),
@@ -468,6 +487,48 @@ test('cancelling during final authentication verification cannot report success'
     ok: false,
     reason: 'cancelled',
     message: 'GitHub sign-in was cancelled.',
+  });
+});
+
+test('authentication cannot report success when its deadline expires during verification', async () => {
+  const child = fakeChild();
+  child.killed = true;
+  let timeoutCallback;
+  let verificationStarted;
+  const started = new Promise((resolve) => {
+    verificationStarted = resolve;
+  });
+  let finishVerification;
+  const pending = authenticate({
+    resolveGh: async () => '/opt/homebrew/bin/gh',
+    spawnProcess: () => {
+      queueMicrotask(() => {
+        child.stderr.write('https://github.com/login/device\n');
+        child.emit('close', 0, null);
+      });
+      return child;
+    },
+    verifyAuth: async () => {
+      verificationStarted();
+      return new Promise((resolve) => {
+        finishVerification = resolve;
+      });
+    },
+    setTimer: (callback) => {
+      timeoutCallback = callback;
+      return { unref() {} };
+    },
+    clearTimer: () => undefined,
+  });
+
+  await started;
+  timeoutCallback();
+  finishVerification(true);
+
+  assert.deepEqual(await pending, {
+    ok: false,
+    reason: 'timeout',
+    message: 'GitHub sign-in timed out.',
   });
 });
 

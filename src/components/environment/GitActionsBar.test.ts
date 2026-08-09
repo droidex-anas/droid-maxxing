@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { GitActionsBar } from './GitActionsBar.js';
-import { canRenderPrSheet } from '../../lib/gitActionVisibility.js';
+import { canRenderPrSheet, reconcileGitActionSheet } from '../../lib/gitActionVisibility.js';
 import type { GitEnvironment } from '../../types/vcs.js';
 
 const env: GitEnvironment = {
@@ -46,4 +46,6 @@ test('an open PR sheet closes when GitHub readiness is lost', () => {
   assert.equal(canRenderPrSheet('pr', true, false, false, false), false);
   assert.equal(canRenderPrSheet('pr', false, true, false, false), false);
   assert.equal(canRenderPrSheet('pr', true, true, true, false), false);
+  assert.equal(reconcileGitActionSheet('pr', true, false, false, false), 'none');
+  assert.equal(reconcileGitActionSheet('commit', true, false, false, false), 'commit');
 });

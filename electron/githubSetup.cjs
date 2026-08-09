@@ -262,6 +262,10 @@ function runAuthenticationProcess(executable, operation, options = {}) {
         finish({ ok: false, reason: 'cancelled', message: 'GitHub sign-in was cancelled.' });
         return;
       }
+      if (timedOut) {
+        finish({ ok: false, reason: 'timeout', message: 'GitHub sign-in timed out.' });
+        return;
+      }
       if (!authenticated) {
         finish({
           ok: false,

@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2, Upload } from 'lucide-react';
 import { GitCommitIcon, GitPullRequestIcon } from './GithubIcons';
 import { CommitSheet } from './CommitSheet';
 import { CreatePrSheet } from './CreatePrSheet';
 import { gitPush } from '../../lib/git';
 import { toast } from '../../lib/toast';
-import { canRenderPrSheet, type GitActionSheet } from '../../lib/gitActionVisibility';
+import {
+  canRenderPrSheet,
+  reconcileGitActionSheet,
+  type GitActionSheet,
+} from '../../lib/gitActionVisibility';
 import type { GitBranchList, GitEnvironment } from '../../types/vcs';
 
 function ActionButton({
@@ -59,6 +63,12 @@ export function GitActionsBar({
 }) {
   const [sheet, setSheet] = useState<GitActionSheet>('none');
   const [pushing, setPushing] = useState(false);
+
+  useEffect(() => {
+    setSheet((current) =>
+      reconcileGitActionSheet(current, isGitHub, githubReady, hasPr, !!env?.detached),
+    );
+  }, [isGitHub, githubReady, hasPr, env?.detached]);
 
   const toggle = (next: GitActionSheet) => {
     setSheet((cur) => (cur === next ? 'none' : next));

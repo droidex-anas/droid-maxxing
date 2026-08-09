@@ -103,3 +103,22 @@ test('reports a bounded timeout and activates a session at most once', async () 
   assert.equal(activations, 1);
   assert.deepEqual(await pending, { shown: false, reason: 'timeout' });
 });
+
+test('a notification shown after the delivery timeout remains owned for shutdown', async () => {
+  let timeoutCallback;
+  const pending = showDesktopNotification(FakeNotification, payload(), {
+    setTimer(callback) {
+      timeoutCallback = callback;
+      return 1;
+    },
+    clearTimer() {},
+  });
+  const lateNotification = FakeNotification.latest;
+
+  timeoutCallback();
+  assert.deepEqual(await pending, { shown: false, reason: 'timeout' });
+  lateNotification.emit('show');
+  closeAllDesktopNotifications();
+
+  assert.equal(lateNotification.closed, true);
+});

@@ -91,11 +91,13 @@ function setupContent(
 export function GithubAuthPromptContent({
   code,
   copied = false,
+  copyFailed = false,
   onCopy,
   onCancel,
 }: {
   code: string;
   copied?: boolean;
+  copyFailed?: boolean;
   onCopy: () => void;
   onCancel: () => void;
 }) {
@@ -118,6 +120,11 @@ export function GithubAuthPromptContent({
           {copied ? 'Copied' : 'Copy code'}
         </button>
       </div>
+      {copyFailed && (
+        <p aria-live="polite" className="mt-2 text-[11.5px] leading-4 text-droid-red">
+          Could not copy the code. Select it and copy it manually.
+        </p>
+      )}
       <div className="mt-3 flex justify-end">
         <button
           type="button"
@@ -158,22 +165,24 @@ export function GithubSetupCard({
 }: GithubSetupCardProps) {
   const actionRef = useRef<HTMLButtonElement>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [copyFailedCode, setCopyFailedCode] = useState<string | null>(null);
   if (!availability || (availability.installed && availability.authenticated)) return null;
 
   const isBusy = action !== 'idle' && !authCode;
   const copied = isGithubAuthCodeCopied(authCode, copiedCode);
+  const copyFailed = isGithubAuthCodeCopied(authCode, copyFailedCode);
   const content = setupContent(availability, action, manualGuideOpened, authCode);
 
-  const copyCode = () => {
+  const copyCode = async () => {
     if (!authCode) return;
-    void navigator.clipboard
-      .writeText(authCode)
-      .then(() => {
-        setCopiedCode(authCode);
-      })
-      .catch(() => {
-        setCopiedCode(null);
-      });
+    setCopyFailedCode(null);
+    try {
+      await navigator.clipboard.writeText(authCode);
+      setCopiedCode(authCode);
+    } catch {
+      setCopiedCode(null);
+      setCopyFailedCode(authCode);
+    }
   };
 
   return (
@@ -212,7 +221,8 @@ export function GithubSetupCard({
               <GithubAuthPromptContent
                 code={authCode}
                 copied={copied}
-                onCopy={copyCode}
+                copyFailed={copyFailed}
+                onCopy={() => void copyCode()}
                 onCancel={() => {
                   onCloseAuthPrompt();
                   onCancelAuthentication();

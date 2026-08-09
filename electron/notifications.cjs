@@ -48,19 +48,21 @@ function showDesktopNotification(NotificationClass, payload, dependencies = {}) 
       note.removeListener('show', onShow);
       note.removeListener('failed', onFailed);
     };
-    const settle = (result) => {
+    const settle = (result, { keepSettlementListeners = false } = {}) => {
       if (settled) return;
       settled = true;
       if (timer !== undefined) clearTimer(timer);
-      cleanupSettlementListeners();
+      if (!keepSettlementListeners) cleanupSettlementListeners();
       resolve(result);
     };
     const onShow = () => {
       retainNotification(note, activate);
+      cleanupSettlementListeners();
       settle({ shown: true });
     };
     const onFailed = (_event, error) => {
       const message = errorMessage(error);
+      cleanupSettlementListeners();
       settle({
         shown: false,
         reason: 'failed',
@@ -80,7 +82,7 @@ function showDesktopNotification(NotificationClass, payload, dependencies = {}) 
       note.on('click', activate);
       note.on('action', activate);
       timer = setTimer(
-        () => settle({ shown: false, reason: 'timeout' }),
+        () => settle({ shown: false, reason: 'timeout' }, { keepSettlementListeners: true }),
         payload.timeoutMs || 5_000,
       );
       note.show();

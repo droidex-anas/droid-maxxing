@@ -128,6 +128,21 @@ test('device-code popover content shows copy and cancellation actions', async ()
   assert.match(html, /Paste this code into GitHub/);
 });
 
+test('device-code popover explains how to recover from a clipboard failure', async () => {
+  const { GithubAuthPromptContent } = await loadCard();
+  const html = renderToStaticMarkup(
+    createElement(GithubAuthPromptContent, {
+      code: 'ABCD-7HJK',
+      copyFailed: true,
+      onCopy: () => undefined,
+      onCancel: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Could not copy the code/i);
+  assert.match(html, /select it and copy it manually/i);
+});
+
 test('setup failures use accessible live text in addition to color', async () => {
   const html = await render(homebrewMissing, { error: 'Homebrew could not install GitHub CLI.' });
 
