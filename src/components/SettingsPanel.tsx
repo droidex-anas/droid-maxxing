@@ -395,6 +395,7 @@ function GeneralSection() {
           description="Choose what plain Enter does during an active model turn. Cmd/Ctrl+Enter does the opposite."
         >
           <Dropdown
+            ariaLabel="Enter while working"
             value={state.liveEnterBehavior}
             width="w-44"
             options={[
@@ -414,6 +415,7 @@ function GeneralSection() {
           description="How pasted or dropped images are encoded for the model. Original keeps the exact pixels; smaller tiers save context tokens."
         >
           <Dropdown
+            ariaLabel="Image paste quality"
             value={state.imagePasteQuality}
             width="w-52"
             options={[
@@ -438,6 +440,7 @@ function GeneralSection() {
           description="How file diffs render in the Review tab — one column or side-by-side."
         >
           <Dropdown
+            ariaLabel="Diff view"
             value={state.diffView}
             width="w-44"
             options={[
@@ -454,6 +457,7 @@ function GeneralSection() {
           description="Choose a softer GitHub-style tint or a stronger focused change treatment."
         >
           <Dropdown
+            ariaLabel="Diff theme"
             value={state.theme.diffStyle}
             width="w-44"
             options={[
@@ -541,6 +545,7 @@ function GeneralSection() {
         {availableForOverride.length > 0 && (
           <div className="mt-2.5">
             <Dropdown
+              ariaLabel="Add a model override"
               value=""
               placeholder="Add a model override…"
               triggerIcon={<Plus className="w-3.5 h-3.5 text-droid-text-muted" />}

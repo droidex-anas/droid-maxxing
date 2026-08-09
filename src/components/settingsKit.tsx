@@ -34,6 +34,7 @@ export function Dropdown({
   value,
   options,
   onChange,
+  ariaLabel,
   placeholder = 'Select…',
   triggerIcon,
   width = 'w-44',
@@ -42,6 +43,8 @@ export function Dropdown({
   value: string;
   options: DropdownOption[];
   onChange: (v: string) => void;
+  /** Accessible name for the listbox popup (usually the field's label). */
+  ariaLabel: string;
   placeholder?: string;
   triggerIcon?: React.ReactNode;
   width?: string;
@@ -125,7 +128,11 @@ export function Dropdown({
         <div
           className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1.5 min-w-full rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50`}
         >
-          <div className="max-h-72 overflow-y-auto space-y-0.5" role="listbox">
+          <div
+            className="max-h-72 overflow-y-auto space-y-0.5"
+            role="listbox"
+            aria-label={ariaLabel}
+          >
             {options.map((o) => {
               const active = o.value === value;
               return (
