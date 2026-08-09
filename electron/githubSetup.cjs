@@ -89,6 +89,9 @@ async function install(options = {}) {
 
   try {
     const brew = await resolveBrew();
+    if (operation.cancelled) {
+      return { ok: false, reason: 'cancelled', message: 'GitHub CLI installation was cancelled.' };
+    }
     if (!brew) {
       return { ok: false, reason: 'installer_missing', message: 'Homebrew is not installed.' };
     }

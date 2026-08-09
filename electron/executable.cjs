@@ -54,8 +54,11 @@ async function resolveExecutable({ binaryName, commonPaths }, options = {}) {
   if (!shell) return null;
   const lookup = await execute(shell, ['-lc', `command -v ${binaryName}`], { timeout: 5_000 });
   if (lookup.code !== 0) return null;
-  const shellCandidate = lookup.stdout.trim().split(/\r?\n/, 1)[0];
-  if (!path.isAbsolute(shellCandidate)) return null;
+  const shellCandidate = lookup.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => path.isAbsolute(line));
+  if (!shellCandidate) return null;
   return validate(shellCandidate);
 }
 

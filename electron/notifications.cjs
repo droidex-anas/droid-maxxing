@@ -1,6 +1,12 @@
 const activeNotifications = new Map();
+const MAX_RETAINED_NOTIFICATIONS = 32;
 
 function retainNotification(note, activate) {
+  if (activeNotifications.size >= MAX_RETAINED_NOTIFICATIONS) {
+    const [oldestNote, releaseOldest] = activeNotifications.entries().next().value;
+    releaseOldest();
+    oldestNote.close();
+  }
   const release = () => {
     note.removeListener('click', activate);
     note.removeListener('action', activate);

@@ -209,6 +209,15 @@ export function GithubSetupCard({
             <SetupActionIcon icon={content.icon} />
             {content.label}
           </button>
+          {isBusy && (
+            <button
+              type="button"
+              onClick={onCancelAuthentication}
+              className="ml-2 mt-2 rounded-lg px-2.5 py-1.5 text-[11.5px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
+            >
+              {action === 'installing' ? 'Cancel installation' : 'Cancel sign-in'}
+            </button>
+          )}
           {authCode && (
             <Popover
               open={isAuthPopoverOpen}

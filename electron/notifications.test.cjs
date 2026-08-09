@@ -122,3 +122,19 @@ test('a notification shown after the delivery timeout remains owned for shutdown
 
   assert.equal(lateNotification.closed, true);
 });
+
+test('retained notifications stay bounded when macOS banners never emit close', async () => {
+  const shown = [];
+  for (let index = 0; index < 33; index += 1) {
+    const pending = showDesktopNotification(FakeNotification, payload());
+    const notification = FakeNotification.latest;
+    shown.push(notification);
+    notification.emit('show');
+    await pending;
+  }
+
+  assert.equal(shown[0].closed, true);
+  assert.equal(shown[1].closed, undefined);
+
+  closeAllDesktopNotifications();
+});

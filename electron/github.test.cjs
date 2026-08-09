@@ -126,6 +126,23 @@ test('discovers gh through the macOS login shell when Finder omits SHELL', async
   assert.equal(executable, '/custom/login/bin/gh');
 });
 
+test('ignores login-shell banner lines when discovering gh', async () => {
+  const executable = await resolveGhExecutable({
+    env: { PATH: '/usr/bin:/bin', SHELL: '/bin/zsh' },
+    access: async (candidate) => {
+      if (candidate !== '/custom/login/bin/gh') throw new Error('missing');
+    },
+    runFile: async (file) => {
+      if (file === '/bin/zsh') {
+        return ghResult({ stdout: 'Welcome to this shell\n/custom/login/bin/gh\n' });
+      }
+      return ghResult({ stdout: 'gh version 2.78.0' });
+    },
+  });
+
+  assert.equal(executable, '/custom/login/bin/gh');
+});
+
 test('availability reports the supported recovery path when gh is missing', async () => {
   const homebrew = await available({
     runGh: async () => ghResult({ code: 1, spawnFailed: true }),
@@ -199,6 +216,32 @@ test('installation reports a missing supported package manager', async () => {
     reason: 'installer_missing',
     message: 'Homebrew is not installed.',
   });
+});
+
+test('cancelling during Homebrew discovery never starts installation', async () => {
+  let finishDiscovery;
+  let installationStarted = false;
+  const pending = install({
+    resolveBrew: async () =>
+      new Promise((resolve) => {
+        finishDiscovery = resolve;
+      }),
+    execute: async () => {
+      installationStarted = true;
+      return { code: 0, timedOut: false };
+    },
+  });
+  await Promise.resolve();
+
+  cancelSetup();
+  finishDiscovery('/opt/homebrew/bin/brew');
+
+  assert.deepEqual(await pending, {
+    ok: false,
+    reason: 'cancelled',
+    message: 'GitHub CLI installation was cancelled.',
+  });
+  assert.equal(installationStarted, false);
 });
 
 test('installation verifies gh even when Homebrew exits successfully', async () => {

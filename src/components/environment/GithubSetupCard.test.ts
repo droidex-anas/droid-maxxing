@@ -90,14 +90,16 @@ test('installed signed-out CLI offers GitHub browser authentication', async () =
   assert.match(html, /Sign in to GitHub/);
 });
 
-test('busy setup states are disabled and explicit', async () => {
+test('busy setup states keep an explicit cancellation action available', async () => {
   const installing = await render(homebrewMissing, { action: 'installing' });
   const authenticating = await render(signedOut, { action: 'authenticating' });
 
   assert.match(installing, /Installing…/);
   assert.match(installing, /disabled=""/);
+  assert.match(installing, /Cancel installation/);
   assert.match(authenticating, /Waiting for GitHub…/);
   assert.match(authenticating, /disabled=""/);
+  assert.match(authenticating, /Cancel sign-in/);
 });
 
 test('authentication with a device code keeps a button to reopen the popover', async () => {
