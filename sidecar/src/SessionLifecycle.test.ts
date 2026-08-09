@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   ReasoningEffort,
@@ -375,6 +378,7 @@ test('create and cold resume publish only after registration', async () => {
   assert.ok(createPersist >= 0 && createPersist < createPublished);
   assert.ok(createPublished < createTrace.indexOf('stream'));
   assert.equal(created.registry.getCanonicalSummary('created-1')?.appSessionId, 'created-1');
+  assert.equal(created.runtime.createCalls[0]?.cwd, '/workspace');
   assert.equal(created.publicationRegistration.every(Boolean), true);
   const resumed = createHarness([summary('app-2', 'provider-2')]);
   queueLoad(resumed, 'provider-2');
@@ -393,6 +397,33 @@ test('create and cold resume publish only after registration', async () => {
   );
   assert.equal(resumed.runtime.loadCalls[0]?.handlers.cwd, '/workspace');
   assert.equal(resumed.publicationRegistration.every(Boolean), true);
+});
+
+test('folder-less chats run in the DROIDEX chats directory', async (t) => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'droidex-user-data-'));
+  const previousUserDataDir = process.env.DROIDEX_USER_DATA_DIR;
+  process.env.DROIDEX_USER_DATA_DIR = userDataDir;
+  t.after(async () => {
+    if (previousUserDataDir === undefined) delete process.env.DROIDEX_USER_DATA_DIR;
+    else process.env.DROIDEX_USER_DATA_DIR = previousUserDataDir;
+    await rm(userDataDir, { recursive: true, force: true });
+  });
+
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'plain-chat');
+  await harness.lifecycle.create({ ...createCommand(), cwd: '' });
+  await provider.waitForPrompts(1);
+
+  const chatCwd = join(userDataDir, 'chats');
+  assert.equal(harness.runtime.createCalls[0]?.cwd, chatCwd);
+  assert.equal((await stat(chatCwd)).isDirectory(), true);
+  assert.deepEqual(
+    harness.registry.getCanonicalSummary('plain-chat') && {
+      cwd: harness.registry.getCanonicalSummary('plain-chat')?.cwd,
+      workspaceKind: harness.registry.getCanonicalSummary('plain-chat')?.workspaceKind,
+    },
+    { cwd: '', workspaceKind: 'none' },
+  );
 });
 
 test('create omits an unarmed daemon compaction limit from its summary', async () => {

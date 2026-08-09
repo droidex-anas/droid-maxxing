@@ -5,7 +5,6 @@ import {
   type MissionFeature,
   type PermissionHandler,
 } from '@factory/droid-sdk';
-import { homedir } from 'node:os';
 import type { CreateRuntimeSessionOptions } from './DroidRuntime.js';
 import type {
   Autonomy,
@@ -254,7 +253,7 @@ export function createDefaultsModeForCommand(
 
 export function buildCreateRuntimeOptions(input: {
   command: SessionCreateCommand;
-  appCwd: string;
+  runtimeCwd: string;
   interactionMode: SessionInteractionMode;
   primary: { modelId?: string; reasoningEffort?: ReasoningEffort };
   agents: Pick<
@@ -278,7 +277,7 @@ export function buildCreateRuntimeOptions(input: {
     ? input.primary.reasoningEffort
     : input.defaults.specReasoningEffort;
   return {
-    cwd: input.appCwd.length > 0 ? input.appCwd : homedir(),
+    cwd: input.runtimeCwd,
     interactionMode: input.interactionMode,
     ...(input.primary.modelId !== undefined ? { modelId: input.primary.modelId } : {}),
     autonomyLevel: input.autonomy,

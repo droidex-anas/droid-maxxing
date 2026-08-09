@@ -3,7 +3,10 @@ import {
   type McpServerConfig,
   type PermissionHandler,
 } from '@factory/droid-sdk';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
+import { droidexUserDataDir } from './droidexPaths.js';
 import type {
   ClientCommand,
   FactoryDefaultSettings,
@@ -27,6 +30,14 @@ import {
 } from './sessionHelpers.js';
 
 export type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
+
+async function sessionRuntimeCwd(appCwd: string): Promise<string> {
+  if (appCwd) return appCwd;
+  const chatCwd = join(droidexUserDataDir(), 'chats');
+  await mkdir(chatCwd, { recursive: true });
+  return chatCwd;
+}
+
 interface LocalMcpResource {
   close(): Promise<void>;
 }
@@ -131,12 +142,13 @@ export class SessionLifecycle {
         },
         defaults,
       });
+      const runtimeCwd = await sessionRuntimeCwd(appCwd);
       this.requireOpenAdmission();
       const mcp = await d.startLocalMcpServers(ref);
       pendingMcpServers = mcp.servers;
       const runtimeOptions = buildCreateRuntimeOptions({
         command,
-        appCwd,
+        runtimeCwd,
         interactionMode,
         primary,
         agents,
