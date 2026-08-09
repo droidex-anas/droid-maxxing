@@ -291,7 +291,7 @@ export function ColorField({
         <button
           ref={swatchRef}
           onClick={() => setOpen((o) => !o)}
-          className="w-5 h-5 rounded border border-droid-border cursor-pointer hover:border-droid-border-hover transition-colors"
+          className="w-8 h-8 rounded-lg border border-droid-border cursor-pointer hover:border-droid-border-hover transition-colors"
           style={{ backgroundColor: value }}
           title="Pick color"
         />
@@ -299,7 +299,8 @@ export function ColorField({
           type="text"
           value={draft}
           onChange={(e) => commit(e.target.value)}
-          className="w-16 bg-droid-elevated border border-droid-border rounded px-1.5 py-0.5 font-mono text-[10px] text-droid-text-secondary focus:outline-none focus:border-droid-border-hover"
+          spellCheck={false}
+          className="w-24 bg-droid-elevated border border-droid-border rounded-lg px-2 py-1.5 font-mono text-[11px] text-droid-text-secondary focus:outline-none focus:border-droid-border-hover"
         />
         {open && (
           <ColorPopover anchor={swatchRef.current} onClose={() => setOpen(false)}>

@@ -5,7 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { initialState, reducer, StoreContext, type AppState } from '../hooks/useStore.js';
 import type { AppIconMode } from '../lib/appIcon.js';
-import SettingsPanel, { AppearanceSection } from './SettingsPanel.js';
+import { AppearanceSection } from './AppearanceSettings.js';
+import SettingsPanel from './SettingsPanel.js';
 
 const ICON_MODES: readonly [AppIconMode, string][] = [
   ['system', 'System'],

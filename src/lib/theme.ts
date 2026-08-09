@@ -23,27 +23,317 @@ export interface ThemeSettings extends ThemeColors {
   contrast: number;
 }
 
-// Each preset carries a theme-matched neutral accent so switching mode/preset
+// A named theme with a light and a dark variant. The color scheme setting
+// (light/dark/system) picks which variant of the active preset is applied.
+export interface ThemePreset {
+  id: string;
+  name: string;
+  light: ThemeColors;
+  dark: ThemeColors;
+}
+
+// Sentinel presetId for flattened colors that match no preset (manual edits).
+export const CUSTOM_THEME_ID = 'custom';
+export const DEFAULT_THEME_ID = 'droid';
+
+// Each preset carries a theme-matched neutral accent so switching scheme/preset
 // keeps the UI monochrome (the accent tracks the foreground tone) instead of
-// leaving a stale colored accent behind. Tinted themes (midnight/warm) use
-// their own fg tone as the accent so they stay on a single tonal scale.
+// leaving a stale colored accent behind. Tinted themes use their own fg tone
+// as the accent so they stay on a single tonal scale. The branded presets
+// (Claude, VS Code, ChatGPT, Catppuccin, Tokyo Night) instead carry their
+// signature accent color, tuned per variant so it reads on its own canvas.
 //
-// Light is deliberately NOT white-on-white: a warm grey canvas with pure-white
-// surfaces gives the same tonal depth dark mode has (cards and hover states
-// stay visible), keeps near-black text from glaring, and lets the pastel diff
-// palettes read. Pure-white backgrounds are tiring and flatten every border.
-export const PRESET_THEMES: Record<string, ThemeColors> = {
-  dark: { bg: '#0a0a0a', fg: '#ededed', surface: '#111111', border: '#1f1f1f', accent: '#f2f2f2' },
-  light: { bg: '#e9e7e4', fg: '#262521', surface: '#ffffff', border: '#ddd9d4', accent: '#1c1b18' },
-  midnight: {
-    bg: '#0a0e1a',
-    fg: '#c8d0e0',
-    surface: '#11152a',
-    border: '#1a2040',
-    accent: '#c8d0e0',
+// Light variants are deliberately NOT white-on-white: a warm grey canvas with
+// near-white surfaces gives the same tonal depth dark mode has (cards and
+// hover states stay visible), keeps near-black text from glaring, and lets the
+// pastel diff palettes read. Each variant carries a hue-matched tint (warm
+// paper for Droid, cool blue for Midnight, etc.) and a softened, slightly
+// warm foreground instead of a harsh neutral, so the whole scale sits gently
+// on the eye — pure-white backgrounds and black text are tiring and flatten
+// every border.
+export const BUILT_IN_THEMES: ThemePreset[] = [
+  {
+    id: DEFAULT_THEME_ID,
+    name: 'Droid',
+    dark: {
+      bg: '#0a0a0a',
+      fg: '#ededed',
+      surface: '#111111',
+      border: '#1f1f1f',
+      accent: '#f2f2f2',
+    },
+    light: {
+      bg: '#efede8',
+      fg: '#2e2b26',
+      surface: '#faf8f4',
+      border: '#e2ded6',
+      accent: '#2e2b26',
+    },
   },
-  warm: { bg: '#1a1612', fg: '#d8d0c8', surface: '#221e18', border: '#322a22', accent: '#d8d0c8' },
-};
+  {
+    id: 'midnight',
+    name: 'Midnight',
+    dark: {
+      bg: '#0a0e1a',
+      fg: '#c8d0e0',
+      surface: '#11152a',
+      border: '#1a2040',
+      accent: '#c8d0e0',
+    },
+    light: {
+      bg: '#e9ecf2',
+      fg: '#2a3040',
+      surface: '#f8f9fb',
+      border: '#d9dde6',
+      accent: '#2a3040',
+    },
+  },
+  {
+    id: 'ember',
+    name: 'Ember',
+    dark: {
+      bg: '#1a1612',
+      fg: '#d8d0c8',
+      surface: '#221e18',
+      border: '#322a22',
+      accent: '#d8d0c8',
+    },
+    light: {
+      bg: '#f1ebe2',
+      fg: '#362e26',
+      surface: '#faf5ee',
+      border: '#e4dacb',
+      accent: '#362e26',
+    },
+  },
+  {
+    id: 'ocean',
+    name: 'Ocean',
+    dark: {
+      bg: '#081318',
+      fg: '#c2d4dc',
+      surface: '#0d1b22',
+      border: '#1a2e39',
+      accent: '#c2d4dc',
+    },
+    light: {
+      bg: '#e6edee',
+      fg: '#25353c',
+      surface: '#f7fafb',
+      border: '#d5dfe2',
+      accent: '#25353c',
+    },
+  },
+  {
+    id: 'violet',
+    name: 'Violet',
+    dark: {
+      bg: '#120e1c',
+      fg: '#d2cbe8',
+      surface: '#1a1428',
+      border: '#2a2140',
+      accent: '#d2cbe8',
+    },
+    light: {
+      bg: '#edeaf3',
+      fg: '#322b44',
+      surface: '#f9f8fb',
+      border: '#dfd9e9',
+      accent: '#322b44',
+    },
+  },
+  // Anthropic's Claude: warm book-cloth ivory / warm ink, terracotta accent.
+  // The light accent is a deepened terracotta so links and active states keep
+  // ~4.6:1 on the ivory canvas; dark keeps the brand orange (#d97757).
+  {
+    id: 'claude',
+    name: 'Claude',
+    dark: {
+      bg: '#141413',
+      fg: '#ede9e3',
+      surface: '#1e1d1b',
+      border: '#2e2c29',
+      accent: '#d97757',
+    },
+    light: {
+      bg: '#edebe3',
+      fg: '#141413',
+      surface: '#f7f5ee',
+      border: '#dcd7ca',
+      accent: '#a84a28',
+    },
+  },
+  // VS Code Dark+/Light+: the familiar editor greys with the status-bar blue.
+  {
+    id: 'vscode',
+    name: 'VS Code',
+    dark: {
+      bg: '#1e1e1e',
+      fg: '#d4d4d4',
+      surface: '#252526',
+      border: '#3c3c3c',
+      accent: '#007acc',
+    },
+    light: {
+      bg: '#ecedf0',
+      fg: '#1f1f1f',
+      surface: '#f8f9fb',
+      border: '#d6d8de',
+      accent: '#007acc',
+    },
+  },
+  // ChatGPT/Codex: strictly monochrome mid-greys; the accent is the send-button
+  // white/black, like the real app.
+  {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    dark: {
+      bg: '#212121',
+      fg: '#ececec',
+      surface: '#2f2f2f',
+      border: '#424242',
+      accent: '#f5f5f5',
+    },
+    light: {
+      bg: '#ededec',
+      fg: '#0d0d0d',
+      surface: '#f9f9f8',
+      border: '#dcdcda',
+      accent: '#0d0d0d',
+    },
+  },
+  // Catppuccin Mocha/Latte with the signature mauve accent. The Latte text and
+  // canvas are deepened a step so body text keeps >=7:1 on tinted paper.
+  {
+    id: 'catppuccin',
+    name: 'Catppuccin',
+    dark: {
+      bg: '#1e1e2e',
+      fg: '#cdd6f4',
+      surface: '#313244',
+      border: '#45475a',
+      accent: '#cba6f7',
+    },
+    light: {
+      bg: '#e8eaf0',
+      fg: '#40435c',
+      surface: '#f5f6fa',
+      border: '#ccd0dc',
+      accent: '#8839ef',
+    },
+  },
+  // Tokyo Night (Night/Day): deep blue-grey canvas with the signature blue.
+  {
+    id: 'tokyo-night',
+    name: 'Tokyo Night',
+    dark: {
+      bg: '#1a1b26',
+      fg: '#c0caf5',
+      surface: '#24283b',
+      border: '#3b4261',
+      accent: '#7aa2f7',
+    },
+    light: {
+      bg: '#e1e2e7',
+      fg: '#343b58',
+      surface: '#eceef3',
+      border: '#c4c8d4',
+      accent: '#2e7de9',
+    },
+  },
+];
+
+export const DEFAULT_THEME: ThemePreset = BUILT_IN_THEMES[0];
+
+export function findPreset(id: string, customThemes: ThemePreset[]): ThemePreset | undefined {
+  return BUILT_IN_THEMES.find((p) => p.id === id) ?? customThemes.find((p) => p.id === id);
+}
+
+// Resolve which variant of a preset a scheme mode selects. `system` follows the
+// OS preference (dark when no preference is readable, e.g. in tests).
+export function resolveVariant(preset: ThemePreset, mode: ThemeMode): ThemeColors {
+  const isLight =
+    mode === 'light' ||
+    (mode === 'system' &&
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-color-scheme: light)').matches);
+  return isLight ? preset.light : preset.dark;
+}
+
+function sameColors(a: ThemeColors, b: ThemeColors): boolean {
+  return (Object.keys(a) as (keyof ThemeColors)[]).every(
+    (key) => a[key].toLowerCase() === b[key].toLowerCase(),
+  );
+}
+
+// Identify the preset a flattened palette came from (either variant matches).
+// Used to label themes saved before presetId existed; unmatched colors are
+// reported as CUSTOM_THEME_ID.
+export function detectPresetId(colors: ThemeColors, customThemes: ThemePreset[] = []): string {
+  for (const preset of [...BUILT_IN_THEMES, ...customThemes]) {
+    if (sameColors(preset.light, colors) || sameColors(preset.dark, colors)) return preset.id;
+  }
+  return CUSTOM_THEME_ID;
+}
+
+/* ── custom preset persistence + import ── */
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+function readColors(value: unknown): ThemeColors | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const colors = {
+    bg: raw.bg,
+    fg: raw.fg,
+    surface: raw.surface,
+    border: raw.border,
+    accent: raw.accent,
+  };
+  for (const v of Object.values(colors)) {
+    if (typeof v !== 'string' || !HEX_COLOR.test(v)) return null;
+  }
+  return colors as ThemeColors;
+}
+
+function readPresetName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const name = value.trim().slice(0, 60);
+  return name ? name : null;
+}
+
+// Validate the persisted custom-theme list, dropping malformed entries so a
+// corrupt payload never blocks the built-ins.
+export function parseCustomThemes(raw: unknown): ThemePreset[] {
+  if (!Array.isArray(raw)) return [];
+  const presets: ThemePreset[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name, light, dark } = entry as Record<string, unknown>;
+    const colors = { light: readColors(light), dark: readColors(dark) };
+    const label = readPresetName(name);
+    if (typeof id !== 'string' || !id || !label || !colors.light || !colors.dark) continue;
+    presets.push({ id, name: label, light: colors.light, dark: colors.dark });
+  }
+  return presets;
+}
+
+// Validate an imported theme file ({ name, light, dark }). The preset gets a
+// fresh id when the import is saved.
+export function parseThemePresetImport(
+  raw: unknown,
+): { name: string; light: ThemeColors; dark: ThemeColors } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { name, light, dark } = raw as Record<string, unknown>;
+  const label = readPresetName(name);
+  const lightColors = readColors(light);
+  const darkColors = readColors(dark);
+  if (!label || !lightColors || !darkColors) return null;
+  return { name: label, light: lightColors, dark: darkColors };
+}
+
+export function newCustomThemeId(): string {
+  return `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
 
 // The light preset as it shipped before the readability pass. A saved theme
 // still carrying all five legacy values was never customized, so it is swapped
@@ -60,7 +350,7 @@ export function migrateLegacyLightPreset(colors: ThemeColors): ThemeColors {
   const isLegacy = (Object.keys(LEGACY_LIGHT_PRESET) as (keyof ThemeColors)[]).every(
     (key) => colors[key].toLowerCase() === LEGACY_LIGHT_PRESET[key],
   );
-  return isLegacy ? { ...PRESET_THEMES.light } : colors;
+  return isLegacy ? { ...DEFAULT_THEME.light } : colors;
 }
 
 const SYSTEM_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
@@ -76,14 +366,6 @@ export const UI_FONTS: { id: string; label: string; stack: string }[] = [
 
 export function uiFontStack(id: string): string {
   return UI_FONTS.find((f) => f.id === id)?.stack ?? SYSTEM_FONT_STACK;
-}
-
-// Base palette for a theme mode. `system` follows the OS preference.
-export function paletteForMode(mode: ThemeMode): ThemeColors {
-  const isLight =
-    mode === 'light' ||
-    (mode === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
-  return isLight ? PRESET_THEMES.light : PRESET_THEMES.dark;
 }
 
 /* ── apply CSS variables to document ── */
@@ -213,4 +495,27 @@ function mixHex(hex: string, target: string, t: number): string {
   const mix = (a: number, b: number) => Math.round(a * (1 - t) + b * t);
   const toHex = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
   return `#${toHex(mix(r1, r2))}${toHex(mix(g1, g2))}${toHex(mix(b1, b2))}`;
+}
+
+// sRGB channel -> linear-light value, for WCAG contrast checks.
+export function linearChannel(hexPair: string): number {
+  const c = parseInt(hexPair, 16) / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+// WCAG relative luminance (0 = black, 1 = white).
+export function relativeLuminance(hex: string): number {
+  return (
+    0.2126 * linearChannel(hex.slice(1, 3)) +
+    0.7152 * linearChannel(hex.slice(3, 5)) +
+    0.0722 * linearChannel(hex.slice(5, 7))
+  );
+}
+
+// WCAG contrast ratio between two hex colors (1..21).
+export function contrastRatio(a: string, b: string): number {
+  const l1 = relativeLuminance(a);
+  const l2 = relativeLuminance(b);
+  const [hi, lo] = l1 >= l2 ? [l1, l2] : [l2, l1];
+  return (hi + 0.05) / (lo + 0.05);
 }

@@ -3,7 +3,13 @@ import { createContext, useContext, useMemo, useReducer, useState, useEffect } f
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
-import { migrateLegacyLightPreset } from '../lib/theme';
+import {
+  DEFAULT_THEME_ID,
+  detectPresetId,
+  migrateLegacyLightPreset,
+  parseCustomThemes,
+  type ThemePreset,
+} from '../lib/theme';
 import {
   clearDesignMode,
   setDesignMode,
@@ -118,6 +124,9 @@ export type DiffStyle = 'soft' | 'focused';
 export interface ThemeConfig {
   mode: 'dark' | 'light' | 'system';
   appIconMode: AppIconMode;
+  // The preset the flattened colors came from: a built-in/custom theme id, or
+  // 'custom' when the colors were edited by hand and match no preset.
+  presetId: string;
   accent: string;
   bg: string;
   fg: string;
@@ -216,6 +225,9 @@ export interface AppState {
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
   theme: ThemeConfig;
+  // User-saved theme presets (built-ins live in lib/theme). Persisted to
+  // localStorage; the active one is referenced by theme.presetId.
+  customThemes: ThemePreset[];
   missionControlMode: boolean;
   draftChat: { cwd: string; branch?: string } | null;
   // Persisted app-wide default autonomy for new sessions. Owned by Settings;
@@ -446,6 +458,8 @@ type Action =
   | { type: 'TOGGLE_DESIGN_MODE'; appSessionId: string }
   | { type: 'SET_DESIGN_MODE'; appSessionId: string; open: boolean }
   | { type: 'SET_THEME'; theme: Partial<ThemeConfig> }
+  | { type: 'SAVE_CUSTOM_THEME'; preset: ThemePreset }
+  | { type: 'DELETE_CUSTOM_THEME'; id: string }
   | { type: 'SELECT_FEATURE'; id: string | null }
   | { type: 'SELECT_CHILD'; selection: ChildSelection | null; requestId?: string }
 
@@ -470,6 +484,7 @@ type Action =
 const defaultTheme: ThemeConfig = {
   mode: 'dark',
   appIconMode: 'system',
+  presetId: DEFAULT_THEME_ID,
   accent: '#f2f2f2',
   bg: '#0a0a0a',
   fg: '#ededed',
@@ -530,50 +545,92 @@ export function normalizeDiffStyle(value: unknown): DiffStyle {
   return 'soft';
 }
 
-function loadTheme(): ThemeConfig {
+const CUSTOM_THEMES_STORAGE_KEY = 'droid-theme-presets';
+
+function loadCustomThemes(): ThemePreset[] {
   try {
-    const storage = getLocalStorage();
-    const saved = storage?.getItem('droid-theme');
-    const theme = saved ? { ...defaultTheme, ...JSON.parse(saved) } : { ...defaultTheme };
-    theme.diffStyle = normalizeDiffStyle(theme.diffStyle);
-    theme.appIconMode = normalizeAppIconMode(theme.appIconMode);
-    // One-time migration: a saved accent still carrying an old fixed-orange
-    // default was never deliberately chosen, so neutralize it once. Keying off a
-    // persisted flag (not the accent value) lets a user later pick that same
-    // orange from the preset palette and have the choice stick across reloads.
-    if (storage && storage.getItem(THEME_ACCENT_MIGRATED_KEY) !== '1') {
-      // Migration writes are isolated so a storage failure (quota/restricted)
-      // never discards the theme we already parsed successfully above.
-      try {
-        if (saved && LEGACY_DEFAULT_ACCENTS.has(String(theme.accent).toLowerCase())) {
-          theme.accent = neutralAccentFor(theme.bg);
-          storage.setItem('droid-theme', JSON.stringify(theme));
-        }
-        storage.setItem(THEME_ACCENT_MIGRATED_KEY, '1');
-      } catch {
-        /* migration write failed; retry on a later load */
+    const raw = getLocalStorage()?.getItem(CUSTOM_THEMES_STORAGE_KEY);
+    return raw ? parseCustomThemes(JSON.parse(raw)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistCustomThemes(presets: ThemePreset[]): void {
+  try {
+    getLocalStorage()?.setItem(CUSTOM_THEMES_STORAGE_KEY, JSON.stringify(presets));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Loaded once at module scope so the theme loader can match saved colors
+// against custom presets when recovering a missing presetId.
+const initialCustomThemes = loadCustomThemes();
+
+// One-time migration: a saved accent still carrying an old fixed-orange
+// default was never deliberately chosen, so neutralize it once. Keying off a
+// persisted flag (not the accent value) lets a user later pick that same
+// orange from the preset palette and have the choice stick across reloads.
+function migrateLegacyAccent(storage: Storage, saved: string | null, theme: ThemeConfig): void {
+  if (storage.getItem(THEME_ACCENT_MIGRATED_KEY) === '1') return;
+  // Migration writes are isolated so a storage failure (quota/restricted)
+  // never discards the theme we already parsed successfully above.
+  try {
+    if (saved && LEGACY_DEFAULT_ACCENTS.has(theme.accent.toLowerCase())) {
+      theme.accent = neutralAccentFor(theme.bg);
+      storage.setItem('droid-theme', JSON.stringify(theme));
+    }
+    storage.setItem(THEME_ACCENT_MIGRATED_KEY, '1');
+  } catch {
+    /* migration write failed; retry on a later load */
+  }
+}
+
+// One-time migration: a saved theme still matching the old white-on-white
+// light preset exactly was never customized, so swap it to the readable
+// warm-grey palette. Same persisted-flag pattern as the accent migration.
+function migrateLegacyLight(storage: Storage, saved: string | null, theme: ThemeConfig): void {
+  if (storage.getItem(THEME_LIGHT_PRESET_MIGRATED_KEY) === '1') return;
+  try {
+    if (saved) {
+      const migrated = migrateLegacyLightPreset(theme);
+      if (migrated !== theme) {
+        theme.bg = migrated.bg;
+        theme.fg = migrated.fg;
+        theme.surface = migrated.surface;
+        theme.border = migrated.border;
+        theme.accent = migrated.accent;
+        storage.setItem('droid-theme', JSON.stringify(theme));
       }
     }
-    // One-time migration: a saved theme still matching the old white-on-white
-    // light preset exactly was never customized, so swap it to the readable
-    // warm-grey palette. Same persisted-flag pattern as the accent migration.
-    if (storage && storage.getItem(THEME_LIGHT_PRESET_MIGRATED_KEY) !== '1') {
-      try {
-        if (saved) {
-          const migrated = migrateLegacyLightPreset(theme);
-          if (migrated !== theme) {
-            theme.bg = migrated.bg;
-            theme.fg = migrated.fg;
-            theme.surface = migrated.surface;
-            theme.border = migrated.border;
-            theme.accent = migrated.accent;
-            storage.setItem('droid-theme', JSON.stringify(theme));
-          }
-        }
-        storage.setItem(THEME_LIGHT_PRESET_MIGRATED_KEY, '1');
-      } catch {
-        /* migration write failed; retry on a later load */
-      }
+    storage.setItem(THEME_LIGHT_PRESET_MIGRATED_KEY, '1');
+  } catch {
+    /* migration write failed; retry on a later load */
+  }
+}
+
+function loadTheme(customThemes: ThemePreset[]): ThemeConfig {
+  try {
+    const storage = getLocalStorage();
+    const saved = storage?.getItem('droid-theme') ?? null;
+    const parsed: unknown = saved ? JSON.parse(saved) : null;
+    const theme =
+      parsed && typeof parsed === 'object'
+        ? { ...defaultTheme, ...(parsed as Partial<ThemeConfig>) }
+        : { ...defaultTheme };
+    theme.diffStyle = normalizeDiffStyle(theme.diffStyle);
+    theme.appIconMode = normalizeAppIconMode(theme.appIconMode);
+    // Themes saved before presets existed have no presetId: recover it by
+    // matching the saved colors against known variants, else label them custom.
+    const savedPresetId = (parsed as { presetId?: unknown } | null)?.presetId;
+    theme.presetId =
+      typeof savedPresetId === 'string' && savedPresetId
+        ? savedPresetId
+        : detectPresetId(theme, customThemes);
+    if (storage) {
+      migrateLegacyAccent(storage, saved, theme);
+      migrateLegacyLight(storage, saved, theme);
     }
     return theme;
   } catch {
@@ -913,7 +970,8 @@ export const initialState: AppState = {
   specMode: persistedUiState.specMode ?? false,
   settingsOpen: false,
   commandPaletteOpen: false,
-  theme: loadTheme(),
+  theme: loadTheme(initialCustomThemes),
+  customThemes: initialCustomThemes,
   missionControlMode: persistedUiState.missionControlMode ?? false,
   draftChat: null,
   defaultAutonomy: loadDefaultAutonomy(),
@@ -2429,6 +2487,21 @@ function baseReducer(state: AppState, action: Action): AppState {
         /* ignore */
       }
       return { ...state, theme: next };
+    }
+
+    case 'SAVE_CUSTOM_THEME': {
+      const exists = state.customThemes.some((p) => p.id === action.preset.id);
+      const customThemes = exists
+        ? state.customThemes.map((p) => (p.id === action.preset.id ? action.preset : p))
+        : [...state.customThemes, action.preset];
+      persistCustomThemes(customThemes);
+      return { ...state, customThemes };
+    }
+
+    case 'DELETE_CUSTOM_THEME': {
+      const customThemes = state.customThemes.filter((p) => p.id !== action.id);
+      persistCustomThemes(customThemes);
+      return { ...state, customThemes };
     }
 
     case 'SELECT_FEATURE':
