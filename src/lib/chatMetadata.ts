@@ -55,21 +55,42 @@ function sanitizeMetadata(value: unknown): ChatMetadata | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+// Tombstones (archived/deleted) outlive preference metadata (pins, renames)
+// under the cap: forgetting a preference is harmless, but forgetting a
+// tombstone resurfaces a chat the user hid.
+function isTombstone(meta: ChatMetadata): boolean {
+  return meta.archivedAt !== undefined || meta.deletedAt !== undefined;
+}
+
+// Enforces MAX_TRACKED_CHATS on entries in recency order, dropping the oldest
+// first and tombstones last. One rule for both seams — oversized payloads at
+// load and runtime writes — so neither path can resurrect a hidden chat.
+function capMetadataEntries(entries: [string, ChatMetadata][]): [string, ChatMetadata][] {
+  if (entries.length <= MAX_TRACKED_CHATS) return entries;
+  const byEvictionOrder = [
+    ...entries.filter(([, meta]) => !isTombstone(meta)),
+    ...entries.filter(([, meta]) => isTombstone(meta)),
+  ];
+  const dropped = new Set(
+    byEvictionOrder.slice(0, entries.length - MAX_TRACKED_CHATS).map(([id]) => id),
+  );
+  return entries.filter(([id]) => !dropped.has(id));
+}
+
 export function loadChatMetadata(): ChatMetadataMap {
   try {
     const raw = getLocalStorage()?.getItem(CHAT_METADATA_STORAGE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const out: ChatMetadataMap = {};
-    // Oversized-at-rest payloads keep the newest entries: storage order is
-    // recency (writes reinsert the touched id last), so the same bound the
-    // write path enforces drops the oldest here too.
-    for (const [appSessionId, value] of Object.entries(parsed).slice(-MAX_TRACKED_CHATS)) {
+    const entries: [string, ChatMetadata][] = [];
+    for (const [appSessionId, value] of Object.entries(parsed)) {
       const meta = sanitizeMetadata(value);
-      if (meta) out[appSessionId] = meta;
+      if (meta) entries.push([appSessionId, meta]);
     }
-    return out;
+    // Storage order is recency (writes reinsert the touched id last); the cap
+    // drops the oldest entries, tombstones last.
+    return Object.fromEntries(capMetadataEntries(entries));
   } catch {
     return {};
   }
@@ -159,20 +180,7 @@ function withMetadata(
   // The same bound loadChatMetadata enforces on read, applied here so runtime
   // updates cannot grow storage past it between restarts. The touched id is
   // reinserted last, so insertion order is recency and the oldest drop first.
-  // Tombstones (archived/deleted) drop last: forgetting a pin or rename is
-  // harmless, but forgetting a tombstone resurfaces a chat the user hid.
-  const entries = Object.entries(next);
-  if (entries.length <= MAX_TRACKED_CHATS) return next;
-  const isTombstone = (entry: [string, ChatMetadata]): boolean =>
-    entry[1].archivedAt !== undefined || entry[1].deletedAt !== undefined;
-  const byEvictionOrder = [
-    ...entries.filter((entry) => !isTombstone(entry)),
-    ...entries.filter(isTombstone),
-  ];
-  const dropped = new Set(
-    byEvictionOrder.slice(0, entries.length - MAX_TRACKED_CHATS).map(([id]) => id),
-  );
-  return Object.fromEntries(entries.filter(([id]) => !dropped.has(id)));
+  return Object.fromEntries(capMetadataEntries(Object.entries(next)));
 }
 
 // The transforms below return null when nothing would change so the reducer

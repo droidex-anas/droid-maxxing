@@ -258,6 +258,27 @@ test('runtime updates cap the map at MAX_TRACKED_CHATS, dropping the oldest', ()
   assert.equal(renamed.s1?.displayTitle, 'still here');
 });
 
+test('loadChatMetadata keeps tombstones over preferences in oversized payloads', () => {
+  // Same eviction rule as the write path: a restart must not resurrect hidden
+  // chats from an oversized-at-rest payload either.
+  const data = fakeStorage();
+  const payload: Record<string, Record<string, number>> = {
+    // Inserted first, so these are the OLDEST entries — and tombstones.
+    'old-archive': { archivedAt: 1 },
+    'old-delete': { deletedAt: 2 },
+  };
+  for (let i = 0; i < 1000; i += 1) payload[`s${String(i)}`] = { pinnedAt: i };
+  data.set('droid-chat-metadata', JSON.stringify(payload));
+
+  const loaded = loadChatMetadata();
+  assert.equal(Object.keys(loaded).length, 1000);
+  // The overflow (2) comes out of the oldest preference entries instead.
+  assert.equal(loaded.s0, undefined);
+  assert.equal(loaded.s1, undefined);
+  assert.equal(loaded['old-archive']?.archivedAt, 1);
+  assert.equal(loaded['old-delete']?.deletedAt, 2);
+});
+
 test('the runtime cap evicts tombstones last so hidden chats stay hidden', () => {
   // Forgetting a pin or rename is harmless; forgetting an archived/deleted
   // tombstone would resurface a chat the user explicitly hid.
