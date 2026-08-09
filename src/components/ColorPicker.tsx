@@ -233,7 +233,9 @@ export function ColorPopover({
   // editor's layer and let Escape cancel the editor). Push once per anchor
   // and read the latest onClose through a ref.
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {

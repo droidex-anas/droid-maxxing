@@ -48,7 +48,9 @@ export function ThemeEditor({
   // latest store theme: cancel restores it instead of a stale open-time
   // snapshot.
   const latestTheme = useRef(state.theme);
-  latestTheme.current = state.theme;
+  useEffect(() => {
+    latestTheme.current = state.theme;
+  });
   const savedRef = useRef(false);
   const [draft, setDraft] = useState<ThemeDraft>(initial);
   // Resolve System mode so the editor opens on the variant actually on screen.
@@ -73,7 +75,9 @@ export function ThemeEditor({
   // re-render, and effects flush child-first, so the editor would end up
   // ABOVE an open picker's layer and Escape would cancel the editor.
   const onCancelRef = useRef(onCancel);
-  onCancelRef.current = onCancel;
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  });
   useEffect(
     () =>
       pushEscapeLayer(() => {
@@ -119,9 +123,9 @@ export function ThemeEditor({
           ),
         ),
       );
-      if (focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
+      if (!first || !last) return;
       const active = document.activeElement as HTMLElement | null;
       const inside = active !== null && roots.some((root) => root.contains(active));
       if (e.shiftKey && (active === first || !inside)) {
