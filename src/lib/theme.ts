@@ -303,6 +303,19 @@ function readPresetName(value: unknown): string | null {
   return name ? name : null;
 }
 
+// Add a custom preset, replacing any existing entry with the same id. Shared
+// by the store reducer and the UI handler that persists first, so both always
+// compute the same list.
+export function upsertCustomTheme(themes: ThemePreset[], preset: ThemePreset): ThemePreset[] {
+  return themes.some((p) => p.id === preset.id)
+    ? themes.map((p) => (p.id === preset.id ? preset : p))
+    : [...themes, preset];
+}
+
+export function removeCustomTheme(themes: ThemePreset[], id: string): ThemePreset[] {
+  return themes.filter((p) => p.id !== id);
+}
+
 // Validate the persisted custom-theme list, dropping malformed entries so a
 // corrupt payload never blocks the built-ins.
 export function parseCustomThemes(raw: unknown): ThemePreset[] {

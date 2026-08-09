@@ -8,6 +8,8 @@ import {
   detectPresetId,
   migrateLegacyLightPreset,
   parseCustomThemes,
+  removeCustomTheme,
+  upsertCustomTheme,
   type ThemePreset,
 } from '../lib/theme';
 import {
@@ -556,10 +558,13 @@ function loadCustomThemes(): ThemePreset[] {
   }
 }
 
-// Throws on write failure (quota, restricted storage): the reducers persist
-// before returning new state, so a failed write aborts the action instead of
-// reporting success in live state and silently losing presets on restart.
-function persistCustomThemes(presets: ThemePreset[]): void {
+// Persistence lives OUTSIDE the reducer: reducers must stay pure, and a throw
+// from the root reducer would surface during render and unmount the app. The
+// dispatching handler (ThemePresetCard) calls this BEFORE dispatching, so a
+// write failure (quota, restricted storage) leaves live state untouched and
+// surfaces as a retryable UI error instead of faking success. It throws on
+// failure; callers must catch.
+export function persistCustomThemes(presets: ThemePreset[]): void {
   getLocalStorage()?.setItem(CUSTOM_THEMES_STORAGE_KEY, JSON.stringify(presets));
 }
 
@@ -2491,20 +2496,13 @@ function baseReducer(state: AppState, action: Action): AppState {
       return { ...state, theme: next };
     }
 
-    case 'SAVE_CUSTOM_THEME': {
-      const exists = state.customThemes.some((p) => p.id === action.preset.id);
-      const customThemes = exists
-        ? state.customThemes.map((p) => (p.id === action.preset.id ? action.preset : p))
-        : [...state.customThemes, action.preset];
-      persistCustomThemes(customThemes);
-      return { ...state, customThemes };
-    }
+    // Pure state transitions only: persistence happens in the dispatching
+    // handler (see persistCustomThemes), never in the root reducer.
+    case 'SAVE_CUSTOM_THEME':
+      return { ...state, customThemes: upsertCustomTheme(state.customThemes, action.preset) };
 
-    case 'DELETE_CUSTOM_THEME': {
-      const customThemes = state.customThemes.filter((p) => p.id !== action.id);
-      persistCustomThemes(customThemes);
-      return { ...state, customThemes };
-    }
+    case 'DELETE_CUSTOM_THEME':
+      return { ...state, customThemes: removeCustomTheme(state.customThemes, action.id) };
 
     case 'SELECT_FEATURE':
       return { ...state, selectedFeatureId: action.id };

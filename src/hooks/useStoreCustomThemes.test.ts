@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initialState, reducer } from './useStore';
+import { initialState, persistCustomThemes, reducer } from './useStore';
 import type { ThemePreset } from '../lib/theme';
 
 const PRESET: ThemePreset = {
@@ -43,11 +43,14 @@ function persistedThemes(): unknown {
   return raw ? JSON.parse(raw) : undefined;
 }
 
-test('SAVE_CUSTOM_THEME appends a new preset and persists it', () => {
+// The reducer is pure: persistence happens in the dispatching handler, so
+// these transitions never touch storage (persistCustomThemes is tested
+// separately below).
+test('SAVE_CUSTOM_THEME appends a new preset to state only', () => {
   withLocalStorage(() => {
     const next = reducer(initialState, { type: 'SAVE_CUSTOM_THEME', preset: PRESET });
     assert.deepEqual(next.customThemes, [PRESET]);
-    assert.deepEqual(persistedThemes(), [PRESET]);
+    assert.equal(persistedThemes(), undefined);
   });
 });
 
@@ -57,23 +60,29 @@ test('SAVE_CUSTOM_THEME upserts an existing preset by id', () => {
     const renamed = { ...PRESET, name: 'Renamed' };
     const next = reducer(state, { type: 'SAVE_CUSTOM_THEME', preset: renamed });
     assert.deepEqual(next.customThemes, [renamed]);
-    assert.deepEqual(persistedThemes(), [renamed]);
   });
 });
 
-test('DELETE_CUSTOM_THEME removes the preset and persists the list', () => {
+test('DELETE_CUSTOM_THEME removes the preset from state only', () => {
   withLocalStorage(() => {
     const other = { ...PRESET, id: 'custom-two', name: 'Two' };
     const state = { ...initialState, customThemes: [PRESET, other] };
     const next = reducer(state, { type: 'DELETE_CUSTOM_THEME', id: PRESET.id });
     assert.deepEqual(next.customThemes, [other]);
-    assert.deepEqual(persistedThemes(), [other]);
+    assert.equal(persistedThemes(), undefined);
   });
 });
 
-// A failed write must abort the action (the reducer throws before returning)
-// instead of reporting success in live state and losing the preset on restart.
-test('SAVE_CUSTOM_THEME propagates storage failure instead of faking success', () => {
+test('persistCustomThemes writes the list the handler computed', () => {
+  withLocalStorage(() => {
+    persistCustomThemes([PRESET]);
+    assert.deepEqual(persistedThemes(), [PRESET]);
+  });
+});
+
+// A failed write must reach the handler (throw) instead of being swallowed,
+// so the UI can keep state untouched and show a retryable error.
+test('persistCustomThemes propagates storage failure instead of faking success', () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   const throwing = {
     getItem: () => null,
@@ -83,7 +92,7 @@ test('SAVE_CUSTOM_THEME propagates storage failure instead of faking success', (
   } as unknown as Storage;
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: throwing });
   try {
-    assert.throws(() => reducer(initialState, { type: 'SAVE_CUSTOM_THEME', preset: PRESET }));
+    assert.throws(() => persistCustomThemes([PRESET]));
   } finally {
     if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
     else delete (globalThis as { localStorage?: Storage }).localStorage;

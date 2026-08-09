@@ -12,8 +12,10 @@ import {
   parseCustomThemes,
   parseThemePresetImport,
   relativeLuminance,
+  removeCustomTheme,
   resolveVariant,
   uiFontStack,
+  upsertCustomTheme,
   type ThemeColors,
   type ThemePreset,
 } from './theme';
@@ -92,6 +94,30 @@ describe('BUILT_IN_THEMES', () => {
         }
       }
     }
+  });
+});
+
+describe('custom theme list helpers', () => {
+  it('upsertCustomTheme appends or replaces by id without mutating the input', () => {
+    const list = [EXAMPLE_CUSTOM];
+    const appended = upsertCustomTheme(list, { ...EXAMPLE_CUSTOM, id: 'custom-two' });
+    assert.deepEqual(
+      appended.map((p) => p.id),
+      ['custom-test', 'custom-two'],
+    );
+    const replaced = upsertCustomTheme(list, { ...EXAMPLE_CUSTOM, name: 'Renamed' });
+    assert.equal(replaced.length, 1);
+    assert.equal(replaced[0].name, 'Renamed');
+    assert.equal(list[0].name, 'Test Theme');
+  });
+
+  it('removeCustomTheme drops only the matching id', () => {
+    const list = [EXAMPLE_CUSTOM, { ...EXAMPLE_CUSTOM, id: 'custom-two' }];
+    assert.deepEqual(
+      removeCustomTheme(list, 'custom-test').map((p) => p.id),
+      ['custom-two'],
+    );
+    assert.equal(removeCustomTheme(list, 'nope').length, 2);
   });
 });
 

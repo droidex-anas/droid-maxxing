@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
-import { useStore, type ThemeConfig } from '../hooks/useStore';
+import { persistCustomThemes, useStore, type ThemeConfig } from '../hooks/useStore';
 import {
   applyTheme,
   BUILT_IN_THEMES,
@@ -16,7 +16,9 @@ import {
   findPreset,
   newCustomThemeId,
   parseThemePresetImport,
+  removeCustomTheme,
   resolveVariant,
+  upsertCustomTheme,
   type ThemeColors,
   type ThemePreset,
 } from '../lib/theme';
@@ -53,6 +55,12 @@ const COLOR_ROWS: { key: keyof ThemeColors; label: string; description: string }
 type EditorState =
   | { kind: 'create'; draft: ThemeDraft }
   | { kind: 'edit'; id: string; draft: ThemeDraft };
+
+// Ink (near-black or near-white) with the better contrast against a filled
+// pill/swatch — shared by the color rows and the quick-accent checks so the
+// rule stays in one place.
+const contrastInk = (value: string): string =>
+  contrastRatio(value, '#101010') >= contrastRatio(value, '#f7f7f7') ? '#101010' : '#f7f7f7';
 
 function CardButton({
   icon: Icon,
@@ -98,8 +106,7 @@ function ThemeColorRow({
   const pillRef = useRef<HTMLButtonElement>(null);
   // The pill is filled with the color itself; the hex picks whichever ink
   // (near-black or near-white) has better contrast against it.
-  const ink =
-    contrastRatio(value, '#101010') >= contrastRatio(value, '#f7f7f7') ? '#101010' : '#f7f7f7';
+  const ink = contrastInk(value);
   return (
     <div className="flex items-center justify-between gap-3 py-2.5 border-b border-droid-border">
       <div>
@@ -209,15 +216,43 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
     });
   };
 
+  // Persist BEFORE dispatching (the reducer is pure; a throw there would
+  // surface during render and unmount the app). On a storage failure we keep
+  // state untouched and show a retryable error — the editor stays open.
+  const persistThemes = (next: ThemePreset[], failure: string): boolean => {
+    try {
+      persistCustomThemes(next);
+      setThemeError(null);
+      return true;
+    } catch {
+      setThemeError(failure);
+      return false;
+    }
+  };
+
   const handleSave = (draft: ThemeDraft) => {
     const id = editor?.kind === 'edit' ? editor.id : newCustomThemeId();
     const preset: ThemePreset = { id, name: draft.name, light: draft.light, dark: draft.dark };
+    if (
+      !persistThemes(
+        upsertCustomTheme(customThemes, preset),
+        'Could not save the theme — browser storage is unavailable. Fix that and try again.',
+      )
+    )
+      return;
     dispatch({ type: 'SAVE_CUSTOM_THEME', preset });
     updateTheme({ presetId: id, ...resolveVariant(preset, theme.mode) });
     setEditor(null);
   };
 
   const handleDelete = (p: ThemePreset) => {
+    if (
+      !persistThemes(
+        removeCustomTheme(customThemes, p.id),
+        'Could not delete the theme — browser storage is unavailable. Fix that and try again.',
+      )
+    )
+      return;
     dispatch({ type: 'DELETE_CUSTOM_THEME', id: p.id });
     // Deleting the active theme falls back to the default so presetId never
     // dangles.
@@ -348,10 +383,9 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
           <div className="flex flex-wrap justify-end gap-1.5">
             {QUICK_ACCENTS.map((c) => {
               const selected = theme.accent.toLowerCase() === c.toLowerCase();
-              // The check sits on the swatch itself, so pick its ink by
-              // contrast (a white check vanishes on the near-white accent).
-              const ink =
-                contrastRatio(c, '#101010') >= contrastRatio(c, '#f7f7f7') ? '#101010' : '#f7f7f7';
+              // The check sits on the swatch itself (a white check vanishes on
+              // the near-white accent).
+              const ink = contrastInk(c);
               return (
                 <button
                   key={c}
@@ -437,6 +471,7 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
         <ThemeEditor
           title={editor.kind === 'edit' ? 'Edit theme' : 'New theme'}
           initial={editor.draft}
+          error={themeError}
           onSave={handleSave}
           onCancel={() => {
             setEditor(null);
