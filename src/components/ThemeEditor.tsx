@@ -35,25 +35,35 @@ export function ThemeEditor({
   onCancel: () => void;
 }) {
   const { state } = useStore();
-  // The theme as it was when the editor opened; restored on cancel. The store
-  // theme is never dispatched while the editor is open, so a ref is enough.
-  const baseTheme = useRef(state.theme).current;
+  // The store theme is never dispatched while the editor is open, but an
+  // external update (e.g. an OS scheme change) can still land, so track the
+  // latest store theme: cancel restores it instead of a stale open-time
+  // snapshot.
+  const latestTheme = useRef(state.theme);
+  latestTheme.current = state.theme;
   const savedRef = useRef(false);
   const [draft, setDraft] = useState<ThemeDraft>(initial);
+  // Resolve System mode with the same media query the appearance section uses,
+  // so the editor opens on the variant actually on screen.
   const [editing, setEditing] = useState<'light' | 'dark'>(() =>
-    state.theme.mode === 'light' ? 'light' : 'dark',
+    state.theme.mode === 'light' ||
+    (state.theme.mode === 'system' &&
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-color-scheme: light)').matches)
+      ? 'light'
+      : 'dark',
   );
 
   // Live-preview the variant being edited across the whole app.
   useEffect(() => {
-    applyTheme({ ...baseTheme, ...draft[editing] });
-  }, [baseTheme, draft, editing]);
+    applyTheme({ ...state.theme, ...draft[editing] });
+  }, [state.theme, draft, editing]);
 
   useEffect(() => {
     return () => {
-      if (!savedRef.current) applyTheme(baseTheme);
+      if (!savedRef.current) applyTheme(latestTheme.current);
     };
-  }, [baseTheme]);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,9 +93,16 @@ export function ThemeEditor({
         if (e.target === e.currentTarget) onCancel();
       }}
     >
-      <div className="w-[560px] max-w-full rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="theme-editor-title"
+        className="w-[560px] max-w-full rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50"
+      >
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
-          <h3 className="text-[14px] font-semibold text-droid-text">{title}</h3>
+          <h3 id="theme-editor-title" className="text-[14px] font-semibold text-droid-text">
+            {title}
+          </h3>
           <button
             onClick={onCancel}
             aria-label="Close theme editor"
