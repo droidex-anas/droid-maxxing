@@ -1,3 +1,5 @@
+// Mirrored in src/types/mcp.ts — keep both files in sync.
+
 export type McpServerType = 'http' | 'sse' | 'stdio';
 export type McpServerStatus = 'connecting' | 'connected' | 'disconnected' | 'failed' | 'disabled';
 export type McpServerSource =
