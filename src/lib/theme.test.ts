@@ -13,6 +13,7 @@ import {
   parseThemePresetImport,
   relativeLuminance,
   removeCustomTheme,
+  resolveScheme,
   resolveVariant,
   uiFontStack,
   upsertCustomTheme,
@@ -142,6 +143,15 @@ describe('resolveVariant', () => {
   it('falls back to the dark variant for system when no preference is readable', () => {
     // node:test has no window, so matchMedia is unavailable.
     assert.equal(resolveVariant(DEFAULT_THEME, 'system'), DEFAULT_THEME.dark);
+  });
+});
+
+describe('resolveScheme', () => {
+  it('passes explicit schemes through and falls back to dark for system', () => {
+    // node:test has no window, so matchMedia is unavailable.
+    assert.equal(resolveScheme('light'), 'light');
+    assert.equal(resolveScheme('dark'), 'dark');
+    assert.equal(resolveScheme('system'), 'dark');
   });
 });
 

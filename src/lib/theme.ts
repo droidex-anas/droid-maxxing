@@ -251,15 +251,21 @@ export function findPreset(id: string, customThemes: ThemePreset[]): ThemePreset
   return BUILT_IN_THEMES.find((p) => p.id === id) ?? customThemes.find((p) => p.id === id);
 }
 
-// Resolve which variant of a preset a scheme mode selects. `system` follows the
-// OS preference (dark when no preference is readable, e.g. in tests).
-export function resolveVariant(preset: ThemePreset, mode: ThemeMode): ThemeColors {
-  const isLight =
-    mode === 'light' ||
+// Resolve the on-screen scheme for a mode: 'system' follows the OS preference
+// (dark when no preference is readable, e.g. in tests). Shared by every place
+// that needs the visible scheme so the media query lives in exactly one spot.
+export function resolveScheme(mode: ThemeMode): 'light' | 'dark' {
+  return mode === 'light' ||
     (mode === 'system' &&
       typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-color-scheme: light)').matches);
-  return isLight ? preset.light : preset.dark;
+      window.matchMedia('(prefers-color-scheme: light)').matches)
+    ? 'light'
+    : 'dark';
+}
+
+// Resolve which variant of a preset a scheme mode selects.
+export function resolveVariant(preset: ThemePreset, mode: ThemeMode): ThemeColors {
+  return resolveScheme(mode) === 'light' ? preset.light : preset.dark;
 }
 
 function sameColors(a: ThemeColors, b: ThemeColors): boolean {

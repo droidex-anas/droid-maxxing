@@ -248,7 +248,14 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
 
   const handleSave = (draft: ThemeDraft): boolean => {
     const id = editor?.kind === 'edit' ? editor.id : newCustomThemeId();
-    const preset: ThemePreset = { id, name: draft.name, light: draft.light, dark: draft.dark };
+    // Clamp to the persisted limit (readPresetName truncates at 60) so the
+    // name shown now matches what survives a restart.
+    const preset: ThemePreset = {
+      id,
+      name: draft.name.slice(0, 60),
+      light: draft.light,
+      dark: draft.dark,
+    };
     if (
       !persistThemes(
         upsertCustomTheme(customThemes, preset),
@@ -366,6 +373,7 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
             }}
           />
           <Dropdown
+            ariaLabel="Theme preset"
             value={theme.presetId}
             width="w-48"
             options={themeOptions}

@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Moon, Sun, X } from 'lucide-react';
 import { useStore } from '../hooks/useStore';
-import { applyTheme, type ThemeColors } from '../lib/theme';
+import { applyTheme, resolveScheme, type ThemeColors } from '../lib/theme';
 import { ColorField } from './ColorPicker';
 import { pushEscapeLayer } from './environment/usePopover';
 import { MiniAppFrame, ThemeSwatches } from './ThemePreview';
@@ -51,16 +51,8 @@ export function ThemeEditor({
   latestTheme.current = state.theme;
   const savedRef = useRef(false);
   const [draft, setDraft] = useState<ThemeDraft>(initial);
-  // Resolve System mode with the same media query the appearance section uses,
-  // so the editor opens on the variant actually on screen.
-  const [editing, setEditing] = useState<'light' | 'dark'>(() =>
-    state.theme.mode === 'light' ||
-    (state.theme.mode === 'system' &&
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-color-scheme: light)').matches)
-      ? 'light'
-      : 'dark',
-  );
+  // Resolve System mode so the editor opens on the variant actually on screen.
+  const [editing, setEditing] = useState<'light' | 'dark'>(() => resolveScheme(state.theme.mode));
 
   // Live-preview the variant being edited across the whole app.
   useEffect(() => {
@@ -245,6 +237,7 @@ export function ThemeEditor({
             <input
               id="theme-name"
               autoFocus
+              maxLength={60}
               value={draft.name}
               onChange={(e) => {
                 setDraft((d) => ({ ...d, name: e.target.value }));

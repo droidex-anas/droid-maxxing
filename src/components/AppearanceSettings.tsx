@@ -9,6 +9,7 @@ import {
   applyTheme,
   DEFAULT_THEME,
   findPreset,
+  resolveScheme,
   resolveVariant,
   UI_FONTS,
   type ThemeMode,
@@ -75,6 +76,7 @@ function Slider({
           min={min}
           max={max}
           value={value}
+          aria-label={label}
           onChange={(e) => {
             onChange(Number(e.target.value));
           }}
@@ -169,13 +171,7 @@ export function AppearanceSection() {
   // Palette behind the scheme cards: the active preset, or the default when
   // the current colors are hand-edited and match no preset.
   const previewPreset = activePreset ?? DEFAULT_THEME;
-  const resolvedScheme: 'light' | 'dark' =
-    theme.mode === 'light' ||
-    (theme.mode === 'system' &&
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-color-scheme: light)').matches)
-      ? 'light'
-      : 'dark';
+  const resolvedScheme = resolveScheme(theme.mode);
 
   const updateTheme = (patch: Partial<ThemeConfig>) => {
     dispatch({ type: 'SET_THEME', theme: patch });
@@ -271,6 +267,7 @@ export function AppearanceSection() {
             </div>
           </div>
           <Dropdown
+            ariaLabel="UI font"
             value={theme.uiFont}
             width="w-44"
             options={UI_FONTS.map((f) => ({ value: f.id, label: f.label }))}
