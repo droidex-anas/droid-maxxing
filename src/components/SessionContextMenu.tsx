@@ -109,21 +109,22 @@ export function SessionContextMenuPanel({
   // Enter/Space activate the focused button natively. On close, focus returns
   // to the element that opened the menu (WAI-ARIA menu pattern) unless the
   // user already moved it — e.g. the rename flow's autofocused input, or a
-  // click that focused another control.
+  // click that focused another control. The opener is captured only once:
+  // StrictMode replays this effect, and by the replay focus already sits on a
+  // menu button, so recapturing would restore focus to a node that unmounts
+  // with the menu.
+  const openerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    const opener = document.activeElement;
+    if (openerRef.current === null) {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body) openerRef.current = active;
+    }
+    const opener = openerRef.current;
     panelRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
     return () => {
       const focusDiedWithMenu =
         document.activeElement === null || document.activeElement === document.body;
-      if (
-        opener instanceof HTMLElement &&
-        opener !== document.body &&
-        opener.isConnected &&
-        focusDiedWithMenu
-      ) {
-        opener.focus();
-      }
+      if (opener !== null && opener.isConnected && focusDiedWithMenu) opener.focus();
     };
   }, []);
 

@@ -107,6 +107,34 @@ test('chatDisplayTitle prefers the override and falls back to the session title'
   assert.equal(chatDisplayTitle(session, { displayTitle: 'My name' }), 'My name');
 });
 
+test('chatDisplayTitle humanizes slash-command titles without rewriting storage', () => {
+  // The CLI titles skill invocations by the raw command ("/review src"); the
+  // sidebar shows the command as a name. Display-only: the stored title is
+  // never rewritten, so the original string is always recoverable.
+  assert.equal(
+    chatDisplayTitle(makeSession('s1', 1_000, '/review src/lib'), undefined),
+    'Review: src/lib',
+  );
+  assert.equal(
+    chatDisplayTitle(makeSession('s2', 1_000, '/btw side conversation (hidden)'), undefined),
+    'Btw: side conversation (hidden)',
+  );
+  assert.equal(chatDisplayTitle(makeSession('s3', 1_000, '/ review'), undefined), 'Review');
+  assert.equal(
+    chatDisplayTitle(makeSession('s4', 1_000, '/review'), { displayTitle: '/review' }),
+    'Review',
+  );
+  // Not bare commands: paths and ordinary titles pass through verbatim.
+  assert.equal(
+    chatDisplayTitle(makeSession('s5', 1_000, '/already/a/path'), undefined),
+    '/already/a/path',
+  );
+  assert.equal(
+    chatDisplayTitle(makeSession('s6', 1_000, 'see /review later'), undefined),
+    'see /review later',
+  );
+});
+
 test('pinChat stamps pinnedAt and unpinChat removes the empty entry', () => {
   const pinned = pinChat({}, 's1', 100);
   assert.deepEqual(pinned, { s1: { pinnedAt: 100 } });
@@ -203,10 +231,11 @@ test('loadChatMetadata caps the payload at MAX_TRACKED_CHATS entries', () => {
   data.set('droid-chat-metadata', JSON.stringify(payload));
   const loaded = loadChatMetadata();
   assert.equal(Object.keys(loaded).length, 1000);
-  // Insertion order is preserved: the first 1000 entries survive.
-  assert.equal(loaded.s0.pinnedAt, 0);
-  assert.equal(loaded.s999.pinnedAt, 999);
-  assert.equal(loaded.s1000, undefined);
+  // Storage order is recency (writes reinsert the touched id last), so the
+  // load cap drops the oldest entries — the same rule the write cap enforces.
+  assert.equal(loaded.s0, undefined);
+  assert.equal(loaded.s1.pinnedAt, 1);
+  assert.equal(loaded.s1000.pinnedAt, 1000);
 });
 
 test('runtime updates cap the map at MAX_TRACKED_CHATS, dropping the oldest', () => {
@@ -227,6 +256,29 @@ test('runtime updates cap the map at MAX_TRACKED_CHATS, dropping the oldest', ()
   const renamed = renameChat(next, 's1', 'still here') ?? {};
   assert.equal(Object.keys(renamed).length, 1000);
   assert.equal(renamed.s1?.displayTitle, 'still here');
+});
+
+test('the runtime cap evicts tombstones last so hidden chats stay hidden', () => {
+  // Forgetting a pin or rename is harmless; forgetting an archived/deleted
+  // tombstone would resurface a chat the user explicitly hid.
+  let map: ChatMetadataMap = {};
+  for (let i = 0; i < 1000; i += 1) map = pinChat(map, `s${String(i)}`, i) ?? map;
+
+  // Adding tombstones to a full map overflows it: the oldest pins drop first.
+  map = archiveChat(map, 'hidden-1', 2000) ?? {};
+  map = deleteChat(map, 'hidden-2', 2001) ?? {};
+  assert.equal(Object.keys(map).length, 1000);
+  assert.equal(map.s0, undefined);
+  assert.equal(map.s1, undefined);
+  assert.equal(map['hidden-1']?.archivedAt, 2000);
+  assert.equal(map['hidden-2']?.deletedAt, 2001);
+
+  // One more preference entry still evicts a pin, never the tombstones.
+  map = pinChat(map, 's1001', 2002) ?? {};
+  assert.equal(Object.keys(map).length, 1000);
+  assert.equal(map.s2, undefined);
+  assert.equal(map['hidden-1']?.archivedAt, 2000);
+  assert.equal(map['hidden-2']?.deletedAt, 2001);
 });
 
 test('loadChatMetadata sanitizes corrupt payloads', () => {

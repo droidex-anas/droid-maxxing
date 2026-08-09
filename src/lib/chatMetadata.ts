@@ -62,7 +62,10 @@ export function loadChatMetadata(): ChatMetadataMap {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     const out: ChatMetadataMap = {};
-    for (const [appSessionId, value] of Object.entries(parsed).slice(0, MAX_TRACKED_CHATS)) {
+    // Oversized-at-rest payloads keep the newest entries: storage order is
+    // recency (writes reinsert the touched id last), so the same bound the
+    // write path enforces drops the oldest here too.
+    for (const [appSessionId, value] of Object.entries(parsed).slice(-MAX_TRACKED_CHATS)) {
       const meta = sanitizeMetadata(value);
       if (meta) out[appSessionId] = meta;
     }
@@ -89,10 +92,28 @@ export function isChatPinned(meta: ChatMetadata | undefined): boolean {
   return meta?.pinnedAt !== undefined && !isChatHidden(meta);
 }
 
+// The CLI titles a session started with a skill or slash command by the raw
+// invocation ("/review src", "/btw …"), which reads as chrome instead of a
+// name. Present the humanized command: "Review: src", "Btw". Titles that are
+// not a bare command (paths like "/already/a/path") pass through untouched.
+// Display-only by design: the stored title stays raw, so nothing is ever
+// rewritten in the session file or caches and the original is recoverable.
+function presentSlashCommandTitle(title: string): string {
+  const command = /^\/\s*([\w-]+)(?:\s+(.*))?$/.exec(title.trim());
+  if (!command) return title;
+  // Index access types groups as plain strings; .at() is honest about the
+  // optional args group being undefined for a bare command like "/review".
+  const name = command[1];
+  const rawArgs = command.at(2);
+  const label = name.charAt(0).toUpperCase() + name.slice(1);
+  const args = rawArgs?.trim();
+  return args ? `${label}: ${args}` : label;
+}
+
 // The title the UI shows: the user's override when present, else the
-// harness-generated session title.
+// harness-generated session title, with slash-command invocations humanized.
 export function chatDisplayTitle(session: SessionSummary, meta: ChatMetadata | undefined): string {
-  return meta?.displayTitle ?? session.title;
+  return presentSlashCommandTitle(meta?.displayTitle ?? session.title);
 }
 
 // Chats for the Pinned section: pinned and not hidden. Callers keep their
@@ -138,10 +159,20 @@ function withMetadata(
   // The same bound loadChatMetadata enforces on read, applied here so runtime
   // updates cannot grow storage past it between restarts. The touched id is
   // reinserted last, so insertion order is recency and the oldest drop first.
+  // Tombstones (archived/deleted) drop last: forgetting a pin or rename is
+  // harmless, but forgetting a tombstone resurfaces a chat the user hid.
   const entries = Object.entries(next);
-  return entries.length > MAX_TRACKED_CHATS
-    ? Object.fromEntries(entries.slice(entries.length - MAX_TRACKED_CHATS))
-    : next;
+  if (entries.length <= MAX_TRACKED_CHATS) return next;
+  const isTombstone = (entry: [string, ChatMetadata]): boolean =>
+    entry[1].archivedAt !== undefined || entry[1].deletedAt !== undefined;
+  const byEvictionOrder = [
+    ...entries.filter((entry) => !isTombstone(entry)),
+    ...entries.filter(isTombstone),
+  ];
+  const dropped = new Set(
+    byEvictionOrder.slice(0, entries.length - MAX_TRACKED_CHATS).map(([id]) => id),
+  );
+  return Object.fromEntries(entries.filter(([id]) => !dropped.has(id)));
 }
 
 // The transforms below return null when nothing would change so the reducer

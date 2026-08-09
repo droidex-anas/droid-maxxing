@@ -194,41 +194,6 @@ test('loadHistoricalSessions keeps forked chats (bare parent, no spawn markers) 
   ]);
 });
 
-test('slash-command titles present as the humanized command, not the raw invocation', () => {
-  // Sessions started with a skill ("/review src") are titled by the raw
-  // command on disk; the sidebar shows the command as a name instead.
-  const cwd = join(home, 'workspace-slash-titles');
-  writeSession('slash-review', cwd, { sessionTitle: '/review src/lib' });
-  writeSession('slash-btw', cwd, { sessionTitle: '/btw side conversation (hidden)' });
-  writeSession('slash-spacey', cwd, { sessionTitle: '/ review' });
-  writeSession('path-like-title', cwd, { sessionTitle: '/already/a/path' });
-  writeSession('plain-title', cwd, { sessionTitle: 'Plain chat' });
-
-  const rows = loadHistoricalSessions({ workspaceCwds: [cwd] });
-  const titles = new Map(rows.map((row) => [row.summary.appSessionId, row.summary.title]));
-
-  assert.equal(titles.get('slash-review'), 'Review: src/lib');
-  assert.equal(titles.get('slash-btw'), 'Btw: side conversation (hidden)');
-  assert.equal(titles.get('slash-spacey'), 'Review');
-  // Not a bare command, so it stays verbatim.
-  assert.equal(titles.get('path-like-title'), '/already/a/path');
-  assert.equal(titles.get('plain-title'), 'Plain chat');
-});
-
-test('cached slash titles present the same way on the next load', () => {
-  // The sqlite summary cache overrides fresh file titles, so a slash title
-  // written before the cleanup must not keep the raw command visible.
-  const cwd = join(home, 'workspace-slash-cache');
-  writeSession('slash-cached', cwd);
-  const index = new HistoryIndex();
-  index.syncSummaries([{ ...summary('slash-cached', cwd), title: '/review src' }]);
-  index.close();
-
-  const rows = loadHistoricalSessions({ workspaceCwds: [cwd] });
-  const row = rows.find((r) => r.summary.appSessionId === 'slash-cached');
-  assert.equal(row?.summary.title, 'Review: src');
-});
-
 test('loadHistoricalSessions returns every session when no limit is requested', () => {
   const cwd = join(home, 'workspace-nolimit');
   for (let i = 0; i < 7; i++) writeSession(`nolimit-${i}`, cwd);

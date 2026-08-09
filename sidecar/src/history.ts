@@ -220,28 +220,6 @@ export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): H
   );
 }
 
-// The CLI stores a skill or slash-command invocation as the session title
-// verbatim ("/review src", "/btw …"), which reads as chrome in the sidebar
-// instead of a name. Present it as the humanized command: "Review: src",
-// "Btw". Titles that are not a bare command pass through untouched.
-function presentStoredTitle(title: string | undefined): string | undefined {
-  const trimmed = title?.trim();
-  if (!trimmed) return undefined;
-  const command = /^\/\s*([\w-]+)(?:\s+(.*))?$/.exec(trimmed);
-  if (!command) return title;
-  // exec types groups as plain strings, but the optional args group is
-  // undefined at runtime for a bare command like "/review".
-  const name: string = command[1];
-  const rawArgs: string | undefined = command[2];
-  const label = name.charAt(0).toUpperCase() + name.slice(1);
-  const args = rawArgs?.trim();
-  return args ? `${label}: ${args}` : label;
-}
-
-function sessionTitleFromStored(title: string | undefined, providerSessionId: string): string {
-  return presentStoredTitle(title) ?? `Session ${providerSessionId.slice(0, 8)}`;
-}
-
 export function loadSessionHistory(): SessionHistoryEntry[] {
   const rows: SessionHistoryEntry[] = [];
   for (const [providerSessionId, path] of buildSessionIndex()) {
@@ -249,7 +227,7 @@ export function loadSessionHistory(): SessionHistoryEntry[] {
     const stat = statSync(path);
     rows.push({
       providerSessionId,
-      title: sessionTitleFromStored(start.sessionTitle || start.title, providerSessionId),
+      title: start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`,
       cwd: start.cwd,
       modifiedTime: stat.mtimeMs,
       createdTime: stat.birthtimeMs,
@@ -1008,9 +986,7 @@ function summaryPatchesFromRows(
       compactedFromProviderSessionIds: jsonStringArray(row.compacted_from_provider_session_ids),
       sessionPurpose: sessionPurpose(stringValue(row.session_purpose)),
       interactionMode: sessionInteractionModeValue(stringValue(row.interaction_mode)),
-      // Cached titles predate presentation rules, so the slash-command
-      // cleanup runs here too instead of only at summarization time.
-      title: presentStoredTitle(stringValue(row.title)),
+      title: stringValue(row.title),
       cwd: stringValue(row.cwd),
       workspaceKind: workspaceKind(stringValue(row.workspace_kind)),
       modelId: stringValue(row.model_id),
@@ -1686,7 +1662,7 @@ function summarizeSessionFile(
   // become permanent sidebar rows. Live sessions are registered separately,
   // so this historical-only check cannot hide a first turn while it is running.
   if (!hasCompletedConversation(file.path, file.sizeBytes)) return null;
-  const title = sessionTitleFromStored(start.sessionTitle || start.title, providerSessionId);
+  const title = start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`;
   const settings = readSessionModelSettings(start, file.path);
   return {
     appSessionId: providerSessionId,

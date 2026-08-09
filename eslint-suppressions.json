@@ -4,7 +4,7 @@
       "count": 1
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
+      "count": 2
     },
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
@@ -13,7 +13,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 34
+      "count": 36
     },
     "@typescript-eslint/restrict-template-expressions": {
       "count": 4
