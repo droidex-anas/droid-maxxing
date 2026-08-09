@@ -2,6 +2,7 @@
   "name": "droidex",
   "description": "DROIDEX desktop agent workspace for Factory Droid.",
   "author": "DROIDEX",
+  "license": "UNLICENSED",
   "private": true,
   "version": "1.1.1",
   "type": "module",
