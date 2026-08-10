@@ -53,6 +53,7 @@ import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
 import { useWorkspaceScopes } from './hooks/useWorkspaceScopes';
+import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
 
 function ContextListIcon({ className }: { className?: string }) {
   return (
@@ -334,15 +335,21 @@ export default function App() {
   useEffect(() => {
     if (embedded) return;
     if (!activeSession) return;
-    if (
-      state.historyLoaded[activeSession.appSessionId] ||
-      requestedHistory.current.has(activeSession.appSessionId)
-    )
+    const appSessionId = activeSession.appSessionId;
+    if (state.historyLoaded[appSessionId]) {
+      requestedHistory.current.delete(appSessionId);
       return;
-    requestedHistory.current.add(activeSession.appSessionId);
-    dispatch({ type: 'SESSION_RESTORE_START', appSessionId: activeSession.appSessionId });
-    loadSessionHistory(activeSession.appSessionId);
-  }, [activeSession, embedded, state.historyLoaded, dispatch]);
+    }
+    const restore = state.sessionRestore[appSessionId];
+    if (restore?.status === 'failed') {
+      requestedHistory.current.delete(appSessionId);
+      return;
+    }
+    if (restore?.status === 'loading' || requestedHistory.current.has(appSessionId)) return;
+    requestedHistory.current.add(appSessionId);
+    dispatch({ type: 'SESSION_RESTORE_START', appSessionId });
+    loadSessionHistory(appSessionId, undefined, transcriptRehydrationLimit(restore));
+  }, [activeSession, embedded, state.historyLoaded, state.sessionRestore, dispatch]);
 
   useEffect(() => {
     if (embedded || !activeSession) return;

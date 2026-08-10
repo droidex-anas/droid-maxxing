@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useMemo, useState, useCallback } from 'react';
+import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStore } from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
@@ -28,6 +28,7 @@ import type { FileChange } from '../lib/diff';
 import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
+import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -256,76 +257,10 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     dispatch({ type: 'SESSION_RESTORE_START', appSessionId: historyAppSessionId });
     loadSessionHistory(historyAppSessionId);
   }, [historyAppSessionId, dispatch]);
-  // Anchor captured when an older page is requested, used to keep the viewport
-  // visually fixed once the prepended messages grow the scroll height.
-  const prependAnchor = useRef<{ height: number; top: number } | null>(null);
-  // Roughly three viewports: far enough ahead that even a fast fling toward
-  // the top lands on already-loaded messages instead of a visible loader.
-  const PREFETCH_PX = 2400;
   // Auto-page older history until the conversation timeline has at least this
   // many anchors (or the chain ends); the rest fills in as the user scrolls up.
   const TIMELINE_TARGET_ANCHORS = 12;
-
-  // Only auto-scroll when the user is already pinned to the bottom; if they've
-  // scrolled up to read, leave their position alone while the model responds.
-  const stickRef = useRef(true);
-  const [scrollSnapshots] = useState(() => new Map<string, { top: number; pinned: boolean }>());
-  // Scroll snapshots are owned by onScroll, which fires for every user scroll
-  // and every programmatic auto-scroll, so each conversation's position is
-  // already current when we switch away. A cleanup here would read scrollTop
-  // AFTER the keyed transcript swap (layout-effect cleanups run post-mutation),
-  // capturing the incoming conversation's position and corrupting the outgoing
-  // snapshot — so there is no cleanup here.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !visibleConversationKey) return;
-    const snapshot = scrollSnapshots.get(visibleConversationKey);
-    prependAnchor.current = null;
-    stickRef.current = snapshot?.pinned ?? true;
-    el.scrollTop = snapshot?.top ?? el.scrollHeight;
-  }, [scrollSnapshots, visibleConversationKey]);
-
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (visibleConversationKey) {
-      scrollSnapshots.set(visibleConversationKey, {
-        top: el.scrollTop,
-        pinned: stickRef.current,
-      });
-    }
-    if (
-      !viewingChildSession &&
-      historyAppSessionId &&
-      olderCursor &&
-      !loadingOlder &&
-      el.scrollTop < PREFETCH_PX
-    ) {
-      prependAnchor.current = { height: el.scrollHeight, top: el.scrollTop };
-      dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
-      loadSessionHistory(historyAppSessionId, olderCursor);
-    }
-  };
-
-  // Restore scroll position after an older page settles so the content the user
-  // was reading stays put instead of jumping to the top. Keyed on the loading
-  // flag too, so an empty (fully-deduped) page still clears the stale anchor.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || prependAnchor.current === null || loadingOlder) return;
-    const delta = el.scrollHeight - prependAnchor.current.height;
-    if (delta > 0) el.scrollTop = prependAnchor.current.top + delta;
-    prependAnchor.current = null;
-  }, [transcript.length, loadingOlder]);
-
   const tailLen = transcript.length > 0 ? (transcript[transcript.length - 1].text?.length ?? 0) : 0;
-  useEffect(() => {
-    if (scrollRef.current && stickRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [visibleConversationKey, transcript.length, tailLen]);
-
   const primaryLive = useSessionLive(activeSession?.appSessionId ?? null);
   const live = visibleTarget.kind === 'child' ? visibleTarget.canInterrupt : primaryLive;
   const draftFolder = state.draftChat?.cwd.split('/').filter(Boolean).pop();
@@ -427,31 +362,37 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     () => (viewingChildSession ? [] : promptAnchorsFromItems(feedItems)),
     [feedItems, viewingChildSession],
   );
+  const isAutoPagingOlderHistory =
+    !viewingChildSession &&
+    !!historyAppSessionId &&
+    !!olderCursor &&
+    !loadingOlder &&
+    timelineAnchors.length < TIMELINE_TARGET_ANCHORS &&
+    restore?.status !== 'failed';
+  const { onScroll, requestOlderHistory } = useConversationScrollWindow({
+    scrollRef,
+    visibleConversationKey,
+    isViewingChildSession: viewingChildSession,
+    activeAppSessionId,
+    historyAppSessionId,
+    olderCursor,
+    isLoadingOlder: loadingOlder,
+    transcriptLength: transcript.length,
+    transcriptTailLength: tailLen,
+    retainedTranscriptLength: allTranscript.length,
+    isPrimaryLive: primaryLive,
+    isAutoPagingOlderHistory,
+    dispatch,
+  });
 
   // Old/large chats restore only a recent window, which can hold too few final
   // responses for the rail to be useful. Page older history in (via the same
   // prepend-stable path as scroll prefetch) until there are enough anchors or
   // the compaction chain is exhausted, so the timeline works on any chat.
   useEffect(() => {
-    if (viewingChildSession || !historyAppSessionId || !olderCursor || loadingOlder) return;
-    if (timelineAnchors.length >= TIMELINE_TARGET_ANCHORS) return;
-    // A failed older-page load leaves the cursor intact so a later user scroll
-    // can retry; without this guard the auto-pager would immediately re-fire the
-    // same failing cursor in a tight loop, since clearing loadingOlder re-arms it.
-    if (restore?.status === 'failed') return;
-    const el = scrollRef.current;
-    if (el) prependAnchor.current = { height: el.scrollHeight, top: el.scrollTop };
-    dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
-    loadSessionHistory(historyAppSessionId, olderCursor);
-  }, [
-    viewingChildSession,
-    historyAppSessionId,
-    olderCursor,
-    loadingOlder,
-    timelineAnchors.length,
-    restore?.status,
-    dispatch,
-  ]);
+    if (!isAutoPagingOlderHistory) return;
+    requestOlderHistory();
+  }, [isAutoPagingOlderHistory, requestOlderHistory]);
 
   return (
     <div data-testid="chat-view" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
@@ -505,13 +446,6 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
             >
               {!viewingChildSession && restore?.status === 'failed' && (
                 <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
-              )}
-              {!viewingChildSession && loadingOlder && (
-                <div className="mb-4 flex justify-center">
-                  <span className="text-[11px] text-droid-text-muted">
-                    Loading earlier messages…
-                  </span>
-                </div>
               )}
               <MessageFeed
                 events={transcript}

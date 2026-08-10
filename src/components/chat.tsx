@@ -209,6 +209,7 @@ function Expand({ open, children }: { open: boolean; children: React.ReactNode }
           exit={{ height: 0, opacity: 0 }}
           transition={{ duration: 0.2, ease: EASE }}
           className="overflow-hidden"
+          style={{ contain: 'layout paint' }}
         >
           {children}
         </motion.div>
@@ -318,13 +319,19 @@ function argStr(args: unknown, key: string): string | undefined {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
         void navigator.clipboard?.writeText(text);
         setCopied(true);
-        setTimeout(() => setCopied(false), 1200);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => {
+          timer.current = null;
+          setCopied(false);
+        }, 1200);
       }}
       title="Copy"
       className="p-1 rounded-md text-droid-text-muted/60 hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
@@ -405,12 +412,14 @@ function ErrorLine({ text }: { text: string }) {
         <Caret open={open} />
       </button>
       <Expand open={open}>
-        <pre
-          className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-          style={{ backgroundColor: RED_TINT, color: RED }}
-        >
-          {linkify(body)}
-        </pre>
+        {open ? (
+          <pre
+            className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+            style={{ backgroundColor: RED_TINT, color: RED }}
+          >
+            {linkify(body)}
+          </pre>
+        ) : null}
       </Expand>
     </div>
   );
@@ -467,7 +476,7 @@ function CommandCard({
           <ErrorTag />
           <Caret open={open} />
         </button>
-        <Expand open={open}>{body}</Expand>
+        <Expand open={open}>{open ? body : null}</Expand>
       </div>
     );
   }
@@ -533,12 +542,14 @@ function ToolLine({
         </button>
         {out && (
           <Expand open={open}>
-            <pre
-              className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-              style={{ backgroundColor: RED_TINT, color: RED }}
-            >
-              {out}
-            </pre>
+            {open ? (
+              <pre
+                className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+                style={{ backgroundColor: RED_TINT, color: RED }}
+              >
+                {out}
+              </pre>
+            ) : null}
           </Expand>
         )}
       </div>
@@ -698,9 +709,9 @@ function WebSearchCard({
   running?: boolean;
 }) {
   const query = argStr(event.toolArgs, 'query') ?? '';
-  const { results, count } = parseWebSearch(output ?? '');
+  const { results, count } = useMemo(() => parseWebSearch(output ?? ''), [output]);
   const total = count ?? results.length;
-  const raw = output ? stripAnsi(output).trim() : '';
+  const raw = useMemo(() => (output ? stripAnsi(output).trim() : ''), [output]);
   const [open, setOpen] = useState(false);
   const isX = toolArgStringArray(event.toolArgs, 'includeDomains').some((d) =>
     /(^|\.)(x|twitter)\.com$/i.test(d),
@@ -709,7 +720,7 @@ function WebSearchCard({
   const trailing = searchTrailing(error, total);
 
   let body: React.ReactNode = null;
-  if (results.length > 0) {
+  if (open && results.length > 0) {
     body = (
       <div className="mt-2 space-y-1">
         {results.map((r, i) => (
@@ -723,7 +734,7 @@ function WebSearchCard({
         ))}
       </div>
     );
-  } else if (raw) {
+  } else if (open && raw) {
     body = (
       <pre className="mt-1.5 max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
         {linkify(raw)}
@@ -757,7 +768,7 @@ function WebSearchCard({
         {trailing}
         <Caret open={open} />
       </button>
-      <Expand open={open}>{body}</Expand>
+      <Expand open={open}>{open ? body : null}</Expand>
     </div>
   );
 }
@@ -869,12 +880,18 @@ function WebFetchCard({
     argStr(event.toolArgs, 'uri') ??
     argStr(event.toolArgs, 'href') ??
     '';
-  const page = parseWebFetch(output ?? '', urlArg.length > 0 ? urlArg : undefined);
+  const page = useMemo(
+    () => parseWebFetch(output ?? '', urlArg.length > 0 ? urlArg : undefined),
+    [output, urlArg],
+  );
   const url = page.url ?? urlArg;
   const hasBody = page.body.length > 0;
   const [open, setOpen] = useState(false);
   const displayTitle = page.title ?? (url.length > 0 ? webSourceName(url) : 'Page');
-  const snippet = hasBody ? fetchSnippet(page.body) : '';
+  const snippet = useMemo(
+    () => (open && hasBody ? fetchSnippet(page.body) : ''),
+    [open, hasBody, page.body],
+  );
   const badge = fetchSizeBadge(page.chars, page.truncatedChars);
   const trailing = fetchTrailing(error, badge);
 
@@ -901,14 +918,16 @@ function WebFetchCard({
         <Caret open={open} />
       </button>
       <Expand open={open}>
-        <WebFetchBody
-          error={error}
-          hasBody={hasBody}
-          body={page.body}
-          url={url}
-          title={displayTitle}
-          snippet={snippet}
-        />
+        {open ? (
+          <WebFetchBody
+            error={error}
+            hasBody={hasBody}
+            body={page.body}
+            url={url}
+            title={displayTitle}
+            snippet={snippet}
+          />
+        ) : null}
       </Expand>
     </div>
   );
@@ -1086,7 +1105,7 @@ function ToolGroupItem({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const summary = summarizeTools(events);
+  const summary = useMemo(() => summarizeTools(events), [events]);
   return (
     <div>
       <button
@@ -1103,7 +1122,9 @@ function ToolGroupItem({
         )}
       </button>
       <Expand open={open}>
-        <div className="mt-2 pl-[18px] space-y-2.5">{renderToolEvents(events, active)}</div>
+        {open ? (
+          <div className="mt-2 pl-[18px] space-y-2.5">{renderToolEvents(events, active)}</div>
+        ) : null}
       </Expand>
     </div>
   );
@@ -2231,21 +2252,23 @@ function WorkedGroup({
         <Caret open={open} />
       </button>
       <Expand open={open}>
-        <div className="mt-3 space-y-4 border-l border-droid-border pl-4">
-          {item.items.map((child) => (
-            <FeedItemView
-              key={child.key}
-              item={child}
-              live={false}
-              onOpenDiff={onOpenDiff}
-              onOpenChildSession={onOpenChildSession}
-              childSessionActivity={childSessionActivity}
-              subagentsDock={subagentsDock}
-              specContent={specContent}
-              expandGroups
-            />
-          ))}
-        </div>
+        {open ? (
+          <div className="mt-3 space-y-4 border-l border-droid-border pl-4">
+            {item.items.map((child) => (
+              <FeedItemView
+                key={child.key}
+                item={child}
+                live={false}
+                onOpenDiff={onOpenDiff}
+                onOpenChildSession={onOpenChildSession}
+                childSessionActivity={childSessionActivity}
+                subagentsDock={subagentsDock}
+                specContent={specContent}
+                expandGroups
+              />
+            ))}
+          </div>
+        ) : null}
       </Expand>
     </div>
   );
@@ -2263,6 +2286,7 @@ function DiffGroup({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [showAll, setShowAll] = useState(false);
   const added = changes.reduce((s, c) => s + c.change.added, 0);
   const removed = changes.reduce((s, c) => s + c.change.removed, 0);
   const files = new Set(changes.map((c) => c.change.path));
@@ -2271,9 +2295,9 @@ function DiffGroup({
     files.size <= 1
       ? `Edited ${baseName(changes[0].change.path)} · ${edits}`
       : `Edited ${files.size} files · ${edits}`;
-  // Cap how many diff cards render at once so a genuinely large multi-edit run
-  // can't flood the feed with hundreds of cards; the rest stay summarized.
-  const shown = changes.slice(0, MAX_DIFF_CARDS);
+  // Mount a first chunk so opening a genuinely huge edit run stays responsive.
+  // The rest remain one click away; no diff metadata or payload is discarded.
+  const shown = showAll ? changes : changes.slice(0, MAX_DIFF_CARDS);
   const hiddenCount = changes.length - shown.length;
   return (
     <div>
@@ -2298,20 +2322,26 @@ function DiffGroup({
         </span>
       </button>
       <Expand open={open}>
-        <div className="mt-2 space-y-2 border-l border-droid-border pl-3">
-          {shown.map((c) => (
-            <DiffCard
-              key={c.event.id}
-              change={c.change}
-              onOpen={onOpenDiff ? () => onOpenDiff(c.change) : undefined}
-            />
-          ))}
-          {hiddenCount > 0 && (
-            <div className="text-[11px] text-droid-text-muted/70">
-              +{hiddenCount} more {hiddenCount === 1 ? 'edit' : 'edits'}
-            </div>
-          )}
-        </div>
+        {open ? (
+          <div className="mt-2 space-y-2 border-l border-droid-border pl-3">
+            {shown.map((c) => (
+              <DiffCard
+                key={c.event.id}
+                change={c.change}
+                onOpen={onOpenDiff ? () => onOpenDiff(c.change) : undefined}
+              />
+            ))}
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="text-[11px] text-droid-text-muted/70 transition-colors hover:text-droid-text-secondary"
+              >
+                Show {hiddenCount} more {hiddenCount === 1 ? 'edit' : 'edits'}
+              </button>
+            )}
+          </div>
+        ) : null}
       </Expand>
     </div>
   );
@@ -2369,29 +2399,33 @@ function TurnChangesPanel({
         </span>
       </button>
       <Expand open={open}>
-        <div className="border-t border-droid-border">
-          {files.map((f) => {
-            const display = displayEditPath(f.path, cwd);
-            const slash = display.lastIndexOf('/');
-            const dir = slash >= 0 ? display.slice(0, slash) : '';
-            const name = slash >= 0 ? display.slice(slash + 1) : display;
-            return (
-              <button
-                key={f.path}
-                onClick={() => onOpenFile?.(f.path)}
-                disabled={!onOpenFile}
-                title={f.path}
-                className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/40 disabled:cursor-default"
-              >
-                <span className="min-w-0 flex-1 truncate text-[12.5px]">
-                  <span className="text-droid-text-secondary">{name}</span>
-                  {dir && <span className="ml-2 text-[11px] text-droid-text-muted/60">{dir}</span>}
-                </span>
-                <ChangeCount added={f.added} removed={f.removed} />
-              </button>
-            );
-          })}
-        </div>
+        {open ? (
+          <div className="border-t border-droid-border">
+            {files.map((f) => {
+              const display = displayEditPath(f.path, cwd);
+              const slash = display.lastIndexOf('/');
+              const dir = slash >= 0 ? display.slice(0, slash) : '';
+              const name = slash >= 0 ? display.slice(slash + 1) : display;
+              return (
+                <button
+                  key={f.path}
+                  onClick={() => onOpenFile?.(f.path)}
+                  disabled={!onOpenFile}
+                  title={f.path}
+                  className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/40 disabled:cursor-default"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[12.5px]">
+                    <span className="text-droid-text-secondary">{name}</span>
+                    {dir && (
+                      <span className="ml-2 text-[11px] text-droid-text-muted/60">{dir}</span>
+                    )}
+                  </span>
+                  <ChangeCount added={f.added} removed={f.removed} />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </Expand>
     </div>
   );

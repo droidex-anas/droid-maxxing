@@ -49,6 +49,7 @@ import {
 } from '../lib/compactionSettings';
 import { sanitizeForLog } from '../lib/sensitiveLogRedaction';
 import { composePrompt } from '../lib/composePrompt';
+import { sessionIsLive } from '../lib/sessions';
 import {
   addSessionNote,
   loadSessionNotes,
@@ -85,6 +86,16 @@ import {
   type UtilityTool,
 } from '../lib/utilityPanel';
 import type { ImagePasteQuality } from '../lib/images';
+import {
+  estimateTranscriptCost,
+  INACTIVE_TRANSCRIPT_POLICY,
+  VIEWPORT_TRANSCRIPT_POLICY,
+} from '../lib/transcriptWindow';
+import {
+  appendTranscriptEvent,
+  pruneRemovedSessionState,
+  releaseSessionTranscriptWindow,
+} from '../lib/transcriptStoreMemory';
 
 export type AgentKind = 'primary' | 'worker' | 'validator';
 export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
@@ -186,6 +197,12 @@ export interface AppState {
   // persisted in localStorage; the harness session data is never touched.
   chatMetadata: ChatMetadataMap;
   transcripts: Record<string, TranscriptEvent[]>;
+  // Relative retained-payload estimate for each in-memory transcript window.
+  // This is budgeting telemetry, not a claim about exact V8 heap bytes.
+  transcriptRetainedCost: Record<string, number>;
+  // Primary transcript viewport state. Normal eviction is allowed only after
+  // the viewport is bottom-pinned; scrolled-up reading stays resident.
+  transcriptViewportPinned: Record<string, boolean>;
   progress: Record<string, ProgressEntry[]>;
   childSessions: Record<string, Record<string, ChildSessionInfo>>;
   historyLoaded: Record<string, boolean>;
@@ -390,6 +407,8 @@ type Action =
       stats: ContextStatsSnapshot;
     }
   | { type: 'SESSION_TRANSCRIPT'; event: TranscriptEvent }
+  | { type: 'TRANSCRIPT_VIEWPORT'; appSessionId: string; pinned: boolean }
+  | { type: 'TRANSCRIPT_RELEASE_VIEWPORT'; appSessionId: string }
   | { type: 'QUEUE_PROMPT'; appSessionId: string; prompt: QueuedPrompt }
   | { type: 'REMOVE_QUEUED_PROMPT'; appSessionId: string; id: string }
   | { type: 'REORDER_QUEUE'; appSessionId: string; from: number; to: number }
@@ -988,6 +1007,14 @@ export const initialState: AppState = {
   transcripts: sessionSnapshot?.transcript
     ? { [sessionSnapshot.transcript.appSessionId]: sessionSnapshot.transcript.events }
     : {},
+  transcriptRetainedCost: sessionSnapshot?.transcript
+    ? {
+        [sessionSnapshot.transcript.appSessionId]: estimateTranscriptCost(
+          sessionSnapshot.transcript.events,
+        ),
+      }
+    : {},
+  transcriptViewportPinned: {},
   progress: {},
   childSessions: {},
   historyLoaded: {},
@@ -1211,23 +1238,6 @@ export function reducer(state: AppState, action: Action): AppState {
   return syncBrowserOpen(baseReducer(state, action));
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-// Merge a streamed tool_call delta's args onto the accumulated args. One tool
-// call streams as many partial deltas: a Task spawn sends subagent_type and
-// description in separate deltas, and Todo/edit deltas can be payload-less or
-// carry only some fields. Replacing wholesale would drop earlier-streamed
-// fields, so shallow-merge when both are objects (latest field value wins) and
-// only fall back to a non-object/absent delta when there is nothing to merge.
-// Protocol mirror: sidecar/src/SessionTimeline.ts merges pre-coalesced
-// tool_call deltas with the same rule; keep both sides synchronized.
-function mergeToolArgs(prev: unknown, next: unknown): unknown {
-  if (isPlainRecord(prev) && isPlainRecord(next)) return { ...prev, ...next };
-  return next ?? prev;
-}
-
 function baseReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_CONNECTION': {
@@ -1265,6 +1275,7 @@ function baseReducer(state: AppState, action: Action): AppState {
       // Seed the first user message: the goal is the user's opening prompt and the
       // backend never echoes it back, so without this the first message never shows.
       let transcripts = state.transcripts;
+      let transcriptRetainedCost = state.transcriptRetainedCost;
       const hasTranscript = (state.transcripts[action.session.appSessionId]?.length ?? 0) > 0;
       if (action.session.goal && !hasTranscript) {
         const seed: TranscriptEvent = {
@@ -1280,6 +1291,10 @@ function baseReducer(state: AppState, action: Action): AppState {
           files: pending?.files.length ? pending.files : undefined,
         };
         transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
+        transcriptRetainedCost = {
+          ...state.transcriptRetainedCost,
+          [action.session.appSessionId]: estimateTranscriptCost([seed]),
+        };
       }
 
       const pendingCompose = pending
@@ -1299,6 +1314,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         },
         sessionOrder: order,
         transcripts,
+        transcriptRetainedCost,
         activeAppSessionId: shouldActivate ? action.session.appSessionId : state.activeAppSessionId,
         draftChat: shouldActivate ? null : state.draftChat,
         draftAutonomy: shouldActivate ? null : state.draftAutonomy,
@@ -1650,64 +1666,26 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
     }
 
-    case 'SESSION_TRANSCRIPT': {
-      const ev = action.event;
-      const mid = ev.appSessionId;
-      const prev = state.transcripts[mid] ?? [];
-      if (prev.some((event) => event.id === ev.id)) return state;
+    case 'SESSION_TRANSCRIPT':
+      return appendTranscriptEvent(state, action.event);
 
-      // Delta merging: if the last event has the same kind + sourceSessionId, append text
-      // Only merge backend streaming deltas (author is absent); do NOT merge explicit user echoes
-      // Protocol mirror: the sidecar pre-coalesces delta runs with the same
-      // rules (sidecar/src/SessionTimeline.ts); keep both sides synchronized.
-      const last = prev[prev.length - 1];
-      if (
-        last &&
-        !ev.author && // backend streaming delta (user echoes have author:'user')
-        last.kind === ev.kind &&
-        last.sourceSessionId === ev.sourceSessionId &&
-        last.author === ev.author &&
-        (ev.kind === 'text' || ev.kind === 'thinking') &&
-        ev.text &&
-        !ev.toolName
-      ) {
-        const merged = [...prev];
-        merged[merged.length - 1] = {
-          ...last,
-          text: (last.text ?? '') + ev.text,
-          endTs: ev.endTs ?? ev.ts,
-        };
-        return { ...state, transcripts: { ...state.transcripts, [mid]: merged } };
-      }
+    case 'TRANSCRIPT_VIEWPORT':
+      return state.transcriptViewportPinned[action.appSessionId] === action.pinned
+        ? state
+        : {
+            ...state,
+            transcriptViewportPinned: {
+              ...state.transcriptViewportPinned,
+              [action.appSessionId]: action.pinned,
+            },
+          };
 
-      // Coalesce tool_call deltas: a single tool call streams as many partial
-      // tool_call events sharing one toolUseId. Collapse them onto the prior
-      // event (keeping its stable id, adopting the latest args) so live render
-      // matches replay's one-event-per-tool-use shape and edit stats are not
-      // inflated by counting every partial snapshot.
-      if (
-        last &&
-        !ev.author &&
-        ev.kind === 'tool_call' &&
-        last.kind === 'tool_call' &&
-        last.sourceSessionId === ev.sourceSessionId &&
-        !!ev.toolUseId &&
-        last.toolUseId === ev.toolUseId
-      ) {
-        const merged = [...prev];
-        merged[merged.length - 1] = {
-          ...last,
-          toolName: ev.toolName ?? last.toolName,
-          toolArgs: mergeToolArgs(last.toolArgs, ev.toolArgs),
-          endTs: ev.endTs ?? ev.ts,
-        };
-        return { ...state, transcripts: { ...state.transcripts, [mid]: merged } };
-      }
-
-      return {
-        ...state,
-        transcripts: { ...state.transcripts, [mid]: [...prev, ev] },
-      };
+    case 'TRANSCRIPT_RELEASE_VIEWPORT': {
+      if (state.activeAppSessionId !== action.appSessionId) return state;
+      if (state.transcriptViewportPinned[action.appSessionId] === false) return state;
+      const session = state.sessions[action.appSessionId];
+      if (!session || sessionIsLive(session)) return state;
+      return releaseSessionTranscriptWindow(state, action.appSessionId, VIEWPORT_TRANSCRIPT_POLICY);
     }
 
     case 'QUEUE_PROMPT': {
@@ -1857,10 +1835,12 @@ function baseReducer(state: AppState, action: Action): AppState {
       ]
         .filter((id) => map[id])
         .sort((a, b) => map[b].updatedAt - map[a].updatedAt);
+      const retainedSessionIds = new Set(Object.keys(map));
+      const retainedState = pruneRemovedSessionState(state, retainedSessionIds);
       // Seed last-seen for sessions this client has never tracked so existing
       // history is not retroactively marked unread; only activity that arrives
       // after this point (a newer updatedAt) flips a row to unread.
-      const seededLastSeen = { ...state.sessionLastSeen };
+      const seededLastSeen = { ...retainedState.sessionLastSeen };
       for (const m of action.sessions) {
         if (seededLastSeen[m.appSessionId] === undefined) {
           seededLastSeen[m.appSessionId] = m.updatedAt;
@@ -1888,7 +1868,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         );
       }
       return {
-        ...state,
+        ...retainedState,
         sessions: map,
         sessionOrder: order,
         sessionLastSeen: seededLastSeen,
@@ -1963,12 +1943,19 @@ function baseReducer(state: AppState, action: Action): AppState {
         const changed = older.length > 0 || kept.length !== existing.length;
         const merged = changed ? [...older, ...kept] : existing;
         const hasMore = Boolean(action.olderCursor);
+        const estimatedCost = changed
+          ? estimateTranscriptCost(merged)
+          : (state.transcriptRetainedCost[action.appSessionId] ?? estimateTranscriptCost(existing));
         return withHistoricalCompactionGeneration(
           {
             ...state,
             transcripts: changed
               ? { ...state.transcripts, [action.appSessionId]: merged }
               : state.transcripts,
+            transcriptRetainedCost: {
+              ...state.transcriptRetainedCost,
+              [action.appSessionId]: estimatedCost,
+            },
             historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
             historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
             sessionRestore: {
@@ -2086,6 +2073,10 @@ function baseReducer(state: AppState, action: Action): AppState {
       const after = liveOnly.filter((e) => e.ts >= firstTs);
       const mergedTranscript = page.length > 0 ? [...before, ...page, ...after] : existing;
       const transcripts = { ...state.transcripts, [action.appSessionId]: mergedTranscript };
+      const transcriptRetainedCost = {
+        ...state.transcriptRetainedCost,
+        [action.appSessionId]: estimateTranscriptCost(mergedTranscript),
+      };
       const historicalChildren = action.childSessions ?? [];
       const existingChildSessions = state.childSessions[action.appSessionId] ?? {};
       let childSessions = state.childSessions;
@@ -2109,6 +2100,7 @@ function baseReducer(state: AppState, action: Action): AppState {
           ...state,
           progress: { ...state.progress, [action.appSessionId]: mergedProgress },
           transcripts,
+          transcriptRetainedCost,
           childSessions,
           historyLoaded: { ...state.historyLoaded, [action.appSessionId]: true },
           historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
@@ -2143,7 +2135,24 @@ function baseReducer(state: AppState, action: Action): AppState {
         sessionLastSeen[state.activeAppSessionId] = now;
       }
       if (action.id) sessionLastSeen[action.id] = now;
-      const next = invalidateSelectedChildOpening(state);
+      let next = invalidateSelectedChildOpening(state);
+      const outgoingAppSessionId = state.activeAppSessionId;
+      const outgoingSession = outgoingAppSessionId
+        ? state.sessions[outgoingAppSessionId]
+        : undefined;
+      if (
+        outgoingAppSessionId &&
+        outgoingAppSessionId !== action.id &&
+        outgoingSession &&
+        !sessionIsLive(outgoingSession) &&
+        state.transcriptViewportPinned[outgoingAppSessionId] !== false
+      ) {
+        next = releaseSessionTranscriptWindow(
+          next,
+          outgoingAppSessionId,
+          INACTIVE_TRANSCRIPT_POLICY,
+        );
+      }
       return {
         ...next,
         activeAppSessionId: action.id,
