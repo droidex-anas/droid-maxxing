@@ -44,6 +44,9 @@ export interface SessionTimelineDependencies {
   // Streaming deltas buffered longer than this are flushed as one event.
   // 0 disables coalescing (every delta records and emits immediately).
   streamingCoalesceMs?: number;
+  // Serialized payload budget for one coalesced run. Crossing it flushes early
+  // and starts another run; content is never truncated or dropped.
+  streamingCoalesceMaxBytes?: number;
 }
 
 interface SessionHistoryPage {
@@ -55,26 +58,42 @@ interface SessionHistoryPage {
   olderCursor?: string;
 }
 
+// Protocol mirror of src/lib/transcriptStoreMemory.ts. Scroll pages are smaller;
+// this ceiling also permits one bounded recent-tail repair after local release.
+const MAX_HISTORY_PAGE_EVENTS = 1_600;
+
 // Preserve the existing enumerable `cursor: undefined` loader boundary while
-// keeping the extracted module clean under exactOptionalPropertyTypes.
-function legacyCursorOptions(cursor: string | undefined): { cursor?: string } {
-  const options: { cursor?: string } = {};
+// keeping the extracted module clean under exactOptionalPropertyTypes. Limits
+// tune only local disk/bridge page size; they never change provider traffic.
+function historyWindowOptions(
+  cursor: string | undefined,
+  limit: number | undefined,
+): { cursor?: string; limit?: number } {
+  const options: { cursor?: string; limit?: number } = {};
   Object.defineProperty(options, 'cursor', { enumerable: true, value: cursor });
+  if (limit !== undefined && Number.isFinite(limit)) {
+    options.limit = Math.min(MAX_HISTORY_PAGE_EVENTS, Math.max(1, Math.floor(limit)));
+  }
   return options;
 }
 
 const DEFAULT_STREAMING_COALESCE_MS = 40;
+const DEFAULT_STREAMING_COALESCE_MAX_BYTES = 64 * 1024;
 
 export class SessionTimeline {
   private statusSeq = 0;
   private readonly loaders: SessionTimelineLoaders;
   private readonly streamingCoalesceMs: number;
+  private readonly streamingCoalesceMaxBytes: number;
   // At most one buffered run: the most recent streaming delta and everything
   // merged into it. A single slot mirrors the renderer reducer, which only
   // merges into the *last* transcript event, so interleaved sources flush each
   // other and ordering is preserved exactly.
-  private streamingBuffer: { event: TranscriptEvent; timer: ReturnType<typeof setTimeout> } | null =
-    null;
+  private streamingBuffer: {
+    event: TranscriptEvent;
+    estimatedBytes: number;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
     this.loaders = dependencies.loaders ?? {
@@ -85,6 +104,8 @@ export class SessionTimeline {
       transcriptWindow: loadSessionTranscriptWindow,
     };
     this.streamingCoalesceMs = dependencies.streamingCoalesceMs ?? DEFAULT_STREAMING_COALESCE_MS;
+    this.streamingCoalesceMaxBytes =
+      dependencies.streamingCoalesceMaxBytes ?? DEFAULT_STREAMING_COALESCE_MAX_BYTES;
   }
 
   list(): void {
@@ -95,15 +116,15 @@ export class SessionTimeline {
     }
   }
 
-  load(appSessionIdOrProviderSessionId: string, cursor?: string): void {
+  load(appSessionIdOrProviderSessionId: string, cursor?: string, limit?: number): void {
     const summary = this.dependencies.registry.resolveSummary(appSessionIdOrProviderSessionId);
     const appSessionId = summary?.appSessionId ?? appSessionIdOrProviderSessionId;
     const providerSessionId = summary?.providerSessionId ?? appSessionIdOrProviderSessionId;
     try {
       const history =
         summary?.sessionPurpose === 'mission-control'
-          ? this.loaders.hydrateMission(appSessionId, legacyCursorOptions(cursor))
-          : this.loadStandard(appSessionId, providerSessionId, cursor);
+          ? this.loaders.hydrateMission(appSessionId, historyWindowOptions(cursor, limit))
+          : this.loadStandard(appSessionId, providerSessionId, cursor, limit);
       const transcripts = history.transcripts.map((event) => ({ ...event, appSessionId }));
       this.record(transcripts);
       if (cursor) {
@@ -213,17 +234,20 @@ export class SessionTimeline {
     if (buffer) {
       const merged = mergeStreamingDelta(buffer.event, event);
       if (merged) {
+        const incomingBytes = estimateStreamingDeltaBytes(event);
+        if (buffer.estimatedBytes + incomingBytes > this.streamingCoalesceMaxBytes) {
+          this.flushStreaming();
+          this.bufferStreamingEvent(event, incomingBytes);
+          return;
+        }
         buffer.event = merged;
+        buffer.estimatedBytes += incomingBytes;
         return;
       }
     }
     this.flushStreaming();
     if (isCoalescableDelta(event)) {
-      const timer = setTimeout(() => {
-        this.flushStreaming();
-      }, this.streamingCoalesceMs);
-      timer.unref();
-      this.streamingBuffer = { event, timer };
+      this.bufferStreamingEvent(event, estimateStreamingDeltaBytes(event));
       return;
     }
     this.recordAndEmit(event);
@@ -238,6 +262,26 @@ export class SessionTimeline {
     this.streamingBuffer = null;
     clearTimeout(buffer.timer);
     this.recordAndEmit(buffer.event);
+  }
+
+  private bufferStreamingEvent(event: TranscriptEvent, estimatedBytes: number): void {
+    if (estimatedBytes >= this.streamingCoalesceMaxBytes) {
+      this.recordAndEmit(event);
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        this.flushStreaming();
+      } catch (error) {
+        this.dependencies.emitError({
+          appSessionId: event.appSessionId,
+          message: `Could not persist streaming transcript: ${errMsg(error)}`,
+          recoverable: true,
+        });
+      }
+    }, this.streamingCoalesceMs);
+    timer.unref();
+    this.streamingBuffer = { event, estimatedBytes, timer };
   }
 
   private recordAndEmit(event: TranscriptEvent): void {
@@ -292,10 +336,15 @@ export class SessionTimeline {
     appSessionId: string,
     providerSessionId: string,
     cursor?: string,
+    limit?: number,
   ): ReturnType<typeof hydrateHistoricalSession> {
     const chain = this.loaders.resolveChain(appSessionId, providerSessionId);
     if (chain.length === 0) throw new Error(`Session history not found for ${providerSessionId}`);
-    const window = this.loaders.transcriptWindow(appSessionId, chain, legacyCursorOptions(cursor));
+    const window = this.loaders.transcriptWindow(
+      appSessionId,
+      chain,
+      historyWindowOptions(cursor, limit),
+    );
     return {
       progress: [],
       transcripts: window.events,
@@ -344,6 +393,23 @@ function isToolCallDelta(event: TranscriptEvent): boolean {
 
 function isCoalescableDelta(event: TranscriptEvent): boolean {
   return isTextDelta(event) || isToolCallDelta(event);
+}
+
+function estimateStreamingDeltaBytes(event: TranscriptEvent): number {
+  let bytes = 192;
+  if (event.text) bytes += Buffer.byteLength(event.text, 'utf8');
+  if (event.toolName) bytes += Buffer.byteLength(event.toolName, 'utf8');
+  if (event.toolArgs !== undefined) {
+    try {
+      const serialized = JSON.stringify(event.toolArgs);
+      if (serialized) bytes += Buffer.byteLength(serialized, 'utf8');
+    } catch {
+      // Cyclic provider payloads are not valid bridge JSON anyway. Treat them
+      // as over-budget so they bypass the coalescer and fail at the usual seam.
+      return Number.POSITIVE_INFINITY;
+    }
+  }
+  return bytes;
 }
 
 function sameDeltaRun(previous: TranscriptEvent, next: TranscriptEvent): boolean {

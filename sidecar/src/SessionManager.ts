@@ -417,6 +417,9 @@ export class SessionManager {
       forgetMissionControl: (appSessionId) => {
         this.missionControlPolicy.forget(appSessionId);
       },
+      forgetPendingSettings: (appSessionId) => {
+        this.pendingAgentSettings.delete(appSessionId);
+      },
       closeBrowserSession: (appSessionId) => this.browsers.close(appSessionId),
       emit: (event) => {
         this.emit(event);
@@ -613,7 +616,7 @@ export class SessionManager {
         this.timeline.loadProviderPage(cmd.providerSessionId, cmd.cursor, cmd.limit);
         return;
       case 'session.loadHistory':
-        this.timeline.load(cmd.appSessionId, cmd.cursor);
+        this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
       case 'sessions.search': {
         // Track the newest query so a superseded scan stops spending its file
@@ -1169,7 +1172,11 @@ export class SessionManager {
     } catch (err) {
       if (!this.isCurrentPrimarySession(liveSession)) {
         return;
-      } else if (liveSession.interruptingForSteer) {
+      }
+      // A buffered final delta must be visible before any terminal status,
+      // error, or phase update from this failed/interrupted turn.
+      this.timeline.flushStreaming();
+      if (liveSession.interruptingForSteer) {
         this.timeline.appendStatus(appSessionId, 'Current turn interrupted for steering.');
       } else if (liveSession.interrupting && isUserCancellation(err)) {
         // The user pressed Stop; interrupt() already set the paused phase, so

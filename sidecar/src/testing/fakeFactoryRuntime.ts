@@ -112,9 +112,9 @@ export class FakeFactorySession implements FactorySession {
     await this.streamGates.shift()?.promise;
     const streamError = this.nextStreamError;
     delete this.nextStreamError;
-    if (streamError) throw streamError;
     const events = this.streamEventQueue.shift() ?? [];
     for (const event of events) yield event;
+    if (streamError) throw streamError;
     if (!events.some((event) => event.type === 'result')) {
       yield successfulResultEvent(this.sessionId);
     }

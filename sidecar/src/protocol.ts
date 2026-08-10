@@ -601,7 +601,7 @@ export type ClientCommand =
       includePlainChats?: boolean;
       limitPerWorkspace?: number;
     }
-  | { type: 'session.loadHistory'; appSessionId: string; cursor?: string }
+  | { type: 'session.loadHistory'; appSessionId: string; cursor?: string; limit?: number }
   | { type: 'sessions.search'; requestId: string; query: string }
   | {
       type: 'child.open';

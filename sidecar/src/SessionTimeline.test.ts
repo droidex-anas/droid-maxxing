@@ -22,6 +22,7 @@ interface HarnessOptions {
   now?: () => number;
   onRecordEvent?: (event: TranscriptEvent) => void;
   streamingCoalesceMs?: number;
+  streamingCoalesceMaxBytes?: number;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -70,6 +71,9 @@ function createHarness(options: HarnessOptions = {}) {
     ...(options.now ? { now: options.now } : {}),
     ...(options.streamingCoalesceMs !== undefined
       ? { streamingCoalesceMs: options.streamingCoalesceMs }
+      : {}),
+    ...(options.streamingCoalesceMaxBytes !== undefined
+      ? { streamingCoalesceMaxBytes: options.streamingCoalesceMaxBytes }
       : {}),
   });
   return { emitted, errors, recorded, timeline, trace };
@@ -168,6 +172,48 @@ test('streaming text deltas coalesce into one event flushed by the timer', async
   assert.equal(recorded.length, 1);
   assert.deepEqual(recorded[0], delta('a', { text: 'Hello', ts: 10, endTs: 12 }));
   assert.deepEqual(emitted, [{ type: 'event.appended', event: recorded[0] }]);
+});
+
+test('timer flush failures report a recoverable error instead of escaping', async () => {
+  const { emitted, errors, timeline } = createHarness({
+    streamingCoalesceMs: 5,
+    onRecordEvent: () => {
+      throw new Error('disk full');
+    },
+  });
+
+  timeline.appendStreaming(delta('a', { text: 'buffered tail' }));
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(errors, [
+    {
+      appSessionId: 'app-1',
+      message: 'Could not persist streaming transcript: disk full',
+      recoverable: true,
+    },
+  ]);
+});
+
+test('streaming byte budget flushes early without dropping or truncating content', () => {
+  const { recorded, timeline } = createHarness({
+    streamingCoalesceMs: 1_000,
+    streamingCoalesceMaxBytes: 400,
+  });
+
+  timeline.appendStreaming(delta('a', { text: 'a'.repeat(120) }));
+  timeline.appendStreaming(delta('b', { text: 'b'.repeat(120) }));
+  timeline.appendStreaming(delta('c', { text: 'c'.repeat(1_000) }));
+  timeline.flushStreaming();
+
+  assert.equal(
+    recorded.map((event) => event.text ?? '').join(''),
+    `${'a'.repeat(120)}${'b'.repeat(120)}${'c'.repeat(1_000)}`,
+  );
+  assert.equal(
+    recorded.every((event) => (event.text?.length ?? 0) > 0),
+    true,
+  );
 });
 
 test('non-mergeable streaming events flush the buffer and keep order', () => {
@@ -325,6 +371,28 @@ test('plain restore resolves aliases, records in order, and emits replace teleme
   assert.equal(page.loadedCount, 2);
   assert.equal(page.hasMore, true);
   assert.deepEqual(page.childSessions, childSessions);
+});
+
+test('history page limits tune only the bounded local transcript window', () => {
+  const calls: unknown[][] = [];
+  const harness = createHarness({
+    summaries: [summary('app-1', 'provider-1')],
+    loaders: {
+      resolveChain: () => ['provider-1'],
+      transcriptWindow: (...args) => {
+        calls.push(args);
+        return { events: [] };
+      },
+    },
+  });
+
+  harness.timeline.load('app-1', 'cursor-1', 240);
+  harness.timeline.load('app-1', 'cursor-2', 100_000);
+
+  assert.deepEqual(calls, [
+    ['app-1', ['provider-1'], { cursor: 'cursor-1', limit: 240 }],
+    ['app-1', ['provider-1'], { cursor: 'cursor-2', limit: 1_600 }],
+  ]);
 });
 
 test('Mission Control restore preserves progress, child links, cursor, identity, and order', () => {
