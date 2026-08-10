@@ -10,6 +10,7 @@ import {
   collectTurnFiles,
   conversationAnchors,
   correlateResults,
+  feedRowId,
   fetchSizeBadge,
   groupTurns,
   isResultFor,
@@ -115,6 +116,44 @@ test('a leading model message before any prompt does not add a stray dot', () =>
     anchors.map((a) => a.label),
     ['one', 'two'],
   );
+});
+
+test('prepending events into a worked group preserves its viewport row identity', () => {
+  const older = todo('1. [completed] inspect');
+  const tail = grep();
+  const answer = asst('done');
+  const before = groupTurns(buildFeed([tail, answer]), false);
+  const after = groupTurns(buildFeed([older, tail, answer]), false);
+  const beforeWorked = before.find(
+    (item): item is Extract<FeedItem, { type: 'worked' }> => item.type === 'worked',
+  );
+  const afterWorked = after.find(
+    (item): item is Extract<FeedItem, { type: 'worked' }> => item.type === 'worked',
+  );
+
+  assert.ok(beforeWorked);
+  assert.ok(afterWorked);
+  assert.notEqual(beforeWorked.key, afterWorked.key);
+  assert.equal(feedRowId(beforeWorked), feedRowId(afterWorked));
+});
+
+test('prepending a reconciled answer fragment preserves the merged message viewport identity', () => {
+  const older = asst('first half');
+  const reconciliation = todo('1. [completed] inspect');
+  const tail = asst('second half');
+  const before = groupTurns(buildFeed([tail]), false);
+  const after = groupTurns(buildFeed([older, reconciliation, tail]), false);
+  const beforeMessage = before.find(
+    (item): item is Extract<FeedItem, { type: 'message' }> => item.type === 'message',
+  );
+  const afterMessage = after.find(
+    (item): item is Extract<FeedItem, { type: 'message' }> => item.type === 'message',
+  );
+
+  assert.ok(beforeMessage);
+  assert.ok(afterMessage);
+  assert.notEqual(beforeMessage.key, afterMessage.key);
+  assert.equal(feedRowId(beforeMessage), feedRowId(afterMessage));
 });
 
 test('#20 repeated TodoWrite calls are deduped to the latest snapshot', () => {
@@ -883,6 +922,24 @@ test('#27 a completed turn that edited files gets a top-level changes summary', 
   assert.equal(changes.added, 5);
   // The summary is top-level, never nested inside the Worked group.
   assert.ok(!workedChildren(grouped).some((c) => c.type === 'turnChanges'));
+});
+
+test('prepending turn activity preserves the changes-summary viewport identity', () => {
+  const edit = editFile('src/a.ts', 2, 'stable-edit');
+  const answer = asst('done');
+  const before = groupTurns(buildFeed([edit, answer]), false, undefined, true);
+  const after = groupTurns(buildFeed([grep(), edit, answer]), false, undefined, true);
+  const beforeChanges = before.find(
+    (item): item is Extract<FeedItem, { type: 'turnChanges' }> => item.type === 'turnChanges',
+  );
+  const afterChanges = after.find(
+    (item): item is Extract<FeedItem, { type: 'turnChanges' }> => item.type === 'turnChanges',
+  );
+
+  assert.ok(beforeChanges);
+  assert.ok(afterChanges);
+  assert.notEqual(beforeChanges.key, afterChanges.key);
+  assert.equal(feedRowId(beforeChanges), feedRowId(afterChanges));
 });
 
 test('#27 a turn with no file edits gets no changes summary', () => {

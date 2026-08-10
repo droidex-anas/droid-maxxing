@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { shouldReleaseConversationTranscript } from './useConversationScrollWindow';
+import {
+  rowIntersectsViewport,
+  scrollTopForPreservedAnchor,
+  updateViewportAnchorGeometry,
+} from './conversationViewportAnchor';
+import {
+  didCommitRequestedHistoryPrepend,
+  shouldReleaseConversationTranscript,
+} from './useConversationScrollWindow';
 
 const settledPinned = {
   isViewingChildSession: false,
@@ -42,5 +50,76 @@ test('child and scrolled-up conversations stay pinned in memory', () => {
       isPinned: false,
     }),
     false,
+  );
+});
+
+test('row anchoring compensates for prepends and later interactive height changes', () => {
+  const captured = { scrollTop: 1_200, rowOffsetTop: -40 };
+
+  // An older page inserts 640 px above the row currently under the viewport.
+  assert.equal(scrollTopForPreservedAnchor(captured, 600), 1_840);
+
+  // A widget above the same row then grows by another 180 px after it mounts.
+  assert.equal(scrollTopForPreservedAnchor({ scrollTop: 1_840, rowOffsetTop: 600 }, 780), 2_020);
+
+  // Height changes below the anchor do not move the reading position.
+  assert.equal(scrollTopForPreservedAnchor({ scrollTop: 2_020, rowOffsetTop: 780 }, 780), 2_020);
+});
+
+test('anchor geometry refresh keeps tracking the originally captured row', () => {
+  const anchor = {
+    rowId: 'message-42',
+    rowOffsetTop: 24,
+    scrollTop: 0,
+    scrollHeight: 20_000,
+  };
+
+  assert.deepEqual(updateViewportAnchorGeometry(anchor, 3_500, 3_476, 23_500), {
+    rowId: 'message-42',
+    rowOffsetTop: 3_500,
+    scrollTop: 3_476,
+    scrollHeight: 23_500,
+  });
+});
+
+test('ordinary live appends do not start prepend restoration', () => {
+  assert.equal(
+    didCommitRequestedHistoryPrepend({
+      requestedCursor: 'cursor-2',
+      currentCursor: 'cursor-2',
+      previousTranscriptLength: 240,
+      transcriptLength: 241,
+    }),
+    false,
+  );
+  assert.equal(
+    didCommitRequestedHistoryPrepend({
+      requestedCursor: 'cursor-2',
+      currentCursor: 'cursor-1',
+      previousTranscriptLength: 240,
+      transcriptLength: 289,
+    }),
+    true,
+  );
+});
+
+test('anchor fallback ignores feed rows entirely below non-feed viewport content', () => {
+  assert.equal(
+    rowIntersectsViewport({
+      viewportTop: 100,
+      viewportBottom: 700,
+      rowTop: 760,
+      rowBottom: 920,
+    }),
+    false,
+  );
+  assert.equal(
+    rowIntersectsViewport({
+      viewportTop: 100,
+      viewportBottom: 700,
+      rowTop: 620,
+      rowBottom: 780,
+    }),
+    true,
   );
 });

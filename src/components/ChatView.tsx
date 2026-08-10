@@ -10,7 +10,6 @@ import {
   ChatSkeleton,
   TranscriptSkeleton,
   buildGroupedFeed,
-  promptAnchorsFromItems,
 } from './chat';
 import { readFile } from '../lib/desktop';
 import { interruptChild, loadSessionHistory } from '../lib/commands';
@@ -29,6 +28,7 @@ import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
 import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
+import { useConversationTimeline } from '../hooks/useConversationTimeline';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -257,9 +257,6 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     dispatch({ type: 'SESSION_RESTORE_START', appSessionId: historyAppSessionId });
     loadSessionHistory(historyAppSessionId);
   }, [historyAppSessionId, dispatch]);
-  // Auto-page older history until the conversation timeline has at least this
-  // many anchors (or the chain ends); the rest fills in as the user scrolls up.
-  const TIMELINE_TARGET_ANCHORS = 12;
   const tailLen = transcript.length > 0 ? (transcript[transcript.length - 1].text?.length ?? 0) : 0;
   const primaryLive = useSessionLive(activeSession?.appSessionId ?? null);
   const live = visibleTarget.kind === 'child' ? visibleTarget.canInterrupt : primaryLive;
@@ -356,19 +353,14 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
       }),
     [transcript, live, specContent, viewingChildSession],
   );
-  // Dots for the conversation timeline: one per user prompt, derived from the
-  // same feed the transcript renders so the rail stays in sync.
-  const timelineAnchors = useMemo(
-    () => (viewingChildSession ? [] : promptAnchorsFromItems(feedItems)),
-    [feedItems, viewingChildSession],
-  );
-  const isAutoPagingOlderHistory =
-    !viewingChildSession &&
-    !!historyAppSessionId &&
-    !!olderCursor &&
-    !loadingOlder &&
-    timelineAnchors.length < TIMELINE_TARGET_ANCHORS &&
-    restore?.status !== 'failed';
+  const { timelineAnchors, isTimelinePriming, isAutoPagingOlderHistory } = useConversationTimeline({
+    feedItems,
+    isViewingChildSession: viewingChildSession,
+    historyAppSessionId,
+    olderCursor,
+    isLoadingOlder: loadingOlder,
+    restoreStatus: restore?.status,
+  });
   const { onScroll, requestOlderHistory } = useConversationScrollWindow({
     scrollRef,
     visibleConversationKey,
@@ -424,7 +416,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
         />
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
-        {activeSession && timelineAnchors.length >= 2 && (
+        {activeSession && !isTimelinePriming && timelineAnchors.length >= 2 && (
           <ConversationTimeline scrollRef={scrollRef} anchors={timelineAnchors} />
         )}
         <div
@@ -434,6 +426,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
           style={{
             paddingRight: rightInset ? 312 : undefined,
             transition: 'padding-right 0.2s ease',
+            overflowAnchor: 'none',
           }}
         >
           {activeSession && transcript.length > 0 ? (

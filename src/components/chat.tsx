@@ -1144,7 +1144,14 @@ export type FeedItem =
   | { type: 'child_sessions'; key: string; events: TranscriptEvent[] }
   | { type: 'tools'; key: string; events: TranscriptEvent[] }
   | { type: 'worked'; key: string; items: FeedItem[]; durationMs: number }
-  | { type: 'turnChanges'; key: string; files: TurnFile[]; added: number; removed: number };
+  | {
+      type: 'turnChanges';
+      key: string;
+      tailEventId: string;
+      files: TurnFile[];
+      added: number;
+      removed: number;
+    };
 
 // One file touched during a completed turn, aggregated across every edit the
 // agent made to it that turn.
@@ -1506,6 +1513,32 @@ export interface ConversationAnchor {
   label: string;
 }
 
+export function recentConversationAnchors(
+  anchors: ConversationAnchor[],
+  limit: number,
+): ConversationAnchor[] {
+  return anchors.length > limit ? anchors.slice(-limit) : anchors;
+}
+
+export function shouldPrimeConversationTimeline({
+  isViewingChildSession,
+  anchorCount,
+  targetAnchorCount,
+  restoreStatus,
+}: {
+  isViewingChildSession: boolean;
+  anchorCount: number;
+  targetAnchorCount: number;
+  restoreStatus: 'loading' | 'paged' | 'loaded' | 'failed' | undefined;
+}): boolean {
+  return (
+    !isViewingChildSession &&
+    anchorCount < targetAnchorCount &&
+    restoreStatus !== 'loaded' &&
+    restoreStatus !== 'failed'
+  );
+}
+
 // One anchor per turn: the turn's final model response (its summary). The id is
 // the feed item key, which MessageFeed also stamps onto the rendered row so the
 // timeline can scroll to it.
@@ -1597,6 +1630,29 @@ export function conversationAnchors(
   return promptAnchorsFromItems(buildGroupedFeed(events, pending, options));
 }
 
+function feedItemTailId(item: FeedItem): string {
+  if (item.type === 'worked') {
+    const tail = item.items[item.items.length - 1];
+    return tail ? feedItemTailId(tail) : item.key;
+  }
+  if (item.type === 'tools' || item.type === 'child_sessions') {
+    return item.events[item.events.length - 1]?.id ?? item.key;
+  }
+  if (item.type === 'diffs') {
+    return item.changes[item.changes.length - 1]?.event.id ?? item.key;
+  }
+  if (item.type === 'turnChanges') return item.tailEventId;
+  return item.event.id;
+}
+
+// React keys preserve a group's component instance while live work appends, so
+// composite keys intentionally start at the group's first event. Viewport
+// anchoring has the opposite requirement during history prepend: an older page
+// can extend that group backward, while its tail event remains unchanged.
+export function feedRowId(item: FeedItem): string {
+  return `${item.type}:${feedItemTailId(item)}`;
+}
+
 // Best-effort end timestamp of a feed item, used to time the live working cue.
 function tailTimestamp(item?: FeedItem): number | undefined {
   if (!item) return undefined;
@@ -1670,11 +1726,12 @@ function mergeAssistantMessages(
     .filter(Boolean)
     .join('\n\n');
   return {
-    ...prev,
+    ...next,
+    key: prev.key,
     event: {
-      ...prev.event,
+      ...next.event,
       text,
-      endTs: next.event.endTs ?? next.event.ts ?? prev.event.endTs,
+      ts: prev.event.ts,
     },
   };
 }
@@ -1794,6 +1851,7 @@ export function groupTurns(
           out.push({
             type: 'turnChanges',
             key: `changes-${run[0].key}`,
+            tailEventId: feedItemTailId(run[run.length - 1]),
             files,
             added: files.reduce((s, f) => s + f.added, 0),
             removed: files.reduce((s, f) => s + f.removed, 0),
@@ -2753,6 +2811,7 @@ export function MessageFeed({
         return (
           <Fragment key={item.key}>
             <motion.div
+              data-feed-row-id={feedRowId(item)}
               {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
               style={FEED_ROW_RENDER_STYLE}
               initial={isNewItem ? { opacity: 0, y: 4 } : false}
