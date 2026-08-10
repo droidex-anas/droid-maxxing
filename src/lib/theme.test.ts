@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   PRESET_THEMES,
   SKILL_COLORS,
+  elevatedSurfaceColor,
   migrateLegacyLightPreset,
   paletteForMode,
   uiFontStack,
@@ -53,8 +54,8 @@ describe('PRESET_THEMES', () => {
 
 describe('SKILL_COLORS', () => {
   it('keeps skill labels blue and WCAG AA readable on user bubbles', () => {
-    assert.ok(contrastRatio(SKILL_COLORS.dark, '#1e1e1e') >= 4.5);
-    assert.ok(contrastRatio(SKILL_COLORS.light, '#f2f2f2') >= 4.5);
+    assert.ok(contrastRatio(SKILL_COLORS.dark, elevatedSurfaceColor(PRESET_THEMES.dark)) >= 4.5);
+    assert.ok(contrastRatio(SKILL_COLORS.light, elevatedSurfaceColor(PRESET_THEMES.light)) >= 4.5);
   });
 });
 

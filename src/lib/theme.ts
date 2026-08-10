@@ -50,6 +50,10 @@ export const SKILL_COLORS = {
   light: '#1d4ed8',
 } as const;
 
+export function elevatedSurfaceColor(theme: Pick<ThemeColors, 'bg' | 'surface'>): string {
+  return adjustColor(theme.surface, colorLuminance(theme.bg) < 0.4 ? 13 : -13);
+}
+
 // The light preset as it shipped before the readability pass. A saved theme
 // still carrying all five legacy values was never customized, so it is swapped
 // to the new preset once on load (see useStore loadTheme).
@@ -103,7 +107,7 @@ export function applyTheme(theme: ThemeSettings) {
   // hierarchy in both modes instead of an inverted/flat ramp.
   const bgIsDark = colorLuminance(theme.bg) < 0.4;
   const lift = (amount: number) => adjustColor(theme.surface, bgIsDark ? amount : -amount);
-  root.style.setProperty('--droid-elevated', lift(13));
+  root.style.setProperty('--droid-elevated', elevatedSurfaceColor(theme));
   // Input fields inside cards: lifted like elevated on dark (reads as a raised
   // pad), plain surface on light so fields stay crisp on the tinted card
   // instead of stepping darker into a grey smudge.
