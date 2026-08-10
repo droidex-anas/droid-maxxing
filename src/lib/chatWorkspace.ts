@@ -5,6 +5,27 @@ export type ChatWorkingDirectoryResult =
   | { ok: true; path: string }
   | { ok: false; reason: string; message?: string };
 
+export interface ChatWorktreeDetails {
+  id: string;
+  path: string;
+  repositoryName: string;
+}
+
+export function chatWorktreeName(clientRef: string): string {
+  const timestamp = clientRef.split('-')[1];
+  return timestamp && /^[a-z0-9]+$/i.test(timestamp) ? timestamp.slice(-4) : 'chat';
+}
+
+export function chatWorktreeDetails(cwd: string): ChatWorktreeDetails | null {
+  const parts = cwd.split(/[\\/]/).filter(Boolean);
+  const marker = parts.lastIndexOf('.worktrees');
+  if (marker < 0 || parts.length !== marker + 3) return null;
+  const id = parts[marker + 1];
+  const repositoryName = parts[marker + 2];
+  if (!id || !repositoryName) return null;
+  return { id, path: cwd, repositoryName };
+}
+
 export function resolveMainCheckout(
   environment: GitEnvironment,
   worktrees: readonly Pick<GitWorktree, 'path' | 'branch' | 'isMain'>[],

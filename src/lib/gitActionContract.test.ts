@@ -1,7 +1,12 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkoutGitBranch, gitFetch } from './git';
-import { prepareChatWorkingDirectory, resolveMainCheckout } from './chatWorkspace';
+import {
+  chatWorktreeDetails,
+  chatWorktreeName,
+  prepareChatWorkingDirectory,
+  resolveMainCheckout,
+} from './chatWorkspace';
 import { createPullRequest, detectPullRequest, postPrComment } from './github';
 
 // These wrappers promise one error contract: IPC-level rejections surface as
@@ -70,6 +75,21 @@ test('chat worktrees are created from the Git-owned main repository', async () =
     { detached: true, base: 'origin/main', name: 'chat-c-1' },
   ]);
   assert.deepEqual(result, { ok: true, path: '/repo/.worktrees/chat-c-1' });
+});
+
+test('chat worktrees use a compact id and retain the repository name in their path', () => {
+  assert.equal(chatWorktreeName('c-msmufmwg-0'), 'fmwg');
+  assert.deepEqual(chatWorktreeDetails('/repo/.worktrees/fmwg/droid-control'), {
+    id: 'fmwg',
+    path: '/repo/.worktrees/fmwg/droid-control',
+    repositoryName: 'droid-control',
+  });
+  assert.deepEqual(chatWorktreeDetails('C:\\repo\\.worktrees\\f401\\droid-control'), {
+    id: 'f401',
+    path: 'C:\\repo\\.worktrees\\f401\\droid-control',
+    repositoryName: 'droid-control',
+  });
+  assert.equal(chatWorktreeDetails('/repo/.worktrees/manual'), null);
 });
 
 test('main checkout selection waits when a linked checkout has no worktree snapshot', () => {

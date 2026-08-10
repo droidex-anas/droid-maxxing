@@ -808,6 +808,10 @@ function defaultWorktreeLocation(root, branch) {
   return path.join(root, '.worktrees', sanitizeSegment(branch) || 'worktree');
 }
 
+function detachedWorktreeLocation(root, name) {
+  return path.join(defaultWorktreeLocation(root, name), path.basename(root));
+}
+
 // Default worktrees live under `<repo>/.worktrees`. Add that path to the repo's
 // local exclude file (not a tracked `.gitignore`) so creating one does not leave
 // the original checkout dirty and trip the dirty-tree guards / status counts.
@@ -877,7 +881,9 @@ async function createWorktree(dir, options = {}) {
   // directories, missing collisions and starting the chat at the wrong cwd.
   let target = location
     ? path.resolve(root, expandHome(location))
-    : defaultWorktreeLocation(root, worktreeName);
+    : detached
+      ? detachedWorktreeLocation(root, worktreeName)
+      : defaultWorktreeLocation(root, worktreeName);
   if (location) {
     if (!allowedWorktreeTarget(root, target))
       return {
@@ -889,8 +895,11 @@ async function createWorktree(dir, options = {}) {
   } else {
     // Default-location worktrees auto-suffix so a second worktree for the same
     // branch (or a leftover directory) never collides — keeps the flow workable.
-    const baseTarget = target;
-    for (let n = 2; fs.existsSync(target); n++) target = `${baseTarget}-${n}`;
+    for (let n = 2; fs.existsSync(target); n++) {
+      target = detached
+        ? detachedWorktreeLocation(root, `${worktreeName}-${String(n)}`)
+        : `${defaultWorktreeLocation(root, worktreeName)}-${String(n)}`;
+    }
   }
   try {
     // Ignore `.worktrees/` whenever the target lives there, even if the caller

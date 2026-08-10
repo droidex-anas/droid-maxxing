@@ -32,7 +32,11 @@ import { FeedbackModal } from './FeedbackModal';
 import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
 import { markGitTurnStart } from '../lib/git';
-import { prepareChatWorkingDirectory, type ChatWorkingDirectoryResult } from '../lib/chatWorkspace';
+import {
+  chatWorktreeName,
+  prepareChatWorkingDirectory,
+  type ChatWorkingDirectoryResult,
+} from '../lib/chatWorkspace';
 import { createLocalDesignTranscriptEvent, newQueueId } from '../lib/promptQueue';
 import { composePrompt, parseSlashSkillInvocation } from '../lib/composePrompt';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
@@ -536,7 +540,7 @@ export default function PromptInput({
     const result = await prepareChatWorkingDirectory(dir, {
       executionMode: draft?.executionMode ?? 'local',
       base: draft?.branch,
-      name: `chat-${clientRef}`,
+      name: chatWorktreeName(clientRef),
     });
     if (result.ok) return result;
 

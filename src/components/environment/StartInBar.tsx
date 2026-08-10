@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Check, FolderGit2, FolderPlus } from 'lucide-react';
 import { Popover } from './Popover';
+import { WorktreeIcon } from '../icons/WorktreeIcon';
 
 // Custom composer-bar glyphs (16x16, currentColor) that replace the stock
 // lucide marks for the Local/machine and branch pills.
@@ -42,25 +43,6 @@ function BranchGlyph({ className }: { className?: string }) {
   );
 }
 
-function WorktreeGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M3 6V3h3" />
-      <path d="m3 3 4 4" />
-      <path d="M13 10v3h-3" />
-      <path d="m13 13-4-4" />
-    </svg>
-  );
-}
 import { StartBranchMenu } from './StartBranchMenu';
 import { useStore } from '../../hooks/useStore';
 import { useGitEnvironment } from '../../hooks/useGitEnvironment';
@@ -227,7 +209,7 @@ export function StartInBar() {
           <Pill
             icon={
               createsWorktree ? (
-                <WorktreeGlyph className="h-3.5 w-3.5" />
+                <WorktreeIcon className="h-3.5 w-3.5" />
               ) : (
                 <LocalGlyph className="h-3.5 w-3.5" />
               )
@@ -261,7 +243,7 @@ export function StartInBar() {
                 aria-pressed={createsWorktree}
                 className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
-                <WorktreeGlyph className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                <WorktreeIcon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12.5px] text-droid-text">New worktree</span>
                   <span className="block truncate text-[10.5px] text-droid-text-muted">
@@ -314,7 +296,7 @@ export function StartInBar() {
                     aria-pressed={currentWtPath === w.path}
                     className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
                   >
-                    <WorktreeGlyph className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                    <WorktreeIcon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                     <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
                       {worktreeName(w)}
                     </span>

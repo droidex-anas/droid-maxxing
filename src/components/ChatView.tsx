@@ -27,6 +27,7 @@ import {
 import type { FileChange } from '../lib/diff';
 import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
+import { chatWorktreeDetails } from '../lib/chatWorkspace';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -145,6 +146,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   const selectedChildSessionId =
     visibleTarget.kind === 'child' ? visibleTarget.childSessionId : undefined;
   const viewingChildSession = Boolean(selectedChildSessionId);
+  const createdWorktree = activeSession ? chatWorktreeDetails(activeSession.cwd) : null;
   const visibleConversationKey = activeSession
     ? `${activeSession.appSessionId}:${selectedChildSessionId ?? 'primary'}`
     : null;
@@ -520,6 +522,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
                       }
                     : undefined
                 }
+                createdWorktreePath={!viewingChildSession ? createdWorktree?.path : undefined}
               />
             </motion.div>
           ) : activeSession && restore?.status === 'failed' ? (

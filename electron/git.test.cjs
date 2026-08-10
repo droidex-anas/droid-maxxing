@@ -212,7 +212,8 @@ test('detached worktree creation uses the selected base without creating a branc
   });
 
   assert.equal(created.ok, true);
-  assert.equal(created.path, path.join(await fsp.realpath(dir), '.worktrees', 'chat-client123'));
+  const root = await fsp.realpath(dir);
+  assert.equal(created.path, path.join(root, '.worktrees', 'chat-client123', path.basename(root)));
   assert.equal((await git(created.path, ['rev-parse', 'HEAD'])).trim(), baseCommit);
   assert.equal((await git(created.path, ['branch', '--show-current'])).trim(), '');
 });
