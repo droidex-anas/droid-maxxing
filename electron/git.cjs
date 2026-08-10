@@ -854,18 +854,30 @@ function allowedWorktreeTarget(root, target) {
   );
 }
 
-async function createWorktree(dir, { branch, base, newBranch = false, location } = {}) {
+async function createWorktree(dir, options = {}) {
   const root = await repoRootOf(dir);
   if (!root) return { ok: false, reason: 'not_a_repo' };
-  if (!validBranchName(branch))
+  const detached = options.detached === true;
+  const branch = options.branch;
+  const base = options.base;
+  const newBranch = options.newBranch ?? false;
+  const location = options.location;
+  const worktreeName = detached ? sanitizeSegment(options.name) : branch;
+  if (detached) {
+    if (!worktreeName || worktreeName === '.' || worktreeName === '..')
+      return { ok: false, reason: 'invalid_name', message: 'Invalid worktree name' };
+    if (!(await resolvesToCommit(root, base)))
+      return { ok: false, reason: 'invalid_name', message: `Invalid base ref "${base ?? ''}"` };
+  } else if (!validBranchName(branch)) {
     return { ok: false, reason: 'invalid_name', message: `Invalid branch name "${branch ?? ''}"` };
+  }
   // A relative custom location must resolve against the repo root (where git
   // creates it), not the Electron process cwd — otherwise the existence check,
   // the actual creation, and the returned path could all refer to different
   // directories, missing collisions and starting the chat at the wrong cwd.
   let target = location
     ? path.resolve(root, expandHome(location))
-    : defaultWorktreeLocation(root, branch);
+    : defaultWorktreeLocation(root, worktreeName);
   if (location) {
     if (!allowedWorktreeTarget(root, target))
       return {
@@ -892,9 +904,11 @@ async function createWorktree(dir, { branch, base, newBranch = false, location }
     const baseRef = newBranch && (await resolvesToCommit(root, base)) ? base : null;
     // `--` ends option parsing so a user-editable target path (e.g. a relative
     // `-wt`) or ref can never be read as a git option.
-    const args = newBranch
-      ? ['worktree', 'add', '-b', branch, '--', target, ...(baseRef ? [baseRef] : [])]
-      : ['worktree', 'add', '--', target, branch];
+    const args = detached
+      ? ['worktree', 'add', '--detach', '--', target, base]
+      : newBranch
+        ? ['worktree', 'add', '-b', branch, '--', target, ...(baseRef ? [baseRef] : [])]
+        : ['worktree', 'add', '--', target, branch];
     await run(root, args, { timeout: PUSH_TIMEOUT });
     if (newBranch) await rememberBase(root, branch, baseRef);
     // When forking from a remote-tracking ref (e.g. `upstream/foo`), set up
@@ -915,7 +929,7 @@ async function createWorktree(dir, { branch, base, newBranch = false, location }
       }
     }
     invalidateReads(root);
-    return { ok: true, path: target, branch };
+    return detached ? { ok: true, path: target } : { ok: true, path: target, branch };
   } catch (err) {
     return { ok: false, reason: 'git_error', message: sanitizeGitError(err.message) };
   }

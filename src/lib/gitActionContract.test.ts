@@ -1,6 +1,7 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert';
 import { checkoutGitBranch, gitFetch } from './git';
+import { prepareChatWorkingDirectory } from './chatWorkspace';
 import { createPullRequest, detectPullRequest, postPrComment } from './github';
 
 // These wrappers promise one error contract: IPC-level rejections surface as
@@ -40,6 +41,46 @@ test('action wrappers pass successful results through untouched', async () => {
   const result = { ok: true };
   withBridge({ gitCheckout: () => Promise.resolve(result) });
   assert.equal(await checkoutGitBranch('/repo', { ref: 'main' }), result);
+});
+
+test('chat worktrees are created from the Git-owned main repository', async () => {
+  let createArgs: unknown[] = [];
+  withBridge({
+    gitEnvironment: () =>
+      Promise.resolve({ isRepo: true, repoRoot: '/repo/.worktrees/current', branch: 'feature' }),
+    gitWorktrees: () =>
+      Promise.resolve([
+        { path: '/repo', isMain: true, bare: false },
+        { path: '/repo/.worktrees/current', isMain: false, bare: false },
+      ]),
+    gitCreateWorktree: (...args) => {
+      createArgs = args;
+      return Promise.resolve({ ok: true, path: '/repo/.worktrees/chat-c-1' });
+    },
+  });
+
+  const result = await prepareChatWorkingDirectory('/repo/.worktrees/current', {
+    executionMode: 'worktree',
+    base: 'origin/main',
+    name: 'chat-c-1',
+  });
+
+  assert.deepEqual(createArgs, [
+    '/repo',
+    { detached: true, base: 'origin/main', name: 'chat-c-1' },
+  ]);
+  assert.deepEqual(result, { ok: true, path: '/repo/.worktrees/chat-c-1' });
+});
+
+test('local chat preparation never invokes Git', async () => {
+  withBridge({});
+  assert.deepEqual(
+    await prepareChatWorkingDirectory('/repo', {
+      executionMode: 'local',
+      name: 'chat-c-1',
+    }),
+    { ok: true, path: '/repo' },
+  );
 });
 
 test('detectPullRequest treats non-desktop and missing dir as an authoritative empty answer', async () => {

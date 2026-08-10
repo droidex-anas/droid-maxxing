@@ -199,6 +199,39 @@ test('a created worktree keeps its review diff after its base branch merges it',
   }
 });
 
+test('detached worktree creation uses the selected base without creating a branch', async () => {
+  const dir = await makeRepo();
+  await write(dir, 'seed.txt', 'seed\n');
+  await commitAll(dir, 'init');
+  const baseCommit = (await git(dir, ['rev-parse', 'HEAD'])).trim();
+
+  const created = await createWorktree(dir, {
+    detached: true,
+    base: 'HEAD',
+    name: 'chat-client123',
+  });
+
+  assert.equal(created.ok, true);
+  assert.equal(created.path, path.join(await fsp.realpath(dir), '.worktrees', 'chat-client123'));
+  assert.equal((await git(created.path, ['rev-parse', 'HEAD'])).trim(), baseCommit);
+  assert.equal((await git(created.path, ['branch', '--show-current'])).trim(), '');
+});
+
+test('detached worktree names cannot escape the default worktree directory', async () => {
+  const dir = await makeRepo();
+  await write(dir, 'seed.txt', 'seed\n');
+  await commitAll(dir, 'init');
+
+  const created = await createWorktree(dir, {
+    detached: true,
+    base: 'HEAD',
+    name: '..',
+  });
+
+  assert.equal(created.ok, false);
+  assert.equal(created.reason, 'invalid_name');
+});
+
 test('worktree removal deletes only a branch Git confirms is merged', async () => {
   const unmergedRoot = await makeRepo();
   await write(unmergedRoot, 'base.txt', 'base\n');

@@ -1,4 +1,5 @@
 import type { SessionSummary } from '../types/bridge';
+import type { GitWorktree } from '../types/vcs';
 
 // How many sessions a sidebar section shows before collapsing the rest behind
 // a "Show more" control. This is a display default, not a hard cap: every
@@ -9,6 +10,48 @@ export interface WorkspaceSection {
   cwd: string;
   name: string;
   sessions: SessionSummary[];
+}
+
+export interface WorkspaceSectionOptions {
+  limit?: number;
+  executionCwds?: ReadonlyMap<string, readonly string[]>;
+}
+
+export interface WorkspaceScope {
+  cwd: string;
+  executionCwds: string[];
+}
+
+export function buildWorkspaceScopes(
+  discoveries: readonly {
+    cwd: string;
+    worktrees: readonly Pick<GitWorktree, 'path' | 'bare' | 'isMain'>[];
+  }[],
+): WorkspaceScope[] {
+  const scopes = new Map<string, Set<string>>();
+  for (const discovery of discoveries) {
+    const linkedPaths = discovery.worktrees.flatMap((worktree) =>
+      worktree.bare || !worktree.path ? [] : [worktree.path],
+    );
+    const mainCwd =
+      discovery.worktrees.find((worktree) => worktree.isMain && worktree.path)?.path ??
+      discovery.cwd;
+    const executionCwds = scopes.get(mainCwd) ?? new Set<string>();
+    executionCwds.add(mainCwd);
+    for (const path of linkedPaths) executionCwds.add(path);
+    scopes.set(mainCwd, executionCwds);
+  }
+  return [...scopes].map(([cwd, executionCwds]) => ({ cwd, executionCwds: [...executionCwds] }));
+}
+
+export async function discoverWorkspaceScopes(
+  workspaceCwds: readonly string[],
+  loadWorktrees: (cwd: string) => Promise<GitWorktree[]>,
+): Promise<WorkspaceScope[]> {
+  const discoveries = await Promise.all(
+    workspaceCwds.map(async (cwd) => ({ cwd, worktrees: await loadWorktrees(cwd) })),
+  );
+  return buildWorkspaceScopes(discoveries);
 }
 
 export function workspaceName(cwd: string): string {
@@ -45,7 +88,7 @@ function repositoryWorkspaceCwd(cwd: string): string {
 export function buildWorkspaceSections(
   workspaceCwds: string[],
   sessions: SessionSummary[],
-  limit?: number,
+  options: WorkspaceSectionOptions = {},
 ): WorkspaceSection[] {
   const seen = new Set<string>();
   const workspaces = workspaceCwds.map(repositoryWorkspaceCwd).filter((cwd) => {
@@ -56,14 +99,18 @@ export function buildWorkspaceSections(
   const ownerFor = (sessionCwd: string) => {
     const normalizedSessionCwd = sessionCwd.replace(/\\/g, '/');
     return workspaces
-      .filter((cwd) => {
-        const normalizedCwd = cwd.replace(/\\/g, '/');
-        return (
-          normalizedSessionCwd === normalizedCwd ||
-          normalizedSessionCwd.startsWith(`${normalizedCwd}/`)
-        );
-      })
-      .sort((a, b) => b.length - a.length)[0];
+      .flatMap((cwd) =>
+        (options.executionCwds?.get(cwd) ?? [cwd]).map((executionCwd) => ({
+          cwd,
+          executionCwd: executionCwd.replace(/\\/g, '/'),
+        })),
+      )
+      .filter(
+        ({ executionCwd }) =>
+          normalizedSessionCwd === executionCwd ||
+          normalizedSessionCwd.startsWith(`${executionCwd}/`),
+      )
+      .sort((a, b) => b.executionCwd.length - a.executionCwd.length)[0]?.cwd;
   };
 
   return workspaces.map((cwd) => ({
@@ -73,7 +120,7 @@ export function buildWorkspaceSections(
       sessions
         .filter((session) => ownerFor(session.cwd) === cwd)
         .sort((a, b) => b.updatedAt - a.updatedAt),
-      limit,
+      options.limit,
     ),
   }));
 }

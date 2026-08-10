@@ -1,7 +1,7 @@
 import { useMemo, useState, type RefObject } from 'react';
 import { Check, ChevronLeft, GitBranch, Loader2, Plus, Search } from 'lucide-react';
 import { Popover } from './Popover';
-import { checkoutGitBranch, createGitWorktree, stripRemotePrefix } from '../../lib/git';
+import { checkoutGitBranch, createGitBranch, stripRemotePrefix } from '../../lib/git';
 import { useGitFetchOnOpen } from '../../hooks/useGitFetchOnOpen';
 import { useBusyAction } from '../../hooks/useBusyAction';
 import { toast } from '../../lib/toast';
@@ -17,6 +17,7 @@ export function StartBranchMenu({
   worktrees,
   uncommittedFiles,
   base,
+  executionMode,
   onStartIn,
   onRefresh,
 }: {
@@ -29,20 +30,20 @@ export function StartBranchMenu({
   worktrees: GitWorktree[];
   uncommittedFiles: number;
   base: string;
-  onStartIn: (path: string, branch?: string) => void;
+  executionMode: 'worktree' | 'local';
+  onStartIn: (path: string, branch?: string, executionMode?: 'worktree' | 'local') => void;
   onRefresh: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState<{ branch: string; remote: boolean } | null>(null);
-  const [path, setPath] = useState('');
-  const [defaultPath, setDefaultPath] = useState('');
   const [creatingNew, setCreatingNew] = useState(false);
   const [newName, setNewName] = useState('');
   const { busy, run } = useBusyAction();
   const fetching = useGitFetchOnOpen(open, cwd, onRefresh, env?.repoRoot ?? undefined);
 
-  const repoRoot = env?.repoRoot ?? cwd;
+  const repoRoot = worktrees.find((worktree) => worktree.isMain)?.path ?? env?.repoRoot ?? cwd;
   const current = env?.branch ?? null;
+  const selected = executionMode === 'worktree' ? base : current;
 
   const reset = () => {
     setPending(null);
@@ -60,8 +61,8 @@ export function StartBranchMenu({
     const locals = (branches?.local ?? [])
       .filter((b) => !q || b.name.toLowerCase().includes(q))
       .sort((a, b) => {
-        if (a.name === current) return -1;
-        if (b.name === current) return 1;
+        if (a.name === selected) return -1;
+        if (b.name === selected) return 1;
         return b.committerDate - a.committerDate;
       });
     // Keep remote entries visible even when a local branch shares the short
@@ -69,12 +70,18 @@ export function StartBranchMenu({
     // version (e.g. upstream/foo vs origin/foo).
     const remotes = (branches?.remote ?? []).filter((r) => !q || r.name.toLowerCase().includes(q));
     return { locals, remotes };
-  }, [branches, query, current]);
+  }, [branches, query, selected]);
 
   const worktreeFor = (branch: string) =>
     worktrees.find((w) => w.branch === branch && w.path && !w.bare);
 
   const pickBranch = (branch: string, remote: boolean) => {
+    if (executionMode === 'worktree') {
+      onStartIn(repoRoot, branch, 'worktree');
+      close();
+      return;
+    }
+
     // Match worktrees by the local short name: a remote entry like origin/foo
     // must resolve to a worktree whose branch is `foo`, not the prefixed ref.
     const localName = remote ? stripRemotePrefix(branch, env?.remotes) : branch;
@@ -85,48 +92,17 @@ export function StartBranchMenu({
       if (remote && branch !== localName) {
         toast.info(`Opened existing worktree on ${localName}; pull there to sync with ${branch}`);
       }
-      onStartIn(wt.path, localName);
+      onStartIn(wt.path, localName, 'local');
+      close();
+      return;
+    }
+    if (!remote && branch === current) {
+      onStartIn(cwd, branch, 'local');
       close();
       return;
     }
     setPending({ branch, remote });
-    const def = `${repoRoot}/.worktrees/${localName.replace(/[^\w.-]+/g, '-')}`;
-    setDefaultPath(def);
-    setPath(def);
   };
-
-  const confirmCreate = () =>
-    run(async () => {
-      if (!pending) return;
-      const localName = pending.remote
-        ? stripRemotePrefix(pending.branch, env?.remotes)
-        : pending.branch;
-      const trimmed = path.trim();
-      try {
-        const res = await createGitWorktree(cwd, {
-          branch: localName,
-          // Use the selected remote ref verbatim so upstream/foo doesn't silently
-          // become origin/foo (or fail when only one remote has the branch).
-          base: pending.remote ? pending.branch : undefined,
-          newBranch: pending.remote,
-          // Leave location unset when the default path is unchanged so the backend
-          // can auto-suffix collisions and add `.worktrees/` to the repo's exclude.
-          location: trimmed && trimmed !== defaultPath ? trimmed : undefined,
-        });
-        if (res.ok && res.path) {
-          toast.success(`Worktree ready on ${localName}`);
-          onStartIn(res.path, localName);
-          onRefresh();
-          close();
-        } else if (res.reason === 'exists') {
-          toast.error('A worktree already exists at that path');
-        } else {
-          toast.error(res.message || 'Could not create worktree');
-        }
-      } catch {
-        toast.error('Could not create worktree');
-      }
-    });
 
   const checkoutLocally = () =>
     run(async () => {
@@ -142,13 +118,14 @@ export function StartBranchMenu({
           onStartIn(
             cwd,
             pending.remote ? stripRemotePrefix(pending.branch, env?.remotes) : pending.branch,
+            'local',
           );
           onRefresh();
           close();
         } else if (res.reason === 'dirty') {
           toast.error('Commit or stash your changes before checking out locally');
         } else {
-          toast.error(res.message || 'Could not checkout');
+          toast.error(res.message ?? 'Could not checkout');
         }
       } catch {
         toast.error('Could not checkout');
@@ -160,68 +137,64 @@ export function StartBranchMenu({
       const branch = newName.trim();
       if (!branch) return;
       try {
-        const res = await createGitWorktree(cwd, { branch, base, newBranch: true });
-        if (res.ok && res.path) {
-          toast.success(`Worktree ready on ${branch}`);
-          onStartIn(res.path, branch);
+        const res = await createGitBranch(cwd, { name: branch, base, checkout: true });
+        if (res.ok) {
+          toast.success(`Checked out ${branch}`);
+          onStartIn(cwd, branch, 'local');
           onRefresh();
           close();
-        } else if (res.reason === 'exists') {
-          toast.error('A worktree already exists at that path');
         } else {
-          toast.error(res.message || 'Could not create worktree');
+          toast.error(res.message ?? 'Could not create branch');
         }
       } catch {
-        toast.error('Could not create worktree');
+        toast.error('Could not create branch');
       }
     });
+
+  let popoverLabel = 'Choose local branch';
+  if (executionMode === 'worktree') popoverLabel = 'Choose worktree base';
+  if (pending) popoverLabel = `Checkout ${pending.branch}`;
+  let selectedDescription = 'No uncommitted changes';
+  if (executionMode === 'worktree') selectedDescription = 'Selected base';
+  else if (uncommittedFiles > 0) {
+    selectedDescription = `Uncommitted: ${String(uncommittedFiles)} file${uncommittedFiles === 1 ? '' : 's'}`;
+  }
 
   return (
     <Popover
       open={open}
       onClose={close}
       anchorRef={anchorRef}
-      label={pending ? `Set up worktree for ${pending.branch}` : 'Choose starting branch'}
+      label={popoverLabel}
       align="left"
       width={320}
     >
       {pending ? (
         <div className="p-2.5">
           <button
-            onClick={() => setPending(null)}
+            onClick={() => {
+              setPending(null);
+            }}
             className="mb-2 flex items-center gap-1 text-[11.5px] text-droid-text-muted hover:text-droid-text"
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Branches
           </button>
           <div className="mb-1 text-[12.5px] text-droid-text">
-            <span className="font-medium">{pending.branch}</span> has no worktree
+            Checkout <span className="font-medium">{pending.branch}</span> locally?
           </div>
           <div className="mb-2 text-[11px] text-droid-text-muted">
-            A linked worktree keeps your current checkout untouched.
+            {uncommittedFiles > 0
+              ? `Your current checkout has ${String(uncommittedFiles)} uncommitted file${uncommittedFiles === 1 ? '' : 's'}.`
+              : 'This changes the branch in your current checkout.'}
           </div>
-          <input
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            spellCheck={false}
-            className="mb-2.5 w-full rounded-md bg-droid-bg/60 px-2 py-1.5 font-mono text-[11.5px] text-droid-text focus:outline-none"
-          />
-          <div className="flex items-center justify-end gap-1.5">
-            <button
-              onClick={() => void checkoutLocally()}
-              disabled={busy}
-              className="rounded-md px-2 py-1 text-[11.5px] text-droid-text-secondary hover:bg-droid-elevated/60 hover:text-droid-text disabled:opacity-40"
-            >
-              Checkout locally
-            </button>
-            <button
-              onClick={() => void confirmCreate()}
-              disabled={busy}
-              className="flex items-center gap-1 rounded-md bg-droid-accent/15 px-2.5 py-1 text-[11.5px] font-medium text-droid-accent hover:bg-droid-accent/25 disabled:opacity-40"
-            >
-              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-              Create worktree
-            </button>
-          </div>
+          <button
+            onClick={() => void checkoutLocally()}
+            disabled={busy}
+            className="ml-auto flex items-center gap-1 rounded-md bg-droid-accent/15 px-2.5 py-1 text-[11.5px] font-medium text-droid-accent hover:bg-droid-accent/25 disabled:opacity-40"
+          >
+            {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+            Checkout locally
+          </button>
         </div>
       ) : (
         <>
@@ -230,7 +203,9 @@ export function StartBranchMenu({
             <input
               autoFocus
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+              }}
               placeholder="Search branches"
               className="w-full bg-transparent text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
             />
@@ -245,18 +220,18 @@ export function StartBranchMenu({
             {locals.map((b) => (
               <button
                 key={b.name}
-                onClick={() => pickBranch(b.name, false)}
-                aria-pressed={b.name === current}
+                onClick={() => {
+                  pickBranch(b.name, false);
+                }}
+                aria-pressed={b.name === selected}
                 className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
                 <GitBranch className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12.5px] text-droid-text">{b.name}</span>
-                  {b.name === current ? (
+                  {b.name === selected ? (
                     <span className="block truncate text-[10.5px] text-droid-text-muted">
-                      {uncommittedFiles > 0
-                        ? `Uncommitted: ${uncommittedFiles} file${uncommittedFiles === 1 ? '' : 's'}`
-                        : 'No uncommitted changes'}
+                      {selectedDescription}
                     </span>
                   ) : (
                     b.subject && (
@@ -266,7 +241,7 @@ export function StartBranchMenu({
                     )
                   )}
                 </span>
-                {b.name === current && (
+                {b.name === selected && (
                   <Check
                     className="h-3.5 w-3.5 shrink-0"
                     style={{ color: 'var(--droid-accent)' }}
@@ -284,13 +259,23 @@ export function StartBranchMenu({
             {remotes.map((r) => (
               <button
                 key={r.name}
-                onClick={() => pickBranch(r.name, true)}
+                onClick={() => {
+                  pickBranch(r.name, true);
+                }}
+                aria-pressed={r.name === selected}
                 className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
                 <GitBranch className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
                   {r.name}
                 </span>
+                {r.name === selected && (
+                  <Check
+                    className="h-3.5 w-3.5 shrink-0"
+                    style={{ color: 'var(--droid-accent)' }}
+                    strokeWidth={3}
+                  />
+                )}
               </button>
             ))}
 
@@ -299,47 +284,57 @@ export function StartBranchMenu({
             )}
           </div>
 
-          <div className="border-t border-droid-border/70 p-1.5">
-            {creatingNew ? (
-              <div className="space-y-1.5">
-                <input
-                  autoFocus
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && void createNewBranch()}
-                  placeholder="new-branch-name"
-                  className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
-                />
-                <div className="px-0.5 text-[10.5px] text-droid-text-muted">
-                  Branches off <span className="text-droid-text-secondary">{base}</span>
+          {executionMode === 'local' && (
+            <div className="border-t border-droid-border/70 p-1.5">
+              {creatingNew ? (
+                <div className="space-y-1.5">
+                  <input
+                    autoFocus
+                    value={newName}
+                    onChange={(e) => {
+                      setNewName(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void createNewBranch();
+                    }}
+                    placeholder="new-branch-name"
+                    className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+                  />
+                  <div className="px-0.5 text-[10.5px] text-droid-text-muted">
+                    Branches off <span className="text-droid-text-secondary">{base}</span>
+                  </div>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button
+                      onClick={() => {
+                        setCreatingNew(false);
+                      }}
+                      className="rounded-md px-2 py-1 text-[11px] text-droid-text-muted hover:text-droid-text"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => void createNewBranch()}
+                      disabled={!newName.trim() || busy}
+                      className="flex items-center gap-1 rounded-md bg-droid-accent/15 px-2 py-1 text-[11px] font-medium text-droid-accent disabled:opacity-40"
+                    >
+                      {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+                      Create & start
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center justify-end gap-1.5">
-                  <button
-                    onClick={() => setCreatingNew(false)}
-                    className="rounded-md px-2 py-1 text-[11px] text-droid-text-muted hover:text-droid-text"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => void createNewBranch()}
-                    disabled={!newName.trim() || busy}
-                    className="flex items-center gap-1 rounded-md bg-droid-accent/15 px-2 py-1 text-[11px] font-medium text-droid-accent disabled:opacity-40"
-                  >
-                    {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-                    Create & start
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setCreatingNew(true)}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text transition-colors hover:bg-droid-elevated/60"
-              >
-                <Plus className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-                Create and checkout new branch…
-              </button>
-            )}
-          </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setCreatingNew(true);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text transition-colors hover:bg-droid-elevated/60"
+                >
+                  <Plus className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                  Create and checkout new branch…
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
     </Popover>

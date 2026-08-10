@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from './hooks/useStore';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PanelLeft, PanelRight } from 'lucide-react';
@@ -52,6 +52,8 @@ import { isTerminalInputTarget, isTerminalTabShortcut } from './lib/keyboardShor
 import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
+import { getGitWorktrees } from './lib/git';
+import { discoverWorkspaceScopes, type WorkspaceScope } from './lib/workspaces';
 
 function ContextListIcon({ className }: { className?: string }) {
   return (
@@ -108,6 +110,18 @@ export default function App() {
   const workingDirectory = useSessionWorkingDirectory(activeSession);
   const repoStatus = useRepoStatus(workingDirectory);
   const documentVisible = useDocumentVisible();
+  const workspaceScopeKey = JSON.stringify(state.workspaceCwds);
+  const [workspaceDiscovery, setWorkspaceDiscovery] = useState<{
+    key: string;
+    scopes: WorkspaceScope[];
+  }>({ key: '', scopes: [] });
+  const workspaceScopes = useMemo(
+    () =>
+      workspaceDiscovery.key === workspaceScopeKey
+        ? workspaceDiscovery.scopes
+        : state.workspaceCwds.map((cwd) => ({ cwd, executionCwds: [cwd] })),
+    [state.workspaceCwds, workspaceDiscovery, workspaceScopeKey],
+  );
   // Mission Control is active only for a session explicitly created for it,
   // not merely because the compose preview is open.
   const isMissionControlView = activeSession?.sessionPurpose === 'mission-control';
@@ -238,11 +252,38 @@ export default function App() {
   }, [embedded]);
 
   useEffect(() => {
-    if (embedded) return;
+    if (embedded || !documentVisible) return;
+    let cancelled = false;
+    void discoverWorkspaceScopes(state.workspaceCwds, getGitWorktrees).then((scopes) => {
+      if (cancelled) return;
+      const canonicalCwds = scopes.map((scope) => scope.cwd);
+      if (JSON.stringify(canonicalCwds) !== workspaceScopeKey) {
+        dispatch({ type: 'SET_WORKSPACE_CWDS', cwds: canonicalCwds });
+        return;
+      }
+      setWorkspaceDiscovery({ key: workspaceScopeKey, scopes });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSession?.cwd,
+    dispatch,
+    documentVisible,
+    embedded,
+    state.workspaceCwds,
+    workspaceScopeKey,
+  ]);
+
+  useEffect(() => {
+    if (embedded || workspaceDiscovery.key !== workspaceScopeKey) return;
     // Load every known session for the chosen workspaces; the sidebar shows the
     // latest few and reveals the rest behind "Show more" rather than capping.
-    listSessions({ workspaceCwds: state.workspaceCwds, includePlainChats: true });
-  }, [embedded, state.workspaceCwds]);
+    const workspaceCwds = [
+      ...new Set(workspaceDiscovery.scopes.flatMap((scope) => scope.executionCwds)),
+    ];
+    listSessions({ workspaceCwds, includePlainChats: true });
+  }, [embedded, workspaceDiscovery, workspaceScopeKey]);
 
   // Post-onboarding launch tasks: optional CLI maintenance plus a non-blocking
   // app update check. App installation always requires an explicit user action.
@@ -430,7 +471,7 @@ export default function App() {
               transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
               className="shrink-0 overflow-hidden h-full"
             >
-              <Sidebar />
+              <Sidebar workspaceScopes={workspaceScopes} />
             </motion.div>
           )}
         </AnimatePresence>

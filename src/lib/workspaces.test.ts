@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { SessionSummary } from '../types/bridge';
+import * as workspaceModule from './workspaces';
 import {
   addWorkspaceCwd,
   buildWorkspaceSections,
@@ -91,7 +92,9 @@ test('buildWorkspaceSections can still cap an explicit bootstrap list', () => {
     session(`repo-${i}`, '/repo/app', i + 1),
   );
 
-  const sections = buildWorkspaceSections(['/repo/app'], sessions, SIDEBAR_VISIBLE_SESSION_LIMIT);
+  const sections = buildWorkspaceSections(['/repo/app'], sessions, {
+    limit: SIDEBAR_VISIBLE_SESSION_LIMIT,
+  });
 
   assert.deepEqual(
     sections[0].sessions.map((item) => item.appSessionId),
@@ -119,4 +122,67 @@ test('buildWorkspaceSections keeps nested worktree sessions under the repository
   );
   assert.equal(sections.length, 2);
   assert.equal(sections[0].cwd, '/repo/app');
+});
+
+test('buildWorkspaceSections groups registered external worktrees under their repository', () => {
+  const externalWorktree = '/Users/dev/.codex/worktrees/f401/app';
+  const sections = buildWorkspaceSections(
+    ['/repo/app'],
+    [session('worktree', externalWorktree, 2), session('unrelated', '/repo/other', 3)],
+    {
+      executionCwds: new Map([['/repo/app', ['/repo/app', externalWorktree]]]),
+    },
+  );
+
+  assert.deepEqual(
+    sections[0].sessions.map((item) => item.appSessionId),
+    ['worktree'],
+  );
+});
+
+test('buildWorkspaceScopes resolves linked paths to one main repository', () => {
+  const buildWorkspaceScopes = Reflect.get(workspaceModule, 'buildWorkspaceScopes');
+  assert.equal(typeof buildWorkspaceScopes, 'function');
+
+  const scopes = buildWorkspaceScopes([
+    {
+      cwd: '/Users/dev/.codex/worktrees/f401/app',
+      worktrees: [
+        { path: '/repo/app', bare: false, isMain: true },
+        { path: '/Users/dev/.codex/worktrees/f401/app', bare: false, isMain: false },
+      ],
+    },
+    {
+      cwd: '/repo/app',
+      worktrees: [
+        { path: '/repo/app', bare: false, isMain: true },
+        { path: '/repo/app/.worktrees/feature', bare: false, isMain: false },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(scopes, [
+    {
+      cwd: '/repo/app',
+      executionCwds: [
+        '/repo/app',
+        '/Users/dev/.codex/worktrees/f401/app',
+        '/repo/app/.worktrees/feature',
+      ],
+    },
+  ]);
+});
+
+test('discoverWorkspaceScopes loads Git ownership for every selected workspace', async () => {
+  const discoverWorkspaceScopes = Reflect.get(workspaceModule, 'discoverWorkspaceScopes');
+  assert.equal(typeof discoverWorkspaceScopes, 'function');
+
+  const scopes = await discoverWorkspaceScopes(['/repo/app'], async () => [
+    { path: '/repo/app', bare: false, isMain: true },
+    { path: '/outside/app-worktree', bare: false, isMain: false },
+  ]);
+
+  assert.deepEqual(scopes, [
+    { cwd: '/repo/app', executionCwds: ['/repo/app', '/outside/app-worktree'] },
+  ]);
 });

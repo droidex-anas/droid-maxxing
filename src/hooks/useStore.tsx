@@ -245,7 +245,11 @@ export interface AppState {
   // localStorage; the active one is referenced by theme.presetId.
   customThemes: ThemePreset[];
   missionControlMode: boolean;
-  draftChat: { cwd: string; branch?: string } | null;
+  draftChat: {
+    cwd: string;
+    executionMode: 'worktree' | 'local';
+    branch?: string;
+  } | null;
   // Persisted app-wide default autonomy for new sessions. Owned by Settings;
   // factory-default reloads and draft/session changes never overwrite it.
   defaultAutonomy: Autonomy;
@@ -459,13 +463,19 @@ type Action =
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
-  | { type: 'START_CHAT'; cwd: string; branch?: string }
+  | {
+      type: 'START_CHAT';
+      cwd: string;
+      executionMode: 'worktree' | 'local';
+      branch?: string;
+    }
   | { type: 'SEED_COMPOSER'; text: string }
   | { type: 'CLEAR_COMPOSER_SEED' }
   | { type: 'SESSION_NOTE_ADD'; appSessionId: string; text: string }
   | { type: 'SESSION_NOTE_MARK_USED'; appSessionId: string; noteId: string }
   | { type: 'SESSION_NOTE_REMOVE'; appSessionId: string; noteId: string }
   | { type: 'ADD_WORKSPACE'; cwd: string }
+  | { type: 'SET_WORKSPACE_CWDS'; cwds: string[] }
   | { type: 'TOGGLE_BROWSER' }
   | { type: 'SET_BROWSER_OPEN'; open: boolean }
   | { type: 'BROWSER_UPDATED'; browser: BrowserState }
@@ -2375,7 +2385,11 @@ function baseReducer(state: AppState, action: Action): AppState {
       const next = invalidateSelectedChildOpening(state);
       return {
         ...next,
-        draftChat: { cwd: action.cwd, branch: action.branch },
+        draftChat: {
+          cwd: action.cwd,
+          executionMode: action.executionMode,
+          branch: action.branch,
+        },
         draftAutonomy: null,
         activeAppSessionId: null,
         missionControlMode: false,
@@ -2423,6 +2437,9 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         workspaceCwds: saveWorkspaceCwds(addWorkspaceCwd(state.workspaceCwds, action.cwd)),
       };
+
+    case 'SET_WORKSPACE_CWDS':
+      return { ...state, workspaceCwds: saveWorkspaceCwds(action.cwds) };
 
     case 'TOGGLE_BROWSER': {
       const key = activeBrowserKey(state);

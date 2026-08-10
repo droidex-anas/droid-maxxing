@@ -32,6 +32,7 @@ import { FeedbackModal } from './FeedbackModal';
 import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
 import { markGitTurnStart } from '../lib/git';
+import { prepareChatWorkingDirectory } from '../lib/chatWorkspace';
 import { createLocalDesignTranscriptEvent, newQueueId } from '../lib/promptQueue';
 import { composePrompt, parseSlashSkillInvocation } from '../lib/composePrompt';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
@@ -62,6 +63,7 @@ import { StartInBar } from './environment/StartInBar';
 import type { Autonomy, SkillInfo } from '../types/bridge';
 import { feedbackDraftFromCommand } from '../lib/feedbackReport';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
+import { toast } from '../lib/toast';
 
 const ACCENT = 'var(--droid-accent)';
 const accentMix = (pct: number) =>
@@ -526,6 +528,19 @@ export default function PromptInput({
 
   const composeFrom = composePrompt;
 
+  const prepareDraftCwd = async (dir: string, clientRef: string): Promise<string | null> => {
+    const draft = state.draftChat;
+    const result = await prepareChatWorkingDirectory(dir, {
+      executionMode: draft?.executionMode ?? 'local',
+      base: draft?.branch,
+      name: `chat-${clientRef}`,
+    });
+    if (result.ok && result.path) return result.path;
+
+    toast.error(result.message ?? 'Could not create the chat worktree');
+    return null;
+  };
+
   // Re-entry guard: a send awaits markGitTurnStart before the input is cleared,
   // so without this a second Enter/click during that window would resend the
   // same payload (and create a duplicate session turn).
@@ -616,10 +631,12 @@ export default function PromptInput({
         setMissionAutonomyGateOpen(true);
         return;
       }
-      const dir = state.draftChat?.cwd ?? (await pickDirectory());
-      if (!dir) return;
+      const selectedDir = state.draftChat?.cwd ?? (await pickDirectory());
+      if (!selectedDir) return;
       const { primary, worker, validator } = state.agentConfig;
       const clientRef = newClientRef();
+      const dir = await prepareDraftCwd(selectedDir, clientRef);
+      if (!dir) return;
       registerPending(clientRef);
       // Clear the composer before the git-baseline await below so a prompt the
       // user starts typing during that delay is never wiped by a late clear.
@@ -651,9 +668,11 @@ export default function PromptInput({
 
     // Draft/default chat: first message creates the session. No workspace is required.
     if (!activeSession) {
-      const dir = state.draftChat?.cwd ?? '';
+      const selectedDir = state.draftChat?.cwd ?? '';
       const { primary } = state.agentConfig;
       const clientRef = newClientRef();
+      const dir = await prepareDraftCwd(selectedDir, clientRef);
+      if (dir === null) return;
       registerPending(clientRef);
       // Clear before the baseline await (see above) so fast typing isn't lost.
       clearAfterSubmit();

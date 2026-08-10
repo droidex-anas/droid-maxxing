@@ -95,7 +95,12 @@ export function WorktreeMenu({
   );
 
   const openInNewChat = (path: string, branch?: string | null) => {
-    dispatch({ type: 'START_CHAT', cwd: path, branch: branch ?? undefined });
+    dispatch({
+      type: 'START_CHAT',
+      cwd: path,
+      executionMode: 'local',
+      branch: branch ?? undefined,
+    });
     setOpen(false);
   };
 
