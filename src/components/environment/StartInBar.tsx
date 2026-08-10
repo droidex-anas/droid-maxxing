@@ -66,6 +66,7 @@ import { useStore } from '../../hooks/useStore';
 import { useGitEnvironment } from '../../hooks/useGitEnvironment';
 import { pickDirectory } from '../../lib/desktop';
 import { worktreeName } from '../../lib/git';
+import { resolveMainCheckout } from '../../lib/chatWorkspace';
 import { workspaceName } from '../../lib/workspaces';
 
 function Pill({
@@ -124,8 +125,8 @@ export function StartInBar() {
 
   if (!draft || !cwd) return null;
 
-  const mainWorktree = worktrees.find((worktree) => worktree.isMain);
-  const repoRoot = mainWorktree?.path ?? env?.repoRoot ?? cwd;
+  const mainCheckout = env ? resolveMainCheckout(env, worktrees) : null;
+  const repoRoot = mainCheckout?.path ?? env?.repoRoot ?? cwd;
   const isRepo = !!env?.isRepo;
   const base = draft.branch ?? env?.branch ?? env?.head ?? env?.defaultBranch ?? 'main';
   const localWorktrees = worktrees.filter((w) => !w.bare && w.path);
@@ -134,7 +135,7 @@ export function StartInBar() {
   const currentWtPath = env?.worktreePath ?? cwd;
   const currentWt = localWorktrees.find((w) => w.path === currentWtPath && w.path !== repoRoot);
   const createsWorktree = draft.executionMode === 'worktree';
-  const onLocal = !createsWorktree && !currentWt;
+  const onLocal = !createsWorktree && !currentWt && !!mainCheckout;
   let workLocationLabel = 'Local';
   if (createsWorktree) workLocationLabel = 'New worktree';
   else if (currentWt) workLocationLabel = worktreeName(currentWt);
@@ -277,17 +278,20 @@ export function StartInBar() {
               </button>
               <button
                 onClick={() => {
-                  startIn(repoRoot, mainWorktree?.branch ?? undefined, 'local');
+                  if (mainCheckout) startIn(mainCheckout.path, mainCheckout.branch, 'local');
                   setLocOpen(false);
                 }}
+                disabled={!mainCheckout}
                 aria-pressed={onLocal}
-                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
+                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/60 disabled:opacity-50"
               >
                 <LocalGlyph className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12.5px] text-droid-text">Work locally</span>
                   <span className="block truncate text-[10.5px] text-droid-text-muted">
-                    {mainWorktree?.branch ?? 'detached'} · current checkout
+                    {mainCheckout
+                      ? `${mainCheckout.branch ?? 'detached'} · main checkout`
+                      : 'Loading main checkout…'}
                   </span>
                 </span>
                 {onLocal && (

@@ -1,7 +1,7 @@
 import test, { afterEach } from 'node:test';
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { checkoutGitBranch, gitFetch } from './git';
-import { prepareChatWorkingDirectory } from './chatWorkspace';
+import { prepareChatWorkingDirectory, resolveMainCheckout } from './chatWorkspace';
 import { createPullRequest, detectPullRequest, postPrComment } from './github';
 
 // These wrappers promise one error contract: IPC-level rejections surface as
@@ -72,8 +72,37 @@ test('chat worktrees are created from the Git-owned main repository', async () =
   assert.deepEqual(result, { ok: true, path: '/repo/.worktrees/chat-c-1' });
 });
 
+test('main checkout selection waits when a linked checkout has no worktree snapshot', () => {
+  assert.equal(
+    resolveMainCheckout(
+      {
+        isRepo: true,
+        repoRoot: '/repo/.worktrees/current',
+        isLinkedWorktree: true,
+      },
+      [],
+    ),
+    null,
+  );
+  assert.deepEqual(
+    resolveMainCheckout({ isRepo: true, repoRoot: '/repo', isLinkedWorktree: false }, [
+      { path: '/repo', branch: 'main', isMain: true, bare: false },
+    ]),
+    { path: '/repo', branch: 'main' },
+  );
+});
+
 test('local chat preparation never invokes Git', async () => {
-  withBridge({});
+  let gitCalls = 0;
+  const unexpectedGitCall = () => {
+    gitCalls += 1;
+    return Promise.reject(new Error('local preparation invoked Git'));
+  };
+  withBridge({
+    gitEnvironment: unexpectedGitCall,
+    gitWorktrees: unexpectedGitCall,
+    gitCreateWorktree: unexpectedGitCall,
+  });
   assert.deepEqual(
     await prepareChatWorkingDirectory('/repo', {
       executionMode: 'local',
@@ -81,6 +110,65 @@ test('local chat preparation never invokes Git', async () => {
     }),
     { ok: true, path: '/repo' },
   );
+  assert.equal(gitCalls, 0);
+});
+
+test('linked checkout preparation waits for the main worktree discovery', async () => {
+  let createCalls = 0;
+  withBridge({
+    gitEnvironment: () =>
+      Promise.resolve({
+        isRepo: true,
+        repoRoot: '/repo/.worktrees/current',
+        isLinkedWorktree: true,
+        branch: 'feature',
+      }),
+    gitWorktrees: () => Promise.resolve([]),
+    gitCreateWorktree: () => {
+      createCalls += 1;
+      return Promise.resolve({ ok: true, path: '/wrong/chat' });
+    },
+  });
+
+  const result = await prepareChatWorkingDirectory('/repo/.worktrees/current', {
+    executionMode: 'worktree',
+    name: 'chat-c-1',
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'worktree_discovery_pending',
+    message: 'The repository worktrees are still loading. Try again.',
+  });
+  assert.equal(createCalls, 0);
+});
+
+test('folderless chat preparation preserves the successful empty directory', async () => {
+  const result = await prepareChatWorkingDirectory('', {
+    executionMode: 'local',
+    name: 'chat-c-1',
+  });
+
+  assert.deepEqual(result, { ok: true, path: '' });
+});
+
+test('chat worktree preparation rejects a successful response without a path', async () => {
+  withBridge({
+    gitEnvironment: () => Promise.resolve({ isRepo: true, repoRoot: '/repo', branch: 'main' }),
+    gitWorktrees: () => Promise.resolve([{ path: '/repo', isMain: true, bare: false }]),
+    gitCreateWorktree: () => Promise.resolve({ ok: true }),
+  });
+
+  const result = await prepareChatWorkingDirectory('/repo', {
+    executionMode: 'worktree',
+    name: 'chat-c-1',
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'worktree_create_failed',
+    message: 'Git did not return the new worktree path.',
+  });
 });
 
 test('detectPullRequest treats non-desktop and missing dir as an authoritative empty answer', async () => {

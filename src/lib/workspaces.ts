@@ -1,5 +1,6 @@
 import type { SessionSummary } from '../types/bridge';
 import type { GitWorktree } from '../types/vcs';
+import { comparablePath } from './pathComparison';
 
 // How many sessions a sidebar section shows before collapsing the rest behind
 // a "Show more" control. This is a display default, not a hard cap: every
@@ -20,6 +21,11 @@ export interface WorkspaceSectionOptions {
 export interface WorkspaceScope {
   cwd: string;
   executionCwds: string[];
+}
+
+export interface WorkspaceDiscovery {
+  scopes: WorkspaceScope[];
+  complete: boolean;
 }
 
 export function buildWorkspaceScopes(
@@ -47,11 +53,14 @@ export function buildWorkspaceScopes(
 export async function discoverWorkspaceScopes(
   workspaceCwds: readonly string[],
   loadWorktrees: (cwd: string) => Promise<GitWorktree[]>,
-): Promise<WorkspaceScope[]> {
+): Promise<WorkspaceDiscovery> {
   const discoveries = await Promise.all(
     workspaceCwds.map(async (cwd) => ({ cwd, worktrees: await loadWorktrees(cwd) })),
   );
-  return buildWorkspaceScopes(discoveries);
+  return {
+    scopes: buildWorkspaceScopes(discoveries),
+    complete: discoveries.every((discovery) => discovery.worktrees.length > 0),
+  };
 }
 
 export function workspaceName(cwd: string): string {
@@ -97,12 +106,12 @@ export function buildWorkspaceSections(
     return true;
   });
   const ownerFor = (sessionCwd: string) => {
-    const normalizedSessionCwd = sessionCwd.replace(/\\/g, '/');
+    const normalizedSessionCwd = comparablePath(sessionCwd);
     return workspaces
       .flatMap((cwd) =>
         (options.executionCwds?.get(cwd) ?? [cwd]).map((executionCwd) => ({
           cwd,
-          executionCwd: executionCwd.replace(/\\/g, '/'),
+          executionCwd: comparablePath(executionCwd),
         })),
       )
       .filter(

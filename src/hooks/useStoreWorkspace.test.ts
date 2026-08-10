@@ -1,15 +1,6 @@
 import test from 'node:test';
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { initialState, reducer } from './useStore';
-
-test('workspace discovery replaces physical worktree entries with canonical repositories', () => {
-  const state = reducer(
-    { ...initialState, workspaceCwds: ['/repo/.worktrees/chat-1', '/other'] },
-    { type: 'SET_WORKSPACE_CWDS', cwds: ['/repo', '/other'] },
-  );
-
-  assert.deepEqual(state.workspaceCwds, ['/repo', '/other']);
-});
 
 test('new workspace chats retain their explicit execution mode', () => {
   const state = reducer(initialState, {

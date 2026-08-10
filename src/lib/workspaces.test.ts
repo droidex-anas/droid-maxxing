@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { SessionSummary } from '../types/bridge';
-import * as workspaceModule from './workspaces';
 import {
   addWorkspaceCwd,
+  buildWorkspaceScopes,
   buildWorkspaceSections,
+  discoverWorkspaceScopes,
   resolveNewChatCwd,
   SIDEBAR_VISIBLE_SESSION_LIMIT,
 } from './workspaces';
@@ -140,10 +141,24 @@ test('buildWorkspaceSections groups registered external worktrees under their re
   );
 });
 
-test('buildWorkspaceScopes resolves linked paths to one main repository', () => {
-  const buildWorkspaceScopes = Reflect.get(workspaceModule, 'buildWorkspaceScopes');
-  assert.equal(typeof buildWorkspaceScopes, 'function');
+test('buildWorkspaceSections matches Windows worktree paths without case sensitivity', () => {
+  const sections = buildWorkspaceSections(
+    ['C:\\Users\\Dev\\Droid-Control'],
+    [session('worktree', 'c:\\users\\dev\\droid-control\\.worktrees\\chat-1', 2)],
+    {
+      executionCwds: new Map([
+        ['C:\\Users\\Dev\\Droid-Control', ['C:\\Users\\Dev\\Droid-Control']],
+      ]),
+    },
+  );
 
+  assert.deepEqual(
+    sections[0].sessions.map((item) => item.appSessionId),
+    ['worktree'],
+  );
+});
+
+test('buildWorkspaceScopes resolves linked paths to one main repository', () => {
   const scopes = buildWorkspaceScopes([
     {
       cwd: '/Users/dev/.codex/worktrees/f401/app',
@@ -174,15 +189,20 @@ test('buildWorkspaceScopes resolves linked paths to one main repository', () => 
 });
 
 test('discoverWorkspaceScopes loads Git ownership for every selected workspace', async () => {
-  const discoverWorkspaceScopes = Reflect.get(workspaceModule, 'discoverWorkspaceScopes');
-  assert.equal(typeof discoverWorkspaceScopes, 'function');
-
   const scopes = await discoverWorkspaceScopes(['/repo/app'], async () => [
     { path: '/repo/app', bare: false, isMain: true },
     { path: '/outside/app-worktree', bare: false, isMain: false },
   ]);
 
-  assert.deepEqual(scopes, [
-    { cwd: '/repo/app', executionCwds: ['/repo/app', '/outside/app-worktree'] },
-  ]);
+  assert.deepEqual(scopes, {
+    complete: true,
+    scopes: [{ cwd: '/repo/app', executionCwds: ['/repo/app', '/outside/app-worktree'] }],
+  });
+});
+
+test('discoverWorkspaceScopes reports an empty Git result as incomplete', async () => {
+  assert.deepEqual(await discoverWorkspaceScopes(['/repo/app'], async () => []), {
+    complete: false,
+    scopes: [{ cwd: '/repo/app', executionCwds: ['/repo/app'] }],
+  });
 });

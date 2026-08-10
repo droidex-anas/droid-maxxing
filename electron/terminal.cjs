@@ -164,7 +164,8 @@ function createTerminalManager(opts) {
     if (typeof appSessionId !== 'string' || appSessionId.length === 0) {
       throw new Error('appSessionId is required');
     }
-    const requestedCwd = args.cwd || (defaultCwd ? await defaultCwd() : args.cwd);
+    let requestedCwd = args.cwd;
+    if (!requestedCwd && defaultCwd) requestedCwd = await defaultCwd();
     const cwdResult = await validateCwd(requestedCwd, fspLib);
     if (!cwdResult.ok) throw new Error(cwdResult.error);
 

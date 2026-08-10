@@ -32,7 +32,7 @@ import { FeedbackModal } from './FeedbackModal';
 import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
 import { markGitTurnStart } from '../lib/git';
-import { prepareChatWorkingDirectory } from '../lib/chatWorkspace';
+import { prepareChatWorkingDirectory, type ChatWorkingDirectoryResult } from '../lib/chatWorkspace';
 import { createLocalDesignTranscriptEvent, newQueueId } from '../lib/promptQueue';
 import { composePrompt, parseSlashSkillInvocation } from '../lib/composePrompt';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
@@ -528,17 +528,20 @@ export default function PromptInput({
 
   const composeFrom = composePrompt;
 
-  const prepareDraftCwd = async (dir: string, clientRef: string): Promise<string | null> => {
+  const prepareDraftCwd = async (
+    dir: string,
+    clientRef: string,
+  ): Promise<ChatWorkingDirectoryResult> => {
     const draft = state.draftChat;
     const result = await prepareChatWorkingDirectory(dir, {
       executionMode: draft?.executionMode ?? 'local',
       base: draft?.branch,
       name: `chat-${clientRef}`,
     });
-    if (result.ok && result.path) return result.path;
+    if (result.ok) return result;
 
     toast.error(result.message ?? 'Could not create the chat worktree');
-    return null;
+    return result;
   };
 
   // Re-entry guard: a send awaits markGitTurnStart before the input is cleared,
@@ -635,8 +638,9 @@ export default function PromptInput({
       if (!selectedDir) return;
       const { primary, worker, validator } = state.agentConfig;
       const clientRef = newClientRef();
-      const dir = await prepareDraftCwd(selectedDir, clientRef);
-      if (!dir) return;
+      const preparation = await prepareDraftCwd(selectedDir, clientRef);
+      if (!preparation.ok) return;
+      const dir = preparation.path;
       registerPending(clientRef);
       // Clear the composer before the git-baseline await below so a prompt the
       // user starts typing during that delay is never wiped by a late clear.
@@ -671,8 +675,9 @@ export default function PromptInput({
       const selectedDir = state.draftChat?.cwd ?? '';
       const { primary } = state.agentConfig;
       const clientRef = newClientRef();
-      const dir = await prepareDraftCwd(selectedDir, clientRef);
-      if (dir === null) return;
+      const preparation = await prepareDraftCwd(selectedDir, clientRef);
+      if (!preparation.ok) return;
+      const dir = preparation.path;
       registerPending(clientRef);
       // Clear before the baseline await (see above) so fast typing isn't lost.
       clearAfterSubmit();
