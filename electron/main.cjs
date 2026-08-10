@@ -31,6 +31,7 @@ const { attachChildView, detachChildView } = require('./nativeBrowserHost.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
+const { createRendererOomRecovery } = require('./rendererOomRecovery.cjs');
 const { autoUpdater } = require('electron-updater');
 const { createAppUpdater } = require('./appUpdater.cjs');
 const Sentry = require('@sentry/electron/main');
@@ -68,6 +69,7 @@ const appUpdater = createAppUpdater({
   prepareToInstall: () => sidecarSupervisor.stop(),
   logError: (message, error) => console.error('[update] %s:', message, error),
 });
+const rendererOomRecovery = createRendererOomRecovery();
 
 let mainWindow = null;
 let hiddenNativeBrowserWindow = null;
@@ -195,6 +197,7 @@ function createMainWindow() {
   });
 
   mainWindow.on('closed', () => {
+    rendererOomRecovery.cancel();
     githubVcs.cancelSetup();
     closeAllNativeBrowsers();
     terminalManager.closeAll();
@@ -648,12 +651,28 @@ function installMainRendererLifecycle(contents) {
     cleanedForNavigation = false;
   });
   contents.on('will-frame-navigate', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) cleanupForRendererReplacement();
+    if (isMainFrame && !isInPlace) {
+      rendererOomRecovery.cancel();
+      cleanupForRendererReplacement();
+    }
   });
   contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) cleanupForRendererReplacement();
+    if (isMainFrame && !isInPlace) {
+      rendererOomRecovery.cancel();
+      cleanupForRendererReplacement();
+    }
   });
   contents.on('render-process-gone', cleanupForRendererReplacement);
+  contents.on('render-process-gone', (_event, details) => {
+    const scheduled = rendererOomRecovery.handle(details, () => {
+      if (!isWindowUsable(mainWindow) || mainWindow.webContents !== contents) return;
+      console.error('[renderer] Reloading after renderer OOM');
+      reloadShell(false);
+    });
+    if (details.reason === 'oom' && !scheduled) {
+      console.error('[renderer] Automatic OOM recovery stopped to avoid a reload crash loop');
+    }
+  });
 }
 
 function closeRendererOwnedTerminals() {

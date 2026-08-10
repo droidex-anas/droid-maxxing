@@ -42,9 +42,9 @@ test('main renderer reload closes renderer-owned terminals before navigation', (
   const closeRendererOwnedTerminals =
     /function closeRendererOwnedTerminals\(\) \{\s*terminalSubscriptions\.clear\(\);\s*terminalManager\.closeAll\(\);\s*\}/;
   const willFrameNavigateCleanup =
-    /contents\.on\('will-frame-navigate', \(_event, _url, isInPlace, isMainFrame\) => \{\s*if \(isMainFrame && !isInPlace\) cleanupForRendererReplacement\(\);\s*\}\);/;
+    /contents\.on\('will-frame-navigate', \(_event, _url, isInPlace, isMainFrame\) => \{\s*if \(isMainFrame && !isInPlace\) \{\s*rendererOomRecovery\.cancel\(\);\s*cleanupForRendererReplacement\(\);\s*\}\s*\}\);/;
   const didStartNavigationCleanup =
-    /contents\.on\('did-start-navigation', \(_event, _url, isInPlace, isMainFrame\) => \{\s*if \(isMainFrame && !isInPlace\) cleanupForRendererReplacement\(\);\s*\}\);/;
+    /contents\.on\('did-start-navigation', \(_event, _url, isInPlace, isMainFrame\) => \{\s*if \(isMainFrame && !isInPlace\) \{\s*rendererOomRecovery\.cancel\(\);\s*cleanupForRendererReplacement\(\);\s*\}\s*\}\);/;
   const explicitReloadCleanup =
     /function reloadShell\(ignoreCache\) \{\s*detachNativeBrowser\(\);\s*if \(!isWindowUsable\(mainWindow\)\) return;\s*closeRendererOwnedTerminals\(\);/;
 
@@ -53,6 +53,8 @@ test('main renderer reload closes renderer-owned terminals before navigation', (
   assert.match(mainSource, willFrameNavigateCleanup);
   assert.match(mainSource, didStartNavigationCleanup);
   assert.match(mainSource, /contents\.on\('render-process-gone', cleanupForRendererReplacement\)/);
+  assert.match(mainSource, /rendererOomRecovery\.handle\(details,/);
+  assert.match(mainSource, /reloadShell\(false\)/);
   assert.match(mainSource, explicitReloadCleanup);
 });
 
