@@ -5,6 +5,16 @@ projects, terminals, browser sessions, and agent work together in one app.
 
 Website: [droidex.vercel.app](https://droidex.vercel.app)
 
+## License and contributions
+
+DROIDEX is proprietary source-available software, not open-source software.
+You may inspect the code and create a fork solely to propose contributions to
+this repository. Reuse, redistribution, deployment as another project, and
+claims of ownership are prohibited without written permission. See
+[LICENSE](LICENSE) for the complete terms. Contributions are welcome under the
+process in [CONTRIBUTING.md](CONTRIBUTING.md) and the copyright-assignment terms
+in [CLA.md](CLA.md).
+
 ## Run it locally
 
 You need Node.js 22, npm, and the Factory Droid CLI. DROIDEX can install the
@@ -23,6 +33,16 @@ For renderer-only development, use:
 ```bash
 npm run dev
 ```
+
+## GitHub pull requests
+
+For GitHub repositories, the Context panel shows pull requests, checks, and
+review comments through GitHub CLI. If `gh` is missing or signed out, DROIDEX
+shows the recovery action in Context. It can install `gh` through an existing
+Homebrew installation; otherwise it opens GitHub's official installation page.
+Authentication always completes through GitHub CLI's browser/device flow. The
+Context popover keeps the one-time code visible and copyable until `gh` confirms
+the account is connected.
 
 ## Useful commands
 

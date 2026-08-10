@@ -1,12 +1,15 @@
 // GitHub pull-request integration for the Context panel, driven by the `gh`
 // CLI so it reuses the user's existing authentication and works on every OS.
 // Every method degrades gracefully when `gh` is missing or unauthenticated.
-const { execFile } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
+const { resolveExecutable, runFile } = require('./executable.cjs');
+const githubSetup = require('./githubSetup.cjs');
 
 const DEFAULT_TIMEOUT = 15000;
-const MAX_BUFFER = 16 * 1024 * 1024;
+const COMMON_GH_PATHS = ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/opt/local/bin/gh'];
+
+let cachedGhExecutablePromise;
 
 function expandHome(value) {
   const str = String(value || '');
@@ -15,23 +18,44 @@ function expandHome(value) {
   return str;
 }
 
+function resolveGhExecutable(options = {}) {
+  return resolveExecutable({ binaryName: 'gh', commonPaths: COMMON_GH_PATHS }, options);
+}
+
+async function cachedGhExecutable() {
+  cachedGhExecutablePromise ||= resolveGhExecutable();
+  const executable = await cachedGhExecutablePromise;
+  if (!executable) cachedGhExecutablePromise = undefined;
+  return executable;
+}
+
+function install(options = {}) {
+  return githubSetup.install({
+    ...options,
+    resolveGh: options.resolveGh || cachedGhExecutable,
+    invalidateGh: () => {
+      cachedGhExecutablePromise = undefined;
+    },
+  });
+}
+
+function authenticate(options = {}) {
+  return githubSetup.authenticate({
+    ...options,
+    resolveGh: options.resolveGh || cachedGhExecutable,
+  });
+}
+
 // Resolve with { code, stdout, stderr } and never reject, so callers can decide
 // how to treat non-zero exits (e.g. `gh pr checks` exits 8 while checks pend).
-function gh(cwd, args, { timeout = DEFAULT_TIMEOUT } = {}) {
-  return new Promise((resolve) => {
-    execFile(
-      'gh',
-      args,
-      { cwd: expandHome(cwd) || process.cwd(), timeout, maxBuffer: MAX_BUFFER },
-      (err, stdout, stderr) => {
-        resolve({
-          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-          stdout: String(stdout || ''),
-          stderr: String(stderr || ''),
-          spawnFailed: !!err && err.code === 'ENOENT',
-        });
-      },
-    );
+async function gh(cwd, args, { timeout = DEFAULT_TIMEOUT } = {}) {
+  const executable = await cachedGhExecutable();
+  if (!executable) {
+    return { code: 1, stdout: '', stderr: 'GitHub CLI was not found.', spawnFailed: true };
+  }
+  return runFile(executable, args, {
+    cwd: expandHome(cwd) || process.cwd(),
+    timeout,
   });
 }
 
@@ -53,13 +77,19 @@ function prSelector(value) {
   return /^[0-9]+$/.test(s) ? s : null;
 }
 
-async function available() {
-  const version = await gh(process.cwd(), ['--version']);
+async function available(options = {}) {
+  const runGh = options.runGh || gh;
+  const resolveBrew = options.resolveBrew || githubSetup.resolveBrewExecutable;
+  const version = await runGh(process.cwd(), ['--version']);
   if (version.spawnFailed || version.code !== 0) {
-    return { installed: false, authenticated: false };
+    return {
+      installed: false,
+      authenticated: false,
+      installMethod: (await resolveBrew()) ? 'homebrew' : 'manual',
+    };
   }
-  const auth = await gh(process.cwd(), ['auth', 'status']);
-  return { installed: true, authenticated: auth.code === 0 };
+  const auth = await runGh(process.cwd(), ['auth', 'status', '--hostname', 'github.com']);
+  return { installed: true, authenticated: auth.code === 0, installMethod: null };
 }
 
 const PR_FIELDS = [
@@ -302,6 +332,12 @@ async function postComment(dir, { prNumber, body } = {}) {
 
 module.exports = {
   available,
+  authenticate,
+  install,
+  cancelSetup: githubSetup.cancelSetup,
+  isGithubDeviceUrl: githubSetup.isGithubDeviceUrl,
+  resolveBrewExecutable: githubSetup.resolveBrewExecutable,
+  resolveGhExecutable,
   // Exported for unit tests: the validation boundary for PR selectors.
   prSelector,
   normalizePrComments,

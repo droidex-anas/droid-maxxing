@@ -3,7 +3,15 @@ import { createContext, useContext, useMemo, useReducer, useState, useEffect } f
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
-import { migrateLegacyLightPreset } from '../lib/theme';
+import {
+  DEFAULT_THEME_ID,
+  detectPresetId,
+  migrateLegacyLightPreset,
+  parseCustomThemes,
+  removeCustomTheme,
+  upsertCustomTheme,
+  type ThemePreset,
+} from '../lib/theme';
 import {
   clearDesignMode,
   setDesignMode,
@@ -49,6 +57,17 @@ import {
   saveSessionNotes,
   type SessionNotesMap,
 } from '../lib/sessionNotes';
+import {
+  archiveChat,
+  deleteChat,
+  loadChatMetadata,
+  pinChat,
+  renameChat,
+  restoreChat,
+  saveChatMetadata,
+  unpinChat,
+  type ChatMetadataMap,
+} from '../lib/chatMetadata';
 import { createSnapshotScheduler, loadSessionSnapshot } from '../lib/sessionSnapshot';
 import { toast } from '../lib/toast';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
@@ -118,6 +137,9 @@ export type DiffStyle = 'soft' | 'focused';
 export interface ThemeConfig {
   mode: 'dark' | 'light' | 'system';
   appIconMode: AppIconMode;
+  // The preset the flattened colors came from: a built-in/custom theme id, or
+  // 'custom' when the colors were edited by hand and match no preset.
+  presetId: string;
   accent: string;
   bg: string;
   fg: string;
@@ -160,6 +182,9 @@ export interface AppState {
   // its updatedAt (latest model activity) is newer than this. Internal only:
   // surfaced as a bold row in the sidebar, never shown as a timestamp.
   sessionLastSeen: Record<string, number>;
+  // App-level pin/archive/delete organization per chat. Pure renderer metadata,
+  // persisted in localStorage; the harness session data is never touched.
+  chatMetadata: ChatMetadataMap;
   transcripts: Record<string, TranscriptEvent[]>;
   progress: Record<string, ProgressEntry[]>;
   childSessions: Record<string, Record<string, ChildSessionInfo>>;
@@ -216,6 +241,9 @@ export interface AppState {
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
   theme: ThemeConfig;
+  // User-saved theme presets (built-ins live in lib/theme). Persisted to
+  // localStorage; the active one is referenced by theme.presetId.
+  customThemes: ThemePreset[];
   missionControlMode: boolean;
   draftChat: { cwd: string; branch?: string } | null;
   // Persisted app-wide default autonomy for new sessions. Owned by Settings;
@@ -300,6 +328,14 @@ type Action =
     }
   | { type: 'SESSION_UPDATED'; session: SessionSummary }
   | { type: 'SESSION_CLOSED'; appSessionId: string }
+  // App-level chat organization (rename/pin/archive/delete); see lib/chatMetadata.
+  // A blank RENAME_CHAT title clears the override back to the generated title.
+  | { type: 'RENAME_CHAT'; appSessionId: string; title: string }
+  | { type: 'PIN_CHAT'; appSessionId: string }
+  | { type: 'UNPIN_CHAT'; appSessionId: string }
+  | { type: 'ARCHIVE_CHAT'; appSessionId: string }
+  | { type: 'RESTORE_CHAT'; appSessionId: string }
+  | { type: 'DELETE_CHAT'; appSessionId: string }
   | { type: 'SESSION_FEATURES'; appSessionId: string; features: SessionSummary['features'] }
   | { type: 'SESSION_PROGRESS'; appSessionId: string; entries: ProgressEntry[] }
   | {
@@ -385,6 +421,7 @@ type Action =
 
   // UI
   | { type: 'SET_ACTIVE_SESSION'; id: string | null }
+  | { type: 'MARK_ALL_SESSIONS_READ'; seenAt: number }
   | { type: 'SET_RIGHT_PANEL'; open: boolean }
   | {
       type: 'OPEN_UTILITY_TOOL';
@@ -445,6 +482,8 @@ type Action =
   | { type: 'TOGGLE_DESIGN_MODE'; appSessionId: string }
   | { type: 'SET_DESIGN_MODE'; appSessionId: string; open: boolean }
   | { type: 'SET_THEME'; theme: Partial<ThemeConfig> }
+  | { type: 'SAVE_CUSTOM_THEME'; preset: ThemePreset }
+  | { type: 'DELETE_CUSTOM_THEME'; id: string }
   | { type: 'SELECT_FEATURE'; id: string | null }
   | { type: 'SELECT_CHILD'; selection: ChildSelection | null; requestId?: string }
 
@@ -469,6 +508,7 @@ type Action =
 const defaultTheme: ThemeConfig = {
   mode: 'dark',
   appIconMode: 'system',
+  presetId: DEFAULT_THEME_ID,
   accent: '#f2f2f2',
   bg: '#0a0a0a',
   fg: '#ededed',
@@ -529,51 +569,98 @@ export function normalizeDiffStyle(value: unknown): DiffStyle {
   return 'soft';
 }
 
-function loadTheme(): ThemeConfig {
+const CUSTOM_THEMES_STORAGE_KEY = 'droid-theme-presets';
+
+function loadCustomThemes(): ThemePreset[] {
+  try {
+    const raw = getLocalStorage()?.getItem(CUSTOM_THEMES_STORAGE_KEY);
+    return raw ? parseCustomThemes(JSON.parse(raw)) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Persistence lives OUTSIDE the reducer: reducers must stay pure, and a throw
+// from the root reducer would surface during render and unmount the app. The
+// dispatching handler (ThemePresetCard) calls this BEFORE dispatching, so a
+// write failure (quota, restricted storage) leaves live state untouched and
+// surfaces as a retryable UI error instead of faking success. It throws on
+// failure; callers must catch.
+export function persistCustomThemes(presets: ThemePreset[]): void {
+  getLocalStorage()?.setItem(CUSTOM_THEMES_STORAGE_KEY, JSON.stringify(presets));
+}
+
+// Loaded once at module scope so the theme loader can match saved colors
+// against custom presets when recovering a missing presetId.
+const initialCustomThemes = loadCustomThemes();
+
+// One-time migration: a saved accent still carrying an old fixed-orange
+// default was never deliberately chosen, so neutralize it once. Keying off a
+// persisted flag (not the accent value) lets a user later pick that same
+// orange from the preset palette and have the choice stick across reloads.
+function migrateLegacyAccent(storage: Storage, saved: string | null, theme: ThemeConfig): void {
+  if (storage.getItem(THEME_ACCENT_MIGRATED_KEY) === '1') return;
+  // Migration writes are isolated so a storage failure (quota/restricted)
+  // never discards the theme we already parsed successfully above.
+  try {
+    if (saved && LEGACY_DEFAULT_ACCENTS.has(theme.accent.toLowerCase())) {
+      theme.accent = neutralAccentFor(theme.bg);
+      storage.setItem('droid-theme', JSON.stringify(theme));
+    }
+    storage.setItem(THEME_ACCENT_MIGRATED_KEY, '1');
+  } catch {
+    /* migration write failed; retry on a later load */
+  }
+}
+
+// One-time migration: a saved theme still matching the old white-on-white
+// light preset exactly was never customized, so swap it to the readable
+// warm-grey palette. Same persisted-flag pattern as the accent migration.
+function migrateLegacyLight(storage: Storage, saved: string | null, theme: ThemeConfig): void {
+  if (storage.getItem(THEME_LIGHT_PRESET_MIGRATED_KEY) === '1') return;
+  try {
+    if (saved) {
+      const migrated = migrateLegacyLightPreset(theme);
+      if (migrated !== theme) {
+        theme.bg = migrated.bg;
+        theme.fg = migrated.fg;
+        theme.surface = migrated.surface;
+        theme.border = migrated.border;
+        theme.accent = migrated.accent;
+        storage.setItem('droid-theme', JSON.stringify(theme));
+      }
+    }
+    storage.setItem(THEME_LIGHT_PRESET_MIGRATED_KEY, '1');
+  } catch {
+    /* migration write failed; retry on a later load */
+  }
+}
+
+function loadTheme(customThemes: ThemePreset[]): ThemeConfig {
   try {
     const storage = getLocalStorage();
-    const saved = storage?.getItem('droid-theme');
-    const theme = saved ? { ...defaultTheme, ...JSON.parse(saved) } : { ...defaultTheme };
+    const saved = storage?.getItem('droid-theme') ?? null;
+    const parsed: unknown = saved ? JSON.parse(saved) : null;
+    const theme =
+      parsed && typeof parsed === 'object'
+        ? { ...defaultTheme, ...(parsed as Partial<ThemeConfig>) }
+        : { ...defaultTheme };
     theme.diffStyle = normalizeDiffStyle(theme.diffStyle);
     theme.appIconMode = normalizeAppIconMode(theme.appIconMode);
-    // One-time migration: a saved accent still carrying an old fixed-orange
-    // default was never deliberately chosen, so neutralize it once. Keying off a
-    // persisted flag (not the accent value) lets a user later pick that same
-    // orange from the preset palette and have the choice stick across reloads.
-    if (storage && storage.getItem(THEME_ACCENT_MIGRATED_KEY) !== '1') {
-      // Migration writes are isolated so a storage failure (quota/restricted)
-      // never discards the theme we already parsed successfully above.
-      try {
-        if (saved && LEGACY_DEFAULT_ACCENTS.has(String(theme.accent).toLowerCase())) {
-          theme.accent = neutralAccentFor(theme.bg);
-          storage.setItem('droid-theme', JSON.stringify(theme));
-        }
-        storage.setItem(THEME_ACCENT_MIGRATED_KEY, '1');
-      } catch {
-        /* migration write failed; retry on a later load */
-      }
+    // Migrations run BEFORE preset detection: a legacy palette migrated onto
+    // the default variant must come out with the default's presetId, not
+    // 'custom' — otherwise Dark/System can never resolve its other variant.
+    if (storage) {
+      migrateLegacyAccent(storage, saved, theme);
+      migrateLegacyLight(storage, saved, theme);
     }
-    // One-time migration: a saved theme still matching the old white-on-white
-    // light preset exactly was never customized, so swap it to the readable
-    // warm-grey palette. Same persisted-flag pattern as the accent migration.
-    if (storage && storage.getItem(THEME_LIGHT_PRESET_MIGRATED_KEY) !== '1') {
-      try {
-        if (saved) {
-          const migrated = migrateLegacyLightPreset(theme);
-          if (migrated !== theme) {
-            theme.bg = migrated.bg;
-            theme.fg = migrated.fg;
-            theme.surface = migrated.surface;
-            theme.border = migrated.border;
-            theme.accent = migrated.accent;
-            storage.setItem('droid-theme', JSON.stringify(theme));
-          }
-        }
-        storage.setItem(THEME_LIGHT_PRESET_MIGRATED_KEY, '1');
-      } catch {
-        /* migration write failed; retry on a later load */
-      }
-    }
+    // Themes saved before presets existed have no presetId: recover it by
+    // matching the saved colors against known variants, else label them custom.
+    const savedPresetId = (parsed as { presetId?: unknown } | null)?.presetId;
+    theme.presetId =
+      typeof savedPresetId === 'string' && savedPresetId
+        ? savedPresetId
+        : detectPresetId(theme, customThemes);
     return theme;
   } catch {
     /* ignore */
@@ -887,6 +974,7 @@ export const initialState: AppState = {
   listConfirmedSessionIds: sessionSnapshot?.sessionOrder ?? null,
   activeAppSessionId: persistedUiState.activeAppSessionId ?? null,
   sessionLastSeen: loadSessionLastSeen(),
+  chatMetadata: loadChatMetadata(),
   transcripts: sessionSnapshot?.transcript
     ? { [sessionSnapshot.transcript.appSessionId]: sessionSnapshot.transcript.events }
     : {},
@@ -912,7 +1000,8 @@ export const initialState: AppState = {
   specMode: persistedUiState.specMode ?? false,
   settingsOpen: false,
   commandPaletteOpen: false,
-  theme: loadTheme(),
+  theme: loadTheme(initialCustomThemes),
+  customThemes: initialCustomThemes,
   missionControlMode: persistedUiState.missionControlMode ?? false,
   draftChat: null,
   defaultAutonomy: loadDefaultAutonomy(),
@@ -1307,6 +1396,38 @@ function baseReducer(state: AppState, action: Action): AppState {
             ? null
             : state.selectedChild,
       };
+    }
+
+    // Chat organization transforms return null for no-ops so these cases keep
+    // the current state untouched (no re-render, no storage write).
+    case 'RENAME_CHAT': {
+      const chatMetadata = renameChat(state.chatMetadata, action.appSessionId, action.title);
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'PIN_CHAT': {
+      const chatMetadata = pinChat(state.chatMetadata, action.appSessionId, Date.now());
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'UNPIN_CHAT': {
+      const chatMetadata = unpinChat(state.chatMetadata, action.appSessionId);
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'ARCHIVE_CHAT': {
+      const chatMetadata = archiveChat(state.chatMetadata, action.appSessionId, Date.now());
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'RESTORE_CHAT': {
+      const chatMetadata = restoreChat(state.chatMetadata, action.appSessionId);
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
+    case 'DELETE_CHAT': {
+      const chatMetadata = deleteChat(state.chatMetadata, action.appSessionId, Date.now());
+      return chatMetadata ? { ...state, chatMetadata } : state;
     }
 
     case 'SESSION_FEATURES': {
@@ -1735,11 +1856,25 @@ function baseReducer(state: AppState, action: Action): AppState {
         state.activeAppSessionId !== null && mapById[state.activeAppSessionId] !== undefined
           ? state.activeAppSessionId
           : null;
+      // Prune pin/archive metadata for the same confirmed-gone rows so
+      // localStorage does not accumulate orphans. Metadata for rows added
+      // locally this run (not yet list-confirmed) survives.
+      let chatMetadata = state.chatMetadata;
+      const orphaned = Object.keys(chatMetadata).filter(
+        (id) => confirmed?.includes(id) && !incoming.has(id),
+      );
+      if (orphaned.length > 0) {
+        const drop = new Set(orphaned);
+        chatMetadata = Object.fromEntries(
+          Object.entries(chatMetadata).filter(([id]) => !drop.has(id)),
+        );
+      }
       return {
         ...state,
         sessions: map,
         sessionOrder: order,
         sessionLastSeen: seededLastSeen,
+        chatMetadata,
         listConfirmedSessionIds: action.sessions.map((m) => m.appSessionId),
         activeAppSessionId,
       };
@@ -2002,6 +2137,23 @@ function baseReducer(state: AppState, action: Action): AppState {
         // it; never let it fire in another session's panel after a switch.
         reviewFocusPath: action.id === state.activeAppSessionId ? state.reviewFocusPath : null,
       };
+    }
+
+    case 'MARK_ALL_SESSIONS_READ': {
+      const sessionLastSeen = { ...state.sessionLastSeen };
+      let changed = false;
+      for (const appSessionId of state.sessionOrder) {
+        const session = state.sessions[appSessionId];
+        // Persisted renderer state can briefly contain an order entry whose
+        // session was already removed.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (!session) continue;
+        const seenAt = Math.max(action.seenAt, session.updatedAt);
+        if (sessionLastSeen[appSessionId] === seenAt) continue;
+        sessionLastSeen[appSessionId] = seenAt;
+        changed = true;
+      }
+      return changed ? { ...state, sessionLastSeen } : state;
     }
 
     case 'SET_RIGHT_PANEL':
@@ -2413,6 +2565,14 @@ function baseReducer(state: AppState, action: Action): AppState {
       return { ...state, theme: next };
     }
 
+    // Pure state transitions only: persistence happens in the dispatching
+    // handler (see persistCustomThemes), never in the root reducer.
+    case 'SAVE_CUSTOM_THEME':
+      return { ...state, customThemes: upsertCustomTheme(state.customThemes, action.preset) };
+
+    case 'DELETE_CUSTOM_THEME':
+      return { ...state, customThemes: removeCustomTheme(state.customThemes, action.id) };
+
     case 'SELECT_FEATURE':
       return { ...state, selectedFeatureId: action.id };
 
@@ -2697,6 +2857,7 @@ function finiteNumber(value: unknown): number | undefined {
 
 /* ── Bridge event adapter ── */
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
+  if (ev.type === 'error' && ev.code === 'bridge.unsupported_command') return ev.message;
   if (
     ev.type === 'error' &&
     (ev.code === 'session.autonomy_update_failed' || ev.code === 'session.create_failed')
@@ -2858,9 +3019,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     savePersistedUiState(state);
     saveSessionLastSeen(state.sessionLastSeen);
     saveSessionNotes(state.sessionNotes);
+    saveChatMetadata(state.chatMetadata);
   }, [
     state.sessionLastSeen,
     state.sessionNotes,
+    state.chatMetadata,
     state.activeAppSessionId,
     state.browserOpenKeys,
     state.browsers,

@@ -43,6 +43,7 @@ import {
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
 import { searchSessionFiles } from './sessionSearch.js';
+import { hasCompletedConversation } from './sessionHistoryAdmission.js';
 
 interface StoredMissionState {
   missionId?: string;
@@ -169,7 +170,7 @@ export function loadMissionControlSessions(
   const workspaceCwds = options.workspaceCwds
     ? new Set(options.workspaceCwds.filter(Boolean))
     : null;
-  if (workspaceCwds && workspaceCwds.size === 0 && !options.includePlainChats) return [];
+  if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
   const rows = missionDirs()
     .filter((dir) => {
       if (!workspaceCwds && !options.includePlainChats) return true;
@@ -196,7 +197,7 @@ export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): H
   const workspaceCwds = options.workspaceCwds
     ? new Set(options.workspaceCwds.filter(Boolean))
     : null;
-  if (workspaceCwds && workspaceCwds.size === 0 && !options.includePlainChats) return [];
+  if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
   for (const [providerSessionId, file] of scanSessionFiles()) {
     const summary = summarizeSessionFile(providerSessionId, file);
     if (!summary) continue;
@@ -808,7 +809,7 @@ function hasPrimaryKey(
 
 function tableInfo(db: DatabaseSync, table: string): Record<string, unknown>[] {
   if (!/^[a-z_]+$/.test(table)) return [];
-  return db.prepare(`PRAGMA table_info(${table})`).all() as Record<string, unknown>[];
+  return db.prepare(`PRAGMA table_info(${table})`).all();
 }
 
 function hasPartialUniqueIndex(
@@ -1058,9 +1059,7 @@ export function applyCachedSummary(
 }
 
 function definedPatch(patch: Partial<SessionSummary>): Partial<SessionSummary> {
-  return Object.fromEntries(
-    Object.entries(patch).filter(([, value]) => value !== undefined),
-  ) as Partial<SessionSummary>;
+  return Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
 }
 
 export function hydrateHistoricalSession(
@@ -1128,7 +1127,7 @@ export function resolveSessionChain(appSessionId: string, providerSessionId: str
   );
 }
 
-function dedupeStrings(values: Array<string | undefined>): string[] {
+function dedupeStrings(values: (string | undefined)[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
@@ -1157,8 +1156,7 @@ function transcriptReaderFor(
   const stat = statSync(path);
   const cached = transcriptReaders.get(path);
   if (
-    cached &&
-    cached.mtimeMs === stat.mtimeMs &&
+    cached?.mtimeMs === stat.mtimeMs &&
     cached.sizeBytes === stat.size &&
     cached.appSessionId === appSessionId
   ) {
@@ -1662,8 +1660,8 @@ function sessionIndexFor(requiredId: string): Map<string, string> {
 }
 
 // Builds the base summary for one on-disk session file, or null when the file
-// is a worker/validator/Task-child session that never appears as top-level
-// history. The app_sessions patch overlay is applied by the caller.
+// is not admitted to durable top-level history. The app_sessions patch overlay
+// is applied by the caller.
 function summarizeSessionFile(
   providerSessionId: string,
   file: SessionFileStat,
@@ -1671,6 +1669,12 @@ function summarizeSessionFile(
   const start = readSessionStart(file.path);
   const classification = classifyStoredSession(start);
   if (!classification) return null;
+  // A provider writes session_start before the first prompt. Interrupted or
+  // abandoned turns therefore leave valid JSONL files without a completed
+  // user/model exchange; those are not durable conversations and must not
+  // become permanent sidebar rows. Live sessions are registered separately,
+  // so this historical-only check cannot hide a first turn while it is running.
+  if (!hasCompletedConversation(file.path, file.sizeBytes)) return null;
   const title = start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`;
   const settings = readSessionModelSettings(start, file.path);
   return {

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionSummary } from './protocol.js';
+import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-home-'));
@@ -22,13 +23,13 @@ function writeSession(id: string, cwd: string, extra: Record<string, unknown> = 
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, `${id}.jsonl`),
-    `${JSON.stringify({
+    providerSessionJsonl({
       type: 'session_start',
       cwd,
       sessionTitle: 'Plain chat',
       settings: { interactionMode: 'auto' },
       ...extra,
-    })}\n`,
+    }),
   );
 }
 

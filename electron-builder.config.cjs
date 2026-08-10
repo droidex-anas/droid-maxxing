@@ -7,6 +7,7 @@
 const process = require('node:process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { URL } = require('node:url');
 
 const isReleaseBuild = process.env.DROIDEX_RELEASE_BUILD === '1';
 const isUnsignedReleaseBuild = process.env.DROIDEX_UNSIGNED_RELEASE_BUILD === '1';
@@ -38,6 +39,22 @@ if (isReleaseBuild && !canNotarize) {
 }
 if ((isReleaseBuild || isUnsignedReleaseBuild) && !sentryDsn) {
   throw new Error('DROIDEX release builds require SENTRY_DSN for crash and bug reporting.');
+}
+if (isReleaseBuild || isUnsignedReleaseBuild) {
+  let isCanonicalSentryProject = false;
+  try {
+    const parsedSentryDsn = new URL(sentryDsn);
+    isCanonicalSentryProject =
+      parsedSentryDsn.origin === 'https://o4511166732304384.ingest.de.sentry.io' &&
+      parsedSentryDsn.username.length > 0 &&
+      parsedSentryDsn.password === '' &&
+      parsedSentryDsn.pathname === '/4511850999185488';
+  } catch {
+    // The closed release validation below owns the user-facing error.
+  }
+  if (!isCanonicalSentryProject) {
+    throw new Error('DROIDEX release builds require the canonical Sentry project destination.');
+  }
 }
 
 /** @type {import('electron-builder').Configuration} */

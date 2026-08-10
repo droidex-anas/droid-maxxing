@@ -187,6 +187,57 @@ export const closeSession = (appSessionId: string) => {
   bridge.send({ type: 'session.close', appSessionId });
 };
 
+// Best-effort sync of a chat rename to the harness's own session title. The
+// app-level displayTitle (lib/chatMetadata) stays the UI source of truth, so
+// a failure here only means other clients keep the generated title.
+export const renameSession = (appSessionId: string, title: string) => {
+  bridge.send({ type: 'session.rename', appSessionId, title });
+};
+
+// Full chat transcript rendered as Markdown by the sidecar, which reads the
+// stored session file from disk — so the export is complete even for a chat
+// that was never opened in this app run.
+export const exportSessionMarkdown = (appSessionId: string, title: string): Promise<string> => {
+  const requestId = newClientRef();
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      unsubscribe();
+      reject(new Error('Timed out while exporting the chat.'));
+    }, 10_000);
+    const unsubscribe = bridge.subscribe((event) => {
+      // A sidecar older than this renderer answers unknown commands with
+      // bridge.unsupported_command instead of the awaited reply; fail the
+      // export immediately rather than waiting out the timeout. Only the
+      // event echoing this request's id is ours — a foreign unsupported
+      // command failing concurrently must not reject this export.
+      if (
+        event.type === 'error' &&
+        event.code === 'bridge.unsupported_command' &&
+        event.requestId === requestId
+      ) {
+        globalThis.clearTimeout(timeout);
+        unsubscribe();
+        // The code rides along so the caller can skip its own toast: the
+        // global bridge subscriber already surfaced the skew error.
+        reject(Object.assign(new Error(event.message), { code: event.code }));
+        return;
+      }
+      if (event.type !== 'session.markdownExported' || event.requestId !== requestId) return;
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      if (event.ok) resolve(event.markdown);
+      else reject(new Error(event.message));
+    });
+    if (
+      !bridge.sendIfConnected({ type: 'session.exportMarkdown', appSessionId, requestId, title })
+    ) {
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      reject(new Error('Reconnect to DROIDEX before exporting a chat.'));
+    }
+  });
+};
+
 export const reanchorSessionsForWorktreeRemoval = (
   fromCwd: string,
   toCwd: string,

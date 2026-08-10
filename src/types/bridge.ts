@@ -595,6 +595,14 @@ export type ClientCommand =
   | { type: 'session.compact'; appSessionId: string; customInstructions?: string }
   | { type: 'session.fork'; appSessionId: string }
   | { type: 'session.rename'; appSessionId: string; title: string }
+  | {
+      // Full-transcript Markdown export ("Copy as Markdown"). `title` is the
+      // renderer's effective (possibly user-renamed) title for the header.
+      type: 'session.exportMarkdown';
+      appSessionId: string;
+      requestId: string;
+      title?: string;
+    }
   | { type: 'sessions.reanchorCwd'; requestId: string; fromCwd: string; toCwd: string }
   | { type: 'session.rewindInfo'; appSessionId: string }
   | { type: 'session.rewind'; appSessionId: string; rewindId?: string }
@@ -711,8 +719,7 @@ export type ClientCommand =
       instruction: string;
       referenceIds: string[];
     }
-  | { type: 'browser.native.result'; result: BrowserNativeResult }
-  | { type: 'spec.read'; appSessionId: string; path: string };
+  | { type: 'browser.native.result'; result: BrowserNativeResult };
 
 export type ChildUpdatedEvent =
   | {
@@ -776,6 +783,19 @@ export type ServerEvent =
       count: number;
       message?: string;
     }
+  // "Copy as Markdown" reply: success and failure carry disjoint payloads.
+  | {
+      type: 'session.markdownExported';
+      requestId: string;
+      ok: true;
+      markdown: string;
+    }
+  | {
+      type: 'session.markdownExported';
+      requestId: string;
+      ok: false;
+      message: string;
+    }
   | ChildUpdatedEvent
   | ChildErrorEvent
   | { type: 'event.appended'; event: TranscriptEvent }
@@ -801,6 +821,9 @@ export type ServerEvent =
       type: 'error';
       code?: string;
       clientRef?: string;
+      // Echoed from the offending command when it carried one, so requesters
+      // can tell their own failure apart from a foreign command's.
+      requestId?: string;
       appSessionId?: string;
       providerSessionId?: string;
       message: string;

@@ -485,7 +485,15 @@ test('[A2] Open and replay a linked child session', { concurrency: false }, asyn
       linkedWorker('app-a2', 'worker-a2', 'tool-a2', 'paused'),
       linkedWorker('app-a2', 'worker-unknown-a2', 'tool-unknown-a2'),
     ]);
-    writeHistorySession(h.home, 'provider-a2', []);
+    writeHistorySession(h.home, 'provider-a2', [
+      {
+        type: 'message',
+        id: 'user-a2',
+        timestamp: new Date(0).toISOString(),
+        message: { role: 'user', content: [{ type: 'text', text: 'parent prompt' }] },
+      },
+      assistantMessage('parent-a2', 'parent response', 1),
+    ]);
     writeHistorySession(h.home, 'worker-a2', [assistantMessage('child-a2', 'child replay', 0)], {
       callingSessionId: 'provider-a2',
       callingToolUseId: 'tool-a2',

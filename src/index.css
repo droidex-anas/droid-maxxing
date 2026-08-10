@@ -24,7 +24,7 @@
     --droid-accent: #f2f2f2;
     /* Skill invocations stay blue, with applyTheme selecting the accessible
        light-theme shade. */
-    --droid-skill: #60a5fa;
+    --droid-skill: #93c5fd;
     /* Fixed semantic status colors: success green, warning amber, and danger red
        stay vivid across every theme (including monochrome) so diffs, status, and
        callouts always read by hue. The neutral accent governs UI chrome only and
@@ -178,22 +178,6 @@
     animation: caret-blink 1s ease-in-out infinite;
   }
 
-  @keyframes dot-pulse {
-    0%,
-    100% {
-      opacity: 0.25;
-      transform: translateY(1px);
-    }
-    50% {
-      opacity: 1;
-      transform: translateY(-1.5px);
-    }
-  }
-
-  .dot-pulse {
-    animation: dot-pulse 0.9s ease-in-out infinite;
-  }
-
   /* Subagent avatar pixels: a diagonal shimmer sweep while the agent works.
      Per-pixel animation-delay (set inline) moves the wave across the creature. */
   @keyframes agent-pixel-shimmer {
@@ -213,9 +197,37 @@
   /* Infinite status indicators must respect reduced-motion preferences. */
   @media (prefers-reduced-motion: reduce) {
     .caret-blink,
-    .dot-pulse,
     .shimmer-text,
     .agent-avatar-pixel {
+      animation: none;
+    }
+  }
+
+  /* Sidebar titles longer than the row rest truncated; on hover the title
+     sweeps left to reveal the full name, holds, then slides back. Travel
+     distance and duration are per-row CSS vars set on mouseenter. */
+  @keyframes title-marquee {
+    0%,
+    12% {
+      transform: translateX(0);
+    }
+    44%,
+    56% {
+      transform: translateX(var(--title-marquee-x, 0px));
+    }
+    88%,
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  .title-marquee {
+    animation: title-marquee var(--title-marquee-duration, 4s) ease-in-out infinite;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .title-marquee {
       animation: none;
     }
   }
@@ -385,29 +397,6 @@
   .review-split-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
-  }
-
-  .diff-preview-line {
-    border-left: 2px solid transparent;
-    padding: 0 12px;
-  }
-
-  .diff-preview-add {
-    background: var(--diff-add-bg);
-    color: var(--diff-add-fg);
-  }
-
-  .diff-preview-del {
-    background: var(--diff-del-bg);
-    color: var(--diff-del-fg);
-  }
-
-  html[data-diff-style='focused'] .diff-preview-add {
-    border-left-color: var(--diff-add-fg);
-  }
-
-  html[data-diff-style='focused'] .diff-preview-del {
-    border-left-color: var(--diff-del-fg);
   }
 
   @container (max-width: 700px) {
