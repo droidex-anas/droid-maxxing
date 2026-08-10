@@ -69,10 +69,9 @@ export default function RightPanel() {
         ? spawnedChildSessions(
             transcript ?? [],
             Object.values(state.childSessions[activeAppSessionId] ?? {}),
-            working,
           )
         : [],
-    [activeAppSessionId, transcript, state.childSessions, working],
+    [activeAppSessionId, transcript, state.childSessions],
   );
   // Index access on these records is typed as always-present; Partial keeps the
   // lookup honest without changing runtime behavior.

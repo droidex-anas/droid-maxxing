@@ -118,6 +118,9 @@ const LAUNCH_ID_RE = /^(?:session_id|task_id):[ \t]*(\S+)[ \t]*$/m;
 const SPAWN_FINAL_RE = /^session_id:[ \t]*(\S+)[ \t]*$/;
 const POLL_ID_RE = /^Task ID:[ \t]*(\S+)[ \t]*$/;
 const POLL_STATUS_RE = /^Status:[ \t]*(\w+)[ \t]*$/im;
+const BACKGROUND_TASK_TERMINAL_RE =
+  /^Background task (?:completed|failed|stopped|cancelled|canceled)\.?$/i;
+const BACKGROUND_TASK_ID_RE = /^(?:task_id|session_id):[ \t]*(\S+)[ \t]*$/im;
 
 // Subagent Task-family results arrive in three content shapes, told apart by
 // their FIRST line (the report body itself may mention task ids or statuses):
@@ -165,4 +168,14 @@ export function taskResultChildUpdate(
     isSpawnResult: false,
     ...(activity ? { activity } : {}),
   };
+}
+
+// Background Task completion is emitted as an internal create_message
+// notification. It is intentionally not part of the stream returned by the
+// SDK, so the primary notification listener uses this parser to settle a child
+// even when the parent never calls TaskOutput after launching it.
+export function backgroundTaskCompletionProviderSessionId(content: string): string | undefined {
+  const firstLine = content.replace(/\r\n/g, '\n').trimStart().split('\n', 1)[0]?.trim();
+  if (!firstLine || !BACKGROUND_TASK_TERMINAL_RE.test(firstLine)) return undefined;
+  return BACKGROUND_TASK_ID_RE.exec(content)?.[1];
 }

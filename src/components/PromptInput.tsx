@@ -24,7 +24,7 @@ import {
   isDesktop,
   type FeedbackReportRequest,
 } from '../lib/desktop';
-import { type AttachedImage, useImageAttachments } from '../hooks/useImageAttachments';
+import { useImageAttachments } from '../hooks/useImageAttachments';
 import { useImageFileDrop } from '../hooks/useImageFileDrop';
 import { ImageChip } from './composer/ImageChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
@@ -33,7 +33,7 @@ import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
 import { markGitTurnStart } from '../lib/git';
 import { createLocalDesignTranscriptEvent, newQueueId } from '../lib/promptQueue';
-import { composePrompt } from '../lib/composePrompt';
+import { composePrompt, parseSlashSkillInvocation } from '../lib/composePrompt';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
 import { resetComposerAfterSubmit } from '../lib/composerReset';
@@ -526,13 +526,6 @@ export default function PromptInput({
 
   const composeFrom = composePrompt;
 
-  const composeText = (text: string, images: AttachedImage[]): string =>
-    composeFrom(
-      text,
-      activeSkills.map((s) => s.name),
-      [...attachedFiles, ...images.map((i) => i.path)],
-    );
-
   // Re-entry guard: a send awaits markGitTurnStart before the input is cleared,
   // so without this a second Enter/click during that window would resend the
   // same payload (and create a duplicate session turn).
@@ -597,14 +590,18 @@ export default function PromptInput({
 
     if (!childActionsEnabled) return;
 
-    const composed = composeText(text, readyImages);
-
-    const skillNames = activeSkills.map((s) => s.name);
+    const slashSkill =
+      activeSkills.length === 0 ? parseSlashSkillInvocation(text, invocableSkills) : undefined;
+    const displayText = slashSkill?.prompt ?? text;
+    const skillNames = slashSkill
+      ? [slashSkill.skillName]
+      : activeSkills.map((skill) => skill.name);
+    const composed = composeFrom(displayText, skillNames, allFiles);
     const registerPending = (ref: string) => {
       dispatch({
         type: 'SET_PENDING_COMPOSE',
         clientRef: ref,
-        text,
+        text: displayText,
         skills: skillNames,
         files: allFiles,
       });
@@ -633,7 +630,7 @@ export default function PromptInput({
       createSession({
         clientRef,
         cwd: dir,
-        title: (text || activeSkills[0]?.name || 'Mission').slice(0, 48),
+        title: (displayText || skillNames[0] || 'Mission').slice(0, 48),
         goal: composed,
         sessionPurpose: 'mission-control',
         interactionMode: 'agi',
@@ -664,7 +661,7 @@ export default function PromptInput({
       createSession({
         clientRef,
         cwd: dir,
-        title: (text || activeSkills[0]?.name || 'Chat').slice(0, 48),
+        title: (displayText || skillNames[0] || 'Chat').slice(0, 48),
         goal: composed,
         sessionPurpose: 'chat',
         interactionMode: isSpecMode ? 'spec' : 'auto',
@@ -684,7 +681,7 @@ export default function PromptInput({
       dispatch({
         type: 'QUEUE_PROMPT',
         appSessionId: activeSession.appSessionId,
-        prompt: { id: newQueueId(), text, skills: skillNames, files: allFiles },
+        prompt: { id: newQueueId(), text: displayText, skills: skillNames, files: allFiles },
       });
       clearAfterSubmit();
       return;
@@ -700,9 +697,9 @@ export default function PromptInput({
           role: targetChild?.role ?? 'primary',
           ts: Date.now(),
           kind: 'text',
-          text,
+          text: displayText,
           author: 'user',
-          skills: activeSkills.map((s) => s.name),
+          skills: skillNames,
           files: allFiles,
           steered: isLive && mode === 'now',
         },

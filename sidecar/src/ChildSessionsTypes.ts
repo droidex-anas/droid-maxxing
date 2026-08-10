@@ -19,7 +19,10 @@ export type ChildSettingsTarget = ChildRuntimeTarget & {
 export interface ChildSessionsDependencies {
   runtime: Pick<FactoryRuntime, 'loadSession'>;
   registry: Pick<SessionRegistry<ChildParentLease>, 'getLive'>;
-  history: Pick<HistoryIndex, 'childSessions' | 'childSession' | 'upsertChildSession'>;
+  history: Pick<
+    HistoryIndex,
+    'childSessions' | 'childSession' | 'sessionLaunchSettings' | 'upsertChildSession'
+  >;
   timeline: Pick<SessionTimeline, 'append' | 'appendStatus' | 'replayChild'>;
   eventFlow: Pick<SessionEventFlow, 'beginTurn' | 'applyNotification' | 'applyStreamEvent'>;
   interactions: Pick<SessionInteractions, 'makePermissionHandler' | 'makeAskUserHandler'>;

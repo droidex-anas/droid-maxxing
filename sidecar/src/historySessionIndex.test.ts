@@ -56,6 +56,25 @@ function writeSession(id: string, text?: string): string {
   return path;
 }
 
+test('session launch settings resolve the exact provider-scoped model and reasoning', () => {
+  invalidateSessionIndex();
+  const id = nextId('launch-settings');
+  const path = writeSession(id);
+  writeFileSync(
+    path.replace(/\.jsonl$/, '.settings.json'),
+    JSON.stringify({ model: 'custom:glm-5.2', reasoningEffort: 'max' }),
+  );
+  const index = new HistoryIndex();
+  try {
+    assert.deepEqual(index.sessionLaunchSettings(id), {
+      modelId: 'custom:glm-5.2',
+      reasoningEffort: 'max',
+    });
+  } finally {
+    index.close();
+  }
+});
+
 test('resolveSessionChain finds a session file created after the index was memoized', () => {
   invalidateSessionIndex();
   const first = nextId('idx-first');

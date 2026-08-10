@@ -2,10 +2,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BUILT_IN_THEMES,
+  SKILL_COLORS,
   contrastRatio,
   CUSTOM_THEME_ID,
   DEFAULT_THEME,
   detectPresetId,
+  elevatedSurfaceColor,
   findPreset,
   migrateLegacyLightPreset,
   newCustomThemeId,
@@ -172,6 +174,20 @@ describe('detectPresetId', () => {
       detectPresetId({ ...DEFAULT_THEME.dark, accent: '#ee6018' }, [EXAMPLE_CUSTOM]),
       CUSTOM_THEME_ID,
     );
+  });
+});
+
+describe('SKILL_COLORS', () => {
+  it('keeps skill labels blue and WCAG AA readable on every built-in user bubble', () => {
+    for (const preset of BUILT_IN_THEMES) {
+      for (const scheme of ['light', 'dark'] as const) {
+        const variant = preset[scheme];
+        assert.ok(
+          contrastRatio(SKILL_COLORS[scheme], elevatedSurfaceColor(variant)) >= 4.5,
+          `${preset.id} ${scheme} skill label should reach 4.5:1`,
+        );
+      }
+    }
   });
 });
 

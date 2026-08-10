@@ -16,6 +16,7 @@ import {
   sameFeedEvents,
   MessageFeed,
   StreamingCaret,
+  UserBubble,
   WebFetchBody,
   appendedFeedItemKeys,
   type FeedItem,
@@ -65,6 +66,15 @@ test('parent liveness cannot make paused historical child activity look running'
   assert.equal(childSessionLineIsRunning({ status: 'paused' }), false);
   assert.equal(childSessionLineIsRunning({ status: 'completed' }), false);
   assert.equal(childSessionLineIsRunning({ status: 'running' }), true);
+});
+
+test('a skill prompt renders the skill inline in blue before the user text', () => {
+  const html = renderToStaticMarkup(
+    createElement(UserBubble, { event: { text: 'PR #100', skills: ['review'] } }),
+  );
+  assert.match(html, /text-droid-skill[^>]*>.*review/);
+  assert.ok(html.indexOf('review') < html.indexOf('PR #100'));
+  assert.ok(!html.includes('violet'));
 });
 
 // ── #20: TodoWrite / tool orchestration must not leak as chat ──

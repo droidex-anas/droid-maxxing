@@ -41,7 +41,7 @@ function createHarness(
     maxOpenSessions?: number;
     failForgetChild?: string;
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
-    failReplayChild?: boolean;
+    missReplayChildOnce?: boolean;
   } = {},
 ): Harness {
   const calls: RecordedCall[] = [];
@@ -49,7 +49,7 @@ function createHarness(
   const history = new FakeHistoryIndex(calls);
   const runtime = new FakeFactoryRuntime(calls);
   const parentId = 'parent';
-  let failReplayChild = options.failReplayChild;
+  let missReplayChildOnce = options.missReplayChildOnce;
   let failDriveSetup = options.failDriveSetup;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
     if (failDriveSetup !== stage) return;
@@ -75,9 +75,9 @@ function createHarness(
         calls.push({ target: 'protocol', method: 'timeline.status', args });
       },
       replayChild: (...args) => {
-        if (failReplayChild) {
-          failReplayChild = false;
-          throw new Error('replay failed');
+        if (missReplayChildOnce) {
+          missReplayChildOnce = false;
+          return;
         }
         calls.push({ target: 'protocol', method: 'timeline.replayChild', args });
       },
@@ -395,6 +395,8 @@ test('result-only completion admits the exact pending spawn as historical', () =
     parentAppSessionId: h.parentId,
     providerSessionId: 'provider-child-current',
     role: 'worker',
+    modelId: 'model-default',
+    reasoningEffort: ReasoningEffort.Low,
     spawnLink: { kind: 'tool-use', id: 'tool-current' },
     done: true,
   });
@@ -417,6 +419,76 @@ test('result-only completion admits the exact pending spawn as historical', () =
   assert.equal(h.history.childSessions(h.parentId)[0]?.providerSessionId, 'provider-child-current');
 });
 
+test('missing Task settings defer exact admission and preserve provider-only completion', () => {
+  const h = createHarness([]);
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    role: 'worker',
+    spawnLink: { kind: 'tool-use', id: 'tool-deferred' },
+    label: 'worker-2',
+    requiresExactLaunchSettings: true,
+  });
+
+  assert.doesNotThrow(() =>
+    h.owner.admitChildObservation({
+      parentAppSessionId: h.parentId,
+      providerSessionId: 'provider-deferred',
+      role: 'worker',
+      spawnLink: { kind: 'tool-use', id: 'tool-deferred' },
+      requiresExactLaunchSettings: true,
+    }),
+  );
+  assert.deepEqual(h.owner.list(h.parentId), []);
+
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    providerSessionId: 'provider-deferred',
+    role: 'worker',
+    requiresExactLaunchSettings: true,
+    done: true,
+  });
+  assert.deepEqual(h.owner.list(h.parentId), []);
+
+  h.history.seedSessionLaunchSettings('provider-deferred', {
+    modelId: 'custom:glm-5.2',
+    reasoningEffort: ReasoningEffort.High,
+  });
+  h.owner.retryPendingLaunchSettings(['provider-deferred']);
+
+  assert.deepEqual(h.owner.list(h.parentId), [
+    {
+      parentAppSessionId: h.parentId,
+      childSessionId: 'generated-child',
+      role: 'worker',
+      status: 'completed',
+      label: 'worker-2',
+      modelId: 'custom:glm-5.2',
+      reasoningEffort: ReasoningEffort.High,
+      spawnLink: { kind: 'tool-use', id: 'tool-deferred' },
+      transcriptAvailable: true,
+      startedAt: 100,
+    },
+  ]);
+});
+
+test('exact launch settings replace stale reasoning as one snapshot', () => {
+  const record = {
+    ...childRecord('child', 'provider'),
+    reasoningEffort: ReasoningEffort.High,
+  };
+  const h = createHarness([record]);
+
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    providerSessionId: record.providerSessionId,
+    role: 'worker',
+    spawnLink: record.spawnLink,
+    modelId: record.modelId,
+  });
+
+  assert.equal(h.owner.list(h.parentId)[0]?.reasoningEffort, undefined);
+});
+
 test('poll observations never rekey a child away from its spawn link', () => {
   const h = createHarness([]);
   h.owner.admitChildObservation({
@@ -430,6 +502,8 @@ test('poll observations never rekey a child away from its spawn link', () => {
     parentAppSessionId: h.parentId,
     providerSessionId: 'provider-child',
     role: 'worker',
+    modelId: 'model-default',
+    reasoningEffort: ReasoningEffort.Low,
     spawnLink: { kind: 'tool-use', id: 'tool-spawn' },
   });
 
@@ -466,6 +540,16 @@ test('opening a child the harness is still driving keeps it running', async () =
   assert.equal(h.owner.list(h.parentId)[0]?.status, 'running');
 
   await h.open(record);
+
+  const replayIndex = h.calls.findIndex(
+    (call) => call.target === 'protocol' && call.method === 'timeline.replayChild',
+  );
+  const loadIndex = h.calls.findIndex(
+    (call) => call.target === 'runtime' && call.method === 'loadSession',
+  );
+  assert.ok(replayIndex >= 0);
+  assert.ok(loadIndex >= 0);
+  assert.ok(replayIndex < loadIndex, 'cached history must render before provider hydration');
 
   assert.equal(
     h.events.some(
@@ -529,30 +613,14 @@ test('completed child under a live parent opens only as history', async () => {
   );
 });
 
-test('post-install open failure closes the runtime and reports the exact request', async () => {
+test('missing child history does not block provider hydration', async () => {
   const record = childRecord('child', 'provider');
-  const h = createHarness([record], { failReplayChild: true });
-  const failedRuntime = await h.open(record);
+  const h = createHarness([record], { missReplayChildOnce: true });
+  await h.open(record);
 
-  assert.equal(h.owner.compactionRetuneTargets().length, 0);
+  assert.equal(h.owner.compactionRetuneTargets().length, 1);
   assert.equal(
-    h.calls.filter(
-      (call) =>
-        call.target === 'cleanup' &&
-        call.method === 'session.close' &&
-        call.args[0] === record.providerSessionId,
-    ).length,
-    1,
-  );
-  assert.equal(
-    h.events.some(
-      (event) =>
-        event.type === 'child.error' &&
-        event.operation === 'open' &&
-        event.requestId === 'open-child' &&
-        event.code === 'child.open_failed' &&
-        event.message === 'replay failed',
-    ),
+    h.calls.some((call) => call.target === 'runtime' && call.method === 'loadSession'),
     true,
   );
   assert.equal(
@@ -562,23 +630,13 @@ test('post-install open failure closes the runtime and reports the exact request
         event.requestId === 'open-child' &&
         event.access === 'ready',
     ),
+    true,
+  );
+  assert.equal(
+    h.events.some((event) => event.type === 'child.error' && event.requestId === 'open-child'),
     false,
   );
-
-  const replacement = new FakeFactorySession(record.providerSessionId!, {}, h.calls);
-  await h.open(record, replacement);
-
-  assert.notEqual(replacement, failedRuntime);
   assert.equal(h.target(record.childSessionId).providerSessionId, record.providerSessionId);
-  assert.equal(
-    h.events.some(
-      (event) =>
-        event.type === 'child.updated' &&
-        event.requestId === 'open-child' &&
-        event.access === 'ready',
-    ),
-    true,
-  );
 });
 
 test('completion during a live stream rejects queued resurrection', async () => {

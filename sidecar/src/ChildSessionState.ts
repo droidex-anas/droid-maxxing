@@ -20,6 +20,11 @@ export interface ChildSpawnObservation {
   spawnLink?: PersistedChildSession['spawnLink'];
   label?: string;
   prompt?: string;
+  modelId?: string;
+  reasoningEffort?: ReasoningEffort;
+  // Task children choose their model in Factory. DROIDEX must wait for that
+  // provider session's settings instead of substituting parent defaults.
+  requiresExactLaunchSettings?: boolean;
   done?: boolean;
   // Latest activity observed for this child (a poll's status, plus the last line
   // it had produced). Live-only: never persisted, since it describes a moment
@@ -139,6 +144,37 @@ export function childStateFromRecord(record: PersistedChildSession): ChildSessio
   };
 }
 
+export function newChildState(input: {
+  parentAppSessionId: string;
+  childSessionId: string;
+  role: PersistedChildSession['role'];
+  spawnLink?: PersistedChildSpawnLink;
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  updatedAt: number;
+}): ChildSessionState {
+  return childStateFromRecord({
+    parentAppSessionId: input.parentAppSessionId,
+    childSessionId: input.childSessionId,
+    role: input.role,
+    status: 'pending',
+    modelId: input.modelId,
+    reasoningEffort: input.reasoningEffort,
+    ...(input.spawnLink ? { spawnLink: input.spawnLink } : {}),
+    transcriptAvailable: false,
+    updatedAt: input.updatedAt,
+  });
+}
+
+export function applyChildLaunchSettings(child: ChildSessionState, settings: ChildSettings): void {
+  if (!settings.modelId) return;
+  if (child.modelId === settings.modelId && child.reasoningEffort === settings.reasoningEffort)
+    return;
+  child.modelId = settings.modelId;
+  child.reasoningEffort = settings.reasoningEffort;
+  child.configurationGeneration += 1;
+}
+
 export function persistedChild(child: ChildSessionState): PersistedChildSession {
   return {
     ...child.identity,
@@ -185,6 +221,65 @@ export function findChildBySpawn(parent: ParentChildSessions, spawnLink: Persist
   return [...parent.children.values()].find(
     (child) => child.spawnLink?.kind === spawnLink.kind && child.spawnLink.id === spawnLink.id,
   );
+}
+
+function pendingObservationKey(observation: ChildSpawnObservation): string | undefined {
+  if (observation.spawnLink)
+    return `spawn:${observation.spawnLink.kind}:${observation.spawnLink.id}`;
+  return observation.providerSessionId ? `provider:${observation.providerSessionId}` : undefined;
+}
+
+export function findPendingChildObservation(
+  parent: ParentChildSessions,
+  observation: ChildSpawnObservation,
+): ChildSpawnObservation | undefined {
+  const key = pendingObservationKey(observation);
+  const exact = key ? parent.pendingSpawns.get(key) : undefined;
+  if (exact || !observation.providerSessionId) return exact;
+  return [...parent.pendingSpawns.values()].find(
+    (pending) => pending.providerSessionId === observation.providerSessionId,
+  );
+}
+
+export function mergeChildObservations(
+  pending: ChildSpawnObservation | undefined,
+  observation: ChildSpawnObservation,
+): ChildSpawnObservation {
+  return {
+    ...pending,
+    ...observation,
+    providerSessionId: observation.providerSessionId ?? pending?.providerSessionId,
+    spawnLink: pending?.spawnLink ?? observation.spawnLink,
+    label: pending?.label ?? observation.label,
+    prompt: observation.prompt ?? pending?.prompt,
+    modelId: observation.modelId ?? pending?.modelId,
+    reasoningEffort:
+      observation.modelId !== undefined ? observation.reasoningEffort : pending?.reasoningEffort,
+    requiresExactLaunchSettings:
+      observation.requiresExactLaunchSettings === true ||
+      pending?.requiresExactLaunchSettings === true,
+    done: observation.done === true || pending?.done === true,
+    activity: observation.activity ?? pending?.activity,
+  };
+}
+
+export function rememberPendingChildObservation(
+  parent: ParentChildSessions,
+  previous: ChildSpawnObservation | undefined,
+  observation: ChildSpawnObservation,
+): void {
+  const previousKey = previous ? pendingObservationKey(previous) : undefined;
+  if (previousKey) parent.pendingSpawns.delete(previousKey);
+  const key = pendingObservationKey(observation);
+  if (key) parent.pendingSpawns.set(key, observation);
+}
+
+export function forgetPendingChildObservation(
+  parent: ParentChildSessions,
+  observation: ChildSpawnObservation | undefined,
+): void {
+  const key = observation ? pendingObservationKey(observation) : undefined;
+  if (key && parent.pendingSpawns.get(key) === observation) parent.pendingSpawns.delete(key);
 }
 
 export function childAcceptsWork(child: ChildSessionState): boolean {

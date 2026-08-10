@@ -247,6 +247,7 @@ test('[A1] Child-session link persistence', { concurrency: false }, async () => 
     const parent = h.provider.session('provider-1');
     await parent.waitForPrompts(1);
     await h.waitForIdle();
+    h.history.seedSessionLaunchSettings('worker-a1', { modelId: 'model-default' });
     parent.queueStreamEvents([
       {
         type: 'tool_progress',
@@ -309,7 +310,7 @@ test('[A1] Child-session link persistence', { concurrency: false }, async () => 
   }
 });
 
-test('[A1b] child persistence resolves the accepted catalog default when settings are empty', async () => {
+test('[A1b] a Task child waits for exact launch settings without failing its parent', async () => {
   const h = createSessionManagerTestContext({
     getFactoryDefaults: () => Promise.resolve({}),
   });
@@ -345,19 +346,31 @@ test('[A1b] child persistence resolves the accepted catalog default when setting
       text: 'spawn worker',
     });
 
-    const persistence = h.calls.find(
-      (call) => call.target === 'history' && call.method === 'upsertChildSession',
-    )?.args[0];
-    assert.ok(persistence && typeof persistence === 'object');
-    assert.equal(Reflect.get(persistence, 'childSessionId'), 'child-1');
-    assert.equal(Reflect.get(persistence, 'modelId'), 'model-default');
+    assert.equal(h.history.childSessions('provider-1').length, 0);
     assert.equal(
-      h.events.some(
-        (event) =>
-          event.type === 'error' && event.message.includes('accepted model is unavailable'),
-      ),
+      h.events.some((event) => event.type === 'error'),
       false,
     );
+
+    h.history.seedSessionLaunchSettings('worker-a1b', { modelId: 'model-exact' });
+    parent.queueStreamEvents([
+      {
+        type: 'tool_result',
+        toolName: 'Task',
+        toolUseId: 'tool-a1b',
+        content: 'session_id: worker-a1b\ndone',
+        isError: false,
+      },
+    ]);
+    await h.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: 'collect worker',
+    });
+
+    const child = h.history.childSessions('provider-1')[0];
+    assert.equal(child?.modelId, 'model-exact');
+    assert.equal(child?.status, 'completed');
   } finally {
     await h.dispose();
   }
@@ -378,6 +391,8 @@ test('[A1c] provider replacement preserves the logical child identity', async ()
     const parent = h.provider.session('provider-1');
     await parent.waitForPrompts(1);
     await h.waitForIdle();
+    h.history.seedSessionLaunchSettings('worker-a1c-old', { modelId: 'model-default' });
+    h.history.seedSessionLaunchSettings('worker-a1c-new', { modelId: 'model-default' });
     const observeProvider = async (providerSessionId: string, text: string): Promise<void> => {
       parent.queueStreamEvents([
         {
@@ -505,6 +520,12 @@ test('[A2] Open and replay a linked child session', { concurrency: false }, asyn
       requestId: 'open-worker-a2',
     });
     const primary = h.provider.session('provider-a2');
+    h.history.seedSessionLaunchSettings('worker-completed-a2', {
+      modelId: 'model-default',
+    });
+    h.history.seedSessionLaunchSettings('worker-running-a2', {
+      modelId: 'model-default',
+    });
     primary.queueStreamEvents([
       {
         type: 'tool_progress',

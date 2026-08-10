@@ -12,6 +12,7 @@ import {
 } from './SessionCompaction.js';
 import { errMsg, isUserCancellation } from './sessionHelpers.js';
 import {
+  applyChildLaunchSettings,
   childAcceptsWork,
   childIdentity,
   childSettingsFromInit,
@@ -19,12 +20,18 @@ import {
   childSummary,
   findChildByProvider,
   findChildBySpawn,
+  findPendingChildObservation,
+  forgetPendingChildObservation,
+  mergeChildObservations,
+  newChildState,
   persistedChild,
+  rememberPendingChildObservation,
   restoredChildStatus,
   type ChildIdentity,
   type ChildOpenAttempt,
   type ChildRuntimeState,
   type ChildRuntimeTarget,
+  type ChildSettings,
   type ChildSessionState,
   type ChildSpawnObservation,
   type ParentChildSessions,
@@ -80,38 +87,56 @@ export class ChildSessions {
   admitChildObservation(observation: ChildSpawnObservation): ChildIdentity | undefined {
     const parent = this.parents.get(observation.parentAppSessionId);
     if (!parent || !this.isCurrentParent(parent)) return undefined;
-    const spawnKey = observation.spawnLink
-      ? `${observation.spawnLink.kind}:${observation.spawnLink.id}`
-      : undefined;
-    const pending = spawnKey ? parent.pendingSpawns.get(spawnKey) : undefined;
-    if (!observation.providerSessionId) {
-      if (observation.done && observation.spawnLink)
-        this.complete(parent, findChildBySpawn(parent, observation.spawnLink));
-      else if (spawnKey) parent.pendingSpawns.set(spawnKey, observation);
+    const pending = findPendingChildObservation(parent, observation);
+    const observed = mergeChildObservations(pending, observation);
+    const spawnLink = observed.spawnLink;
+    if (!observed.providerSessionId) {
+      const child = spawnLink ? findChildBySpawn(parent, spawnLink) : undefined;
+      if (observed.done && child) this.complete(parent, child);
+      else if (spawnLink) rememberPendingChildObservation(parent, pending, observed);
       return undefined;
     }
-    const providerSessionId = observation.providerSessionId;
+    const providerSessionId = observed.providerSessionId;
     for (const child of parent.children.values())
       if (child.retiredProviderSessionIds.has(providerSessionId)) return undefined;
-    if (observation.done) {
-      const providerChild = findChildByProvider(parent, providerSessionId);
-      const spawnChild = observation.spawnLink
-        ? findChildBySpawn(parent, observation.spawnLink)
-        : providerChild;
-      if (providerChild && providerChild === spawnChild) this.complete(parent, providerChild);
-      else if (!providerChild && !spawnChild && pending) {
-        const identity = this.admitChildObservation({ ...observation, done: false });
-        this.complete(parent, identity ? parent.children.get(identity.childSessionId) : undefined);
-      }
-      return undefined;
-    }
-    const spawnLink = observation.spawnLink ?? pending?.spawnLink;
+
     const spawnChild = spawnLink ? findChildBySpawn(parent, spawnLink) : undefined;
     const providerChild = findChildByProvider(parent, providerSessionId);
     if (spawnChild && providerChild && spawnChild !== providerChild) return undefined;
-    if (spawnKey) parent.pendingSpawns.delete(spawnKey);
+    if (observed.done && providerChild) {
+      if (spawnLink && spawnChild !== providerChild) return undefined;
+      forgetPendingChildObservation(parent, pending);
+      this.complete(parent, providerChild);
+      return undefined;
+    }
+
+    const existingChild = spawnChild ?? providerChild;
+    const existingProviderSessionId =
+      existingChild?.runtime?.session.sessionId ?? existingChild?.providerSessionId;
+    const needsExactSettings =
+      observed.requiresExactLaunchSettings === true &&
+      (!existingChild || existingProviderSessionId !== providerSessionId);
+    if (needsExactSettings && !observed.modelId) {
+      const firstProviderObservation = !pending?.providerSessionId;
+      const firstTerminalObservation = observed.done === true && pending?.done !== true;
+      if (firstProviderObservation || firstTerminalObservation) {
+        const launchSettings = this.readLaunchSettings(providerSessionId);
+        if (launchSettings) {
+          observed.modelId = launchSettings.modelId;
+          observed.reasoningEffort = launchSettings.reasoningEffort;
+        }
+      }
+      if (!observed.modelId) {
+        rememberPendingChildObservation(parent, pending, observed);
+        return undefined;
+      }
+    }
+
     const child =
-      spawnChild ?? providerChild ?? this.createChild(parent, observation.role, spawnLink);
+      spawnChild ??
+      providerChild ??
+      this.createChild(parent, observed.role, spawnLink, observed, needsExactSettings);
+    forgetPendingChildObservation(parent, pending);
     // Poll-style observations (TaskOutput) carry their own call's tool_use id,
     // not the spawn's; only a link that matched an observed spawn call (pending)
     // may key a child that already has one. Trusting the poll's id would rekey
@@ -128,23 +153,28 @@ export class ChildSessions {
       if (child.providerSessionId && child.providerSessionId !== providerSessionId)
         child.retiredProviderSessionIds.add(child.providerSessionId);
       const previousPrompt = child.prompt;
-      if (child.role !== observation.role) {
+      if (child.role !== observed.role) {
         if (child.turn.autoCompacting)
           this.d.compaction.cancel(this.automaticTarget(parent, child));
-        child.role = observation.role;
+        child.role = observed.role;
         child.configurationGeneration += 1;
       }
       child.providerSessionId = providerSessionId;
       child.status = 'running';
+      applyChildLaunchSettings(child, {
+        modelId: observed.modelId,
+        reasoningEffort: observed.reasoningEffort,
+      });
       // First label wins: the spawn call's label is set at admission, and
       // later poll observations echo the same metadata with different casing.
-      child.label ??= observation.label ?? pending?.label;
-      child.prompt = observation.prompt ?? pending?.prompt ?? child.prompt;
+      child.label ??= observed.label;
+      child.prompt = observed.prompt ?? child.prompt;
       child.spawnLink = linkForApply ?? child.spawnLink;
-      child.activity = observation.activity ?? child.activity;
+      child.activity = observed.activity ?? child.activity;
       child.transcriptAvailable = true;
       child.startedAt ??= this.d.now();
-      this.commit(child);
+      if (observed.done) this.complete(parent, child);
+      else this.commit(child);
       if (child.prompt && child.prompt !== previousPrompt)
         this.d.timeline.appendStatus(
           child.identity.parentAppSessionId,
@@ -154,12 +184,36 @@ export class ChildSessions {
           child.role,
         );
     };
-    if (child.mutationTail || child.role !== observation.role) {
+    if (child.mutationTail || child.role !== observed.role) {
       const update = (child.mutationTail ?? Promise.resolve()).catch(ignoreError).then(apply);
       child.mutationTail = update;
       void update.finally(() => this.clearMutation(child, update)).catch(ignoreError);
     } else apply();
-    return child.identity;
+    return observed.done ? undefined : child.identity;
+  }
+
+  retryPendingLaunchSettings(providerSessionIds?: readonly string[]): void {
+    const requested = providerSessionIds ? new Set(providerSessionIds) : undefined;
+    for (const parent of this.parents.values()) {
+      if (!this.isCurrentParent(parent)) continue;
+      for (const pending of parent.pendingSpawns.values()) {
+        const providerSessionId = pending.providerSessionId;
+        if (
+          !pending.requiresExactLaunchSettings ||
+          !providerSessionId ||
+          pending.modelId ||
+          (requested && !requested.has(providerSessionId))
+        )
+          continue;
+        const settings = this.readLaunchSettings(providerSessionId);
+        if (settings)
+          this.admitChildObservation({
+            ...pending,
+            modelId: settings.modelId,
+            reasoningEffort: settings.reasoningEffort,
+          });
+      }
+    }
   }
 
   async open(command: Extract<ClientCommand, { type: 'child.open' }>): Promise<void> {
@@ -419,6 +473,10 @@ export class ChildSessions {
     const attempt = this.beginOpenAttempt(parent, childSessionId);
     let loaded: FactorySession | undefined;
     try {
+      // Paint persisted history immediately. This is deliberately best effort:
+      // a live child may not have flushed history yet, but its provider runtime
+      // must still open without waiting for that file.
+      this.d.timeline.replayChild(parentAppSessionId, childSessionId, child.providerSessionId);
       const admitted = await this.awaitOpenStep(
         attempt,
         this.reserveCapacity(parent, child, operation, requestId),
@@ -507,7 +565,6 @@ export class ChildSessions {
         );
       });
       this.persist(child);
-      this.d.timeline.replayChild(parentAppSessionId, childSessionId, loaded.sessionId);
       this.publish(child);
       // Seed child context telemetry immediately so compaction policy can learn
       // a provider-reported model window before the first turn settles.
@@ -719,26 +776,42 @@ export class ChildSessions {
     parent: ParentChildSessions,
     role: PersistedChildSession['role'],
     spawnLink?: PersistedChildSpawnLink,
+    launchSettings: ChildSettings = {},
+    exactLaunchSettings = false,
   ): ChildSessionState {
-    const defaults = this.d.resolveDefaultSettings(
-      parent.lease.summary,
-      parent.lease.session.initResult,
-      role,
-    );
-    if (!defaults.modelId) throw new Error(`No accepted model is available for ${role}.`);
-    const child = childStateFromRecord({
+    const settings = exactLaunchSettings
+      ? launchSettings
+      : {
+          ...this.d.resolveDefaultSettings(
+            parent.lease.summary,
+            parent.lease.session.initResult,
+            role,
+          ),
+          ...launchSettings,
+        };
+    if (!settings.modelId) throw new Error(`No accepted model is available for ${role}.`);
+    const child = newChildState({
       parentAppSessionId: parent.parentAppSessionId,
       childSessionId: this.d.nextChildSessionId(),
       role,
-      status: 'pending',
-      modelId: defaults.modelId,
-      reasoningEffort: defaults.reasoningEffort,
-      ...(spawnLink ? { spawnLink } : {}),
-      transcriptAvailable: false,
+      spawnLink,
+      modelId: settings.modelId,
+      reasoningEffort: settings.reasoningEffort,
       updatedAt: this.d.now(),
     });
     parent.children.set(child.identity.childSessionId, child);
     return child;
+  }
+
+  private readLaunchSettings(providerSessionId: string): ChildSettings | undefined {
+    try {
+      return this.d.history.sessionLaunchSettings(providerSessionId);
+    } catch (error) {
+      console.error(
+        `Could not read Task launch settings for ${providerSessionId}: ${errMsg(error)}`,
+      );
+      return undefined;
+    }
   }
 
   private async reserveCapacity(

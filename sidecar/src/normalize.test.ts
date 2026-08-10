@@ -5,6 +5,7 @@ import {
   confirmationType,
   extractCompactionNotification,
   mapProgress,
+  normalizeNotification,
   permissionSignature,
   normalizeStreamEvent,
 } from './normalize.js';
@@ -77,6 +78,102 @@ test('extractCompactionNotification ignores unrelated notifications', () => {
     null,
   );
   assert.equal(extractCompactionNotification({}), null);
+});
+
+test('normalizes internal background-task completion notifications', () => {
+  const normalized = normalizeNotification('parent', 'parent', 'primary', {
+    jsonrpc: '2.0',
+    method: 'droid.session_notification',
+    params: {
+      notification: {
+        type: 'create_message',
+        message: {
+          id: 'background-completed-1',
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Background task completed.\ntask_id: child-background-1\noutput: done',
+            },
+          ],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(normalized, [
+    {
+      childSession: {
+        providerSessionId: 'child-background-1',
+        done: true,
+      },
+    },
+  ]);
+});
+
+test('does not treat non-terminal background-task messages as completion', () => {
+  const normalized = normalizeNotification('parent', 'parent', 'primary', {
+    params: {
+      notification: {
+        type: 'create_message',
+        message: {
+          id: 'background-started-1',
+          role: 'user',
+          content: [{ type: 'text', text: 'Background task launched.\ntask_id: child-1' }],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(normalized, []);
+});
+
+test('normalizes a user-only skill activation as harness output without echoing the prompt', () => {
+  const normalized = normalizeNotification('parent', 'parent', 'primary', {
+    params: {
+      notification: {
+        type: 'create_message',
+        message: {
+          id: 'skill-activation-1',
+          role: 'user',
+          visibility: 'user_only',
+          content: [{ type: 'text', text: 'Skill "review" activated: PR #100' }],
+        },
+      },
+    },
+  });
+
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].transcript?.author, undefined);
+  assert.equal(normalized[0].transcript?.text, 'Skill "review" activated: PR #100');
+});
+
+test('keeps unrecognized user create_message notifications off the live transcript', () => {
+  const normalized = normalizeNotification('parent', 'parent', 'primary', {
+    params: {
+      notification: {
+        type: 'create_message',
+        message: {
+          id: 'skill-instructions-1',
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              // Internal skill bodies arrive through this generic notification
+              // shape. Only explicitly parsed harness signals may enter chat.
+              text: '<system-notification>private skill body</system-notification>',
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(normalized, []);
 });
 
 test('token usage maps context to the daemon threshold formula (in + out + cacheRead)', () => {

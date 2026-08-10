@@ -284,6 +284,19 @@ export class HistoryIndex {
     return this.sessionFiles.size;
   }
 
+  sessionLaunchSettings(
+    providerSessionId: string,
+  ): Pick<FactoryDefaults, 'modelId' | 'reasoningEffort'> | undefined {
+    const path = sessionIndexFor(providerSessionId).get(providerSessionId);
+    if (!path) return undefined;
+    const settings = readSessionModelSettings(readSessionStart(path), path);
+    if (!settings.modelId) return undefined;
+    return {
+      modelId: settings.modelId,
+      ...(settings.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
+    };
+  }
+
   // Serves the historical session list from the session file cache instead of
   // walking and re-reading every session file on each request. Rows are as of
   // the last reconcileSessionFiles() run, which happens once per boot and on

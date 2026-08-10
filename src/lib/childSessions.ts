@@ -276,7 +276,6 @@ type ChildSessionSpawnRef = Pick<
 export function resolveWaveSessions(
   spawns: readonly ChildSessionSpawnRef[],
   childSessions: readonly ChildSessionInfo[],
-  live = false,
 ): ChildSessionInfo[] {
   return spawns.map((spawn) => {
     const registered = findChildSessionForTarget(childSessions, { toolUseId: spawn.toolUseId });
@@ -284,7 +283,7 @@ export function resolveWaveSessions(
     // the actual spawn; the wave's spawn event carries the true start time.
     if (registered?.startedAt != null && registered.startedAt > spawn.ts)
       return { ...registered, startedAt: spawn.ts };
-    return registered ?? pendingChildSession(spawn, live);
+    return registered ?? pendingChildSession(spawn);
   });
 }
 
@@ -296,7 +295,6 @@ export function resolveWaveSessions(
 export function spawnedChildSessions(
   transcript: readonly TranscriptEvent[],
   childSessions: readonly ChildSessionInfo[],
-  live = false,
 ): ChildSessionInfo[] {
   const spawns = new Map<string, TranscriptEvent>();
   for (const event of transcript) {
@@ -305,7 +303,7 @@ export function spawnedChildSessions(
     const merged = spawns.get(key);
     spawns.set(key, merged ? mergeChildSessionSpawn(merged, event) : event);
   }
-  const resolved = resolveWaveSessions([...spawns.values()], childSessions, live);
+  const resolved = resolveWaveSessions([...spawns.values()], childSessions);
   const seen = new Set(resolved.map((child) => child.childSessionId));
   // A registered child whose spawn scrolled out of the loaded transcript window
   // (paged or compacted history) still belongs to the session.
@@ -351,19 +349,17 @@ export function isPendingChildPlaceholder(
   return child.childSessionId.startsWith('pending-');
 }
 
-function pendingChildSession(spawn: ChildSessionSpawnRef, live: boolean): ChildSessionInfo {
+function pendingChildSession(spawn: ChildSessionSpawnRef): ChildSessionInfo {
   const toolUseId = spawn.toolUseId ?? spawn.id;
   const info = childSessionInfo(spawn.toolArgs);
   return {
     parentAppSessionId: spawn.appSessionId,
     childSessionId: `pending-${toolUseId}`,
     role: 'worker',
-    // An issued spawn is working: its store record can lag the entire run,
-    // because a background Task only registers once its provider session id is
-    // observed. The tool call's own end says nothing (a background Task
-    // acknowledges its launch immediately), so endTs only settles a replayed
-    // spawn, after its turn is over.
-    status: live ? 'running' : spawn.endTs ? 'completed' : 'pending',
+    // Until the provider session registers, its lifecycle is unknown. Parent
+    // activity and the Task tool call ending cannot prove that the background
+    // child started or finished. Only an exact child lifecycle event may do so.
+    status: 'pending',
     label: info.label ?? 'Subagent',
     prompt: info.description,
     modelId: '',

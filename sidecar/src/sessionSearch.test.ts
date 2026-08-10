@@ -131,6 +131,18 @@ test('llm-only orchestration context is not searchable', async () => {
   assert.equal((await searchSessionFiles([candidate], 'secret handshake')).length, 0);
 });
 
+test('internal skill notifications are not searchable as user messages', async () => {
+  const candidate = writeSession('s1', [
+    messageLine(
+      'm1',
+      'user',
+      '<system-notification>private review instructions</system-notification>',
+      1,
+    ),
+  ]);
+  assert.equal((await searchSessionFiles([candidate], 'private review instructions')).length, 0);
+});
+
 test('a chat message whose text is the token llm_only stays searchable', async () => {
   const candidate = writeSession('s1', [
     messageLine('m1', 'user', 'llm_only', 1),

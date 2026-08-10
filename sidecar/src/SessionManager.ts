@@ -92,6 +92,7 @@ type SessionHistory = Pick<
   | 'reconcileSessionFiles'
   | 'reconcileSessionFilePaths'
   | 'sessionFileCacheSize'
+  | 'sessionLaunchSettings'
   | 'childSessions'
   | 'childSession'
   | 'upsertChildSession'
@@ -334,6 +335,14 @@ export class SessionManager {
       resolveAutomaticTarget: (key) => this.resolveAutomaticCompactionTarget(key),
       settleAutomatic: (settlement) => {
         this.settleAutomaticCompaction(settlement);
+      },
+      onPrimaryNotification: (target, notification) => {
+        this.eventFlow.applyNotification(
+          target.appSessionId,
+          target.providerSessionId,
+          'primary',
+          notification,
+        );
       },
     });
     this.eventFlow = new SessionEventFlow({
@@ -1093,8 +1102,7 @@ export class SessionManager {
         // tree and its own emit is authoritative, so a change seen here is
         // already covered by it. After boot, the cache is fresh and events
         // reconcile and republish normally.
-        if (this.shutdownPromise || !this.lastSessionListOptions || this.sessionsBootReconcile)
-          return;
+        if (this.shutdownPromise || this.sessionsBootReconcile) return;
         try {
           // A targeted change list reconciles exactly the reported files;
           // null means the watcher saw unexplained events and only a full
@@ -1105,12 +1113,16 @@ export class SessionManager {
           console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
           return;
         }
-        this.emitSessionList(this.lastSessionListOptions);
+        this.childSessions.retryPendingLaunchSettings(
+          changes?.map(({ providerSessionId }) => providerSessionId),
+        );
+        if (this.lastSessionListOptions) this.emitSessionList(this.lastSessionListOptions);
       },
     });
     if (this.history.sessionFileCacheSize === 0) {
       try {
         this.history.reconcileSessionFiles();
+        this.childSessions.retryPendingLaunchSettings();
       } catch (error) {
         console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
       }
@@ -1121,6 +1133,7 @@ export class SessionManager {
         if (!this.shutdownPromise) {
           try {
             this.history.reconcileSessionFiles();
+            this.childSessions.retryPendingLaunchSettings();
           } catch (error) {
             console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
           }
@@ -1281,6 +1294,7 @@ export class SessionManager {
         parentAppSessionId: appSessionId,
         role: 'worker',
         ...childSession,
+        requiresExactLaunchSettings: true,
         ...(toolUseId ? { spawnLink: { kind: 'tool-use', id: toolUseId } } : {}),
       });
     }

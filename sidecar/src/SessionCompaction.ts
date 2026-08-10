@@ -111,6 +111,10 @@ export interface SessionCompactionDependencies extends SessionCompactionExecutio
   maxContextTokensForModel(modelId?: string): number | undefined;
   resolveAutomaticTarget(key: CompactionResourceKey): AutomaticCompactionTarget | undefined;
   settleAutomatic(settlement: AutoCompactionSettlement): void;
+  onPrimaryNotification(
+    target: PrimaryAutomaticCompactionTarget,
+    notification: Record<string, unknown>,
+  ): void;
 }
 
 export function childCompactionModelId(
@@ -223,8 +227,10 @@ export class SessionCompaction {
     const epoch = this.epoch;
     liveSession.unsubscribe?.();
     liveSession.unsubscribe = session.onNotification((note: Record<string, unknown>) => {
-      if (!this.isCurrent(target, epoch) || liveSession.compacting) return;
-      this.handleAutomaticNotification(target, note);
+      if (!this.isCurrent(target, epoch)) return;
+      if (!liveSession.compacting) this.handleAutomaticNotification(target, note);
+      if (notificationType(note) === 'create_message')
+        this.dependencies.onPrimaryNotification(target, note);
     });
   }
 
@@ -450,6 +456,17 @@ export class SessionCompaction {
   private isCurrent(target: ProviderOperationTarget, epoch: number): boolean {
     return epoch === this.epoch && target.isCurrent();
   }
+}
+
+function notificationType(notification: Record<string, unknown>): string | undefined {
+  const params = notification.params;
+  const inner =
+    params && typeof params === 'object' && !Array.isArray(params)
+      ? (params as Record<string, unknown>).notification
+      : notification.notification;
+  if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return undefined;
+  const type = (inner as Record<string, unknown>).type;
+  return typeof type === 'string' ? type : undefined;
 }
 
 function limitPatch(update: CompactionTokenLimitPatch): CompactionTokenLimitPatch {

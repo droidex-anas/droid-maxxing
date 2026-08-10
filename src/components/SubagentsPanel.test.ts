@@ -62,11 +62,37 @@ test('rows render the label and a quiet status readout', () => {
   const text = textOf(html);
   assert.ok(text.includes('explorer'));
   assert.ok(text.includes('Working'));
-  assert.ok(text.includes('Queued'));
+  assert.ok(text.includes('Awaiting status'));
   assert.ok(text.includes('Idle'));
   assert.ok(text.includes('Done'));
   // The working readout shimmers instead of spinning or pulsing.
   assert.match(html, /shimmer-text[^"]*">Working/);
+});
+
+test('rows show the custom-agent name and exact launch model together', () => {
+  const html = renderSection(
+    [
+      child('running', {
+        childSessionId: 'child-stable-id',
+        label: 'worker-2',
+        modelId: 'custom:glm-5.2',
+        reasoningEffort: 'max',
+      }),
+    ],
+    {
+      models: [
+        {
+          id: 'custom:glm-5.2',
+          displayName: 'GLM 5.2',
+          isCustom: true,
+        },
+      ],
+    },
+  );
+  const text = textOf(html);
+  assert.ok(text.includes('worker-2'));
+  assert.ok(text.includes('GLM 5.2 (custom:glm-5.2) · max'));
+  assert.ok(html.includes('Child ID: child-stable-id'));
 });
 
 test('the list folds past five rows behind a show-more button', () => {

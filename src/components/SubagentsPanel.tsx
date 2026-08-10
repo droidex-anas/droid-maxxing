@@ -22,7 +22,7 @@ const VISIBLE_LIMIT = 5;
 // Same status vocabulary as the in-chat subagents dock.
 const STATUS_LABEL: Record<ChildStatus, string> = {
   running: 'Working',
-  pending: 'Queued',
+  pending: 'Awaiting status',
   paused: 'Idle',
   completed: 'Done',
 };
@@ -56,7 +56,10 @@ function SubagentRow({
   onSelect: (child: ChildSessionInfo) => void;
 }) {
   const model = models.find((m) => m.id === child.modelId);
-  const meta = childSessionMeta(child, model?.displayName ?? child.modelId);
+  const displayedModel = model?.displayName
+    ? `${model.displayName} (${child.modelId})`
+    : child.modelId;
+  const meta = childSessionMeta(child, displayedModel);
   return (
     <div
       data-testid="subagent-row"
@@ -72,18 +75,26 @@ function SubagentRow({
         onClick={() => {
           onSelect(child);
         }}
-        title={child.prompt ? `${meta}\n${child.prompt}` : meta}
+        title={`${meta}\nChild ID: ${child.childSessionId}${child.prompt ? `\n${child.prompt}` : ''}`}
         className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left disabled:cursor-default"
       >
         <span className="shrink-0 transition-[filter] group-hover:brightness-125">
           <AgentAvatar seed={seed} size={16} working={child.status === 'running'} />
         </span>
-        <span
-          className={`min-w-0 flex-1 truncate text-[12.5px] font-medium ${
-            selected ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'
-          }`}
-        >
-          {label}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span
+            className={`truncate text-[12.5px] font-medium ${
+              selected ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'
+            }`}
+          >
+            {label}
+          </span>
+          {child.modelId && (
+            <span className="truncate text-[10.5px] text-droid-text-muted">
+              {displayedModel}
+              {child.reasoningEffort ? ` · ${child.reasoningEffort}` : ''}
+            </span>
+          )}
         </span>
         <RowStatus status={child.status} />
       </button>

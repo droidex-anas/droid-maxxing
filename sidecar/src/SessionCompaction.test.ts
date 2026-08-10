@@ -64,6 +64,7 @@ function createHarness(): Harness {
     maxContextTokensForModel: (modelId) => (modelId === 'unbounded' ? undefined : 1_000),
     resolveAutomaticTarget: () => undefined,
     settleAutomatic: () => undefined,
+    onPrimaryNotification: () => undefined,
   });
   return {
     calls,
