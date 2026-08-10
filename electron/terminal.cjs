@@ -105,6 +105,7 @@ function createTerminalManager(opts) {
   const scheduleTimeout = config.setTimeout || setTimeout;
   const cancelTimeout = config.clearTimeout || clearTimeout;
   const exitRetentionMs = config.exitRetentionMs ?? EXIT_RETENTION_MS;
+  const defaultCwd = config.defaultCwd;
   // Lazy-load node-pty only when the first PTY is spawned. require()ing this
   // module must never throw if node-pty has not been added to package.json.
   const loadPty =
@@ -163,7 +164,8 @@ function createTerminalManager(opts) {
     if (typeof appSessionId !== 'string' || appSessionId.length === 0) {
       throw new Error('appSessionId is required');
     }
-    const cwdResult = await validateCwd(args.cwd, fspLib);
+    const requestedCwd = args.cwd || (defaultCwd ? await defaultCwd() : args.cwd);
+    const cwdResult = await validateCwd(requestedCwd, fspLib);
     if (!cwdResult.ok) throw new Error(cwdResult.error);
 
     if (terminals.size >= MAX_GLOBAL_TERMINALS) {

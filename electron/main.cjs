@@ -38,7 +38,13 @@ const { createDiagnostics } = require('./diagnostics.cjs');
 const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 const APP_NAME = 'DROIDEX';
 const buildMetadata = readBuildMetadata();
-const terminalManager = createTerminalManager();
+const terminalManager = createTerminalManager({
+  defaultCwd: async () => {
+    const chatCwd = path.join(app.getPath('userData'), 'chats');
+    await fsp.mkdir(chatCwd, { recursive: true });
+    return chatCwd;
+  },
+});
 const terminalSubscriptions = createTerminalSubscriptionRegistry(terminalManager);
 const filesRootAccess = files.createRootAccessRegistry();
 const diagnostics = createDiagnostics({
