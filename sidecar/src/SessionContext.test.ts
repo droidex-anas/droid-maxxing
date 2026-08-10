@@ -243,6 +243,35 @@ test('unchanged in-turn poll readings emit context once until the reading change
   assert.equal(contextEvents(h).length, 3);
   assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 260);
 });
+test('deduplicated in-turn polls still synchronize exact context summary fields', async () => {
+  const h = createHarness();
+  const { live, session } = registerLive(h, 'app-1');
+  live.summary.maxContextTokens = 1_000;
+  session.nextContextStats = {
+    used: 100,
+    remaining: 900,
+    limit: 1_000,
+    accuracy: ContextStatsAccuracy.Estimated,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const target = primaryTarget(h, live);
+
+  await h.context.refresh(target, { persist: false });
+  h.context.recordUsage('app-1', 'app-1', {
+    tokensIn: 10,
+    tokensOut: 3,
+    contextTokens: 800,
+  });
+  const publishedCount = contextEvents(h).length;
+  assert.equal(live.summary.contextTokens, 800);
+  assert.equal(live.summary.contextRemainingTokens, 900);
+
+  await h.context.refresh(target, { persist: false });
+
+  assert.equal(contextEvents(h).length, publishedCount);
+  assert.equal(live.summary.contextRemainingTokens, 200);
+  assert.equal(live.summary.contextAccuracy, 'exact');
+});
 
 test('provider context wins over an impossible persisted exact reading', async () => {
   const h = createHarness();

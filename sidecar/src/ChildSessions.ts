@@ -672,8 +672,10 @@ export class ChildSessions {
           child.identity.childSessionId,
           child.role,
         );
-      else if (!(child.turn.interrupting && isUserCancellation(error)))
+      else if (!(child.turn.interrupting && isUserCancellation(error))) {
+        this.flushStreaming(child.identity);
         this.emitError(child.identity, 'send', null, 'child.send_failed', errMsg(error));
+      }
     } finally {
       await this.settleTurn(parent, child, runtime, turnGeneration);
     }
@@ -686,7 +688,7 @@ export class ChildSessions {
     turnGeneration: number,
   ): Promise<void> {
     // Deliver any buffered streaming tail before the turn reads as settled.
-    this.d.timeline.flushStreaming();
+    this.flushStreaming(child.identity);
     this.d.context.stopPolling(this.contextTarget(parent, child, runtime));
     if (!this.isCurrentTurn(parent, child, runtime, turnGeneration)) return;
     child.turn.interruptingForSteer = false;
@@ -710,6 +712,20 @@ export class ChildSessions {
     }
     child.status = 'paused';
     this.commit(child);
+  }
+
+  private flushStreaming(identity: ChildIdentity): void {
+    try {
+      this.d.timeline.flushStreaming();
+    } catch (error) {
+      this.emitError(
+        identity,
+        'send',
+        null,
+        'child.transcript_persist_failed',
+        `Unable to persist buffered child output: ${errMsg(error)}`,
+      );
+    }
   }
 
   private async performSettingsUpdate(

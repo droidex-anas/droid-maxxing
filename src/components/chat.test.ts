@@ -10,7 +10,6 @@ import {
   collectTurnFiles,
   conversationAnchors,
   correlateResults,
-  feedRowId,
   fetchSizeBadge,
   groupTurns,
   isResultFor,
@@ -22,6 +21,7 @@ import {
   appendedFeedItemKeys,
   type FeedItem,
 } from './chat';
+import { feedRowId } from '../hooks/conversationViewportAnchor';
 import { hasTodoPayload, parseTruncatedTail } from '../lib/tools';
 import type { TranscriptEvent } from '../types/bridge';
 

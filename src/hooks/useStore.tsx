@@ -202,7 +202,7 @@ export interface AppState {
   transcriptRetainedCost: Record<string, number>;
   // Primary transcript viewport state. Normal eviction is allowed only after
   // the viewport is bottom-pinned; scrolled-up reading stays resident.
-  transcriptViewportPinned: Record<string, boolean>;
+  transcriptViewportPinned: Partial<Record<string, boolean>>;
   progress: Record<string, ProgressEntry[]>;
   childSessions: Record<string, Record<string, ChildSessionInfo>>;
   historyLoaded: Record<string, boolean>;
@@ -216,7 +216,7 @@ export interface AppState {
   // is loading, partially loaded (older pages remain), fully loaded, or failed.
   // Lets the chat show an honest restoring/partial/retry surface instead of a
   // blank or silently truncated transcript (#29).
-  sessionRestore: Record<string, SessionRestore>;
+  sessionRestore: Partial<Record<string, SessionRestore>>;
   childAccess: Record<string, Record<string, ChildAccess>>;
   childRuntime: Record<string, Record<string, ChildRuntimeState>>;
   pendingPermission: PermissionRequest | null;

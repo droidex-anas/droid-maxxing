@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  primaryViewportOwner,
   rowIntersectsViewport,
   scrollTopForPreservedAnchor,
+  shouldCaptureViewportAnchorAfterScroll,
   updateViewportAnchorGeometry,
 } from './conversationViewportAnchor';
 import {
@@ -48,6 +50,30 @@ test('child and scrolled-up conversations stay pinned in memory', () => {
     shouldReleaseConversationTranscript({
       ...settledPinned,
       isPinned: false,
+    }),
+    false,
+  );
+});
+
+test('child scrolling never takes ownership of the parent transcript viewport', () => {
+  assert.equal(primaryViewportOwner('parent', false), 'parent');
+  assert.equal(primaryViewportOwner('parent', true), undefined);
+});
+
+test('user movement selects a fresh prepend anchor while older history is loading', () => {
+  assert.equal(
+    shouldCaptureViewportAnchorAfterScroll({
+      isPinned: false,
+      isLoadingOlder: true,
+      isRestoringViewport: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldCaptureViewportAnchorAfterScroll({
+      isPinned: false,
+      isLoadingOlder: true,
+      isRestoringViewport: true,
     }),
     false,
   );

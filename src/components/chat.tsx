@@ -55,6 +55,7 @@ import {
 import { openExternal } from '../lib/onboarding';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
+import { feedItemTailId, feedRowId } from '../hooks/conversationViewportAnchor';
 
 // Open a link in the OS default browser rather than inside the Electron window.
 function openLink(e: React.MouseEvent, url: string) {
@@ -320,7 +321,12 @@ function argStr(args: unknown, key: string): string | undefined {
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current ?? undefined);
+    },
+    [],
+  );
   return (
     <button
       onClick={(e) => {
@@ -1513,32 +1519,6 @@ export interface ConversationAnchor {
   label: string;
 }
 
-export function recentConversationAnchors(
-  anchors: ConversationAnchor[],
-  limit: number,
-): ConversationAnchor[] {
-  return anchors.length > limit ? anchors.slice(-limit) : anchors;
-}
-
-export function shouldPrimeConversationTimeline({
-  isViewingChildSession,
-  anchorCount,
-  targetAnchorCount,
-  restoreStatus,
-}: {
-  isViewingChildSession: boolean;
-  anchorCount: number;
-  targetAnchorCount: number;
-  restoreStatus: 'loading' | 'paged' | 'loaded' | 'failed' | undefined;
-}): boolean {
-  return (
-    !isViewingChildSession &&
-    anchorCount < targetAnchorCount &&
-    restoreStatus !== 'loaded' &&
-    restoreStatus !== 'failed'
-  );
-}
-
 // One anchor per turn: the turn's final model response (its summary). The id is
 // the feed item key, which MessageFeed also stamps onto the rendered row so the
 // timeline can scroll to it.
@@ -1628,29 +1608,6 @@ export function conversationAnchors(
   options?: GroupedFeedOptions,
 ): ConversationAnchor[] {
   return promptAnchorsFromItems(buildGroupedFeed(events, pending, options));
-}
-
-function feedItemTailId(item: FeedItem): string {
-  if (item.type === 'worked') {
-    const tail = item.items[item.items.length - 1];
-    return tail ? feedItemTailId(tail) : item.key;
-  }
-  if (item.type === 'tools' || item.type === 'child_sessions') {
-    return item.events[item.events.length - 1]?.id ?? item.key;
-  }
-  if (item.type === 'diffs') {
-    return item.changes[item.changes.length - 1]?.event.id ?? item.key;
-  }
-  if (item.type === 'turnChanges') return item.tailEventId;
-  return item.event.id;
-}
-
-// React keys preserve a group's component instance while live work appends, so
-// composite keys intentionally start at the group's first event. Viewport
-// anchoring has the opposite requirement during history prepend: an older page
-// can extend that group backward, while its tail event remains unchanged.
-export function feedRowId(item: FeedItem): string {
-  return `${item.type}:${feedItemTailId(item)}`;
 }
 
 // Best-effort end timestamp of a feed item, used to time the live working cue.
@@ -2386,13 +2343,21 @@ function DiffGroup({
               <DiffCard
                 key={c.event.id}
                 change={c.change}
-                onOpen={onOpenDiff ? () => onOpenDiff(c.change) : undefined}
+                onOpen={
+                  onOpenDiff
+                    ? () => {
+                        onOpenDiff(c.change);
+                      }
+                    : undefined
+                }
               />
             ))}
             {hiddenCount > 0 && (
               <button
                 type="button"
-                onClick={() => setShowAll(true)}
+                onClick={() => {
+                  setShowAll(true);
+                }}
                 className="text-[11px] text-droid-text-muted/70 transition-colors hover:text-droid-text-secondary"
               >
                 Show {hiddenCount} more {hiddenCount === 1 ? 'edit' : 'edits'}

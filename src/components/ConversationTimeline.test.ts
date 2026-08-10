@@ -3,8 +3,8 @@ import test from 'node:test';
 import {
   recentConversationAnchors,
   shouldPrimeConversationTimeline,
-  type ConversationAnchor,
-} from './chat';
+} from '../hooks/useConversationTimeline';
+import type { ConversationAnchor } from './chat';
 
 function anchors(ids: string[]): ConversationAnchor[] {
   return ids.map((id) => ({ id, label: id }));

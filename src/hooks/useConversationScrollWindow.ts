@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { loadSessionHistory } from '../lib/commands';
 import {
   captureViewportAnchor,
+  primaryViewportOwner,
   restoreViewportAnchor,
   viewportAnchorAfterScroll,
   type ViewportAnchor,
@@ -97,6 +98,7 @@ export function useConversationScrollWindow({
   const reportedPinned = useRef<{ appSessionId: string; pinned: boolean } | null>(null);
   const isOlderRequestPending = useRef(false);
   const [scrollSnapshots] = useState(() => new Map<string, { top: number; pinned: boolean }>());
+  const viewportAppSessionId = primaryViewportOwner(activeAppSessionId, isViewingChildSession);
 
   useEffect(() => {
     if (isLoadingOlder) return;
@@ -118,25 +120,18 @@ export function useConversationScrollWindow({
     isPinned.current = snapshot?.pinned ?? true;
     element.scrollTop = snapshot?.top ?? element.scrollHeight;
     if (!isPinned.current) viewportAnchor.current = captureViewportAnchor(element, true);
-    if (activeAppSessionId) {
+    if (viewportAppSessionId) {
       reportedPinned.current = {
-        appSessionId: activeAppSessionId,
+        appSessionId: viewportAppSessionId,
         pinned: isPinned.current,
       };
       dispatch({
         type: 'TRANSCRIPT_VIEWPORT',
-        appSessionId: activeAppSessionId,
+        appSessionId: viewportAppSessionId,
         pinned: isPinned.current,
       });
     }
-  }, [
-    activeAppSessionId,
-    dispatch,
-    isViewingChildSession,
-    scrollRef,
-    scrollSnapshots,
-    visibleConversationKey,
-  ]);
+  }, [dispatch, scrollRef, scrollSnapshots, viewportAppSessionId, visibleConversationKey]);
 
   const requestOlderHistory = useCallback(() => {
     if (!historyAppSessionId || !olderCursor || isLoadingOlder || isOlderRequestPending.current)
@@ -189,16 +184,16 @@ export function useConversationScrollWindow({
       isRestoringViewport: isRestoringViewport.current,
     });
 
-    if (activeAppSessionId) {
+    if (viewportAppSessionId) {
       const reported = reportedPinned.current;
-      if (reported?.appSessionId !== activeAppSessionId || reported.pinned !== isPinned.current) {
+      if (reported?.appSessionId !== viewportAppSessionId || reported.pinned !== isPinned.current) {
         reportedPinned.current = {
-          appSessionId: activeAppSessionId,
+          appSessionId: viewportAppSessionId,
           pinned: isPinned.current,
         };
         dispatch({
           type: 'TRANSCRIPT_VIEWPORT',
-          appSessionId: activeAppSessionId,
+          appSessionId: viewportAppSessionId,
           pinned: isPinned.current,
         });
       }
@@ -214,7 +209,6 @@ export function useConversationScrollWindow({
       requestOlderHistory();
     }
   }, [
-    activeAppSessionId,
     dispatch,
     historyAppSessionId,
     isLoadingOlder,
@@ -223,6 +217,7 @@ export function useConversationScrollWindow({
     requestOlderHistory,
     scrollRef,
     scrollSnapshots,
+    viewportAppSessionId,
     visibleConversationKey,
   ]);
 

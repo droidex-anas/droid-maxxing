@@ -371,25 +371,31 @@ export class SessionContext {
 
     if (!target.isCurrent()) return;
     // The in-turn poller repeats the same provider reading every tick; an
-    // unchanged snapshot would only fan out no-op renders. Settlement refreshes
-    // (persist !== false) always publish so summaries settle authoritatively.
-    if (options.persist === false && sameContextReading(this.snapshots.get(key), snapshot)) return;
+    // unchanged snapshot would only fan out no-op renders. Still synchronize
+    // the primary summary below: an exact usage event may have updated the
+    // cached snapshot without filling derived summary fields such as remaining.
+    // Settlement refreshes (persist !== false) always publish so summaries
+    // settle authoritatively.
+    const skipTelemetry =
+      options.persist === false && sameContextReading(this.snapshots.get(key), snapshot);
     // Do NOT clear pendingCompactionResets here: a late pre-compaction usage
     // event delivered after this provider reading could resurrect the old meter.
     // The guard is cleared at the stream-settlement boundary (beginTurn) instead.
-    this.snapshots.set(key, snapshot);
-    this.dependencies.emit({
-      type: 'context.updated',
-      appSessionId: target.appSessionId,
-      sourceSessionId: target.sourceSessionId,
-      ...(isChildTarget(target)
-        ? {
-            parentAppSessionId: target.parentAppSessionId,
-            childSessionId: target.childSessionId,
-          }
-        : {}),
-      stats: snapshot,
-    });
+    if (!skipTelemetry) {
+      this.snapshots.set(key, snapshot);
+      this.dependencies.emit({
+        type: 'context.updated',
+        appSessionId: target.appSessionId,
+        sourceSessionId: target.sourceSessionId,
+        ...(isChildTarget(target)
+          ? {
+              parentAppSessionId: target.parentAppSessionId,
+              childSessionId: target.childSessionId,
+            }
+          : {}),
+        stats: snapshot,
+      });
+    }
 
     if (isChildTarget(target)) return;
     const contextPatch = {
@@ -400,9 +406,16 @@ export class SessionContext {
       contextAccuracy: snapshot.accuracy,
       contextUpdatedAt: snapshot.updatedAt,
     };
-    if (options.persist === false)
-      liveSession.summary = { ...liveSession.summary, ...contextPatch };
-    else
+    if (options.persist === false) {
+      if (
+        liveSession.summary.contextTokens !== contextPatch.contextTokens ||
+        liveSession.summary.contextRemainingTokens !== contextPatch.contextRemainingTokens ||
+        liveSession.summary.maxContextTokens !== contextPatch.maxContextTokens ||
+        liveSession.summary.contextAccuracy !== contextPatch.contextAccuracy ||
+        liveSession.summary.contextUpdatedAt !== contextPatch.contextUpdatedAt
+      )
+        liveSession.summary = { ...liveSession.summary, ...contextPatch };
+    } else
       this.dependencies.registry.updateSummary(target.appSessionId, contextPatch, {
         touchActivity: false,
       });
@@ -524,7 +537,12 @@ function sameContextReading(
   next: ContextStatsSnapshot,
 ): boolean {
   if (!previous) return false;
-  const { updatedAt: _previousAt, ...previousRest } = previous;
-  const { updatedAt: _nextAt, ...nextRest } = next;
-  return JSON.stringify(previousRest) === JSON.stringify(nextRest);
+  return (
+    previous.used === next.used &&
+    previous.remaining === next.remaining &&
+    previous.limit === next.limit &&
+    previous.accuracy === next.accuracy &&
+    previous.compactions === next.compactions &&
+    JSON.stringify(previous.breakdown) === JSON.stringify(next.breakdown)
+  );
 }

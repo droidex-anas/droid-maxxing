@@ -1,3 +1,5 @@
+import type { FeedItem } from '../components/chat';
+
 export interface ViewportAnchor {
   rowId: string;
   rowOffsetTop: number;
@@ -8,6 +10,29 @@ export interface ViewportAnchor {
 export interface ViewportAnchorRestore {
   anchor: ViewportAnchor;
   didFindRow: boolean;
+}
+
+export function feedItemTailId(item: FeedItem): string {
+  if (item.type === 'worked') {
+    const tail = item.items.at(-1);
+    return tail ? feedItemTailId(tail) : item.key;
+  }
+  if (item.type === 'tools' || item.type === 'child_sessions') {
+    return item.events.at(-1)?.id ?? item.key;
+  }
+  if (item.type === 'diffs') {
+    return item.changes.at(-1)?.event.id ?? item.key;
+  }
+  if (item.type === 'turnChanges') return item.tailEventId;
+  return item.event.id;
+}
+
+// React keys preserve a group's component instance while live work appends, so
+// composite keys intentionally start at the group's first event. Viewport
+// anchoring has the opposite requirement during history prepend: an older page
+// can extend that group backward, while its tail event remains unchanged.
+export function feedRowId(item: FeedItem): string {
+  return `${item.type}:${feedItemTailId(item)}`;
 }
 
 export function scrollTopForPreservedAnchor(
@@ -173,6 +198,30 @@ export function viewportAnchorAfterScroll({
   isRestoringViewport: boolean;
 }): ViewportAnchor | null {
   if (isPinned) return null;
-  if (isLoadingOlder || isRestoringViewport) return anchor;
+  if (
+    !shouldCaptureViewportAnchorAfterScroll({
+      isPinned,
+      isLoadingOlder,
+      isRestoringViewport,
+    })
+  )
+    return anchor;
   return captureViewportAnchor(element);
+}
+
+export function shouldCaptureViewportAnchorAfterScroll(options: {
+  isPinned: boolean;
+  isLoadingOlder: boolean;
+  isRestoringViewport: boolean;
+}): boolean {
+  // A pending history request does not own the scroll position. Only active
+  // restoration does, so genuine user movement selects a fresh row anchor.
+  return !options.isPinned && !options.isRestoringViewport;
+}
+
+export function primaryViewportOwner(
+  activeAppSessionId: string | undefined,
+  isViewingChildSession: boolean,
+): string | undefined {
+  return isViewingChildSession ? undefined : activeAppSessionId;
 }

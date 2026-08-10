@@ -26,6 +26,7 @@ import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 interface Harness {
   calls: RecordedCall[];
   events: ServerEvent[];
+  sequence: string[];
   history: FakeHistoryIndex;
   runtime: FakeFactoryRuntime;
   owner: ChildSessions;
@@ -41,16 +42,19 @@ function createHarness(
     maxOpenSessions?: number;
     failForgetChild?: string;
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
+    failFlushStreamingOnce?: boolean;
     missReplayChildOnce?: boolean;
   } = {},
 ): Harness {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
+  const sequence: string[] = [];
   const history = new FakeHistoryIndex(calls);
   const runtime = new FakeFactoryRuntime(calls);
   const parentId = 'parent';
   let missReplayChildOnce = options.missReplayChildOnce;
   let failDriveSetup = options.failDriveSetup;
+  let failFlushStreaming = options.failFlushStreamingOnce;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
     if (failDriveSetup !== stage) return;
     failDriveSetup = undefined;
@@ -74,7 +78,12 @@ function createHarness(
       appendStatus: (...args) => {
         calls.push({ target: 'protocol', method: 'timeline.status', args });
       },
-      flushStreaming: () => undefined,
+      flushStreaming: () => {
+        sequence.push('timeline.flushStreaming');
+        if (!failFlushStreaming) return;
+        failFlushStreaming = false;
+        throw new Error('flush failed');
+      },
       replayChild: (...args) => {
         if (missReplayChildOnce) {
           missReplayChildOnce = false;
@@ -110,6 +119,7 @@ function createHarness(
       refresh: () => Promise.resolve(),
       startPolling: () => throwDriveSetup('startPolling'),
       stopPolling: (target) => {
+        sequence.push('context.stopPolling');
         calls.push({
           target: 'cleanup',
           method: 'context.stopPolling',
@@ -142,7 +152,10 @@ function createHarness(
       reasoningEffort: ReasoningEffort.Low,
     }),
     isShutdownStarted: () => false,
-    emit: (event) => events.push(event),
+    emit: (event) => {
+      events.push(event);
+      if (event.type === 'child.error') sequence.push(`child.error:${event.code}`);
+    },
     nextChildSessionId: () => 'generated-child',
     maxOpenSessions: options.maxOpenSessions ?? 4,
     now: () => 100,
@@ -152,6 +165,7 @@ function createHarness(
   const harness: Harness = {
     calls,
     events,
+    sequence,
     history,
     runtime,
     owner,
@@ -723,6 +737,43 @@ test('turn setup failures settle cleanly and permit the next send', async () => 
     assert.deepEqual(runtime.prompts, [`recover after ${failDriveSetup}`], failDriveSetup);
     assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused', failDriveSetup);
   }
+});
+
+test('child stream failures flush buffered output before publishing the terminal error', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  const runtime = await h.open(record);
+  runtime.nextStreamError = new Error('stream failed');
+  h.sequence.length = 0;
+
+  await h.owner.send(record, 'fail after output');
+
+  assert.deepEqual(h.sequence, [
+    'timeline.flushStreaming',
+    'child.error:child.send_failed',
+    'timeline.flushStreaming',
+    'context.stopPolling',
+  ]);
+  assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused');
+});
+
+test('child settlement stops polling and returns idle when streaming persistence fails', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { failFlushStreamingOnce: true });
+  const runtime = await h.open(record);
+  runtime.nextStreamError = new Error('stream failed');
+  h.sequence.length = 0;
+
+  await h.owner.send(record, 'fail after output');
+
+  assert.deepEqual(h.sequence, [
+    'timeline.flushStreaming',
+    'child.error:child.transcript_persist_failed',
+    'child.error:child.send_failed',
+    'timeline.flushStreaming',
+    'context.stopPolling',
+  ]);
+  assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused');
 });
 
 test('completion invalidates a role observation queued behind settings', async () => {

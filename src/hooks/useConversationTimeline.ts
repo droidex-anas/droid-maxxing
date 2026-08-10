@@ -1,13 +1,34 @@
 import { useMemo } from 'react';
-import {
-  promptAnchorsFromItems,
-  recentConversationAnchors,
-  shouldPrimeConversationTimeline,
-  type FeedItem,
-} from '../components/chat';
+import { promptAnchorsFromItems, type ConversationAnchor, type FeedItem } from '../components/chat';
 import type { SessionRestoreStatus } from './useStore';
 
 const TIMELINE_TARGET_ANCHORS = 12;
+
+export function recentConversationAnchors(
+  anchors: ConversationAnchor[],
+  limit: number,
+): ConversationAnchor[] {
+  return anchors.length > limit ? anchors.slice(-limit) : anchors;
+}
+
+export function shouldPrimeConversationTimeline({
+  isViewingChildSession,
+  anchorCount,
+  targetAnchorCount,
+  restoreStatus,
+}: {
+  isViewingChildSession: boolean;
+  anchorCount: number;
+  targetAnchorCount: number;
+  restoreStatus: SessionRestoreStatus | undefined;
+}): boolean {
+  return (
+    !isViewingChildSession &&
+    anchorCount < targetAnchorCount &&
+    restoreStatus !== 'loaded' &&
+    restoreStatus !== 'failed'
+  );
+}
 
 export function useConversationTimeline({
   feedItems,
