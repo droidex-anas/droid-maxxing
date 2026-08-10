@@ -45,6 +45,11 @@ export const PRESET_THEMES: Record<string, ThemeColors> = {
   warm: { bg: '#1a1612', fg: '#d8d0c8', surface: '#221e18', border: '#322a22', accent: '#d8d0c8' },
 };
 
+export const SKILL_COLORS = {
+  dark: '#60a5fa',
+  light: '#1d4ed8',
+} as const;
+
 // The light preset as it shipped before the readability pass. A saved theme
 // still carrying all five legacy values was never customized, so it is swapped
 // to the new preset once on load (see useStore loadTheme).
@@ -126,6 +131,7 @@ export function applyTheme(theme: ThemeSettings) {
     root.style.setProperty('--droid-text-muted', mixHex(theme.fg, theme.bg, 0.62));
   }
   root.style.setProperty('--droid-accent', theme.accent);
+  root.style.setProperty('--droid-skill', bgIsDark ? SKILL_COLORS.dark : SKILL_COLORS.light);
   // Floating-card shadow: strong and near-black on dark where it separates
   // surfaces, soft and diffuse on light so cards lift without looking dirty.
   root.style.setProperty(

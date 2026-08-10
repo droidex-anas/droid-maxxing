@@ -72,7 +72,7 @@ test('a skill prompt renders the skill inline in blue before the user text', () 
   const html = renderToStaticMarkup(
     createElement(UserBubble, { event: { text: 'PR #100', skills: ['review'] } }),
   );
-  assert.match(html, /text-blue-400[^>]*>.*review/);
+  assert.match(html, /text-droid-skill[^>]*>.*review/);
   assert.ok(html.indexOf('review') < html.indexOf('PR #100'));
   assert.ok(!html.includes('violet'));
 });

@@ -2,11 +2,25 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PRESET_THEMES,
+  SKILL_COLORS,
   migrateLegacyLightPreset,
   paletteForMode,
   uiFontStack,
   type ThemeColors,
 } from './theme';
+
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (hex: string) => {
+    const channels = [1, 3, 5].map((offset) => {
+      const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const lighter = Math.max(luminance(foreground), luminance(background));
+  const darker = Math.min(luminance(foreground), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
 
 const LEGACY_LIGHT: ThemeColors = {
   bg: '#fcfcfc',
@@ -34,6 +48,13 @@ describe('PRESET_THEMES', () => {
       255;
     assert.ok(lum(bg) < 0.92, `light bg ${bg} should sit below searing white`);
     assert.ok(lum(surface) > lum(bg), 'surfaces must lift above the canvas');
+  });
+});
+
+describe('SKILL_COLORS', () => {
+  it('keeps skill labels blue and WCAG AA readable on user bubbles', () => {
+    assert.ok(contrastRatio(SKILL_COLORS.dark, '#1e1e1e') >= 4.5);
+    assert.ok(contrastRatio(SKILL_COLORS.light, '#f2f2f2') >= 4.5);
   });
 });
 
