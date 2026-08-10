@@ -5,9 +5,23 @@ export type ChatWorkingDirectoryResult =
   | { ok: true; path: string }
   | { ok: false; reason: string; message?: string };
 
-export function chatWorktreeName(clientRef: string): string {
-  const timestamp = clientRef.split('-')[1];
-  return timestamp && /^[a-z0-9]+$/i.test(timestamp) ? timestamp.slice(-4) : 'chat';
+export function chatWorktreeName(title: string, clientRef: string): string {
+  const suffix =
+    clientRef
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(-5) || 'chat';
+  const maxIntentLength = 48 - suffix.length - 1;
+  const intent =
+    title
+      .normalize('NFKD')
+      .toLowerCase()
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, maxIntentLength)
+      .replace(/-+$/g, '') || 'chat';
+  return `${intent}-${suffix}`;
 }
 
 export function isChatWorktreePath(cwd: string): boolean {

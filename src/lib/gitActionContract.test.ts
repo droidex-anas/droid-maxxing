@@ -77,10 +77,18 @@ test('chat worktrees are created from the Git-owned main repository', async () =
   assert.deepEqual(result, { ok: true, path: '/repo/.worktrees/chat-c-1' });
 });
 
-test('chat worktrees use a compact id and retain the repository name in their path', () => {
-  assert.equal(chatWorktreeName('c-msmufmwg-0'), 'fmwg');
-  assert.equal(isChatWorktreePath('/repo/.worktrees/fmwg/droid-control'), true);
-  assert.equal(isChatWorktreePath('C:\\repo\\.worktrees\\f401\\droid-control'), true);
+test('chat worktrees combine opening intent with a unique suffix', () => {
+  assert.equal(
+    chatWorktreeName('Fix empty sidebar sessions', 'c-msmufmwg-0'),
+    'fix-empty-sidebar-sessions-fmwg0',
+  );
+  assert.notEqual(
+    chatWorktreeName('Fix empty sidebar sessions', 'c-msmufmwg-0'),
+    chatWorktreeName('Fix empty sidebar sessions', 'c-msmufmwg-1'),
+  );
+  assert.equal(chatWorktreeName('✨ Theme polish ✨', 'c-msmufmwg-0'), 'theme-polish-fmwg0');
+  assert.equal(isChatWorktreePath('/repo/.worktrees/fix-empty-sidebar-fmwg0/droid-control'), true);
+  assert.equal(isChatWorktreePath('C:\\repo\\.worktrees\\theme-polish-f401\\droid-control'), true);
   assert.equal(isChatWorktreePath('/repo/.worktrees/manual'), false);
 });
 

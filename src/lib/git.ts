@@ -185,6 +185,8 @@ export function baseDescriptor(
 export function worktreeName(worktree: Pick<GitWorktree, 'path' | 'branch'>): string {
   if (worktree.branch) return worktree.branch;
   const segments = (worktree.path ?? '').split(/[\\/]/).filter(Boolean);
+  const marker = segments.lastIndexOf('.worktrees');
+  if (marker >= 0 && segments.length === marker + 3) return segments[marker + 1];
   return segments[segments.length - 1] ?? 'worktree';
 }
 

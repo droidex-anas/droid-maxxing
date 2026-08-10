@@ -535,12 +535,13 @@ export default function PromptInput({
   const prepareDraftCwd = async (
     dir: string,
     clientRef: string,
+    title: string,
   ): Promise<ChatWorkingDirectoryResult> => {
     const draft = state.draftChat;
     const result = await prepareChatWorkingDirectory(dir, {
       executionMode: draft?.executionMode ?? 'local',
       base: draft?.branch,
-      name: chatWorktreeName(clientRef),
+      name: chatWorktreeName(title, clientRef),
     });
     if (result.ok) return result;
 
@@ -642,7 +643,8 @@ export default function PromptInput({
       if (!selectedDir) return;
       const { primary, worker, validator } = state.agentConfig;
       const clientRef = newClientRef();
-      const preparation = await prepareDraftCwd(selectedDir, clientRef);
+      const title = (displayText || skillNames[0] || 'Mission').slice(0, 48);
+      const preparation = await prepareDraftCwd(selectedDir, clientRef, title);
       if (!preparation.ok) return;
       const dir = preparation.path;
       registerPending(clientRef);
@@ -655,7 +657,7 @@ export default function PromptInput({
       createSession({
         clientRef,
         cwd: dir,
-        title: (displayText || skillNames[0] || 'Mission').slice(0, 48),
+        title,
         goal: composed,
         sessionPurpose: 'mission-control',
         interactionMode: 'agi',
@@ -679,7 +681,8 @@ export default function PromptInput({
       const selectedDir = state.draftChat?.cwd ?? '';
       const { primary } = state.agentConfig;
       const clientRef = newClientRef();
-      const preparation = await prepareDraftCwd(selectedDir, clientRef);
+      const title = (displayText || skillNames[0] || 'Chat').slice(0, 48);
+      const preparation = await prepareDraftCwd(selectedDir, clientRef, title);
       if (!preparation.ok) return;
       const dir = preparation.path;
       registerPending(clientRef);
@@ -689,7 +692,7 @@ export default function PromptInput({
       createSession({
         clientRef,
         cwd: dir,
-        title: (displayText || skillNames[0] || 'Chat').slice(0, 48),
+        title,
         goal: composed,
         sessionPurpose: 'chat',
         interactionMode: isSpecMode ? 'spec' : 'auto',
