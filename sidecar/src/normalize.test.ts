@@ -152,7 +152,7 @@ test('normalizes a user-only skill activation as harness output without echoing 
   assert.equal(normalized[0].transcript?.text, 'Skill "review" activated: PR #100');
 });
 
-test('does not surface internal skill instructions from live notifications', () => {
+test('keeps unrecognized user create_message notifications off the live transcript', () => {
   const normalized = normalizeNotification('parent', 'parent', 'primary', {
     params: {
       notification: {
@@ -163,6 +163,8 @@ test('does not surface internal skill instructions from live notifications', () 
           content: [
             {
               type: 'text',
+              // Internal skill bodies arrive through this generic notification
+              // shape. Only explicitly parsed harness signals may enter chat.
               text: '<system-notification>private skill body</system-notification>',
             },
           ],

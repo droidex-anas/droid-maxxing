@@ -1863,7 +1863,7 @@ export function UserBubble({
             <span
               key={skill}
               title={`Skill: ${skill}`}
-              className="inline-flex items-center gap-1.5 font-medium text-droid-accent"
+              className="inline-flex items-center gap-1.5 font-medium text-blue-400"
             >
               <span className="flex h-5 w-5 items-center justify-center rounded-md bg-droid-text">
                 <Hexagon className="h-2.5 w-2.5 fill-droid-accent text-droid-accent" />

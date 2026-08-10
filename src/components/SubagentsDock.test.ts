@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { buildFeed, groupTurns, MessageFeed, trailingSubagentPoll } from './chat';
-import { SubagentsDock } from './SubagentsDock';
+import { SubagentsDock, subagentRowTitle } from './SubagentsDock';
 import { isPendingChildPlaceholder, resolveWaveSessions } from '../lib/childSessions';
 import { childSessionInfo } from '../lib/tools';
 import type { ChildSessionSummary, ChildStatus, TranscriptEvent } from '../types/bridge';
@@ -236,6 +236,17 @@ test('an unresolved live spawn reports unknown status and never infers lifecycle
 
   // Ending the parent turn still says nothing about the child's lifecycle.
   assert.equal(resolveWaveSessions([launched], [])[0].status, 'pending');
+});
+
+test('placeholder tool ids are never presented as stable child ids', () => {
+  assert.equal(
+    subagentRowTitle('Explorer', { childSessionId: 'pending-tool-1' }),
+    'Open Explorer session',
+  );
+  assert.equal(
+    subagentRowTitle('Explorer', { childSessionId: 'child-stable-1' }),
+    'Open Explorer session\nChild ID: child-stable-1',
+  );
 });
 
 test('the dock renders instantly from spawn events, before sessions register', () => {

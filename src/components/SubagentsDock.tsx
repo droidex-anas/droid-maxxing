@@ -79,6 +79,15 @@ interface SubagentRow {
   target?: ChildSessionTarget;
 }
 
+export function subagentRowTitle(
+  name: string,
+  child: Pick<ChildSessionSummary, 'childSessionId'>,
+): string {
+  return isPendingChildPlaceholder(child)
+    ? `Open ${name} session`
+    : `Open ${name} session\nChild ID: ${child.childSessionId}`;
+}
+
 function buildRows(
   sessions: ChildSessionSummary[],
   activity?: (target: ChildSessionTarget) => ChildSessionActivity | undefined,
@@ -367,7 +376,7 @@ export function SubagentsDock({
                       // Placeholder rows have no registered session to open yet.
                       disabled={!row.target || !onOpen || isPendingChildPlaceholder(row.child)}
                       onClick={() => row.target && onOpen?.(row.target)}
-                      title={`Open ${name} session\nChild ID: ${row.child.childSessionId}`}
+                      title={subagentRowTitle(name, row.child)}
                       className="group/row flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-droid-active/40 disabled:cursor-default disabled:hover:bg-transparent"
                     >
                       <span className="flex w-48 shrink-0 items-center gap-2.5">

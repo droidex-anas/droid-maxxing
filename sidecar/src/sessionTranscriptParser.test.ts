@@ -138,6 +138,19 @@ test('user-only skill activation restores the prompt and harness acknowledgement
   );
 });
 
+test('child skill activations never replay as primary user prompts', () => {
+  const line = JSON.parse(
+    messageLine({
+      role: 'user',
+      visibility: 'user_only',
+      content: [{ type: 'text', text: 'Skill "review" activated: child task' }],
+    }),
+  );
+
+  for (const role of ['worker', 'validator'] as const)
+    assert.deepEqual(parseSessionLineEvents('app', 'child-provider', role, line), []);
+});
+
 test('a mid-file compaction_state record replays as a divider event', () => {
   const line = JSON.parse(
     JSON.stringify({

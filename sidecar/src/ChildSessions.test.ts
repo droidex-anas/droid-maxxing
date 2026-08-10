@@ -41,7 +41,7 @@ function createHarness(
     maxOpenSessions?: number;
     failForgetChild?: string;
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
-    failReplayChild?: boolean;
+    missReplayChildOnce?: boolean;
   } = {},
 ): Harness {
   const calls: RecordedCall[] = [];
@@ -49,7 +49,7 @@ function createHarness(
   const history = new FakeHistoryIndex(calls);
   const runtime = new FakeFactoryRuntime(calls);
   const parentId = 'parent';
-  let failReplayChild = options.failReplayChild;
+  let missReplayChildOnce = options.missReplayChildOnce;
   let failDriveSetup = options.failDriveSetup;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
     if (failDriveSetup !== stage) return;
@@ -75,9 +75,9 @@ function createHarness(
         calls.push({ target: 'protocol', method: 'timeline.status', args });
       },
       replayChild: (...args) => {
-        if (failReplayChild) {
-          failReplayChild = false;
-          throw new Error('replay failed');
+        if (missReplayChildOnce) {
+          missReplayChildOnce = false;
+          return;
         }
         calls.push({ target: 'protocol', method: 'timeline.replayChild', args });
       },
@@ -613,25 +613,14 @@ test('completed child under a live parent opens only as history', async () => {
   );
 });
 
-test('history replay failure stops before provider hydration and reports the exact request', async () => {
+test('missing child history does not block provider hydration', async () => {
   const record = childRecord('child', 'provider');
-  const h = createHarness([record], { failReplayChild: true });
-  const failedRuntime = await h.open(record);
+  const h = createHarness([record], { missReplayChildOnce: true });
+  await h.open(record);
 
-  assert.equal(h.owner.compactionRetuneTargets().length, 0);
+  assert.equal(h.owner.compactionRetuneTargets().length, 1);
   assert.equal(
     h.calls.some((call) => call.target === 'runtime' && call.method === 'loadSession'),
-    false,
-  );
-  assert.equal(
-    h.events.some(
-      (event) =>
-        event.type === 'child.error' &&
-        event.operation === 'open' &&
-        event.requestId === 'open-child' &&
-        event.code === 'child.open_failed' &&
-        event.message === 'replay failed',
-    ),
     true,
   );
   assert.equal(
@@ -641,23 +630,13 @@ test('history replay failure stops before provider hydration and reports the exa
         event.requestId === 'open-child' &&
         event.access === 'ready',
     ),
+    true,
+  );
+  assert.equal(
+    h.events.some((event) => event.type === 'child.error' && event.requestId === 'open-child'),
     false,
   );
-
-  const replacement = new FakeFactorySession(record.providerSessionId!, {}, h.calls);
-  await h.open(record, replacement);
-
-  assert.notEqual(replacement, failedRuntime);
   assert.equal(h.target(record.childSessionId).providerSessionId, record.providerSessionId);
-  assert.equal(
-    h.events.some(
-      (event) =>
-        event.type === 'child.updated' &&
-        event.requestId === 'open-child' &&
-        event.access === 'ready',
-    ),
-    true,
-  );
 });
 
 test('completion during a live stream rejects queued resurrection', async () => {

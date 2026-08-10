@@ -473,9 +473,9 @@ export class ChildSessions {
     const attempt = this.beginOpenAttempt(parent, childSessionId);
     let loaded: FactorySession | undefined;
     try {
-      // Paint persisted history immediately. Provider loading and compaction
-      // setup may take noticeable time, but neither is required to read the
-      // child's existing transcript.
+      // Paint persisted history immediately. This is deliberately best effort:
+      // a live child may not have flushed history yet, but its provider runtime
+      // must still open without waiting for that file.
       this.d.timeline.replayChild(parentAppSessionId, childSessionId, child.providerSessionId);
       const admitted = await this.awaitOpenStep(
         attempt,

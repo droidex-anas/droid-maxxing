@@ -182,7 +182,7 @@ export function parseSessionLineEvents(
   const messageRole = message?.role;
 
   const activation =
-    messageRole === 'user' && message?.visibility === 'user_only'
+    role === 'primary' && messageRole === 'user' && message?.visibility === 'user_only'
       ? skillActivationFromContent(content)
       : undefined;
   if (activation) {
