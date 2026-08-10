@@ -195,7 +195,7 @@ test('starting a new chat drops a pending review-focus request', () => {
     scope: 'last_turn',
     path: 'src/app.ts',
   });
-  state = reducer(state, { type: 'START_CHAT', cwd: '/repo' });
+  state = reducer(state, { type: 'START_CHAT', cwd: '/repo', executionMode: 'worktree' });
   assert.equal(state.activeAppSessionId, null);
   assert.equal(state.reviewFocusPath, null);
 });

@@ -1,6 +1,7 @@
 import type { TranscriptEvent } from '../types/bridge';
 import type { GitWorktree } from '../types/vcs';
 import { extractFileChange } from './diff';
+import { comparablePath, normalizePath } from './pathComparison';
 
 const DIRECT_DIRECTORY_KEYS = new Set(['cwd', 'workdir', 'workingDirectory']);
 const PATH_EVIDENCE_KEYS = new Set([
@@ -13,43 +14,6 @@ const PATH_EVIDENCE_KEYS = new Set([
   'target_file',
 ]);
 
-function normalizedPath(path: string): string {
-  const slashed = path.replaceAll('\\', '/');
-  const drive = /^[a-z]:/i.exec(slashed)?.[0] ?? '';
-  const absolute = slashed.startsWith('/') || drive.length > 0;
-  const body = drive ? slashed.slice(drive.length).replace(/^\//, '') : slashed.replace(/^\//, '');
-  const segments = normalizedSegments(body, absolute);
-  let prefix = '';
-  if (drive) prefix = `${drive}/`;
-  else if (absolute) prefix = '/';
-  return `${prefix}${segments.join('/')}` || (absolute ? prefix : '.');
-}
-
-function normalizedSegments(path: string, absolute: boolean): string[] {
-  const segments: string[] = [];
-  for (const segment of path.split('/')) {
-    if (!segment || segment === '.') continue;
-    if (segment === '..') {
-      if (segments.length > 0 && segments.at(-1) !== '..') segments.pop();
-      else if (!absolute) segments.push(segment);
-      continue;
-    }
-    segments.push(segment);
-  }
-  return segments;
-}
-
-function isCaseInsensitivePath(path: string): boolean {
-  if (/^[a-z]:\//i.test(path)) return true;
-  if (typeof navigator === 'undefined') return false;
-  return /mac|iphone|ipad|ipod|windows/i.test(navigator.userAgent);
-}
-
-function comparablePath(path: string): string {
-  const normalized = normalizedPath(path);
-  return isCaseInsensitivePath(normalized) ? normalized.toLocaleLowerCase('en-US') : normalized;
-}
-
 function pathContains(root: string, candidate: string): boolean {
   const normalizedRoot = comparablePath(root);
   const normalizedCandidate = comparablePath(candidate);
@@ -59,13 +23,13 @@ function pathContains(root: string, candidate: string): boolean {
 }
 
 function isAbsolutePath(path: string): boolean {
-  const normalized = normalizedPath(path);
+  const normalized = normalizePath(path);
   return normalized.startsWith('/') || /^[a-z]:\//i.test(normalized);
 }
 
 function resolveToolPath(path: string, cwd: string): string {
   if (isAbsolutePath(path)) return path;
-  return `${normalizedPath(cwd)}/${path.replace(/^\.\//, '')}`;
+  return `${normalizePath(cwd)}/${path.replace(/^\.\//, '')}`;
 }
 
 function isPathReferenceBoundary(character: string | undefined): boolean {

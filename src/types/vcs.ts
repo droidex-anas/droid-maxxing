@@ -125,12 +125,19 @@ export interface CreateBranchOptions {
   checkout?: boolean;
 }
 
-export interface CreateWorktreeOptions {
-  branch: string;
-  base?: string;
-  newBranch?: boolean;
-  location?: string;
-}
+export type CreateWorktreeOptions =
+  | {
+      branch: string;
+      base?: string;
+      newBranch?: boolean;
+      location?: string;
+      detached?: false;
+    }
+  | {
+      detached: true;
+      base: string;
+      name: string;
+    };
 
 export interface CommitOptions {
   message: string;

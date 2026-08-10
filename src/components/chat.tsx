@@ -1,4 +1,4 @@
-import { useMemo, useState, memo, useEffect, useRef } from 'react';
+import { Fragment, useMemo, useState, memo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
@@ -53,6 +53,7 @@ import {
   type ChildSessionTarget,
 } from '../lib/childSessions';
 import { openExternal } from '../lib/onboarding';
+import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
 
 // Open a link in the OS default browser rather than inside the Electron window.
@@ -2541,6 +2542,7 @@ export function MessageFeed({
   subagentsDock,
   specContent,
   onOpenSpecWiki,
+  createdWorktreePath,
 }: {
   events: TranscriptEvent[];
   items?: FeedItem[];
@@ -2555,6 +2557,7 @@ export function MessageFeed({
   subagentsDock?: SubagentsDockData;
   specContent?: string;
   onOpenSpecWiki?: () => void;
+  createdWorktreePath?: string;
 }) {
   // Child session cards, waiting label, and live timers are enabled only for the
   // chat/spec feed (which supplies onOpenChildSession). Per-turn change summaries
@@ -2636,6 +2639,9 @@ export function MessageFeed({
     () => new Set(promptAnchorsFromItems(items).map((a) => a.id)),
     [items],
   );
+  const worktreeInsertAfter = createdWorktreePath
+    ? items.findIndex((item) => item.type === 'message' && item.event.author === 'user')
+    : -1;
 
   const lastIdx = items.length - 1;
   // Empty feeds are real (a fresh session), so the tail is genuinely optional.
@@ -2699,29 +2705,33 @@ export function MessageFeed({
       {items.map((item, idx) => {
         const isNewItem = animateKeys.has(item.key);
         return (
-          <motion.div
-            key={item.key}
-            {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
-            initial={isNewItem ? { opacity: 0, y: 4 } : false}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: EASE }}
-          >
-            <FeedItemView
-              item={item}
-              live={pending && idx === lastIdx && !subagentPoll}
-              sessionLive={pending}
-              compacting={compacting && idx === lastIdx}
-              cwd={cwd}
-              onOpenDiff={stableOnOpenDiff}
-              onOpenReviewFile={stableOnOpenReviewFile}
-              onOpenChildSession={stableOnOpenChildSession}
-              childSessionActivity={stableChildSessionActivity}
-              subagentsDock={subagentsDock}
-              liveTiming={rich}
-              specContent={specContent}
-              isFinalResponse={finalResponseKeys.has(item.key)}
-            />
-          </motion.div>
+          <Fragment key={item.key}>
+            <motion.div
+              {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
+              initial={isNewItem ? { opacity: 0, y: 4 } : false}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: EASE }}
+            >
+              <FeedItemView
+                item={item}
+                live={pending && idx === lastIdx && !subagentPoll}
+                sessionLive={pending}
+                compacting={compacting && idx === lastIdx}
+                cwd={cwd}
+                onOpenDiff={stableOnOpenDiff}
+                onOpenReviewFile={stableOnOpenReviewFile}
+                onOpenChildSession={stableOnOpenChildSession}
+                childSessionActivity={stableChildSessionActivity}
+                subagentsDock={subagentsDock}
+                liveTiming={rich}
+                specContent={specContent}
+                isFinalResponse={finalResponseKeys.has(item.key)}
+              />
+            </motion.div>
+            {idx === worktreeInsertAfter && createdWorktreePath && (
+              <WorktreeCreatedCard path={createdWorktreePath} />
+            )}
+          </Fragment>
         );
       })}
 

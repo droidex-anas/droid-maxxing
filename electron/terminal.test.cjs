@@ -24,6 +24,7 @@ function fixture(options = {}) {
     setTimeout: options.setTimeout,
     clearTimeout: options.clearTimeout,
     exitRetentionMs: options.exitRetentionMs,
+    defaultCwd: options.defaultCwd,
     resolveShell: () => ({ file: '/bin/zsh', args: ['-l'] }),
     buildEnv: () => ({ TERM: 'xterm-256color' }),
     loadPty: () => ({
@@ -112,6 +113,15 @@ test('terminal manager keeps a PTY alive until explicit kill', async () => {
   manager.kill(terminal.id);
   assert.equal(instances[0].killed, true);
   assert.equal(manager.list().length, 0);
+});
+
+test('terminal manager opens a folderless chat in its configured runtime directory', async () => {
+  const { manager, instances } = fixture({ defaultCwd: () => '/droidex/chats' });
+
+  const terminal = await manager.create({ appSessionId: 'chat-1', cwd: '' });
+
+  assert.equal(terminal.cwd, '/real/droidex/chats');
+  assert.equal(instances[0].options.cwd, '/real/droidex/chats');
 });
 
 test('explicit kill does not retain the terminal after its PTY exits', async () => {

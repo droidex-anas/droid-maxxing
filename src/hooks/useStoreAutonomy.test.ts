@@ -60,7 +60,11 @@ test('the draft override resets at every draft lifecycle point', () => {
   assert.equal(switched.draftAutonomy, null);
 
   const draftedOnceMore = reducer(drafted, { type: 'SET_DRAFT_AUTONOMY', autonomy: 'off' });
-  const newChat = reducer(draftedOnceMore, { type: 'START_CHAT', cwd: '/tmp' });
+  const newChat = reducer(draftedOnceMore, {
+    type: 'START_CHAT',
+    cwd: '/tmp',
+    executionMode: 'worktree',
+  });
   assert.equal(newChat.draftAutonomy, null);
 });
 

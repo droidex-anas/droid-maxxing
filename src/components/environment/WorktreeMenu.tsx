@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Columns2, ExternalLink, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ExternalLink, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { Popover } from './Popover';
 import { useStore } from '../../hooks/useStore';
 import { createGitWorktree, isWorktreeInUse, removeGitWorktree, worktreeName } from '../../lib/git';
@@ -10,6 +10,7 @@ import { toast } from '../../lib/toast';
 import { reanchorSessionsForWorktreeRemoval } from '../../lib/commands';
 import { removeWorktreeAndReanchor } from '../../lib/worktreeRemoval';
 import type { GitBranchList, GitEnvironment, GitWorktree } from '../../types/vcs';
+import { WorktreeIcon } from '../icons/WorktreeIcon';
 
 function notifyWorktreeRemoved(reanchored: number, reanchorFailed: boolean): void {
   if (reanchorFailed) {
@@ -95,7 +96,12 @@ export function WorktreeMenu({
   );
 
   const openInNewChat = (path: string, branch?: string | null) => {
-    dispatch({ type: 'START_CHAT', cwd: path, branch: branch ?? undefined });
+    dispatch({
+      type: 'START_CHAT',
+      cwd: path,
+      executionMode: 'local',
+      branch: branch ?? undefined,
+    });
     setOpen(false);
   };
 
@@ -179,7 +185,7 @@ export function WorktreeMenu({
         }`}
       >
         <span className="shrink-0 text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
-          <Columns2 className="h-4 w-4" />
+          <WorktreeIcon className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-droid-text">
           {current ? worktreeName(current) : 'Worktree'}
@@ -244,7 +250,7 @@ export function WorktreeMenu({
                 title="Open this worktree in a new chat"
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
               >
-                <Columns2 className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                <WorktreeIcon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
                   {worktreeName(w)}
                 </span>

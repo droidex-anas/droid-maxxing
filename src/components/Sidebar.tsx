@@ -33,6 +33,7 @@ import {
   buildWorkspaceSections,
   resolveNewChatCwd,
   SIDEBAR_VISIBLE_SESSION_LIMIT,
+  type WorkspaceScope,
 } from '../lib/workspaces';
 import { chatDisplayTitle, isChatHidden, isChatPinned, pinnedChats } from '../lib/chatMetadata';
 import { exportSessionMarkdown, renameSession } from '../lib/commands';
@@ -151,7 +152,7 @@ function WorkspaceFolderIcon({ open }: { open: boolean }) {
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({ workspaceScopes }: { workspaceScopes: WorkspaceScope[] }) {
   const { state, dispatch } = useStore();
   const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -232,7 +233,7 @@ export default function Sidebar() {
   }, [dispatch]);
 
   const startChat = (cwd: string) => {
-    dispatch({ type: 'START_CHAT', cwd });
+    dispatch({ type: 'START_CHAT', cwd, executionMode: cwd ? 'worktree' : 'local' });
   };
 
   const pickAndChat = async () => {
@@ -295,20 +296,20 @@ export default function Sidebar() {
       .map((id) => state.sessions[id])
       .filter(Boolean)
       .filter(isListedNormally);
-    const sections = buildWorkspaceSections(state.workspaceCwds, sessions);
+    const executionCwds = new Map(
+      workspaceScopes.map((scope) => [scope.cwd, scope.executionCwds] as const),
+    );
+    const sections = buildWorkspaceSections(
+      workspaceScopes.map((scope) => scope.cwd),
+      sessions,
+      { executionCwds },
+    );
     // In unread-only mode, drop read sessions and workspaces left empty.
     if (!unreadOnly) return sections;
     return sections
       .map((ws) => ({ ...ws, sessions: ws.sessions.filter(isUnread) }))
       .filter((ws) => ws.sessions.length > 0);
-  }, [
-    state.sessionOrder,
-    state.sessions,
-    state.workspaceCwds,
-    unreadOnly,
-    isUnread,
-    isListedNormally,
-  ]);
+  }, [state.sessionOrder, state.sessions, workspaceScopes, unreadOnly, isUnread, isListedNormally]);
 
   const handleSelectSession = useCallback(
     (appSessionId: string) => {

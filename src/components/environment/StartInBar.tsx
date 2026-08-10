@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
-import { Check, FolderGit2, FolderPlus, PanelsTopLeft } from 'lucide-react';
+import { Check, FolderGit2, FolderPlus } from 'lucide-react';
 import { Popover } from './Popover';
+import { WorktreeIcon } from '../icons/WorktreeIcon';
 
 // Custom composer-bar glyphs (16x16, currentColor) that replace the stock
 // lucide marks for the Local/machine and branch pills.
@@ -41,11 +42,13 @@ function BranchGlyph({ className }: { className?: string }) {
     </svg>
   );
 }
+
 import { StartBranchMenu } from './StartBranchMenu';
 import { useStore } from '../../hooks/useStore';
 import { useGitEnvironment } from '../../hooks/useGitEnvironment';
 import { pickDirectory } from '../../lib/desktop';
 import { worktreeName } from '../../lib/git';
+import { resolveMainCheckout } from '../../lib/chatWorkspace';
 import { workspaceName } from '../../lib/workspaces';
 
 function Pill({
@@ -85,9 +88,8 @@ function Pill({
   );
 }
 
-// The composer's "Start in" controls: pick the repo, the location (live checkout
-// or a worktree) and the branch a brand-new chat runs in. Only shown while
-// drafting, since a running session never hops worktrees.
+// The composer's "Start in" controls: pick the repository, choose an isolated
+// worktree or the local checkout, and select the starting ref.
 export function StartInBar() {
   const { state, dispatch } = useStore();
   const draft = state.draftChat;
@@ -103,20 +105,29 @@ export function StartInBar() {
   const locRef = useRef<HTMLButtonElement>(null);
   const branchRef = useRef<HTMLButtonElement>(null);
 
-  if (!cwd) return null;
+  if (!draft || !cwd) return null;
 
-  const repoRoot = env?.repoRoot ?? cwd;
+  const mainCheckout = env ? resolveMainCheckout(env, worktrees) : null;
+  const repoRoot = mainCheckout?.path ?? env?.repoRoot ?? cwd;
   const isRepo = !!env?.isRepo;
-  const base = env?.branch ?? env?.defaultBranch ?? 'main';
+  const base = draft.branch ?? env?.branch ?? env?.head ?? env?.defaultBranch ?? 'main';
   const localWorktrees = worktrees.filter((w) => !w.bare && w.path);
   // Match on the resolved worktree root, not the raw draft cwd, so a chat whose
   // cwd is a subdirectory of a worktree still maps to that worktree.
   const currentWtPath = env?.worktreePath ?? cwd;
   const currentWt = localWorktrees.find((w) => w.path === currentWtPath && w.path !== repoRoot);
-  const onLocal = !currentWt;
+  const createsWorktree = draft.executionMode === 'worktree';
+  const onLocal = !createsWorktree && !currentWt && !!mainCheckout;
+  let workLocationLabel = 'Local';
+  if (createsWorktree) workLocationLabel = 'New worktree';
+  else if (currentWt) workLocationLabel = worktreeName(currentWt);
 
-  const startIn = (path: string, branch?: string) => {
-    dispatch({ type: 'START_CHAT', cwd: path, branch });
+  const startIn = (
+    path: string,
+    branch?: string,
+    executionMode: 'worktree' | 'local' = 'worktree',
+  ) => {
+    dispatch({ type: 'START_CHAT', cwd: path, executionMode, branch });
   };
 
   const openFolder = async () => {
@@ -144,7 +155,9 @@ export function StartInBar() {
       />
       <Popover
         open={repoOpen}
-        onClose={() => setRepoOpen(false)}
+        onClose={() => {
+          setRepoOpen(false);
+        }}
         anchorRef={repoRef}
         label="Projects"
         align="left"
@@ -180,7 +193,9 @@ export function StartInBar() {
         </div>
         <div className="border-t border-droid-border/70 p-1.5">
           <button
-            onClick={() => void openFolder()}
+            onClick={() => {
+              void openFolder();
+            }}
             className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text transition-colors hover:bg-droid-elevated/60"
           >
             <FolderPlus className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
@@ -192,9 +207,15 @@ export function StartInBar() {
       {isRepo && (
         <>
           <Pill
-            icon={<LocalGlyph className="h-3.5 w-3.5" />}
-            label={currentWt ? worktreeName(currentWt) : 'Local'}
-            title="Worktree"
+            icon={
+              createsWorktree ? (
+                <WorktreeIcon className="h-3.5 w-3.5" />
+              ) : (
+                <LocalGlyph className="h-3.5 w-3.5" />
+              )
+            }
+            label={workLocationLabel}
+            title="Work in"
             open={locOpen}
             innerRef={locRef}
             onClick={() => {
@@ -205,7 +226,9 @@ export function StartInBar() {
           />
           <Popover
             open={locOpen}
-            onClose={() => setLocOpen(false)}
+            onClose={() => {
+              setLocOpen(false);
+            }}
             anchorRef={locRef}
             label="Worktrees"
             align="left"
@@ -214,17 +237,43 @@ export function StartInBar() {
             <div className="max-h-[260px] overflow-y-auto py-1">
               <button
                 onClick={() => {
-                  startIn(repoRoot);
+                  startIn(repoRoot, draft.branch ?? env.branch ?? undefined, 'worktree');
                   setLocOpen(false);
                 }}
-                aria-pressed={onLocal}
+                aria-pressed={createsWorktree}
                 className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
-                <PanelsTopLeft className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                <WorktreeIcon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px] text-droid-text">New worktree</span>
+                  <span className="block truncate text-[10.5px] text-droid-text-muted">
+                    Isolated checkout for this chat
+                  </span>
+                </span>
+                {createsWorktree && (
+                  <Check
+                    className="h-3.5 w-3.5 shrink-0"
+                    style={{ color: 'var(--droid-accent)' }}
+                    strokeWidth={3}
+                  />
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  if (mainCheckout) startIn(mainCheckout.path, mainCheckout.branch, 'local');
+                  setLocOpen(false);
+                }}
+                disabled={!mainCheckout}
+                aria-pressed={onLocal}
+                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/60 disabled:opacity-50"
+              >
+                <LocalGlyph className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12.5px] text-droid-text">Work locally</span>
                   <span className="block truncate text-[10.5px] text-droid-text-muted">
-                    {env?.branch ?? 'detached'} · current checkout
+                    {mainCheckout
+                      ? `${mainCheckout.branch ?? 'detached'} · main checkout`
+                      : 'Loading main checkout…'}
                   </span>
                 </span>
                 {onLocal && (
@@ -241,13 +290,13 @@ export function StartInBar() {
                   <button
                     key={w.path}
                     onClick={() => {
-                      if (w.path) startIn(w.path, w.branch ?? undefined);
+                      if (w.path) startIn(w.path, w.branch ?? undefined, 'local');
                       setLocOpen(false);
                     }}
                     aria-pressed={currentWtPath === w.path}
                     className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
                   >
-                    <PanelsTopLeft className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                    <WorktreeIcon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
                     <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
                       {worktreeName(w)}
                     </span>
@@ -265,7 +314,7 @@ export function StartInBar() {
 
           <Pill
             icon={<BranchGlyph className="h-3.5 w-3.5" />}
-            label={draft?.branch ?? env?.branch ?? 'detached'}
+            label={draft.branch ?? env.branch ?? 'detached'}
             title="Branch"
             open={branchOpen}
             innerRef={branchRef}
@@ -277,7 +326,9 @@ export function StartInBar() {
           />
           <StartBranchMenu
             open={branchOpen}
-            onClose={() => setBranchOpen(false)}
+            onClose={() => {
+              setBranchOpen(false);
+            }}
             anchorRef={branchRef}
             cwd={cwd}
             env={env}
@@ -285,6 +336,7 @@ export function StartInBar() {
             worktrees={worktrees}
             uncommittedFiles={diffStat?.files ?? 0}
             base={base}
+            executionMode={draft.executionMode}
             onStartIn={startIn}
             onRefresh={refresh}
           />

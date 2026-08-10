@@ -345,7 +345,11 @@ test('disconnect clears child selection, access, and runtime watermarks', () => 
 
 test('starting a draft invalidates the selected child open request', () => {
   let state = select(initialState, 'parent-a', 'child-a', 'request-a');
-  state = reducer(state, { type: 'START_CHAT', cwd: '/workspace' });
+  state = reducer(state, {
+    type: 'START_CHAT',
+    cwd: '/workspace',
+    executionMode: 'worktree',
+  });
 
   assert.equal(state.selectedChild, null);
   assert.equal(state.activeAppSessionId, null);

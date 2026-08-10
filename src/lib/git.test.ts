@@ -66,6 +66,13 @@ test('worktreeName prefers the branch then falls back to the path basename', () 
   );
   assert.equal(worktreeName({ path: '/repo/.worktrees/feature', branch: null }), 'feature');
   assert.equal(worktreeName({ path: 'C:\\repo\\.worktrees\\win', branch: null }), 'win');
+  assert.equal(
+    worktreeName({
+      path: '/repo/.worktrees/fix-empty-sidebar-fmwg0/droid-control',
+      branch: null,
+    }),
+    'fix-empty-sidebar-fmwg0',
+  );
 });
 
 test('aheadBehindLabel renders only the non-zero sides', () => {
