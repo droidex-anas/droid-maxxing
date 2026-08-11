@@ -3,8 +3,14 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { StoreProvider } from '../hooks/useStore.js';
+import {
+  initialState,
+  StaticStoreProvider,
+  StoreProvider,
+  type AppState,
+} from '../hooks/useStore.js';
 import type { ExactChildSettingsTarget } from '../lib/exactChildSettings.js';
+import type { ModelInfo } from '../types/bridge.js';
 import ModelSelectorPopover from './ModelSelectorPopover.js';
 
 function renderTarget(readiness: ExactChildSettingsTarget['readiness']): string {
@@ -50,4 +56,37 @@ test('exact child editor labels readiness and keeps standalone reasoning disable
     (unavailable.match(/disabled=""/g) ?? []).length,
     (opening.match(/disabled=""/g) ?? []).length,
   );
+});
+
+test('a dangling active session id keeps using the visible global defaults', () => {
+  const model: ModelInfo = {
+    id: 'global-model',
+    displayName: 'Global Model',
+    provider: 'factory',
+    supportedReasoningEfforts: ['low', 'high'],
+    defaultReasoningEffort: 'high',
+  };
+  const state: AppState = {
+    ...initialState,
+    activeAppSessionId: 'missing-session',
+    sessions: {},
+    models: [model],
+    agentConfig: {
+      ...initialState.agentConfig,
+      primary: { modelId: model.id, reasoning: 'low' },
+    },
+  };
+  const html = renderToStaticMarkup(
+    createElement(
+      StaticStoreProvider,
+      { state, dispatch: () => undefined },
+      createElement(ModelSelectorPopover, {
+        singleAgent: true,
+        onClose: () => undefined,
+      }),
+    ),
+  );
+
+  assert.match(html, /Search models · Global Model/);
+  assert.match(html, /Reasoning<\/span><span[^>]*>low<\/span>/);
 });

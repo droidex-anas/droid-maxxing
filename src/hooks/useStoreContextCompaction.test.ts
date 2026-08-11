@@ -33,6 +33,30 @@ const snapshot = (used: number): ContextStatsSnapshot => ({
   updatedAt: '2026-07-11T07:49:46.824Z',
 });
 
+function longTranscriptWithHistoricalCompactions(): TranscriptEvent[] {
+  return Array.from({ length: 30_002 }, (_, index): TranscriptEvent => {
+    if (index < 2) {
+      return {
+        id: `restored-compaction-${String(index)}`,
+        appSessionId: 'm1',
+        sourceSessionId: 'primary',
+        role: 'primary',
+        ts: index,
+        kind: 'compaction',
+      };
+    }
+    return {
+      id: `event-${String(index)}`,
+      appSessionId: 'm1',
+      sourceSessionId: 'primary',
+      role: 'primary',
+      ts: index,
+      kind: 'text',
+      text: `event ${String(index)}`,
+    };
+  });
+}
+
 test('SESSION_UPDATED invalidates stale context stats when compaction generation advances', () => {
   const start: AppState = {
     ...initialState,
@@ -118,6 +142,63 @@ test('restored compaction history advances the meter generation and clears stale
     hasMore: false,
   });
 
+  assert.equal(next.sessions.m1.autoCompactions, 2);
+  assert.equal(next.sessions.m1.contextTokens, 0);
+  assert.equal(next.contextStats.primary.m1, undefined);
+});
+
+test('long replace restores count compactions released from the retained transcript tail', () => {
+  const restored = longTranscriptWithHistoricalCompactions();
+  const start: AppState = {
+    ...initialState,
+    sessions: { m1: session() },
+    contextStats: { primary: { m1: snapshot(100_000) }, child: {} },
+  };
+
+  const next = reducer(start, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: restored,
+    mode: 'replace',
+    olderCursor: undefined,
+  });
+
+  assert.ok(next.transcripts.m1.length <= 1_200);
+  assert.equal(
+    next.transcripts.m1.some((event) => event.kind === 'compaction'),
+    false,
+  );
+  assert.equal(next.sessions.m1.autoCompactions, 2);
+  assert.equal(next.sessions.m1.contextTokens, 0);
+  assert.equal(next.contextStats.primary.m1, undefined);
+});
+
+test('long prepend restores count compactions released from the retained transcript tail', () => {
+  const restored = longTranscriptWithHistoricalCompactions();
+  const olderPage = restored.slice(0, 2_000);
+  const existing = restored.slice(2_000);
+  const start: AppState = {
+    ...initialState,
+    sessions: { m1: session() },
+    transcripts: { m1: existing },
+    contextStats: { primary: { m1: snapshot(100_000) }, child: {} },
+  };
+
+  const next = reducer(start, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: olderPage,
+    mode: 'prepend',
+    olderCursor: 'older-page',
+  });
+
+  assert.ok(next.transcripts.m1.length <= 1_200);
+  assert.equal(
+    next.transcripts.m1.some((event) => event.kind === 'compaction'),
+    false,
+  );
   assert.equal(next.sessions.m1.autoCompactions, 2);
   assert.equal(next.sessions.m1.contextTokens, 0);
   assert.equal(next.contextStats.primary.m1, undefined);

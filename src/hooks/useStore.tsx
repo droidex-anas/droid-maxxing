@@ -2197,11 +2197,7 @@ function baseReducer(state: AppState, action: Action): AppState {
               estimateTranscriptCost(mergedTranscript),
             )
           : historyState;
-        return withHistoricalCompactionGeneration(
-          next,
-          action.appSessionId,
-          next.transcripts[action.appSessionId] ?? [],
-        );
+        return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
       }
 
       const mergedTranscript = reconcileRestoredTranscript(existing, action.transcripts, !hasMore);
@@ -2247,11 +2243,7 @@ function baseReducer(state: AppState, action: Action): AppState {
             estimateTranscriptCost(mergedTranscript),
           )
         : historyState;
-      return withHistoricalCompactionGeneration(
-        next,
-        action.appSessionId,
-        next.transcripts[action.appSessionId] ?? [],
-      );
+      return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
     }
     /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
