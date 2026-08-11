@@ -48,6 +48,7 @@ type PersistedSummaryPatch = Pick<
 export class FakeHistoryIndex implements SessionHistoryDependencies {
   nextCloseError?: Error;
   nextSyncError?: Error;
+  recordEventErrorForText?: { text: string; error: Error };
   private readonly summariesByAppId = new Map<string, PersistedSummaryPatch>();
   private readonly childrenByParent = new Map<string, Map<string, PersistedChildSession>>();
   private readonly launchSettingsByProvider = new Map<
@@ -193,6 +194,17 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
   }
 
   recordEvent(event: unknown): void {
+    const failure = this.recordEventErrorForText;
+    if (
+      failure &&
+      typeof event === 'object' &&
+      event !== null &&
+      'text' in event &&
+      event.text === failure.text
+    ) {
+      delete this.recordEventErrorForText;
+      throw failure.error;
+    }
     this.calls.push({ target: 'history', method: 'recordEvent', args: [event] });
   }
 

@@ -219,9 +219,9 @@ export function shouldCaptureViewportAnchorAfterScroll(options: {
   return !options.isPinned && !options.isRestoringViewport;
 }
 
-export function primaryViewportOwner(
-  activeAppSessionId: string | undefined,
-  isViewingChildSession: boolean,
-): string | undefined {
-  return isViewingChildSession ? undefined : activeAppSessionId;
+export function shouldCancelViewportRestore(
+  expectedScrollTop: number | null,
+  currentScrollTop: number,
+): boolean {
+  return expectedScrollTop !== null && Math.abs(currentScrollTop - expectedScrollTop) > 0.75;
 }

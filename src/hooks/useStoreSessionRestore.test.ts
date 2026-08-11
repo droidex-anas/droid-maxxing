@@ -29,6 +29,25 @@ function userEv(id: string, ts: number, text: string): TranscriptEvent {
   };
 }
 
+function childEv(
+  childSessionId: string,
+  id: string,
+  ts: number,
+  text = id,
+  author?: 'user',
+): TranscriptEvent {
+  return {
+    id,
+    appSessionId: 'm1',
+    sourceSessionId: childSessionId,
+    role: 'worker',
+    kind: 'text',
+    text,
+    ts,
+    author,
+  };
+}
+
 test('#29 SESSION_RESTORE_START marks the transcript as loading', () => {
   const next = reducer(initialState as unknown as AppState, {
     type: 'SESSION_RESTORE_START',
@@ -332,6 +351,191 @@ test('#29 a replace keeps a genuinely repeated live message the page only contai
     next.transcripts.m1.map((e) => e.id),
     ['sess:1:0:text', 'live-2'],
   );
+});
+
+test('child replace reconciles only its logical source and removes a superseded local prompt', () => {
+  const primary = ev('primary-live', 5, 'parent output');
+  const sibling = childEv('child-b', 'sibling-live', 6, 'same output');
+  const seeded = {
+    ...initialState,
+    transcripts: {
+      m1: [
+        primary,
+        childEv('child-a', 'local-1000', 10, 'run checks', 'user'),
+        sibling,
+        childEv('child-a', 'child-live', 21, 'new live output'),
+      ],
+    },
+  } as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    childSessionId: 'child-a',
+    progress: [],
+    transcripts: [
+      childEv('child-a', 'persisted-prompt', 10, 'run checks', 'user'),
+      childEv('child-a', 'persisted-output', 20, 'saved output'),
+    ],
+    mode: 'replace',
+    olderCursor: 'child-cursor',
+    hasMore: true,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1
+      .filter((event) => event.sourceSessionId === 'child-a')
+      .map((event) => event.id),
+    ['persisted-prompt', 'persisted-output', 'child-live'],
+  );
+  assert.equal(
+    next.transcripts.m1.find((event) => event.id === primary.id),
+    primary,
+  );
+  assert.equal(
+    next.transcripts.m1.find((event) => event.id === sibling.id),
+    sibling,
+  );
+  assert.deepEqual(next.childHistory.m1['child-a'], {
+    status: 'paged',
+    loadedCount: 3,
+    hasMore: true,
+    isLoaded: true,
+    isLoadingOlder: false,
+    olderCursor: 'child-cursor',
+    isViewportPinned: true,
+  });
+  assert.equal(next.historyCursor.m1, undefined);
+  assert.equal(next.sessionRestore.m1, undefined);
+});
+
+test('child prepend advances only that child cursor and preserves parent and sibling order', () => {
+  const primary = ev('primary-live', 5, 'parent output');
+  const sibling = childEv('child-b', 'sibling-live', 6, 'sibling output');
+  const seeded = {
+    ...initialState,
+    transcripts: {
+      m1: [primary, childEv('child-a', 'child-newer', 20), sibling],
+    },
+    childHistory: {
+      m1: {
+        'child-a': {
+          status: 'paged',
+          loadedCount: 1,
+          hasMore: true,
+          isLoaded: true,
+          isLoadingOlder: true,
+          olderCursor: 'cursor-2',
+          isViewportPinned: false,
+        },
+      },
+    },
+  } as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    childSessionId: 'child-a',
+    progress: [],
+    transcripts: [childEv('child-a', 'child-older', 10)],
+    mode: 'prepend',
+    olderCursor: 'cursor-1',
+    hasMore: true,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1
+      .filter((event) => event.sourceSessionId === 'child-a')
+      .map((event) => event.id),
+    ['child-older', 'child-newer'],
+  );
+  assert.deepEqual(
+    next.transcripts.m1
+      .filter((event) => event.sourceSessionId !== 'child-a')
+      .map((event) => event.id),
+    [primary.id, sibling.id],
+  );
+  assert.equal(next.childHistory.m1['child-a'].olderCursor, 'cursor-1');
+  assert.equal(next.childHistory.m1['child-a'].isLoadingOlder, false);
+  assert.equal(next.childHistory.m1['child-a'].isViewportPinned, false);
+});
+
+test('successful empty child history settles loading without clearing other sources', () => {
+  const existing = [ev('primary-live', 5), childEv('child-b', 'sibling-live', 6)];
+  const seeded = {
+    ...initialState,
+    transcripts: { m1: existing },
+    childHistory: {
+      m1: {
+        'child-a': {
+          status: 'loading',
+          loadedCount: 0,
+          hasMore: false,
+          isLoaded: false,
+          isLoadingOlder: false,
+          isViewportPinned: true,
+        },
+      },
+    },
+  } as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    childSessionId: 'child-a',
+    progress: [],
+    transcripts: [],
+    mode: 'replace',
+    hasMore: false,
+  });
+
+  assert.equal(next.transcripts.m1, existing);
+  assert.deepEqual(next.childHistory.m1['child-a'], {
+    status: 'loaded',
+    loadedCount: 0,
+    hasMore: false,
+    isLoaded: true,
+    isLoadingOlder: false,
+    olderCursor: undefined,
+    isViewportPinned: true,
+  });
+});
+
+test('opening an unloaded child creates explicit history loading state', () => {
+  const seeded = {
+    ...initialState,
+    activeAppSessionId: 'm1',
+    childSessions: {
+      m1: {
+        'child-a': {
+          parentAppSessionId: 'm1',
+          childSessionId: 'child-a',
+          role: 'worker' as const,
+          status: 'completed' as const,
+          modelId: 'model-1',
+          transcriptAvailable: true,
+        },
+      },
+    },
+  };
+  const next = reducer(seeded, {
+    type: 'SELECT_CHILD',
+    selection: { parentAppSessionId: 'm1', childSessionId: 'child-a' },
+    requestId: 'open-1',
+  });
+
+  assert.deepEqual(next.childHistory.m1['child-a'], {
+    status: 'loading',
+    loadedCount: 0,
+    hasMore: false,
+    isLoaded: false,
+    isLoadingOlder: false,
+    isViewportPinned: true,
+  });
+  assert.deepEqual(next.childAccess.m1['child-a'], {
+    state: 'opening',
+    requestId: 'open-1',
+  });
 });
 
 test('#29 a replace dedups a live primary event against its persisted twin', () => {

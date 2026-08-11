@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createRendererOomRecovery } = require('./rendererOomRecovery.cjs');
+const { createRendererOomRecovery, isRendererMemoryExit } = require('./rendererOomRecovery.cjs');
 
 function harness(options = {}) {
   let now = 0;
@@ -34,7 +34,7 @@ function harness(options = {}) {
   };
 }
 
-test('only renderer OOM exits schedule an automatic reload', () => {
+test('only renderer memory exits schedule an automatic reload', () => {
   const h = harness();
   let reloads = 0;
 
@@ -52,6 +52,42 @@ test('only renderer OOM exits schedule an automatic reload', () => {
   assert.equal(timer.delayMs, 25);
   h.run(timerId);
   assert.equal(reloads, 1);
+
+  assert.equal(
+    h.recovery.handle({ reason: 'memory-eviction' }, () => reloads++),
+    true,
+  );
+  assert.equal(h.scheduled.size, 1);
+});
+
+test('the macOS V8 OOM crash signature schedules an automatic reload', () => {
+  const h = harness({ platform: 'darwin' });
+  let reloads = 0;
+
+  assert.equal(
+    h.recovery.handle({ reason: 'crashed', exitCode: 5 }, () => reloads++),
+    true,
+  );
+  assert.equal(h.scheduled.size, 1);
+  h.run(1);
+  assert.equal(reloads, 1);
+});
+
+test('exit code 5 remains an ordinary crash outside macOS', () => {
+  const h = harness({ platform: 'linux' });
+
+  assert.equal(
+    h.recovery.handle({ reason: 'crashed', exitCode: 5 }, () => {}),
+    false,
+  );
+  assert.equal(h.scheduled.size, 0);
+});
+
+test('every supported memory-exit signature shares the diagnostic predicate', () => {
+  assert.equal(isRendererMemoryExit({ reason: 'oom' }, 'linux'), true);
+  assert.equal(isRendererMemoryExit({ reason: 'memory-eviction' }, 'win32'), true);
+  assert.equal(isRendererMemoryExit({ reason: 'crashed', exitCode: 5 }, 'darwin'), true);
+  assert.equal(isRendererMemoryExit({ reason: 'crashed', exitCode: 5 }, 'linux'), false);
 });
 
 test('repeated OOM exits are rate-limited to avoid a reload crash loop', () => {

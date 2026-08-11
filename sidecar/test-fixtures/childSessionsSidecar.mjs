@@ -1,10 +1,13 @@
 import { appendFileSync } from 'node:fs';
+import process from 'node:process';
+import { clearInterval, clearTimeout, setInterval, setTimeout } from 'node:timers';
 import { WebSocket, WebSocketServer } from 'ws';
 
 const port = Number(process.env.BRIDGE_PORT);
 const token = process.env.BRIDGE_TOKEN ?? '';
 const logPath = process.env.CHILD_SESSIONS_SMOKE_LOG;
 const allowAnyToken = process.env.CHILD_SESSIONS_SMOKE_ALLOW_ANY_TOKEN === '1';
+const streamEventCount = Number(process.env.CHILD_SESSIONS_SMOKE_STREAM_EVENTS ?? '0');
 
 if (
   !Number.isSafeInteger(port) ||
@@ -81,6 +84,34 @@ const transcriptEvent = (appSessionId, id, sourceSessionId, role, text, ts, auth
   ...(author ? { author } : {}),
 });
 
+const alphaSiblingHistory = Array.from({ length: 180 }, (_, index) => {
+  const number = index + 1;
+  const suffix =
+    number === 180
+      ? 'ALPHA CHILD TWO OUTPUT'
+      : `ALPHA CHILD HISTORY ${String(number).padStart(4, '0')}`;
+  return transcriptEvent(
+    'parent-alpha',
+    `alpha-sibling-${String(number).padStart(4, '0')}`,
+    'alpha-sibling',
+    'worker',
+    `${suffix}\n${'history detail '.repeat((number % 4) + 1).trim()}`,
+    now - 3_700 + number,
+  );
+});
+
+const alphaHistoricalHistory = Array.from({ length: 900 }, (_, index) => {
+  const number = index + 1;
+  return transcriptEvent(
+    'parent-alpha',
+    `alpha-history-${String(number).padStart(4, '0')}`,
+    'alpha-history',
+    'worker',
+    number === 900 ? 'ALPHA HISTORICAL OUTPUT' : `ALPHA HISTORICAL ${String(number)}`,
+    now - 3_600 + number,
+  );
+});
+
 const transcripts = {
   'parent-alpha': [
     transcriptEvent(
@@ -108,22 +139,8 @@ const transcripts = {
       'ALPHA SHARED CHILD OUTPUT',
       now - 3_800,
     ),
-    transcriptEvent(
-      'parent-alpha',
-      'alpha-sibling-output',
-      'alpha-sibling',
-      'worker',
-      'ALPHA CHILD TWO OUTPUT',
-      now - 3_700,
-    ),
-    transcriptEvent(
-      'parent-alpha',
-      'alpha-history-output',
-      'alpha-history',
-      'worker',
-      'ALPHA HISTORICAL OUTPUT',
-      now - 3_600,
-    ),
+    ...alphaSiblingHistory,
+    ...alphaHistoricalHistory,
   ],
   'parent-beta': [
     transcriptEvent(
@@ -157,28 +174,110 @@ record({
 
 const server = new WebSocketServer({ host: '127.0.0.1', port });
 const timers = new Set();
+const streamingSockets = new WeakSet();
 
 function send(socket, event) {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
 }
 
 function history(socket, appSessionId) {
+  const primaryTranscript = (transcripts[appSessionId] ?? []).filter(
+    (event) => event.sourceSessionId === 'user' || event.sourceSessionId === appSessionId,
+  );
   send(socket, {
     type: 'session.history',
     appSessionId,
     progress: [],
-    transcripts: transcripts[appSessionId] ?? [],
+    transcripts: primaryTranscript,
     childSessions: children[appSessionId] ?? [],
     mode: 'replace',
-    loadedCount: transcripts[appSessionId]?.length ?? 0,
+    loadedCount: primaryTranscript.length,
     hasMore: false,
   });
+}
+
+function childHistory(socket, command) {
+  const childTranscript = (transcripts[command.parentAppSessionId] ?? []).filter(
+    (event) => event.sourceSessionId === command.childSessionId,
+  );
+  const requestedLimit =
+    Number.isSafeInteger(command.limit) && command.limit > 0 ? command.limit : undefined;
+  const pageSize =
+    command.childSessionId === 'alpha-sibling'
+      ? Math.min(60, requestedLimit ?? 60)
+      : Math.min(childTranscript.length, requestedLimit ?? childTranscript.length);
+  const isMiddlePage = command.cursor === 'alpha-sibling-middle';
+  const isOldestPage = command.cursor === 'alpha-sibling-oldest';
+  let page = childTranscript.slice(-pageSize);
+  let olderCursor = command.childSessionId === 'alpha-sibling' ? 'alpha-sibling-middle' : undefined;
+  if (isMiddlePage) {
+    page = childTranscript.slice(pageSize, pageSize * 2);
+    olderCursor = 'alpha-sibling-oldest';
+  } else if (isOldestPage) {
+    page = childTranscript.slice(0, pageSize);
+    olderCursor = undefined;
+  }
+  const deliver = () =>
+    send(socket, {
+      type: 'session.history',
+      appSessionId: command.parentAppSessionId,
+      childSessionId: command.childSessionId,
+      progress: [],
+      transcripts: page,
+      mode: command.cursor ? 'prepend' : 'replace',
+      olderCursor,
+      loadedCount: page.length,
+      hasMore: Boolean(olderCursor),
+    });
+  if (!command.cursor) {
+    deliver();
+    return;
+  }
+  const timer = setTimeout(() => {
+    timers.delete(timer);
+    deliver();
+  }, 150);
+  timers.add(timer);
+}
+
+function startChildStream(socket, command) {
+  if (
+    command.parentAppSessionId !== 'parent-alpha' ||
+    command.childSessionId !== 'alpha-sibling' ||
+    !Number.isSafeInteger(streamEventCount) ||
+    streamEventCount <= 0 ||
+    streamingSockets.has(socket)
+  ) {
+    return;
+  }
+  streamingSockets.add(socket);
+  let index = 0;
+  const timer = setInterval(() => {
+    index += 1;
+    send(socket, {
+      type: 'event.appended',
+      event: transcriptEvent(
+        'parent-alpha',
+        `alpha-stream-${String(index).padStart(4, '0')}`,
+        'alpha-sibling',
+        'worker',
+        `STREAMING OUTPUT ${String(index)}`,
+        Date.now(),
+      ),
+    });
+    if (index >= streamEventCount) {
+      clearInterval(timer);
+      timers.delete(timer);
+    }
+  }, 25);
+  timers.add(timer);
 }
 
 function openChild(socket, command) {
   const summary = children[command.parentAppSessionId]?.find(
     (candidate) => candidate.childSessionId === command.childSessionId,
   );
+  childHistory(socket, command);
   if (!summary || summary.status === 'completed') {
     send(socket, {
       type: 'child.updated',
@@ -189,6 +288,7 @@ function openChild(socket, command) {
     });
     return;
   }
+  startChildStream(socket, command);
   const reply = () =>
     send(socket, {
       type: 'child.updated',
@@ -263,6 +363,9 @@ server.on('connection', (socket, request) => {
         break;
       case 'session.loadHistory':
         history(socket, command.appSessionId);
+        break;
+      case 'child.loadHistory':
+        childHistory(socket, command);
         break;
       case 'child.open':
         openChild(socket, command);

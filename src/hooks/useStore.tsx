@@ -48,7 +48,6 @@ import {
   saveCompactionTokenLimitPerModel,
 } from '../lib/compactionSettings';
 import { sanitizeForLog } from '../lib/sensitiveLogRedaction';
-import { composePrompt } from '../lib/composePrompt';
 import { sessionIsLive } from '../lib/sessions';
 import {
   addSessionNote,
@@ -94,8 +93,15 @@ import {
 import {
   appendTranscriptEvent,
   pruneRemovedSessionState,
+  releaseSessionChildTranscriptWindow,
   releaseSessionTranscriptWindow,
+  withUpdatedTranscript,
 } from '../lib/transcriptStoreMemory';
+import {
+  reconcilePrependedTranscript,
+  reconcileRestoredTranscript,
+  reconcileTranscriptSourcePage,
+} from '../lib/transcriptHistory';
 
 export type AgentKind = 'primary' | 'worker' | 'validator';
 export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
@@ -173,6 +179,13 @@ export interface SessionRestore {
   error?: string;
 }
 
+export interface ChildHistoryState extends SessionRestore {
+  isLoaded: boolean;
+  isLoadingOlder: boolean;
+  olderCursor?: string;
+  isViewportPinned: boolean;
+}
+
 export interface AppState {
   // Connection
   connection: 'idle' | 'connecting' | 'connected' | 'error';
@@ -217,6 +230,10 @@ export interface AppState {
   // Lets the chat show an honest restoring/partial/retry surface instead of a
   // blank or silently truncated transcript (#29).
   sessionRestore: Partial<Record<string, SessionRestore>>;
+  // Child transcripts share the parent event array for live rendering, but
+  // each logical child owns an independent persisted-history cursor and
+  // viewport lifecycle.
+  childHistory: Record<string, Record<string, ChildHistoryState>>;
   childAccess: Record<string, Record<string, ChildAccess>>;
   childRuntime: Record<string, Record<string, ChildRuntimeState>>;
   pendingPermission: PermissionRequest | null;
@@ -428,6 +445,7 @@ type Action =
   | {
       type: 'SESSION_HISTORY';
       appSessionId: string;
+      childSessionId?: string;
       progress: ProgressEntry[];
       transcripts: TranscriptEvent[];
       childSessions?: ChildSessionSummary[];
@@ -437,8 +455,34 @@ type Action =
       hasMore?: boolean;
     }
   | { type: 'SESSION_RESTORE_START'; appSessionId: string }
-  | { type: 'SESSION_HISTORY_FAILED'; appSessionId: string; message: string }
+  | {
+      type: 'SESSION_HISTORY_FAILED';
+      appSessionId: string;
+      childSessionId?: string;
+      message: string;
+    }
   | { type: 'SESSION_HISTORY_LOADING_OLDER'; appSessionId: string }
+  | {
+      type: 'CHILD_HISTORY_LOADING';
+      parentAppSessionId: string;
+      childSessionId: string;
+    }
+  | {
+      type: 'CHILD_HISTORY_LOADING_OLDER';
+      parentAppSessionId: string;
+      childSessionId: string;
+    }
+  | {
+      type: 'CHILD_TRANSCRIPT_VIEWPORT';
+      parentAppSessionId: string;
+      childSessionId: string;
+      pinned: boolean;
+    }
+  | {
+      type: 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT';
+      parentAppSessionId: string;
+      childSessionId: string;
+    }
   | { type: 'CLEAR_PERMISSION' }
   | { type: 'CLEAR_QUESTION' }
 
@@ -1021,6 +1065,7 @@ export const initialState: AppState = {
   historyCursor: {},
   historyLoadingOlder: {},
   sessionRestore: {},
+  childHistory: {},
   childAccess: {},
   childRuntime: {},
   pendingPermission: null,
@@ -1108,21 +1153,6 @@ function clearBrowserOpenKey(keys: Record<string, boolean>, key: string): Record
 
 // Re-derive `browserOpen` from the per-session open set and the active session.
 // Applied after every reducer pass so the convenience flag never goes stale.
-// How close in time a live event and a restored page entry must be to count as
-// the same (persisted) event. A twin is logged within moments of the live emit,
-// while a coincidental same-text repeat is typically much further apart.
-const REPLAY_DEDUP_TOLERANCE_MS = 5_000;
-
-// An optimistic user echo stores the raw input, but history persists the
-// composed prompt (raw text plus skill/file context). Match against both so a
-// skill/file prompt is recognized as superseded instead of duplicating.
-function echoMatchesPersisted(e: TranscriptEvent, persisted: Set<string | undefined>): boolean {
-  if (!e.text) return false;
-  if (persisted.has(e.text)) return true;
-  const composed = composePrompt(e.text, e.skills ?? [], e.files ?? []);
-  return composed !== e.text && persisted.has(composed);
-}
-
 function syncBrowserOpen(state: AppState): AppState {
   const key = activeBrowserKey(state);
   const open = key ? Boolean(state.browserOpenKeys[key]) : false;
@@ -1182,6 +1212,53 @@ function withChildRuntime(
       [parentAppSessionId]: { ...parent, [childSessionId]: runtime },
     },
   };
+}
+
+function withChildHistory(
+  state: AppState,
+  parentAppSessionId: string,
+  childSessionId: string,
+  history: ChildHistoryState,
+): AppState {
+  return {
+    ...state,
+    childHistory: {
+      ...state.childHistory,
+      [parentAppSessionId]: {
+        ...state.childHistory[parentAppSessionId],
+        [childSessionId]: history,
+      },
+    },
+  };
+}
+
+function releaseInactiveChildTranscript(
+  state: AppState,
+  parentAppSessionId: string,
+  childSessionId: string,
+): AppState {
+  // These keyed renderer maps are intentionally sparse at runtime despite
+  // their long-standing Record types.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+  const history = state.childHistory[parentAppSessionId]?.[childSessionId];
+  if (!history?.isLoaded || !history.isViewportPinned) return state;
+  const child = state.childSessions[parentAppSessionId]?.[childSessionId];
+  const runtime = state.childRuntime[parentAppSessionId]?.[childSessionId];
+  if (child?.status === 'running' && runtime?.available) return state;
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+  return releaseSessionChildTranscriptWindow(
+    state,
+    parentAppSessionId,
+    childSessionId,
+    INACTIVE_TRANSCRIPT_POLICY,
+  );
+}
+
+function releaseInactiveSelectedChild(state: AppState): AppState {
+  const selected = state.selectedChild;
+  return selected
+    ? releaseInactiveChildTranscript(state, selected.parentAppSessionId, selected.childSessionId)
+    : state;
 }
 
 function invalidateSelectedChildOpening(state: AppState): AppState {
@@ -1680,6 +1757,7 @@ function baseReducer(state: AppState, action: Action): AppState {
             },
           };
 
+    /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
     case 'TRANSCRIPT_RELEASE_VIEWPORT': {
       if (state.activeAppSessionId !== action.appSessionId) return state;
       if (state.transcriptViewportPinned[action.appSessionId] === false) return state;
@@ -1687,6 +1765,46 @@ function baseReducer(state: AppState, action: Action): AppState {
       if (!session || sessionIsLive(session)) return state;
       return releaseSessionTranscriptWindow(state, action.appSessionId, VIEWPORT_TRANSCRIPT_POLICY);
     }
+
+    case 'CHILD_TRANSCRIPT_VIEWPORT': {
+      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      if (!previous || previous.isViewportPinned === action.pinned) return state;
+      return {
+        ...state,
+        childHistory: {
+          ...state.childHistory,
+          [action.parentAppSessionId]: {
+            ...state.childHistory[action.parentAppSessionId],
+            [action.childSessionId]: {
+              ...previous,
+              isViewportPinned: action.pinned,
+            },
+          },
+        },
+      };
+    }
+
+    case 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT': {
+      if (
+        state.activeAppSessionId !== action.parentAppSessionId ||
+        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
+        state.selectedChild.childSessionId !== action.childSessionId
+      ) {
+        return state;
+      }
+      const history = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      if (!history?.isLoaded || !history.isViewportPinned) return state;
+      const child = state.childSessions[action.parentAppSessionId]?.[action.childSessionId];
+      const runtime = state.childRuntime[action.parentAppSessionId]?.[action.childSessionId];
+      if (child?.status === 'running' && runtime?.available) return state;
+      return releaseSessionChildTranscriptWindow(
+        state,
+        action.parentAppSessionId,
+        action.childSessionId,
+        VIEWPORT_TRANSCRIPT_POLICY,
+      );
+    }
+    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
     case 'QUEUE_PROMPT': {
       const prev = state.promptQueue[action.appSessionId] ?? [];
@@ -1884,6 +2002,29 @@ function baseReducer(state: AppState, action: Action): AppState {
         historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: true },
       };
 
+    /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+    case 'CHILD_HISTORY_LOADING': {
+      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
+        status: 'loading',
+        loadedCount: previous?.loadedCount ?? 0,
+        hasMore: previous?.hasMore ?? false,
+        isLoaded: false,
+        isLoadingOlder: false,
+        olderCursor: undefined,
+        isViewportPinned: previous?.isViewportPinned ?? true,
+      });
+    }
+
+    case 'CHILD_HISTORY_LOADING_OLDER': {
+      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      if (!previous || previous.isLoadingOlder) return state;
+      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
+        ...previous,
+        isLoadingOlder: true,
+      });
+    }
+
     case 'SESSION_RESTORE_START': {
       const prev = state.sessionRestore[action.appSessionId];
       return {
@@ -1900,6 +2041,19 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'SESSION_HISTORY_FAILED': {
+      if (action.childSessionId) {
+        const prev = state.childHistory[action.appSessionId]?.[action.childSessionId];
+        return withChildHistory(state, action.appSessionId, action.childSessionId, {
+          status: 'failed',
+          loadedCount: prev?.loadedCount ?? 0,
+          hasMore: prev?.hasMore ?? false,
+          error: action.message,
+          isLoaded: prev?.isLoaded ?? false,
+          isLoadingOlder: false,
+          olderCursor: prev?.olderCursor,
+          isViewportPinned: prev?.isViewportPinned ?? true,
+        });
+      }
       const prev = state.sessionRestore[action.appSessionId];
       return {
         ...state,
@@ -1918,165 +2072,77 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     case 'SESSION_HISTORY': {
       const existing = state.transcripts[action.appSessionId] ?? [];
-      // An older page prepends its events to the front of the existing scrollback
-      // (deduping by id so a trimmed/overlapping boundary never doubles a message).
-      if (action.mode === 'prepend') {
-        // Drop optimistic user echoes (seed-/local-) now superseded by the real
-        // persisted prompt arriving in this older page. They were kept above a
-        // partial page during the initial restore; without this they would
-        // duplicate and misorder the opening prompt once it pages in (their ids
-        // differ from the persisted prompt, so id-dedup alone misses them).
-        const olderUserText = new Set(
-          action.transcripts.filter((e) => e.author === 'user' && e.text).map((e) => e.text),
+      const hasMore = Boolean(action.olderCursor);
+
+      if (action.childSessionId) {
+        const reconciled = reconcileTranscriptSourcePage(
+          existing,
+          action.childSessionId,
+          action.transcripts,
+          action.mode ?? 'replace',
+          hasMore,
         );
-        const olderLastTs =
-          action.transcripts.length > 0 ? action.transcripts[action.transcripts.length - 1].ts : 0;
-        const supersededEcho = (e: TranscriptEvent) =>
-          (e.id.startsWith('seed-') || e.id.startsWith('local-')) &&
-          e.author === 'user' &&
-          !!e.text &&
-          e.ts <= olderLastTs &&
-          echoMatchesPersisted(e, olderUserText);
-        const kept = existing.filter((e) => !supersededEcho(e));
-        const have = new Set(kept.map((e) => e.id));
-        const older = action.transcripts.filter((e) => !have.has(e.id));
-        const changed = older.length > 0 || kept.length !== existing.length;
-        const merged = changed ? [...older, ...kept] : existing;
-        const hasMore = Boolean(action.olderCursor);
-        const estimatedCost = changed
-          ? estimateTranscriptCost(merged)
-          : (state.transcriptRetainedCost[action.appSessionId] ?? estimateTranscriptCost(existing));
-        return withHistoricalCompactionGeneration(
-          {
-            ...state,
-            transcripts: changed
-              ? { ...state.transcripts, [action.appSessionId]: merged }
-              : state.transcripts,
-            transcriptRetainedCost: {
-              ...state.transcriptRetainedCost,
-              [action.appSessionId]: estimatedCost,
-            },
-            historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-            historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-            sessionRestore: {
-              ...state.sessionRestore,
-              [action.appSessionId]: {
-                status: hasMore ? 'paged' : 'loaded',
-                loadedCount: merged.length,
-                hasMore,
-              },
+        const transcriptChanged = reconciled.transcript !== existing;
+        const previousHistory = state.childHistory[action.appSessionId]?.[action.childSessionId];
+        const historyState = withChildHistory(state, action.appSessionId, action.childSessionId, {
+          status: hasMore ? 'paged' : 'loaded',
+          loadedCount: reconciled.sourceEvents.length,
+          hasMore,
+          isLoaded: true,
+          isLoadingOlder: false,
+          olderCursor: action.olderCursor,
+          isViewportPinned: previousHistory?.isViewportPinned ?? true,
+        });
+        const next = transcriptChanged
+          ? withUpdatedTranscript(
+              historyState,
+              action.appSessionId,
+              reconciled.transcript,
+              estimateTranscriptCost(reconciled.transcript),
+              action.childSessionId,
+            )
+          : historyState;
+        const isSelected =
+          next.selectedChild?.parentAppSessionId === action.appSessionId &&
+          next.selectedChild.childSessionId === action.childSessionId;
+        return isSelected
+          ? next
+          : releaseInactiveChildTranscript(next, action.appSessionId, action.childSessionId);
+      }
+
+      if (action.mode === 'prepend') {
+        const mergedTranscript = reconcilePrependedTranscript(existing, action.transcripts);
+        const transcriptChanged = mergedTranscript !== existing;
+        const historyState: AppState = {
+          ...state,
+          historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
+          historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
+          sessionRestore: {
+            ...state.sessionRestore,
+            [action.appSessionId]: {
+              status: hasMore ? 'paged' : 'loaded',
+              loadedCount: mergedTranscript.length,
+              hasMore,
             },
           },
+        };
+        const next = transcriptChanged
+          ? withUpdatedTranscript(
+              historyState,
+              action.appSessionId,
+              mergedTranscript,
+              estimateTranscriptCost(mergedTranscript),
+            )
+          : historyState;
+        return withHistoricalCompactionGeneration(
+          next,
           action.appSessionId,
-          merged,
+          next.transcripts[action.appSessionId] ?? [],
         );
       }
-      // No-clobber replace: reconcile the authoritative, correctly-ordered
-      // replay page with any live events already in state (a reconnect to a
-      // running session can deliver live events first, and a brand-new session
-      // carries a locally seeded opening prompt).
-      //   - Shared ids: the page wins.
-      //   - Optimistic user echoes (seed-/local- ids) the page already contains
-      //     (matched by author + text within the page's time window) are dropped
-      //     so the opening prompt never double-renders once history arrives.
-      //     Echoes newer than the whole page (a prompt sent during restore) are
-      //     kept, as are echoes older than a PARTIAL page (paged restore): there
-      //     the matching text is a later message, not this echo, so dropping it
-      //     would lose the opening prompt that belongs above the page.
-      //   - Live events that duplicate a replayed one by content are dropped:
-      //     live ids are transient (nextId) and live ts is receipt-time, so a
-      //     reconnect-race event and its persisted twin share neither id nor ts
-      //     and would otherwise both render. They are matched by a content
-      //     signature (sourceSessionId + toolUseId for tools, else
-      //     sourceSessionId + author/role + kind + text) consumed once per page
-      //     occurrence so a genuinely repeated message is kept. Scoping by
-      //     sourceSessionId stops one child session's output masking another's.
-      //   - Remaining live-only events keep their place by timestamp relative to
-      //     the page: an un-persisted opening prompt stays above it, a just-sent
-      //     prompt (reconnect race) stays below it.
-      // The page's internal order (seq) is preserved by never re-sorting it.
-      const page = action.transcripts;
-      const pageIds = new Set(page.map((e) => e.id));
-      const pageUserText = new Set(
-        page.filter((e) => e.author === 'user' && e.text).map((e) => e.text),
-      );
-      const firstTs = page.length > 0 ? page[0].ts : 0;
-      const lastTs = page.length > 0 ? page[page.length - 1].ts : 0;
-      // A partial page (older history still pages in) does not contain anything
-      // older than firstTs, so an earlier echo must not be deduped against it.
-      // A complete page (no older cursor) spans the whole conversation, so the
-      // lower bound is relaxed to also catch a seed whose createdAt slightly
-      // predates the first persisted message.
-      const pageIsComplete = !action.olderCursor;
-      const supersededEcho = (e: TranscriptEvent) =>
-        (e.id.startsWith('seed-') || e.id.startsWith('local-')) &&
-        e.author === 'user' &&
-        !!e.text &&
-        e.ts <= lastTs &&
-        (pageIsComplete || e.ts >= firstTs) &&
-        echoMatchesPersisted(e, pageUserText);
-      // Live primary events carry the current provider identity while restored
-      // history canonicalizes that source to 'primary' (mirroring the
-      // sidecar). Normalize so a reconnect-race twin matches instead of both the
-      // live and persisted copy surviving and duplicating main-agent output.
-      const sessionKey = (e: TranscriptEvent) =>
-        e.role === 'primary' && e.sourceSessionId !== 'user' ? 'primary' : e.sourceSessionId;
-      const contentSig = (e: TranscriptEvent) =>
-        e.toolUseId
-          ? `tool:${sessionKey(e)}:${e.kind}:${e.toolUseId}`
-          : `${sessionKey(e)}:${e.author ?? e.role}:${e.kind}:${e.text ?? ''}`;
-      // Index page entries by content signature -> their timestamps so a live
-      // event is matched to the persisted twin nearest in time rather than to
-      // any same-text occurrence anywhere in restored history.
-      const pageSig = new Map<string, number[]>();
-      for (const e of page) {
-        const k = contentSig(e);
-        const at = pageSig.get(k);
-        if (at) at.push(e.ts);
-        else pageSig.set(k, [e.ts]);
-      }
-      const isReplayedDuplicate = (e: TranscriptEvent) => {
-        // Optimistic user echoes are governed solely by supersededEcho above; do
-        // not let content-dedup drop one the echo logic intentionally keeps.
-        if (e.id.startsWith('seed-') || e.id.startsWith('local-')) return false;
-        const at = pageSig.get(contentSig(e));
-        if (!at || at.length === 0) return false;
-        // A persisted twin is logged within moments of the live event; a page
-        // entry far from this event's time is a different occurrence (e.g. a
-        // repeated "ok"). Consume only the closest twin within tolerance so a
-        // brand-new live output that merely repeats old text is never dropped.
-        // Streamed text/thinking keep the first-chunk ts but advance endTs, while
-        // history timestamps near completion, so compare against the whole live
-        // [ts, endTs] span rather than just the start.
-        const lo = Math.min(e.ts, e.endTs ?? e.ts);
-        const hi = Math.max(e.ts, e.endTs ?? e.ts);
-        let bestIdx = -1;
-        let bestDiff = Infinity;
-        for (let i = 0; i < at.length; i++) {
-          const t = at[i];
-          const diff = t < lo ? lo - t : t > hi ? t - hi : 0;
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            bestIdx = i;
-          }
-        }
-        if (bestIdx >= 0 && bestDiff <= REPLAY_DEDUP_TOLERANCE_MS) {
-          at.splice(bestIdx, 1);
-          return true;
-        }
-        return false;
-      };
-      const liveOnly = existing.filter(
-        (e) => !pageIds.has(e.id) && !supersededEcho(e) && !isReplayedDuplicate(e),
-      );
-      const before = liveOnly.filter((e) => e.ts < firstTs);
-      const after = liveOnly.filter((e) => e.ts >= firstTs);
-      const mergedTranscript = page.length > 0 ? [...before, ...page, ...after] : existing;
-      const transcripts = { ...state.transcripts, [action.appSessionId]: mergedTranscript };
-      const transcriptRetainedCost = {
-        ...state.transcriptRetainedCost,
-        [action.appSessionId]: estimateTranscriptCost(mergedTranscript),
-      };
+
+      const mergedTranscript = reconcileRestoredTranscript(existing, action.transcripts, !hasMore);
+      const transcriptChanged = mergedTranscript !== existing;
       const historicalChildren = action.childSessions ?? [];
       const existingChildSessions = state.childSessions[action.appSessionId] ?? {};
       let childSessions = state.childSessions;
@@ -2089,35 +2155,42 @@ function baseReducer(state: AppState, action: Action): AppState {
           [action.appSessionId]: byChild,
         };
       }
-      const hasMore = Boolean(action.olderCursor);
       // An empty restore (e.g. a live session with no persisted history yet)
       // must not wipe progress already delivered by live events; only adopt the
       // replayed progress when it actually carries entries.
       const existingProgress = state.progress[action.appSessionId] ?? [];
       const mergedProgress = action.progress.length > 0 ? action.progress : existingProgress;
-      return withHistoricalCompactionGeneration(
-        {
-          ...state,
-          progress: { ...state.progress, [action.appSessionId]: mergedProgress },
-          transcripts,
-          transcriptRetainedCost,
-          childSessions,
-          historyLoaded: { ...state.historyLoaded, [action.appSessionId]: true },
-          historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-          historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-          sessionRestore: {
-            ...state.sessionRestore,
-            [action.appSessionId]: {
-              status: hasMore ? 'paged' : 'loaded',
-              loadedCount: mergedTranscript.length,
-              hasMore,
-            },
+      const historyState: AppState = {
+        ...state,
+        progress: { ...state.progress, [action.appSessionId]: mergedProgress },
+        childSessions,
+        historyLoaded: { ...state.historyLoaded, [action.appSessionId]: true },
+        historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
+        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
+        sessionRestore: {
+          ...state.sessionRestore,
+          [action.appSessionId]: {
+            status: hasMore ? 'paged' : 'loaded',
+            loadedCount: mergedTranscript.length,
+            hasMore,
           },
         },
+      };
+      const next = transcriptChanged
+        ? withUpdatedTranscript(
+            historyState,
+            action.appSessionId,
+            mergedTranscript,
+            estimateTranscriptCost(mergedTranscript),
+          )
+        : historyState;
+      return withHistoricalCompactionGeneration(
+        next,
         action.appSessionId,
-        mergedTranscript,
+        next.transcripts[action.appSessionId] ?? [],
       );
     }
+    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
     case 'CLEAR_PERMISSION':
       return { ...state, pendingPermission: null };
@@ -2135,7 +2208,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         sessionLastSeen[state.activeAppSessionId] = now;
       }
       if (action.id) sessionLastSeen[action.id] = now;
-      let next = invalidateSelectedChildOpening(state);
+      let next = invalidateSelectedChildOpening(releaseInactiveSelectedChild(state));
       const outgoingAppSessionId = state.activeAppSessionId;
       const outgoingSession = outgoingAppSessionId
         ? state.sessions[outgoingAppSessionId]
@@ -2616,7 +2689,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         previous &&
         (action.selection?.parentAppSessionId !== previous.parentAppSessionId ||
           action.selection.childSessionId !== previous.childSessionId)
-          ? invalidateSelectedChildOpening(state)
+          ? invalidateSelectedChildOpening(releaseInactiveSelectedChild(state))
           : state;
       if (!action.selection) return { ...next, selectedChild: null };
       const { parentAppSessionId, childSessionId } = action.selection;
@@ -2626,11 +2699,27 @@ function baseReducer(state: AppState, action: Action): AppState {
       )
         return { ...next, selectedChild: null };
       next = { ...next, selectedChild: action.selection };
-      if (action.requestId)
-        return withChildAccess(next, parentAppSessionId, childSessionId, {
+      if (action.requestId) {
+        const opening = withChildAccess(next, parentAppSessionId, childSessionId, {
           state: 'opening',
           requestId: action.requestId,
         });
+        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+        const history = opening.childHistory[parentAppSessionId]?.[childSessionId];
+        if (history?.isLoaded) return opening;
+        const loadedCount = (opening.transcripts[parentAppSessionId] ?? []).filter(
+          (event) => event.sourceSessionId === childSessionId,
+        ).length;
+        return withChildHistory(opening, parentAppSessionId, childSessionId, {
+          status: 'loading',
+          loadedCount,
+          hasMore: false,
+          isLoaded: false,
+          isLoadingOlder: false,
+          isViewportPinned: history?.isViewportPinned ?? true,
+        });
+        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+      }
       const access = next.childAccess[parentAppSessionId]?.[childSessionId];
       return access?.state === 'failed' || access?.state === 'closed'
         ? withoutChildAccess(next, parentAppSessionId, childSessionId)
@@ -2990,6 +3079,7 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       return {
         type: 'SESSION_HISTORY',
         appSessionId: ev.appSessionId,
+        childSessionId: ev.childSessionId,
         progress: ev.progress,
         transcripts: ev.transcripts,
         childSessions: ev.childSessions,
@@ -2999,7 +3089,12 @@ export function adaptEvent(ev: ServerEvent): Action | null {
         hasMore: ev.hasMore,
       };
     case 'session.history.error':
-      return { type: 'SESSION_HISTORY_FAILED', appSessionId: ev.appSessionId, message: ev.message };
+      return {
+        type: 'SESSION_HISTORY_FAILED',
+        appSessionId: ev.appSessionId,
+        childSessionId: ev.childSessionId,
+        message: ev.message,
+      };
     case 'context.updated':
       return {
         type: 'CONTEXT_UPDATED',

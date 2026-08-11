@@ -83,6 +83,7 @@ export class SessionContext {
   // resurrect the old meter.
   private readonly pendingCompactionResets = new Set<string>();
   private readonly recordedCompactions = new Map<string, Map<string, number>>();
+  private readonly usagePersistenceRetries = new Set<string>();
   private readonly pollers = new Map<string, ContextPoller>();
   private epoch = 0;
 
@@ -119,6 +120,7 @@ export class SessionContext {
       (currentContextTokens === summaryBefore.contextTokens &&
         (currentContextTokens <= 0 || summaryBefore.contextAccuracy === 'exact'));
     if (
+      !this.usagePersistenceRetries.has(stableAppSessionId) &&
       nextSummary.tokensIn === summaryBefore.tokensIn &&
       nextSummary.tokensOut === summaryBefore.tokensOut &&
       contextUnchanged
@@ -153,8 +155,10 @@ export class SessionContext {
         },
         { touchActivity: false },
       );
+      this.usagePersistenceRetries.delete(stableAppSessionId);
     } catch {
       // Usage telemetry must not fail the active provider turn.
+      this.usagePersistenceRetries.add(stableAppSessionId);
       liveSession.summary = nextSummary;
       this.dependencies.emit({
         type: 'session.updated',
@@ -306,6 +310,7 @@ export class SessionContext {
     this.providerUsageBaselines.delete(key);
     this.latestProviderUsage.delete(key);
     this.pendingCompactionResets.delete(key);
+    this.usagePersistenceRetries.delete(appSessionId);
     this.forgetRecordedCompactions(key);
   }
 
@@ -319,6 +324,7 @@ export class SessionContext {
     this.latestProviderUsage.clear();
     this.pendingCompactionResets.clear();
     this.recordedCompactions.clear();
+    this.usagePersistenceRetries.clear();
     this.usageOffsets.clear();
   }
 

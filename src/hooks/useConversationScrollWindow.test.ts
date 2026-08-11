@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  primaryViewportOwner,
   rowIntersectsViewport,
   scrollTopForPreservedAnchor,
+  shouldCancelViewportRestore,
   shouldCaptureViewportAnchorAfterScroll,
   updateViewportAnchorGeometry,
 } from './conversationViewportAnchor';
@@ -13,8 +13,7 @@ import {
 } from './useConversationScrollWindow';
 
 const settledPinned = {
-  isViewingChildSession: false,
-  isPrimaryLive: false,
+  isConversationLive: false,
   isLoadingOlder: false,
   isAutoPagingOlderHistory: false,
   isPinned: true,
@@ -38,13 +37,12 @@ test('settled transcript release waits for older-history paging to finish', () =
   );
 });
 
-test('child and scrolled-up conversations stay pinned in memory', () => {
+test('settled primary and child conversations can release only while bottom-pinned', () => {
   assert.equal(
     shouldReleaseConversationTranscript({
       ...settledPinned,
-      isViewingChildSession: true,
     }),
-    false,
+    true,
   );
   assert.equal(
     shouldReleaseConversationTranscript({
@@ -55,9 +53,14 @@ test('child and scrolled-up conversations stay pinned in memory', () => {
   );
 });
 
-test('child scrolling never takes ownership of the parent transcript viewport', () => {
-  assert.equal(primaryViewportOwner('parent', false), 'parent');
-  assert.equal(primaryViewportOwner('parent', true), undefined);
+test('live child conversations stay pinned in memory', () => {
+  assert.equal(
+    shouldReleaseConversationTranscript({
+      ...settledPinned,
+      isConversationLive: true,
+    }),
+    false,
+  );
 });
 
 test('user movement selects a fresh prepend anchor while older history is loading', () => {
@@ -77,6 +80,12 @@ test('user movement selects a fresh prepend anchor while older history is loadin
     }),
     false,
   );
+});
+
+test('active user movement cancels multi-frame viewport restoration', () => {
+  assert.equal(shouldCancelViewportRestore(1_840, 1_840.4), false);
+  assert.equal(shouldCancelViewportRestore(1_840, 1_920), true);
+  assert.equal(shouldCancelViewportRestore(null, 1_920), false);
 });
 
 test('row anchoring compensates for prepends and later interactive height changes', () => {

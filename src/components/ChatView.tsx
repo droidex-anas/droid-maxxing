@@ -1,6 +1,6 @@
-import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
+import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
-import { useStore } from '../hooks/useStore';
+import { useStore, type SessionRestore } from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { motion } from 'framer-motion';
 import {
@@ -12,7 +12,7 @@ import {
   buildGroupedFeed,
 } from './chat';
 import { readFile } from '../lib/desktop';
-import { interruptChild, loadSessionHistory } from '../lib/commands';
+import { interruptChild, loadChildHistory, loadSessionHistory } from '../lib/commands';
 import { chatDisplayTitle } from '../lib/chatMetadata';
 import {
   childSessionActivityForTarget,
@@ -20,6 +20,7 @@ import {
   childSessionMeta,
   findChildSessionForTarget,
   orderedChildSessions,
+  shouldRequestReleasedChildHistory,
   transcriptForVisibleSession,
   visibleSessionTarget,
 } from '../lib/childSessions';
@@ -29,6 +30,8 @@ import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
 import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
 import { useConversationTimeline } from '../hooks/useConversationTimeline';
+import { transcriptRehydrationLimit } from '../lib/transcriptStoreMemory';
+import { VIEWPORT_TRANSCRIPT_POLICY } from '../lib/transcriptWindow';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -245,22 +248,75 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     return transcriptForVisibleSession(allTranscript, selectedChildSessionId ?? null);
   }, [allTranscript, viewingChildSession, selectedChildSessionId]);
 
-  // Lazily page older primary-session history (across the compaction chain) in as
-  // the user scrolls toward the top, prefetching well before the edge so the
-  // scrollback feels endless and smooth rather than hitting a hard stop.
+  // Primary and logical-child transcripts each own their persisted cursor even
+  // though live child events share the parent's in-memory event array.
   const historyAppSessionId = activeSession?.appSessionId;
-  const olderCursor = historyAppSessionId ? state.historyCursor[historyAppSessionId] : undefined;
-  const loadingOlder = historyAppSessionId ? state.historyLoadingOlder[historyAppSessionId] : false;
-  const restore = historyAppSessionId ? state.sessionRestore[historyAppSessionId] : undefined;
+  const historyChildSessionId = selectedChildSessionId;
+  // These keyed renderer maps are intentionally sparse at runtime despite
+  // their long-standing Record types.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+  const childHistory =
+    historyAppSessionId && historyChildSessionId
+      ? state.childHistory[historyAppSessionId]?.[historyChildSessionId]
+      : undefined;
+  let olderCursor: string | undefined;
+  let loadingOlder = false;
+  let restore: SessionRestore | undefined = childHistory;
+  if (historyChildSessionId) {
+    olderCursor = childHistory?.olderCursor;
+    loadingOlder = childHistory?.isLoadingOlder ?? false;
+  } else if (historyAppSessionId) {
+    olderCursor = state.historyCursor[historyAppSessionId];
+    loadingOlder = state.historyLoadingOlder[historyAppSessionId] ?? false;
+    restore = state.sessionRestore[historyAppSessionId];
+  }
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
   const retryRestore = useCallback(() => {
     if (!historyAppSessionId) return;
+    if (historyChildSessionId) {
+      dispatch({
+        type: 'CHILD_HISTORY_LOADING',
+        parentAppSessionId: historyAppSessionId,
+        childSessionId: historyChildSessionId,
+      });
+      loadChildHistory(historyAppSessionId, historyChildSessionId);
+      return;
+    }
     dispatch({ type: 'SESSION_RESTORE_START', appSessionId: historyAppSessionId });
     loadSessionHistory(historyAppSessionId);
-  }, [historyAppSessionId, dispatch]);
+  }, [dispatch, historyAppSessionId, historyChildSessionId]);
   const tailLen = transcript.length > 0 ? (transcript[transcript.length - 1].text?.length ?? 0) : 0;
   const primaryLive = useSessionLive(activeSession?.appSessionId ?? null);
   const live = visibleTarget.kind === 'child' ? visibleTarget.canInterrupt : primaryLive;
   const draftFolder = state.draftChat?.cwd.split('/').filter(Boolean).pop();
+
+  // A released child tail keeps enough rows for instant switching, then repairs
+  // its recent persisted page before that child can page further back.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+  useEffect(() => {
+    if (
+      !historyAppSessionId ||
+      !historyChildSessionId ||
+      childHistory?.isLoaded !== false ||
+      childHistory.status !== 'paged'
+    ) {
+      return;
+    }
+    const access = state.childAccess[historyAppSessionId]?.[historyChildSessionId];
+    if (!shouldRequestReleasedChildHistory(access)) return;
+    dispatch({
+      type: 'CHILD_HISTORY_LOADING',
+      parentAppSessionId: historyAppSessionId,
+      childSessionId: historyChildSessionId,
+    });
+    loadChildHistory(
+      historyAppSessionId,
+      historyChildSessionId,
+      undefined,
+      transcriptRehydrationLimit(childHistory),
+    );
+  }, [childHistory, dispatch, historyAppSessionId, historyChildSessionId, state.childAccess]);
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
   // Between pressing send on a fresh chat and SESSION_CREATED arriving (the
   // sidecar spawns the session, ~1-2s), there is no active session yet. Show the
@@ -356,9 +412,16 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
   const { timelineAnchors, isTimelinePriming, isAutoPagingOlderHistory } = useConversationTimeline({
     feedItems,
     isViewingChildSession: viewingChildSession,
+    conversationKey: visibleConversationKey,
     historyAppSessionId,
     olderCursor,
     isLoadingOlder: loadingOlder,
+    isTranscriptWindowAtCapacity:
+      allTranscript.length > VIEWPORT_TRANSCRIPT_POLICY.highWaterEvents ||
+      (activeSession
+        ? (state.transcriptRetainedCost[activeSession.appSessionId] ?? 0) >
+          VIEWPORT_TRANSCRIPT_POLICY.highWaterCost
+        : false),
     restoreStatus: restore?.status,
   });
   const { onScroll, requestOlderHistory } = useConversationScrollWindow({
@@ -367,12 +430,13 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     isViewingChildSession: viewingChildSession,
     activeAppSessionId,
     historyAppSessionId,
+    historyChildSessionId,
     olderCursor,
     isLoadingOlder: loadingOlder,
     transcriptLength: transcript.length,
     transcriptTailLength: tailLen,
-    retainedTranscriptLength: allTranscript.length,
-    isPrimaryLive: primaryLive,
+    retainedTranscriptLength: transcript.length,
+    isConversationLive: live,
     isAutoPagingOlderHistory,
     dispatch,
   });
@@ -386,33 +450,125 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     requestOlderHistory();
   }, [isAutoPagingOlderHistory, requestOlderHistory]);
 
+  const stopSelectedChild =
+    visibleTarget.kind === 'child' && visibleTarget.canInterrupt
+      ? () => {
+          interruptChild(visibleTarget.parentAppSessionId, visibleTarget.childSessionId);
+        }
+      : undefined;
+  const chatHeaderSub = viewingChildSession
+    ? {
+        label: selectedChildLabel,
+        meta: selectedChildMeta,
+        running: live,
+        onBack: () => {
+          dispatch({ type: 'SELECT_CHILD', selection: null });
+        },
+        onStop: stopSelectedChild,
+      }
+    : undefined;
+  const openSpecWiki = activeAppSessionId
+    ? () => {
+        dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeAppSessionId });
+      }
+    : undefined;
+
+  let emptyChildActivity: ReactNode;
+  if (visibleTarget.kind === 'child' && visibleTarget.canInterrupt) {
+    emptyChildActivity = (
+      <WorkingIndicator
+        label={`${selectedChildLabel} is working`}
+        startTs={visibleTarget.child.startedAt}
+      />
+    );
+  } else if (selectedChildOpening) {
+    emptyChildActivity = <WorkingIndicator label={`Loading ${selectedChildLabel} activity`} />;
+  } else {
+    emptyChildActivity = (
+      <span className="text-[13px] text-droid-text-muted">
+        No activity captured for {selectedChildLabel}.
+      </span>
+    );
+  }
+
+  let conversationContent: ReactNode;
+  if (activeSession && transcript.length > 0) {
+    conversationContent = (
+      <motion.div
+        key={`${activeAppSessionId ?? 'none'}:${viewingChildSession ? String(selectedChildSessionId) : 'primary'}`}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+        className="mx-auto min-w-0 px-6 py-6 max-w-2xl"
+      >
+        {restore?.status === 'failed' && (
+          <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
+        )}
+        <MessageFeed
+          events={transcript}
+          items={feedItems}
+          pending={live}
+          cwd={activeSession.cwd}
+          onOpenDiff={openDiff}
+          onOpenReviewFile={openReviewFile}
+          onOpenChildSession={openChildSession}
+          childSessionActivity={childSessionActivity}
+          subagentsDock={subagentsDock}
+          specContent={specContent}
+          onOpenSpecWiki={openSpecWiki}
+          createdWorktreePath={!viewingChildSession ? createdWorktreePath : undefined}
+        />
+      </motion.div>
+    );
+  } else if (activeSession && restore?.status === 'failed') {
+    conversationContent = <RestoreFailedState message={restore.error} onRetry={retryRestore} />;
+  } else if (activeSession && viewingChildSession && restore?.status === 'loading') {
+    conversationContent = <RestoringState />;
+  } else if (activeSession && viewingChildSession) {
+    conversationContent = (
+      <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center gap-4 px-8 text-center">
+        {selectedChildSession?.prompt && (
+          <div className="max-w-lg rounded-xl bg-droid-elevated/40 px-4 py-3 text-left">
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-droid-text-muted">
+              Task
+            </div>
+            <div className="text-[12.5px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
+              {selectedChildSession.prompt}
+            </div>
+          </div>
+        )}
+        {emptyChildActivity}
+      </div>
+    );
+  } else if (activeSession && restore?.status === 'loading') {
+    conversationContent = <RestoringState />;
+  } else if (startingCompose) {
+    conversationContent = (
+      <div className="mx-auto min-w-0 max-w-2xl px-6 py-6">
+        <UserBubble event={startingCompose} />
+        <div className="mt-5">
+          <ChatSkeleton />
+        </div>
+      </div>
+    );
+  } else {
+    conversationContent = (
+      <WelcomeScreen
+        folder={draftFolder}
+        onSeedPrompt={(text) => {
+          dispatch({ type: 'SEED_COMPOSER', text });
+        }}
+      />
+    );
+  }
+
   return (
     <div data-testid="chat-view" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
       {activeSession && (
         <ChatHeader
           title={chatDisplayTitle(activeSession, state.chatMetadata[activeSession.appSessionId])}
           live={live}
-          sub={
-            viewingChildSession
-              ? {
-                  label: selectedChildLabel,
-                  meta: selectedChildMeta,
-                  running: live,
-                  onBack: () => {
-                    dispatch({ type: 'SELECT_CHILD', selection: null });
-                  },
-                  onStop:
-                    visibleTarget.kind === 'child' && visibleTarget.canInterrupt
-                      ? () => {
-                          interruptChild(
-                            visibleTarget.parentAppSessionId,
-                            visibleTarget.childSessionId,
-                          );
-                        }
-                      : undefined,
-                }
-              : undefined
-          }
+          sub={chatHeaderSub}
         />
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
@@ -429,82 +585,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
             overflowAnchor: 'none',
           }}
         >
-          {activeSession && transcript.length > 0 ? (
-            <motion.div
-              key={`${activeAppSessionId ?? 'none'}:${viewingChildSession ? String(selectedChildSessionId) : 'primary'}`}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-              className="mx-auto min-w-0 px-6 py-6 max-w-2xl"
-            >
-              {!viewingChildSession && restore?.status === 'failed' && (
-                <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
-              )}
-              <MessageFeed
-                events={transcript}
-                items={feedItems}
-                pending={live}
-                cwd={activeSession.cwd}
-                onOpenDiff={openDiff}
-                onOpenReviewFile={openReviewFile}
-                onOpenChildSession={openChildSession}
-                childSessionActivity={childSessionActivity}
-                subagentsDock={subagentsDock}
-                specContent={specContent}
-                onOpenSpecWiki={
-                  activeAppSessionId
-                    ? () => {
-                        dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeAppSessionId });
-                      }
-                    : undefined
-                }
-                createdWorktreePath={!viewingChildSession ? createdWorktreePath : undefined}
-              />
-            </motion.div>
-          ) : activeSession && restore?.status === 'failed' ? (
-            <RestoreFailedState message={restore.error} onRetry={retryRestore} />
-          ) : activeSession && viewingChildSession ? (
-            <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center gap-4 px-8 text-center">
-              {selectedChildSession?.prompt && (
-                <div className="max-w-lg rounded-xl bg-droid-elevated/40 px-4 py-3 text-left">
-                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-droid-text-muted">
-                    Task
-                  </div>
-                  <div className="text-[12.5px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
-                    {selectedChildSession.prompt}
-                  </div>
-                </div>
-              )}
-              {visibleTarget.kind === 'child' && visibleTarget.canInterrupt ? (
-                <WorkingIndicator
-                  label={`${selectedChildLabel} is working`}
-                  startTs={visibleTarget.child.startedAt}
-                />
-              ) : selectedChildOpening ? (
-                <WorkingIndicator label={`Loading ${selectedChildLabel} activity`} />
-              ) : (
-                <span className="text-[13px] text-droid-text-muted">
-                  No activity captured for {selectedChildLabel}.
-                </span>
-              )}
-            </div>
-          ) : activeSession && restore?.status === 'loading' ? (
-            <RestoringState />
-          ) : startingCompose ? (
-            <div className="mx-auto min-w-0 max-w-2xl px-6 py-6">
-              <UserBubble event={startingCompose} />
-              <div className="mt-5">
-                <ChatSkeleton />
-              </div>
-            </div>
-          ) : (
-            <WelcomeScreen
-              folder={draftFolder}
-              onSeedPrompt={(text) => {
-                dispatch({ type: 'SEED_COMPOSER', text });
-              }}
-            />
-          )}
+          {conversationContent}
         </div>
       </div>
     </div>

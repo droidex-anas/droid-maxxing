@@ -5,7 +5,9 @@ import {
   estimateAppendedTranscriptCost,
   estimateReplacedTranscriptTailCost,
   estimateTranscriptCost,
+  releaseChildTranscriptWindow,
   releaseTranscriptWindow,
+  shouldReleaseTranscriptWindow,
   type TranscriptWindow,
   type TranscriptWindowPolicy,
 } from './transcriptWindow';
@@ -15,7 +17,10 @@ import {
 const MAX_RECENT_REHYDRATION_EVENTS = 1_600;
 
 export function transcriptRehydrationLimit(
-  restore: AppState['sessionRestore'][string] | undefined,
+  restore:
+    | AppState['sessionRestore'][string]
+    | AppState['childHistory'][string][string]
+    | undefined,
 ): number | undefined {
   if (restore?.status !== 'paged') return undefined;
   return Math.min(MAX_RECENT_REHYDRATION_EVENTS, Math.max(1, restore.loadedCount));
@@ -45,6 +50,7 @@ export function appendTranscriptEvent(state: AppState, event: TranscriptEvent): 
       appSessionId,
       merged,
       estimateReplacedTranscriptTailCost(previousCost, textDelta.previous, mergedTail),
+      event.role === 'primary' ? undefined : event.sourceSessionId,
     );
   }
 
@@ -65,6 +71,7 @@ export function appendTranscriptEvent(state: AppState, event: TranscriptEvent): 
       appSessionId,
       merged,
       estimateReplacedTranscriptTailCost(previousCost, toolCallTail, mergedTail),
+      event.role === 'primary' ? undefined : event.sourceSessionId,
     );
   }
 
@@ -73,6 +80,7 @@ export function appendTranscriptEvent(state: AppState, event: TranscriptEvent): 
     appSessionId,
     [...previous, event],
     estimateAppendedTranscriptCost(previousCost, event),
+    event.role === 'primary' ? undefined : event.sourceSessionId,
   );
 }
 
@@ -85,6 +93,16 @@ export function releaseSessionTranscriptWindow(
   if (transcript.length === 0) return state;
   const estimatedCost =
     state.transcriptRetainedCost[appSessionId] ?? estimateTranscriptCost(transcript);
+  if (!shouldReleaseTranscriptWindow(transcript, estimatedCost, policy)) {
+    if (Object.hasOwn(state.transcriptRetainedCost, appSessionId)) return state;
+    return {
+      ...state,
+      transcriptRetainedCost: {
+        ...state.transcriptRetainedCost,
+        [appSessionId]: estimatedCost,
+      },
+    };
+  }
   const window = releasePrimaryTranscriptWindow(transcript, estimatedCost, policy);
   if (!window.released) {
     if (Object.hasOwn(state.transcriptRetainedCost, appSessionId)) return state;
@@ -121,13 +139,60 @@ export function releaseSessionTranscriptWindow(
   };
 }
 
+export function releaseSessionChildTranscriptWindow(
+  state: AppState,
+  parentAppSessionId: string,
+  childSessionId: string,
+  policy: TranscriptWindowPolicy,
+): AppState {
+  // These keyed renderer maps are intentionally sparse at runtime despite
+  // their long-standing Record types.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+  const transcript = state.transcripts[parentAppSessionId] ?? [];
+  if (transcript.length === 0) return state;
+  const estimatedCost =
+    state.transcriptRetainedCost[parentAppSessionId] ?? estimateTranscriptCost(transcript);
+  if (!shouldReleaseTranscriptWindow(transcript, estimatedCost, policy)) return state;
+  const window = releaseChildTranscriptWindow(transcript, childSessionId, policy);
+  if (!window.released) return state;
+  const previousHistory = state.childHistory[parentAppSessionId]?.[childSessionId];
+  const childEventCount = window.events.filter(
+    (event) => event.sourceSessionId === childSessionId,
+  ).length;
+  return {
+    ...state,
+    transcripts: { ...state.transcripts, [parentAppSessionId]: window.events },
+    transcriptRetainedCost: {
+      ...state.transcriptRetainedCost,
+      [parentAppSessionId]: window.estimatedCost,
+    },
+    childHistory: {
+      ...state.childHistory,
+      [parentAppSessionId]: {
+        ...state.childHistory[parentAppSessionId],
+        [childSessionId]: {
+          status: 'paged',
+          loadedCount: childEventCount,
+          hasMore: true,
+          isLoaded: false,
+          isLoadingOlder: false,
+          olderCursor: undefined,
+          isViewportPinned: previousHistory?.isViewportPinned ?? true,
+        },
+      },
+    },
+  };
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+}
+
 export function withUpdatedTranscript(
   state: AppState,
   appSessionId: string,
   transcript: TranscriptEvent[],
   estimatedCost: number,
+  childSessionId?: string,
 ): AppState {
-  const next = {
+  let next = {
     ...state,
     transcripts: { ...state.transcripts, [appSessionId]: transcript },
     transcriptRetainedCost: {
@@ -135,7 +200,88 @@ export function withUpdatedTranscript(
       [appSessionId]: estimatedCost,
     },
   };
+  if (childSessionId) {
+    next = releaseSessionChildTranscriptWindow(
+      next,
+      appSessionId,
+      childSessionId,
+      EMERGENCY_TRANSCRIPT_POLICY,
+    );
+  }
+  next = releaseAggregateChildTranscriptWindows(next, appSessionId);
   return releaseSessionTranscriptWindow(next, appSessionId, EMERGENCY_TRANSCRIPT_POLICY);
+}
+
+function releaseAggregateChildTranscriptWindows(state: AppState, appSessionId: string): AppState {
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+  const transcript = state.transcripts[appSessionId] ?? [];
+  const estimatedCost =
+    state.transcriptRetainedCost[appSessionId] ?? estimateTranscriptCost(transcript);
+  if (!shouldReleaseTranscriptWindow(transcript, estimatedCost, EMERGENCY_TRANSCRIPT_POLICY)) {
+    return state;
+  }
+
+  const childSessionIds = Object.keys(state.childSessions[appSessionId] ?? {});
+  if (childSessionIds.length === 0) return state;
+  const sourcePolicy: TranscriptWindowPolicy = {
+    ...EMERGENCY_TRANSCRIPT_POLICY,
+    highWaterCost: Math.max(
+      64 * 1024,
+      Math.floor(EMERGENCY_TRANSCRIPT_POLICY.targetCost / childSessionIds.length),
+    ),
+    highWaterEvents: Math.max(
+      15,
+      Math.floor(EMERGENCY_TRANSCRIPT_POLICY.targetEvents / childSessionIds.length),
+    ),
+    targetCost: Math.max(
+      32 * 1024,
+      Math.floor(EMERGENCY_TRANSCRIPT_POLICY.targetCost / childSessionIds.length),
+    ),
+    targetEvents: Math.max(
+      15,
+      Math.floor(EMERGENCY_TRANSCRIPT_POLICY.targetEvents / childSessionIds.length),
+    ),
+    minimumEvents: 1,
+    boundaryScanEvents: 24,
+  };
+
+  let events = transcript;
+  let childHistory = state.childHistory[appSessionId] ?? {};
+  let released = false;
+  for (const childSessionId of childSessionIds) {
+    const window = releaseChildTranscriptWindow(events, childSessionId, sourcePolicy);
+    if (!window.released) continue;
+    released = true;
+    events = window.events;
+    const previousHistory = childHistory[childSessionId];
+    const loadedCount = events.filter((event) => event.sourceSessionId === childSessionId).length;
+    childHistory = {
+      ...childHistory,
+      [childSessionId]: {
+        status: 'paged',
+        loadedCount,
+        hasMore: true,
+        isLoaded: false,
+        isLoadingOlder: false,
+        olderCursor: undefined,
+        isViewportPinned: previousHistory?.isViewportPinned ?? true,
+      },
+    };
+  }
+  if (!released) return state;
+  return {
+    ...state,
+    transcripts: { ...state.transcripts, [appSessionId]: events },
+    transcriptRetainedCost: {
+      ...state.transcriptRetainedCost,
+      [appSessionId]: estimateTranscriptCost(events),
+    },
+    childHistory: {
+      ...state.childHistory,
+      [appSessionId]: childHistory,
+    },
+  };
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 }
 
 export function pruneRemovedSessionState(
@@ -165,6 +311,7 @@ export function pruneRemovedSessionState(
     historyCursor: pruneSessionRecord(state.historyCursor, retainedSessionIds),
     historyLoadingOlder: pruneSessionRecord(state.historyLoadingOlder, retainedSessionIds),
     sessionRestore: pruneSessionRecord(state.sessionRestore, retainedSessionIds),
+    childHistory: pruneSessionRecord(state.childHistory, retainedSessionIds),
     childAccess: pruneSessionRecord(state.childAccess, retainedSessionIds),
     childRuntime: pruneSessionRecord(state.childRuntime, retainedSessionIds),
     contextStats: {

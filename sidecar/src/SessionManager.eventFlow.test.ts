@@ -168,6 +168,51 @@ test('a buffered streaming tail is emitted before failed turn settlement', async
   }
 });
 
+test('primary streaming persistence failures still settle and refresh context', async () => {
+  const context = createSessionManagerTestContext({ streamingCoalesceMs: 1_000 });
+  try {
+    await context.create({
+      sessionPurpose: 'chat',
+      clientRef: 'event-persist-failure',
+      title: 'Persist failure',
+      goal: 'initial',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+    const provider = context.provider.session('provider-1');
+    await provider.waitForPrompts(1);
+    await context.waitForIdle();
+    const contextStatsCallsBeforeTurn = provider.contextStatsCalls;
+    context.events.length = 0;
+
+    provider.queueStreamEvents([assistantTextDelta('cannot persist this tail')]);
+    context.history.recordEventErrorForText = {
+      text: 'cannot persist this tail',
+      error: new Error('history write failed'),
+    };
+    await context.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: 'trigger a streaming persistence failure',
+    });
+    await context.waitForIdle();
+
+    assert.equal(
+      context.events.filter(
+        (event) =>
+          event.type === 'error' &&
+          event.message === 'Could not persist streaming transcript: history write failed',
+      ).length,
+      1,
+    );
+    assert.equal(latestSessionUpdate(context.events)?.session.phase, 'failed');
+    assert.ok(provider.contextStatsCalls >= contextStatsCallsBeforeTurn + 2);
+    assert.equal(appendedTexts(context.events).includes('cannot persist this tail'), false);
+  } finally {
+    await context.dispose();
+  }
+});
+
 test('terminal results quarantine only later generation from the same turn', async () => {
   const context = createSessionManagerTestContext();
   try {

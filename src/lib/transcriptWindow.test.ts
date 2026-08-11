@@ -4,6 +4,7 @@ import type { TranscriptEvent } from '../types/bridge';
 import {
   estimateRetainedPayloadCost,
   estimateTranscriptCost,
+  releaseChildTranscriptWindow,
   releaseTranscriptWindow,
   VIEWPORT_TRANSCRIPT_POLICY,
   type TranscriptWindowPolicy,
@@ -118,4 +119,40 @@ test('large tool-call soak releases old objects and plateaus at the viewport win
   assert.ok(result.events.length >= VIEWPORT_TRANSCRIPT_POLICY.minimumEvents);
   assert.equal(result.events.at(-1)?.id, 'result-1999');
   assert.equal(new Set(result.events.map((item) => item.id)).size, result.events.length);
+});
+
+test('child release trims only one logical child and preserves parent and sibling rows', () => {
+  const primary = [event('primary-1'), event('primary-2')];
+  const sibling = [
+    event('sibling-1', { sourceSessionId: 'child-b', role: 'validator' }),
+    event('sibling-2', { sourceSessionId: 'child-b', role: 'validator' }),
+  ];
+  const child = Array.from({ length: 14 }, (_, index) =>
+    event(`child-${index}`, {
+      sourceSessionId: 'child-a',
+      role: 'worker',
+      ...(index === 8 ? { author: 'user' as const, text: 'new child turn' } : {}),
+    }),
+  );
+  const transcript = [primary[0], child[0], sibling[0], ...child.slice(1), primary[1], sibling[1]];
+
+  const result = releaseChildTranscriptWindow(transcript, 'child-a', {
+    ...TEST_POLICY,
+    highWaterCost: 4_000,
+  });
+
+  assert.equal(result.released, true);
+  assert.deepEqual(
+    result.events.filter((item) => item.sourceSessionId === 'primary').map((item) => item.id),
+    primary.map((item) => item.id),
+  );
+  assert.deepEqual(
+    result.events.filter((item) => item.sourceSessionId === 'child-b').map((item) => item.id),
+    sibling.map((item) => item.id),
+  );
+  assert.equal(
+    result.events.filter((item) => item.sourceSessionId === 'child-a')[0]?.id,
+    'child-8',
+  );
+  assert.equal(result.events.at(-1)?.id, 'sibling-2');
 });

@@ -200,6 +200,45 @@ export function releaseTranscriptWindow(
   };
 }
 
+export function releaseChildTranscriptWindow(
+  events: TranscriptEvent[],
+  childSessionId: string,
+  policy: TranscriptWindowPolicy,
+): TranscriptWindow {
+  const childEvents = events.filter((event) => event.sourceSessionId === childSessionId);
+  const retained = releaseTranscriptWindow(
+    childEvents,
+    estimateTranscriptCost(childEvents),
+    policy,
+  );
+  if (!retained.released) {
+    return {
+      events,
+      estimatedCost: estimateTranscriptCost(events),
+      released: false,
+    };
+  }
+
+  const merged: TranscriptEvent[] = [];
+  let inserted = false;
+  for (const event of events) {
+    if (event.sourceSessionId !== childSessionId) {
+      merged.push(event);
+      continue;
+    }
+    if (!inserted) {
+      merged.push(...retained.events);
+      inserted = true;
+    }
+  }
+  if (!inserted) merged.push(...retained.events);
+  return {
+    events: merged,
+    estimatedCost: estimateTranscriptCost(merged),
+    released: true,
+  };
+}
+
 function utf8ByteLength(value: string): number {
   let bytes = 0;
   for (let i = 0; i < value.length; i++) {

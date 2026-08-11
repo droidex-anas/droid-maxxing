@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { loadSessionHistory } from '../lib/commands';
+import { loadChildHistory, loadSessionHistory } from '../lib/commands';
 import {
   captureViewportAnchor,
-  primaryViewportOwner,
   restoreViewportAnchor,
+  shouldCancelViewportRestore,
   viewportAnchorAfterScroll,
   type ViewportAnchor,
 } from './conversationViewportAnchor';
@@ -16,7 +16,23 @@ type ScrollDispatch = (
   action:
     | { type: 'TRANSCRIPT_VIEWPORT'; appSessionId: string; pinned: boolean }
     | { type: 'TRANSCRIPT_RELEASE_VIEWPORT'; appSessionId: string }
-    | { type: 'SESSION_HISTORY_LOADING_OLDER'; appSessionId: string },
+    | { type: 'SESSION_HISTORY_LOADING_OLDER'; appSessionId: string }
+    | {
+        type: 'CHILD_HISTORY_LOADING_OLDER';
+        parentAppSessionId: string;
+        childSessionId: string;
+      }
+    | {
+        type: 'CHILD_TRANSCRIPT_VIEWPORT';
+        parentAppSessionId: string;
+        childSessionId: string;
+        pinned: boolean;
+      }
+    | {
+        type: 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT';
+        parentAppSessionId: string;
+        childSessionId: string;
+      },
 ) => void;
 
 interface ConversationScrollWindowOptions {
@@ -25,12 +41,13 @@ interface ConversationScrollWindowOptions {
   isViewingChildSession: boolean;
   activeAppSessionId: string | undefined;
   historyAppSessionId: string | undefined;
+  historyChildSessionId: string | undefined;
   olderCursor: string | undefined;
   isLoadingOlder: boolean;
   transcriptLength: number;
   transcriptTailLength: number;
   retainedTranscriptLength: number;
-  isPrimaryLive: boolean;
+  isConversationLive: boolean;
   isAutoPagingOlderHistory: boolean;
   dispatch: ScrollDispatch;
 }
@@ -41,16 +58,68 @@ interface PendingHistoryPrepend {
   transcriptLength: number;
 }
 
+interface ScrollSnapshot {
+  top: number;
+  pinned: boolean;
+  anchor: ViewportAnchor | null;
+}
+
+function rememberScrollSnapshot(
+  snapshots: Map<string, ScrollSnapshot>,
+  conversationKey: string | null,
+  snapshot: ScrollSnapshot,
+): void {
+  if (!conversationKey) return;
+  snapshots.delete(conversationKey);
+  snapshots.set(conversationKey, snapshot);
+  while (snapshots.size > MAX_SCROLL_SNAPSHOTS) {
+    const oldest = snapshots.keys().next().value;
+    if (typeof oldest !== 'string') return;
+    snapshots.delete(oldest);
+  }
+}
+
+function shouldReportPinnedViewport(
+  reported: { conversationKey: string; pinned: boolean } | null,
+  conversationKey: string,
+  pinned: boolean,
+): boolean {
+  if (!reported) return true;
+  return reported.conversationKey !== conversationKey || reported.pinned !== pinned;
+}
+
+function pinnedViewportAction({
+  appSessionId,
+  childSessionId,
+  pinned,
+}: {
+  appSessionId: string;
+  childSessionId?: string;
+  pinned: boolean;
+}): Parameters<ScrollDispatch>[0] {
+  if (childSessionId) {
+    return {
+      type: 'CHILD_TRANSCRIPT_VIEWPORT',
+      parentAppSessionId: appSessionId,
+      childSessionId,
+      pinned,
+    };
+  }
+  return {
+    type: 'TRANSCRIPT_VIEWPORT',
+    appSessionId,
+    pinned,
+  };
+}
+
 export function shouldReleaseConversationTranscript(options: {
-  isViewingChildSession: boolean;
-  isPrimaryLive: boolean;
+  isConversationLive: boolean;
   isLoadingOlder: boolean;
   isAutoPagingOlderHistory: boolean;
   isPinned: boolean;
 }): boolean {
   return (
-    !options.isViewingChildSession &&
-    !options.isPrimaryLive &&
+    !options.isConversationLive &&
     !options.isLoadingOlder &&
     !options.isAutoPagingOlderHistory &&
     options.isPinned
@@ -77,12 +146,13 @@ export function useConversationScrollWindow({
   isViewingChildSession,
   activeAppSessionId,
   historyAppSessionId,
+  historyChildSessionId,
   olderCursor,
   isLoadingOlder,
   transcriptLength,
   transcriptTailLength,
   retainedTranscriptLength,
-  isPrimaryLive,
+  isConversationLive,
   isAutoPagingOlderHistory,
   dispatch,
 }: ConversationScrollWindowOptions): {
@@ -92,19 +162,19 @@ export function useConversationScrollWindow({
   const viewportAnchor = useRef<ViewportAnchor | null>(null);
   const isRestoringViewport = useRef(false);
   const isSettlingHistoryPrepend = useRef(false);
+  const expectedRestoredScrollTop = useRef<number | null>(null);
   const viewportRestoreGeneration = useRef(0);
   const pendingHistoryPrepend = useRef<PendingHistoryPrepend | null>(null);
   const isPinned = useRef(true);
-  const reportedPinned = useRef<{ appSessionId: string; pinned: boolean } | null>(null);
+  const reportedPinned = useRef<{ conversationKey: string; pinned: boolean } | null>(null);
   const isOlderRequestPending = useRef(false);
-  const [scrollSnapshots] = useState(() => new Map<string, { top: number; pinned: boolean }>());
-  const viewportAppSessionId = primaryViewportOwner(activeAppSessionId, isViewingChildSession);
+  const [scrollSnapshots] = useState(() => new Map<string, ScrollSnapshot>());
 
   useEffect(() => {
     if (isLoadingOlder) return;
     isOlderRequestPending.current = false;
     pendingHistoryPrepend.current = null;
-  }, [historyAppSessionId, isLoadingOlder, olderCursor]);
+  }, [historyAppSessionId, historyChildSessionId, isLoadingOlder, olderCursor]);
 
   // Scroll snapshots are current before a keyed transcript swap because every
   // user and programmatic scroll passes through onScroll.
@@ -116,30 +186,52 @@ export function useConversationScrollWindow({
     viewportRestoreGeneration.current++;
     isRestoringViewport.current = false;
     isSettlingHistoryPrepend.current = false;
+    expectedRestoredScrollTop.current = null;
     viewportAnchor.current = null;
     isPinned.current = snapshot?.pinned ?? true;
     element.scrollTop = snapshot?.top ?? element.scrollHeight;
-    if (!isPinned.current) viewportAnchor.current = captureViewportAnchor(element, true);
-    if (viewportAppSessionId) {
+    if (!isPinned.current) {
+      viewportAnchor.current = snapshot?.anchor
+        ? restoreViewportAnchor(element, snapshot.anchor).anchor
+        : captureViewportAnchor(element, true);
+    }
+    if (activeAppSessionId) {
       reportedPinned.current = {
-        appSessionId: viewportAppSessionId,
+        conversationKey: visibleConversationKey,
         pinned: isPinned.current,
       };
-      dispatch({
-        type: 'TRANSCRIPT_VIEWPORT',
-        appSessionId: viewportAppSessionId,
-        pinned: isPinned.current,
-      });
+      dispatch(
+        isViewingChildSession && historyChildSessionId
+          ? {
+              type: 'CHILD_TRANSCRIPT_VIEWPORT',
+              parentAppSessionId: activeAppSessionId,
+              childSessionId: historyChildSessionId,
+              pinned: isPinned.current,
+            }
+          : {
+              type: 'TRANSCRIPT_VIEWPORT',
+              appSessionId: activeAppSessionId,
+              pinned: isPinned.current,
+            },
+      );
     }
-  }, [dispatch, scrollRef, scrollSnapshots, viewportAppSessionId, visibleConversationKey]);
+  }, [
+    activeAppSessionId,
+    dispatch,
+    historyChildSessionId,
+    isViewingChildSession,
+    scrollRef,
+    scrollSnapshots,
+    visibleConversationKey,
+  ]);
 
   const requestOlderHistory = useCallback(() => {
     if (!historyAppSessionId || !olderCursor || isLoadingOlder || isOlderRequestPending.current)
       return;
     isOlderRequestPending.current = true;
     const element = scrollRef.current;
-    if (element && visibleConversationKey && !isPinned.current) {
-      viewportAnchor.current = captureViewportAnchor(element, true);
+    if (element && visibleConversationKey) {
+      if (!isPinned.current) viewportAnchor.current = captureViewportAnchor(element, true);
       pendingHistoryPrepend.current = {
         conversationKey: visibleConversationKey,
         requestedCursor: olderCursor,
@@ -148,11 +240,26 @@ export function useConversationScrollWindow({
     } else {
       pendingHistoryPrepend.current = null;
     }
-    dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
-    loadSessionHistory(historyAppSessionId, olderCursor, HISTORY_PAGE_EVENT_LIMIT);
+    if (historyChildSessionId) {
+      dispatch({
+        type: 'CHILD_HISTORY_LOADING_OLDER',
+        parentAppSessionId: historyAppSessionId,
+        childSessionId: historyChildSessionId,
+      });
+      loadChildHistory(
+        historyAppSessionId,
+        historyChildSessionId,
+        olderCursor,
+        HISTORY_PAGE_EVENT_LIMIT,
+      );
+    } else {
+      dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
+      loadSessionHistory(historyAppSessionId, olderCursor, HISTORY_PAGE_EVENT_LIMIT);
+    }
   }, [
     dispatch,
     historyAppSessionId,
+    historyChildSessionId,
     isLoadingOlder,
     olderCursor,
     scrollRef,
@@ -164,52 +271,54 @@ export function useConversationScrollWindow({
     const element = scrollRef.current;
     if (!element) return;
     isPinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-    if (visibleConversationKey) {
-      scrollSnapshots.delete(visibleConversationKey);
-      scrollSnapshots.set(visibleConversationKey, {
-        top: element.scrollTop,
-        pinned: isPinned.current,
+    if (
+      isRestoringViewport.current &&
+      shouldCancelViewportRestore(expectedRestoredScrollTop.current, element.scrollTop)
+    ) {
+      viewportRestoreGeneration.current++;
+      isRestoringViewport.current = false;
+      isSettlingHistoryPrepend.current = false;
+      expectedRestoredScrollTop.current = null;
+      viewportAnchor.current = isPinned.current ? null : captureViewportAnchor(element, true);
+    } else {
+      viewportAnchor.current = viewportAnchorAfterScroll({
+        element,
+        anchor: viewportAnchor.current,
+        isPinned: isPinned.current,
+        isLoadingOlder,
+        isRestoringViewport: isRestoringViewport.current,
       });
-      while (scrollSnapshots.size > MAX_SCROLL_SNAPSHOTS) {
-        const oldest = scrollSnapshots.keys().next().value;
-        if (typeof oldest !== 'string') break;
-        scrollSnapshots.delete(oldest);
-      }
     }
-    viewportAnchor.current = viewportAnchorAfterScroll({
-      element,
+    rememberScrollSnapshot(scrollSnapshots, visibleConversationKey, {
+      top: element.scrollTop,
+      pinned: isPinned.current,
       anchor: viewportAnchor.current,
-      isPinned: isPinned.current,
-      isLoadingOlder,
-      isRestoringViewport: isRestoringViewport.current,
     });
 
-    if (viewportAppSessionId) {
+    if (activeAppSessionId && visibleConversationKey) {
       const reported = reportedPinned.current;
-      if (reported?.appSessionId !== viewportAppSessionId || reported.pinned !== isPinned.current) {
+      if (shouldReportPinnedViewport(reported, visibleConversationKey, isPinned.current)) {
         reportedPinned.current = {
-          appSessionId: viewportAppSessionId,
+          conversationKey: visibleConversationKey,
           pinned: isPinned.current,
         };
-        dispatch({
-          type: 'TRANSCRIPT_VIEWPORT',
-          appSessionId: viewportAppSessionId,
-          pinned: isPinned.current,
-        });
+        dispatch(
+          pinnedViewportAction({
+            appSessionId: activeAppSessionId,
+            childSessionId: isViewingChildSession ? historyChildSessionId : undefined,
+            pinned: isPinned.current,
+          }),
+        );
       }
     }
 
-    if (
-      !isViewingChildSession &&
-      historyAppSessionId &&
-      olderCursor &&
-      !isLoadingOlder &&
-      element.scrollTop < PREFETCH_PX
-    ) {
+    if (historyAppSessionId && olderCursor && !isLoadingOlder && element.scrollTop < PREFETCH_PX) {
       requestOlderHistory();
     }
   }, [
+    activeAppSessionId,
     dispatch,
+    historyChildSessionId,
     historyAppSessionId,
     isLoadingOlder,
     isViewingChildSession,
@@ -217,7 +326,6 @@ export function useConversationScrollWindow({
     requestOlderHistory,
     scrollRef,
     scrollSnapshots,
-    viewportAppSessionId,
     visibleConversationKey,
   ]);
 
@@ -250,15 +358,16 @@ export function useConversationScrollWindow({
     let animationFrame = 0;
     let remainingAttempts = 8;
     const settle = () => {
+      if (viewportRestoreGeneration.current !== restoreGeneration) return;
       if (viewportAnchor.current === null || isPinned.current) {
-        if (viewportRestoreGeneration.current === restoreGeneration) {
-          isRestoringViewport.current = false;
-          isSettlingHistoryPrepend.current = false;
-        }
+        isRestoringViewport.current = false;
+        isSettlingHistoryPrepend.current = false;
+        expectedRestoredScrollTop.current = null;
         return;
       }
       const restored = restoreViewportAnchor(element, viewportAnchor.current);
       viewportAnchor.current = restored.anchor;
+      expectedRestoredScrollTop.current = element.scrollTop;
       // content-visibility can exchange intrinsic estimates for measured row
       // heights without changing the feed's total height. Recheck for a few
       // frames even after finding the row, because a container-only observer
@@ -270,10 +379,9 @@ export function useConversationScrollWindow({
         if (!restored.didFindRow) {
           viewportAnchor.current = captureViewportAnchor(element, true);
         }
-        if (viewportRestoreGeneration.current === restoreGeneration) {
-          isRestoringViewport.current = false;
-          isSettlingHistoryPrepend.current = false;
-        }
+        isRestoringViewport.current = false;
+        isSettlingHistoryPrepend.current = false;
+        expectedRestoredScrollTop.current = null;
       }
     };
     settle();
@@ -282,6 +390,7 @@ export function useConversationScrollWindow({
       if (viewportRestoreGeneration.current === restoreGeneration) {
         isRestoringViewport.current = false;
         isSettlingHistoryPrepend.current = false;
+        expectedRestoredScrollTop.current = null;
       }
     };
   }, [isLoadingOlder, olderCursor, scrollRef, transcriptLength, visibleConversationKey]);
@@ -308,6 +417,7 @@ export function useConversationScrollWindow({
         isSettlingHistoryPrepend.current,
       );
       viewportAnchor.current = restored.anchor;
+      expectedRestoredScrollTop.current = element.scrollTop;
       if (ownsRestore) {
         ownedRestoreGeneration = restoreGeneration;
         if (releaseFrame) cancelAnimationFrame(releaseFrame);
@@ -317,9 +427,11 @@ export function useConversationScrollWindow({
             viewportAnchor.current = retried.didFindRow
               ? retried.anchor
               : captureViewportAnchor(element, true);
+            expectedRestoredScrollTop.current = element.scrollTop;
           }
           if (viewportRestoreGeneration.current === restoreGeneration) {
             isRestoringViewport.current = false;
+            expectedRestoredScrollTop.current = null;
           }
           ownedRestoreGeneration = null;
         });
@@ -334,6 +446,7 @@ export function useConversationScrollWindow({
         viewportRestoreGeneration.current === ownedRestoreGeneration
       ) {
         isRestoringViewport.current = false;
+        expectedRestoredScrollTop.current = null;
       }
     };
   }, [scrollRef, transcriptLength, visibleConversationKey]);
@@ -347,21 +460,29 @@ export function useConversationScrollWindow({
     if (
       !activeAppSessionId ||
       !shouldReleaseConversationTranscript({
-        isViewingChildSession,
-        isPrimaryLive,
+        isConversationLive,
         isLoadingOlder,
         isAutoPagingOlderHistory,
         isPinned: isPinned.current,
       })
     )
       return;
-    dispatch({ type: 'TRANSCRIPT_RELEASE_VIEWPORT', appSessionId: activeAppSessionId });
+    dispatch(
+      isViewingChildSession && historyChildSessionId
+        ? {
+            type: 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT',
+            parentAppSessionId: activeAppSessionId,
+            childSessionId: historyChildSessionId,
+          }
+        : { type: 'TRANSCRIPT_RELEASE_VIEWPORT', appSessionId: activeAppSessionId },
+    );
   }, [
     activeAppSessionId,
     dispatch,
+    historyChildSessionId,
     isAutoPagingOlderHistory,
+    isConversationLive,
     isLoadingOlder,
-    isPrimaryLive,
     isViewingChildSession,
     retainedTranscriptLength,
   ]);

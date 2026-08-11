@@ -122,6 +122,7 @@ export interface PersistedChildSession {
   parentAppSessionId: string;
   childSessionId: string;
   providerSessionId?: string;
+  previousProviderSessionIds?: string[];
   role: PersistedChildRole;
   label?: string;
   prompt?: string;
@@ -155,7 +156,7 @@ const DEFAULT_HISTORY_WINDOW = 400;
 // LINE_EVENT_STRIDE band, so the ceiling is (1<<27)/256 = 524,288 lines — far
 // above the ~50K lines a 5MB window of real message lines can hold.
 const SEQ_SEGMENT_STRIDE = 1 << 27;
-const HISTORY_SCHEMA_VERSION = 1;
+const HISTORY_SCHEMA_VERSION = 2;
 export const SESSION_INDEX_FILENAME = 'session-index.sqlite';
 const HISTORY_SCHEMA_RECOVERY =
   'DROIDEX local history index uses an incompatible schema. Quit DROIDEX, remove ' +
@@ -424,6 +425,7 @@ export class HistoryIndex {
         parent_app_session_id TEXT NOT NULL,
         child_session_id TEXT NOT NULL,
         provider_session_id TEXT,
+        previous_provider_session_ids TEXT NOT NULL DEFAULT '[]',
         role TEXT NOT NULL CHECK (role IN ('worker', 'validator')),
         label TEXT,
         prompt TEXT,
@@ -616,6 +618,7 @@ export class HistoryIndex {
         parent_app_session_id,
         child_session_id,
         provider_session_id,
+        previous_provider_session_ids,
         role,
         label,
         prompt,
@@ -628,9 +631,10 @@ export class HistoryIndex {
         started_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(parent_app_session_id, child_session_id) DO UPDATE SET
         provider_session_id = excluded.provider_session_id,
+        previous_provider_session_ids = excluded.previous_provider_session_ids,
         role = excluded.role,
         label = excluded.label,
         prompt = excluded.prompt,
@@ -648,6 +652,7 @@ export class HistoryIndex {
         child.parentAppSessionId,
         child.childSessionId,
         sqlValue(child.providerSessionId),
+        JSON.stringify(child.previousProviderSessionIds ?? []),
         child.role,
         sqlValue(child.label),
         sqlValue(child.prompt),
@@ -720,6 +725,7 @@ const CANONICAL_TABLE_COLUMNS = {
     'parent_app_session_id',
     'child_session_id',
     'provider_session_id',
+    'previous_provider_session_ids',
     'role',
     'label',
     'prompt',
@@ -870,10 +876,12 @@ function persistedChildSessionFromRow(row: Record<string, unknown>): PersistedCh
   if (!parentAppSessionId || !childSessionId || !modelId || updatedAt === undefined)
     throw new Error(HISTORY_SCHEMA_RECOVERY);
   const spawnLink = persistedChildSpawnLink(row);
+  const previousProviderSessionIds = jsonStringArray(row.previous_provider_session_ids);
   return {
     parentAppSessionId,
     childSessionId,
     ...whenString(row.provider_session_id, (providerSessionId) => ({ providerSessionId })),
+    ...(previousProviderSessionIds.length > 0 ? { previousProviderSessionIds } : {}),
     role,
     ...whenString(row.label, (label) => ({ label })),
     ...whenString(row.prompt, (prompt) => ({ prompt })),
@@ -1151,31 +1159,40 @@ function dedupeStrings(values: (string | undefined)[]): string[] {
 const MAX_TRANSCRIPT_READERS = 12;
 const transcriptReaders = new Map<
   string,
-  { mtimeMs: number; sizeBytes: number; appSessionId: string; reader: SessionTranscriptReader }
+  {
+    mtimeMs: number;
+    sizeBytes: number;
+    appSessionId: string;
+    role: SessionRole;
+    reader: SessionTranscriptReader;
+  }
 >();
 
 function transcriptReaderFor(
   appSessionId: string,
   providerSessionId: string,
   path: string,
+  role: SessionRole,
 ): SessionTranscriptReader {
   const stat = statSync(path);
   const cached = transcriptReaders.get(path);
   if (
     cached?.mtimeMs === stat.mtimeMs &&
     cached.sizeBytes === stat.size &&
-    cached.appSessionId === appSessionId
+    cached.appSessionId === appSessionId &&
+    cached.role === role
   ) {
     transcriptReaders.delete(path);
     transcriptReaders.set(path, cached);
     return cached.reader;
   }
-  const reader = new SessionTranscriptReader(appSessionId, providerSessionId, path, 'primary');
+  const reader = new SessionTranscriptReader(appSessionId, providerSessionId, path, role);
   transcriptReaders.delete(path);
   transcriptReaders.set(path, {
     mtimeMs: stat.mtimeMs,
     sizeBytes: stat.size,
     appSessionId,
+    role,
     reader,
   });
   if (transcriptReaders.size > MAX_TRANSCRIPT_READERS) {
@@ -1220,9 +1237,10 @@ function parseTranscriptCursor(
 export function loadSessionTranscriptWindow(
   appSessionId: string,
   chainProviderSessionIds: string[],
-  opts: { cursor?: string; limit?: number } = {},
+  opts: { cursor?: string; limit?: number; role?: SessionRole } = {},
 ): { events: TranscriptEvent[]; olderCursor?: string } {
   const limit = Math.max(1, opts.limit ?? DEFAULT_HISTORY_WINDOW);
+  const role = opts.role ?? 'primary';
   const sessionIndex = buildSessionIndex();
   const chain = chainProviderSessionIds.filter((id) => sessionIndex.has(id));
   if (chain.length === 0) return { events: [] };
@@ -1239,7 +1257,7 @@ export function loadSessionTranscriptWindow(
   const picked: TranscriptEvent[] = [];
   let olderCursor: string | undefined;
   for (let ci = startIdx; ci >= 0; ci--) {
-    const reader = transcriptReaderFor(appSessionId, chain[ci], sessionIndex.get(chain[ci])!);
+    const reader = transcriptReaderFor(appSessionId, chain[ci], sessionIndex.get(chain[ci])!, role);
     // Chain-derived monotonic order: older segments (lower ci) and earlier
     // in-segment positions sort first, independent of wall-clock ts.
     const window = reader.windowBackward(

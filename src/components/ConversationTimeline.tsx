@@ -59,7 +59,7 @@ export function ConversationTimeline({
             bestId = id;
           }
         }
-        setActiveId(bestId);
+        if (bestId) setActiveId(bestId);
       },
       { root, rootMargin: '0px 0px -65% 0px', threshold: 0 },
     );

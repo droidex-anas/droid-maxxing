@@ -51,6 +51,7 @@ export interface SessionTimelineDependencies {
 
 interface SessionHistoryPage {
   appSessionId: string;
+  childSessionId?: string;
   progress: ProgressEntry[];
   transcripts: TranscriptEvent[];
   childSessions?: ChildSessionSummary[];
@@ -68,17 +69,50 @@ const MAX_HISTORY_PAGE_EVENTS = 1_600;
 function historyWindowOptions(
   cursor: string | undefined,
   limit: number | undefined,
-): { cursor?: string; limit?: number } {
-  const options: { cursor?: string; limit?: number } = {};
+  role?: SessionRole,
+): { cursor?: string; limit?: number; role?: SessionRole } {
+  const options: { cursor?: string; limit?: number; role?: SessionRole } = {};
   Object.defineProperty(options, 'cursor', { enumerable: true, value: cursor });
   if (limit !== undefined && Number.isFinite(limit)) {
     options.limit = Math.min(MAX_HISTORY_PAGE_EVENTS, Math.max(1, Math.floor(limit)));
   }
+  if (role !== undefined) options.role = role;
   return options;
 }
 
 const DEFAULT_STREAMING_COALESCE_MS = 40;
 const DEFAULT_STREAMING_COALESCE_MAX_BYTES = 64 * 1024;
+
+function dedupeProviderSessionIds(providerSessionIds: readonly string[]): string[] {
+  return [...new Set(providerSessionIds.filter(Boolean))];
+}
+
+export class StreamingTranscriptPersistenceError extends Error {
+  readonly isReported = true;
+
+  constructor(
+    readonly appSessionId: string,
+    readonly sourceSessionId: string,
+    cause: unknown,
+  ) {
+    super(`Could not persist streaming transcript: ${errMsg(cause)}`, { cause });
+    this.name = 'StreamingTranscriptPersistenceError';
+  }
+}
+
+export function isReportedStreamingTranscriptError(
+  error: unknown,
+): error is StreamingTranscriptPersistenceError {
+  return error instanceof StreamingTranscriptPersistenceError && error.isReported;
+}
+
+function streamingSourceKey(appSessionId: string, sourceSessionId: string): string {
+  return `${appSessionId}\u0000${sourceSessionId}`;
+}
+
+function streamingEventOwner(event: TranscriptEvent): string {
+  return event.role === 'primary' ? event.appSessionId : event.sourceSessionId;
+}
 
 export class SessionTimeline {
   private statusSeq = 0;
@@ -94,6 +128,7 @@ export class SessionTimeline {
     estimatedBytes: number;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
+  private readonly streamingFlushFailures = new Map<string, StreamingTranscriptPersistenceError>();
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
     this.loaders = dependencies.loaders ?? {
@@ -198,24 +233,70 @@ export class SessionTimeline {
     }
   }
 
-  replayChild(appSessionId: string, childSessionId: string, childProviderSessionId: string): void {
+  loadChildHistory({
+    appSessionId,
+    childSessionId,
+    childProviderSessionIds,
+    role,
+    cursor,
+    limit,
+  }: {
+    appSessionId: string;
+    childSessionId: string;
+    childProviderSessionIds: readonly string[];
+    role: SessionRole;
+    cursor?: string;
+    limit?: number;
+  }): void {
     try {
-      const page = this.loaders.page(childProviderSessionId, appSessionId, undefined, 200);
-      for (const event of page.events)
-        this.append({
-          ...event,
-          appSessionId,
-          sourceSessionId: childSessionId,
-        });
-    } catch {
-      // Some live child sessions have not flushed history yet.
+      const currentProviderSessionId = childProviderSessionIds.at(-1) ?? childSessionId;
+      const discoveredChain = this.loaders.resolveChain(childSessionId, currentProviderSessionId);
+      const chain = dedupeProviderSessionIds([
+        ...childProviderSessionIds.slice(0, -1),
+        ...discoveredChain.filter((id) => id !== currentProviderSessionId),
+        currentProviderSessionId,
+      ]);
+      const window = this.loaders.transcriptWindow(
+        appSessionId,
+        chain,
+        historyWindowOptions(cursor, limit, role),
+      );
+      const transcripts = window.events.map((event) => ({
+        ...event,
+        appSessionId,
+        sourceSessionId: childSessionId,
+        role,
+      }));
+      this.emitHistory({
+        appSessionId,
+        childSessionId,
+        progress: [],
+        transcripts,
+        mode: cursor ? 'prepend' : 'replace',
+        ...(window.olderCursor ? { olderCursor: window.olderCursor } : {}),
+      });
+    } catch (error) {
+      const providerSessionId = childProviderSessionIds.at(-1) ?? childSessionId;
+      const message = errMsg(error);
+      this.dependencies.emit({
+        type: 'session.history.error',
+        appSessionId,
+        childSessionId,
+        message,
+      });
+      this.dependencies.emitError({
+        appSessionId,
+        providerSessionId,
+        message,
+        recoverable: true,
+      });
     }
   }
 
   append(event: TranscriptEvent): void {
     // Non-streaming appends (status lines, compaction dividers, replay) must
     // never overtake a buffered delta run, so the buffer flushes first.
-    this.flushStreaming();
+    this.flushStreamingBefore(event);
     this.recordAndEmit(event);
   }
 
@@ -236,7 +317,7 @@ export class SessionTimeline {
       if (merged) {
         const incomingBytes = estimateStreamingDeltaBytes(event);
         if (buffer.estimatedBytes + incomingBytes > this.streamingCoalesceMaxBytes) {
-          this.flushStreaming();
+          this.flushStreamingBefore(event);
           this.bufferStreamingEvent(event, incomingBytes);
           return;
         }
@@ -245,12 +326,28 @@ export class SessionTimeline {
         return;
       }
     }
-    this.flushStreaming();
+    this.flushStreamingBefore(event);
     if (isCoalescableDelta(event)) {
       this.bufferStreamingEvent(event, estimateStreamingDeltaBytes(event));
       return;
     }
     this.recordAndEmit(event);
+  }
+
+  private flushStreamingBefore(event: TranscriptEvent): void {
+    try {
+      this.flushStreaming();
+    } catch (error) {
+      if (
+        !isReportedStreamingTranscriptError(error) ||
+        (error.appSessionId === event.appSessionId &&
+          error.sourceSessionId === streamingEventOwner(event))
+      ) {
+        throw error;
+      }
+      // One conversation's sticky persistence failure must not abort another
+      // conversation that happened to arrive while its buffered tail flushed.
+    }
   }
 
   // Emits any buffered delta run immediately. Called at turn settlement so the
@@ -261,7 +358,38 @@ export class SessionTimeline {
     if (!buffer) return;
     this.streamingBuffer = null;
     clearTimeout(buffer.timer);
-    this.recordAndEmit(buffer.event);
+    try {
+      this.recordAndEmit(buffer.event);
+    } catch (error) {
+      throw this.rememberStreamingFailure(buffer.event, error);
+    }
+  }
+
+  flushStreamingFor(appSessionId: string, sourceSessionId: string): void {
+    const buffer = this.streamingBuffer;
+    if (!buffer) return;
+    if (buffer.event.appSessionId !== appSessionId) return;
+    if (streamingEventOwner(buffer.event) !== sourceSessionId) return;
+    this.flushStreaming();
+  }
+
+  settleStreaming(appSessionId: string, sourceSessionId: string): void {
+    let flushError: Error | undefined;
+    try {
+      this.flushStreamingFor(appSessionId, sourceSessionId);
+    } catch (error) {
+      flushError =
+        error instanceof Error
+          ? error
+          : new Error('Could not persist streaming transcript', { cause: error });
+    }
+    const key = streamingSourceKey(appSessionId, sourceSessionId);
+    const failure = this.streamingFlushFailures.get(key);
+    if (failure) {
+      this.streamingFlushFailures.delete(key);
+      throw failure;
+    }
+    if (flushError) throw flushError;
   }
 
   private bufferStreamingEvent(event: TranscriptEvent, estimatedBytes: number): void {
@@ -272,16 +400,48 @@ export class SessionTimeline {
     const timer = setTimeout(() => {
       try {
         this.flushStreaming();
-      } catch (error) {
-        this.dependencies.emitError({
-          appSessionId: event.appSessionId,
-          message: `Could not persist streaming transcript: ${errMsg(error)}`,
-          recoverable: true,
-        });
+      } catch {
+        // The failure is reported and retained by flushStreaming. Turn
+        // settlement remains its sole consumer.
       }
     }, this.streamingCoalesceMs);
     timer.unref();
     this.streamingBuffer = { event, estimatedBytes, timer };
+  }
+
+  private rememberStreamingFailure(
+    event: TranscriptEvent,
+    cause: unknown,
+  ): StreamingTranscriptPersistenceError {
+    const sourceSessionId = streamingEventOwner(event);
+    const key = streamingSourceKey(event.appSessionId, sourceSessionId);
+    const existing = this.streamingFlushFailures.get(key);
+    if (existing) return existing;
+    const failure = new StreamingTranscriptPersistenceError(
+      event.appSessionId,
+      sourceSessionId,
+      cause,
+    );
+    this.streamingFlushFailures.set(key, failure);
+    if (event.role === 'primary') {
+      this.dependencies.emitError({
+        appSessionId: event.appSessionId,
+        message: failure.message,
+        recoverable: true,
+      });
+    } else {
+      this.dependencies.emit({
+        type: 'child.error',
+        parentAppSessionId: event.appSessionId,
+        childSessionId: event.sourceSessionId,
+        operation: 'send',
+        requestId: null,
+        code: 'child.transcript_persist_failed',
+        message: `Unable to persist buffered child output: ${errMsg(cause)}`,
+        recoverable: true,
+      });
+    }
+    return failure;
   }
 
   private recordAndEmit(event: TranscriptEvent): void {
@@ -356,6 +516,7 @@ export class SessionTimeline {
     this.dependencies.emit({
       type: 'session.history',
       appSessionId: page.appSessionId,
+      ...(page.childSessionId ? { childSessionId: page.childSessionId } : {}),
       progress: page.progress,
       transcripts: page.transcripts,
       ...(page.childSessions ? { childSessions: page.childSessions } : {}),

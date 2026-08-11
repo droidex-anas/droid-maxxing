@@ -174,7 +174,7 @@ test('streaming text deltas coalesce into one event flushed by the timer', async
   assert.deepEqual(emitted, [{ type: 'event.appended', event: recorded[0] }]);
 });
 
-test('timer flush failures report a recoverable error instead of escaping', async () => {
+test('timer flush failures stay owned by turn settlement', async () => {
   const { emitted, errors, timeline } = createHarness({
     streamingCoalesceMs: 5,
     onRecordEvent: () => {
@@ -193,6 +193,92 @@ test('timer flush failures report a recoverable error instead of escaping', asyn
       recoverable: true,
     },
   ]);
+  assert.doesNotThrow(() => timeline.flushStreamingFor('app-1', 'app-1'));
+  assert.throws(() => timeline.settleStreaming('app-1', 'app-1'), /disk full/);
+  assert.doesNotThrow(() => timeline.settleStreaming('app-1', 'app-1'));
+});
+
+test('timer flush failures report once through the owning child conversation', async () => {
+  const { emitted, errors, timeline } = createHarness({
+    streamingCoalesceMs: 5,
+    onRecordEvent: () => {
+      throw new Error('disk full');
+    },
+  });
+
+  timeline.appendStreaming(
+    delta('a', {
+      appSessionId: 'parent-1',
+      sourceSessionId: 'child-1',
+      role: 'worker',
+      text: 'buffered child tail',
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.deepEqual(errors, []);
+  assert.deepEqual(emitted, [
+    {
+      type: 'child.error',
+      parentAppSessionId: 'parent-1',
+      childSessionId: 'child-1',
+      operation: 'send',
+      requestId: null,
+      code: 'child.transcript_persist_failed',
+      message: 'Unable to persist buffered child output: disk full',
+      recoverable: true,
+    },
+  ]);
+  assert.doesNotThrow(() => timeline.flushStreamingFor('parent-1', 'child-1'));
+  assert.throws(() => timeline.settleStreaming('parent-1', 'child-1'), /disk full/);
+  assert.equal(emitted.length, 1);
+});
+
+test('one child persistence failure does not abort another child append', () => {
+  const { emitted, recorded, timeline } = createHarness({
+    streamingCoalesceMs: 1_000,
+    onRecordEvent: (event) => {
+      if (event.sourceSessionId === 'child-a') throw new Error('child A disk failure');
+    },
+  });
+
+  timeline.appendStreaming(
+    delta('a', {
+      appSessionId: 'parent-1',
+      sourceSessionId: 'child-a',
+      role: 'worker',
+    }),
+  );
+  assert.doesNotThrow(() => {
+    timeline.appendStreaming(
+      delta('b', {
+        appSessionId: 'parent-1',
+        sourceSessionId: 'child-b',
+        role: 'worker',
+      }),
+    );
+  });
+  timeline.flushStreamingFor('parent-1', 'child-b');
+
+  assert.deepEqual(
+    recorded.map((event) => event.id),
+    ['b'],
+  );
+  assert.deepEqual(emitted, [
+    {
+      type: 'child.error',
+      parentAppSessionId: 'parent-1',
+      childSessionId: 'child-a',
+      operation: 'send',
+      requestId: null,
+      code: 'child.transcript_persist_failed',
+      message: 'Unable to persist buffered child output: child A disk failure',
+      recoverable: true,
+    },
+    { type: 'event.appended', event: recorded[0] },
+  ]);
+  assert.throws(() => timeline.settleStreaming('parent-1', 'child-a'), /child A disk failure/);
+  assert.doesNotThrow(() => timeline.settleStreaming('parent-1', 'child-b'));
 });
 
 test('streaming byte budget flushes early without dropping or truncating content', () => {
@@ -625,45 +711,118 @@ test('legacy provider pages keep their shape, identity, order, limit, and error 
   });
 });
 
-test('child replay uses the live append path and silently tolerates missing history', () => {
+test('child history loads a canonical replace batch and reports replay failures for retry', () => {
   let fail = false;
   const events = [transcript('child-first'), transcript('child-second')];
   const harness = createHarness({
     loaders: {
-      page: (providerSessionId, appSessionId, cursor, limit) => {
+      resolveChain: (appSessionId, providerSessionId) => {
+        assert.deepEqual([appSessionId, providerSessionId], ['child-logical', 'child-provider']);
+        return ['child-provider'];
+      },
+      transcriptWindow: (appSessionId, chain, options) => {
         assert.deepEqual(
-          [providerSessionId, appSessionId, cursor, limit],
-          ['child-provider', 'app-1', undefined, 200],
+          [appSessionId, chain, options],
+          [
+            'app-1',
+            ['child-old', 'child-provider'],
+            Object.assign(
+              Object.defineProperty({}, 'cursor', { enumerable: true, value: undefined }),
+              { role: 'worker' },
+            ),
+          ],
         );
         if (fail) throw new Error('not flushed');
-        return { events };
+        return { events, olderCursor: 'v2:0:1:0' };
       },
     },
   });
 
-  harness.timeline.replayChild('app-1', 'child-logical', 'child-provider');
+  harness.timeline.loadChildHistory({
+    appSessionId: 'app-1',
+    childSessionId: 'child-logical',
+    childProviderSessionIds: ['child-old', 'child-provider'],
+    role: 'worker',
+  });
 
-  assert.deepEqual(harness.trace, [
-    'record:child-first',
-    'emit:event.appended',
-    'record:child-second',
-    'emit:event.appended',
-  ]);
+  assert.deepEqual(harness.trace, ['emit:session.history']);
+  const page = harness.emitted[0];
+  assert.equal(page?.type, 'session.history');
+  if (page?.type !== 'session.history') return;
+  assert.equal(page.appSessionId, 'app-1');
+  assert.equal(page.childSessionId, 'child-logical');
+  assert.equal(page.mode, 'replace');
+  assert.equal(page.olderCursor, 'v2:0:1:0');
+  assert.equal(page.loadedCount, 2);
+  assert.equal(page.hasMore, true);
+  assert.deepEqual(page.progress, []);
   assert.deepEqual(
-    harness.emitted.map((event) =>
-      event.type === 'event.appended'
-        ? [event.event.appSessionId, event.event.sourceSessionId]
-        : null,
-    ),
+    page.transcripts.map((event) => [event.appSessionId, event.sourceSessionId, event.role]),
     [
-      ['app-1', 'child-logical'],
-      ['app-1', 'child-logical'],
+      ['app-1', 'child-logical', 'worker'],
+      ['app-1', 'child-logical', 'worker'],
     ],
   );
   fail = true;
-  harness.timeline.replayChild('app-1', 'child-logical', 'child-provider');
-  assert.equal(harness.errors.length, 0);
-  assert.equal(harness.emitted.length, 2);
+  harness.timeline.loadChildHistory({
+    appSessionId: 'app-1',
+    childSessionId: 'child-logical',
+    childProviderSessionIds: ['child-old', 'child-provider'],
+    role: 'worker',
+  });
+  assert.deepEqual(harness.errors.at(-1), {
+    appSessionId: 'app-1',
+    providerSessionId: 'child-provider',
+    message: 'not flushed',
+    recoverable: true,
+  });
+  assert.deepEqual(harness.emitted.at(-1), {
+    type: 'session.history.error',
+    appSessionId: 'app-1',
+    childSessionId: 'child-logical',
+    message: 'not flushed',
+  });
+});
+
+test('child history older page prepends and reports cursor exhaustion', () => {
+  const harness = createHarness({
+    loaders: {
+      resolveChain: () => ['child-provider'],
+      transcriptWindow: (_appSessionId, _chain, options) =>
+        options?.cursor === 'older' ? { events: [transcript('older')] } : { events: [] },
+    },
+  });
+
+  harness.timeline.loadChildHistory({
+    appSessionId: 'app-1',
+    childSessionId: 'child-logical',
+    childProviderSessionIds: ['child-provider'],
+    role: 'validator',
+    cursor: 'older',
+    limit: 50,
+  });
+  harness.timeline.loadChildHistory({
+    appSessionId: 'app-1',
+    childSessionId: 'child-logical',
+    childProviderSessionIds: ['child-provider'],
+    role: 'validator',
+    cursor: 'done',
+    limit: 50,
+  });
+
+  const pages = harness.emitted.filter((event) => event.type === 'session.history');
+  assert.equal(pages.length, 2);
+  const first = pages[0];
+  const second = pages[1];
+  if (first?.type !== 'session.history' || second?.type !== 'session.history') return;
+  assert.equal(first.mode, 'prepend');
+  assert.equal(first.loadedCount, 1);
+  assert.equal(first.hasMore, false);
+  assert.equal(first.transcripts[0]?.sourceSessionId, 'child-logical');
+  assert.equal(first.transcripts[0]?.role, 'validator');
+  assert.equal(second.mode, 'prepend');
+  assert.equal(second.loadedCount, 0);
+  assert.equal(second.hasMore, false);
 });
 
 test('status appends keep unique IDs, clock behavior, compact type, source, and role', () => {

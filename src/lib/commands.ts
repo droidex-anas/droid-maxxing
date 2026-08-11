@@ -275,6 +275,21 @@ export const loadSessionHistory = (appSessionId: string, cursor?: string, limit?
   bridge.send({ type: 'session.loadHistory', appSessionId, cursor, limit });
 };
 
+export const loadChildHistory = (
+  parentAppSessionId: string,
+  childSessionId: string,
+  cursor?: string,
+  limit?: number,
+) => {
+  bridge.send({
+    type: 'child.loadHistory',
+    parentAppSessionId,
+    childSessionId,
+    cursor,
+    limit,
+  });
+};
+
 // Transcript content search; the matching sessions.searchResults event
 // carries the same requestId so callers can drop stale responses.
 export const searchSessions = (requestId: string, query: string) => {

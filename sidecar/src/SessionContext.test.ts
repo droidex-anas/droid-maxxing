@@ -421,21 +421,27 @@ test('usage without current-context telemetry updates totals only', () => {
   assert.equal(live.summary.contextAccuracy, 'estimated');
 });
 
-test('usage persistence failure keeps live telemetry and does not fail the turn', () => {
+test('usage persistence failure keeps live telemetry and retries an identical reading', () => {
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
+  const persistedBefore = h.history.summaryPatchesAndHidden().patches.get('app-1');
   h.history.nextSyncError = new Error('disk unavailable');
+  const usage = {
+    tokensIn: 12,
+    tokensOut: 4,
+    contextTokens: 80,
+  };
 
-  assert.doesNotThrow(() =>
-    h.context.recordUsage('app-1', 'app-1', {
-      tokensIn: 12,
-      tokensOut: 4,
-      contextTokens: 80,
-    }),
-  );
+  assert.doesNotThrow(() => h.context.recordUsage('app-1', 'app-1', usage));
   assert.equal(live.summary.tokensIn, 12);
   assert.equal(live.summary.contextTokens, 80);
   assert.equal(h.events.at(-1)?.type, 'session.updated');
+  assert.deepEqual(h.history.summaryPatchesAndHidden().patches.get('app-1'), persistedBefore);
+
+  h.context.recordUsage('app-1', 'app-1', usage);
+
+  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.tokensIn, 12);
+  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 80);
 });
 
 test('child refresh never inherits the parent exact context reading', async () => {

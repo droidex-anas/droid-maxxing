@@ -103,6 +103,7 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
     const {
       createSession,
       interruptVisibleSession,
+      loadChildHistory,
       openChild,
       reanchorSessionsForWorktreeRemoval,
       updateChildSettings,
@@ -126,6 +127,7 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
       reasoningEffort: 'high',
     });
     openChild('r1', 'validator-r1', 'open-validator-r1');
+    loadChildHistory('r1', 'validator-r1', 'cursor-r1', 240);
     interruptVisibleSession('r1', 'worker-r1');
     interruptVisibleSession('r1');
     await bridge.start();
@@ -134,7 +136,7 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
     assert.equal(socket.url, 'ws://127.0.0.1:43123?token=r1-token');
     assert.deepEqual(socket.sent, []);
     socket.open();
-    assert.equal(socket.sent.length, 5);
+    assert.equal(socket.sent.length, 6);
     assert.deepEqual(JSON.parse(socket.sent[0]), {
       type: 'session.create',
       clientRef: 'r1-create',
@@ -158,16 +160,23 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
       requestId: 'open-validator-r1',
     });
     assert.deepEqual(JSON.parse(socket.sent[3]), {
+      type: 'child.loadHistory',
+      parentAppSessionId: 'r1',
+      childSessionId: 'validator-r1',
+      cursor: 'cursor-r1',
+      limit: 240,
+    });
+    assert.deepEqual(JSON.parse(socket.sent[4]), {
       type: 'child.interrupt',
       parentAppSessionId: 'r1',
       childSessionId: 'worker-r1',
     });
-    assert.deepEqual(JSON.parse(socket.sent[4]), {
+    assert.deepEqual(JSON.parse(socket.sent[5]), {
       type: 'session.interrupt',
       appSessionId: 'r1',
     });
     const reanchoring = reanchorSessionsForWorktreeRemoval('/repo/.worktrees/feature', '/repo');
-    const reanchorCommand = JSON.parse(socket.sent[5] ?? '') as {
+    const reanchorCommand = JSON.parse(socket.sent[6] ?? '') as {
       type: string;
       requestId: string;
       fromCwd: string;

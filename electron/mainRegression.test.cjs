@@ -54,6 +54,7 @@ test('main renderer reload closes renderer-owned terminals before navigation', (
   assert.match(mainSource, didStartNavigationCleanup);
   assert.match(mainSource, /contents\.on\('render-process-gone', cleanupForRendererReplacement\)/);
   assert.match(mainSource, /rendererOomRecovery\.handle\(details,/);
+  assert.match(mainSource, /if \(isRendererMemoryExit\(details\) && !scheduled\)/);
   assert.match(mainSource, /reloadShell\(false\)/);
   assert.match(mainSource, explicitReloadCleanup);
 });

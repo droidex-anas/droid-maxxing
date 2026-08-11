@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   recentConversationAnchors,
+  rememberTimelineCapacityBlock,
   shouldPrimeConversationTimeline,
 } from '../hooks/useConversationTimeline';
 import type { ConversationAnchor } from './chat';
@@ -26,6 +27,14 @@ test('short conversations keep every available timeline anchor', () => {
   assert.equal(recentConversationAnchors(short, 12), short);
 });
 
+test('timeline capacity blocks survive conversation switches', () => {
+  let blocked = rememberTimelineCapacityBlock(new Set(), 'app-1:primary', true);
+  blocked = rememberTimelineCapacityBlock(blocked, 'app-2:primary', false);
+
+  assert.equal(blocked.has('app-1:primary'), true);
+  assert.equal(blocked.has('app-2:primary'), false);
+});
+
 test('snapshot-backed timelines stay hidden until the initial restore settles', () => {
   const base = {
     isViewingChildSession: false,
@@ -38,6 +47,14 @@ test('snapshot-backed timelines stay hidden until the initial restore settles', 
   assert.equal(shouldPrimeConversationTimeline({ ...base, restoreStatus: 'paged' }), true);
   assert.equal(shouldPrimeConversationTimeline({ ...base, restoreStatus: 'loaded' }), false);
   assert.equal(shouldPrimeConversationTimeline({ ...base, restoreStatus: 'failed' }), false);
+  assert.equal(
+    shouldPrimeConversationTimeline({
+      ...base,
+      restoreStatus: 'paged',
+      isTranscriptWindowAtCapacity: true,
+    }),
+    false,
+  );
   assert.equal(
     shouldPrimeConversationTimeline({
       ...base,

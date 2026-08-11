@@ -17,6 +17,7 @@ import {
   orderedChildSessions,
   selectedChildForParent,
   shouldOpenSelectedChild,
+  shouldRequestReleasedChildHistory,
   spawnedChildSessions,
   workingFirstChildSessions,
   transcriptForVisibleSession,
@@ -647,6 +648,31 @@ test('child open retries require explicit reselection after terminal access', ()
   assert.equal(shouldOpenSelectedChild({ state: 'history', requestId: 'request-a' }), false);
   assert.equal(shouldOpenSelectedChild({ state: 'failed', requestId: 'request-a' }), false);
   assert.equal(shouldOpenSelectedChild({ state: 'closed', requestId: null }), false);
+});
+
+test('released child history rehydrates without requiring runtime access', () => {
+  assert.equal(shouldRequestReleasedChildHistory(undefined), true);
+  assert.equal(
+    shouldRequestReleasedChildHistory({ state: 'opening', requestId: 'request-a' }),
+    false,
+  );
+  assert.equal(
+    shouldRequestReleasedChildHistory({
+      state: 'ready',
+      requestId: 'request-a',
+      runtimeGeneration: 2,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRequestReleasedChildHistory({ state: 'history', requestId: 'request-a' }),
+    true,
+  );
+  assert.equal(
+    shouldRequestReleasedChildHistory({ state: 'failed', requestId: 'request-a' }),
+    true,
+  );
+  assert.equal(shouldRequestReleasedChildHistory({ state: 'closed', requestId: null }), true);
 });
 
 test('feature navigation uses only the latest exact progress child link', () => {

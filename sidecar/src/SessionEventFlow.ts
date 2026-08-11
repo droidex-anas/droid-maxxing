@@ -8,6 +8,7 @@ export type NormalizedTokenUsage = NonNullable<NormalizedEvent['tokens']>;
 
 export interface SessionEventFlowDependencies {
   appendTranscript: (event: TranscriptEvent) => void;
+  flushTranscript: (appSessionId: string, sourceSessionId: string) => void;
   applySideEffects: (appSessionId: string, sideEffects: NormalizedSideEffects) => void;
   recordUsage: (
     appSessionId: string,
@@ -36,7 +37,7 @@ export class SessionEventFlow {
   ): void {
     const normalized = normalizeStreamEvent(appSessionId, sourceProviderSessionId, role, event);
     if (normalized) {
-      this.applyNormalized(appSessionId, sourceProviderSessionId, normalized, childSessionId);
+      this.applyNormalized(appSessionId, sourceProviderSessionId, role, normalized, childSessionId);
     }
   }
 
@@ -53,7 +54,7 @@ export class SessionEventFlow {
       role,
       notification,
     )) {
-      this.applyNormalized(appSessionId, sourceProviderSessionId, normalized, childSessionId);
+      this.applyNormalized(appSessionId, sourceProviderSessionId, role, normalized, childSessionId);
     }
   }
 
@@ -64,6 +65,7 @@ export class SessionEventFlow {
   private applyNormalized(
     appSessionId: string,
     sourceProviderSessionId: string,
+    role: SessionRole,
     normalized: NormalizedEvent,
     childSessionId?: string,
   ): void {
@@ -86,6 +88,16 @@ export class SessionEventFlow {
 
     const sideEffects = normalizedSideEffects(normalized);
     if (hasSideEffects(sideEffects)) {
+      try {
+        const sourceSessionId =
+          childSessionId ?? (role === 'primary' ? appSessionId : sourceProviderSessionId);
+        this.dependencies.flushTranscript(appSessionId, sourceSessionId);
+      } catch {
+        // Provider notifications are synchronous SDK callbacks. Persistence
+        // failures are already reported and remain owned by turn settlement;
+        // never let a callback consume or rethrow that sticky failure.
+        return;
+      }
       this.dependencies.applySideEffects(appSessionId, sideEffects);
     }
   }

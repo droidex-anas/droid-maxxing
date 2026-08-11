@@ -31,7 +31,7 @@ const { attachChildView, detachChildView } = require('./nativeBrowserHost.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
-const { createRendererOomRecovery } = require('./rendererOomRecovery.cjs');
+const { createRendererOomRecovery, isRendererMemoryExit } = require('./rendererOomRecovery.cjs');
 const { autoUpdater } = require('electron-updater');
 const { createAppUpdater } = require('./appUpdater.cjs');
 const Sentry = require('@sentry/electron/main');
@@ -669,7 +669,7 @@ function installMainRendererLifecycle(contents) {
       console.error('[renderer] Reloading after renderer OOM');
       reloadShell(false);
     });
-    if (details.reason === 'oom' && !scheduled) {
+    if (isRendererMemoryExit(details) && !scheduled) {
       console.error('[renderer] Automatic OOM recovery stopped to avoid a reload crash loop');
     }
   });

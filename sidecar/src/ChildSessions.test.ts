@@ -78,18 +78,24 @@ function createHarness(
       appendStatus: (...args) => {
         calls.push({ target: 'protocol', method: 'timeline.status', args });
       },
-      flushStreaming: () => {
+      flushStreamingFor: () => {
         sequence.push('timeline.flushStreaming');
         if (!failFlushStreaming) return;
         failFlushStreaming = false;
         throw new Error('flush failed');
       },
-      replayChild: (...args) => {
+      settleStreaming: () => {
+        sequence.push('timeline.flushStreaming');
+        if (!failFlushStreaming) return;
+        failFlushStreaming = false;
+        throw new Error('flush failed');
+      },
+      loadChildHistory: (...args) => {
         if (missReplayChildOnce) {
           missReplayChildOnce = false;
           return;
         }
-        calls.push({ target: 'protocol', method: 'timeline.replayChild', args });
+        calls.push({ target: 'protocol', method: 'timeline.loadChildHistory', args });
       },
     },
     eventFlow: {
@@ -557,7 +563,7 @@ test('opening a child the harness is still driving keeps it running', async () =
   await h.open(record);
 
   const replayIndex = h.calls.findIndex(
-    (call) => call.target === 'protocol' && call.method === 'timeline.replayChild',
+    (call) => call.target === 'protocol' && call.method === 'timeline.loadChildHistory',
   );
   const loadIndex = h.calls.findIndex(
     (call) => call.target === 'runtime' && call.method === 'loadSession',
@@ -1103,7 +1109,26 @@ test('rapid provider replacements retire every intermediate identity', async () 
     h.history.childSession(h.parentId, record.childSessionId)?.providerSessionId,
     'provider-c',
   );
+  assert.deepEqual(
+    h.history.childSession(h.parentId, record.childSessionId)?.previousProviderSessionIds,
+    ['provider-a', 'provider-b'],
+  );
   assert.equal(h.owner.list(h.parentId)[0]?.role, 'worker');
+  await h.owner.loadHistory({
+    type: 'child.loadHistory',
+    parentAppSessionId: h.parentId,
+    childSessionId: record.childSessionId,
+  });
+  const historyCall = h.calls.findLast(
+    (call) => call.target === 'protocol' && call.method === 'timeline.loadChildHistory',
+  );
+  const historyRequest = historyCall?.args[0];
+  assert.ok(isChildHistoryRequest(historyRequest));
+  assert.deepEqual(historyRequest.childProviderSessionIds, [
+    'provider-a',
+    'provider-b',
+    'provider-c',
+  ]);
   const replacement = { ...record, providerSessionId: 'provider-c' };
   await h.open(replacement, new FakeFactorySession('provider-c', {}, h.calls));
   const before = mutationCount(h);
@@ -1118,6 +1143,12 @@ test('rapid provider replacements retire every intermediate identity', async () 
   assert.equal(mutationCount(h), before);
   assert.equal(h.target(record.childSessionId).providerSessionId, 'provider-c');
 });
+
+function isChildHistoryRequest(value: unknown): value is { childProviderSessionIds: unknown } {
+  return (
+    typeof value === 'object' && value !== null && Object.hasOwn(value, 'childProviderSessionIds')
+  );
+}
 
 test('runtime close invalidates immediately and waits for in-flight settings teardown', async () => {
   const record = childRecord('child', 'provider');

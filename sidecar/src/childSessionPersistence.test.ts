@@ -97,6 +97,7 @@ test('provider replacement updates runtime identity without changing logical chi
   index.upsertChildSession({
     ...original,
     providerSessionId: 'provider-new',
+    previousProviderSessionIds: ['provider-old'],
     status: 'running',
     updatedAt: 300,
   });
@@ -107,6 +108,7 @@ test('provider replacement updates runtime identity without changing logical chi
   assert.equal(restored.length, 1);
   assert.equal(restored[0].childSessionId, 'stable-child');
   assert.equal(restored[0].providerSessionId, 'provider-new');
+  assert.deepEqual(restored[0].previousProviderSessionIds, ['provider-old']);
   assert.equal(restored[0].status, 'running');
 });
 
@@ -166,7 +168,7 @@ test('fresh history index uses only the canonical child schema', () => {
   ).map(({ name }) => name);
   db.close();
 
-  assert.equal(version.user_version, 1);
+  assert.equal(version.user_version, 2);
   assert.ok(tables.includes('child_sessions'));
   assert.ok(!tables.includes('child_session_links'));
   assert.ok(!tables.includes('linked_child_sessions'));
@@ -174,6 +176,7 @@ test('fresh history index uses only the canonical child schema', () => {
     'parent_app_session_id',
     'child_session_id',
     'provider_session_id',
+    'previous_provider_session_ids',
     'role',
     'label',
     'prompt',
@@ -234,7 +237,7 @@ test('canonical session index remains isolated from the legacy droid index', () 
   }
 });
 
-test('version-one index missing a canonical identity constraint uses hard-cut recovery', () => {
+test('current index missing a canonical identity constraint uses hard-cut recovery', () => {
   const malformedHome = mkdtempSync(join(tmpdir(), 'droid-child-schema-v1-malformed-'));
   process.env.HOME = malformedHome;
   try {
@@ -255,7 +258,7 @@ test('version-one index missing a canonical identity constraint uses hard-cut re
   }
 });
 
-test('version-one index missing the canonical spawn-kind check uses hard-cut recovery', () => {
+test('current index missing the canonical spawn-kind check uses hard-cut recovery', () => {
   const malformedHome = mkdtempSync(join(tmpdir(), 'droid-child-schema-v1-check-'));
   process.env.HOME = malformedHome;
   try {
@@ -272,6 +275,7 @@ test('version-one index missing the canonical spawn-kind check uses hard-cut rec
         parent_app_session_id TEXT NOT NULL,
         child_session_id TEXT NOT NULL,
         provider_session_id TEXT,
+        previous_provider_session_ids TEXT NOT NULL DEFAULT '[]',
         role TEXT NOT NULL CHECK (role IN ('worker', 'validator')),
         label TEXT,
         prompt TEXT,
@@ -311,7 +315,7 @@ test('version-one index missing the canonical spawn-kind check uses hard-cut rec
   }
 });
 
-test('version-one indexes with incompatible partial definitions use hard-cut recovery', () => {
+test('current indexes with incompatible partial definitions use hard-cut recovery', () => {
   const cases = [
     {
       name: 'child_sessions_provider_identity',

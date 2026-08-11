@@ -56,7 +56,7 @@ import { NativeBrowserRuntime } from './browser/NativeBrowserRuntime.js';
 import { SessionRegistry } from './SessionRegistry.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
-import { SessionTimeline } from './SessionTimeline.js';
+import { isReportedStreamingTranscriptError, SessionTimeline } from './SessionTimeline.js';
 import { SessionContext, type LiveOperationTarget } from './SessionContext.js';
 import {
   SessionCompaction,
@@ -356,6 +356,9 @@ export class SessionManager {
       appendTranscript: (event) => {
         this.timeline.appendStreaming(event);
       },
+      flushTranscript: (appSessionId, sourceSessionId) => {
+        this.timeline.flushStreamingFor(appSessionId, sourceSessionId);
+      },
       applySideEffects: (appSessionId, sideEffects) => {
         this.applyEventSideEffects(appSessionId, sideEffects);
       },
@@ -534,6 +537,9 @@ export class SessionManager {
         return;
       case 'child.interrupt':
         await this.childSessions.interrupt(cmd);
+        return;
+      case 'child.loadHistory':
+        await this.childSessions.loadHistory(cmd);
         return;
       case 'child.updateSettings':
         await this.childSessions.updateSettings(cmd);
@@ -1161,41 +1167,47 @@ export class SessionManager {
     this.eventFlow.beginTurn(appSessionId, appSessionId);
     this.context.beginTurn(appSessionId);
     this.context.startPolling(contextTarget);
+    let turnError: unknown;
     try {
       await this.applyDesignToolPolicy(liveSession, isDesignPrompt(prompt));
-      if (!this.isCurrentPrimarySession(liveSession)) return;
+      if (!this.isCurrentPrimarySession(liveSession)) {
+        this.context.stopPolling(contextTarget);
+        return;
+      }
       const stream = liveSession.session.stream(prompt, { includePartialMessages: true });
       for await (const ev of stream) {
         if (!this.isCurrentPrimarySession(liveSession)) break;
         this.eventFlow.applyStreamEvent(appSessionId, appSessionId, 'primary', ev);
       }
     } catch (err) {
-      if (!this.isCurrentPrimarySession(liveSession)) {
-        return;
-      }
-      // A buffered final delta must be visible before any terminal status,
-      // error, or phase update from this failed/interrupted turn.
-      this.timeline.flushStreaming();
+      turnError = err;
+    }
+    try {
+      // Deliver any buffered streaming tail before the turn reads as settled.
+      this.timeline.settleStreaming(appSessionId, appSessionId);
+    } catch (err) {
+      turnError ??= err;
+    } finally {
+      this.context.stopPolling(contextTarget);
+    }
+    if (!this.isCurrentPrimarySession(liveSession)) return;
+    if (turnError) {
       if (liveSession.interruptingForSteer) {
         this.timeline.appendStatus(appSessionId, 'Current turn interrupted for steering.');
-      } else if (liveSession.interrupting && isUserCancellation(err)) {
+      } else if (liveSession.interrupting && isUserCancellation(turnError)) {
         // The user pressed Stop; interrupt() already set the paused phase, so
         // settle quietly without surfacing an error.
         this.registry.updateSummary(appSessionId, { phase: 'paused' });
       } else {
-        this.emitError({ appSessionId, message: errMsg(err) });
+        if (!isReportedStreamingTranscriptError(turnError)) {
+          this.emitError({ appSessionId, message: errMsg(turnError) });
+        }
         this.registry.updateSummary(appSessionId, { phase: 'failed' });
       }
-    } finally {
-      // Deliver any buffered streaming tail before the turn reads as settled.
-      this.timeline.flushStreaming();
-      this.context.stopPolling(contextTarget);
-      // Keep streaming=true while the context refresh is in flight so concurrent
-      // sends queue instead of racing a second lifecycle turn.
-      if (this.isCurrentPrimarySession(liveSession)) {
-        await this.context.refresh(contextTarget);
-      }
     }
+    // Keep streaming=true while the context refresh is in flight so concurrent
+    // sends queue instead of racing a second lifecycle turn.
+    await this.context.refresh(contextTarget);
   }
 
   private isCurrentPrimarySession(liveSession: LiveSession): boolean {
