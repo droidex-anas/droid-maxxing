@@ -21,7 +21,10 @@ import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
   extractFileChange,
   MAX_DIFF_CARDS_PER_COMMIT,
-  nextDiffCardCount,
+  createDiffDisclosure,
+  mountNextRevealedDiffCards,
+  reopenDiffDisclosure,
+  revealNextDiffCards,
   type FileChange,
 } from '../lib/diff';
 import { DiffCard } from './DiffView';
@@ -2350,7 +2353,7 @@ function DiffGroup({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [visibleCount, setVisibleCount] = useState(MAX_DIFF_CARDS_PER_COMMIT);
+  const [disclosure, setDisclosure] = useState(() => createDiffDisclosure(changes.length));
   const added = changes.reduce((s, c) => s + c.change.added, 0);
   const removed = changes.reduce((s, c) => s + c.change.removed, 0);
   const files = new Set(changes.map((c) => c.change.path));
@@ -2361,15 +2364,29 @@ function DiffGroup({
       : `Edited ${files.size} files · ${edits}`;
   // Mount bounded chunks so neither opening nor disclosing a genuinely huge
   // edit run creates one long renderer commit. No diff content is discarded.
-  const shown = changes.slice(0, visibleCount);
+  const shown = changes.slice(0, disclosure.mountedCount);
   const hiddenCount = changes.length - shown.length;
   const revealCount = Math.min(MAX_DIFF_CARDS_PER_COMMIT, hiddenCount);
+  const canRevealMore = hiddenCount > 0 && disclosure.mountedCount >= disclosure.revealedCount;
+
+  useEffect(() => {
+    if (!open || disclosure.mountedCount >= disclosure.revealedCount) return;
+    const frame = requestAnimationFrame(() => {
+      setDisclosure((current) => mountNextRevealedDiffCards(current, changes.length));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [changes.length, disclosure.mountedCount, disclosure.revealedCount, open]);
+
   return (
     <div>
       <button
         onClick={() => {
-          if (open) setVisibleCount(MAX_DIFF_CARDS_PER_COMMIT);
-          setOpen(!open);
+          if (!open) {
+            setDisclosure((current) => reopenDiffDisclosure(current, changes.length));
+          }
+          setOpen((current) => !current);
         }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left"
       >
@@ -2405,11 +2422,11 @@ function DiffGroup({
                 }
               />
             ))}
-            {hiddenCount > 0 && (
+            {canRevealMore && (
               <button
                 type="button"
                 onClick={() => {
-                  setVisibleCount((current) => nextDiffCardCount(current, changes.length));
+                  setDisclosure((current) => revealNextDiffCards(current, changes.length));
                 }}
                 className="text-[11px] text-droid-text-muted/70 transition-colors hover:text-droid-text-secondary"
               >

@@ -17,6 +17,56 @@ export function nextDiffCardCount(currentCount: number, totalCount: number): num
   return Math.min(totalCount, currentCount + MAX_DIFF_CARDS_PER_COMMIT);
 }
 
+export interface DiffDisclosureState {
+  revealedCount: number;
+  mountedCount: number;
+}
+
+function minimumDiffCardCount(totalCount: number): number {
+  return Math.min(totalCount, MAX_DIFF_CARDS_PER_COMMIT);
+}
+
+function revealedDiffCardCount(state: DiffDisclosureState, totalCount: number): number {
+  return Math.min(totalCount, Math.max(state.revealedCount, minimumDiffCardCount(totalCount)));
+}
+
+export function createDiffDisclosure(totalCount: number): DiffDisclosureState {
+  const count = minimumDiffCardCount(totalCount);
+  return { revealedCount: count, mountedCount: count };
+}
+
+export function reopenDiffDisclosure(
+  state: DiffDisclosureState,
+  totalCount: number,
+): DiffDisclosureState {
+  const revealedCount = revealedDiffCardCount(state, totalCount);
+  return {
+    revealedCount,
+    mountedCount: Math.min(revealedCount, MAX_DIFF_CARDS_PER_COMMIT),
+  };
+}
+
+export function revealNextDiffCards(
+  state: DiffDisclosureState,
+  totalCount: number,
+): DiffDisclosureState {
+  return {
+    revealedCount: nextDiffCardCount(revealedDiffCardCount(state, totalCount), totalCount),
+    mountedCount: Math.min(state.mountedCount, totalCount),
+  };
+}
+
+export function mountNextRevealedDiffCards(
+  state: DiffDisclosureState,
+  totalCount: number,
+): DiffDisclosureState {
+  const revealedCount = revealedDiffCardCount(state, totalCount);
+  return {
+    revealedCount,
+    mountedCount: nextDiffCardCount(Math.min(state.mountedCount, revealedCount), revealedCount),
+  };
+}
+
 const EDIT_TOOLS = [
   'edit',
   'multiedit',

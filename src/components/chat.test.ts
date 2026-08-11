@@ -22,7 +22,13 @@ import {
   type FeedItem,
 } from './chat';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
-import { nextDiffCardCount } from '../lib/diff';
+import {
+  createDiffDisclosure,
+  mountNextRevealedDiffCards,
+  nextDiffCardCount,
+  reopenDiffDisclosure,
+  revealNextDiffCards,
+} from '../lib/diff';
 import { hasTodoPayload, parseTruncatedTail } from '../lib/tools';
 import type { TranscriptEvent } from '../types/bridge';
 
@@ -879,6 +885,32 @@ test('diff disclosure grows in bounded renderer commits', () => {
   assert.equal(nextDiffCardCount(50, 500), 100);
   assert.equal(nextDiffCardCount(100, 125), 125);
   assert.equal(nextDiffCardCount(125, 125), 125);
+});
+
+test('diff disclosure preserves reveal progress while remounting in bounded commits', () => {
+  let disclosure = createDiffDisclosure(500);
+  for (let count = 50; count < 200; count += 50) {
+    disclosure = revealNextDiffCards(disclosure, 500);
+    disclosure = mountNextRevealedDiffCards(disclosure, 500);
+  }
+  assert.deepEqual(disclosure, { revealedCount: 200, mountedCount: 200 });
+
+  disclosure = reopenDiffDisclosure(disclosure, 500);
+  assert.deepEqual(disclosure, { revealedCount: 200, mountedCount: 50 });
+
+  for (let count = 50; count < 200; count += 50) {
+    disclosure = mountNextRevealedDiffCards(disclosure, 500);
+    assert.equal(disclosure.mountedCount, count + 50);
+    assert.equal(disclosure.revealedCount, 200);
+  }
+});
+
+test('history paging uses a persistent live region whose text changes in place', () => {
+  const chatViewPath = fileURLToPath(new URL('./ChatView.tsx', import.meta.url));
+  const source = readFileSync(chatViewPath, 'utf8');
+  assert.match(source, /aria-atomic="true"\s+aria-live="polite"/);
+  assert.match(source, /\{loadingOlder \? 'Loading earlier messages…' : ''\}/);
+  assert.doesNotMatch(source, /\{loadingOlder \? \(\s*<div[^>]+aria-live="polite"/);
 });
 
 test('a singleton diff keeps its viewport identity when an older edit joins the group', () => {

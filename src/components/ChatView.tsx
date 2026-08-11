@@ -508,11 +508,13 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
         {restore?.status === 'failed' && (
           <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
         )}
-        {loadingOlder ? (
-          <div aria-live="polite" className="pb-2 text-center text-[11px] text-droid-text-muted/70">
-            Loading earlier messages…
-          </div>
-        ) : null}
+        <div
+          aria-atomic="true"
+          aria-live="polite"
+          className={loadingOlder ? 'pb-2 text-center text-[11px] text-droid-text-muted/70' : ''}
+        >
+          {loadingOlder ? 'Loading earlier messages…' : ''}
+        </div>
         <MessageFeed
           events={transcript}
           items={feedItems}
