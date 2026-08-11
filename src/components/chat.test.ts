@@ -21,6 +21,7 @@ import {
   appendedFeedItemKeys,
   type FeedItem,
 } from './chat';
+import { EarlierHistoryStatus } from './ChatView';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
   createDiffDisclosure,
@@ -906,11 +907,15 @@ test('diff disclosure preserves reveal progress while remounting in bounded comm
 });
 
 test('history paging uses a persistent live region whose text changes in place', () => {
-  const chatViewPath = fileURLToPath(new URL('./ChatView.tsx', import.meta.url));
-  const source = readFileSync(chatViewPath, 'utf8');
-  assert.match(source, /aria-atomic="true"\s+aria-live="polite"/);
-  assert.match(source, /\{loadingOlder \? 'Loading earlier messages…' : ''\}/);
-  assert.doesNotMatch(source, /\{loadingOlder \? \(\s*<div[^>]+aria-live="polite"/);
+  const idle = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: false }));
+  const loading = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: true }));
+
+  for (const markup of [idle, loading]) {
+    assert.match(markup, /aria-atomic="true"/);
+    assert.match(markup, /aria-live="polite"/);
+  }
+  assert.doesNotMatch(idle, /Loading earlier messages/);
+  assert.match(loading, /Loading earlier messages…/);
 });
 
 test('a singleton diff keeps its viewport identity when an older edit joins the group', () => {

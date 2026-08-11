@@ -64,6 +64,18 @@ function RestoreFailedState({ message, onRetry }: { message?: string; onRetry: (
   );
 }
 
+export function EarlierHistoryStatus({ loading }: { loading: boolean }) {
+  return (
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      className={loading ? 'pb-2 text-center text-[11px] text-droid-text-muted/70' : ''}
+    >
+      {loading ? 'Loading earlier messages…' : ''}
+    </div>
+  );
+}
+
 function RestoreFailedBanner({ message, onRetry }: { message?: string; onRetry: () => void }) {
   return (
     <div className="mb-4 flex flex-wrap items-center justify-center gap-2 rounded-lg border border-droid-border bg-droid-elevated/40 px-3 py-2 text-center">
@@ -508,13 +520,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
         {restore?.status === 'failed' && (
           <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
         )}
-        <div
-          aria-atomic="true"
-          aria-live="polite"
-          className={loadingOlder ? 'pb-2 text-center text-[11px] text-droid-text-muted/70' : ''}
-        >
-          {loadingOlder ? 'Loading earlier messages…' : ''}
-        </div>
+        <EarlierHistoryStatus loading={loadingOlder} />
         <MessageFeed
           events={transcript}
           items={feedItems}
