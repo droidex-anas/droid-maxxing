@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, X } from 'lucide-react';
-import { useStore } from '../hooks/useStore';
+import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { NotesIntroCard } from './NotesIntroCard';
 import { INTRO_WIDTH, notesIntroPosition } from '../lib/notesIntro';
 import {
@@ -18,14 +18,15 @@ import {
 import { dismissNotesIntro, loadNotesIntroSeen, type SessionNote } from '../lib/sessionNotes';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
+const EMPTY_NOTES: SessionNote[] = [];
 
 // Scratch notes for the active session: write a thought down in the notepad
 // box, it stacks as a checklist line, and clicking a line hands the text to
 // the composer so it can be sent as a prompt. The bullet fills once a note has
 // been sent. Notes persist per session across restarts.
 export default function NotesSection({ appSessionId }: { appSessionId: string }) {
-  const { state, dispatch } = useStore();
-  const notes = state.sessionNotes[appSessionId] ?? [];
+  const dispatch = useStoreDispatch();
+  const notes = useStoreSelector((state) => state.sessionNotes[appSessionId] ?? EMPTY_NOTES);
   const [draft, setDraft] = useState('');
   // Tag chipped in the pad via the @ menu; save folds it into the note text.
   const [tag, setTag] = useState<NoteTag | null>(null);

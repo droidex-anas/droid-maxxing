@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { initialState, StoreContext, type AppState } from '../hooks/useStore.js';
+import { initialState, StaticStoreProvider, type AppState } from '../hooks/useStore.js';
 import type { ModelInfo, ReasoningEffort, SessionSummary } from '../types/bridge.js';
 import RightPanel from './RightPanel.js';
 import { EnvironmentSection } from './environment/EnvironmentSection.js';
@@ -55,8 +55,8 @@ function renderPanel(
   };
   return renderToStaticMarkup(
     createElement(
-      StoreContext.Provider,
-      { value: { state, dispatch: () => undefined } },
+      StaticStoreProvider,
+      { state, dispatch: () => undefined },
       createElement(RightPanel),
     ),
   );
@@ -105,8 +105,8 @@ test('PR detection and Context setup share authenticated GitHub readiness', () =
   const renderEnvironment = (githubReady: boolean, availability: GithubAvailability) =>
     renderToStaticMarkup(
       createElement(
-        StoreContext.Provider,
-        { value: { state: initialState, dispatch: action } },
+        StaticStoreProvider,
+        { state: initialState, dispatch: action },
         createElement(EnvironmentSection, {
           cwd: '/workspace',
           env,

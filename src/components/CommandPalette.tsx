@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStore } from '../hooks/useStore';
+import { useStoreDispatch } from '../hooks/useStore';
 import { Plus, Folder, Settings, Zap, GitBranch, Terminal, ArrowRight } from 'lucide-react';
 import PaletteShell from './PaletteShell';
 import { usePaletteNavigation } from './usePaletteNavigation';
@@ -26,7 +26,7 @@ const commands = [
 ];
 
 export default function CommandPalette() {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [query, setQuery] = useState('');
 
   const close = () => {

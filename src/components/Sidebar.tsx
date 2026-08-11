@@ -10,7 +10,7 @@
 // grows past that.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { useStore } from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { pickDirectory } from '../lib/desktop';
 import { dismissSidebarCard, loadSidebarCardSeen } from '../lib/sidebarCards';
@@ -153,7 +153,18 @@ function WorkspaceFolderIcon({ open }: { open: boolean }) {
 }
 
 export default function Sidebar({ workspaceScopes }: { workspaceScopes: WorkspaceScope[] }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const state = useStoreSelector(
+    (current) => ({
+      activeAppSessionId: current.activeAppSessionId,
+      chatMetadata: current.chatMetadata,
+      draftChat: current.draftChat,
+      sessionLastSeen: current.sessionLastSeen,
+      sessionOrder: current.sessionOrder,
+      sessions: current.sessions,
+    }),
+    shallowEqual,
+  );
   const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Sidebar-local chrome state: the search palette and the unread-only filter

@@ -44,7 +44,7 @@ function BranchGlyph({ className }: { className?: string }) {
 }
 
 import { StartBranchMenu } from './StartBranchMenu';
-import { useStore } from '../../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { useGitEnvironment } from '../../hooks/useGitEnvironment';
 import { pickDirectory } from '../../lib/desktop';
 import { worktreeName } from '../../lib/git';
@@ -91,7 +91,14 @@ function Pill({
 // The composer's "Start in" controls: pick the repository, choose an isolated
 // worktree or the local checkout, and select the starting ref.
 export function StartInBar() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const state = useStoreSelector(
+    (current) => ({
+      draftChat: current.draftChat,
+      workspaceCwds: current.workspaceCwds,
+    }),
+    shallowEqual,
+  );
   const draft = state.draftChat;
   const cwd = draft?.cwd ?? '';
   // 'uncommitted' so the branch-switch warning counts only working-tree changes

@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Moon, Sun, X } from 'lucide-react';
-import { useStore } from '../hooks/useStore';
+import { useStoreSelector } from '../hooks/useStore';
 import { applyTheme, resolveScheme, type ThemeColors } from '../lib/theme';
 import { ColorField } from './ColorPicker';
 import { pushEscapeLayer } from './environment/usePopover';
@@ -42,24 +42,24 @@ export function ThemeEditor({
   onSave: (draft: ThemeDraft) => boolean;
   onCancel: () => void;
 }) {
-  const { state } = useStore();
+  const theme = useStoreSelector((state) => state.theme);
   // The store theme is never dispatched while the editor is open, but an
   // external update (e.g. an OS scheme change) can still land, so track the
   // latest store theme: cancel restores it instead of a stale open-time
   // snapshot.
-  const latestTheme = useRef(state.theme);
+  const latestTheme = useRef(theme);
   useEffect(() => {
-    latestTheme.current = state.theme;
+    latestTheme.current = theme;
   });
   const savedRef = useRef(false);
   const [draft, setDraft] = useState<ThemeDraft>(initial);
   // Resolve System mode so the editor opens on the variant actually on screen.
-  const [editing, setEditing] = useState<'light' | 'dark'>(() => resolveScheme(state.theme.mode));
+  const [editing, setEditing] = useState<'light' | 'dark'>(() => resolveScheme(theme.mode));
 
   // Live-preview the variant being edited across the whole app.
   useEffect(() => {
-    applyTheme({ ...state.theme, ...draft[editing] });
-  }, [state.theme, draft, editing]);
+    applyTheme({ ...theme, ...draft[editing] });
+  }, [theme, draft, editing]);
 
   useEffect(() => {
     return () => {
@@ -91,7 +91,7 @@ export function ThemeEditor({
   // stale colors (App dispatches the new variant, but draft[editing] would
   // keep overriding it with the variant selected at open time).
   useEffect(() => {
-    if (state.theme.mode !== 'system') return;
+    if (theme.mode !== 'system') return;
     const mq = window.matchMedia('(prefers-color-scheme: light)');
     const onChange = () => {
       setEditing(mq.matches ? 'light' : 'dark');
@@ -100,7 +100,7 @@ export function ThemeEditor({
     return () => {
       mq.removeEventListener('change', onChange);
     };
-  }, [state.theme.mode]);
+  }, [theme.mode]);
 
   // aria-modal contract: Tab must cycle inside the dialog. Same
   // focusable-element query and wrap logic the environment Popover uses for
@@ -123,8 +123,8 @@ export function ThemeEditor({
           ),
         ),
       );
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
+      const first = focusables.at(0);
+      const last = focusables.at(-1);
       if (!first || !last) return;
       const active = document.activeElement as HTMLElement | null;
       const inside = active !== null && roots.some((root) => root.contains(active));

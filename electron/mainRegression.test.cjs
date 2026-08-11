@@ -38,6 +38,52 @@ test('native browser invoke handlers authorize the main renderer', () => {
   }
 });
 
+test('native browser restore does not reopen a URL that already failed this run', () => {
+  assert.match(mainSource, /targetUrl: null,\s*failedRestoreUrl: null,/);
+  assert.match(
+    mainSource,
+    /function rememberFailedRestoreUrl\(entry, url\) \{\s*if \(entry\.failedRestoreUrl\) return;[\s\S]*?entry\.failedRestoreUrl = restoreUrl;/,
+  );
+  assert.match(
+    mainSource,
+    /if \(fallback\) \{\s*rememberFailedRestoreUrl\(entry, entry\.targetUrl \|\| failedUrl\);\s*void loadNativeBrowserUrl\(entry, fallback, \{ force: true \}\);/,
+  );
+  assert.match(
+    mainSource,
+    /}\s*rememberFailedRestoreUrl\(entry, entry\.targetUrl \|\| failedUrl\);\s*emitNativeBrowserLoadFailed/,
+  );
+  assert.match(
+    mainSource,
+    /contents\.on\('did-navigate', \(_event, loadedUrl\) => \{[\s\S]*?entry\.failedRestoreUrl = null;[\s\S]*?entry\.targetUrl = loadedUrl;/,
+  );
+  assert.match(
+    mainSource,
+    /contents\.on\('will-navigate', \(_event, requestedUrl\) => \{[\s\S]*?entry\.failedRestoreUrl = null;[\s\S]*?entry\.targetUrl = requestedUrl;/,
+  );
+  const nativeDidNavigateStart = mainSource.indexOf("contents.on('did-navigate'");
+  const didFinishStart = mainSource.indexOf(
+    "contents.on('did-finish-load'",
+    nativeDidNavigateStart,
+  );
+  const didFailStart = mainSource.indexOf("contents.on('did-fail-load'", didFinishStart);
+  assert.doesNotMatch(
+    mainSource.slice(didFinishStart, didFailStart),
+    /entry\.failedRestoreUrl = null/,
+  );
+  assert.match(
+    mainSource,
+    /function nativeBrowserUrlsMatch\(left, right\) \{[\s\S]*?new URL\(left\)\.href === new URL\(right\)\.href/,
+  );
+  assert.match(
+    mainSource,
+    /function restorableUrlForEntry\(entry, url\) \{[\s\S]*?nativeBrowserUrlsMatch\(entry\.failedRestoreUrl, value\)[\s\S]*?\? undefined/,
+  );
+  assert.match(
+    mainSource,
+    /if \(entry\.failedRestoreUrl\) \{\s*const retryUrl = entry\.failedRestoreUrl;\s*entry\.failedRestoreUrl = null;\s*return loadNativeBrowserUrl\(entry, retryUrl, \{ force: true \}\);/,
+  );
+});
+
 test('main renderer reload closes renderer-owned terminals before navigation', () => {
   const closeRendererOwnedTerminals =
     /function closeRendererOwnedTerminals\(\) \{\s*terminalSubscriptions\.clear\(\);\s*terminalManager\.closeAll\(\);\s*\}/;

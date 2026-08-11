@@ -906,6 +906,7 @@ function createNativeBrowserEntry(browserSessionId) {
     browserSessionId,
     view: null,
     targetUrl: null,
+    failedRestoreUrl: null,
     state: { designMode: false, pencilMode: false },
     attached: false,
     visible: true,
@@ -951,6 +952,19 @@ function ensureNativeBrowserView(browserSessionId) {
       entry.consoleEvents.splice(0, entry.consoleEvents.length - 100);
     }
   });
+  contents.on('will-navigate', (_event, requestedUrl) => {
+    if (entry.view !== view) return;
+    // This event is limited to page/user-initiated navigations; programmatic
+    // loadURL retries (including the HTTPS-to-HTTP fallback) do not emit it.
+    entry.failedRestoreUrl = null;
+    entry.targetUrl = requestedUrl;
+  });
+  contents.on('did-navigate', (_event, loadedUrl) => {
+    if (entry.view !== view || isChromeErrorUrl(loadedUrl)) return;
+    entry.failedRestoreUrl = null;
+    entry.targetUrl = loadedUrl;
+    emitNativeBrowserLoaded(entry, loadedUrl);
+  });
   contents.on('did-finish-load', () => {
     const current = safeWebContents(view);
     if (entry.view !== view || !current) return;
@@ -960,8 +974,6 @@ function ensureNativeBrowserView(browserSessionId) {
         emitNativeBrowserLoaded(entry, entry.targetUrl);
       return;
     }
-    entry.targetUrl = loadedUrl;
-    emitNativeBrowserLoaded(entry, loadedUrl);
     if (entry.state.designMode) applyNativeBrowserDesignState(entry);
     void autofillSavedCredential(entry);
   });
@@ -969,9 +981,11 @@ function ensureNativeBrowserView(browserSessionId) {
     if (entry.view !== view || !isMainFrame || errorCode === -3) return;
     const fallback = httpFallbackUrl(failedUrl, errorCode);
     if (fallback) {
+      rememberFailedRestoreUrl(entry, entry.targetUrl || failedUrl);
       void loadNativeBrowserUrl(entry, fallback, { force: true });
       return;
     }
+    rememberFailedRestoreUrl(entry, entry.targetUrl || failedUrl);
     emitNativeBrowserLoadFailed(entry, failedUrl, errorDescription || `net error ${errorCode}`);
   });
   contents.on('dom-ready', () => {
@@ -1004,6 +1018,7 @@ async function openNativeBrowser(browserSessionId, url, bounds, viewport) {
   rejectHostAppUrl(url);
   url = normalizeNativeBrowserUrl(entry, url);
   validateUrl(url);
+  entry.failedRestoreUrl = null;
   if (bounds) await attachNativeBrowser(entry.browserSessionId, bounds, { restore: false });
   else {
     setHiddenNativeBrowserBounds(entry, entry.viewport);
@@ -1080,6 +1095,11 @@ function reloadNativeBrowser(browserSessionId) {
   const entry = nativeBrowsers.get(normalizeNativeBrowserSessionId(browserSessionId));
   const contents = safeWebContents(entry?.view);
   if (!contents) throw new Error(`${APP_NAME} browser is not open.`);
+  if (entry.failedRestoreUrl) {
+    const retryUrl = entry.failedRestoreUrl;
+    entry.failedRestoreUrl = null;
+    return loadNativeBrowserUrl(entry, retryUrl, { force: true });
+  }
   entry.targetUrl = contents.getURL();
   contents.reload();
 }
@@ -1826,10 +1846,31 @@ function normalizeNativeBrowserSessionId(browserSessionId) {
   return value;
 }
 
+function nativeBrowserUrlsMatch(left, right) {
+  if (!left || !right) return false;
+  try {
+    return new URL(left).href === new URL(right).href;
+  } catch {
+    return left === right;
+  }
+}
+
 function restorableUrlForEntry(entry, url) {
   if (!url) return undefined;
   const value = normalizeNativeBrowserUrl(entry, url);
-  return value === 'about:blank' || isChromeErrorUrl(value) ? undefined : value;
+  return value === 'about:blank' ||
+    isChromeErrorUrl(value) ||
+    nativeBrowserUrlsMatch(entry.failedRestoreUrl, value)
+    ? undefined
+    : value;
+}
+
+function rememberFailedRestoreUrl(entry, url) {
+  if (entry.failedRestoreUrl) return;
+  const restoreUrl = normalizeNativeBrowserUrl(entry, url);
+  if (restoreUrl !== 'about:blank' && !isChromeErrorUrl(restoreUrl)) {
+    entry.failedRestoreUrl = restoreUrl;
+  }
 }
 
 function nativeBrowserSessionIdForWebContents(contents) {

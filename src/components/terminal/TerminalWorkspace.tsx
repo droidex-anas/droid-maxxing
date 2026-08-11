@@ -11,7 +11,7 @@ import {
   writeTerminal,
 } from '../../lib/desktop';
 import { closeTerminalForTab, ensureTerminalForTab } from '../../lib/terminal';
-import { useStore, type ThemeConfig } from '../../hooks/useStore';
+import { useStoreSelector, type ThemeConfig } from '../../hooks/useStore';
 import { isTerminalTabShortcut } from '../../lib/keyboardShortcuts';
 
 export function TerminalWorkspace({
@@ -27,13 +27,13 @@ export function TerminalWorkspace({
   cwd: string;
   onCreated: (terminalId: string, label: string) => void;
 }) {
-  const { state } = useStore();
+  const theme = useStoreSelector((state) => state.theme);
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef(terminalId);
   const onCreatedRef = useRef(onCreated);
-  const themeRef = useRef(state.theme);
+  const themeRef = useRef(theme);
   const lastSizeRef = useRef({ cols: 0, rows: 0 });
   const [status, setStatus] = useState<'starting' | 'running' | 'exited' | 'error'>(
     terminalId ? 'running' : 'starting',
@@ -162,9 +162,9 @@ export function TerminalWorkspace({
   }, [cwd, appSessionId, tabId]);
 
   useEffect(() => {
-    themeRef.current = state.theme;
-    if (terminalRef.current) terminalRef.current.options.theme = terminalTheme(state.theme);
-  }, [state.theme]);
+    themeRef.current = theme;
+    if (terminalRef.current) terminalRef.current.options.theme = terminalTheme(theme);
+  }, [theme]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-droid-bg">

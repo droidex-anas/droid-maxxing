@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { useStore } from '../hooks/useStore';
+import { shallowEqual, useStoreSelector } from '../hooks/useStore';
 import { bridge } from '../lib/bridge';
 import { searchSessions } from '../lib/commands';
 import { chatDisplayTitle, isChatHidden } from '../lib/chatMetadata';
@@ -36,7 +36,14 @@ export default function SidebarSearch({
   onClose: () => void;
   onOpen: (appSessionId: string) => void;
 }) {
-  const { state } = useStore();
+  const state = useStoreSelector(
+    (current) => ({
+      chatMetadata: current.chatMetadata,
+      sessionOrder: current.sessionOrder,
+      sessions: current.sessions,
+    }),
+    shallowEqual,
+  );
   const [query, setQuery] = useState('');
   const [contentResults, setContentResults] = useState<ReadonlyMap<string, SessionSearchMatch[]>>(
     new Map(),

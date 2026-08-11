@@ -1,5 +1,7 @@
 import {
-  useStore,
+  shallowEqual,
+  useStoreDispatch,
+  useStoreSelector,
   type DiffStyle,
   type DiffViewMode,
   type ImagePasteQuality,
@@ -357,7 +359,20 @@ function SettingRow({
 
 /* ── general content ── */
 function GeneralSection() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const state = useStoreSelector(
+    (current) => ({
+      compactionModel: current.compactionModel,
+      compactionTokenLimit: current.compactionTokenLimit,
+      compactionTokenLimitPerModel: current.compactionTokenLimitPerModel,
+      models: current.models,
+      liveEnterBehavior: current.liveEnterBehavior,
+      imagePasteQuality: current.imagePasteQuality,
+      diffView: current.diffView,
+      theme: current.theme,
+    }),
+    shallowEqual,
+  );
   const selected = state.compactionModel || 'current-model';
 
   const setCompaction = (value: string) => {
@@ -721,7 +736,8 @@ function SetupSection({ onClose }: { onClose: () => void }) {
 
 /* ── configuration content ── */
 function ConfigurationSection() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const defaultAutonomy = useStoreSelector((state) => state.defaultAutonomy);
   return (
     <div className="max-w-2xl mx-auto">
       <SectionTitle title="Configuration" />
@@ -733,7 +749,7 @@ function ConfigurationSection() {
         >
           <AutonomySelector
             scope="settings"
-            value={state.defaultAutonomy}
+            value={defaultAutonomy}
             placement="down"
             onSelect={(level) => {
               dispatch({ type: 'SET_DEFAULT_AUTONOMY', autonomy: level });
@@ -812,7 +828,16 @@ function SettingsSearchResults({
 
 /* ── main full-page settings ── */
 export default function SettingsPanel() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const { settingsOpen, mcpCwd } = useStoreSelector((state) => {
+    const activeSession = state.activeAppSessionId
+      ? state.sessions[state.activeAppSessionId]
+      : undefined;
+    return {
+      settingsOpen: state.settingsOpen,
+      mcpCwd: activeSession?.cwd ?? state.workspaceCwds[0],
+    };
+  }, shallowEqual);
   const [active, setActive] = useState('Appearance');
   const [query, setQuery] = useState('');
 
@@ -838,11 +863,6 @@ export default function SettingsPanel() {
   };
   const q = query.trim();
   const hits = q ? searchSettings(q) : [];
-  const activeSession = state.activeAppSessionId
-    ? state.sessions[state.activeAppSessionId]
-    : undefined;
-  const mcpCwd = activeSession?.cwd ?? state.workspaceCwds[0];
-
   let content: React.ReactNode;
   switch (active) {
     case 'Appearance':
@@ -882,7 +902,7 @@ export default function SettingsPanel() {
 
   return (
     <AnimatePresence>
-      {state.settingsOpen && (
+      {settingsOpen && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

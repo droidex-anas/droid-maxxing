@@ -1,5 +1,5 @@
 import { sessionIsLive } from '../lib/sessions';
-import { useStore } from './useStore';
+import { useStoreSelector } from './useStore';
 
 /**
  * Whether a session is actively generating right now.
@@ -9,7 +9,8 @@ import { useStore } from './useStore';
  * from transcript freshness. We still respect phase for terminal/awaiting states.
  */
 export function useSessionLive(appSessionId: string | null): boolean {
-  const { state } = useStore();
-  const session = appSessionId ? state.sessions[appSessionId] : null;
-  return session ? sessionIsLive(session) : false;
+  return useStoreSelector((state) => {
+    const session = appSessionId ? state.sessions[appSessionId] : null;
+    return session ? sessionIsLive(session) : false;
+  });
 }

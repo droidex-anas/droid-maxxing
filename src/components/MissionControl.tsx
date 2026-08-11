@@ -1,5 +1,11 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
-import { useStore } from '../hooks/useStore';
+import {
+  shallowEqual,
+  useStoreDispatch,
+  useStoreSelector,
+  type ChildAccess,
+  type ChildRuntimeState,
+} from '../hooks/useStore';
 import { useRepoStatus } from '../hooks/useRepoStatus';
 import { interruptVisibleSession, updateSessionSettings } from '../lib/commands';
 import { utilityPanelForSession } from '../lib/utilityPanel';
@@ -56,7 +62,13 @@ import PromptInput from './PromptInput';
 import AutonomySelector from './AutonomySelector';
 
 const ACCENT = 'var(--droid-accent)';
-const accentMix = (pct: number) => `color-mix(in srgb, var(--droid-accent) ${pct}%, transparent)`;
+const accentMix = (pct: number) =>
+  `color-mix(in srgb, var(--droid-accent) ${String(pct)}%, transparent)`;
+const EMPTY_TRANSCRIPT: TranscriptEvent[] = [];
+const EMPTY_PROGRESS: ProgressEntry[] = [];
+const EMPTY_CHILD_SESSIONS: Record<string, ChildSessionSummary> = {};
+const EMPTY_CHILD_ACCESS: Record<string, ChildAccess> = {};
+const EMPTY_CHILD_RUNTIME: Record<string, ChildRuntimeState> = {};
 
 /* ════════════════════════ chat ════════════════════════ */
 
@@ -141,8 +153,9 @@ function FeaturesColumn({
     const map = new Map<string, BridgeFeature[]>();
     features.forEach((f) => {
       const m = f.milestone ?? 'Tasks';
-      if (!map.has(m)) map.set(m, []);
-      map.get(m)!.push(f);
+      const milestoneFeatures = map.get(m);
+      if (milestoneFeatures) milestoneFeatures.push(f);
+      else map.set(m, [f]);
     });
     return Array.from(map.entries());
   }, [features]);
@@ -168,7 +181,9 @@ function FeaturesColumn({
               return (
                 <button
                   key={f.id}
-                  onClick={() => onSelect(f)}
+                  onClick={() => {
+                    onSelect(f);
+                  }}
                   className="group relative w-full flex items-center gap-2 text-left pl-3 pr-2 py-1.5 rounded-md transition-colors"
                   style={active ? { background: accentMix(7) } : undefined}
                 >
@@ -247,6 +262,9 @@ function ContextColumn({
   progress,
   selectedChildSessionId,
   primaryIsLive,
+  models,
+  pendingAutonomy,
+  childRuntime,
   onSelectChild,
   big,
 }: {
@@ -255,6 +273,9 @@ function ContextColumn({
   progress: ProgressEntry[];
   selectedChildSessionId: string | null;
   primaryIsLive: boolean;
+  models: ModelInfo[];
+  pendingAutonomy: boolean;
+  childRuntime: Record<string, ChildRuntimeState>;
   onSelectChild: (childSessionId: string | null) => void;
   big?: boolean;
 }) {
@@ -278,14 +299,18 @@ function ContextColumn({
               ? 'Open a diff of uncommitted changes in your editor'
               : 'No git repository here'
           }
-          onClick={() => openCurrentDiff(mission.cwd)}
+          onClick={() => {
+            openCurrentDiff(mission.cwd);
+          }}
         />
         <EnvRow
           icon={<Monitor className="w-4 h-4" />}
           label={env.location}
           title={repoStatus?.repoRoot ?? mission.cwd}
           chevron
-          onClick={() => openCodebase(mission.cwd)}
+          onClick={() => {
+            openCodebase(mission.cwd);
+          }}
         />
         <EnvRow
           icon={<GitBranch className="w-4 h-4" />}
@@ -302,6 +327,9 @@ function ContextColumn({
         childSessions={childSessions}
         selectedChildSessionId={selectedChildSessionId}
         primaryIsLive={primaryIsLive}
+        models={models}
+        pendingAutonomy={pendingAutonomy}
+        childRuntime={childRuntime}
         onSelectChild={onSelectChild}
       />
 
@@ -323,7 +351,7 @@ function ContextColumn({
         </div>
         <div className="flex items-center gap-1 px-1">
           <button
-            title={`${skills.length} skills`}
+            title={`${String(skills.length)} skills`}
             className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/60 transition-colors"
           >
             <Boxes className="w-4 h-4" />
@@ -363,15 +391,21 @@ function AgentsSection({
   childSessions,
   selectedChildSessionId,
   primaryIsLive,
+  models,
+  pendingAutonomy,
+  childRuntime,
   onSelectChild,
 }: {
   mission: SessionSummary;
   childSessions: ChildSessionSummary[];
   selectedChildSessionId: string | null;
   primaryIsLive: boolean;
+  models: ModelInfo[];
+  pendingAutonomy: boolean;
+  childRuntime: Record<string, ChildRuntimeState>;
   onSelectChild: (childSessionId: string | null) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
 
   return (
     <section>
@@ -381,7 +415,7 @@ function AgentsSection({
         <AutonomySelector
           scope="session"
           value={mission.autonomy}
-          pending={mission.appSessionId in state.pendingAutonomy}
+          pending={pendingAutonomy}
           placement="down"
           onSelect={(level) => {
             dispatch({
@@ -398,29 +432,30 @@ function AgentsSection({
         <AgentRow
           title="Orchestrator"
           id={mission.modelId}
-          meta={[modelLabel(state.models, mission.modelId), mission.reasoningEffort, mission.phase]
+          meta={[modelLabel(models, mission.modelId), mission.reasoningEffort, mission.phase]
             .filter(Boolean)
             .join(' · ')}
-          models={state.models}
+          models={models}
           selected={selectedChildSessionId === null}
           working={primaryIsLive}
-          onClick={() => onSelectChild(null)}
+          onClick={() => {
+            onSelectChild(null);
+          }}
         />
         {childSessions.map((childSession, index) => {
-          const displayedModel = modelLabel(state.models, childSession.modelId);
+          const displayedModel = modelLabel(models, childSession.modelId);
           return (
             <AgentRow
               key={childSession.childSessionId}
               title={childSessionLabel(childSession, index)}
               id={childSession.modelId}
               meta={childSessionMeta(childSession, displayedModel)}
-              models={state.models}
+              models={models}
               selected={selectedChildSessionId === childSession.childSessionId}
-              working={childSessionIsLive(
-                childSession,
-                state.childRuntime[childSession.parentAppSessionId]?.[childSession.childSessionId],
-              )}
-              onClick={() => onSelectChild(childSession.childSessionId)}
+              working={childSessionIsLive(childSession, childRuntime[childSession.childSessionId])}
+              onClick={() => {
+                onSelectChild(childSession.childSessionId);
+              }}
             />
           );
         })}
@@ -503,7 +538,7 @@ function ProgressSection({
         {shown.map((entry, index) => (
           <button
             type="button"
-            key={`${entry.timestamp}-${entry.type}-${index}`}
+            key={`${entry.timestamp}-${entry.type}-${String(index)}`}
             disabled={!entry.workerChildSessionId}
             title={entry.workerChildSessionId ? 'Open exact child transcript' : undefined}
             onClick={() => {
@@ -526,7 +561,9 @@ function ProgressSection({
         )}
         {!big && hidden > 0 && (
           <button
-            onClick={() => setShowAll(true)}
+            onClick={() => {
+              setShowAll(true);
+            }}
             className="w-full text-left px-2 py-1 text-[11.5px] text-droid-text-muted hover:text-droid-text transition-colors"
           >
             Show {hidden} more
@@ -534,7 +571,9 @@ function ProgressSection({
         )}
         {!big && showAll && ordered.length > COLLAPSED && (
           <button
-            onClick={() => setShowAll(false)}
+            onClick={() => {
+              setShowAll(false);
+            }}
             className="w-full text-left px-2 py-1 text-[11.5px] text-droid-text-muted hover:text-droid-text transition-colors"
           >
             Show less
@@ -572,7 +611,9 @@ function ExpandModal({
         exit={{ scale: 0.97, opacity: 0, y: 8 }}
         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
         className="w-full max-w-3xl h-[82vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/60 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
       >
         <div className="flex items-center justify-between px-5 h-12 border-b border-droid-border shrink-0">
           <span className="text-[13px] font-medium text-droid-text">{title}</span>
@@ -684,7 +725,7 @@ function ActionRow({
 }
 
 function SpecList({ title, items }: { title: string; items: string[] }) {
-  if (!items || items.length === 0) return null;
+  if (items.length === 0) return null;
   return (
     <div>
       <div className="text-[11px] font-medium uppercase tracking-wider text-droid-text-muted mb-1.5">
@@ -783,10 +824,12 @@ function FeatureFocus({
           </div>
           {toolCalls.length > curated.length && (
             <button
-              onClick={() => setShowAll((v) => !v)}
+              onClick={() => {
+                setShowAll((v) => !v);
+              }}
               className="text-[11px] text-droid-text-muted hover:text-droid-text transition-colors"
             >
-              {showAll ? 'Show key actions' : `Reveal all (${toolCalls.length})`}
+              {showAll ? 'Show key actions' : `Reveal all (${String(toolCalls.length)})`}
             </button>
           )}
         </div>
@@ -808,9 +851,47 @@ function FeatureFocus({
 /* ════════════════════════ main ════════════════════════ */
 
 export default function MissionControl() {
-  const { state, dispatch } = useStore();
-  const mission = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
-  const utilityOpen = utilityPanelForSession(state.utilityPanels, state.activeAppSessionId).open;
+  const dispatch = useStoreDispatch();
+  const missionState = useStoreSelector((state) => {
+    const appSessionId = state.activeAppSessionId;
+    return {
+      mission: appSessionId ? (state.sessions[appSessionId] ?? null) : null,
+      utilityOpen: utilityPanelForSession(state.utilityPanels, appSessionId).open,
+      transcript: appSessionId
+        ? (state.transcripts[appSessionId] ?? EMPTY_TRANSCRIPT)
+        : EMPTY_TRANSCRIPT,
+      progress: appSessionId ? (state.progress[appSessionId] ?? EMPTY_PROGRESS) : EMPTY_PROGRESS,
+      childSessions: appSessionId
+        ? (state.childSessions[appSessionId] ?? EMPTY_CHILD_SESSIONS)
+        : EMPTY_CHILD_SESSIONS,
+      childAccess: appSessionId
+        ? (state.childAccess[appSessionId] ?? EMPTY_CHILD_ACCESS)
+        : EMPTY_CHILD_ACCESS,
+      childRuntime: appSessionId
+        ? (state.childRuntime[appSessionId] ?? EMPTY_CHILD_RUNTIME)
+        : EMPTY_CHILD_RUNTIME,
+      selectedChild:
+        appSessionId && state.selectedChild?.parentAppSessionId === appSessionId
+          ? state.selectedChild
+          : null,
+      rightPanelOpen: state.rightPanelOpen,
+      models: state.models,
+      pendingAutonomy: appSessionId ? appSessionId in state.pendingAutonomy : false,
+    };
+  }, shallowEqual);
+  const {
+    mission,
+    utilityOpen,
+    transcript: allTx,
+    progress,
+    childSessions: childSessionsById,
+    childAccess,
+    childRuntime,
+    selectedChild,
+    rightPanelOpen,
+    models,
+    pendingAutonomy,
+  } = missionState;
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
   const [focusOpen, setFocusOpen] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -818,16 +899,12 @@ export default function MissionControl() {
   const [openDiff, setOpenDiff] = useState<FileChange | null>(null);
 
   const features = mission?.features ?? [];
-  const allTx = mission ? (state.transcripts[mission.appSessionId] ?? []) : [];
-  const progress = mission ? (state.progress[mission.appSessionId] ?? []) : [];
-  const childSessions = mission
-    ? orderedChildSessions(Object.values(state.childSessions[mission.appSessionId] ?? {}))
-    : [];
+  const childSessions = mission ? orderedChildSessions(Object.values(childSessionsById)) : [];
   const visibleTarget = visibleSessionTarget(
     mission?.appSessionId,
-    state.selectedChild,
-    state.childSessions,
-    state.childAccess,
+    selectedChild,
+    mission ? { [mission.appSessionId]: childSessionsById } : {},
+    mission ? { [mission.appSessionId]: childAccess } : {},
   );
 
   const selectChild = useCallback(
@@ -922,7 +999,9 @@ export default function MissionControl() {
         {railCollapsed ? (
           <div className="w-11 shrink-0 flex flex-col items-center py-3 border-r border-droid-border bg-droid-surface/20">
             <button
-              onClick={() => setRailCollapsed(false)}
+              onClick={() => {
+                setRailCollapsed(false);
+              }}
               title="Expand features"
               className="p-1.5 rounded-md text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated transition-colors"
             >
@@ -936,9 +1015,13 @@ export default function MissionControl() {
           <aside className="w-[248px] shrink-0 flex flex-col border-r border-droid-border bg-droid-surface/20">
             <PanelHeader
               title="Features"
-              count={features.length > 0 ? `${done}/${features.length}` : undefined}
-              onExpand={() => setExpanded('features')}
-              onCollapse={() => setRailCollapsed(true)}
+              count={features.length > 0 ? `${String(done)}/${String(features.length)}` : undefined}
+              onExpand={() => {
+                setExpanded('features');
+              }}
+              onCollapse={() => {
+                setRailCollapsed(true);
+              }}
             />
             <FeaturesColumn
               features={features}
@@ -963,9 +1046,9 @@ export default function MissionControl() {
                     {visibleAgentLabel} working
                   </span>
                   <button
-                    onClick={() =>
-                      interruptVisibleSession(mission.appSessionId, visibleChildSessionId)
-                    }
+                    onClick={() => {
+                      interruptVisibleSession(mission.appSessionId, visibleChildSessionId);
+                    }}
                     className="px-2 py-1 rounded-md text-[11px] text-droid-text-muted hover:text-droid-text border border-droid-border hover:border-droid-border-hover transition-colors"
                   >
                     Stop
@@ -980,7 +1063,9 @@ export default function MissionControl() {
             <FeatureFocus
               feature={selectedFeature}
               events={selectedFeatureEvents}
-              onBack={() => setFocusOpen(false)}
+              onBack={() => {
+                setFocusOpen(false);
+              }}
               onOpenDiff={setOpenDiff}
             />
           ) : (
@@ -998,7 +1083,7 @@ export default function MissionControl() {
 
         {/* ─── Context panel (collapsible via the top-bar context button) ─── */}
         <AnimatePresence initial={false}>
-          {state.rightPanelOpen && !utilityOpen && (
+          {rightPanelOpen && !utilityOpen && (
             <motion.aside
               key="mc-context"
               initial={{ width: 0, opacity: 0 }}
@@ -1008,13 +1093,21 @@ export default function MissionControl() {
               className="shrink-0 overflow-hidden flex flex-col border-l border-droid-border bg-droid-surface/20"
             >
               <div className="flex h-full w-[272px] flex-col">
-                <PanelHeader title="Context" onExpand={() => setExpanded('context')} />
+                <PanelHeader
+                  title="Context"
+                  onExpand={() => {
+                    setExpanded('context');
+                  }}
+                />
                 <ContextColumn
                   mission={mission}
                   childSessions={childSessions}
                   progress={progress}
                   selectedChildSessionId={visibleChildSessionId}
                   primaryIsLive={isLive}
+                  models={models}
+                  pendingAutonomy={pendingAutonomy}
+                  childRuntime={childRuntime}
                   onSelectChild={selectChild}
                 />
               </div>
@@ -1026,7 +1119,12 @@ export default function MissionControl() {
       {/* ─── Expand overlays ─── */}
       <AnimatePresence>
         {expanded === 'features' && (
-          <ExpandModal title="Features" onClose={() => setExpanded(null)}>
+          <ExpandModal
+            title="Features"
+            onClose={() => {
+              setExpanded(null);
+            }}
+          >
             <FeaturesColumn
               features={features}
               selectedId={selectedFeatureId}
@@ -1040,13 +1138,21 @@ export default function MissionControl() {
           </ExpandModal>
         )}
         {expanded === 'context' && (
-          <ExpandModal title="Context" onClose={() => setExpanded(null)}>
+          <ExpandModal
+            title="Context"
+            onClose={() => {
+              setExpanded(null);
+            }}
+          >
             <ContextColumn
               mission={mission}
               childSessions={childSessions}
               progress={progress}
               selectedChildSessionId={visibleChildSessionId}
               primaryIsLive={isLive}
+              models={models}
+              pendingAutonomy={pendingAutonomy}
+              childRuntime={childRuntime}
               onSelectChild={(childSessionId) => {
                 selectChild(childSessionId);
                 setExpanded(null);
@@ -1056,7 +1162,12 @@ export default function MissionControl() {
           </ExpandModal>
         )}
         {openDiff && (
-          <ExpandModal title={openDiff.path} onClose={() => setOpenDiff(null)}>
+          <ExpandModal
+            title={openDiff.path}
+            onClose={() => {
+              setOpenDiff(null);
+            }}
+          >
             <DiffFull change={openDiff} />
           </ExpandModal>
         )}

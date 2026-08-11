@@ -1,6 +1,6 @@
 import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
-import { useStore, type SessionRestore } from '../hooks/useStore';
+import { useStoreDispatch, useStoreSelector, type SessionRestore } from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { motion } from 'framer-motion';
 import {
@@ -36,6 +36,7 @@ import {
 } from '../hooks/useConversationTimeline';
 import { transcriptRehydrationLimit } from '../lib/transcriptStoreMemory';
 import { VIEWPORT_TRANSCRIPT_POLICY } from '../lib/transcriptWindow';
+import { equalVisibleChatState, selectChatViewState, type ChatViewState } from './chatViewState';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -151,11 +152,23 @@ function ChatHeader({
   );
 }
 
-export default function ChatView({ rightInset = false }: { rightInset?: boolean }) {
-  const { state, dispatch } = useStore();
+export default function ChatView({
+  rightInset = false,
+  isObscured = false,
+}: {
+  rightInset?: boolean;
+  isObscured?: boolean;
+}) {
+  const dispatch = useStoreDispatch();
+  const equalChatState = useCallback(
+    (previous: ChatViewState, next: ChatViewState) =>
+      isObscured || equalVisibleChatState(previous, next),
+    [isObscured],
+  );
+  const state = useStoreSelector(selectChatViewState, equalChatState);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
-  const allTranscript = activeSession ? (state.transcripts[activeSession.appSessionId] ?? []) : [];
+  const activeSession = state.activeSession;
+  const allTranscript = state.allTranscript;
 
   const visibleTarget = visibleSessionTarget(
     activeSession?.appSessionId,

@@ -1388,13 +1388,15 @@ async function fileSignature(root, rel) {
 async function markTurnStart(dir, ownerId) {
   const root = await repoRootOf(dir);
   if (!root || !ownerId) return { ok: false };
-  let baseline = await tryRun(root, ['stash', 'create']);
-  if (!baseline) baseline = await tryRun(root, ['rev-parse', 'HEAD']);
-  // Unborn repo (no commits yet): `stash create` and `rev-parse HEAD` both fail,
-  // so capture the current index as a tree object instead. Diffing against it
-  // (the empty tree when nothing is staged) makes the agent's first-turn work
-  // show up once it commits, rather than falling back to a no-op `HEAD` diff.
-  if (!baseline) baseline = await tryRun(root, ['write-tree']);
+  const baselinePromise = (async () => {
+    let value = await tryRun(root, ['stash', 'create']);
+    if (!value) value = await tryRun(root, ['rev-parse', 'HEAD']);
+    // Unborn repo (no commits yet): `stash create` and `rev-parse HEAD` both
+    // fail, so capture the current index as a tree object instead. Diffing
+    // against it makes the agent's first-turn work show once it commits.
+    if (!value) value = await tryRun(root, ['write-tree']);
+    return value;
+  })();
   // `git stash create` captures tracked changes but omits untracked files, while
   // the last-turn diff folds in every current untracked file. Snapshot each
   // preexisting untracked path with a size+mtime signature so files that predate
@@ -1402,9 +1404,15 @@ async function markTurnStart(dir, ownerId) {
   // Cap like scanUntracked does: past the cap the turn diff won't surface the
   // files anyway, and stat-ing an unbounded listing (node_modules and the like)
   // would stall the turn-start hook.
-  const priorListing = String(
-    (await tryRun(root, ['ls-files', '--others', '--exclude-standard'])) || '',
-  )
+  // The tracked baseline and untracked listing are independent snapshots of
+  // the same turn-start state. Capture them concurrently so repositories with
+  // large tracked and untracked trees do not add both scan times to prompt
+  // delivery latency.
+  const [baseline, priorListingOutput] = await Promise.all([
+    baselinePromise,
+    tryRun(root, ['ls-files', '--others', '--exclude-standard']),
+  ]);
+  const priorListing = String(priorListingOutput || '')
     .split('\n')
     .filter(Boolean);
   const priorNames = priorListing.slice(0, UNTRACKED_FILE_CAP);

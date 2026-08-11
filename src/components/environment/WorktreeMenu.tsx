@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, ExternalLink, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { Popover } from './Popover';
-import { useStore } from '../../hooks/useStore';
+import { useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { createGitWorktree, isWorktreeInUse, removeGitWorktree, worktreeName } from '../../lib/git';
 import { activeSessionCwds } from '../../lib/sessions';
 import { utilityTerminalCwds } from '../../lib/utilityPanel';
@@ -25,6 +25,10 @@ function notifyWorktreeRemoved(reanchored: number, reanchorFailed: boolean): voi
   toast.success(message);
 }
 
+function sameStringList(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export function WorktreeMenu({
   cwd,
   env,
@@ -38,7 +42,7 @@ export function WorktreeMenu({
   branches: GitBranchList | null;
   onChanged: () => void;
 }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [creating, setCreating] = useState(false);
@@ -70,8 +74,8 @@ export function WorktreeMenu({
   const current = worktrees.find((w) => w.isCurrent);
   const mainWorktree = worktrees.find((w) => w.isMain);
   const others = worktrees.filter((w) => !w.isCurrent && !w.bare && w.path);
-  const sessionCwds = useMemo(
-    () =>
+  const sessionCwds = useStoreSelector(
+    (state) =>
       activeSessionCwds({
         sessions: Object.values(state.sessions),
         activeAppSessionId: state.activeAppSessionId,
@@ -84,15 +88,8 @@ export function WorktreeMenu({
             Object.entries(state.sessions).map(([id, session]) => [id, session.cwd]),
           ),
         ),
-      }),
-    [
-      state.sessions,
-      state.activeAppSessionId,
-      state.draftChat?.cwd,
-      state.childSessions,
-      state.childRuntime,
-      state.utilityPanels,
-    ],
+      }).sort(),
+    sameStringList,
   );
 
   const openInNewChat = (path: string, branch?: string | null) => {

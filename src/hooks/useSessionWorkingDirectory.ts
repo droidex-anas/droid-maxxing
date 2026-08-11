@@ -8,7 +8,8 @@ import {
 import { getGitWorktrees } from '../lib/git';
 import type { GitWorktree } from '../types/vcs';
 import { useDocumentVisible } from './useDocumentVisible';
-import { useStore } from './useStore';
+import { useStoreSelector } from './useStore';
+import type { TranscriptEvent } from '../types/bridge';
 
 interface WorktreeSnapshot {
   sessionKey: string;
@@ -19,6 +20,35 @@ interface WorktreeSnapshot {
 }
 
 const EMPTY_DISCOVERY_RETRY_MS = 5_000;
+const EMPTY_TRANSCRIPT: TranscriptEvent[] = [];
+
+function sameTranscriptEvents(left: TranscriptEvent[], right: TranscriptEvent[]): boolean {
+  return left.length === right.length && left.every((event, index) => event === right[index]);
+}
+
+export function createWorkingDirectoryTranscriptSelector(
+  appSessionId: string,
+  sourceSessionId?: string,
+): (state: { transcripts: Record<string, TranscriptEvent[]> }) => TranscriptEvent[] {
+  let sourceTranscript = EMPTY_TRANSCRIPT;
+  let selectedTranscript = EMPTY_TRANSCRIPT;
+  return (state) => {
+    const nextSource = appSessionId
+      ? (state.transcripts[appSessionId] ?? EMPTY_TRANSCRIPT)
+      : EMPTY_TRANSCRIPT;
+    if (nextSource === sourceTranscript) return selectedTranscript;
+    sourceTranscript = nextSource;
+    const nextSelected = nextSource.filter((event) => {
+      const matchesSource = sourceSessionId
+        ? event.sourceSessionId === sourceSessionId
+        : event.role === 'primary';
+      return matchesSource && (event.kind === 'tool_call' || event.kind === 'tool_result');
+    });
+    if (sameTranscriptEvents(selectedTranscript, nextSelected)) return selectedTranscript;
+    selectedTranscript = nextSelected;
+    return selectedTranscript;
+  };
+}
 
 // A worktree discovery is only "settled" once it returned at least one
 // worktree. getGitWorktrees resolves to [] both for a genuine empty repo and
@@ -46,12 +76,15 @@ export function useSessionWorkingDirectory(
   session: SessionSummary | null,
   sourceSessionId?: string,
 ): string {
-  const { state } = useStore();
   const sessionKey = session?.appSessionId ?? '';
   const sessionCwd = session?.cwd ?? '';
   const [discoveryTarget, setDiscoveryTarget] = useState({ sessionKey, cwd: sessionCwd });
   const discoveryCwd = discoveryTarget.sessionKey === sessionKey ? discoveryTarget.cwd : sessionCwd;
-  const transcript = session ? (state.transcripts[session.appSessionId] ?? []) : [];
+  const selectTranscript = useMemo(
+    () => createWorkingDirectoryTranscriptSelector(sessionKey, sourceSessionId),
+    [sessionKey, sourceSessionId],
+  );
+  const transcript = useStoreSelector(selectTranscript);
   const revision = useMemo(
     () => worktreeDiscoveryRevision(transcript, sourceSessionId),
     [sourceSessionId, transcript],

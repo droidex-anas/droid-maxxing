@@ -6,7 +6,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
-import { persistCustomThemes, useStore, type ThemeConfig } from '../hooks/useStore';
+import {
+  persistCustomThemes,
+  shallowEqual,
+  useStoreDispatch,
+  useStoreSelector,
+  type ThemeConfig,
+} from '../hooks/useStore';
 import {
   applyTheme,
   BUILT_IN_THEMES,
@@ -148,9 +154,11 @@ function ThemeColorRow({
 }
 
 export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 'dark' }) {
-  const { state, dispatch } = useStore();
-  const theme = state.theme;
-  const customThemes = state.customThemes;
+  const dispatch = useStoreDispatch();
+  const { theme, customThemes } = useStoreSelector(
+    (state) => ({ theme: state.theme, customThemes: state.customThemes }),
+    shallowEqual,
+  );
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [themeError, setThemeError] = useState<string | null>(null);

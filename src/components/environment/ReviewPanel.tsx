@@ -27,7 +27,7 @@ import { CreatePrSheet } from './CreatePrSheet';
 import { useReviewDiff } from '../../hooks/useReviewDiff';
 import { useReviewFileDiffs, type FileDiffEntry } from '../../hooks/useReviewFileDiffs';
 import { useGitEnvironment } from '../../hooks/useGitEnvironment';
-import { useStore } from '../../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { toast } from '../../lib/toast';
 import { detectPullRequest } from '../../lib/github';
 import {
@@ -40,7 +40,8 @@ import type { DiffFile } from '../../types/vcs';
 import { FileTypeIcon } from '../FileTypeIcon';
 
 function ScopeSelector() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const reviewScope = useStoreSelector((state) => state.reviewScope);
   const [open, setOpen] = useState(false);
   const ref = usePopover(
     open,
@@ -56,7 +57,7 @@ function ScopeSelector() {
         }}
         className="flex items-center gap-1.5 rounded-lg bg-droid-elevated px-2.5 py-1.5 text-[12px] text-droid-text transition-colors hover:bg-droid-elevated/70"
       >
-        <span>{reviewScopeLabel(state.reviewScope)}</span>
+        <span>{reviewScopeLabel(reviewScope)}</span>
         <ChevronDown
           className={`h-3 w-3 text-droid-text-muted/60 transition-transform ${open ? 'rotate-180' : ''}`}
         />
@@ -71,7 +72,7 @@ function ScopeSelector() {
                 setOpen(false);
               }}
               className={`flex w-full flex-col rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-droid-elevated/60 ${
-                option.scope === state.reviewScope ? 'bg-droid-elevated/50' : ''
+                option.scope === reviewScope ? 'bg-droid-elevated/50' : ''
               }`}
             >
               <span className="text-[12.5px] text-droid-text">{option.label}</span>
@@ -90,7 +91,8 @@ const VIEW_TOGGLE_ITEMS = [
 ];
 
 function ViewToggle() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const diffView = useStoreSelector((state) => state.diffView);
   return (
     <div className="review-view-toggle flex items-center rounded-lg bg-droid-elevated p-0.5">
       {VIEW_TOGGLE_ITEMS.map(({ mode, icon: Icon, title }) => (
@@ -101,7 +103,7 @@ function ViewToggle() {
           }}
           title={title}
           className={`rounded-md p-1.5 transition-colors ${
-            state.diffView === mode
+            diffView === mode
               ? 'bg-droid-bg text-droid-text'
               : 'text-droid-text-muted hover:text-droid-text'
           }`}
@@ -231,7 +233,17 @@ const FILE_RENDER_CAP = 100;
 const FILE_RENDER_JUMP_BUFFER = 20;
 
 export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => void }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const reviewState = useStoreSelector(
+    (state) => ({
+      appSessionId: state.activeAppSessionId ?? undefined,
+      reviewScope: state.reviewScope,
+      reviewFocusPath: state.reviewFocusPath,
+      reviewFocusRequestId: state.reviewFocusRequestId,
+      diffView: state.diffView,
+    }),
+    shallowEqual,
+  );
   const [filesOpen, setFilesOpen] = useState(true);
   const [wrap, setWrap] = useState(false);
   const [hideWhitespace, setHideWhitespace] = useState(false);
@@ -271,11 +283,11 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
     };
   }, []);
 
-  const appSessionId = state.activeAppSessionId ?? undefined;
-  const review = useReviewDiff(cwd, state.reviewScope, true, appSessionId);
+  const appSessionId = reviewState.appSessionId;
+  const review = useReviewDiff(cwd, reviewState.reviewScope, true, appSessionId);
   const { entries: diffEntries, ensure } = useReviewFileDiffs(
     cwd,
-    state.reviewScope,
+    reviewState.reviewScope,
     hideWhitespace,
     review.signature,
     appSessionId,
@@ -319,7 +331,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   }, [cwd, branch, isGitHub]);
   useEffect(() => {
     setRenderLimit(FILE_RENDER_CAP);
-  }, [cwd, state.reviewScope]);
+  }, [cwd, reviewState.reviewScope]);
   const { totalAdd, totalDel } = useMemo(
     () => ({
       totalAdd: review.files.reduce((sum, f) => sum + f.additions, 0),
@@ -423,7 +435,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   // from an older turn (or a restored session without a baseline) still opens
   // on its current diff instead of leaving the user to hunt through the list.
   useEffect(() => {
-    const focus = state.reviewFocusPath;
+    const focus = reviewState.reviewFocusPath;
     if (!focus) {
       focusFallbackRef.current = null;
       return;
@@ -440,10 +452,10 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
       dispatch({ type: 'CLEAR_REVIEW_FOCUS' });
       return;
     }
-    const nextScope = nextReviewFocusScope(state.reviewScope);
+    const nextScope = nextReviewFocusScope(reviewState.reviewScope);
     // The request id keeps a repeated click on the same file (a new request)
     // from being swallowed by the dedupe of the previous in-flight chain.
-    const attemptKey = `${String(state.reviewFocusRequestId)}:${state.reviewScope}→${focus}`;
+    const attemptKey = `${String(reviewState.reviewFocusRequestId)}:${reviewState.reviewScope}→${focus}`;
     if (nextScope && focusFallbackRef.current !== attemptKey) {
       // Guard against dispatching the same fallback twice when this effect
       // re-runs (e.g. a poll tick) while the next scope's list loads.
@@ -459,9 +471,9 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
     toast.info(`No current diff for ${focus.replace(/\\/g, '/').split('/').pop() ?? focus}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    state.reviewFocusPath,
-    state.reviewFocusRequestId,
-    state.reviewScope,
+    reviewState.reviewFocusPath,
+    reviewState.reviewFocusRequestId,
+    reviewState.reviewScope,
     review.signature,
     review.loadingList,
   ]);
@@ -708,7 +720,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
                   open={expanded.has(file.path)}
                   active={activePath === file.path}
                   entry={diffEntries[file.path]}
-                  view={compact ? 'unified' : state.diffView}
+                  view={compact ? 'unified' : reviewState.diffView}
                   wrap={wrap}
                   onToggle={toggle}
                   onSectionRef={registerSection}

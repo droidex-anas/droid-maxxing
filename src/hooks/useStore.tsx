@@ -1,5 +1,16 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useReducer, useState, useEffect } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
@@ -37,6 +48,7 @@ import type {
   DesignReference,
 } from '../types/bridge';
 import { addWorkspaceCwd } from '../lib/workspaces';
+import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
 import {
   applyFactoryCompactionDefaults,
@@ -345,9 +357,14 @@ export interface AppState {
 
   // Attachments for the first message of a not-yet-created session, keyed by clientRef.
   pendingCompose: Partial<Record<string, { text: string; skills: string[]; files: string[] }>>;
+  // Bounded settlement identity for the latest successful foreground create.
+  // PromptInput uses it to distinguish that activation from a failure followed
+  // by the user selecting an unrelated existing session.
+  lastCreatedSessionRequest: { clientRef: string; appSessionId: string } | null;
 }
 
 type Action =
+  | { type: 'BATCH'; actions: Action[] }
   // Connection
   | {
       type: 'SET_CONNECTION';
@@ -1116,6 +1133,7 @@ export const initialState: AppState = {
   skillsProviderSessionId: undefined,
   agentConfig: loadAgentConfig(),
   pendingCompose: {},
+  lastCreatedSessionRequest: null,
 };
 
 function progressKey(entry: ProgressEntry): string {
@@ -1312,6 +1330,9 @@ function withHistoricalCompactionGeneration(
 }
 
 export function reducer(state: AppState, action: Action): AppState {
+  if (action.type === 'BATCH') {
+    return action.actions.reduce(reducer, state);
+  }
   return syncBrowserOpen(baseReducer(state, action));
 }
 
@@ -1405,6 +1426,9 @@ function baseReducer(state: AppState, action: Action): AppState {
         childAccess,
         childRuntime,
         pendingCompose,
+        lastCreatedSessionRequest: shouldActivate
+          ? { clientRef: action.clientRef, appSessionId: action.session.appSessionId }
+          : state.lastCreatedSessionRequest,
         // A foreground chat just created by this renderer is already seen.
         sessionLastSeen: shouldActivate
           ? {
@@ -1943,6 +1967,10 @@ function baseReducer(state: AppState, action: Action): AppState {
             ([clientRef]) => clientRef !== action.clientRef,
           ),
         ),
+        lastCreatedSessionRequest:
+          state.lastCreatedSessionRequest?.clientRef === action.clientRef
+            ? null
+            : state.lastCreatedSessionRequest,
       };
 
     case 'SESSION_ERROR': {
@@ -3169,15 +3197,41 @@ export function adaptEvent(ev: ServerEvent): Action | null {
   }
 }
 
-// Exported so tests can mount a component against a reducer-built state
-// without standing up the full provider side effects (persistence, bridge).
-export const StoreContext = createContext<{
-  state: AppState;
+interface StoreContextValue {
+  getState: () => AppState;
+  subscribe: (listener: () => void) => () => void;
   dispatch: React.Dispatch<Action>;
-} | null>(null);
+}
+
+const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState, syncBrowserOpen);
+  const [state, reduceDispatch] = useReducer(reducer, initialState, syncBrowserOpen);
+  const stateRef = useRef(state);
+  const listenersRef = useRef(new Set<() => void>());
+  const bridgeActionBatcherRef = useRef<OrderedActionBatcher<Action> | null>(null);
+  const dispatch = useCallback<React.Dispatch<Action>>((action) => {
+    // A bridge event received before this local action must reduce first even
+    // when it is waiting in the current frame's follower batch.
+    const batcher = bridgeActionBatcherRef.current;
+    if (batcher) batcher.dispatchLocal(action);
+    else reduceDispatch(action);
+  }, []);
+  const [store] = useState<StoreContextValue>(() => ({
+    getState: () => stateRef.current,
+    subscribe: (listener) => {
+      listenersRef.current.add(listener);
+      return () => {
+        listenersRef.current.delete(listener);
+      };
+    },
+    dispatch,
+  }));
+
+  useLayoutEffect(() => {
+    stateRef.current = state;
+    for (const listener of listenersRef.current) listener();
+  }, [state]);
 
   useEffect(() => {
     savePersistedUiState(state);
@@ -3247,19 +3301,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Concurrent streams can deliver many bridge events per frame (token
     // deltas, usage and context telemetry, child updates), and every dispatch
-    // re-renders all store consumers. Batch per frame with a leading edge: the
-    // first event after an idle gap dispatches immediately (interactive
-    // round-trips stay instant), followers arriving within the same 16ms
-    // window flush together as one render. Order is preserved either way.
-    let queued: Action[] = [];
-    let flushTimer: number | null = null;
-    const flushQueued = () => {
-      flushTimer = null;
-      if (queued.length === 0) return;
-      const actions = queued;
-      queued = [];
-      for (const action of actions) dispatch(action);
-    };
+    // still notifies each selective subscriber. Batch per frame with a leading
+    // edge: the first event after an idle gap dispatches immediately
+    // (interactive round-trips stay instant), followers arriving within the
+    // same 16ms window flush together as one ordered state transition.
+    const batcher = createOrderedActionBatcher<Action, number>({
+      dispatchOne: reduceDispatch,
+      dispatchBatch: (actions) => {
+        reduceDispatch({ type: 'BATCH', actions });
+      },
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (timer) => {
+        window.clearTimeout(timer);
+      },
+      delayMs: 16,
+    });
+    bridgeActionBatcherRef.current = batcher;
     const unsub = bridge.subscribe((ev) => {
       // Verbose per-event logging runs on every streaming token and eagerly
       // deep-clones + redacts the whole event, so keep it to dev builds only;
@@ -3269,35 +3326,97 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (toastMessage !== undefined) toast.error(toastMessage);
       const action = adaptEvent(ev);
       if (!action) return;
-      if (flushTimer === null) {
-        dispatch(action);
-        flushTimer = window.setTimeout(flushQueued, 16);
-        return;
-      }
-      queued.push(action);
+      batcher.pushBridge(action);
     });
     return () => {
       unsub();
-      if (flushTimer !== null) window.clearTimeout(flushTimer);
       // StrictMode remounts this effect in dev; deliver anything in flight so
       // no event is lost across the resubscribe.
-      flushQueued();
+      batcher.dispose();
+      if (bridgeActionBatcherRef.current === batcher) bridgeActionBatcherRef.current = null;
     };
   }, []);
 
-  // Memoize the context value so a StoreProvider re-render with unchanged
-  // state (parent re-render, StrictMode double-render) doesn't hand consumers
-  // a fresh { state, dispatch } identity. Dispatches still re-render every
-  // consumer, since the reducer returns a new state object; this only removes
-  // the same-state case. dispatch is stable from useReducer, so [state] is the
-  // correct key.
-  const value = useMemo(() => ({ state, dispatch }), [state]);
-
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
 
-export function useStore() {
+export function StaticStoreProvider({
+  state,
+  dispatch,
+  children,
+}: {
+  state: AppState;
+  dispatch: React.Dispatch<Action>;
+  children: ReactNode;
+}) {
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const [store] = useState<StoreContextValue>(() => ({
+    getState: () => stateRef.current,
+    subscribe: () => () => undefined,
+    dispatch,
+  }));
+  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+}
+
+function useStoreContext(): StoreContextValue {
   const context = useContext(StoreContext);
   if (!context) throw new Error('useStore must be used within StoreProvider');
   return context;
+}
+
+export function useStoreApi(): Pick<StoreContextValue, 'getState'> {
+  return useStoreContext();
+}
+
+export function useStoreDispatch(): React.Dispatch<Action> {
+  return useStoreContext().dispatch;
+}
+
+export function useStoreSelector<Selected>(
+  selector: (state: AppState) => Selected,
+  isEqual: (left: Selected, right: Selected) => boolean = Object.is,
+): Selected {
+  const store = useStoreContext();
+  const committedSelectionRef = useRef<{ hasValue: false } | { hasValue: true; value: Selected }>({
+    hasValue: false,
+  });
+  const getSelection = useMemo(() => {
+    let hasMemo = false;
+    let memoizedState: AppState;
+    let memoizedSelection: Selected;
+    return () => {
+      const nextState = store.getState();
+      if (!hasMemo) {
+        hasMemo = true;
+        memoizedState = nextState;
+        const nextSelection = selector(nextState);
+        const committed = committedSelectionRef.current;
+        if (committed.hasValue && isEqual(committed.value, nextSelection)) {
+          memoizedSelection = committed.value;
+          return committed.value;
+        }
+        memoizedSelection = nextSelection;
+        return nextSelection;
+      }
+      if (Object.is(memoizedState, nextState)) return memoizedSelection;
+      const nextSelection = selector(nextState);
+      memoizedState = nextState;
+      if (isEqual(memoizedSelection, nextSelection)) return memoizedSelection;
+      memoizedSelection = nextSelection;
+      return nextSelection;
+    };
+  }, [isEqual, selector, store]);
+  const selection = useSyncExternalStore(store.subscribe, getSelection, getSelection);
+  useEffect(() => {
+    committedSelectionRef.current = { hasValue: true, value: selection };
+  }, [selection]);
+  return selection;
+}
+
+export function shallowEqual<T extends Record<string, unknown>>(left: T, right: T): boolean {
+  if (Object.is(left, right)) return true;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => Object.is(left[key], right[key]));
 }

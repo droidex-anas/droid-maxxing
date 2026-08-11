@@ -4,7 +4,12 @@
 // directly; they become an unsaved "custom" look until saved as a theme.
 
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
-import { useStore, type ThemeConfig } from '../hooks/useStore';
+import {
+  shallowEqual,
+  useStoreDispatch,
+  useStoreSelector,
+  type ThemeConfig,
+} from '../hooks/useStore';
 import {
   applyTheme,
   DEFAULT_THEME,
@@ -164,10 +169,13 @@ function SchemeCard({
 
 /* ── appearance content ── */
 export function AppearanceSection() {
-  const { state, dispatch } = useStore();
-  const theme = state.theme;
+  const dispatch = useStoreDispatch();
+  const { theme, customThemes } = useStoreSelector(
+    (state) => ({ theme: state.theme, customThemes: state.customThemes }),
+    shallowEqual,
+  );
 
-  const activePreset = findPreset(theme.presetId, state.customThemes);
+  const activePreset = findPreset(theme.presetId, customThemes);
   // Palette behind the scheme cards: the active preset, or the default when
   // the current colors are hand-edited and match no preset.
   const previewPreset = activePreset ?? DEFAULT_THEME;

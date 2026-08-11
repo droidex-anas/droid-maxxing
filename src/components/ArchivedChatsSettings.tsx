@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArchiveRestore, Trash2 } from 'lucide-react';
-import { useStore } from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { archivedChats, chatDisplayTitle } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
 import { workspaceName } from '../lib/workspaces';
@@ -10,12 +10,17 @@ import { workspaceName } from '../lib/workspaces';
 // permanently. Both are app-level metadata only — the underlying conversation
 // data is never touched.
 export function ArchivedChatsSettings() {
-  const { state, dispatch } = useStore();
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
-  const rows = archivedChats(
-    state.sessionOrder.map((id) => state.sessions[id]).filter(Boolean),
-    state.chatMetadata,
+  const dispatch = useStoreDispatch();
+  const { sessionOrder, sessions, chatMetadata } = useStoreSelector(
+    (state) => ({
+      sessionOrder: state.sessionOrder,
+      sessions: state.sessions,
+      chatMetadata: state.chatMetadata,
+    }),
+    shallowEqual,
   );
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const rows = archivedChats(sessionOrder.map((id) => sessions[id]).filter(Boolean), chatMetadata);
   const now = Date.now();
 
   return (
@@ -33,7 +38,7 @@ export function ArchivedChatsSettings() {
       ) : (
         <div className="rounded-xl border border-droid-border bg-droid-surface/40 divide-y divide-droid-border overflow-hidden">
           {rows.map(({ session, archivedAt }) => {
-            const title = chatDisplayTitle(session, state.chatMetadata[session.appSessionId]);
+            const title = chatDisplayTitle(session, chatMetadata[session.appSessionId]);
             return (
               <div
                 key={session.appSessionId}

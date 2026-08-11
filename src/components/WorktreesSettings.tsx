@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { reanchorSessionsForWorktreeRemoval } from '../lib/commands';
 import {
   getGitBranches,
@@ -105,7 +105,19 @@ async function enrichPullRequests(
 }
 
 export function WorktreesSettings() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const state = useStoreSelector(
+    (current) => ({
+      sessions: current.sessions,
+      workspaceCwds: current.workspaceCwds,
+      activeAppSessionId: current.activeAppSessionId,
+      draftChat: current.draftChat,
+      childSessions: current.childSessions,
+      childRuntime: current.childRuntime,
+      utilityPanels: current.utilityPanels,
+    }),
+    shallowEqual,
+  );
   const [repositories, setRepositories] = useState<RepositoryWorktrees[]>([]);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
