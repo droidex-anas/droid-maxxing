@@ -4,7 +4,11 @@ import type { ChildSessionSummary, SessionSummary, TranscriptEvent } from '../ty
 import { estimateTranscriptCost } from '../lib/transcriptWindow';
 import { initialState, reducer, type AppState } from './useStore';
 
-function session(appSessionId: string, streaming: boolean): SessionSummary {
+function session(
+  appSessionId: string,
+  streaming: boolean,
+  updatedAt = streaming ? 1 : 2,
+): SessionSummary {
   return {
     appSessionId,
     sessionPurpose: 'chat',
@@ -21,7 +25,7 @@ function session(appSessionId: string, streaming: boolean): SessionSummary {
     tokensOut: 0,
     contextTokens: 0,
     createdAt: 1,
-    updatedAt: streaming ? 1 : 2,
+    updatedAt,
   };
 }
 
@@ -106,6 +110,27 @@ test('a live primary session settling in the background receives the inactive li
   assert.equal(next.transcripts.outgoing.at(-1)?.id, transcript.at(-1)?.id);
   assert.equal(next.historyLoaded.outgoing, false);
   assert.equal(next.sessionRestore.outgoing?.hasMore, true);
+});
+
+test('a stale terminal primary update cannot release a newer live transcript', () => {
+  const transcript = events('outgoing', 'primary', 'primary');
+  const state = stateWithTranscript('outgoing', transcript, {
+    sessions: {
+      outgoing: session('outgoing', true, 3),
+      incoming: session('incoming', false),
+    },
+    sessionOrder: ['incoming', 'outgoing'],
+    activeAppSessionId: 'incoming',
+  });
+
+  const next = reducer(state, {
+    type: 'SESSION_UPDATED',
+    session: session('outgoing', false, 2),
+  });
+
+  assert.equal(next.transcripts.outgoing.length, transcript.length);
+  assert.equal(next.historyLoaded.outgoing, true);
+  assert.equal(next.sessionRestore.outgoing?.hasMore, false);
 });
 
 test('an unopened running child settling in the background receives the inactive limit', () => {

@@ -1483,6 +1483,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         !previous ||
         !sessionIsLive(previous) ||
         sessionIsLive(m) ||
+        m.updatedAt <= previous.updatedAt ||
         state.activeAppSessionId === m.appSessionId ||
         state.transcriptViewportPinned[m.appSessionId] === false
       )
