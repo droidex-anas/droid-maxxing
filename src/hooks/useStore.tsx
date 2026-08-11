@@ -1241,7 +1241,7 @@ function releaseInactiveChildTranscript(
   // their long-standing Record types.
   /* eslint-disable @typescript-eslint/no-unnecessary-condition */
   const history = state.childHistory[parentAppSessionId]?.[childSessionId];
-  if (!history?.isLoaded || !history.isViewportPinned) return state;
+  if (history && (!history.isLoaded || !history.isViewportPinned)) return state;
   const child = state.childSessions[parentAppSessionId]?.[childSessionId];
   const runtime = state.childRuntime[parentAppSessionId]?.[childSessionId];
   if (child?.status === 'running' && runtime?.available) return state;
@@ -1473,12 +1473,21 @@ function baseReducer(state: AppState, action: Action): AppState {
             Object.entries(state.pendingAutonomy).filter(([id]) => id !== m.appSessionId),
           )
         : state.pendingAutonomy;
-      return {
+      const next = {
         ...state,
         sessions: { ...state.sessions, [m.appSessionId]: m },
         contextStats,
         pendingAutonomy,
       };
+      if (
+        !previous ||
+        !sessionIsLive(previous) ||
+        sessionIsLive(m) ||
+        state.activeAppSessionId === m.appSessionId ||
+        state.transcriptViewportPinned[m.appSessionId] === false
+      )
+        return next;
+      return releaseSessionTranscriptWindow(next, m.appSessionId, INACTIVE_TRANSCRIPT_POLICY);
     }
 
     case 'SESSION_CLOSED': {
@@ -1565,10 +1574,18 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'SESSION_CHILD': {
       const child = action.child;
       const parent = state.childSessions[child.parentAppSessionId] ?? {};
+      const previousChild = parent[child.childSessionId];
       const runtimeParent = state.childRuntime[child.parentAppSessionId] ?? {};
       const previousRuntime = runtimeParent[child.childSessionId];
       if (previousRuntime && action.runtimeGeneration < previousRuntime.runtimeGeneration)
         return state;
+      const settledWhileInactive =
+        previousChild?.status === 'running' &&
+        previousRuntime?.available &&
+        (child.status !== 'running' || !action.runtimeAvailable) &&
+        (state.activeAppSessionId !== child.parentAppSessionId ||
+          state.selectedChild?.parentAppSessionId !== child.parentAppSessionId ||
+          state.selectedChild.childSessionId !== child.childSessionId);
       const clearContext =
         !action.runtimeAvailable ||
         (previousRuntime !== undefined &&
@@ -1597,40 +1614,41 @@ function baseReducer(state: AppState, action: Action): AppState {
             }
           : state.contextStats,
       };
-      if (
+      const runtimeUnchanged =
         // Keep the existence guard because the following comparison dereferences previousRuntime.
         // eslint-disable-next-line @typescript-eslint/prefer-optional-chain
         previousRuntime &&
         action.runtimeGeneration === previousRuntime.runtimeGeneration &&
-        action.runtimeAvailable === previousRuntime.available
-      )
-        return next;
-      next = {
-        ...next,
-        childRuntime: {
-          ...state.childRuntime,
-          [child.parentAppSessionId]: {
-            ...runtimeParent,
-            [child.childSessionId]: {
-              available: action.runtimeAvailable,
-              runtimeGeneration: action.runtimeGeneration,
+        action.runtimeAvailable === previousRuntime.available;
+      if (!runtimeUnchanged) {
+        next = {
+          ...next,
+          childRuntime: {
+            ...state.childRuntime,
+            [child.parentAppSessionId]: {
+              ...runtimeParent,
+              [child.childSessionId]: {
+                available: action.runtimeAvailable,
+                runtimeGeneration: action.runtimeGeneration,
+              },
             },
           },
-        },
-      };
-      const access = state.childAccess[child.parentAppSessionId]?.[child.childSessionId];
-      if (!access) return next;
-      if (!action.runtimeAvailable && (access.state === 'opening' || access.state === 'ready'))
-        return withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-          state: 'closed',
-          requestId: null,
-        });
-      if (action.runtimeAvailable && access.state === 'ready')
-        return withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-          ...access,
-          runtimeGeneration: action.runtimeGeneration,
-        });
-      return next;
+        };
+        const access = state.childAccess[child.parentAppSessionId]?.[child.childSessionId];
+        if (!action.runtimeAvailable && (access?.state === 'opening' || access?.state === 'ready'))
+          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
+            state: 'closed',
+            requestId: null,
+          });
+        else if (action.runtimeAvailable && access?.state === 'ready')
+          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
+            ...access,
+            runtimeGeneration: action.runtimeGeneration,
+          });
+      }
+      return settledWhileInactive
+        ? releaseInactiveChildTranscript(next, child.parentAppSessionId, child.childSessionId)
+        : next;
     }
 
     case 'CHILD_UPDATED': {
