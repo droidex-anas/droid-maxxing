@@ -1948,11 +1948,18 @@ function stringArray(value: unknown): string[] {
 
 function jsonStringArray(value: unknown): string[] {
   const raw = stringValue(value);
-  if (!raw) return [];
+  if (!raw) throw new Error(HISTORY_SCHEMA_RECOVERY);
   try {
-    return stringArray(JSON.parse(raw));
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error(HISTORY_SCHEMA_RECOVERY);
+    const strings: string[] = [];
+    for (const item of parsed) {
+      if (typeof item !== 'string') throw new Error(HISTORY_SCHEMA_RECOVERY);
+      strings.push(item);
+    }
+    return strings;
   } catch {
-    return [];
+    throw new Error(HISTORY_SCHEMA_RECOVERY);
   }
 }
 

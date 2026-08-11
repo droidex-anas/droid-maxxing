@@ -133,6 +133,15 @@ function transcript(id: string, appSessionId = 'provider-source'): TranscriptEve
   };
 }
 
+const TEST_COALESCE_MS = 5;
+const TEST_COALESCE_SETTLE_MARGIN_MS = 20;
+
+function waitForTestCoalesce(): Promise<void> {
+  return new Promise((resolve) =>
+    setTimeout(resolve, TEST_COALESCE_MS + TEST_COALESCE_SETTLE_MARGIN_MS),
+  );
+}
+
 function historyEntry(providerSessionId: string, modifiedTime: number): SessionHistoryEntry {
   return {
     providerSessionId,
@@ -160,14 +169,16 @@ function delta(
 }
 
 test('streaming text deltas coalesce into one event flushed by the timer', async () => {
-  const { emitted, recorded, timeline } = createHarness({ streamingCoalesceMs: 5 });
+  const { emitted, recorded, timeline } = createHarness({
+    streamingCoalesceMs: TEST_COALESCE_MS,
+  });
 
   timeline.appendStreaming(delta('a', { text: 'Hel', ts: 10 }));
   timeline.appendStreaming(delta('b', { text: 'lo', ts: 12 }));
   assert.deepEqual(emitted, []);
   assert.deepEqual(recorded, []);
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitForTestCoalesce();
 
   assert.equal(recorded.length, 1);
   assert.deepEqual(recorded[0], delta('a', { text: 'Hello', ts: 10, endTs: 12 }));
@@ -176,14 +187,14 @@ test('streaming text deltas coalesce into one event flushed by the timer', async
 
 test('timer flush failures stay owned by turn settlement', async () => {
   const { emitted, errors, timeline } = createHarness({
-    streamingCoalesceMs: 5,
+    streamingCoalesceMs: TEST_COALESCE_MS,
     onRecordEvent: () => {
       throw new Error('disk full');
     },
   });
 
   timeline.appendStreaming(delta('a', { text: 'buffered tail' }));
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitForTestCoalesce();
 
   assert.deepEqual(emitted, []);
   assert.deepEqual(errors, [
@@ -200,7 +211,7 @@ test('timer flush failures stay owned by turn settlement', async () => {
 
 test('timer flush failures report once through the owning child conversation', async () => {
   const { emitted, errors, timeline } = createHarness({
-    streamingCoalesceMs: 5,
+    streamingCoalesceMs: TEST_COALESCE_MS,
     onRecordEvent: () => {
       throw new Error('disk full');
     },
@@ -214,7 +225,7 @@ test('timer flush failures report once through the owning child conversation', a
       text: 'buffered child tail',
     }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await waitForTestCoalesce();
 
   assert.deepEqual(errors, []);
   assert.deepEqual(emitted, [
@@ -782,6 +793,39 @@ test('child history loads a canonical replace batch and reports replay failures 
     childSessionId: 'child-logical',
     message: 'not flushed',
   });
+});
+
+test('a live child with no flushed provider file returns an empty successful history page', () => {
+  const harness = createHarness({
+    loaders: {
+      resolveChain: () => [],
+      transcriptWindow: (_appSessionId, chain) => {
+        assert.deepEqual(chain, ['child-provider']);
+        return { events: [] };
+      },
+    },
+  });
+
+  harness.timeline.loadChildHistory({
+    appSessionId: 'app-1',
+    childSessionId: 'child-logical',
+    childProviderSessionIds: ['child-provider'],
+    role: 'worker',
+  });
+
+  assert.equal(harness.errors.length, 0);
+  assert.deepEqual(harness.emitted, [
+    {
+      type: 'session.history',
+      appSessionId: 'app-1',
+      childSessionId: 'child-logical',
+      progress: [],
+      transcripts: [],
+      mode: 'replace',
+      loadedCount: 0,
+      hasMore: false,
+    },
+  ]);
 });
 
 test('child history older page prepends and reports cursor exhaustion', () => {

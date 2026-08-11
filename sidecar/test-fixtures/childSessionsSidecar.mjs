@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import process from 'node:process';
 import { clearInterval, clearTimeout, setInterval, setTimeout } from 'node:timers';
+import { URL } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 
 const port = Number(process.env.BRIDGE_PORT);
@@ -206,17 +207,20 @@ function childHistory(socket, command) {
     command.childSessionId === 'alpha-sibling'
       ? Math.min(60, requestedLimit ?? 60)
       : Math.min(childTranscript.length, requestedLimit ?? childTranscript.length);
-  const isMiddlePage = command.cursor === 'alpha-sibling-middle';
-  const isOldestPage = command.cursor === 'alpha-sibling-oldest';
-  let page = childTranscript.slice(-pageSize);
-  let olderCursor = command.childSessionId === 'alpha-sibling' ? 'alpha-sibling-middle' : undefined;
-  if (isMiddlePage) {
-    page = childTranscript.slice(pageSize, pageSize * 2);
-    olderCursor = 'alpha-sibling-oldest';
-  } else if (isOldestPage) {
-    page = childTranscript.slice(0, pageSize);
-    olderCursor = undefined;
-  }
+  const cursorPrefix = 'alpha-sibling:';
+  const cursorOffset =
+    typeof command.cursor === 'string' && command.cursor.startsWith(cursorPrefix)
+      ? Number.parseInt(command.cursor.slice(cursorPrefix.length), 10)
+      : childTranscript.length;
+  const pageEnd = Number.isSafeInteger(cursorOffset)
+    ? Math.max(0, Math.min(childTranscript.length, cursorOffset))
+    : childTranscript.length;
+  const pageStart = Math.max(0, pageEnd - pageSize);
+  const page = childTranscript.slice(pageStart, pageEnd);
+  const olderCursor =
+    command.childSessionId === 'alpha-sibling' && pageStart > 0
+      ? `${cursorPrefix}${String(pageStart)}`
+      : undefined;
   const deliver = () =>
     send(socket, {
       type: 'session.history',

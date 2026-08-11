@@ -28,8 +28,12 @@ import type { FileChange } from '../lib/diff';
 import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
+import { isEmbedded } from '../lib/embed';
 import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
-import { useConversationTimeline } from '../hooks/useConversationTimeline';
+import {
+  restoreStatusForConversationTimeline,
+  useConversationTimeline,
+} from '../hooks/useConversationTimeline';
 import { transcriptRehydrationLimit } from '../lib/transcriptStoreMemory';
 import { VIEWPORT_TRANSCRIPT_POLICY } from '../lib/transcriptWindow';
 
@@ -422,7 +426,7 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
         ? (state.transcriptRetainedCost[activeSession.appSessionId] ?? 0) >
           VIEWPORT_TRANSCRIPT_POLICY.highWaterCost
         : false),
-    restoreStatus: restore?.status,
+    restoreStatus: restoreStatusForConversationTimeline(restore?.status, !isEmbedded()),
   });
   const { onScroll, requestOlderHistory } = useConversationScrollWindow({
     scrollRef,
@@ -504,6 +508,11 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
         {restore?.status === 'failed' && (
           <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
         )}
+        {loadingOlder ? (
+          <div aria-live="polite" className="pb-2 text-center text-[11px] text-droid-text-muted/70">
+            Loading earlier messages…
+          </div>
+        ) : null}
         <MessageFeed
           events={transcript}
           items={feedItems}

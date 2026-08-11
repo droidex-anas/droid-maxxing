@@ -69,6 +69,25 @@ test('release keeps a recent tail and moves the boundary to a nearby user prompt
   assert.equal(result.events.at(-1)?.id, '13');
 });
 
+test('prompt-boundary expansion never exceeds the event high-water allocation', () => {
+  const events = Array.from({ length: 30 }, (_, index) =>
+    event(String(index), index === 10 ? { author: 'user', text: 'distant turn' } : {}),
+  );
+  const result = releaseTranscriptWindow(events, estimateTranscriptCost(events), {
+    ...TEST_POLICY,
+    highWaterCost: 100_000,
+    highWaterEvents: 8,
+    targetCost: 100_000,
+    targetEvents: 5,
+    minimumEvents: 1,
+    boundaryScanEvents: 24,
+  });
+
+  assert.equal(result.released, true);
+  assert.ok(result.events.length <= 8);
+  assert.equal(result.events.at(-1)?.id, '29');
+});
+
 test('one indivisible oversized event is never truncated or partially retained', () => {
   const events = [event('1', { text: 'x'.repeat(10_000) })];
   const result = releaseTranscriptWindow(events, estimateTranscriptCost(events), TEST_POLICY);

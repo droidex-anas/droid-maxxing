@@ -5,6 +5,13 @@ import type { SessionRestoreStatus } from './useStore';
 const TIMELINE_TARGET_ANCHORS = 12;
 const TIMELINE_CAPACITY_BLOCK_LIMIT = 100;
 
+export function restoreStatusForConversationTimeline(
+  restoreStatus: SessionRestoreStatus | undefined,
+  restorationEnabled: boolean,
+): SessionRestoreStatus {
+  return restoreStatus ?? (restorationEnabled ? 'loading' : 'loaded');
+}
+
 export function recentConversationAnchors(
   anchors: ConversationAnchor[],
   limit: number,

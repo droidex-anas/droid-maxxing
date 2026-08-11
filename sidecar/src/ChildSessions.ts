@@ -39,7 +39,7 @@ import {
 } from './ChildSessionState.js';
 import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
 
-type ChildOperation = 'open' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 type ChildSettingsCommand = Extract<ClientCommand, { type: 'child.updateSettings' }>;
 type ChildLoadHistoryCommand = Extract<ClientCommand, { type: 'child.loadHistory' }>;
 
@@ -268,7 +268,7 @@ export class ChildSessions {
     if (!record) {
       this.emitError(
         identity,
-        'open',
+        'loadHistory',
         null,
         'child.not_in_session',
         `Child session ${command.childSessionId} is not tied to session ${command.parentAppSessionId}.`,
@@ -757,10 +757,11 @@ export class ChildSessions {
     runtime: ChildRuntimeState,
     turnGeneration: number,
   ): Promise<void> {
-    // Deliver any buffered streaming tail before the turn reads as settled.
+    if (!this.isCurrentTurn(parent, child, runtime, turnGeneration)) return;
+    // Deliver only this runtime generation's buffered tail before it reads as
+    // settled. A retired turn must not settle its replacement's shared source.
     this.settleStreaming(child.identity);
     this.d.context.stopPolling(this.contextTarget(parent, child, runtime));
-    if (!this.isCurrentTurn(parent, child, runtime, turnGeneration)) return;
     child.turn.interruptingForSteer = false;
     child.turn.interrupting = false;
     if (child.closeWhenIdle && !child.turn.autoCompacting) {

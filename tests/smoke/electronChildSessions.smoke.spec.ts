@@ -259,7 +259,7 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
         command.type === 'child.loadHistory' &&
         command.parentAppSessionId === 'parent-alpha' &&
         command.childSessionId === 'alpha-sibling' &&
-        command.cursor === 'alpha-sibling-middle',
+        command.cursor === 'alpha-sibling:120',
     );
     await expect(chat.getByText('ALPHA CHILD HISTORY 0061', { exact: false })).toHaveCount(1);
     await expect
@@ -311,7 +311,7 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
         command.type === 'child.loadHistory' &&
         command.parentAppSessionId === 'parent-alpha' &&
         command.childSessionId === 'alpha-sibling' &&
-        command.cursor === 'alpha-sibling-oldest',
+        command.cursor === 'alpha-sibling:60',
     );
     await leftNavigation.locator('[data-app-session-id="parent-beta"]').click();
     await expect(chat.getByText('BETA PRIMARY OUTPUT', { exact: true })).toBeVisible();

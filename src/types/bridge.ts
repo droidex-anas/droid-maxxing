@@ -757,7 +757,7 @@ export interface ChildErrorEvent {
   type: 'child.error';
   parentAppSessionId: string;
   childSessionId: string;
-  operation: 'open' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+  operation: 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
   requestId: string | null;
   code: string;
   message: string;

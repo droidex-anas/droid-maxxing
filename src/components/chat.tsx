@@ -18,7 +18,12 @@ import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridg
 import { Markdown } from './Markdown';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
-import { extractFileChange, type FileChange } from '../lib/diff';
+import {
+  extractFileChange,
+  MAX_DIFF_CARDS_PER_COMMIT,
+  nextDiffCardCount,
+  type FileChange,
+} from '../lib/diff';
 import { DiffCard } from './DiffView';
 import { SubagentsDock, type SubagentsDockData } from './SubagentsDock';
 import {
@@ -80,8 +85,12 @@ function useElapsed(startTs: number | undefined, active: boolean): number {
   useEffect(() => {
     if (!active || !visible) return;
     setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    const id = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      clearInterval(id);
+    };
   }, [active, visible]);
   return startTs != null ? Math.max(0, now - startTs) : 0;
 }
@@ -243,7 +252,9 @@ function ThinkingItem({
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex items-center gap-1.5 text-left"
       >
         <Caret open={open} />
@@ -358,13 +369,15 @@ function linkify(text: string): React.ReactNode {
   while ((m = URL_RE.exec(text)) !== null) {
     if (m.index > last) nodes.push(text.slice(last, m.index));
     let url = m[0];
-    const tail = url.match(/[.,;:!?)\]}]+$/)?.[0] ?? '';
+    const tail = /[.,;:!?)\]}]+$/.exec(url)?.[0] ?? '';
     if (tail) url = url.slice(0, url.length - tail.length);
     nodes.push(
       <a
         key={m.index}
         href={url}
-        onClick={(e) => openLink(e, url)}
+        onClick={(e) => {
+          openLink(e, url);
+        }}
         className="underline underline-offset-2 hover:opacity-80 break-all"
         style={{ color: ACCENT }}
       >
@@ -409,7 +422,9 @@ function ErrorLine({ text }: { text: string }) {
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] leading-relaxed"
       >
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color: RED }} />
@@ -472,7 +487,9 @@ function CommandCard({
         style={{ borderColor: 'color-mix(in srgb, var(--droid-red) 30%, var(--droid-border))' }}
       >
         <button
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setOpen((o) => !o);
+          }}
           className="group flex w-full items-center gap-2 h-8 px-3 bg-droid-surface/60 border-b border-droid-border text-left"
         >
           <Terminal className="w-3.5 h-3.5 shrink-0" style={{ color: RED }} />
@@ -539,7 +556,9 @@ function ToolLine({
     return (
       <div>
         <button
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setOpen((o) => !o);
+          }}
           className="group flex w-full items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0 text-left"
         >
           {label}
@@ -585,7 +604,9 @@ function Favicon({ url }: { url: string }) {
       alt=""
       loading="lazy"
       className="h-3.5 w-3.5 shrink-0 rounded-sm"
-      onError={() => setFailed(true)}
+      onError={() => {
+        setFailed(true);
+      }}
     />
   );
 }
@@ -605,7 +626,14 @@ function WebSourceRow({
   const href = httpHref(url);
   return (
     <a
-      {...(href ? { href, onClick: (e: React.MouseEvent) => openLink(e, href) } : {})}
+      {...(href
+        ? {
+            href,
+            onClick: (e: React.MouseEvent) => {
+              openLink(e, href);
+            },
+          }
+        : {})}
       className={`block rounded-lg px-3 py-2 transition-colors hover:bg-droid-elevated/60 ${
         emphasize ? 'bg-droid-elevated/40' : ''
       }`}
@@ -971,7 +999,7 @@ function TodoChecklist({ event }: { event: TranscriptEvent }) {
 // their results); fall back to adjacency only when neither side has an id (the
 // live stream emits each result immediately after its call).
 export function isResultFor(call: TranscriptEvent, next: TranscriptEvent | undefined): boolean {
-  if (!next || next.kind !== 'tool_result') return false;
+  if (next?.kind !== 'tool_result') return false;
   // A failed result must always surface so the user sees the failure, even when
   // it correlates to the call we are otherwise hiding (e.g. a failed TodoWrite).
   if (next.isError) return false;
@@ -1004,7 +1032,7 @@ export function correlateResults(events: TranscriptEvent[]): {
       result = resultById.get(call.toolUseId);
     } else {
       const next = events[i + 1];
-      if (next && next.kind === 'tool_result' && !next.toolUseId) result = next;
+      if (next?.kind === 'tool_result' && !next.toolUseId) result = next;
     }
     if (!result || consumed.has(result)) continue;
     // A failed plan result must surface (the checklist cannot convey a failure),
@@ -1115,7 +1143,9 @@ function ToolGroupItem({
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex items-center gap-1.5 text-left"
       >
         <Caret open={open} />
@@ -1161,12 +1191,12 @@ export type FeedItem =
 
 // One file touched during a completed turn, aggregated across every edit the
 // agent made to it that turn.
-export type TurnFile = {
+export interface TurnFile {
   path: string;
   added: number;
   removed: number;
   verb: FileChange['verb'];
-};
+}
 
 // Collect the files a turn's run edited, folding repeated edits to the same
 // path into a single entry (summed line counts). Order follows first touch.
@@ -1185,7 +1215,10 @@ export function collectTurnFiles(run: FeedItem[]): TurnFile[] {
   };
   for (const it of run) {
     if (it.type === 'diff') consider(it.change);
-    else if (it.type === 'diffs') it.changes.forEach((c) => consider(c.change));
+    else if (it.type === 'diffs')
+      it.changes.forEach((c) => {
+        consider(c.change);
+      });
   }
   return [...byPath.values()];
 }
@@ -1479,9 +1512,10 @@ function dedupePlanUpdates(events: TranscriptEvent[]): TranscriptEvent[] {
   ).id;
   // toolUseIds of superseded plan calls, so their own results are dropped no
   // matter where they sit in the group (replay batches calls before results).
-  const supersededIds = new Set(
-    plans.filter((p) => p.id !== keepId && p.toolUseId).map((p) => p.toolUseId as string),
-  );
+  const supersededIds = new Set<string>();
+  for (const plan of plans) {
+    if (plan.id !== keepId && plan.toolUseId) supersededIds.add(plan.toolUseId);
+  }
   const out: TranscriptEvent[] = [];
   for (let j = 0; j < events.length; j++) {
     const e = events[j];
@@ -1639,8 +1673,14 @@ function spanOf(items: FeedItem[]): { start: number; end: number } {
     end = Math.max(end, endTs ?? ts);
   };
   for (const it of items) {
-    if (it.type === 'tools') it.events.forEach((e) => consider(e.ts, e.endTs));
-    else if (it.type === 'diffs') it.changes.forEach((c) => consider(c.event.ts, c.event.endTs));
+    if (it.type === 'tools')
+      it.events.forEach((e) => {
+        consider(e.ts, e.endTs);
+      });
+    else if (it.type === 'diffs')
+      it.changes.forEach((c) => {
+        consider(c.event.ts, c.event.endTs);
+      });
     else if (it.type === 'child_sessions')
       it.events.forEach((e) => {
         consider(e.ts, e.endTs);
@@ -1925,7 +1965,7 @@ const InlineSpecCard = memo(function InlineSpecCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const title = useMemo(
-    () => content.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim() ?? 'Specification',
+    () => /^#{1,3}\s+(.+)$/m.exec(content)?.[1]?.trim() ?? 'Specification',
     [content],
   );
   const sections = useMemo(() => (content.match(/^#{1,3}\s+/gm) ?? []).length, [content]);
@@ -1934,7 +1974,9 @@ const InlineSpecCard = memo(function InlineSpecCard({
     <div className="rounded-xl border border-droid-border bg-droid-elevated/20 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <button
-          onClick={() => setExpanded((e) => !e)}
+          onClick={() => {
+            setExpanded((e) => !e);
+          }}
           className="flex items-center gap-2 flex-1 min-w-0 text-left group"
         >
           <ChevronRight
@@ -2213,7 +2255,13 @@ const FeedItemView = memo(function FeedItemView({
       return (
         <DiffCard
           change={item.change}
-          onOpen={onOpenDiff ? () => onOpenDiff(item.change) : undefined}
+          onOpen={
+            onOpenDiff
+              ? () => {
+                  onOpenDiff(item.change);
+                }
+              : undefined
+          }
         />
       );
     case 'diffs':
@@ -2258,7 +2306,9 @@ function WorkedGroup({
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex items-center gap-1.5 text-left"
       >
         <span className="text-[13px] text-droid-text-muted group-hover:text-droid-text-secondary transition-colors">
@@ -2290,7 +2340,6 @@ function WorkedGroup({
 }
 
 /* ── Folded run of file edits: one collapsible header over individual diffs ── */
-const MAX_DIFF_CARDS = 50;
 function DiffGroup({
   changes,
   onOpenDiff,
@@ -2301,7 +2350,7 @@ function DiffGroup({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [showAll, setShowAll] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(MAX_DIFF_CARDS_PER_COMMIT);
   const added = changes.reduce((s, c) => s + c.change.added, 0);
   const removed = changes.reduce((s, c) => s + c.change.removed, 0);
   const files = new Set(changes.map((c) => c.change.path));
@@ -2310,14 +2359,18 @@ function DiffGroup({
     files.size <= 1
       ? `Edited ${baseName(changes[0].change.path)} · ${edits}`
       : `Edited ${files.size} files · ${edits}`;
-  // Mount a first chunk so opening a genuinely huge edit run stays responsive.
-  // The rest remain one click away; no diff metadata or payload is discarded.
-  const shown = showAll ? changes : changes.slice(0, MAX_DIFF_CARDS);
+  // Mount bounded chunks so neither opening nor disclosing a genuinely huge
+  // edit run creates one long renderer commit. No diff content is discarded.
+  const shown = changes.slice(0, visibleCount);
   const hiddenCount = changes.length - shown.length;
+  const revealCount = Math.min(MAX_DIFF_CARDS_PER_COMMIT, hiddenCount);
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (open) setVisibleCount(MAX_DIFF_CARDS_PER_COMMIT);
+          setOpen(!open);
+        }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left"
       >
         <ChevronRight
@@ -2356,11 +2409,12 @@ function DiffGroup({
               <button
                 type="button"
                 onClick={() => {
-                  setShowAll(true);
+                  setVisibleCount((current) => nextDiffCardCount(current, changes.length));
                 }}
                 className="text-[11px] text-droid-text-muted/70 transition-colors hover:text-droid-text-secondary"
               >
-                Show {hiddenCount} more {hiddenCount === 1 ? 'edit' : 'edits'}
+                Show next {revealCount} {revealCount === 1 ? 'edit' : 'edits'} ({hiddenCount}{' '}
+                remaining)
               </button>
             )}
           </div>
@@ -2406,7 +2460,9 @@ function TurnChangesPanel({
   return (
     <div className="overflow-hidden rounded-xl border border-droid-border bg-droid-surface">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-droid-elevated/40"
         aria-expanded={open}
       >
@@ -2501,7 +2557,9 @@ function ChildSessionLine({
       <div className="group flex items-center gap-1.5 text-[13px]">
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setOpen((o) => !o);
+          }}
           className="flex items-center"
           aria-label="Toggle child session activity"
         >

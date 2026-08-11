@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   recentConversationAnchors,
   rememberTimelineCapacityBlock,
+  restoreStatusForConversationTimeline,
   shouldPrimeConversationTimeline,
 } from '../hooks/useConversationTimeline';
 import type { ConversationAnchor } from './chat';
@@ -35,7 +36,7 @@ test('timeline capacity blocks survive conversation switches', () => {
   assert.equal(blocked.has('app-2:primary'), false);
 });
 
-test('snapshot-backed timelines stay hidden until the initial restore settles', () => {
+test('desktop timelines prime until initial restore settles', () => {
   const base = {
     isViewingChildSession: false,
     anchorCount: 5,
@@ -63,4 +64,10 @@ test('snapshot-backed timelines stay hidden until the initial restore settles', 
     }),
     false,
   );
+});
+
+test('embedded timelines treat their intentionally skipped restore as loaded', () => {
+  assert.equal(restoreStatusForConversationTimeline(undefined, false), 'loaded');
+  assert.equal(restoreStatusForConversationTimeline(undefined, true), 'loading');
+  assert.equal(restoreStatusForConversationTimeline('paged', false), 'paged');
 });

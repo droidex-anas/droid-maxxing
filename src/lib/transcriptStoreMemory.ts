@@ -34,8 +34,8 @@ export function appendTranscriptEvent(state: AppState, event: TranscriptEvent): 
     state.transcriptRetainedCost[appSessionId] ?? estimateTranscriptCost(previous);
   const last = previous.at(-1);
 
-  // Protocol mirror: sidecar/src/SessionTimeline.ts pre-coalesces these same
-  // backend-only text/thinking runs.
+  // Protocol mirror of sidecar/src/SessionTimeline.ts mergeStreamingDelta().
+  // Keep both implementations and their behavior tests synchronized.
   const textDelta = getTextDeltaRun(last, event);
   if (textDelta) {
     const merged = [...previous];

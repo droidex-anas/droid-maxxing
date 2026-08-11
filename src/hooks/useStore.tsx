@@ -404,7 +404,7 @@ type Action =
       parentAppSessionId: string;
       childSessionId: string;
       requestId: string | null;
-      operation: 'open' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+      operation: 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
       message: string;
     }
   | {
@@ -1689,6 +1689,22 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'CHILD_ERROR': {
+      if (action.operation === 'loadHistory') {
+        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+        const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+        const next = withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
+          status: 'failed',
+          loadedCount: previous?.loadedCount ?? 0,
+          hasMore: previous?.hasMore ?? false,
+          error: action.message,
+          isLoaded: previous?.isLoaded ?? false,
+          isLoadingOlder: false,
+          olderCursor: previous?.olderCursor,
+          isViewportPinned: previous?.isViewportPinned ?? true,
+        });
+        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+        return next;
+      }
       if (action.operation !== 'open' || !action.requestId) return state;
       if (
         state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||

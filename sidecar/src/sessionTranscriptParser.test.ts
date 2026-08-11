@@ -92,7 +92,7 @@ test('child user prompts replay with child ownership', () => {
     })),
     [
       {
-        sourceSessionId: 'user',
+        sourceSessionId: 'child-provider',
         role: 'worker',
         author: 'user',
         text: 'continue the child task',

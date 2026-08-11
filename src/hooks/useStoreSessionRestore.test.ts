@@ -640,6 +640,51 @@ test('#29 a replace supersedes a skill/file echo whose persisted prompt is compo
   );
 });
 
+test('#29 replace and prepend supersede a skill-only echo with empty raw text', () => {
+  const echo: TranscriptEvent = {
+    id: 'local-skill-only',
+    appSessionId: 'm1',
+    sourceSessionId: 'user',
+    role: 'primary',
+    kind: 'text',
+    text: '',
+    ts: 500,
+    author: 'user',
+    skills: ['debugger'],
+  };
+  const persisted = userEv('sess:skill:text', 1_000, '/debugger');
+  const seeded = {
+    ...initialState,
+    transcripts: { m1: [echo] },
+  } as unknown as AppState;
+
+  const replaced = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [persisted],
+    mode: 'replace',
+    hasMore: false,
+  });
+  const prepended = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [persisted],
+    mode: 'prepend',
+    hasMore: false,
+  });
+
+  assert.deepEqual(
+    replaced.transcripts.m1.map((event) => event.id),
+    ['sess:skill:text'],
+  );
+  assert.deepEqual(
+    prepended.transcripts.m1.map((event) => event.id),
+    ['sess:skill:text'],
+  );
+});
+
 test('#29 an empty replace keeps live progress instead of clearing it', () => {
   // A live session with no persisted history answers with an empty replace; that
   // must not wipe progress already delivered by live events.

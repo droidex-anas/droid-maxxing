@@ -125,7 +125,7 @@ test('a stale open result cannot resurrect readiness after selection changes', (
 });
 
 test('same child IDs under different parents cannot cross-settle', () => {
-  let state = select(initialState, 'parent-a', 'shared-child', 'request-a');
+  const state = select(initialState, 'parent-a', 'shared-child', 'request-a');
   const afterWrongParent = reducer(state, {
     type: 'CHILD_UPDATED',
     parentAppSessionId: 'parent-b',
@@ -495,6 +495,34 @@ test('failed child access retries only after explicit reselection', () => {
   assert.deepEqual(afterLateReady.childAccess['parent-a']?.['child-a'], {
     state: 'opening',
     requestId: 'request-b',
+  });
+});
+
+test('child history errors settle the loading state for retry', () => {
+  let state = reducer(initialState, {
+    type: 'CHILD_HISTORY_LOADING',
+    parentAppSessionId: 'parent-a',
+    childSessionId: 'child-a',
+  });
+
+  state = reducer(state, {
+    type: 'CHILD_ERROR',
+    parentAppSessionId: 'parent-a',
+    childSessionId: 'child-a',
+    operation: 'loadHistory',
+    requestId: null,
+    message: 'history unavailable',
+  });
+
+  assert.deepEqual(state.childHistory['parent-a']?.['child-a'], {
+    status: 'failed',
+    loadedCount: 0,
+    hasMore: false,
+    error: 'history unavailable',
+    isLoaded: false,
+    isLoadingOlder: false,
+    olderCursor: undefined,
+    isViewportPinned: true,
   });
 });
 

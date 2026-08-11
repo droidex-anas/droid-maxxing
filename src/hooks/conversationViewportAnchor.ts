@@ -32,7 +32,8 @@ export function feedItemTailId(item: FeedItem): string {
 // anchoring has the opposite requirement during history prepend: an older page
 // can extend that group backward, while its tail event remains unchanged.
 export function feedRowId(item: FeedItem): string {
-  return `${item.type}:${feedItemTailId(item)}`;
+  const rowType = item.type === 'diffs' ? 'diff' : item.type;
+  return `${rowType}:${feedItemTailId(item)}`;
 }
 
 export function scrollTopForPreservedAnchor(

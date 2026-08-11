@@ -180,8 +180,11 @@ export function releaseTranscriptWindow(
   // and byte guard prevent one enormous turn from defeating the window budget.
   const earliestBoundary = Math.max(0, start - policy.boundaryScanEvents);
   let boundaryCost = keptCost;
+  let boundaryCount = keptCount;
   for (let i = start; i >= earliestBoundary; i--) {
     if (i < start) {
+      boundaryCount += 1;
+      if (boundaryCount > policy.highWaterEvents) break;
       boundaryCost += estimateTranscriptEventCost(events[i]) + SCALAR_OVERHEAD;
       if (boundaryCost > policy.highWaterCost) break;
     }

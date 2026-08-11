@@ -11,6 +11,12 @@ export interface FileChange {
   removed: number;
 }
 
+export const MAX_DIFF_CARDS_PER_COMMIT = 50;
+
+export function nextDiffCardCount(currentCount: number, totalCount: number): number {
+  return Math.min(totalCount, currentCount + MAX_DIFF_CARDS_PER_COMMIT);
+}
+
 const EDIT_TOOLS = [
   'edit',
   'multiedit',
@@ -52,7 +58,7 @@ function lineDiff(oldStr: string, newStr: string): DiffOp[] {
       ...b.map((t) => ({ type: 'add' as const, text: t })),
     ];
   }
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  const dp = Array.from({ length: n + 1 }, () => Array.from({ length: m + 1 }, () => 0));
   for (let i = n - 1; i >= 0; i--)
     for (let j = m - 1; j >= 0; j--)
       dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
@@ -86,11 +92,11 @@ function pathFromPatch(patch: string): string | undefined {
   // (`--- a/x`) for delete-only diffs where the new side is `/dev/null`.
   let fromOld: string | undefined;
   for (const line of patch.split('\n')) {
-    const star = line.match(/^\*\*\* (?:Update|Add|Delete|Move to) File:\s*(.+?)\s*$/);
+    const star = /^\*\*\* (?:Update|Add|Delete|Move to) File:\s*(.+?)\s*$/.exec(line);
     if (star) return star[1];
-    const plus = line.match(/^\+\+\+ (?:[ab]\/)?(.+?)\s*$/);
+    const plus = /^\+\+\+ (?:[ab]\/)?(.+?)\s*$/.exec(line);
     if (plus && plus[1] !== '/dev/null') return plus[1];
-    const minus = line.match(/^--- (?:[ab]\/)?(.+?)\s*$/);
+    const minus = /^--- (?:[ab]\/)?(.+?)\s*$/.exec(line);
     if (minus && minus[1] !== '/dev/null' && fromOld === undefined) fromOld = minus[1];
   }
   return fromOld;

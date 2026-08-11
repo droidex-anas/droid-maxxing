@@ -1795,6 +1795,9 @@ export class SessionManager {
     });
     await run(() => this.browsers.closeAll());
     await run(() => {
+      this.timeline.flushStreaming();
+    });
+    await run(() => {
       this.history.close();
     });
     if (firstError !== undefined)

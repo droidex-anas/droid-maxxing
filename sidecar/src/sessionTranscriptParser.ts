@@ -130,7 +130,8 @@ function nonAssistantBlockEvent(
     const display = designPromptDisplayFromText(rawText);
     const text = display?.text ?? rawText;
     if (!text || isSystemText(text)) return null;
-    return event({ ...base, sourceProviderSessionId: 'user' }, index, 'text', {
+    const sourceProviderSessionId = base.role === 'primary' ? 'user' : base.sourceProviderSessionId;
+    return event({ ...base, sourceProviderSessionId }, index, 'text', {
       text,
       author: 'user',
       browserRefs: display?.browserRefs,

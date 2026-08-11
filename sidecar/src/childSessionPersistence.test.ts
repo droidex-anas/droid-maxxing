@@ -112,6 +112,40 @@ test('provider replacement updates runtime identity without changing logical chi
   assert.equal(restored[0].status, 'running');
 });
 
+test('malformed replacement chains fail with hard-cut index recovery guidance', () => {
+  const parentAppSessionId = 'malformed-chain-parent';
+  const childSessionId = 'malformed-chain-child';
+  const index = new HistoryIndex();
+  index.upsertChildSession(child(parentAppSessionId, childSessionId));
+  index.close();
+
+  const indexPath = join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME);
+  const db = new DatabaseSync(indexPath);
+  db.prepare(
+    `UPDATE child_sessions
+     SET previous_provider_session_ids = ?
+     WHERE parent_app_session_id = ? AND child_session_id = ?`,
+  ).run('{"not":"an array"}', parentAppSessionId, childSessionId);
+  db.close();
+
+  const reopened = new HistoryIndex();
+  try {
+    assert.throws(
+      () => reopened.childSession(parentAppSessionId, childSessionId),
+      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
+    );
+  } finally {
+    reopened.close();
+    const cleanup = new DatabaseSync(indexPath);
+    cleanup
+      .prepare(
+        'DELETE FROM child_sessions WHERE parent_app_session_id = ? AND child_session_id = ?',
+      )
+      .run(parentAppSessionId, childSessionId);
+    cleanup.close();
+  }
+});
+
 test('canonical indexes reject duplicate provider and spawn ownership within one parent', () => {
   const index = new HistoryIndex();
   index.upsertChildSession(

@@ -43,6 +43,7 @@ function createHarness(
     failForgetChild?: string;
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
     failFlushStreamingOnce?: boolean;
+    failSettleStreamingOnce?: boolean;
     missReplayChildOnce?: boolean;
   } = {},
 ): Harness {
@@ -55,6 +56,7 @@ function createHarness(
   let missReplayChildOnce = options.missReplayChildOnce;
   let failDriveSetup = options.failDriveSetup;
   let failFlushStreaming = options.failFlushStreamingOnce;
+  let failSettleStreaming = options.failSettleStreamingOnce;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
     if (failDriveSetup !== stage) return;
     failDriveSetup = undefined;
@@ -85,10 +87,10 @@ function createHarness(
         throw new Error('flush failed');
       },
       settleStreaming: () => {
-        sequence.push('timeline.flushStreaming');
-        if (!failFlushStreaming) return;
-        failFlushStreaming = false;
-        throw new Error('flush failed');
+        sequence.push('timeline.settleStreaming');
+        if (!failSettleStreaming) return;
+        failSettleStreaming = false;
+        throw new Error('settle failed');
       },
       loadChildHistory: (...args) => {
         if (missReplayChildOnce) {
@@ -757,7 +759,7 @@ test('child stream failures flush buffered output before publishing the terminal
   assert.deepEqual(h.sequence, [
     'timeline.flushStreaming',
     'child.error:child.send_failed',
-    'timeline.flushStreaming',
+    'timeline.settleStreaming',
     'context.stopPolling',
   ]);
   assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused');
@@ -765,7 +767,7 @@ test('child stream failures flush buffered output before publishing the terminal
 
 test('child settlement stops polling and returns idle when streaming persistence fails', async () => {
   const record = childRecord('child', 'provider');
-  const h = createHarness([record], { failFlushStreamingOnce: true });
+  const h = createHarness([record], { failSettleStreamingOnce: true });
   const runtime = await h.open(record);
   runtime.nextStreamError = new Error('stream failed');
   h.sequence.length = 0;
@@ -774,9 +776,9 @@ test('child settlement stops polling and returns idle when streaming persistence
 
   assert.deepEqual(h.sequence, [
     'timeline.flushStreaming',
-    'child.error:child.transcript_persist_failed',
     'child.error:child.send_failed',
-    'timeline.flushStreaming',
+    'timeline.settleStreaming',
+    'child.error:child.transcript_persist_failed',
     'context.stopPolling',
   ]);
   assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused');
@@ -1150,6 +1152,27 @@ function isChildHistoryRequest(value: unknown): value is { childProviderSessionI
   );
 }
 
+test('missing child history uses the loadHistory operation for visible retry feedback', async () => {
+  const h = createHarness([]);
+
+  await h.owner.loadHistory({
+    type: 'child.loadHistory',
+    parentAppSessionId: h.parentId,
+    childSessionId: 'missing-child',
+  });
+
+  assert.equal(
+    h.events.some(
+      (event) =>
+        event.type === 'child.error' &&
+        event.childSessionId === 'missing-child' &&
+        event.operation === 'loadHistory' &&
+        event.code === 'child.not_in_session',
+    ),
+    true,
+  );
+});
+
 test('runtime close invalidates immediately and waits for in-flight settings teardown', async () => {
   const record = childRecord('child', 'provider');
   const h = createHarness([record]);
@@ -1379,8 +1402,10 @@ test('stale interrupt and turn settlement cannot make a replacement turn idle', 
     const active = h.owner.send(record, 'replacement turn');
     await replacement.waitForPrompts(1);
 
+    h.sequence.length = 0;
     releaseStale.resolve();
     await stale;
+    if (kind === 'settlement') assert.deepEqual(h.sequence, []);
     await h.owner.send(record, 'must queue');
     assert.deepEqual(replacement.prompts, ['replacement turn'], kind);
 

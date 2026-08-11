@@ -22,6 +22,7 @@ import {
   type FeedItem,
 } from './chat';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
+import { nextDiffCardCount } from '../lib/diff';
 import { hasTodoPayload, parseTruncatedTail } from '../lib/tools';
 import type { TranscriptEvent } from '../types/bridge';
 
@@ -872,6 +873,37 @@ test('#39 distinct edits (different toolUseIds) stay separate in the diffs group
   assert.equal(group.changes.length, 2);
   const added = group.changes.reduce((s, c) => s + c.change.added, 0);
   assert.equal(added, 5);
+});
+
+test('diff disclosure grows in bounded renderer commits', () => {
+  assert.equal(nextDiffCardCount(50, 500), 100);
+  assert.equal(nextDiffCardCount(100, 125), 125);
+  assert.equal(nextDiffCardCount(125, 125), 125);
+});
+
+test('a singleton diff keeps its viewport identity when an older edit joins the group', () => {
+  const latest = ev({
+    kind: 'tool_call',
+    toolName: 'apply_patch',
+    toolArgs: { patch: editPatch(2) },
+    toolUseId: 'latest-edit',
+  });
+  const older = ev({
+    kind: 'tool_call',
+    toolName: 'apply_patch',
+    toolArgs: { patch: editPatch(1) },
+    toolUseId: 'older-edit',
+  });
+  const before = buildFeed([latest]).find(
+    (item): item is Extract<FeedItem, { type: 'diff' }> => item.type === 'diff',
+  );
+  const after = buildFeed([older, latest]).find(
+    (item): item is Extract<FeedItem, { type: 'diffs' }> => item.type === 'diffs',
+  );
+
+  assert.ok(before);
+  assert.ok(after);
+  assert.equal(feedRowId(before), feedRowId(after));
 });
 
 // ── #27: per-turn changes summary after a completed turn that edited files ──

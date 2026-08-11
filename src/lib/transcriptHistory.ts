@@ -12,10 +12,10 @@ function isOptimisticEcho(event: TranscriptEvent): boolean {
 // An optimistic user echo stores raw input, while history persists the composed
 // prompt (raw text plus skill/file context). Match either representation.
 function echoMatchesPersisted(event: TranscriptEvent, persisted: Set<string | undefined>): boolean {
-  if (!event.text) return false;
-  if (persisted.has(event.text)) return true;
-  const composed = composePrompt(event.text, event.skills ?? [], event.files ?? []);
-  return composed !== event.text && persisted.has(composed);
+  const rawText = event.text ?? '';
+  if (rawText && persisted.has(rawText)) return true;
+  const composed = composePrompt(rawText, event.skills ?? [], event.files ?? []);
+  return composed !== rawText && persisted.has(composed);
 }
 
 export function reconcilePrependedTranscript(
@@ -29,7 +29,6 @@ export function reconcilePrependedTranscript(
   const supersededEcho = (event: TranscriptEvent) =>
     isOptimisticEcho(event) &&
     event.author === 'user' &&
-    Boolean(event.text) &&
     event.ts <= olderLastTs &&
     echoMatchesPersisted(event, olderUserText);
   const kept = existing.filter((event) => !supersededEcho(event));
@@ -52,7 +51,6 @@ export function reconcileRestoredTranscript(
   const supersededEcho = (event: TranscriptEvent) =>
     isOptimisticEcho(event) &&
     event.author === 'user' &&
-    Boolean(event.text) &&
     event.ts <= lastTs &&
     (pageIsComplete || event.ts >= firstTs) &&
     echoMatchesPersisted(event, pageUserText);
