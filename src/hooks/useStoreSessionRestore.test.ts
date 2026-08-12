@@ -275,6 +275,36 @@ test('#29 a replace drops a live event that duplicates a replayed one by content
   );
 });
 
+test('#29 a replace keeps one full live event when persisted history truncates its twin', () => {
+  const fullText = `Here is the visualization.\n\n\`\`\`app\n${'x'.repeat(64)}\n\`\`\`\n\nDetails.`;
+  const retainedPrefix = fullText.slice(0, 48);
+  const persistedText = `${retainedPrefix}\n\n[truncated ${String(fullText.length - retainedPrefix.length)} chars]`;
+  const seeded = {
+    ...initialState,
+    transcripts: {
+      m1: [ev('live-prefix', 999, retainedPrefix), ev('live-app', 1000, fullText)],
+    },
+  } as unknown as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [
+      userEv('real-user', 900, '/visualize histogram'),
+      ev('sess:1:0:text', 1001, persistedText),
+    ],
+    mode: 'replace',
+    hasMore: false,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1.map((event) => event.id),
+    ['real-user', 'live-app'],
+  );
+  assert.equal(next.transcripts.m1[1].text, fullText);
+});
+
 test('#29 a replace keeps a live event from a different worker with identical text', () => {
   // Same role/kind/text but a different sourceSessionId is a distinct worker's
   // output; scoping the signature by sourceSessionId must not drop it.
