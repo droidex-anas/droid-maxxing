@@ -16,7 +16,7 @@ The design was prepared from:
 - DROIDEX origin/main at
   6890d1f1698a7944c23c8c31abb4fd612583d33d, the v1.1.2 merge;
 - T3 Code origin/main at
-  b54bfc9312b030bad9d89771fbf561ccbfb2d315;
+  849bac8946c40420174b4187e36fcf17b5ea7cc4;
 - T3 Codex and Claude provider trees that are unchanged between
   5a84614809b6e853b872f9e57ff4b97e9df5df02 and the pinned T3 head;
 - T3's generated Codex app-server protocol reference
@@ -26,9 +26,9 @@ The design was prepared from:
 The isolated worktree was installed and tested with Node.js 22.23.1. The root
 and sidecar test suites passed before this document was added.
 
-At implementation start, refresh T3 origin/main once, review provider-directory
-changes, and freeze the reviewed commit. Never track a moving upstream branch
-during development or at runtime.
+The implementation-start refresh was performed on 2026-08-12. Changes since
+the prior reviewed head were outside the mapped provider trees. Never track a
+moving upstream branch during development or at runtime.
 
 ## Outcome
 
