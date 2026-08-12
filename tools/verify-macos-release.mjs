@@ -295,7 +295,7 @@ async function smokePackagedRuntime(architecture) {
       { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } },
     ).trim();
     const sqliteState = JSON.parse(sqliteResult);
-    assert(sqliteState.version === 1, `${name} SQLite schema version is not canonical`);
+    assert(sqliteState.version === 2, `${name} SQLite schema version is not canonical`);
     assert(sqliteState.tables.includes('app_sessions'), `${name} SQLite app_sessions table is missing`);
     assert(sqliteState.tables.includes('child_sessions'), `${name} SQLite child_sessions table is missing`);
 
