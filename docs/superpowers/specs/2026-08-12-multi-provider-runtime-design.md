@@ -134,18 +134,49 @@ Ownership is explicit:
   shutdown. It does not own provider sessions, catalogs, or normalization.
 - SessionRegistry owns live application sessions, stable appSessionId lookup,
   and immutable provider-instance binding.
-- SessionLifecycle owns create, resume, send, steer, interrupt, close,
-  per-session queues, turn IDs, and generation checks.
+- SessionLifecycle owns create, resume, send, steer, interrupt, settings updates,
+  close, per-session queues, turn IDs, durable binding updates, and generation
+  checks.
 - SessionEventFlow owns lifecycle validation, deduplication, terminal gating,
   and existing state side effects.
 - SessionTimeline owns ordered persistence, paging, and record-before-emit.
 - ProviderRegistry owns the static built-in adapters, sanitized discovery, lazy
   adapter construction, and bounded reverse-order shutdown.
 - ProviderAdapter owns one provider instance's discovery, native session
-  creation and resume, configuration translation, and live session set.
-- ProviderSession owns one live native conversation and exposes send, truthful
-  steering, interrupt, interaction responses, canonical events, opaque resume
-  state, and idempotent close.
+  creation and resume, configuration translation, defensive live-session
+  cleanup, and deadline-bounded close.
+- ProviderSession owns one live native conversation. It accepts turns, performs
+  truthful steering, interrupts only a captured turn/generation, emits canonical
+  events and durable-binding updates, and closes idempotently by an absolute
+  deadline. It never writes application persistence.
+
+The provider lifecycle contract has one terminal authority:
+
+~~~ts
+interface ProviderSession {
+  readonly providerSessionId: string;
+  readonly initialResumeState: unknown;
+  activate(): void;
+  startTurn(input: ProviderTurnInput): Promise<void>; // acceptance only
+  steer(input: ProviderSteerInput): Promise<void>;
+  interrupt(input: {
+    turnId: string;
+    runtimeGeneration: number;
+  }): Promise<void>;
+  close(deadline: ShutdownDeadline): Promise<void>;
+}
+
+interface ProviderAdapter {
+  probe(signal: AbortSignal): Promise<ProviderSnapshot>;
+  create(input: ProviderSessionCreateInput): Promise<ProviderSession>;
+  resume(input: ProviderSessionResumeInput): Promise<ProviderSession>;
+  close(deadline: ShutdownDeadline): Promise<void>;
+}
+~~~
+
+`startTurn` resolves only when the provider has accepted dispatch. Exactly one
+canonical `turn.settled` event completes a turn. A returned terminal result is
+forbidden because it creates a second settlement path.
 
 The first release has static instance IDs droid, codex, and claude. The
 providerInstanceId contract remains explicit even though multiple instances per
@@ -189,7 +220,7 @@ The canonical target is:
 
 ~~~ts
 type SessionTarget =
-  | { kind: "primary"; appSessionId: string }
+  | { kind: "session"; appSessionId: string }
   | {
       kind: "child";
       parentAppSessionId: string;
@@ -224,27 +255,47 @@ Focused ownership is:
 - SessionStore: summaries, bindings, children, and restart state; and
 - TranscriptStore: turns, canonical events, deduplication, and page queries.
 
+`DroidexDatabase` is the only connection owner and the only module with
+`close()`. `SessionStore` and `TranscriptStore` share that connection and do not
+close it independently. `summary_json` contains only non-authoritative summary
+fields; application session identity, provider identity, lifecycle/failure
+state, generation, and timestamps are projected from normalized columns on
+read and cannot diverge from JSON.
+
 These modules must own real invariants and queries. One-method forwarding store
 wrappers are prohibited.
 
 Create ordering is:
 
-1. Allocate appSessionId and the first turnId.
-2. Insert a provisional summary and immutable binding transactionally.
-3. Resolve and validate the exact ProviderAdapter.
-4. Register event handling before native startup can emit.
-5. Create the provider session.
-6. Persist providerSessionId, resume state, and runtime generation.
-7. Start the first turn.
+1. Validate the command and resolve durable `clientRef` deduplication; an
+   existing ref returns its exact canonical session without provider work.
+2. Allocate appSessionId and the first turnId.
+3. Insert the provisional summary, immutable binding, and turn transactionally.
+4. Resolve and validate the exact ProviderAdapter.
+5. Register event handling before native startup can emit.
+6. Create the provider session.
+7. Persist providerSessionId, resume state, and runtime generation.
+8. Activate the bounded event buffer and start the first turn.
 
 A provider create call receives the canonical target and generation before
-native initialization. Transcript events that arrive before step 6 are buffered
+native initialization. Transcript events that arrive before step 7 are buffered
 inside the new ProviderSession and flush only after the native binding is
-durable. Create failure discards buffered transcript output and persists only a
-sanitized startup diagnostic.
+durable. The pre-activation buffer has explicit event-count and encoded-byte
+limits. Overflow fails startup, closes the provider session, discards buffered
+content, and persists only a sanitized diagnostic. Create failure follows the
+same rule.
 
 A provider-start failure leaves a visible failed session with an explicit retry
 or removal action.
+
+`session.retryStart` is valid only for a visible failed session. It preserves
+the immutable provider instance and exact stored session configuration,
+invalidates the old generation, allocates a new turn ID, and retries the same
+operation: create if no native binding was durably established, otherwise exact
+resume. It never changes providers or falls back to a fresh resume. A failed
+retry remains visible. `session.removeFailed` is valid only while the session is
+failed and not live; it transactionally removes only DROIDEX-owned canonical
+rows and emits `session.removed`. It never deletes provider-native history.
 
 Resume always targets the exact persisted instance. Missing provider history or
 a rejected native resume stays a visible failure. It never creates an empty
@@ -252,6 +303,12 @@ replacement conversation.
 
 Opaque resume state is decoded only by the owning adapter. Invalid resume state
 fails fast rather than being interpreted by shared lifecycle code.
+
+Native session replacement and resume-cursor changes arrive as a canonical
+`binding.updated` provider event containing opaque resume state and optional
+replacement provider session ID. `SessionLifecycle` persists it with
+appSessionId, providerInstanceId, and runtimeGeneration compare-and-swap before
+publishing dependent state. Adapters cannot access `SessionStore`.
 
 Hard-cut rules:
 
@@ -262,6 +319,12 @@ Hard-cut rules:
 - renderer session snapshots are versioned so old sessions cannot reappear; and
 - Factory JSONL stops being application history truth only after Droid records
   and restores through the canonical store.
+
+Canonical transcript search remains bounded. It preserves the existing maximum
+work budget equivalent to 150 history files, 40 MB scanned text, 25 returned
+sessions, three snippets per session, cooperative yielding, and stale-query
+cancellation, or replaces the scan with a bounded indexed query proven to meet
+the same result and cancellation limits. An unbounded SQLite scan is forbidden.
 
 Provider-native history exists only to resume its provider. Any future importer
 is an explicit one-way product feature.
@@ -290,8 +353,38 @@ Unsupported operations fail before provider mutation with providerInstanceId,
 the requested operation, the missing capability, and a recovery action. The UI
 hides unavailable creation choices and the sidecar always revalidates.
 
-Canonical model selection contains providerInstanceId, modelId, and
-provider-owned options. The renderer never infers behavior from model names.
+There is one canonical session-configuration object used verbatim by create,
+update, persistence, bridge types, and renderer state:
+
+~~~ts
+interface ProviderSelection {
+  providerInstanceId: ProviderInstanceId;
+  modelId: string;
+  options: Record<string, string | number | boolean>;
+}
+
+interface SessionConfiguration {
+  providerSelection: ProviderSelection;
+  interactionMode: "auto" | "spec" | "agi";
+  autonomy: "off" | "low" | "medium" | "high";
+}
+~~~
+
+`SessionSummary.configuration` is the sole parent-session owner of model,
+provider options, mode, and autonomy. Legacy top-level `modelId`,
+`reasoningEffort`, `interactionMode`, and `autonomy` fields are removed in the
+hard cut; reasoning effort and service tier are provider-owned options.
+Droid-only worker and validator settings live in a separately named optional
+`droidMissionConfiguration`, valid only for a Droid session. The renderer never
+infers behavior from model names.
+
+Provider defaults in Settings seed new drafts only. An explicit
+`session.updateSettings` may change model/options/mode/autonomy for a bound
+session only when the selected instance advertises the capability. The provider
+instance is immutable, an in-flight turn keeps its captured configuration, and
+the new validated configuration applies to the next accepted turn. Adapters
+perform any native `setModel` or permission-mode call immediately before that
+turn; no hidden eager mutation occurs.
 
 ## Decision 6: interaction modes and autonomy
 
@@ -334,8 +427,8 @@ retroactively alter an in-flight turn.
 
 ## Decision 7: canonical events and interactions
 
-Each adapter converts native protocol values directly into a compact canonical
-event union covering:
+Each adapter converts native protocol values directly into one compact
+`CanonicalEvent` envelope. Its payload is a closed discriminated union covering:
 
 - session and turn lifecycle;
 - assistant text, thinking, plan, and command output;
@@ -343,12 +436,24 @@ event union covering:
 - approval and question lifecycle;
 - usage;
 - observational provider-agent activity;
+- durable binding updates;
+- exactly-one turn settlement;
 - warnings; and
 - errors.
 
-Every event includes canonical eventId, native deduplication identity when
-available, createdAt, SessionTarget, provider kind and instance, optional native
-session and turn identity, runtimeGeneration, and optional turnId.
+Every canonical event includes `eventId`, `createdAt`, `SessionTarget`, provider
+kind and instance, runtimeGeneration, optional turnId, and bounded private native
+correlation. `TranscriptStore.append` accepts this full envelope, not the
+renderer's historical `TranscriptEvent` shape. `eventId` is the durable unique
+identity. When projecting a transcript payload to the current renderer bridge,
+`eventId` becomes `TranscriptEvent.id`, target becomes the existing
+app/source-session fields, and SQLite `event_order` becomes `seq`. Provider
+identity, generation, and private native correlation remain sidecar-owned.
+
+Re-appending an `eventId` is idempotent only when the canonical target,
+generation, provider identity, turn, and normalized payload are byte-equivalent
+after canonical encoding. A collision with different content fails visibly and
+allocates no new order.
 
 Raw provider payloads are not bridge payloads and are not normally persisted.
 Opt-in protocol diagnostics are redacted and never contain credentials or
@@ -360,6 +465,8 @@ Event guarantees:
 - correlation stays inside the owning ProviderSession;
 - wrong-instance, wrong-session, stale, duplicate, and post-terminal events are
   rejected deterministically;
+- `turn.settled` is the sole terminal authority; provider method return values
+  cannot settle a turn;
 - SessionEventFlow retains state transitions and terminal gating;
 - SessionTimeline persists before bridge emission;
 - persistence failure emits no undurable transcript; and
@@ -368,6 +475,14 @@ Event guarantees:
 ProviderSession retains raw request IDs and callbacks. SessionInteractions owns
 canonical approvals, questions, and plan reviews. Renderer responses target the
 exact app session and canonical request ID.
+
+Canonical approval requests expose only bounded kind/title/detail/plan/options;
+the existing bridge `raw` field is deleted. Structured questions carry exact
+provider question keys, options, and `multiSelect`; answers return exact-keyed
+string arrays so scalar and multi-select native forms can be reconstructed only
+inside the adapter. Plan review decisions are the closed Implement, Iterate with
+feedback, or Cancel variants. No native callback or authenticated payload
+crosses the bridge.
 
 Interrupt, close, crash, replacement, and shutdown settle every pending native
 callback as denied or cancelled. Always-allow is translated only when the
@@ -418,8 +533,14 @@ The implementation must:
 - support an exact tested Codex CLI allowlist;
 - fail clearly outside that allowlist;
 - register requests and notifications before initialize;
+- initialize with
+  `{ clientInfo: { name, title, version }, capabilities: { experimentalApi: true } }`;
+- preserve and echo both string and numeric JSON-RPC server-request IDs;
+- enforce explicit stdout line/frame and buffered-stderr byte limits;
+- resolve POSIX executables and Windows command shims without shell injection;
 - drain stderr without logging authenticated payloads;
 - settle pending requests on EOF and process failure;
+- terminate the whole spawned process tree within the shared deadline;
 - retry only idempotent discovery after overload; and
 - never replay turn-start automatically.
 
@@ -461,8 +582,12 @@ The implementation must:
 - treat provider tasks as activity unless independently addressable; and
 - verify SDK assets and platform packages in the packaged sidecar.
 
-Claude setup is a release-policy verification gate. DROIDEX does not implement
-custom Claude login or token handling.
+Before Claude runtime implementation, the pinned SDK's all-rights-reserved
+license and referenced Anthropic legal agreements receive an explicit human
+use/redistribution go/no-go. The packaging spike excludes optional provider
+platform binaries unless separately approved. Claude setup remains a release-
+policy verification gate. DROIDEX does not implement custom Claude login or
+token handling.
 
 ## Decision 9: settings and discoverability
 
@@ -489,7 +614,9 @@ payloads.
 Settings semantics:
 
 - changing defaults affects only new drafts and sessions;
-- active sessions retain their provider, model, mode, autonomy, and options;
+- active sessions ignore later default changes and retain their provider;
+- explicit in-session settings changes apply only to the next turn through
+  `session.updateSettings` and never retarget the provider;
 - draft selections are remembered independently per provider;
 - switching draft provider restores its last valid selection;
 - stale models require explicit user replacement;
@@ -509,7 +636,15 @@ feature through small values and operations. They do not own provider
 lifecycles or catalogs.
 
 The bridge publishes provider snapshots and refresh operations. Session create
-requires providerInstanceId and a provider-scoped model selection.
+requires the exact `SessionConfiguration` object.
+
+Every inbound bridge frame is size-bounded before `JSON.parse`, then decoded by
+an exact runtime schema before reaching `SessionManager`. Unknown commands,
+fields, provider instances, option keys/value shapes, oversized arrays/strings,
+and malformed settings fail closed with a structured error. A TypeScript cast is
+not validation. The sidecar applies a WebSocket/frame ceiling and smaller
+command-specific bounds; tests prove malformed or oversized provider selection
+cannot invoke an adapter.
 
 ## Decision 10: lifecycle, concurrency, and shutdown
 
@@ -519,7 +654,9 @@ Per-session coordination:
 - unrelated provider sessions run concurrently;
 - create deduplicates by clientRef;
 - resume is single-flight per appSessionId;
-- interrupt bypasses the ordinary send queue and targets the captured turn;
+- interrupt bypasses the ordinary send queue, captures `{turnId,
+  runtimeGeneration}`, revalidates both immediately before native mutation, and
+  targets only that turn;
 - every provider await captures binding, instance, generation, turn, close, and
   shutdown state;
 - continuations revalidate before committing state; and
@@ -544,7 +681,7 @@ Crash isolation:
 Shutdown ordering:
 
 1. Stop admitting commands.
-2. Stop discovery refresh.
+2. Abort discovery refresh and invalidate stale completions.
 3. Invalidate live generations.
 4. Cancel pending approvals and questions.
 5. Close children, then parent ProviderSessions.
@@ -553,9 +690,21 @@ Shutdown ordering:
 8. Flush timeline and persistence queues.
 9. Close SQLite.
 
-Shutdown is idempotent. One cleanup failure is reported without preventing later
-cleanup. Sidecar and Electron watchdogs must give native processes one bounded
-graceful-close window and prevent surviving process trees.
+The first sidecar shutdown trigger creates one absolute monotonic
+`ShutdownDeadline`, propagated unchanged through SessionLifecycle,
+ProviderSession, ProviderAdapter, task cleanup, and process-tree termination.
+No child, provider, or escalation receives a fresh relative timeout. The
+current Electron six-second supervisor is the outer hard guard and races the
+same shutdown attempt; it never adds a second cleanup window. Provider-local
+budgets, including Claude task stops, clamp to the remaining shared deadline.
+
+ProviderRegistry constructs adapters lazily, records construction order, aborts
+and generation-checks each in-flight refresh, and closes constructed adapters
+in reverse order. SessionLifecycle remains the owner of live application
+sessions; adapter close only performs a defensive bounded sweep of its own
+native resources. Shutdown is idempotent. One cleanup failure is reported
+without preventing later cleanup, and deterministic tests prove no Droid,
+Codex, Claude, sidecar, or descendant process survives the outer guard.
 
 ## Decision 11: branch and parallel development
 
@@ -592,20 +741,25 @@ infrastructure, avoid fake controls, and preserve useful history.
   behavior.
 - Introduce the cohesive database, session, and transcript owners.
 - Create the fresh schema and exact recovery diagnostic.
+- Hard-cut parent session configuration to the single canonical nested object.
 - Generate appSessionId before provider work.
 - Persist immutable bindings and full normalized transcripts.
 - Move list, search, restore, and paging to the canonical store.
+- Add exact failed-start retry and removal commands.
 - Version renderer session snapshots.
 - Remove old native-history truth only after Droid restores from the new store.
 
 ### Phase 2: minimal provider seam and Droid
 
 - Add compact provider contracts and a deterministic fake.
+- Replace bridge command casts with bounded runtime validation.
 - Add the static ProviderRegistry.
 - Normalize native events inside the Droid adapter.
 - Route lifecycle operations through the captured ProviderSession.
 - Capability-gate Droid-only behavior.
 - Remove Factory SDK types from shared lifecycle and interactions.
+- Establish children-first, reverse-adapter, SQLite-last shutdown under the
+  shared absolute deadline before Codex or Claude work begins.
 - Prove no visible Droid regression.
 
 ### Phase 3: parallel Codex and Claude vertical slices
@@ -655,23 +809,40 @@ Each adapter lands a small end-to-end slice before expanding capabilities.
 
 ## Error and recovery model
 
-Required structured categories are:
+The bridge/persistence contract uses one closed error shape:
 
-- invalid provider configuration;
-- missing executable;
-- unauthenticated provider;
-- unsupported provider version;
-- unavailable instance;
-- unsupported capability;
-- native create or resume failure;
-- incompatible provider protocol;
-- provider process exit;
-- cancelled interaction;
-- stale provider operation; and
-- unavailable canonical persistence.
+~~~ts
+interface ProviderError {
+  code:
+    | "invalid_provider_configuration"
+    | "missing_executable"
+    | "unauthenticated_provider"
+    | "unsupported_provider_version"
+    | "unavailable_provider_instance"
+    | "unsupported_capability"
+    | "native_session_start_failed"
+    | "incompatible_provider_protocol"
+    | "provider_process_exited"
+    | "interaction_cancelled"
+    | "stale_provider_operation"
+    | "canonical_persistence_unavailable";
+  providerInstanceId: ProviderInstanceId;
+  message: string;
+  recoveryAction:
+    | "refresh"
+    | "open_droid_setup"
+    | "open_codex_setup"
+    | "open_claude_setup"
+    | "reset_canonical_state"
+    | "retry_session"
+    | "close_session";
+}
+~~~
 
-Errors identify providerInstanceId and a recovery action without exposing
-credentials or provider payloads.
+Unknown codes/actions and native error or payload fields fail decoding. A
+pre-registry database-open failure uses a separate app-startup diagnostic;
+every session-scoped error identifies `providerInstanceId`. Messages are
+sanitized and bounded.
 
 There are no fallback providers. Missing Codex or Claude never routes to Droid.
 Unsupported modes never degrade to auto. Failed resume never starts a new native
@@ -701,10 +872,15 @@ conversation under the same app session.
 - wrong-instance and post-terminal event rejection;
 - record-before-emit and persistence failure;
 - stable, gap-free transcript paging;
+- duplicate-event idempotency and conflicting-event rejection;
+- bounded pre-activation buffering and bounded/cancellable search;
 - restart state projection;
+- generation-CAS resume cursor and native-binding updates;
 - missing instance and missing native history recovery;
+- failed-start exact retry and explicit canonical removal;
 - pending interaction settlement; and
-- bounded idempotent shutdown.
+- children-before-parent, reverse-adapter, SQLite-last shutdown under one
+  absolute deadline.
 
 ### Adapter tests
 
@@ -727,11 +903,18 @@ task-stop timeout, close-resume races, and shutdown.
 - Defaults survive switching between draft providers.
 - Provider selection locks during creation.
 - Active sessions ignore later default changes.
+- Explicit next-turn settings updates preserve the provider and captured
+  in-flight configuration.
 - Unavailable and unsupported states are visible.
 - Mission Control controls appear only for Droid.
 - Catalog, status, and auth values never leak between providers.
 - Refresh updates only the targeted snapshot.
 - No secret enters renderer state.
+- Malformed/oversized command frames and provider options are rejected before
+  dispatch.
+- Exact-key questions preserve scalar/array and multiselect behavior; approval,
+  plan-review, cancellation, retry, and removal controls target only their
+  canonical session/request.
 - Simultaneous events target the correct session.
 - Old renderer snapshots cannot resurrect sessions.
 
@@ -797,8 +980,8 @@ User-facing attribution may say that portions of the multi-provider runtime are
 derived from T3 Code under the MIT License. It must not imply endorsement or use
 T3 trademarks and assets as DROIDEX branding.
 
-Official Codex-generated protocol material retains its applicable Apache-2.0
-notice and exact upstream reference.
+Official Codex-generated protocol material retains the full applicable
+Apache-2.0 license, every required notice, and its exact upstream reference.
 
 The Claude Agent SDK and harness are not T3 MIT code. Their licenses,
 commercial terms, authentication paths, and redistribution rules are reviewed
