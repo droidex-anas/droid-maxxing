@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInitializeSessionParams } from './DroidRuntime.js';
+import { createInitializeSessionParams, waitForSessionInitialization } from './DroidRuntime.js';
 
 test('passes compaction settings when initializing a session', () => {
   const params = createInitializeSessionParams({
@@ -24,4 +24,17 @@ test('passes current-model compaction sentinel when initializing a session', () 
   });
 
   assert.equal(params.compactionModel, 'current-model');
+});
+
+test('allows a healthy Droid session initialization to take 30 seconds', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = waitForSessionInitialization(
+    new Promise<string>((resolve) => {
+      setTimeout(() => resolve('ready'), 30_000);
+    }),
+    'initialize_session',
+  );
+  t.mock.timers.tick(30_000);
+
+  assert.equal(await pending, 'ready');
 });

@@ -20,7 +20,7 @@ import { buildDroidInvocation, resolveDroidPath } from './Environment.js';
 import type { Autonomy, ReasoningEffort, SessionInteractionMode } from './protocol.js';
 
 const EXEC_ARGS = ['exec', '--input-format', 'stream-jsonrpc', '--output-format', 'stream-jsonrpc'];
-const SESSION_INIT_TIMEOUT_MS = 20_000;
+const SESSION_INIT_TIMEOUT_MS = 60_000;
 const ignoreError = (): void => undefined;
 
 export interface RuntimeHandlers {
@@ -138,9 +138,8 @@ export class DroidRuntime implements FactoryRuntime {
     const params = createInitializeSessionParams(options);
 
     try {
-      const init = await withTimeout(
+      const init = await waitForSessionInitialization(
         client.initializeSession(params),
-        SESSION_INIT_TIMEOUT_MS,
         'initialize_session',
       );
       return new DroidSession(client, init.sessionId, init);
@@ -155,11 +154,7 @@ export class DroidRuntime implements FactoryRuntime {
     const params: LoadSessionRequestParams = { sessionId };
     if (handlers.mcpServers?.length) params.mcpServers = handlers.mcpServers;
     try {
-      const init = await withTimeout(
-        client.loadSession(params),
-        SESSION_INIT_TIMEOUT_MS,
-        'load_session',
-      );
+      const init = await waitForSessionInitialization(client.loadSession(params), 'load_session');
       return new DroidSession(client, sessionId, init);
     } catch (err) {
       await transport.close().catch(ignoreError);
@@ -322,4 +317,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+export function waitForSessionInitialization<T>(promise: Promise<T>, label: string): Promise<T> {
+  return withTimeout(promise, SESSION_INIT_TIMEOUT_MS, label);
 }
