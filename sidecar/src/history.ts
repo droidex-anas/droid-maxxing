@@ -387,8 +387,28 @@ export class HistoryIndex {
       HistoryIndex.createSchema(db);
       return;
     }
+    if (version === 1 && hasCanonicalVersionOneHistorySchema(db)) {
+      HistoryIndex.migrateVersionOneHistorySchema(db);
+      if (!hasCanonicalChildSchema(db)) throw new Error(HISTORY_SCHEMA_RECOVERY);
+      return;
+    }
     if (version !== HISTORY_SCHEMA_VERSION || !hasCanonicalChildSchema(db))
       throw new Error(HISTORY_SCHEMA_RECOVERY);
+  }
+
+  private static migrateVersionOneHistorySchema(db: DatabaseSync): void {
+    // DROIDEX v1.1.0 shipped schema v1, so direct app updates must preserve that
+    // index. The canonical v2 child model needs this column and cannot derive
+    // replacement chains from the old rows. This is the only supported legacy
+    // state. Remove after direct upgrades from v1.1.0 are no longer supported;
+    // PR #103 tracks that release boundary.
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE child_sessions
+        ADD COLUMN previous_provider_session_ids TEXT NOT NULL DEFAULT '[]';
+      PRAGMA user_version = ${String(HISTORY_SCHEMA_VERSION)};
+      COMMIT;
+    `);
   }
 
   private static createSchema(db: DatabaseSync): void {
@@ -747,6 +767,10 @@ const CANONICAL_TABLE_COLUMNS = {
   catalog_cache: ['catalog', 'value_json', 'updated_at'],
 } as const;
 
+const VERSION_ONE_CHILD_SESSION_COLUMNS = CANONICAL_TABLE_COLUMNS.child_sessions.filter(
+  (column) => column !== 'previous_provider_session_ids',
+);
+
 const CHILD_SCHEMA_CHECKS = [
   "check (role in ('worker', 'validator'))",
   "check (status in ('pending', 'running', 'paused', 'completed'))",
@@ -769,9 +793,21 @@ const CANONICAL_PRIMARY_KEYS = {
 } as const;
 
 function hasCanonicalChildSchema(db: DatabaseSync): boolean {
+  return hasCanonicalHistorySchema(db, CANONICAL_TABLE_COLUMNS.child_sessions);
+}
+
+function hasCanonicalVersionOneHistorySchema(db: DatabaseSync): boolean {
+  return hasCanonicalHistorySchema(db, VERSION_ONE_CHILD_SESSION_COLUMNS);
+}
+
+function hasCanonicalHistorySchema(
+  db: DatabaseSync,
+  expectedChildColumns: readonly string[],
+): boolean {
   for (const [table, expected] of Object.entries(CANONICAL_TABLE_COLUMNS)) {
+    const expectedColumns = table === 'child_sessions' ? expectedChildColumns : expected;
     if (
-      !hasExactColumns(db, table, expected) ||
+      !hasExactColumns(db, table, expectedColumns) ||
       !hasPrimaryKey(
         db,
         table,
