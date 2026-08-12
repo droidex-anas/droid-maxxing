@@ -82,6 +82,7 @@ function ModelRow({
     <button
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={selected}
       className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
         disabled
           ? 'cursor-not-allowed opacity-50'

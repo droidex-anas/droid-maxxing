@@ -89,4 +89,6 @@ test('a dangling active session id keeps using the visible global defaults', () 
 
   assert.match(html, /Search models · Global Model/);
   assert.match(html, /Reasoning<\/span><span[^>]*>low<\/span>/);
+  assert.equal((html.match(/aria-pressed="true"/g) ?? []).length, 1);
+  assert.equal((html.match(/aria-pressed="false"/g) ?? []).length, 1);
 });
