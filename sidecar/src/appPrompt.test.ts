@@ -23,6 +23,9 @@ test('formatAppPrompt keeps the request recoverable and adds broad internal App 
   assert.match(prompt, /color-blind-safe/);
   assert.match(prompt, /palette or series-color controls/);
   assert.match(prompt, /illustrations, annotated processes, infographics/);
+  assert.match(prompt, /visual, inspector, controls, and explanation/);
+  assert.match(prompt, /hover, click, touch, and keyboard/);
+  assert.match(prompt, /Never clip axis titles, tick labels, legends, or annotations/);
   assert.match(prompt, /wireframes/);
   assert.match(prompt, /Do not use network requests/);
 });
