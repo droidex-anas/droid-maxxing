@@ -344,7 +344,7 @@ function TextPreview({ text, fileName }: { text: string; fileName: string }) {
       )}
       {isMarkdown ? (
         <div className="px-4 py-3">
-          <Markdown allowDiagrams={false}>{visibleText}</Markdown>
+          <Markdown allowGeneratedContent={false}>{visibleText}</Markdown>
         </div>
       ) : (
         <SyntaxCodePreview code={visibleText} fileName={fileName} />

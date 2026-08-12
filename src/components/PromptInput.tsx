@@ -42,7 +42,12 @@ import {
   type ChatWorkingDirectoryResult,
 } from '../lib/chatWorkspace';
 import { createLocalDesignTranscriptEvent, newQueueId } from '../lib/promptQueue';
-import { composePrompt, parseSlashSkillInvocation } from '../lib/composePrompt';
+import {
+  composePrompt,
+  isVisualizeCommand,
+  parseSlashSkillInvocation,
+  VISUALIZE_COMMAND,
+} from '../lib/composePrompt';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
 import { resetComposerAfterSubmit } from '../lib/composerReset';
@@ -376,6 +381,10 @@ export default function PromptInput({
 
   const slashCommands: SlashCommand[] = [
     {
+      ...VISUALIZE_COMMAND,
+      replacement: `${VISUALIZE_COMMAND.cmd} `,
+    },
+    {
       cmd: '/bug',
       desc: 'Send a private bug report',
       run: () => {
@@ -691,6 +700,10 @@ export default function PromptInput({
   };
 
   const runCommand = (s: SlashCommand) => {
+    if (s.replacement !== undefined) {
+      replaceTrigger(s.replacement);
+      return;
+    }
     replaceTrigger('');
     s.run();
   };
@@ -785,7 +798,9 @@ export default function PromptInput({
     if (!childActionsEnabled) return;
 
     const slashSkill =
-      activeSkills.length === 0 ? parseSlashSkillInvocation(text, invocableSkills) : undefined;
+      activeSkills.length === 0 && !isVisualizeCommand(text)
+        ? parseSlashSkillInvocation(text, invocableSkills)
+        : undefined;
     const displayText = slashSkill?.prompt ?? text;
     const skillNames = slashSkill
       ? [slashSkill.skillName]

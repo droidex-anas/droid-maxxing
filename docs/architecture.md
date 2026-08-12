@@ -57,6 +57,13 @@ flowchart LR
 - Selection, readiness, transcript filtering, settings, send, steer, Stop, and interrupt all resolve through one visible target keyed by `parentAppSessionId + childSessionId`.
 - A provider runtime identity is never stored as a renderer child key. Historical or unavailable children remain selectable for transcript review while mutating actions stay disabled.
 
+### In-chat App blocks
+
+- A fenced `app` block in an assistant message is persisted as ordinary transcript text. The renderer remains the only owner of its temporary idle/running state, so restored chats always reopen with the block inert.
+- The source is visible until the user clicks **Play**. Running content mounts in a script-only sandboxed iframe; **Stop** unmounts the iframe and releases its timers and other browser resources.
+- The frame supplies DROIDEX colors as `--app-background`, `--app-surface`, `--app-foreground`, `--app-muted`, `--app-border`, and `--app-accent`. App content owns its responsive layout and reports its intrinsic height to the renderer.
+- App blocks are self-contained. Their content security policy blocks network connections, nested frames, objects, forms, and external resources. Generated content is disabled entirely in file previews, fetched web content, and pull-request comments.
+
 ### Autonomy
 
 - The canonical levels are `off`, `low`, `medium`, and `high`, shared verbatim by the renderer, the bridge protocol, and the sidecar.

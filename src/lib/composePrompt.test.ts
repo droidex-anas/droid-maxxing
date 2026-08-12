@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { composePrompt, parseSlashSkillInvocation } from './composePrompt';
+import { composePrompt, isVisualizeCommand, parseSlashSkillInvocation } from './composePrompt';
 
 test('one selected skill uses the provider-native slash invocation', () => {
   assert.equal(composePrompt('PR #100', ['review'], []), '/review PR #100');
@@ -27,4 +27,27 @@ test('multiple selected skills keep the explicit multi-skill instruction', () =>
     composePrompt('inspect this', ['review', 'semgrep'], []),
     'Use these skills: "review", "semgrep".\n\ninspect this',
   );
+});
+
+test('/visualize asks the model for a responsive interactive App block', () => {
+  const composed = composePrompt('/visualize compare renderer timings', [], []);
+
+  assert.match(composed, /compare renderer timings/);
+  assert.match(composed, /fenced `app` block/);
+  assert.match(composed, /inline HTML, CSS, and JavaScript/);
+  assert.match(composed, /--app-background/);
+  assert.match(composed, /responsive/);
+  assert.doesNotMatch(composed, /^\/visualize/);
+});
+
+test('/visualize without arguments uses the current conversation', () => {
+  const composed = composePrompt('/visualize', [], []);
+
+  assert.match(composed, /current conversation/);
+  assert.match(composed, /fenced `app` block/);
+});
+
+test('/visualize remains an app command even when a provider skill has the same name', () => {
+  assert.equal(isVisualizeCommand('/visualize chart these results'), true);
+  assert.equal(isVisualizeCommand('/visualizer is a different prompt'), false);
 });

@@ -3,6 +3,7 @@ import remarkGfm from 'remark-gfm';
 import { useMemo, useEffect, useRef, useState, memo } from 'react';
 import { Copy, Check } from 'lucide-react';
 import type { Mermaid } from 'mermaid';
+import { AppBlock } from './AppBlock';
 
 let mermaidPromise: Promise<Mermaid> | null = null;
 function loadMermaid(): Promise<Mermaid> {
@@ -46,6 +47,10 @@ function isSvgLang(className?: string) {
 
 function isMermaidLang(className?: string) {
   return className?.includes('language-mermaid') || className?.includes('lang-mermaid');
+}
+
+function isAppLang(className?: string) {
+  return className?.split(/\s+/).some((name) => name === 'language-app' || name === 'lang-app');
 }
 
 // Models frequently emit flowchart syntax mermaid rejects (unquoted special
@@ -310,11 +315,11 @@ function CodeCard({
 function MarkdownImpl({
   children,
   specMode,
-  allowDiagrams = true,
+  allowGeneratedContent = true,
 }: {
   children: string;
   specMode?: boolean;
-  allowDiagrams?: boolean;
+  allowGeneratedContent?: boolean;
 }) {
   return (
     <div
@@ -418,6 +423,9 @@ function MarkdownImpl({
           hr: () => (
             <hr className={`border-0 h-px bg-droid-border/25 ${specMode ? 'my-8' : 'my-4'}`} />
           ),
+          // Every fenced renderer below owns its frame and preformatted region.
+          // Removing react-markdown's wrapper avoids invalid <pre><div> nesting.
+          pre: ({ children }) => <>{children}</>,
           code: ({ className, children }) => {
             const inline = !className;
             if (inline)
@@ -431,11 +439,15 @@ function MarkdownImpl({
 
             const codeText = String(children ?? '');
 
-            if (allowDiagrams && isMermaidLang(className)) {
+            if (allowGeneratedContent && isAppLang(className)) {
+              return <AppBlock source={codeText} />;
+            }
+
+            if (allowGeneratedContent && isMermaidLang(className)) {
               return <MermaidBlock code={codeText} />;
             }
 
-            if (allowDiagrams && isSvgLang(className)) {
+            if (allowGeneratedContent && isSvgLang(className)) {
               return <SvgCodeBlock content={codeText} />;
             }
 

@@ -34,6 +34,21 @@ For renderer-only development, use:
 npm run dev
 ```
 
+## App blocks
+
+Type `/visualize` in the composer to ask the model for a self-contained
+interactive visual. Assistant messages deliver it in an `app` fence; DROIDEX
+shows the source first and starts it only when the user clicks **Play**.
+
+````markdown
+```app
+<button onclick="this.textContent = 'Done'">Run</button>
+```
+````
+
+App blocks can use inline HTML, CSS, JavaScript, SVG, and Canvas. They are
+offline and receive DROIDEX theme colors through the `--app-*` CSS variables.
+
 ## GitHub pull requests
 
 For GitHub repositories, the Context panel shows pull requests, checks, and

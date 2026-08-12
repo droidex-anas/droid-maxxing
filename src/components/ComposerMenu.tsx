@@ -5,11 +5,9 @@ import type { SkillInfo, SkillLocation } from '../types/bridge';
 
 const ACCENT = 'var(--droid-accent)';
 
-export interface SlashCommand {
-  cmd: string;
-  desc: string;
-  run: () => void;
-}
+export type SlashCommand =
+  | { cmd: string; desc: string; replacement: string; run?: never }
+  | { cmd: string; desc: string; replacement?: never; run: () => void };
 
 export type MenuItem =
   | { type: 'command'; command: SlashCommand }
