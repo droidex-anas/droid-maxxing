@@ -793,6 +793,19 @@ test('restored feed rows render immediately instead of replaying entrance motion
   assert.doesNotMatch(html, /translateY\(4px\)/);
 });
 
+test('App responses receive a wider chat canvas while ordinary rows stay readable', () => {
+  const app = 'Here is the result.\n\n```app\n<main>Wide App</main>\n```';
+  const appHtml = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst(app)], pending: false }),
+  );
+  const textHtml = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst('Ordinary answer')], pending: false }),
+  );
+
+  assert.match(appHtml, /max-w-4xl/);
+  assert.match(textHtml, /max-w-2xl/);
+});
+
 test('live thinking stays collapsed until the user opens it', () => {
   const events = [
     userMsg('inspect this'),

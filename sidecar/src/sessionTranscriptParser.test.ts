@@ -101,6 +101,25 @@ test('child user prompts replay with child ownership', () => {
   );
 });
 
+test('app-generation guidance replays as only the concise user command', () => {
+  const line = JSON.parse(
+    messageLine({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: `DROIDEX App request:\n/visualize compare renderer timings\n\nPrivate generation guidance:\nReturn one fenced app block using --app-background.`,
+        },
+      ],
+    }),
+  );
+
+  const events = parseSessionLineEvents('app', 'provider', 'primary', line);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].text, '/visualize compare renderer timings');
+  assert.doesNotMatch(events[0].text ?? '', /Private generation guidance/);
+});
+
 test('internal skill notifications never replay as user-authored chat', () => {
   const line = JSON.parse(
     messageLine({

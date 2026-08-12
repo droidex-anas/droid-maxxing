@@ -7,20 +7,18 @@ import { AppBlock } from './AppBlock';
 
 let mermaidPromise: Promise<Mermaid> | null = null;
 function loadMermaid(): Promise<Mermaid> {
-  if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'loose',
-        theme: 'dark',
-        themeVariables: {
-          fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-          fontSize: '13px',
-        },
-      });
-      return mermaid;
+  mermaidPromise ??= import('mermaid').then(({ default: mermaid }) => {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'dark',
+      themeVariables: {
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        fontSize: '13px',
+      },
     });
-  }
+    return mermaid;
+  });
   return mermaidPromise;
 }
 
@@ -28,7 +26,6 @@ let mermaidSeq = 0;
 
 function slugify(text: string): string {
   return text
-    .toString()
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
@@ -36,22 +33,18 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-/* ── JSON syntax highlighting ── */
-function isJsonLang(className?: string) {
-  return className?.includes('language-json') || className?.includes('lang-json');
+function hasLanguage(className: string | undefined, language: string): boolean {
+  return (
+    className
+      ?.split(/\s+/)
+      .some((name) => name === `language-${language}` || name === `lang-${language}`) ?? false
+  );
 }
 
-function isSvgLang(className?: string) {
-  return className?.includes('language-svg') || className?.includes('lang-svg');
-}
-
-function isMermaidLang(className?: string) {
-  return className?.includes('language-mermaid') || className?.includes('lang-mermaid');
-}
-
-function isAppLang(className?: string) {
-  return className?.split(/\s+/).some((name) => name === 'language-app' || name === 'lang-app');
-}
+const isJsonLang = (className?: string) => hasLanguage(className, 'json');
+const isSvgLang = (className?: string) => hasLanguage(className, 'svg');
+const isMermaidLang = (className?: string) => hasLanguage(className, 'mermaid');
+const isAppLang = (className?: string) => hasLanguage(className, 'app');
 
 // Models frequently emit flowchart syntax mermaid rejects (unquoted special
 // characters in subgraph titles, and `[/text]` which mermaid reads as a
@@ -61,7 +54,7 @@ function sanitizeMermaid(src: string): string {
   return src
     .split('\n')
     .map((line) => {
-      const sg = line.match(/^(\s*subgraph\s+)(.+?)\s*$/i);
+      const sg = /^(\s*subgraph\s+)(.+?)\s*$/i.exec(line);
       if (sg) {
         const title = sg[2].trim();
         const alreadySafe = title.startsWith('"') || /^[\w-]+(\[.*\]|\(.*\))?$/.test(title);
@@ -76,11 +69,10 @@ function sanitizeMermaid(src: string): string {
     .join('\n');
 }
 
-/* ── Mermaid diagram renderer ── */
 const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string>('');
-  const idRef = useRef(`mmd-${++mermaidSeq}`);
+  const idRef = useRef(`mmd-${String(++mermaidSeq)}`);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,8 +92,8 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
           setError('');
         }
       })
-      .catch((err) => {
-        if (!cancelled) setError(String(err?.message ?? err));
+      .catch((error: unknown) => {
+        if (!cancelled) setError(error instanceof Error ? error.message : String(error));
       });
     return () => {
       cancelled = true;
@@ -145,12 +137,12 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
 function HighlightJson({ code }: { code: string }) {
   const nodes = useMemo(() => {
     const tokens = code.split(
-      /("(?:\\.|[^"\\])*"|:|true|false|null|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[\[\]{}!,])/g,
+      /("(?:\\.|[^"\\])*"|:|true|false|null|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[[\]{}!,])/g,
     );
     return tokens.map((token, i) => {
-      if (token.match(/^"(?:\\.|[^"\\])*"$/)) {
-        const next = tokens[i + 1]?.trimStart();
-        if (next?.startsWith(':')) {
+      if (/^"(?:\\.|[^"\\])*"$/.exec(token)) {
+        const next = tokens[i + 1].trimStart();
+        if (next.startsWith(':')) {
           return (
             <span key={i} style={{ color: 'var(--droid-accent)' }}>
               {token}
@@ -175,13 +167,13 @@ function HighlightJson({ code }: { code: string }) {
             {token}
           </span>
         );
-      if (token.match(/^\d/))
+      if (/^\d/.exec(token))
         return (
           <span key={i} style={{ color: 'var(--droid-orange)' }}>
             {token}
           </span>
         );
-      if (/^[{}\[\],:!]$/.test(token))
+      if (/^[{}[\],:!]$/.test(token))
         return (
           <span key={i} style={{ color: 'var(--droid-text-muted)' }}>
             {token}
@@ -256,18 +248,25 @@ function langLabel(className?: string): string {
 function CodeCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current ?? undefined);
+    },
+    [],
+  );
   return (
     <button
       onClick={() => {
         navigator.clipboard
-          ?.writeText(text)
+          .writeText(text)
           .then(() => {
             setCopied(true);
             clearTimeout(timer.current ?? undefined);
-            timer.current = setTimeout(() => setCopied(false), 1200);
+            timer.current = setTimeout(() => {
+              setCopied(false);
+            }, 1200);
           })
-          .catch(() => {});
+          .catch(() => undefined);
       }}
       className="flex items-center gap-1 text-[10.5px] text-droid-text-muted hover:text-droid-text transition-colors"
       title="Copy"
@@ -316,10 +315,12 @@ function MarkdownImpl({
   children,
   specMode,
   allowGeneratedContent = true,
+  autoPlayAppBlocks = false,
 }: {
   children: string;
   specMode?: boolean;
   allowGeneratedContent?: boolean;
+  autoPlayAppBlocks?: boolean;
 }) {
   return (
     <div
@@ -329,7 +330,7 @@ function MarkdownImpl({
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => {
-            const text = String(children ?? '');
+            const text = typeof children === 'string' ? children : '';
             const id = slugify(text);
             return specMode ? (
               <h1
@@ -345,7 +346,7 @@ function MarkdownImpl({
             );
           },
           h2: ({ children }) => {
-            const text = String(children ?? '');
+            const text = typeof children === 'string' ? children : '';
             const id = slugify(text);
             return specMode ? (
               <h2
@@ -361,7 +362,7 @@ function MarkdownImpl({
             );
           },
           h3: ({ children }) => {
-            const text = String(children ?? '');
+            const text = typeof children === 'string' ? children : '';
             const id = slugify(text);
             return specMode ? (
               <h3
@@ -394,7 +395,7 @@ function MarkdownImpl({
             </ol>
           ),
           li: ({ children }) => (
-            <li className={`${specMode ? 'leading-[1.75] pl-1' : 'leading-[1.65] pl-0.5'}`}>
+            <li className={specMode ? 'leading-[1.75] pl-1' : 'leading-[1.65] pl-0.5'}>
               {children}
             </li>
           ),
@@ -437,10 +438,10 @@ function MarkdownImpl({
                 </code>
               );
 
-            const codeText = String(children ?? '');
+            const codeText = typeof children === 'string' ? children : '';
 
             if (allowGeneratedContent && isAppLang(className)) {
-              return <AppBlock source={codeText} />;
+              return <AppBlock source={codeText} autoPlay={autoPlayAppBlocks} />;
             }
 
             if (allowGeneratedContent && isMermaidLang(className)) {

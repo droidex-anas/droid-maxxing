@@ -11,6 +11,7 @@ import type {
   McpServerInput,
   PermissionOutcome,
   ReasoningEffort,
+  ResponseFormat,
   SessionInteractionMode,
   SessionPurpose,
 } from '../types/bridge';
@@ -40,6 +41,7 @@ export const createSession = (input: {
   workerReasoning?: ReasoningEffort;
   validatorModel?: string;
   validatorReasoning?: ReasoningEffort;
+  responseFormat?: ResponseFormat;
 }) => {
   bridge.send({ type: 'session.create', ...input });
 };
@@ -97,20 +99,44 @@ export const listFactoryDefaults = () => {
   bridge.send({ type: 'settings.defaults' });
 };
 
-export const sendToSession = (appSessionId: string, text: string) => {
-  bridge.send({ type: 'session.send', appSessionId, text });
+export const sendToSession = (
+  appSessionId: string,
+  text: string,
+  responseFormat?: ResponseFormat,
+) => {
+  bridge.send({
+    type: 'session.send',
+    appSessionId,
+    text,
+    ...(responseFormat ? { responseFormat } : {}),
+  });
 };
 
-export const sendToSessionNow = (appSessionId: string, text: string) => {
-  bridge.send({ type: 'session.sendNow', appSessionId, text });
+export const sendToSessionNow = (
+  appSessionId: string,
+  text: string,
+  responseFormat?: ResponseFormat,
+) => {
+  bridge.send({
+    type: 'session.sendNow',
+    appSessionId,
+    text,
+    ...(responseFormat ? { responseFormat } : {}),
+  });
 };
 
-export const sendToChild = (parentAppSessionId: string, childSessionId: string, text: string) => {
+export const sendToChild = (
+  parentAppSessionId: string,
+  childSessionId: string,
+  text: string,
+  responseFormat?: ResponseFormat,
+) => {
   bridge.send({
     type: 'child.send',
     parentAppSessionId,
     childSessionId,
     text,
+    ...(responseFormat ? { responseFormat } : {}),
   });
 };
 
@@ -118,12 +144,14 @@ export const sendToChildNow = (
   parentAppSessionId: string,
   childSessionId: string,
   text: string,
+  responseFormat?: ResponseFormat,
 ) => {
   bridge.send({
     type: 'child.sendNow',
     parentAppSessionId,
     childSessionId,
     text,
+    ...(responseFormat ? { responseFormat } : {}),
   });
 };
 

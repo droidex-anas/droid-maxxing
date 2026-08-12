@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
+import { hasCompleteAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
@@ -2003,11 +2004,13 @@ const InlineSpecCard = memo(function InlineSpecCard({
 });
 
 /* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({ text }: { text: string }) {
+const MessageBody = memo(function MessageBody({ text, live }: { text: string; live: boolean }) {
   // Strip the history "[truncated N chars]" sentinel so the raw marker never
   // shows; the cut itself is intentionally not surfaced.
   const { body } = parseTruncatedTail(text);
-  if (!hasJsonRender(body)) return <Markdown>{body}</Markdown>;
+  const autoPlayAppBlocks = live && hasCompleteAppBlock(body);
+  if (!hasJsonRender(body))
+    return <Markdown autoPlayAppBlocks={autoPlayAppBlocks}>{body}</Markdown>;
   const segments = splitJsonRender(body);
   return (
     <>
@@ -2015,7 +2018,9 @@ const MessageBody = memo(function MessageBody({ text }: { text: string }) {
         seg.type === 'json-render' ? (
           <JsonRender key={i} source={seg.value} />
         ) : seg.value.trim() ? (
-          <Markdown key={i}>{seg.value}</Markdown>
+          <Markdown key={i} autoPlayAppBlocks={autoPlayAppBlocks}>
+            {seg.value}
+          </Markdown>
         ) : null,
       )}
     </>
@@ -2170,7 +2175,7 @@ const FeedItemView = memo(function FeedItemView({
       if (specContent && text.trim() && text.trim() === specContent.trim()) return null;
       return (
         <div className="group/msg">
-          <MessageBody text={text} />
+          <MessageBody text={text} live={live} />
           {live ? (
             <StreamingCaret />
           ) : (
@@ -2739,7 +2744,11 @@ export function MessageFeed({
 
   return (
     <div className="space-y-4">
-      {showSpecCard && <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />}
+      {showSpecCard && (
+        <div className="mx-auto min-w-0 max-w-2xl">
+          <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
+        </div>
+      )}
 
       {items.map((item, idx) => {
         const isNewItem = animateKeys.has(item.key);
@@ -2749,6 +2758,13 @@ export function MessageFeed({
               data-feed-row-id={feedRowId(item)}
               {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
               style={FEED_ROW_RENDER_STYLE}
+              className={`mx-auto min-w-0 ${
+                item.type === 'message' &&
+                item.event.author !== 'user' &&
+                hasCompleteAppBlock(item.event.text ?? '')
+                  ? 'max-w-4xl'
+                  : 'max-w-2xl'
+              }`}
               initial={isNewItem ? { opacity: 0, y: 4 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, ease: EASE }}
@@ -2770,13 +2786,19 @@ export function MessageFeed({
               />
             </motion.div>
             {idx === worktreeInsertAfter && createdWorktreePath && (
-              <WorktreeCreatedCard path={createdWorktreePath} />
+              <div className="mx-auto min-w-0 max-w-2xl">
+                <WorktreeCreatedCard path={createdWorktreePath} />
+              </div>
             )}
           </Fragment>
         );
       })}
 
-      {showWorking && <WorkingIndicator label={workingLabel} startTs={workingStart} />}
+      {showWorking && (
+        <div className="mx-auto min-w-0 max-w-2xl">
+          <WorkingIndicator label={workingLabel} startTs={workingStart} />
+        </div>
+      )}
     </div>
   );
 }

@@ -65,6 +65,41 @@ test('[L1] Ordinary create', { concurrency: false }, async () => {
   }
 });
 
+test('App response format enriches the provider prompt without changing the user request', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'app-format-create',
+      title: 'App request',
+      goal: '/visualize compare renderer timings',
+      responseFormat: 'app',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+
+    const createPrompt = h.provider.session('provider-1').prompts[0];
+    assert.match(createPrompt, /^DROIDEX App request:/);
+    assert.match(createPrompt, /\/visualize compare renderer timings/);
+    assert.match(createPrompt, /fenced `app` block/);
+
+    await h.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: '/visualize turn this into a timeline',
+      responseFormat: 'app',
+    });
+    await h.provider.waitForPrompts('provider-1', 2);
+
+    const sendPrompt = h.provider.session('provider-1').prompts[1];
+    assert.match(sendPrompt, /^DROIDEX App request:/);
+    assert.match(sendPrompt, /\/visualize turn this into a timeline/);
+  } finally {
+    await h.dispose();
+  }
+});
+
 test('[L2] Spec create', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
 

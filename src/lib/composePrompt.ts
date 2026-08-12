@@ -1,34 +1,21 @@
 export const VISUALIZE_COMMAND = {
   cmd: '/visualize',
-  desc: 'Create an interactive App block',
+  desc: 'Create an interactive in-chat App',
 } as const;
 
 export function isVisualizeCommand(text: string): boolean {
   return /^\/visualize(?:\s|$)/i.test(text.trim());
 }
 
-function expandVisualizeCommand(text: string): string {
-  const match = /^\/visualize(?:\s+([\s\S]*))?$/i.exec(text.trim());
-  if (!match) return text;
-  const request = match.at(1)?.trim() ?? '';
-  const requestDescription =
-    request.length > 0 ? request : 'the most useful view of the current conversation';
-  return `Create an interactive visualization for ${requestDescription}.
-
-Return a concise explanation followed by one self-contained fenced \`app\` block. Put inline HTML, CSS, and JavaScript inside that fence. Use SVG or Canvas when useful, make the layout responsive at narrow widths, and add meaningful native interaction where it improves understanding. Use the DROIDEX theme variables --app-background, --app-surface, --app-foreground, --app-muted, --app-border, and --app-accent. Do not use network requests, external libraries, external assets, or nested frames.`;
-}
-
 // Builds the prompt text actually sent to a session from the raw user input plus
 // the selected skills and @file mentions. Shared so the optimistic echo dedup
 // can reconstruct the same composed string that gets persisted to history.
 export function composePrompt(text: string, skillNames: string[], files: string[]): string {
-  const expandedText = expandVisualizeCommand(text);
   const parts: string[] = [];
-  if (skillNames.length === 1)
-    parts.push(`/${skillNames[0]}${expandedText ? ` ${expandedText}` : ''}`);
+  if (skillNames.length === 1) parts.push(`/${skillNames[0]}${text ? ` ${text}` : ''}`);
   else if (skillNames.length > 1)
     parts.push(`Use these skills: ${skillNames.map((s) => `"${s}"`).join(', ')}.`);
-  if (expandedText && skillNames.length !== 1) parts.push(expandedText);
+  if (text && skillNames.length !== 1) parts.push(text);
   let composed = parts.join('\n\n');
   if (files.length) {
     const mentions = files.map((f) => `@${f}`).join(' ');

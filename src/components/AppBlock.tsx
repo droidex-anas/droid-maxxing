@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion, type Transition } from 'framer-motion';
-import { Play, Square } from 'lucide-react';
+import { AppWindow, Play, Square } from 'lucide-react';
 import {
   DEFAULT_APP_HEIGHT,
   appBlockHeightFromMessage,
@@ -44,68 +44,75 @@ export function RunningAppFrame({ source, instanceId }: { source: string; instan
   );
 }
 
-export function AppBlock({ source }: { source: string }) {
-  const [state, dispatch] = useReducer(appBlockReducer, 'idle');
+export function AppBlock({ source, autoPlay = false }: { source: string; autoPlay?: boolean }) {
+  const [state, dispatch] = useReducer(appBlockReducer, autoPlay ? 'running' : 'idle');
   const isRunning = state === 'running';
   const instanceId = useId();
+  const previousAutoPlay = useRef(autoPlay);
   const reduceMotion = useReducedMotion();
   const transition: Transition = reduceMotion
     ? { duration: 0 }
     : { duration: 0.22, ease: [0.16, 1, 0.3, 1] };
 
+  useEffect(() => {
+    if (autoPlay && !previousAutoPlay.current) dispatch('play');
+    previousAutoPlay.current = autoPlay;
+  }, [autoPlay]);
+
   return (
-    <motion.div
-      layout="size"
-      transition={{ layout: transition }}
-      className="my-2.5 overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/40"
-    >
-      <div className="flex h-8 items-center justify-between border-b border-droid-border bg-droid-surface/60 px-3">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
-          App
-        </span>
-        <button
-          type="button"
-          aria-label={isRunning ? 'Stop app' : 'Play app'}
-          onClick={() => {
-            dispatch(isRunning ? 'stop' : 'play');
-          }}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text"
+    <AnimatePresence initial={false} mode="wait">
+      {isRunning ? (
+        <motion.div
+          key="running"
+          initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduceMotion ? undefined : { opacity: 0, y: 4 }}
+          transition={transition}
+          className="group/app relative my-3 min-w-0 overflow-hidden"
         >
-          {isRunning ? (
-            <Square className="h-3 w-3 fill-current" />
-          ) : (
+          <button
+            type="button"
+            aria-label="Stop app"
+            title="Stop app"
+            onClick={() => {
+              dispatch('stop');
+            }}
+            className="absolute right-2 top-2 z-10 flex h-7 items-center gap-1.5 rounded-lg border border-droid-border bg-droid-bg/90 px-2 text-[10.5px] font-medium text-droid-text-secondary opacity-70 shadow-sm backdrop-blur transition hover:opacity-100 focus-visible:opacity-100"
+          >
+            <Square className="h-2.5 w-2.5 fill-current" />
+            Stop
+          </button>
+          <RunningAppFrame source={source} instanceId={instanceId} />
+        </motion.div>
+      ) : (
+        <motion.button
+          key="preview"
+          type="button"
+          aria-label="Play app"
+          onClick={() => {
+            dispatch('play');
+          }}
+          initial={reduceMotion ? false : { opacity: 0, y: -3 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
+          transition={transition}
+          className="group my-3 flex w-full items-center gap-3 rounded-xl border border-droid-border bg-droid-surface/55 p-3 text-left transition-colors hover:border-droid-border-hover hover:bg-droid-surface focus-visible:border-droid-border-hover focus-visible:outline-none"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-droid-bg text-droid-text-secondary ring-1 ring-inset ring-droid-border">
+            <AppWindow className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-medium text-droid-text">Interactive App</span>
+            <span className="block text-[11.5px] text-droid-text-muted">
+              Runs locally in this chat
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-droid-text-secondary transition-colors group-hover:bg-droid-elevated group-hover:text-droid-text">
             <Play className="h-3 w-3 fill-current" />
-          )}
-          {isRunning ? 'Stop' : 'Play'}
-        </button>
-      </div>
-      <AnimatePresence initial={false} mode="wait">
-        {isRunning ? (
-          <motion.div
-            key="running"
-            initial={reduceMotion ? false : { height: 0, opacity: 0, y: -4 }}
-            animate={{ height: 'auto', opacity: 1, y: 0 }}
-            exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-            transition={transition}
-            className="overflow-hidden"
-          >
-            <RunningAppFrame source={source} instanceId={instanceId} />
-          </motion.div>
-        ) : (
-          <motion.pre
-            key="source"
-            initial={reduceMotion ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-            transition={transition}
-            className="max-h-72 overflow-auto p-3.5"
-          >
-            <code className="whitespace-pre font-mono text-[12px] leading-[1.65] text-droid-text-secondary">
-              {source}
-            </code>
-          </motion.pre>
-        )}
-      </AnimatePresence>
-    </motion.div>
+            Play
+          </span>
+        </motion.button>
+      )}
+    </AnimatePresence>
   );
 }

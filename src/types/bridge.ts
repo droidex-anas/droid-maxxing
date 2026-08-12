@@ -28,6 +28,7 @@ export type FeatureStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled
 export type SessionRole = 'primary' | 'worker' | 'validator';
 export type SessionPurpose = 'chat' | 'design' | 'mission-control';
 export type SessionInteractionMode = 'auto' | 'spec' | 'agi';
+export type ResponseFormat = 'app';
 export type RunStatus = 'pending' | 'running' | 'paused' | 'done' | 'failed' | 'blocked';
 export type Autonomy = 'off' | 'low' | 'medium' | 'high';
 export type ReasoningEffort =
@@ -579,9 +580,10 @@ export type ClientCommand =
       workerReasoning?: ReasoningEffort;
       validatorModel?: string;
       validatorReasoning?: ReasoningEffort;
+      responseFormat?: ResponseFormat;
     }
-  | { type: 'session.send'; appSessionId: string; text: string }
-  | { type: 'session.sendNow'; appSessionId: string; text: string }
+  | { type: 'session.send'; appSessionId: string; text: string; responseFormat?: ResponseFormat }
+  | { type: 'session.sendNow'; appSessionId: string; text: string; responseFormat?: ResponseFormat }
   | { type: 'session.resume'; appSessionId: string }
   | { type: 'session.interrupt'; appSessionId: string }
   | {
@@ -626,12 +628,14 @@ export type ClientCommand =
       parentAppSessionId: string;
       childSessionId: string;
       text: string;
+      responseFormat?: ResponseFormat;
     }
   | {
       type: 'child.sendNow';
       parentAppSessionId: string;
       childSessionId: string;
       text: string;
+      responseFormat?: ResponseFormat;
     }
   | { type: 'child.interrupt'; parentAppSessionId: string; childSessionId: string }
   | {

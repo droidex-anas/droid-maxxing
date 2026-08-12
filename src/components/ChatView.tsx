@@ -528,7 +528,7 @@ export default function ChatView({
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-        className="mx-auto min-w-0 px-6 py-6 max-w-2xl"
+        className="mx-auto min-w-0 px-6 py-6 max-w-4xl"
       >
         {restore?.status === 'failed' && (
           <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />

@@ -60,8 +60,9 @@ flowchart LR
 ### In-chat App blocks
 
 - A fenced `app` block in an assistant message is persisted as ordinary transcript text. The renderer remains the only owner of its temporary idle/running state, so restored chats always reopen with the block inert.
-- The source is visible until the user clicks **Play**. Running content mounts in a script-only sandboxed iframe; **Stop** unmounts the iframe and releases its timers and other browser resources.
-- The frame supplies DROIDEX colors as `--app-background`, `--app-surface`, `--app-foreground`, `--app-muted`, `--app-border`, and `--app-accent`. App content owns its responsive layout and reports its intrinsic height to the renderer.
+- A completed App opens automatically while its response is live. Reopening the chat shows a compact **Play** card; **Stop** unmounts the running iframe and releases its timers and browser resources.
+- The sandbox is transparent and flows at its reported intrinsic height on the chat canvas. It supplies DROIDEX colors as `--app-background`, `--app-surface`, `--app-foreground`, `--app-muted`, `--app-border`, and `--app-accent`.
+- `/visualize` stays concise in the transcript. The sidecar adds the private, provider-facing App contract and strips it back to the user's command when history is replayed.
 - App blocks are self-contained. Their content security policy blocks network connections, nested frames, objects, forms, and external resources. Generated content is disabled entirely in file previews, fetched web content, and pull-request comments.
 
 ### Autonomy

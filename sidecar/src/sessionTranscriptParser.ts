@@ -8,6 +8,7 @@
 // shares.
 import { dateMs, numberValue, objectValue, safeStringify, stringValue } from './values.js';
 import { designPromptDisplayFromText } from './browser/designPromptDisplay.js';
+import { appPromptDisplayFromText } from './appPrompt.js';
 import { parseSkillActivation } from './skillSignals.js';
 import type { SessionRole, TranscriptEvent } from './protocol.js';
 
@@ -127,14 +128,14 @@ function nonAssistantBlockEvent(
   }
   if (messageRole === 'user' && type === 'text') {
     const rawText = trimText(nonEmpty(stringValue(block.text)));
-    const display = designPromptDisplayFromText(rawText);
-    const text = display?.text ?? rawText;
+    const designDisplay = designPromptDisplayFromText(rawText);
+    const text = designDisplay?.text ?? appPromptDisplayFromText(rawText) ?? rawText;
     if (!text || isSystemText(text)) return null;
     const sourceProviderSessionId = base.role === 'primary' ? 'user' : base.sourceProviderSessionId;
     return event({ ...base, sourceProviderSessionId }, index, 'text', {
       text,
       author: 'user',
-      browserRefs: display?.browserRefs,
+      browserRefs: designDisplay?.browserRefs,
     });
   }
   return null;

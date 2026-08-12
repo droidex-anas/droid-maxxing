@@ -14,15 +14,23 @@ test('disabled diagrams render fenced SVG as escaped code', () => {
   assert.match(html, /&lt;svg onload=/);
 });
 
-test('app fences stay inert behind an explicit Play action', () => {
+test('restored app fences stay inert behind a compact Play card', () => {
   const source = '```app\n<button onclick="document.body.dataset.ran=\'yes\'">Run</button>\n```';
   const html = renderToStaticMarkup(createElement(Markdown, null, source));
 
-  assert.match(html, />App</);
+  assert.match(html, /Interactive App/);
   assert.match(html, /aria-label="Play app"/);
-  assert.match(html, /&lt;button onclick=/);
+  assert.doesNotMatch(html, /&lt;button onclick=/);
   assert.doesNotMatch(html, /<iframe/i);
   assert.doesNotMatch(html, /srcdoc=/i);
+});
+
+test('a complete app fence in the live response opens automatically', () => {
+  const source = '```app\n<main>Live app</main>\n```';
+  const html = renderToStaticMarkup(createElement(Markdown, { autoPlayAppBlocks: true }, source));
+
+  assert.match(html, /<iframe/i);
+  assert.match(html, /aria-label="Stop app"/);
 });
 
 test('app blocks are framed as a top-level surface instead of nesting inside preformatted text', () => {

@@ -3,7 +3,7 @@ export type AppBlockAction = 'play' | 'stop';
 
 export const DEFAULT_APP_HEIGHT = 360;
 const MIN_APP_HEIGHT = 240;
-const MAX_APP_HEIGHT = 640;
+const MAX_APP_HEIGHT = 1_400;
 
 export interface AppBlockTheme {
   colorScheme: 'light' | 'dark';
@@ -62,6 +62,10 @@ export function appBlockReducer(_state: AppBlockState, action: AppBlockAction): 
   return action === 'play' ? 'running' : 'idle';
 }
 
+export function hasCompleteAppBlock(markdown: string): boolean {
+  return /(?:^|\n)```app[ \t]*\n[\s\S]*?```(?:\n|$)/i.test(markdown);
+}
+
 export function normalizeAppBlockHeight(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_APP_HEIGHT;
   return Math.min(MAX_APP_HEIGHT, Math.max(MIN_APP_HEIGHT, Math.ceil(value)));
@@ -104,8 +108,8 @@ export function createAppDocument(
   --app-accent: ${theme.accent};
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
-html, body { margin: 0; min-width: 0; background: var(--app-background); }
-body { box-sizing: border-box; padding: 16px; color: var(--app-foreground); overflow-wrap: anywhere; }
+html, body { margin: 0; min-width: 0; background: transparent; }
+body { box-sizing: border-box; padding: 0; color: var(--app-foreground); overflow-wrap: anywhere; }
 *, *::before, *::after { box-sizing: inherit; }
 img, svg, canvas, video { display: block; max-width: 100%; height: auto; }
 a { color: var(--app-accent); }
@@ -136,6 +140,10 @@ button, input, select, textarea {
 </head>
 <body>
 ${source}
+<style data-droidex-app-host>
+html, body { background: transparent !important; overflow: hidden !important; }
+body { padding: 0 !important; }
+</style>
 </body>
 </html>`;
 }

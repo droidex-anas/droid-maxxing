@@ -802,6 +802,7 @@ export default function PromptInput({
         ? parseSlashSkillInvocation(text, invocableSkills)
         : undefined;
     const displayText = slashSkill?.prompt ?? text;
+    const responseFormat = isVisualizeCommand(displayText) ? 'app' : undefined;
     const skillNames = slashSkill
       ? [slashSkill.skillName]
       : activeSkills.map((skill) => skill.name);
@@ -866,6 +867,7 @@ export default function PromptInput({
           workerReasoning: worker.reasoning,
           validatorModel: validator.modelId,
           validatorReasoning: validator.reasoning,
+          ...(responseFormat ? { responseFormat } : {}),
         });
         armTurnStartingTimeout();
       } catch (error) {
@@ -906,6 +908,7 @@ export default function PromptInput({
           compactionModel:
             state.compactionModel === 'current-model' ? undefined : state.compactionModel,
           ...compactionSettingsSnapshot(compactionSettingsInput),
+          ...(responseFormat ? { responseFormat } : {}),
         });
         armTurnStartingTimeout();
       } catch (error) {
@@ -949,10 +952,17 @@ export default function PromptInput({
       try {
         if (targetChildSessionId) {
           if (mode === 'now')
-            sendToChildNow(activeSession.appSessionId, targetChildSessionId, composed);
-          else sendToChild(activeSession.appSessionId, targetChildSessionId, composed);
-        } else if (mode === 'now') sendToSessionNow(activeSession.appSessionId, composed);
-        else sendToSession(activeSession.appSessionId, composed);
+            sendToChildNow(
+              activeSession.appSessionId,
+              targetChildSessionId,
+              composed,
+              responseFormat,
+            );
+          else
+            sendToChild(activeSession.appSessionId, targetChildSessionId, composed, responseFormat);
+        } else if (mode === 'now')
+          sendToSessionNow(activeSession.appSessionId, composed, responseFormat);
+        else sendToSession(activeSession.appSessionId, composed, responseFormat);
         armTurnStartingTimeout();
       } catch (err) {
         stopTurnStarting();
@@ -1031,7 +1041,11 @@ export default function PromptInput({
     }
 
     try {
-      sendToSession(activeSession.appSessionId, composeFrom(head.text, head.skills, head.files));
+      sendToSession(
+        activeSession.appSessionId,
+        composeFrom(head.text, head.skills, head.files),
+        isVisualizeCommand(head.text) ? 'app' : undefined,
+      );
     } catch (err) {
       // Keep the prompt staged and skip the transcript echo so a send failure
       // neither loses queued input nor leaves a duplicate user message behind.

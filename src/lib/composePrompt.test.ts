@@ -29,22 +29,18 @@ test('multiple selected skills keep the explicit multi-skill instruction', () =>
   );
 });
 
-test('/visualize asks the model for a responsive interactive App block', () => {
+test('/visualize remains concise when the renderer composes the visible prompt', () => {
   const composed = composePrompt('/visualize compare renderer timings', [], []);
 
-  assert.match(composed, /compare renderer timings/);
-  assert.match(composed, /fenced `app` block/);
-  assert.match(composed, /inline HTML, CSS, and JavaScript/);
-  assert.match(composed, /--app-background/);
-  assert.match(composed, /responsive/);
-  assert.doesNotMatch(composed, /^\/visualize/);
+  assert.equal(composed, '/visualize compare renderer timings');
+  assert.doesNotMatch(composed, /fenced `app` block/);
+  assert.doesNotMatch(composed, /--app-background/);
 });
 
-test('/visualize without arguments uses the current conversation', () => {
+test('/visualize without arguments remains the visible user command', () => {
   const composed = composePrompt('/visualize', [], []);
 
-  assert.match(composed, /current conversation/);
-  assert.match(composed, /fenced `app` block/);
+  assert.equal(composed, '/visualize');
 });
 
 test('/visualize remains an app command even when a provider skill has the same name', () => {
