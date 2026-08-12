@@ -6,7 +6,11 @@ const APP_GUIDANCE = [
   '',
   'Return a concise explanation followed by one self-contained fenced `app` block. Put inline HTML, CSS, and JavaScript inside that fence. Use SVG or Canvas when useful and add meaningful native interaction where it improves understanding.',
   '',
-  'The App renders directly on a transparent chat canvas. Do not draw a full-page background, browser frame, or card around the entire App. Use surfaces only to group controls or data, let content height grow naturally without nested scrolling, and adapt fluidly at narrow widths.',
+  'The DROIDEX host owns the transparent chat canvas. Begin with one `<main data-droidex-app-root>` at full width with no outer max-width, page padding, border, radius, or shadow. Mark the primary chart or content region with `data-droidex-app-canvas`; keep that region transparent and unframed. Use surfaces only for compact controls, grouped data, or individual stat tiles. Let content height grow naturally without nested scrolling, and adapt fluidly at narrow widths.',
+  '',
+  'Choose freely among bar, line, area, scatter, bubble, histogram, box, heatmap, network, timeline, and other suitable views. Combine coordinated mixed views when they reveal more than one chart alone, while keeping the result focused. Support illustrations, annotated processes, infographics, diagrams, and responsive wireframes when those communicate the idea better than data marks.',
+  '',
+  "Use responsive SVG for charts, diagrams, and illustrations; Canvas for dense or animated plots; and semantic HTML/CSS for controls, calculators, and wireframes. Build standard charts directly with SVG or Canvas. Give charts useful scales, labels, legends, hover or focus details, and data-driven controls such as filters, toggles, sliders, or selection only when they improve understanding. Use a coherent, high-contrast, color-blind-safe palette and never rely on color alone; the App may define its own local series colors and offer palette or series-color controls when color choice is genuinely useful. For real local LaTeX, put TeX in an element's `data-latex` attribute (add `data-display` for display math), or call `window.droidex.renderMath(elementOrSelector, latex, { displayMode: true })` when values change. Do not hand-build math notation with CSS.",
   '',
   'Use the DROIDEX theme variables --app-background, --app-surface, --app-foreground, --app-muted, --app-border, and --app-accent. Do not use network requests, external libraries, external assets, or nested frames.',
 ].join('\n');

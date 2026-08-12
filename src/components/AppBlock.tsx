@@ -4,9 +4,11 @@ import { AppWindow, Play, Square } from 'lucide-react';
 import {
   DEFAULT_APP_HEIGHT,
   appBlockHeightFromMessage,
+  appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppDocument,
   currentAppBlockTheme,
+  renderAppBlockMath,
 } from './appBlockRuntime';
 
 export function RunningAppFrame({ source, instanceId }: { source: string; instanceId: string }) {
@@ -20,9 +22,39 @@ export function RunningAppFrame({ source, instanceId }: { source: string; instan
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== iframeRef.current?.contentWindow) return;
+      const frameWindow = iframeRef.current?.contentWindow;
+      if (!frameWindow || event.source !== frameWindow) return;
       const nextHeight = appBlockHeightFromMessage(event.data, instanceId);
-      if (nextHeight !== undefined) setHeight(nextHeight);
+      if (nextHeight !== undefined) {
+        setHeight(nextHeight);
+        return;
+      }
+      const mathRequest = appBlockMathRequestFromMessage(event.data, instanceId);
+      if (!mathRequest) return;
+      void renderAppBlockMath(mathRequest)
+        .then((html) => {
+          if (iframeRef.current?.contentWindow !== frameWindow) return;
+          frameWindow.postMessage(
+            {
+              type: 'droidex:math-rendered',
+              instanceId,
+              requestId: mathRequest.requestId,
+              html,
+            },
+            '*',
+          );
+        })
+        .catch(() => {
+          if (iframeRef.current?.contentWindow !== frameWindow) return;
+          frameWindow.postMessage(
+            {
+              type: 'droidex:math-rendered',
+              instanceId,
+              requestId: mathRequest.requestId,
+            },
+            '*',
+          );
+        });
     };
     window.addEventListener('message', onMessage);
     return () => {
@@ -77,7 +109,7 @@ export function AppBlock({ source, autoPlay = false }: { source: string; autoPla
             onClick={() => {
               dispatch('stop');
             }}
-            className="absolute right-2 top-2 z-10 flex h-7 items-center gap-1.5 rounded-lg border border-droid-border bg-droid-bg/90 px-2 text-[10.5px] font-medium text-droid-text-secondary opacity-70 shadow-sm backdrop-blur transition hover:opacity-100 focus-visible:opacity-100"
+            className="pointer-events-none absolute right-2 top-2 z-10 flex h-7 items-center gap-1.5 rounded-lg border border-droid-border bg-droid-bg/90 px-2 text-[10.5px] font-medium text-droid-text-secondary opacity-0 shadow-sm backdrop-blur transition group-hover/app:pointer-events-auto group-hover/app:opacity-70 hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
           >
             <Square className="h-2.5 w-2.5 fill-current" />
             Stop

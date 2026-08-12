@@ -4,6 +4,13 @@ export type AppBlockAction = 'play' | 'stop';
 export const DEFAULT_APP_HEIGHT = 360;
 const MIN_APP_HEIGHT = 240;
 const MAX_APP_HEIGHT = 1_400;
+const MAX_APP_MATH_CHARS = 20_000;
+
+export interface AppBlockMathRequest {
+  requestId: string;
+  latex: string;
+  displayMode: boolean;
+}
 
 export interface AppBlockTheme {
   colorScheme: 'light' | 'dark';
@@ -125,15 +132,77 @@ button, input, select, textarea {
 <script>
 (() => {
   const instanceId = ${serializedId};
+  const pendingMath = new Map();
+  let mathSequence = 0;
   const reportHeight = () => {
     const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
     parent.postMessage({ type: 'droidex:app-height', instanceId, height }, '*');
   };
+  const renderMath = (target, latex, options = {}) => {
+    const element = typeof target === 'string' ? document.querySelector(target) : target;
+    if (!(element instanceof Element) || typeof latex !== 'string') return Promise.resolve(false);
+    const requestId = instanceId + '-math-' + String(++mathSequence);
+    return new Promise((resolve) => {
+      pendingMath.set(requestId, { element, resolve });
+      parent.postMessage({
+        type: 'droidex:render-math',
+        instanceId,
+        requestId,
+        latex,
+        displayMode: options.displayMode === true || element.hasAttribute('data-display'),
+      }, '*');
+    });
+  };
+  const renderAllMath = (root = document) => Promise.all(
+    [...root.querySelectorAll('[data-latex]')].map((element) =>
+      renderMath(element, element.getAttribute('data-latex') ?? '')
+    )
+  );
+  const onMathMessage = (event) => {
+    const data = event.data;
+    if (
+      event.source !== parent ||
+      !data ||
+      data.type !== 'droidex:math-rendered' ||
+      data.instanceId !== instanceId ||
+      typeof data.requestId !== 'string'
+    ) return;
+    const pending = pendingMath.get(data.requestId);
+    if (!pending) return;
+    pendingMath.delete(data.requestId);
+    if (typeof data.html === 'string') {
+      pending.element.innerHTML = data.html;
+      pending.resolve(true);
+    } else {
+      pending.element.textContent = 'Unable to render this expression.';
+      pending.resolve(false);
+    }
+    reportHeight();
+  };
+  addEventListener('message', onMathMessage);
+  window.droidex = Object.freeze({ renderMath, renderAllMath });
   addEventListener('DOMContentLoaded', () => {
+    const root = document.querySelector('[data-droidex-app-root]') ??
+      [...document.body.children].find((element) => !['SCRIPT', 'STYLE'].includes(element.tagName));
+    root?.setAttribute('data-droidex-app-root', '');
+    if (root && !root.querySelector('[data-droidex-app-canvas]')) {
+      const visualRegions = [...root.children].filter((element) =>
+        element.matches('svg, canvas') || element.querySelector('svg, canvas')
+      );
+      if (visualRegions.length === 1) {
+        visualRegions[0].setAttribute('data-droidex-app-canvas', '');
+      }
+    }
+    void renderAllMath();
     reportHeight();
     const observer = new ResizeObserver(reportHeight);
     observer.observe(document.documentElement);
-    addEventListener('pagehide', () => observer.disconnect(), { once: true });
+    addEventListener('pagehide', () => {
+      observer.disconnect();
+      removeEventListener('message', onMathMessage);
+      for (const pending of pendingMath.values()) pending.resolve(false);
+      pendingMath.clear();
+    }, { once: true });
   }, { once: true });
 })();
 </script>
@@ -142,7 +211,25 @@ button, input, select, textarea {
 ${source}
 <style data-droidex-app-host>
 html, body { background: transparent !important; overflow: hidden !important; }
-body { padding: 0 !important; }
+body { min-height: 0 !important; padding: 0 !important; }
+[data-droidex-app-root] {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+[data-droidex-app-canvas] {
+  margin-inline: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
 </style>
 </body>
 </html>`;
@@ -156,4 +243,42 @@ export function appBlockHeightFromMessage(data: unknown, instanceId: string): nu
     return undefined;
   }
   return normalizeAppBlockHeight(data.height);
+}
+
+export function appBlockMathRequestFromMessage(
+  data: unknown,
+  instanceId: string,
+): AppBlockMathRequest | undefined {
+  if (typeof data !== 'object' || data === null) return undefined;
+  if (!('type' in data) || data.type !== 'droidex:render-math') return undefined;
+  if (!('instanceId' in data) || data.instanceId !== instanceId) return undefined;
+  if (
+    !('requestId' in data) ||
+    typeof data.requestId !== 'string' ||
+    data.requestId.length === 0 ||
+    data.requestId.length > 128
+  ) {
+    return undefined;
+  }
+  if (
+    !('latex' in data) ||
+    typeof data.latex !== 'string' ||
+    data.latex.length === 0 ||
+    data.latex.length > MAX_APP_MATH_CHARS
+  ) {
+    return undefined;
+  }
+  if (!('displayMode' in data) || typeof data.displayMode !== 'boolean') return undefined;
+  return { requestId: data.requestId, latex: data.latex, displayMode: data.displayMode };
+}
+
+export async function renderAppBlockMath(request: AppBlockMathRequest): Promise<string> {
+  const { renderToString } = await import('katex');
+  return renderToString(request.latex, {
+    displayMode: request.displayMode,
+    output: 'mathml',
+    throwOnError: false,
+    strict: 'ignore',
+    trust: false,
+  });
 }

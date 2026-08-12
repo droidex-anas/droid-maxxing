@@ -5,10 +5,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AppBlock, RunningAppFrame } from './AppBlock';
 import {
   appBlockHeightFromMessage,
+  appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppDocument,
   hasCompleteAppBlock,
   normalizeAppBlockHeight,
+  renderAppBlockMath,
 } from './appBlockRuntime';
 
 test('Play starts an app and Stop releases it back to the inert preview', () => {
@@ -48,6 +50,13 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /--app-accent: #2f6fed/);
   assert.match(document, /background: transparent/);
   assert.match(document, /padding: 0/);
+  assert.match(document, /\[data-droidex-app-root\]/);
+  assert.match(document, /\[data-droidex-app-canvas\]/);
+  assert.match(document, /max-width: none !important/);
+  assert.match(document, /window\.droidex/);
+  assert.match(document, /\[data-latex\]/);
+  assert.match(document, /droidex:render-math/);
+  assert.match(document, /droidex:math-rendered/);
   assert.match(document, /<main><h1>Responsive app<\/h1><\/main>/);
 });
 
@@ -76,6 +85,8 @@ test('a freshly completed app opens directly on the chat canvas', () => {
 
   assert.match(html, /<iframe/i);
   assert.match(html, /aria-label="Stop app"/);
+  assert.match(html, /opacity-0/);
+  assert.match(html, /group-hover\/app:opacity-70/);
   assert.doesNotMatch(html, />App<\/span>/);
 });
 
@@ -114,4 +125,63 @@ test('the host accepts height updates only for the mounted app instance', () => 
     undefined,
   );
   assert.equal(appBlockHeightFromMessage(null, 'app-3'), undefined);
+});
+
+test('the math bridge accepts only bounded requests for the mounted App', () => {
+  assert.deepEqual(
+    appBlockMathRequestFromMessage(
+      {
+        type: 'droidex:render-math',
+        instanceId: 'app-4',
+        requestId: 'math-1',
+        latex: String.raw`y = \beta_0 + \beta_1 x`,
+        displayMode: true,
+      },
+      'app-4',
+    ),
+    {
+      requestId: 'math-1',
+      latex: String.raw`y = \beta_0 + \beta_1 x`,
+      displayMode: true,
+    },
+  );
+  assert.equal(
+    appBlockMathRequestFromMessage(
+      {
+        type: 'droidex:render-math',
+        instanceId: 'other',
+        requestId: 'math-1',
+        latex: 'x',
+        displayMode: false,
+      },
+      'app-4',
+    ),
+    undefined,
+  );
+  assert.equal(
+    appBlockMathRequestFromMessage(
+      {
+        type: 'droidex:render-math',
+        instanceId: 'app-4',
+        requestId: 'math-1',
+        latex: 'x'.repeat(20_001),
+        displayMode: false,
+      },
+      'app-4',
+    ),
+    undefined,
+  );
+});
+
+test('the local math renderer produces native MathML without iframe network access', async () => {
+  const html = await renderAppBlockMath({
+    requestId: 'math-2',
+    latex: String.raw`\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`,
+    displayMode: true,
+  });
+
+  assert.match(html, /<math/);
+  assert.match(html, /display="block"/);
+  assert.match(html, /<mfrac>/);
+  assert.doesNotMatch(html, /<script/i);
 });
