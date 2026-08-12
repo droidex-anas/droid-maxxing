@@ -249,6 +249,9 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
       missionForgettingAfterUnregister.push(registry.getLive(appSessionId) === undefined);
       calls.push({ target: 'cleanup', method: 'missionControl.forget', args: [appSessionId] });
     },
+    forgetPendingSettings: (appSessionId) => {
+      calls.push({ target: 'cleanup', method: 'pendingSettings.forget', args: [appSessionId] });
+    },
     closeBrowserSession: (appSessionId) => {
       calls.push({ target: 'browser', method: 'browser.close', args: [appSessionId] });
       return Promise.resolve();
@@ -940,6 +943,10 @@ test('close follows ownership order and closeAll closes its initial snapshot', a
   assert.equal(harness.registry.getLive('owner'), undefined);
   assert.ok(
     harness.calls.findIndex((call) => call.method === 'missionControl.forget') <
+      harness.calls.findIndex((call) => call.method === 'session.closed'),
+  );
+  assert.ok(
+    harness.calls.findIndex((call) => call.method === 'pendingSettings.forget') <
       harness.calls.findIndex((call) => call.method === 'session.closed'),
   );
   const ownerList = harness.events.findLast((event) => event.type === 'sessions.list');

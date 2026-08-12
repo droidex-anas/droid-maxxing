@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useStore } from './useStore';
+import { shallowEqual, useStoreSelector } from './useStore';
 import { addDiagnosticsBreadcrumb, setDiagnosticsContext } from '../lib/rendererDiagnostics';
 
 /**
@@ -9,28 +9,29 @@ import { addDiagnosticsBreadcrumb, setDiagnosticsContext } from '../lib/renderer
  * messages, file paths, or credentials.
  */
 export function useDiagnosticsContext(): void {
-  const { state } = useStore();
-  const sessionCount = Object.keys(state.sessions).length;
-  const activeSession = state.activeAppSessionId
-    ? state.sessions[state.activeAppSessionId]
-    : undefined;
+  const { sessionCount, interactionMode, autonomy, sessionPurpose } = useStoreSelector((state) => {
+    const activeSession = state.activeAppSessionId
+      ? state.sessions[state.activeAppSessionId]
+      : undefined;
+    return {
+      sessionCount: Object.keys(state.sessions).length,
+      interactionMode: activeSession?.interactionMode,
+      autonomy: activeSession?.autonomy,
+      sessionPurpose: activeSession?.sessionPurpose,
+    };
+  }, shallowEqual);
   const prevCount = useRef(sessionCount);
-  const prevMode = useRef(activeSession?.interactionMode);
-  const prevAutonomy = useRef(activeSession?.autonomy);
+  const prevMode = useRef(interactionMode);
+  const prevAutonomy = useRef(autonomy);
 
   useEffect(() => {
     setDiagnosticsContext({
-      interactionMode: activeSession?.interactionMode,
-      autonomy: activeSession?.autonomy,
+      interactionMode,
+      autonomy,
       activeSessionCount: sessionCount,
-      view: activeSession?.sessionPurpose ?? 'chat',
+      view: sessionPurpose ?? 'chat',
     });
-  }, [
-    activeSession?.interactionMode,
-    activeSession?.autonomy,
-    activeSession?.sessionPurpose,
-    sessionCount,
-  ]);
+  }, [interactionMode, autonomy, sessionPurpose, sessionCount]);
 
   useEffect(() => {
     if (prevCount.current !== sessionCount) {
@@ -43,20 +44,18 @@ export function useDiagnosticsContext(): void {
   }, [sessionCount]);
 
   useEffect(() => {
-    const mode = activeSession?.interactionMode;
-    if (prevMode.current !== mode) {
-      addDiagnosticsBreadcrumb('session', `mode changed to ${mode ?? 'unknown'}`);
+    if (prevMode.current !== interactionMode) {
+      addDiagnosticsBreadcrumb('session', `mode changed to ${interactionMode ?? 'unknown'}`);
     }
-    prevMode.current = mode;
-  }, [activeSession?.interactionMode]);
+    prevMode.current = interactionMode;
+  }, [interactionMode]);
 
   useEffect(() => {
-    const autonomy = activeSession?.autonomy;
     if (prevAutonomy.current !== autonomy) {
       addDiagnosticsBreadcrumb('session', `autonomy changed to ${autonomy ?? 'unknown'}`);
     }
     prevAutonomy.current = autonomy;
-  }, [activeSession?.autonomy]);
+  }, [autonomy]);
 
   useEffect(() => {
     addDiagnosticsBreadcrumb('app', 'app focused');

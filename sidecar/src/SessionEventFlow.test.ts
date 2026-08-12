@@ -11,7 +11,7 @@ import {
 import type { TranscriptEvent } from './protocol.js';
 import { assistantTextDelta, successfulResultEvent } from './testing/fakeFactoryRuntime.js';
 
-function createHarness() {
+function createHarness(options: { flushError?: Error } = {}) {
   const transcripts: TranscriptEvent[] = [];
   const sideEffects: Array<{
     appSessionId: string;
@@ -27,6 +27,10 @@ function createHarness() {
     appendTranscript: (event) => {
       trace.push(`append:${event.kind}`);
       transcripts.push(event);
+    },
+    flushTranscript: (appSessionId, sourceSessionId) => {
+      trace.push(`flush:${appSessionId}:${sourceSessionId}`);
+      if (options.flushError) throw options.flushError;
     },
     applySideEffects: (appSessionId, value) => {
       trace.push(`side:${sideEffectKind(value)}`);
@@ -98,7 +102,7 @@ test('stream ingress appends an accepted transcript before one side-effect callb
 
   harness.eventFlow.applyStreamEvent('app-1', 'provider-1', 'primary', taskToolCall('task-1'));
 
-  assert.deepEqual(harness.trace, ['append:tool_call', 'side:child']);
+  assert.deepEqual(harness.trace, ['append:tool_call', 'flush:app-1:app-1', 'side:child']);
   assert.equal(harness.transcripts[0]?.sourceSessionId, 'provider-1');
   assert.equal(harness.sideEffects.length, 1);
   assert.equal(harness.sideEffects[0]?.appSessionId, 'app-1');
@@ -188,7 +192,9 @@ test('post-terminal errors plus child, Mission, and token side effects still flo
 
   assert.deepEqual(harness.trace, [
     'append:tool_result',
+    'flush:app-1:worker-1',
     'side:child',
+    'flush:app-1:worker-1',
     'side:missionState',
     'usage:tokens',
   ]);
@@ -201,6 +207,36 @@ test('post-terminal errors plus child, Mission, and token side effects still flo
     tokensOut: 2,
     contextTokens: 10,
   });
+});
+
+test('notification persistence failures do not escape the SDK callback', () => {
+  const harness = createHarness({ flushError: new Error('disk full') });
+
+  assert.doesNotThrow(() => {
+    harness.eventFlow.applyNotification(
+      'app-1',
+      'worker-1',
+      'worker',
+      childNotification('worker-2'),
+      'child-1',
+    );
+  });
+
+  assert.deepEqual(harness.trace, ['flush:app-1:child-1']);
+  assert.deepEqual(harness.sideEffects, []);
+});
+
+test('primary notifications flush the stable app transcript after provider replacement', () => {
+  const harness = createHarness();
+
+  harness.eventFlow.applyNotification(
+    'app-1',
+    'replacement-provider-1',
+    'primary',
+    childNotification('worker-2'),
+  );
+
+  assert.deepEqual(harness.trace, ['flush:app-1:app-1', 'side:child']);
 });
 
 test('terminal gates are isolated across sources and app sessions', () => {

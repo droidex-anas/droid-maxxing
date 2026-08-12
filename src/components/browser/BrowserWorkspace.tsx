@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDesignModeOpen } from '../../hooks/designModeState';
-import { useStore } from '../../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { useSessionLive } from '../../hooks/useSessionLive';
 import {
   addDesignReference,
@@ -47,9 +47,26 @@ export default function BrowserWorkspace({
   externalObscured?: boolean;
   onToggleExpanded?: () => void;
 }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const state = useStoreSelector(
+    (current) => ({
+      activeAppSessionId: current.activeAppSessionId,
+      activeSession: current.activeAppSessionId
+        ? current.sessions[current.activeAppSessionId]
+        : undefined,
+      browserErrors: current.browserErrors,
+      browserGlobalError: current.browserGlobalError,
+      browsers: current.browsers,
+      commandPaletteOpen: current.commandPaletteOpen,
+      designModes: current.designModes,
+      hasPendingQuestion: Boolean(current.pendingQuestion),
+      hasSpecPermission: current.pendingPermission?.kind === 'spec',
+      settingsOpen: current.settingsOpen,
+    }),
+    shallowEqual,
+  );
   const requestedChatId = state.activeAppSessionId ?? undefined;
-  const activeSession = requestedChatId ? state.sessions[requestedChatId] : undefined;
+  const activeSession = state.activeSession;
   const browserKey = browserKeyForSession(activeSession);
   const browser = browserKey ? state.browsers[browserKey] : undefined;
   const browserError = browserKey ? state.browserErrors[browserKey] : state.browserGlobalError;
@@ -63,8 +80,8 @@ export default function BrowserWorkspace({
     externalObscured ||
     state.settingsOpen ||
     state.commandPaletteOpen ||
-    !!state.pendingQuestion ||
-    state.pendingPermission?.kind === 'spec';
+    state.hasPendingQuestion ||
+    state.hasSpecPermission;
   const frameRef = useRef<HTMLDivElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const appOrigin = typeof window === 'undefined' ? undefined : window.location.origin;
@@ -121,7 +138,10 @@ export default function BrowserWorkspace({
   // reload that was already scheduled.
   const lastEditTsRef = useRef(0);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const transcripts = requestedChatId ? state.transcripts[requestedChatId] : undefined;
+  const lastTranscriptEvent = useStoreSelector((current) => {
+    const transcript = requestedChatId ? current.transcripts[requestedChatId] : undefined;
+    return transcript?.[transcript.length - 1];
+  });
   useEffect(() => {
     if (!browserKey) return;
     // Eligibility is checked first so navigating away from a local dev server
@@ -134,9 +154,8 @@ export default function BrowserWorkspace({
       }
       return;
     }
-    if (!transcripts) return;
-    const last = transcripts[transcripts.length - 1];
-    if (!last || last.kind !== 'tool_result') return;
+    const last = lastTranscriptEvent;
+    if (last?.kind !== 'tool_result') return;
     if (!isEditTool(last.toolName) || last.isError) return;
     if (last.ts <= lastEditTsRef.current) return;
     lastEditTsRef.current = last.ts;
@@ -145,7 +164,7 @@ export default function BrowserWorkspace({
       reloadTimerRef.current = null;
       reloadBrowser(browserKey);
     }, 600);
-  }, [activeUrl, browserKey, transcripts]);
+  }, [activeUrl, browserKey, lastTranscriptEvent]);
 
   // Cancel any pending auto-reload when the browser session switches or the
   // component unmounts, so a stale timer doesn't reload the wrong session.
@@ -251,7 +270,9 @@ export default function BrowserWorkspace({
         viewportMode,
       });
     }, 120);
-    return () => window.clearTimeout(id);
+    return () => {
+      window.clearTimeout(id);
+    };
   }, [
     browser?.viewport.deviceScaleFactor,
     browser?.viewport.height,
@@ -388,7 +409,9 @@ export default function BrowserWorkspace({
       if (sessionLive) {
         queueDesignPrompt(text, [reference], [referenceId]);
       } else {
-        window.setTimeout(() => sendDesignPrompt(browserKey, text, [referenceId]), 0);
+        window.setTimeout(() => {
+          sendDesignPrompt(browserKey, text, [referenceId]);
+        }, 0);
         emitDesignTranscript(text, [reference]);
       }
       setReferences([]);
@@ -421,7 +444,9 @@ export default function BrowserWorkspace({
         onToggleDesignMode={() => {
           if (browserKey) dispatch({ type: 'TOGGLE_DESIGN_MODE', appSessionId: browserKey });
         }}
-        onTogglePencilMode={() => setPencilMode((value) => !value)}
+        onTogglePencilMode={() => {
+          setPencilMode((value) => !value);
+        }}
         onToggleExpanded={onToggleExpanded}
       />
 
@@ -452,7 +477,9 @@ export default function BrowserWorkspace({
           <button
             type="button"
             className="shrink-0 rounded px-1 text-[11px] text-droid-text-muted hover:text-droid-text"
-            onClick={() => setLoadFailure(null)}
+            onClick={() => {
+              setLoadFailure(null);
+            }}
             aria-label="Dismiss"
           >
             x
@@ -509,7 +536,7 @@ export default function BrowserWorkspace({
 
         {browserKey && !browser && frameReady && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#070707] px-6 text-sm text-droid-text-muted">
-            Open a URL to start this chat's browser.
+            Open a URL to start this chat&apos;s browser.
           </div>
         )}
 
@@ -521,9 +548,9 @@ export default function BrowserWorkspace({
             disabledReason={disabledReason}
             style={composerStyle}
             onInstructionChange={setInstruction}
-            onRemoveReference={(id) =>
-              setReferences((prev) => prev.filter((item) => item.id !== id))
-            }
+            onRemoveReference={(id) => {
+              setReferences((prev) => prev.filter((item) => item.id !== id));
+            }}
             onSend={sendPrompt}
           />
         )}

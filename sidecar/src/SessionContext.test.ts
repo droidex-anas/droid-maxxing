@@ -199,6 +199,80 @@ test('plausible exact primary usage wins while child usage changes totals only',
   assert.equal(event?.stats.accuracy, 'exact');
 });
 
+test('repeated identical usage readings publish telemetry once', () => {
+  const h = createHarness();
+  const { live } = registerLive(h, 'app-1');
+  live.summary.maxContextTokens = 1_000;
+  const usage = { tokensIn: 10, tokensOut: 3, contextTokens: 800 };
+
+  h.context.recordUsage('app-1', 'app-1', usage);
+  const publishedCount = h.events.length;
+  h.context.recordUsage('app-1', 'app-1', usage);
+
+  assert.ok(publishedCount > 0);
+  assert.equal(h.events.length, publishedCount);
+
+  h.context.recordUsage('app-1', 'app-1', { ...usage, contextTokens: 820 });
+  assert.ok(h.events.length > publishedCount);
+  assert.equal(live.summary.contextTokens, 820);
+});
+
+test('unchanged in-turn poll readings emit context once until the reading changes', async () => {
+  const h = createHarness();
+  const { live, session } = registerLive(h, 'app-1');
+  session.nextContextStats = {
+    used: 240,
+    remaining: 760,
+    limit: 1_000,
+    accuracy: ContextStatsAccuracy.Estimated,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const target = primaryTarget(h, live);
+
+  await h.context.refresh(target, { persist: false });
+  await h.context.refresh(target, { persist: false });
+  assert.equal(contextEvents(h).length, 1);
+
+  session.nextContextStats = { ...session.nextContextStats, used: 260, remaining: 740 };
+  await h.context.refresh(target, { persist: false });
+  assert.equal(contextEvents(h).length, 2);
+
+  // A settlement refresh must always publish and persist authoritatively,
+  // even when the provider reading has not moved.
+  await h.context.refresh(target);
+  assert.equal(contextEvents(h).length, 3);
+  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 260);
+});
+test('deduplicated in-turn polls still synchronize exact context summary fields', async () => {
+  const h = createHarness();
+  const { live, session } = registerLive(h, 'app-1');
+  live.summary.maxContextTokens = 1_000;
+  session.nextContextStats = {
+    used: 100,
+    remaining: 900,
+    limit: 1_000,
+    accuracy: ContextStatsAccuracy.Estimated,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const target = primaryTarget(h, live);
+
+  await h.context.refresh(target, { persist: false });
+  h.context.recordUsage('app-1', 'app-1', {
+    tokensIn: 10,
+    tokensOut: 3,
+    contextTokens: 800,
+  });
+  const publishedCount = contextEvents(h).length;
+  assert.equal(live.summary.contextTokens, 800);
+  assert.equal(live.summary.contextRemainingTokens, 900);
+
+  await h.context.refresh(target, { persist: false });
+
+  assert.equal(contextEvents(h).length, publishedCount);
+  assert.equal(live.summary.contextRemainingTokens, 200);
+  assert.equal(live.summary.contextAccuracy, 'exact');
+});
+
 test('provider context wins over an impossible persisted exact reading', async () => {
   const h = createHarness();
   const { live, session } = registerLive(h, 'app-1');
@@ -347,21 +421,27 @@ test('usage without current-context telemetry updates totals only', () => {
   assert.equal(live.summary.contextAccuracy, 'estimated');
 });
 
-test('usage persistence failure keeps live telemetry and does not fail the turn', () => {
+test('usage persistence failure keeps live telemetry and retries an identical reading', () => {
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
+  const persistedBefore = h.history.summaryPatchesAndHidden().patches.get('app-1');
   h.history.nextSyncError = new Error('disk unavailable');
+  const usage = {
+    tokensIn: 12,
+    tokensOut: 4,
+    contextTokens: 80,
+  };
 
-  assert.doesNotThrow(() =>
-    h.context.recordUsage('app-1', 'app-1', {
-      tokensIn: 12,
-      tokensOut: 4,
-      contextTokens: 80,
-    }),
-  );
+  assert.doesNotThrow(() => h.context.recordUsage('app-1', 'app-1', usage));
   assert.equal(live.summary.tokensIn, 12);
   assert.equal(live.summary.contextTokens, 80);
   assert.equal(h.events.at(-1)?.type, 'session.updated');
+  assert.deepEqual(h.history.summaryPatchesAndHidden().patches.get('app-1'), persistedBefore);
+
+  h.context.recordUsage('app-1', 'app-1', usage);
+
+  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.tokensIn, 12);
+  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 80);
 });
 
 test('child refresh never inherits the parent exact context reading', async () => {

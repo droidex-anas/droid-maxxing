@@ -14,23 +14,30 @@ import {
   latestAssistantSnippet,
   loadFinishNotificationSettings,
 } from '../lib/finishNotifications';
-import { useStore } from './useStore';
+import { shallowEqual, useStoreApi, useStoreDispatch, useStoreSelector } from './useStore';
 
 // Desktop finish banners: working→idle sessions raise a short OS notification.
 // Clicks open that chat via a main-process pending queue (push + focus pull).
 
 export function useFinishNotifications(enabled: boolean): void {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const store = useStoreApi();
+  const { activeAppSessionId, sessions, settingsOpen } = useStoreSelector(
+    (state) => ({
+      activeAppSessionId: state.activeAppSessionId,
+      sessions: state.sessions,
+      settingsOpen: state.settingsOpen,
+    }),
+    shallowEqual,
+  );
   const previouslyWorking = useRef<Set<string>>(new Set());
   const seeded = useRef(false);
-  const settingsOpenRef = useRef(state.settingsOpen);
-  settingsOpenRef.current = state.settingsOpen;
-  const sessionsRef = useRef(state.sessions);
-  sessionsRef.current = state.sessions;
-  const transcriptsRef = useRef(state.transcripts);
-  transcriptsRef.current = state.transcripts;
-  const activeIdRef = useRef(state.activeAppSessionId);
-  activeIdRef.current = state.activeAppSessionId;
+  const settingsOpenRef = useRef(settingsOpen);
+  settingsOpenRef.current = settingsOpen;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const activeIdRef = useRef(activeAppSessionId);
+  activeIdRef.current = activeAppSessionId;
   const lastOpenedRef = useRef<{ id: string; at: number } | null>(null);
 
   const openSessionFromNotification = useCallback(
@@ -89,7 +96,7 @@ export function useFinishNotifications(enabled: boolean): void {
     if (!enabled || !isDesktop()) return;
 
     const { finished, stillWorking } = collectFinishedSessions({
-      sessions: state.sessions,
+      sessions,
       previouslyWorking: previouslyWorking.current,
     });
 
@@ -116,7 +123,9 @@ export function useFinishNotifications(enabled: boolean): void {
         settings,
         session,
         isActiveSession: isActive,
-        assistantSnippet: latestAssistantSnippet(transcriptsRef.current[session.appSessionId]),
+        assistantSnippet: latestAssistantSnippet(
+          store.getState().transcripts[session.appSessionId],
+        ),
         appInForeground,
       });
       if (decision.kind !== 'notify') continue;
@@ -128,5 +137,5 @@ export function useFinishNotifications(enabled: boolean): void {
         /* permission denied or non-desktop — stay quiet */
       });
     }
-  }, [enabled, state.sessions]);
+  }, [enabled, sessions, store]);
 }

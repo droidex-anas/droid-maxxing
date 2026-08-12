@@ -77,6 +77,30 @@ test('llm_only user messages stay hidden (filtering lives in the parser)', () =>
   assert.deepEqual(hidden, []);
 });
 
+test('child user prompts replay with child ownership', () => {
+  const line = JSON.parse(
+    messageLine({ role: 'user', content: [{ type: 'text', text: 'continue the child task' }] }),
+  );
+
+  const events = parseSessionLineEvents('app', 'child-provider', 'worker', line);
+  assert.deepEqual(
+    events.map((event) => ({
+      sourceSessionId: event.sourceSessionId,
+      role: event.role,
+      author: event.author,
+      text: event.text,
+    })),
+    [
+      {
+        sourceSessionId: 'child-provider',
+        role: 'worker',
+        author: 'user',
+        text: 'continue the child task',
+      },
+    ],
+  );
+});
+
 test('internal skill notifications never replay as user-authored chat', () => {
   const line = JSON.parse(
     messageLine({

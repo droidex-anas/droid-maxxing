@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, ChevronRight } from 'lucide-react';
-import { useStore } from '../hooks/useStore';
+import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondPermission, sendToSession, sendToSessionNow } from '../lib/commands';
 import type { Autonomy, PermissionOutcome } from '../types/bridge';
 
@@ -19,8 +19,8 @@ const AUTONOMY: { value: Autonomy; label: string; outcome: PermissionOutcome }[]
 // itself lives in the inline chat card / wiki reader, this only drives the
 // decision (implement vs keep iterating) plus an optional steered comment.
 export default function PlanApprovalInline() {
-  const { state, dispatch } = useStore();
-  const req = state.pendingPermission;
+  const dispatch = useStoreDispatch();
+  const req = useStoreSelector((state) => state.pendingPermission);
   const [autonomy, setAutonomy] = useState<Autonomy>('high');
   const [comment, setComment] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -35,14 +35,19 @@ export default function PlanApprovalInline() {
   const isSpec = req.kind === 'spec';
   const text = comment.trim();
 
-  const finish = () => dispatch({ type: 'CLEAR_PERMISSION' });
+  const finish = () => {
+    dispatch({ type: 'CLEAR_PERMISSION' });
+  };
 
   // Implement: approve at the chosen autonomy (spec) or proceed once (mission),
   // then steer the comment into the turn the model is about to start.
   const implement = () => {
-    const outcome: PermissionOutcome = isSpec
-      ? AUTONOMY.find((a) => a.value === autonomy)!.outcome
-      : 'proceed_once';
+    const selectedAutonomy = AUTONOMY.find((option) => option.value === autonomy);
+    let outcome: PermissionOutcome = 'proceed_once';
+    if (isSpec) {
+      if (!selectedAutonomy) return;
+      outcome = selectedAutonomy.outcome;
+    }
     respondPermission(req.appSessionId, req.requestId, outcome);
     if (isSpec) {
       dispatch({
@@ -63,7 +68,9 @@ export default function PlanApprovalInline() {
     finish();
   };
 
-  const openWiki = () => dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: req.appSessionId });
+  const openWiki = () => {
+    dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: req.appSessionId });
+  };
 
   return (
     <AnimatePresence>
@@ -94,7 +101,9 @@ export default function PlanApprovalInline() {
           <textarea
             ref={inputRef}
             value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            onChange={(e) => {
+              setComment(e.target.value);
+            }}
             onKeyDown={(e) => {
               // During IME composition Enter confirms the composed text;
               // only trigger implement once composition has ended.
@@ -121,7 +130,9 @@ export default function PlanApprovalInline() {
                 return (
                   <button
                     key={a.value}
-                    onClick={() => setAutonomy(a.value)}
+                    onClick={() => {
+                      setAutonomy(a.value);
+                    }}
                     title={`Implement with ${a.label.toLowerCase()} autonomy`}
                     className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
                       active ? 'text-droid-bg' : 'text-droid-text-secondary hover:text-droid-text'

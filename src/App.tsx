@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useStore } from './hooks/useStore';
+import { shallowEqual, useStoreApi, useStoreDispatch, useStoreSelector } from './hooks/useStore';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PanelLeft, PanelRight } from 'lucide-react';
 import { bridge } from './lib/bridge';
@@ -53,6 +53,7 @@ import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
 import { useWorkspaceScopes } from './hooks/useWorkspaceScopes';
+import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
 
 function ContextListIcon({ className }: { className?: string }) {
   return (
@@ -91,7 +92,32 @@ function childAccessForSelection(
 }
 
 export default function App() {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const store = useStoreApi();
+  const state = useStoreSelector((current) => {
+    const activeSession = current.activeAppSessionId
+      ? current.sessions[current.activeAppSessionId]
+      : null;
+    return {
+      activeSession,
+      childAccess: current.childAccess,
+      commandPaletteOpen: current.commandPaletteOpen,
+      customThemes: current.customThemes,
+      hasPendingQuestion: Boolean(current.pendingQuestion),
+      hasSessionContent: Boolean(
+        activeSession && (current.transcripts[activeSession.appSessionId] ?? []).length > 0,
+      ),
+      historyLoaded: current.historyLoaded,
+      rightPanelOpen: current.rightPanelOpen,
+      selectedChild: current.selectedChild,
+      sessionRestore: current.sessionRestore,
+      settingsOpen: current.settingsOpen,
+      sidebarCollapsed: current.sidebarCollapsed,
+      theme: current.theme,
+      utilityPanels: current.utilityPanels,
+      workspaceCwds: current.workspaceCwds,
+    };
+  }, shallowEqual);
   const embedded = isEmbedded();
   const onboard = useOnboarding();
   useDiagnosticsContext();
@@ -105,7 +131,7 @@ export default function App() {
     !embedded && onboard.ready && (forceWizard || shouldShowOnboarding(onboard.onboarding));
   // Desktop-only: toast when a model turn finishes (snippet + optional sound).
   useFinishNotifications(!embedded && !showWizard);
-  const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
+  const activeSession = state.activeSession;
   const workingDirectory = useSessionWorkingDirectory(activeSession);
   const repoStatus = useRepoStatus(workingDirectory);
   const documentVisible = useDocumentVisible();
@@ -135,9 +161,7 @@ export default function App() {
   const focused = isMissionControlView;
   // A normal/spec session only has something worth showing once a message has
   // been sent (the first transcript is seeded from the opening prompt).
-  const hasSessionContent = Boolean(
-    activeSession && (state.transcripts[activeSession.appSessionId] ?? []).length > 0,
-  );
+  const hasSessionContent = state.hasSessionContent;
   // The context toggle is meaningful in Mission Control (always) and in a normal
   // chat only after it has content; otherwise there is nothing to open.
   const canToggleContext = isMissionControlView || hasSessionContent;
@@ -303,8 +327,9 @@ export default function App() {
     if (embedded) return;
     const unsub = bridge.subscribe((event) => {
       if (event.type !== 'browser.native.request') return;
+      const current = store.getState();
       const activeBrowserKey = browserKeyForSession(
-        state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : undefined,
+        current.activeAppSessionId ? current.sessions[current.activeAppSessionId] : undefined,
       );
       const requestIsForActiveChat = nativeBrowserRequestTargetsActiveSession(
         activeBrowserKey,
@@ -329,20 +354,26 @@ export default function App() {
     return () => {
       unsub();
     };
-  }, [dispatch, embedded, state.activeAppSessionId, state.sessions]);
+  }, [dispatch, embedded, store]);
 
   useEffect(() => {
     if (embedded) return;
     if (!activeSession) return;
-    if (
-      state.historyLoaded[activeSession.appSessionId] ||
-      requestedHistory.current.has(activeSession.appSessionId)
-    )
+    const appSessionId = activeSession.appSessionId;
+    if (state.historyLoaded[appSessionId]) {
+      requestedHistory.current.delete(appSessionId);
       return;
-    requestedHistory.current.add(activeSession.appSessionId);
-    dispatch({ type: 'SESSION_RESTORE_START', appSessionId: activeSession.appSessionId });
-    loadSessionHistory(activeSession.appSessionId);
-  }, [activeSession, embedded, state.historyLoaded, dispatch]);
+    }
+    const restore = state.sessionRestore[appSessionId];
+    if (restore?.status === 'failed') {
+      requestedHistory.current.delete(appSessionId);
+      return;
+    }
+    if (restore?.status === 'loading' || requestedHistory.current.has(appSessionId)) return;
+    requestedHistory.current.add(appSessionId);
+    dispatch({ type: 'SESSION_RESTORE_START', appSessionId });
+    loadSessionHistory(appSessionId, undefined, transcriptRehydrationLimit(restore));
+  }, [activeSession, embedded, state.historyLoaded, state.sessionRestore, dispatch]);
 
   useEffect(() => {
     if (embedded || !activeSession) return;
@@ -469,7 +500,7 @@ export default function App() {
                 </motion.div>
               ) : (
                 <>
-                  <ChatView rightInset={rightPanelVisible} />
+                  <ChatView rightInset={rightPanelVisible} isObscured={browserExpanded} />
                   <PromptInput rightInset={rightPanelVisible} />
                 </>
               )}
@@ -590,7 +621,7 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
-            {state.pendingQuestion && <AskUserModal />}
+            {state.hasPendingQuestion && <AskUserModal />}
           </div>
         </main>
 

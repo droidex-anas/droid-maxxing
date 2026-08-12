@@ -619,6 +619,10 @@ function loadIframe(iframe: HTMLIFrameElement, url: string): Promise<void> {
     const startedAt = Date.now();
     iframe.src = url;
     const poll = () => {
+      if (!iframe.isConnected) {
+        resolve();
+        return;
+      }
       const currentUrl = readIframeUrl(iframe);
       if (currentUrl && currentUrl === targetUrl) {
         resolve();

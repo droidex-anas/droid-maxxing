@@ -1,7 +1,11 @@
-import { useState, useRef, useEffect, useMemo, type SetStateAction } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, type SetStateAction } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useStore } from '../hooks/useStore';
-import type { QueuedPrompt } from '../hooks/useStore';
+import {
+  shallowEqual,
+  useStoreDispatch,
+  useStoreSelector,
+  type QueuedPrompt,
+} from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
 import {
   sendToSession,
@@ -51,7 +55,16 @@ import {
   visibleSessionTarget,
   type VisibleSessionTarget,
 } from '../lib/childSessions';
-import { ArrowUp, ChevronDown, Plus, SlidersHorizontal, Square, FileText, X } from 'lucide-react';
+import {
+  ArrowUp,
+  ChevronDown,
+  FileText,
+  LoaderCircle,
+  Plus,
+  SlidersHorizontal,
+  Square,
+  X,
+} from 'lucide-react';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
 import ModelSelectorPopover from './ModelSelectorPopover';
 import AutonomySelector from './AutonomySelector';
@@ -74,6 +87,44 @@ const accentMix = (pct: number) =>
   `color-mix(in srgb, var(--droid-accent) ${String(pct)}%, transparent)`;
 type SubmitMode = 'queue' | 'now';
 const oppositeSubmitMode = (mode: SubmitMode): SubmitMode => (mode === 'queue' ? 'now' : 'queue');
+
+export function shouldShowTurnStarting(isLive: boolean): boolean {
+  return !isLive;
+}
+
+export function shouldStopTurnStarting({
+  isLive,
+  startingTargetKey,
+  visibleTargetKey,
+  pendingClientRef,
+  pendingWasRegistered,
+  pendingCompose,
+  lastCreatedSessionRequest,
+}: {
+  isLive: boolean;
+  startingTargetKey: string | null;
+  visibleTargetKey: string;
+  pendingClientRef: string | null;
+  pendingWasRegistered: boolean;
+  pendingCompose: Partial<Record<string, unknown>>;
+  lastCreatedSessionRequest: { clientRef: string; appSessionId: string } | null;
+}): boolean {
+  const pendingSettled =
+    pendingClientRef !== null &&
+    pendingWasRegistered &&
+    pendingCompose[pendingClientRef] === undefined;
+  const createdSessionActivated =
+    pendingSettled &&
+    lastCreatedSessionRequest?.clientRef === pendingClientRef &&
+    visibleTargetKey === `primary:${lastCreatedSessionRequest.appSessionId}`;
+  return (
+    isLive ||
+    (startingTargetKey !== null &&
+      startingTargetKey !== visibleTargetKey &&
+      !createdSessionActivated) ||
+    (pendingSettled && !createdSessionActivated)
+  );
+}
 
 interface Trigger {
   kind: 'slash' | 'file';
@@ -103,6 +154,10 @@ function basename(p: string): string {
 
 const COMPACT_COMMANDS = new Set(['/compact', '/compaction', '/compression']);
 
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export default function PromptInput({
   rightInset = false,
   compact = false,
@@ -112,7 +167,38 @@ export default function PromptInput({
   compact?: boolean;
   onOverlayChange?: (open: boolean) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const state = useStoreSelector(
+    (current) => ({
+      activeAppSessionId: current.activeAppSessionId,
+      activeSession: current.activeAppSessionId
+        ? current.sessions[current.activeAppSessionId]
+        : null,
+      agentConfig: current.agentConfig,
+      childAccess: current.childAccess,
+      childSessions: current.childSessions,
+      compactionModel: current.compactionModel,
+      compactionTokenLimit: current.compactionTokenLimit,
+      compactionTokenLimitPerModel: current.compactionTokenLimitPerModel,
+      composerSeed: current.composerSeed,
+      defaultAutonomy: current.defaultAutonomy,
+      draftAutonomy: current.draftAutonomy,
+      draftChat: current.draftChat,
+      imagePasteQuality: current.imagePasteQuality,
+      lastCreatedSessionRequest: current.lastCreatedSessionRequest,
+      liveEnterBehavior: current.liveEnterBehavior,
+      missionControlMode: current.missionControlMode,
+      models: current.models,
+      pendingAutonomy: current.pendingAutonomy,
+      pendingCompose: current.pendingCompose,
+      promptQueue: current.promptQueue,
+      selectedChild: current.selectedChild,
+      skills: current.skills,
+      skillsProviderSessionId: current.skillsProviderSessionId,
+      specMode: current.specMode,
+    }),
+    shallowEqual,
+  );
   const composerRevisionRef = useRef(0);
   const [input, setInputState] = useState('');
   const setInput = (value: SetStateAction<string>) => {
@@ -143,21 +229,26 @@ export default function PromptInput({
     setActiveSkillsState(value);
   };
   const [sendHover, setSendHover] = useState(false);
+  const [turnStarting, setTurnStarting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
+  const turnStartingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const turnStartingTargetKeyRef = useRef<string | null>(null);
+  const turnStartingClientRef = useRef<string | null>(null);
+  const turnStartingPendingRegisteredRef = useRef(false);
   const pendingCaret = useRef<number | null>(null);
   const prevLive = useRef<{ appSessionId: string | null; live: boolean }>({
     appSessionId: null,
     live: false,
   });
 
-  const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
+  const activeSession = state.activeSession;
   const primaryIsLive = useSessionLive(state.activeAppSessionId);
 
   // The user's own prompts in this conversation, oldest to newest, for ArrowUp
   // recall (reuse a previous prompt). Consecutive duplicates are collapsed.
-  const promptHistory = useMemo(() => {
-    const events = activeSession ? (state.transcripts[activeSession.appSessionId] ?? []) : [];
+  const promptHistory = useStoreSelector((current) => {
+    const events = activeSession ? (current.transcripts[activeSession.appSessionId] ?? []) : [];
     const out: string[] = [];
     for (const ev of events) {
       if (ev.author !== 'user' || ev.kind !== 'text') continue;
@@ -166,7 +257,7 @@ export default function PromptInput({
       if (out[out.length - 1] !== text) out.push(text);
     }
     return out;
-  }, [activeSession?.appSessionId, state.transcripts]);
+  }, sameStrings);
   // For an existing chat session the mode is whatever the session actually is
   // (so a chat reopened in spec mode shows Spec); only fall back to the global
   // compose flag while drafting a brand-new chat.
@@ -203,7 +294,56 @@ export default function PromptInput({
   );
   const childActionsEnabled = visibleTarget.kind !== 'child' || visibleTarget.canSend;
   const primaryActionsEnabled = visibleSessionCanCompact(visibleTarget);
+  const compactionSettingsInput = {
+    compactionTokenLimitPerModel: state.compactionTokenLimitPerModel,
+    ...(state.compactionTokenLimit === undefined
+      ? {}
+      : { compactionTokenLimit: state.compactionTokenLimit }),
+  };
   const isLive = visibleTarget.kind === 'child' ? visibleTarget.canInterrupt : primaryIsLive;
+  const visibleTargetKey =
+    visibleTarget.kind === 'child'
+      ? `child:${visibleTarget.parentAppSessionId}:${visibleTarget.childSessionId}`
+      : activeSession
+        ? `primary:${activeSession.appSessionId}`
+        : state.missionControlMode
+          ? 'mission-draft'
+          : 'chat-draft';
+  const stopTurnStarting = useCallback(() => {
+    if (turnStartingTimerRef.current) {
+      clearTimeout(turnStartingTimerRef.current);
+      turnStartingTimerRef.current = null;
+    }
+    turnStartingTargetKeyRef.current = null;
+    turnStartingClientRef.current = null;
+    turnStartingPendingRegisteredRef.current = false;
+    setTurnStarting(false);
+  }, []);
+  const startTurnStarting = useCallback(
+    (clientRef?: string) => {
+      if (turnStartingTimerRef.current) clearTimeout(turnStartingTimerRef.current);
+      turnStartingTimerRef.current = null;
+      turnStartingTargetKeyRef.current = visibleTargetKey;
+      turnStartingClientRef.current = clientRef ?? null;
+      turnStartingPendingRegisteredRef.current = false;
+      setTurnStarting(true);
+    },
+    [visibleTargetKey],
+  );
+  const armTurnStartingTimeout = useCallback(() => {
+    if (turnStartingTargetKeyRef.current === null) return;
+    if (turnStartingTimerRef.current) clearTimeout(turnStartingTimerRef.current);
+    // This is only a final fallback for a command that never produces a live
+    // or explicit failure event. Baseline preparation is intentionally outside
+    // this window because large repositories can take longer than a minute.
+    turnStartingTimerRef.current = setTimeout(() => {
+      turnStartingTimerRef.current = null;
+      turnStartingTargetKeyRef.current = null;
+      turnStartingClientRef.current = null;
+      turnStartingPendingRegisteredRef.current = false;
+      setTurnStarting(false);
+    }, 60_000);
+  }, []);
 
   const cwd = activeSession?.cwd ?? state.draftChat?.cwd ?? null;
   const skillsProviderSessionId = activeSession?.providerSessionId ?? null;
@@ -306,6 +446,37 @@ export default function PromptInput({
   useEffect(() => {
     if (!isLive) setSendHover(false);
   }, [isLive]);
+
+  useEffect(() => {
+    if (
+      turnStarting &&
+      shouldStopTurnStarting({
+        isLive,
+        startingTargetKey: turnStartingTargetKeyRef.current,
+        visibleTargetKey,
+        pendingClientRef: turnStartingClientRef.current,
+        pendingWasRegistered: turnStartingPendingRegisteredRef.current,
+        pendingCompose: state.pendingCompose,
+        lastCreatedSessionRequest: state.lastCreatedSessionRequest,
+      })
+    ) {
+      stopTurnStarting();
+    }
+  }, [
+    isLive,
+    state.lastCreatedSessionRequest,
+    state.pendingCompose,
+    stopTurnStarting,
+    turnStarting,
+    visibleTargetKey,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (turnStartingTimerRef.current) clearTimeout(turnStartingTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     onOverlayChange?.(overlayOpen);
@@ -621,6 +792,9 @@ export default function PromptInput({
       : activeSkills.map((skill) => skill.name);
     const composed = composeFrom(displayText, skillNames, allFiles);
     const registerPending = (ref: string) => {
+      if (turnStartingClientRef.current === ref) {
+        turnStartingPendingRegisteredRef.current = true;
+      }
       dispatch({
         type: 'SET_PENDING_COMPOSE',
         clientRef: ref,
@@ -644,8 +818,12 @@ export default function PromptInput({
       const { primary, worker, validator } = state.agentConfig;
       const clientRef = newClientRef();
       const title = (displayText || skillNames[0] || 'Mission').slice(0, 48);
+      startTurnStarting(clientRef);
       const preparation = await prepareDraftCwd(selectedDir, clientRef, title);
-      if (!preparation.ok) return;
+      if (!preparation.ok) {
+        stopTurnStarting();
+        return;
+      }
       const dir = preparation.path;
       registerPending(clientRef);
       // Clear the composer before the git-baseline await below so a prompt the
@@ -654,25 +832,31 @@ export default function PromptInput({
       // Snapshot the tree before the agent's first turn so the Review "Last
       // turn" scope only attributes changes this session actually makes.
       await markGitTurnStart(dir, clientRef);
-      createSession({
-        clientRef,
-        cwd: dir,
-        title,
-        goal: composed,
-        sessionPurpose: 'mission-control',
-        interactionMode: 'agi',
-        autonomy,
-        modelId: primary.modelId,
-        reasoningEffort: primary.reasoning,
-        compactionModel:
-          state.compactionModel === 'current-model' ? undefined : state.compactionModel,
-        // Only user-configured limits may override the daemon's model default.
-        ...compactionSettingsSnapshot(state),
-        workerModel: worker.modelId,
-        workerReasoning: worker.reasoning,
-        validatorModel: validator.modelId,
-        validatorReasoning: validator.reasoning,
-      });
+      try {
+        createSession({
+          clientRef,
+          cwd: dir,
+          title,
+          goal: composed,
+          sessionPurpose: 'mission-control',
+          interactionMode: 'agi',
+          autonomy,
+          modelId: primary.modelId,
+          reasoningEffort: primary.reasoning,
+          compactionModel:
+            state.compactionModel === 'current-model' ? undefined : state.compactionModel,
+          // Only user-configured limits may override the daemon's model default.
+          ...compactionSettingsSnapshot(compactionSettingsInput),
+          workerModel: worker.modelId,
+          workerReasoning: worker.reasoning,
+          validatorModel: validator.modelId,
+          validatorReasoning: validator.reasoning,
+        });
+        armTurnStartingTimeout();
+      } catch (error) {
+        stopTurnStarting();
+        console.error('[PromptInput] createSession failed:', error);
+      }
       return;
     }
 
@@ -682,27 +866,37 @@ export default function PromptInput({
       const { primary } = state.agentConfig;
       const clientRef = newClientRef();
       const title = (displayText || skillNames[0] || 'Chat').slice(0, 48);
+      startTurnStarting(clientRef);
       const preparation = await prepareDraftCwd(selectedDir, clientRef, title);
-      if (!preparation.ok) return;
+      if (!preparation.ok) {
+        stopTurnStarting();
+        return;
+      }
       const dir = preparation.path;
       registerPending(clientRef);
       // Clear before the baseline await (see above) so fast typing isn't lost.
       clearAfterSubmit();
       if (dir) await markGitTurnStart(dir, clientRef);
-      createSession({
-        clientRef,
-        cwd: dir,
-        title,
-        goal: composed,
-        sessionPurpose: 'chat',
-        interactionMode: isSpecMode ? 'spec' : 'auto',
-        autonomy: draftAutonomy,
-        modelId: primary.modelId,
-        reasoningEffort: primary.reasoning,
-        compactionModel:
-          state.compactionModel === 'current-model' ? undefined : state.compactionModel,
-        ...compactionSettingsSnapshot(state),
-      });
+      try {
+        createSession({
+          clientRef,
+          cwd: dir,
+          title,
+          goal: composed,
+          sessionPurpose: 'chat',
+          interactionMode: isSpecMode ? 'spec' : 'auto',
+          autonomy: draftAutonomy,
+          modelId: primary.modelId,
+          reasoningEffort: primary.reasoning,
+          compactionModel:
+            state.compactionModel === 'current-model' ? undefined : state.compactionModel,
+          ...compactionSettingsSnapshot(compactionSettingsInput),
+        });
+        armTurnStartingTimeout();
+      } catch (error) {
+        stopTurnStarting();
+        console.error('[PromptInput] createSession failed:', error);
+      }
       return;
     }
 
@@ -744,14 +938,18 @@ export default function PromptInput({
           else sendToChild(activeSession.appSessionId, targetChildSessionId, composed);
         } else if (mode === 'now') sendToSessionNow(activeSession.appSessionId, composed);
         else sendToSession(activeSession.appSessionId, composed);
+        armTurnStartingTimeout();
       } catch (err) {
+        stopTurnStarting();
         console.error('[PromptInput] sendToSession failed:', err);
       }
     };
 
     const childRuntimeTarget = childRuntimeSubmitTarget(visibleTarget);
     if (childRuntimeTarget && workingDirectory) {
-      await commitChildPromptAfterBaseline({
+      const showTurnStarting = shouldShowTurnStarting(isLive);
+      if (showTurnStarting) startTurnStarting();
+      const committed = await commitChildPromptAfterBaseline({
         capturedTarget: childRuntimeTarget,
         capturedComposerRevision: composerRevisionRef.current,
         waitForBaseline: () => markGitTurnStart(workingDirectory, activeSession.appSessionId),
@@ -761,9 +959,11 @@ export default function PromptInput({
         resetComposer: clearAfterSubmit,
         sendCommand,
       });
+      if (!committed && showTurnStarting) stopTurnStarting();
       return;
     }
 
+    if (shouldShowTurnStarting(isLive)) startTurnStarting();
     appendTranscript();
     clearAfterSubmit();
 
@@ -1322,7 +1522,17 @@ export default function PromptInput({
               />
             )}
 
-            {isLive && !hasContent ? (
+            {turnStarting ? (
+              <button
+                type="button"
+                disabled
+                title="Starting turn"
+                className="p-2 rounded-full text-droid-bg shrink-0 opacity-90"
+                style={{ background: ACCENT }}
+              >
+                <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+              </button>
+            ) : isLive && !hasContent ? (
               <button
                 onClick={() => {
                   if (activeSession)

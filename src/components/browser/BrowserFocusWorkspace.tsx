@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useStore } from '../../hooks/useStore';
+import { useStoreSelector } from '../../hooks/useStore';
 import { useSessionLive } from '../../hooks/useSessionLive';
 import type { TranscriptEvent } from '../../types/bridge';
 import PromptInput from '../PromptInput';
 import BrowserWorkspace from './BrowserWorkspace';
 
 const RECENT_ACTIVITY_LIMIT = 3;
+
+function sameEvents(left: readonly TranscriptEvent[], right: readonly TranscriptEvent[]): boolean {
+  return left.length === right.length && left.every((event, index) => event === right[index]);
+}
 
 export function BrowserFocusWorkspace({
   expanded,
@@ -18,12 +22,13 @@ export function BrowserFocusWorkspace({
   externalObscured?: boolean;
   onToggleExpanded: () => void;
 }) {
-  const { state } = useStore();
   const [activityOpen, setActivityOpen] = useState(false);
   const [promptOverlayOpen, setPromptOverlayOpen] = useState(false);
-  const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
+  const activeSession = useStoreSelector((state) =>
+    state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null,
+  );
   const live = useSessionLive(activeSession?.appSessionId ?? null);
-  const recent = useMemo(() => {
+  const recent = useStoreSelector((state) => {
     if (!activeSession) return [];
     const transcript = state.transcripts[activeSession.appSessionId] ?? [];
     return transcript
@@ -32,7 +37,7 @@ export function BrowserFocusWorkspace({
           event.role === 'primary' || (event.author === 'user' && event.sourceSessionId === 'user'),
       )
       .slice(-RECENT_ACTIVITY_LIMIT);
-  }, [activeSession, state.transcripts]);
+  }, sameEvents);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-droid-bg">
@@ -68,7 +73,7 @@ export function BrowserFocusWorkspace({
                   />
                   <span className="flex-1 text-left">Recent activity</span>
                   <span className="text-[10px] font-normal tabular-nums text-droid-text-muted/60">
-                    {live ? 'Working' : `${recent.length} recent`}
+                    {live ? 'Working' : `${String(recent.length)} recent`}
                   </span>
                   {activityOpen ? (
                     <ChevronDown className="h-3.5 w-3.5" />

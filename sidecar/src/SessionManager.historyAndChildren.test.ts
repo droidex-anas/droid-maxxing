@@ -232,6 +232,202 @@ test('[H2] Paging, empty history, and retry', { concurrency: false }, async () =
   }
 });
 
+test(
+  'child.loadHistory emits initial replace and older prepend pages through logical identity',
+  {
+    concurrency: false,
+  },
+  async () => {
+    const h = createSessionManagerTestContext();
+    try {
+      writeHistorySession(h.home, 'provider-child-history', [
+        assistantMessage('oldest', 'oldest', 1),
+        assistantMessage('middle', 'middle', 2),
+        assistantMessage('newest', 'newest', 3),
+      ]);
+      h.history.seedChildSessions([
+        {
+          parentAppSessionId: 'parent-child-history',
+          childSessionId: 'logical-child-history',
+          providerSessionId: 'provider-child-history',
+          role: 'worker',
+          status: 'completed',
+          modelId: 'model-default',
+          transcriptAvailable: true,
+          updatedAt: 1,
+        },
+      ]);
+
+      await h.handle({
+        type: 'child.loadHistory',
+        parentAppSessionId: 'parent-child-history',
+        childSessionId: 'logical-child-history',
+        limit: 2,
+      });
+
+      const initial = h.events.filter(isSessionHistory).at(-1);
+      assert.ok(initial);
+      assert.equal(initial.appSessionId, 'parent-child-history');
+      assert.equal(initial.childSessionId, 'logical-child-history');
+      assert.equal(initial.mode, 'replace');
+      assert.equal(initial.loadedCount, 2);
+      assert.equal(initial.hasMore, true);
+      assert.deepEqual(
+        initial.transcripts.map((event) => [event.text, event.appSessionId, event.sourceSessionId]),
+        [
+          ['middle', 'parent-child-history', 'logical-child-history'],
+          ['newest', 'parent-child-history', 'logical-child-history'],
+        ],
+      );
+      assert.equal(
+        h.calls.some((call) => call.target === 'history' && call.method === 'recordEvent'),
+        false,
+      );
+
+      await h.handle({
+        type: 'child.loadHistory',
+        parentAppSessionId: 'parent-child-history',
+        childSessionId: 'logical-child-history',
+        cursor: initial.olderCursor,
+        limit: 2,
+      });
+
+      const older = h.events.filter(isSessionHistory).at(-1);
+      assert.ok(older);
+      assert.equal(older.mode, 'prepend');
+      assert.equal(older.childSessionId, 'logical-child-history');
+      assert.equal(older.loadedCount, 1);
+      assert.equal(older.hasMore, false);
+      assert.deepEqual(
+        older.transcripts.map((event) => [event.text, event.appSessionId, event.sourceSessionId]),
+        [['oldest', 'parent-child-history', 'logical-child-history']],
+      );
+    } finally {
+      await h.dispose();
+    }
+  },
+);
+
+test(
+  'child.loadHistory isolates siblings and returns empty replace for unavailable live history',
+  {
+    concurrency: false,
+  },
+  async () => {
+    const h = createSessionManagerTestContext();
+    try {
+      writeHistorySession(h.home, 'provider-child-a', [assistantMessage('a', 'child a', 1)]);
+      writeHistorySession(h.home, 'provider-child-b', [assistantMessage('b', 'child b', 1)]);
+      h.history.seedChildSessions([
+        {
+          parentAppSessionId: 'parent-isolation',
+          childSessionId: 'logical-a',
+          providerSessionId: 'provider-child-a',
+          role: 'worker',
+          status: 'completed',
+          modelId: 'model-default',
+          transcriptAvailable: true,
+          updatedAt: 1,
+        },
+        {
+          parentAppSessionId: 'parent-isolation',
+          childSessionId: 'logical-b',
+          providerSessionId: 'provider-child-b',
+          role: 'validator',
+          status: 'completed',
+          modelId: 'model-default',
+          transcriptAvailable: true,
+          updatedAt: 2,
+        },
+        {
+          parentAppSessionId: 'parent-isolation',
+          childSessionId: 'logical-empty',
+          providerSessionId: 'provider-child-empty',
+          role: 'worker',
+          status: 'running',
+          modelId: 'model-default',
+          transcriptAvailable: true,
+          updatedAt: 3,
+        },
+      ]);
+
+      await h.handle({
+        type: 'child.loadHistory',
+        parentAppSessionId: 'parent-isolation',
+        childSessionId: 'logical-b',
+      });
+      const childB = h.events.filter(isSessionHistory).at(-1);
+      assert.ok(childB);
+      assert.equal(childB.childSessionId, 'logical-b');
+      assert.deepEqual(
+        childB.transcripts.map((event) => [event.text, event.role]),
+        [['child b', 'validator']],
+      );
+
+      await h.handle({
+        type: 'child.loadHistory',
+        parentAppSessionId: 'parent-isolation',
+        childSessionId: 'logical-empty',
+      });
+      const empty = h.events.filter(isSessionHistory).at(-1);
+      assert.ok(empty);
+      assert.equal(empty.childSessionId, 'logical-empty');
+      assert.equal(empty.mode, 'replace');
+      assert.equal(empty.loadedCount, 0);
+      assert.equal(empty.hasMore, false);
+      assert.deepEqual(empty.progress, []);
+      assert.deepEqual(empty.transcripts, []);
+    } finally {
+      await h.dispose();
+    }
+  },
+);
+
+test(
+  'child.loadHistory rejects missing child without leaking another child transcript',
+  {
+    concurrency: false,
+  },
+  async () => {
+    const h = createSessionManagerTestContext();
+    try {
+      writeHistorySession(h.home, 'provider-known-child', [assistantMessage('known', 'known', 1)]);
+      h.history.seedChildSessions([
+        {
+          parentAppSessionId: 'parent-known',
+          childSessionId: 'known-child',
+          providerSessionId: 'provider-known-child',
+          role: 'worker',
+          status: 'completed',
+          modelId: 'model-default',
+          transcriptAvailable: true,
+          updatedAt: 1,
+        },
+      ]);
+
+      await h.handle({
+        type: 'child.loadHistory',
+        parentAppSessionId: 'parent-known',
+        childSessionId: 'missing-child',
+      });
+
+      assert.equal(
+        h.events.some(
+          (event) =>
+            event.type === 'child.error' &&
+            event.code === 'child.not_in_session' &&
+            event.parentAppSessionId === 'parent-known' &&
+            event.childSessionId === 'missing-child',
+        ),
+        true,
+      );
+      assert.equal(h.events.some(isSessionHistory), false);
+    } finally {
+      await h.dispose();
+    }
+  },
+);
+
 test('[A1] Child-session link persistence', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
 
@@ -577,9 +773,12 @@ test('[A2] Open and replay a linked child session', { concurrency: false }, asyn
     assert.equal(
       h.events.some(
         (event) =>
-          event.type === 'event.appended' &&
-          event.event.sourceSessionId === 'worker-a2' &&
-          event.event.text === 'child replay',
+          event.type === 'session.history' &&
+          event.childSessionId === 'worker-a2' &&
+          event.transcripts.some(
+            (transcript) =>
+              transcript.sourceSessionId === 'worker-a2' && transcript.text === 'child replay',
+          ),
       ),
       true,
     );

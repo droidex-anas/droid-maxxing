@@ -601,7 +601,7 @@ export type ClientCommand =
       includePlainChats?: boolean;
       limitPerWorkspace?: number;
     }
-  | { type: 'session.loadHistory'; appSessionId: string; cursor?: string }
+  | { type: 'session.loadHistory'; appSessionId: string; cursor?: string; limit?: number }
   | { type: 'sessions.search'; requestId: string; query: string }
   | {
       type: 'child.open';
@@ -622,6 +622,13 @@ export type ClientCommand =
       text: string;
     }
   | { type: 'child.interrupt'; parentAppSessionId: string; childSessionId: string }
+  | {
+      type: 'child.loadHistory';
+      parentAppSessionId: string;
+      childSessionId: string;
+      cursor?: string;
+      limit?: number;
+    }
   | {
       type: 'child.updateSettings';
       parentAppSessionId: string;
@@ -738,7 +745,7 @@ export interface ChildErrorEvent {
   type: 'child.error';
   parentAppSessionId: string;
   childSessionId: string;
-  operation: 'open' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+  operation: 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
   requestId: string | null;
   code: string;
   message: string;
@@ -830,6 +837,7 @@ export type ServerEvent =
   | {
       type: 'session.history';
       appSessionId: string;
+      childSessionId?: string;
       progress: ProgressEntry[];
       transcripts: TranscriptEvent[];
       childSessions?: ChildSessionSummary[];
@@ -841,7 +849,12 @@ export type ServerEvent =
       loadedCount?: number;
       hasMore?: boolean;
     }
-  | { type: 'session.history.error'; appSessionId: string; message: string }
+  | {
+      type: 'session.history.error';
+      appSessionId: string;
+      childSessionId?: string;
+      message: string;
+    }
   | {
       type: 'sessions.searchResults';
       requestId: string;

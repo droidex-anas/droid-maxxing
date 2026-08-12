@@ -1,0 +1,160 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  rowIntersectsViewport,
+  scrollTopForPreservedAnchor,
+  shouldCancelViewportRestore,
+  shouldCaptureViewportAnchorAfterScroll,
+  updateViewportAnchorGeometry,
+} from './conversationViewportAnchor';
+import {
+  didCommitRequestedHistoryPrepend,
+  shouldReleaseConversationTranscript,
+} from './useConversationScrollWindow';
+
+const settledPinned = {
+  isConversationLive: false,
+  isLoadingOlder: false,
+  isAutoPagingOlderHistory: false,
+  isPinned: true,
+};
+
+test('settled transcript release waits for older-history paging to finish', () => {
+  assert.equal(shouldReleaseConversationTranscript(settledPinned), true);
+  assert.equal(
+    shouldReleaseConversationTranscript({
+      ...settledPinned,
+      isAutoPagingOlderHistory: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldReleaseConversationTranscript({
+      ...settledPinned,
+      isLoadingOlder: true,
+    }),
+    false,
+  );
+});
+
+test('settled primary and child conversations can release only while bottom-pinned', () => {
+  assert.equal(
+    shouldReleaseConversationTranscript({
+      ...settledPinned,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldReleaseConversationTranscript({
+      ...settledPinned,
+      isPinned: false,
+    }),
+    false,
+  );
+});
+
+test('live child conversations stay pinned in memory', () => {
+  assert.equal(
+    shouldReleaseConversationTranscript({
+      ...settledPinned,
+      isConversationLive: true,
+    }),
+    false,
+  );
+});
+
+test('user movement selects a fresh prepend anchor while older history is loading', () => {
+  assert.equal(
+    shouldCaptureViewportAnchorAfterScroll({
+      isPinned: false,
+      isLoadingOlder: true,
+      isRestoringViewport: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldCaptureViewportAnchorAfterScroll({
+      isPinned: false,
+      isLoadingOlder: true,
+      isRestoringViewport: true,
+    }),
+    false,
+  );
+});
+
+test('active user movement cancels multi-frame viewport restoration', () => {
+  assert.equal(shouldCancelViewportRestore(1_840, 1_840.4), false);
+  assert.equal(shouldCancelViewportRestore(1_840, 1_920), true);
+  assert.equal(shouldCancelViewportRestore(null, 1_920), false);
+});
+
+test('row anchoring compensates for prepends and later interactive height changes', () => {
+  const captured = { scrollTop: 1_200, rowOffsetTop: -40 };
+
+  // An older page inserts 640 px above the row currently under the viewport.
+  assert.equal(scrollTopForPreservedAnchor(captured, 600), 1_840);
+
+  // A widget above the same row then grows by another 180 px after it mounts.
+  assert.equal(scrollTopForPreservedAnchor({ scrollTop: 1_840, rowOffsetTop: 600 }, 780), 2_020);
+
+  // Height changes below the anchor do not move the reading position.
+  assert.equal(scrollTopForPreservedAnchor({ scrollTop: 2_020, rowOffsetTop: 780 }, 780), 2_020);
+});
+
+test('anchor geometry refresh keeps tracking the originally captured row', () => {
+  const anchor = {
+    rowId: 'message-42',
+    rowOffsetTop: 24,
+    scrollTop: 0,
+    scrollHeight: 20_000,
+  };
+
+  assert.deepEqual(updateViewportAnchorGeometry(anchor, 3_500, 3_476, 23_500), {
+    rowId: 'message-42',
+    rowOffsetTop: 3_500,
+    scrollTop: 3_476,
+    scrollHeight: 23_500,
+  });
+});
+
+test('ordinary live appends do not start prepend restoration', () => {
+  assert.equal(
+    didCommitRequestedHistoryPrepend({
+      requestedCursor: 'cursor-2',
+      currentCursor: 'cursor-2',
+      previousTranscriptLength: 240,
+      transcriptLength: 241,
+    }),
+    false,
+  );
+  assert.equal(
+    didCommitRequestedHistoryPrepend({
+      requestedCursor: 'cursor-2',
+      currentCursor: 'cursor-1',
+      previousTranscriptLength: 240,
+      transcriptLength: 289,
+    }),
+    true,
+  );
+});
+
+test('anchor fallback ignores feed rows entirely below non-feed viewport content', () => {
+  assert.equal(
+    rowIntersectsViewport({
+      viewportTop: 100,
+      viewportBottom: 700,
+      rowTop: 760,
+      rowBottom: 920,
+    }),
+    false,
+  );
+  assert.equal(
+    rowIntersectsViewport({
+      viewportTop: 100,
+      viewportBottom: 700,
+      rowTop: 620,
+      rowBottom: 780,
+    }),
+    true,
+  );
+});

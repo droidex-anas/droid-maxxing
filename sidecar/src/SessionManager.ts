@@ -56,7 +56,7 @@ import { NativeBrowserRuntime } from './browser/NativeBrowserRuntime.js';
 import { SessionRegistry } from './SessionRegistry.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
-import { SessionTimeline } from './SessionTimeline.js';
+import { isReportedStreamingTranscriptError, SessionTimeline } from './SessionTimeline.js';
 import { SessionContext, type LiveOperationTarget } from './SessionContext.js';
 import {
   SessionCompaction,
@@ -136,6 +136,10 @@ export interface SessionManagerDependencies {
   // watching the real sessions directory. Defaults to a no-op when other
   // dependencies are faked.
   startSessionFileWatcher?: (options: SessionFileWatcherOptions) => SessionFileWatcher | null;
+  // Injectable so integration tests can disable (0) the timer-based streaming
+  // delta coalescing and assert appended events synchronously; the merge
+  // behavior itself is covered by SessionTimeline unit tests.
+  streamingCoalesceMs?: number;
 }
 
 export interface SessionManagerOptions {
@@ -306,6 +310,9 @@ export class SessionManager {
         this.emitError(error);
       },
       now: Date.now,
+      ...(options.dependencies?.streamingCoalesceMs !== undefined
+        ? { streamingCoalesceMs: options.dependencies.streamingCoalesceMs }
+        : {}),
     });
     this.interactions = new SessionInteractions({
       getLiveSession: (id) => this.registry.getLive(id),
@@ -347,7 +354,10 @@ export class SessionManager {
     });
     this.eventFlow = new SessionEventFlow({
       appendTranscript: (event) => {
-        this.timeline.append(event);
+        this.timeline.appendStreaming(event);
+      },
+      flushTranscript: (appSessionId, sourceSessionId) => {
+        this.timeline.flushStreamingFor(appSessionId, sourceSessionId);
       },
       applySideEffects: (appSessionId, sideEffects) => {
         this.applyEventSideEffects(appSessionId, sideEffects);
@@ -409,6 +419,9 @@ export class SessionManager {
       },
       forgetMissionControl: (appSessionId) => {
         this.missionControlPolicy.forget(appSessionId);
+      },
+      forgetPendingSettings: (appSessionId) => {
+        this.pendingAgentSettings.delete(appSessionId);
       },
       closeBrowserSession: (appSessionId) => this.browsers.close(appSessionId),
       emit: (event) => {
@@ -525,6 +538,9 @@ export class SessionManager {
       case 'child.interrupt':
         await this.childSessions.interrupt(cmd);
         return;
+      case 'child.loadHistory':
+        await this.childSessions.loadHistory(cmd);
+        return;
       case 'child.updateSettings':
         await this.childSessions.updateSettings(cmd);
         return;
@@ -606,7 +622,7 @@ export class SessionManager {
         this.timeline.loadProviderPage(cmd.providerSessionId, cmd.cursor, cmd.limit);
         return;
       case 'session.loadHistory':
-        this.timeline.load(cmd.appSessionId, cmd.cursor);
+        this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
       case 'sessions.search': {
         // Track the newest query so a superseded scan stops spending its file
@@ -1151,35 +1167,47 @@ export class SessionManager {
     this.eventFlow.beginTurn(appSessionId, appSessionId);
     this.context.beginTurn(appSessionId);
     this.context.startPolling(contextTarget);
+    let turnError: unknown;
     try {
       await this.applyDesignToolPolicy(liveSession, isDesignPrompt(prompt));
-      if (!this.isCurrentPrimarySession(liveSession)) return;
+      if (!this.isCurrentPrimarySession(liveSession)) {
+        this.context.stopPolling(contextTarget);
+        return;
+      }
       const stream = liveSession.session.stream(prompt, { includePartialMessages: true });
       for await (const ev of stream) {
         if (!this.isCurrentPrimarySession(liveSession)) break;
         this.eventFlow.applyStreamEvent(appSessionId, appSessionId, 'primary', ev);
       }
     } catch (err) {
-      if (!this.isCurrentPrimarySession(liveSession)) {
-        return;
-      } else if (liveSession.interruptingForSteer) {
+      turnError = err;
+    }
+    try {
+      // Deliver any buffered streaming tail before the turn reads as settled.
+      this.timeline.settleStreaming(appSessionId, appSessionId);
+    } catch (err) {
+      turnError ??= err;
+    } finally {
+      this.context.stopPolling(contextTarget);
+    }
+    if (!this.isCurrentPrimarySession(liveSession)) return;
+    if (turnError) {
+      if (liveSession.interruptingForSteer) {
         this.timeline.appendStatus(appSessionId, 'Current turn interrupted for steering.');
-      } else if (liveSession.interrupting && isUserCancellation(err)) {
+      } else if (liveSession.interrupting && isUserCancellation(turnError)) {
         // The user pressed Stop; interrupt() already set the paused phase, so
         // settle quietly without surfacing an error.
         this.registry.updateSummary(appSessionId, { phase: 'paused' });
       } else {
-        this.emitError({ appSessionId, message: errMsg(err) });
+        if (!isReportedStreamingTranscriptError(turnError)) {
+          this.emitError({ appSessionId, message: errMsg(turnError) });
+        }
         this.registry.updateSummary(appSessionId, { phase: 'failed' });
       }
-    } finally {
-      this.context.stopPolling(contextTarget);
-      // Keep streaming=true while the context refresh is in flight so concurrent
-      // sends queue instead of racing a second lifecycle turn.
-      if (this.isCurrentPrimarySession(liveSession)) {
-        await this.context.refresh(contextTarget);
-      }
     }
+    // Keep streaming=true while the context refresh is in flight so concurrent
+    // sends queue instead of racing a second lifecycle turn.
+    await this.context.refresh(contextTarget);
   }
 
   private isCurrentPrimarySession(liveSession: LiveSession): boolean {
@@ -1766,6 +1794,9 @@ export class SessionManager {
       this.compaction.clearAll();
     });
     await run(() => this.browsers.closeAll());
+    await run(() => {
+      this.timeline.flushStreaming();
+    });
     await run(() => {
       this.history.close();
     });

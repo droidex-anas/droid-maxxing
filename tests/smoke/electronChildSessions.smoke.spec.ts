@@ -11,6 +11,7 @@ type RecordedCommand = {
   parentAppSessionId?: string;
   childSessionId?: string;
   text?: string;
+  cursor?: string;
   factoryApiKeyConfigured?: boolean;
   droidPathConfigured?: boolean;
 };
@@ -173,9 +174,6 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
 
   const resources: SmokeResources = { smokeHome };
   try {
-    const fixture = await startFixture(commandLog, unauthenticatedEnvironment, {}, (child) => {
-      resources.fixtureProcess = child;
-    });
     const launchEnvironment = {
       ...unauthenticatedEnvironment,
       HOME: smokeHome,
@@ -184,9 +182,11 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
       XDG_DATA_HOME: profile.data,
       APPDATA: profile.roamingAppData,
       LOCALAPPDATA: profile.localAppData,
+      DROIDEX_USER_DATA_DIR: profile.userData,
       ELECTRON_START_URL: bootstrapUrl,
-      SIDECAR_ENTRY: path.resolve('sidecar/test-fixtures/noopSidecar.mjs'),
-      BRIDGE_PORT: String(fixture.port),
+      SIDECAR_ENTRY: path.resolve('sidecar/test-fixtures/childSessionsSidecar.mjs'),
+      BRIDGE_PORT: '0',
+      CHILD_SESSIONS_SMOKE_LOG: commandLog,
       NODE_BIN: process.execPath,
     };
     const app = await electron.launch({
@@ -224,29 +224,62 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
 
     const rightPanel = page.getByTestId('right-context-panel');
     await expect(rightPanel).toBeVisible();
-    await expect(rightPanel.locator('[data-parent-app-session-id="parent-alpha"]')).toHaveCount(3);
+    await expect(rightPanel.locator('[data-child-session-id]')).toHaveCount(3);
     await expect(rightPanel.getByText('Alpha Worker Shared', { exact: true })).toBeVisible();
     await expect(rightPanel.getByText('Alpha Worker Two', { exact: true })).toBeVisible();
     await expect(rightPanel.getByText('Alpha Historical Worker', { exact: true })).toBeVisible();
 
-    const alphaShared = rightPanel.locator(
-      '[data-parent-app-session-id="parent-alpha"][data-child-session-id="shared-child"]',
-    );
-    const alphaSibling = rightPanel.locator(
-      '[data-parent-app-session-id="parent-alpha"][data-child-session-id="alpha-sibling"]',
-    );
+    const alphaShared = rightPanel.locator('[data-child-session-id="shared-child"]');
+    const alphaSibling = rightPanel.locator('[data-child-session-id="alpha-sibling"]');
     await alphaShared.locator('button').first().click();
     await alphaSibling.locator('button').first().click();
-    await expect(chat.getByText('ALPHA CHILD TWO OUTPUT', { exact: true })).toBeVisible();
+    await expect(chat.getByText('ALPHA CHILD TWO OUTPUT', { exact: false })).toBeVisible();
     await expect(chat.getByText('ALPHA PRIMARY OUTPUT', { exact: true })).toHaveCount(0);
-    await expect(chat.getByText('STALE OPEN PROCESSED', { exact: true })).toBeVisible();
     await expect(chat.getByText('Alpha Worker Two', { exact: true })).toBeVisible();
+
+    const conversationScroll = chat.locator('div.overflow-y-auto').first();
+    await conversationScroll.evaluate((element) => {
+      element.scrollTop = 1_200;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    const anchor = await conversationScroll.evaluate((element) => {
+      const root = element.getBoundingClientRect();
+      const row = Array.from(element.querySelectorAll<HTMLElement>('[data-feed-row-id]')).find(
+        (candidate) => candidate.getBoundingClientRect().bottom > root.top + 1,
+      );
+      if (!row?.dataset.feedRowId) throw new Error('No visible child transcript row found.');
+      return {
+        rowId: row.dataset.feedRowId,
+        offsetTop: row.getBoundingClientRect().top - root.top,
+      };
+    });
+    await waitForCommand(
+      commandLog,
+      (command) =>
+        command.type === 'child.loadHistory' &&
+        command.parentAppSessionId === 'parent-alpha' &&
+        command.childSessionId === 'alpha-sibling' &&
+        command.cursor === 'alpha-sibling:120',
+    );
+    await expect(chat.getByText('ALPHA CHILD HISTORY 0061', { exact: false })).toHaveCount(1);
+    await expect
+      .poll(async () => {
+        const offsetTop = await conversationScroll.evaluate((element, rowId) => {
+          const row = Array.from(element.querySelectorAll<HTMLElement>('[data-feed-row-id]')).find(
+            (candidate) => candidate.dataset.feedRowId === rowId,
+          );
+          if (!row) throw new Error(`Child transcript row ${rowId} was not preserved.`);
+          return row.getBoundingClientRect().top - element.getBoundingClientRect().top;
+        }, anchor.rowId);
+        return Math.abs(offsetTop - anchor.offsetTop);
+      })
+      .toBeLessThan(1);
 
     await chat.getByTitle('Back to primary session').click();
     await expect(chat.getByText('ALPHA PRIMARY OUTPUT', { exact: true })).toBeVisible();
-    await expect(chat.getByText('ALPHA CHILD TWO OUTPUT', { exact: true })).toHaveCount(0);
+    await expect(chat.getByText('ALPHA CHILD TWO OUTPUT', { exact: false })).toHaveCount(0);
     await alphaSibling.locator('button').first().click();
-    await expect(chat.getByText('ALPHA CHILD TWO OUTPUT', { exact: true })).toBeVisible();
+    await expect(chat.getByText('ALPHA CHILD TWO OUTPUT', { exact: false })).toBeVisible();
 
     const composer = page.getByPlaceholder(/What would you like to work on/);
     await composer.fill('STEER EXACT CHILD');
@@ -268,19 +301,52 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
         command.childSessionId === 'alpha-sibling',
     );
 
+    await conversationScroll.evaluate((element) => {
+      element.scrollTop = 1_200;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await waitForCommand(
+      commandLog,
+      (command) =>
+        command.type === 'child.loadHistory' &&
+        command.parentAppSessionId === 'parent-alpha' &&
+        command.childSessionId === 'alpha-sibling' &&
+        command.cursor === 'alpha-sibling:60',
+    );
     await leftNavigation.locator('[data-app-session-id="parent-beta"]').click();
     await expect(chat.getByText('BETA PRIMARY OUTPUT', { exact: true })).toBeVisible();
-    await expect(rightPanel.locator('[data-parent-app-session-id="parent-beta"]')).toHaveCount(1);
+    await expect(chat.getByText('ALPHA CHILD HISTORY 0001', { exact: false })).toHaveCount(0);
+    await expect(rightPanel.locator('[data-child-session-id]')).toHaveCount(1);
     await expect(rightPanel.getByText('Beta Worker Shared', { exact: true })).toBeVisible();
     await expect(rightPanel.getByText('Alpha Worker Shared', { exact: true })).toHaveCount(0);
 
-    const betaShared = rightPanel.locator(
-      '[data-parent-app-session-id="parent-beta"][data-child-session-id="shared-child"]',
-    );
+    const betaShared = rightPanel.locator('[data-child-session-id="shared-child"]');
     await betaShared.locator('button').first().click();
     await expect(chat.getByText('BETA SHARED CHILD OUTPUT', { exact: true })).toBeVisible();
     await expect(chat.getByText('ALPHA SHARED CHILD OUTPUT', { exact: true })).toHaveCount(0);
     await expect(leftNavigation.getByText('Beta Worker Shared', { exact: true })).toHaveCount(0);
+
+    await leftNavigation.locator('[data-app-session-id="parent-alpha"]').click();
+    const alphaHistorical = rightPanel.locator('[data-child-session-id="alpha-history"]');
+    await alphaHistorical.locator('button').first().click();
+    await expect(chat.getByText('ALPHA HISTORICAL OUTPUT', { exact: true })).toBeVisible();
+    await leftNavigation.locator('[data-app-session-id="parent-beta"]').click();
+    await expect(chat.getByText('BETA PRIMARY OUTPUT', { exact: true })).toBeVisible();
+    await leftNavigation.locator('[data-app-session-id="parent-alpha"]').click();
+    await alphaHistorical.locator('button').first().click();
+    await expect(chat.getByText('ALPHA HISTORICAL OUTPUT', { exact: true })).toBeVisible();
+    await expect
+      .poll(
+        () =>
+          recordedCommands(commandLog).filter(
+            (command) =>
+              command.type === 'child.loadHistory' &&
+              command.parentAppSessionId === 'parent-alpha' &&
+              command.childSessionId === 'alpha-history' &&
+              !command.cursor,
+          ).length,
+      )
+      .toBe(1);
   } finally {
     await cleanupSmokeResources(resources);
   }

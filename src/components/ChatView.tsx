@@ -1,6 +1,6 @@
-import { useRef, useEffect, useLayoutEffect, useMemo, useState, useCallback } from 'react';
+import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
-import { useStore } from '../hooks/useStore';
+import { useStoreDispatch, useStoreSelector, type SessionRestore } from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { motion } from 'framer-motion';
 import {
@@ -10,10 +10,9 @@ import {
   ChatSkeleton,
   TranscriptSkeleton,
   buildGroupedFeed,
-  promptAnchorsFromItems,
 } from './chat';
 import { readFile } from '../lib/desktop';
-import { interruptChild, loadSessionHistory } from '../lib/commands';
+import { interruptChild, loadChildHistory, loadSessionHistory } from '../lib/commands';
 import { chatDisplayTitle } from '../lib/chatMetadata';
 import {
   childSessionActivityForTarget,
@@ -21,6 +20,7 @@ import {
   childSessionMeta,
   findChildSessionForTarget,
   orderedChildSessions,
+  shouldRequestReleasedChildHistory,
   transcriptForVisibleSession,
   visibleSessionTarget,
 } from '../lib/childSessions';
@@ -28,6 +28,15 @@ import type { FileChange } from '../lib/diff';
 import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
+import { isEmbedded } from '../lib/embed';
+import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
+import {
+  restoreStatusForConversationTimeline,
+  useConversationTimeline,
+} from '../hooks/useConversationTimeline';
+import { transcriptRehydrationLimit } from '../lib/transcriptStoreMemory';
+import { VIEWPORT_TRANSCRIPT_POLICY } from '../lib/transcriptWindow';
+import { equalVisibleChatState, selectChatViewState, type ChatViewState } from './chatViewState';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -52,6 +61,18 @@ function RestoreFailedState({ message, onRetry }: { message?: string; onRetry: (
       >
         Retry
       </button>
+    </div>
+  );
+}
+
+export function EarlierHistoryStatus({ loading }: { loading: boolean }) {
+  return (
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      className={loading ? 'pb-2 text-center text-[11px] text-droid-text-muted/70' : ''}
+    >
+      {loading ? 'Loading earlier messages…' : ''}
     </div>
   );
 }
@@ -131,11 +152,23 @@ function ChatHeader({
   );
 }
 
-export default function ChatView({ rightInset = false }: { rightInset?: boolean }) {
-  const { state, dispatch } = useStore();
+export default function ChatView({
+  rightInset = false,
+  isObscured = false,
+}: {
+  rightInset?: boolean;
+  isObscured?: boolean;
+}) {
+  const dispatch = useStoreDispatch();
+  const equalChatState = useCallback(
+    (previous: ChatViewState, next: ChatViewState) =>
+      isObscured || equalVisibleChatState(previous, next),
+    [isObscured],
+  );
+  const state = useStoreSelector(selectChatViewState, equalChatState);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
-  const allTranscript = activeSession ? (state.transcripts[activeSession.appSessionId] ?? []) : [];
+  const activeSession = state.activeSession;
+  const allTranscript = state.allTranscript;
 
   const visibleTarget = visibleSessionTarget(
     activeSession?.appSessionId,
@@ -244,89 +277,75 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
     return transcriptForVisibleSession(allTranscript, selectedChildSessionId ?? null);
   }, [allTranscript, viewingChildSession, selectedChildSessionId]);
 
-  // Lazily page older primary-session history (across the compaction chain) in as
-  // the user scrolls toward the top, prefetching well before the edge so the
-  // scrollback feels endless and smooth rather than hitting a hard stop.
+  // Primary and logical-child transcripts each own their persisted cursor even
+  // though live child events share the parent's in-memory event array.
   const historyAppSessionId = activeSession?.appSessionId;
-  const olderCursor = historyAppSessionId ? state.historyCursor[historyAppSessionId] : undefined;
-  const loadingOlder = historyAppSessionId ? state.historyLoadingOlder[historyAppSessionId] : false;
-  const restore = historyAppSessionId ? state.sessionRestore[historyAppSessionId] : undefined;
+  const historyChildSessionId = selectedChildSessionId;
+  // These keyed renderer maps are intentionally sparse at runtime despite
+  // their long-standing Record types.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+  const childHistory =
+    historyAppSessionId && historyChildSessionId
+      ? state.childHistory[historyAppSessionId]?.[historyChildSessionId]
+      : undefined;
+  let olderCursor: string | undefined;
+  let loadingOlder = false;
+  let restore: SessionRestore | undefined = childHistory;
+  if (historyChildSessionId) {
+    olderCursor = childHistory?.olderCursor;
+    loadingOlder = childHistory?.isLoadingOlder ?? false;
+  } else if (historyAppSessionId) {
+    olderCursor = state.historyCursor[historyAppSessionId];
+    loadingOlder = state.historyLoadingOlder[historyAppSessionId] ?? false;
+    restore = state.sessionRestore[historyAppSessionId];
+  }
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
   const retryRestore = useCallback(() => {
     if (!historyAppSessionId) return;
+    if (historyChildSessionId) {
+      dispatch({
+        type: 'CHILD_HISTORY_LOADING',
+        parentAppSessionId: historyAppSessionId,
+        childSessionId: historyChildSessionId,
+      });
+      loadChildHistory(historyAppSessionId, historyChildSessionId);
+      return;
+    }
     dispatch({ type: 'SESSION_RESTORE_START', appSessionId: historyAppSessionId });
     loadSessionHistory(historyAppSessionId);
-  }, [historyAppSessionId, dispatch]);
-  // Anchor captured when an older page is requested, used to keep the viewport
-  // visually fixed once the prepended messages grow the scroll height.
-  const prependAnchor = useRef<{ height: number; top: number } | null>(null);
-  const PREFETCH_PX = 800;
-  // Auto-page older history until the conversation timeline has at least this
-  // many anchors (or the chain ends); the rest fills in as the user scrolls up.
-  const TIMELINE_TARGET_ANCHORS = 12;
-
-  // Only auto-scroll when the user is already pinned to the bottom; if they've
-  // scrolled up to read, leave their position alone while the model responds.
-  const stickRef = useRef(true);
-  const [scrollSnapshots] = useState(() => new Map<string, { top: number; pinned: boolean }>());
-  // Scroll snapshots are owned by onScroll, which fires for every user scroll
-  // and every programmatic auto-scroll, so each conversation's position is
-  // already current when we switch away. A cleanup here would read scrollTop
-  // AFTER the keyed transcript swap (layout-effect cleanups run post-mutation),
-  // capturing the incoming conversation's position and corrupting the outgoing
-  // snapshot — so there is no cleanup here.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !visibleConversationKey) return;
-    const snapshot = scrollSnapshots.get(visibleConversationKey);
-    prependAnchor.current = null;
-    stickRef.current = snapshot?.pinned ?? true;
-    el.scrollTop = snapshot?.top ?? el.scrollHeight;
-  }, [scrollSnapshots, visibleConversationKey]);
-
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (visibleConversationKey) {
-      scrollSnapshots.set(visibleConversationKey, {
-        top: el.scrollTop,
-        pinned: stickRef.current,
-      });
-    }
-    if (
-      !viewingChildSession &&
-      historyAppSessionId &&
-      olderCursor &&
-      !loadingOlder &&
-      el.scrollTop < PREFETCH_PX
-    ) {
-      prependAnchor.current = { height: el.scrollHeight, top: el.scrollTop };
-      dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
-      loadSessionHistory(historyAppSessionId, olderCursor);
-    }
-  };
-
-  // Restore scroll position after an older page settles so the content the user
-  // was reading stays put instead of jumping to the top. Keyed on the loading
-  // flag too, so an empty (fully-deduped) page still clears the stale anchor.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || prependAnchor.current === null || loadingOlder) return;
-    const delta = el.scrollHeight - prependAnchor.current.height;
-    if (delta > 0) el.scrollTop = prependAnchor.current.top + delta;
-    prependAnchor.current = null;
-  }, [transcript.length, loadingOlder]);
-
+  }, [dispatch, historyAppSessionId, historyChildSessionId]);
   const tailLen = transcript.length > 0 ? (transcript[transcript.length - 1].text?.length ?? 0) : 0;
-  useEffect(() => {
-    if (scrollRef.current && stickRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [visibleConversationKey, transcript.length, tailLen]);
-
   const primaryLive = useSessionLive(activeSession?.appSessionId ?? null);
   const live = visibleTarget.kind === 'child' ? visibleTarget.canInterrupt : primaryLive;
   const draftFolder = state.draftChat?.cwd.split('/').filter(Boolean).pop();
+
+  // A released child tail keeps enough rows for instant switching, then repairs
+  // its recent persisted page before that child can page further back.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+  useEffect(() => {
+    if (
+      !historyAppSessionId ||
+      !historyChildSessionId ||
+      childHistory?.isLoaded !== false ||
+      childHistory.status !== 'paged'
+    ) {
+      return;
+    }
+    const access = state.childAccess[historyAppSessionId]?.[historyChildSessionId];
+    if (!shouldRequestReleasedChildHistory(access)) return;
+    dispatch({
+      type: 'CHILD_HISTORY_LOADING',
+      parentAppSessionId: historyAppSessionId,
+      childSessionId: historyChildSessionId,
+    });
+    loadChildHistory(
+      historyAppSessionId,
+      historyChildSessionId,
+      undefined,
+      transcriptRehydrationLimit(childHistory),
+    );
+  }, [childHistory, dispatch, historyAppSessionId, historyChildSessionId, state.childAccess]);
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
   // Between pressing send on a fresh chat and SESSION_CREATED arriving (the
   // sidecar spawns the session, ~1-2s), there is no active session yet. Show the
@@ -419,37 +438,159 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
       }),
     [transcript, live, specContent, viewingChildSession],
   );
-  // Dots for the conversation timeline: one per user prompt, derived from the
-  // same feed the transcript renders so the rail stays in sync.
-  const timelineAnchors = useMemo(
-    () => (viewingChildSession ? [] : promptAnchorsFromItems(feedItems)),
-    [feedItems, viewingChildSession],
-  );
+  const { timelineAnchors, isTimelinePriming, isAutoPagingOlderHistory } = useConversationTimeline({
+    feedItems,
+    isViewingChildSession: viewingChildSession,
+    conversationKey: visibleConversationKey,
+    historyAppSessionId,
+    olderCursor,
+    isLoadingOlder: loadingOlder,
+    isTranscriptWindowAtCapacity:
+      allTranscript.length > VIEWPORT_TRANSCRIPT_POLICY.highWaterEvents ||
+      (activeSession
+        ? (state.transcriptRetainedCost[activeSession.appSessionId] ?? 0) >
+          VIEWPORT_TRANSCRIPT_POLICY.highWaterCost
+        : false),
+    restoreStatus: restoreStatusForConversationTimeline(restore?.status, !isEmbedded()),
+  });
+  const { onScroll, requestOlderHistory } = useConversationScrollWindow({
+    scrollRef,
+    visibleConversationKey,
+    isViewingChildSession: viewingChildSession,
+    activeAppSessionId,
+    historyAppSessionId,
+    historyChildSessionId,
+    olderCursor,
+    isLoadingOlder: loadingOlder,
+    transcriptLength: transcript.length,
+    transcriptTailLength: tailLen,
+    retainedTranscriptLength: transcript.length,
+    isConversationLive: live,
+    isAutoPagingOlderHistory,
+    dispatch,
+  });
 
   // Old/large chats restore only a recent window, which can hold too few final
   // responses for the rail to be useful. Page older history in (via the same
   // prepend-stable path as scroll prefetch) until there are enough anchors or
   // the compaction chain is exhausted, so the timeline works on any chat.
   useEffect(() => {
-    if (viewingChildSession || !historyAppSessionId || !olderCursor || loadingOlder) return;
-    if (timelineAnchors.length >= TIMELINE_TARGET_ANCHORS) return;
-    // A failed older-page load leaves the cursor intact so a later user scroll
-    // can retry; without this guard the auto-pager would immediately re-fire the
-    // same failing cursor in a tight loop, since clearing loadingOlder re-arms it.
-    if (restore?.status === 'failed') return;
-    const el = scrollRef.current;
-    if (el) prependAnchor.current = { height: el.scrollHeight, top: el.scrollTop };
-    dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
-    loadSessionHistory(historyAppSessionId, olderCursor);
-  }, [
-    viewingChildSession,
-    historyAppSessionId,
-    olderCursor,
-    loadingOlder,
-    timelineAnchors.length,
-    restore?.status,
-    dispatch,
-  ]);
+    if (!isAutoPagingOlderHistory) return;
+    requestOlderHistory();
+  }, [isAutoPagingOlderHistory, requestOlderHistory]);
+
+  const stopSelectedChild =
+    visibleTarget.kind === 'child' && visibleTarget.canInterrupt
+      ? () => {
+          interruptChild(visibleTarget.parentAppSessionId, visibleTarget.childSessionId);
+        }
+      : undefined;
+  const chatHeaderSub = viewingChildSession
+    ? {
+        label: selectedChildLabel,
+        meta: selectedChildMeta,
+        running: live,
+        onBack: () => {
+          dispatch({ type: 'SELECT_CHILD', selection: null });
+        },
+        onStop: stopSelectedChild,
+      }
+    : undefined;
+  const openSpecWiki = activeAppSessionId
+    ? () => {
+        dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeAppSessionId });
+      }
+    : undefined;
+
+  let emptyChildActivity: ReactNode;
+  if (visibleTarget.kind === 'child' && visibleTarget.canInterrupt) {
+    emptyChildActivity = (
+      <WorkingIndicator
+        label={`${selectedChildLabel} is working`}
+        startTs={visibleTarget.child.startedAt}
+      />
+    );
+  } else if (selectedChildOpening) {
+    emptyChildActivity = <WorkingIndicator label={`Loading ${selectedChildLabel} activity`} />;
+  } else {
+    emptyChildActivity = (
+      <span className="text-[13px] text-droid-text-muted">
+        No activity captured for {selectedChildLabel}.
+      </span>
+    );
+  }
+
+  let conversationContent: ReactNode;
+  if (activeSession && transcript.length > 0) {
+    conversationContent = (
+      <motion.div
+        key={`${activeAppSessionId ?? 'none'}:${viewingChildSession ? String(selectedChildSessionId) : 'primary'}`}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+        className="mx-auto min-w-0 px-6 py-6 max-w-2xl"
+      >
+        {restore?.status === 'failed' && (
+          <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
+        )}
+        <EarlierHistoryStatus loading={loadingOlder} />
+        <MessageFeed
+          events={transcript}
+          items={feedItems}
+          pending={live}
+          cwd={activeSession.cwd}
+          onOpenDiff={openDiff}
+          onOpenReviewFile={openReviewFile}
+          onOpenChildSession={openChildSession}
+          childSessionActivity={childSessionActivity}
+          subagentsDock={subagentsDock}
+          specContent={specContent}
+          onOpenSpecWiki={openSpecWiki}
+          createdWorktreePath={!viewingChildSession ? createdWorktreePath : undefined}
+        />
+      </motion.div>
+    );
+  } else if (activeSession && restore?.status === 'failed') {
+    conversationContent = <RestoreFailedState message={restore.error} onRetry={retryRestore} />;
+  } else if (activeSession && viewingChildSession && restore?.status === 'loading') {
+    conversationContent = <RestoringState />;
+  } else if (activeSession && viewingChildSession) {
+    conversationContent = (
+      <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center gap-4 px-8 text-center">
+        {selectedChildSession?.prompt && (
+          <div className="max-w-lg rounded-xl bg-droid-elevated/40 px-4 py-3 text-left">
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-droid-text-muted">
+              Task
+            </div>
+            <div className="text-[12.5px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
+              {selectedChildSession.prompt}
+            </div>
+          </div>
+        )}
+        {emptyChildActivity}
+      </div>
+    );
+  } else if (activeSession && restore?.status === 'loading') {
+    conversationContent = <RestoringState />;
+  } else if (startingCompose) {
+    conversationContent = (
+      <div className="mx-auto min-w-0 max-w-2xl px-6 py-6">
+        <UserBubble event={startingCompose} />
+        <div className="mt-5">
+          <ChatSkeleton />
+        </div>
+      </div>
+    );
+  } else {
+    conversationContent = (
+      <WelcomeScreen
+        folder={draftFolder}
+        onSeedPrompt={(text) => {
+          dispatch({ type: 'SEED_COMPOSER', text });
+        }}
+      />
+    );
+  }
 
   return (
     <div data-testid="chat-view" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
@@ -457,31 +598,11 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
         <ChatHeader
           title={chatDisplayTitle(activeSession, state.chatMetadata[activeSession.appSessionId])}
           live={live}
-          sub={
-            viewingChildSession
-              ? {
-                  label: selectedChildLabel,
-                  meta: selectedChildMeta,
-                  running: live,
-                  onBack: () => {
-                    dispatch({ type: 'SELECT_CHILD', selection: null });
-                  },
-                  onStop:
-                    visibleTarget.kind === 'child' && visibleTarget.canInterrupt
-                      ? () => {
-                          interruptChild(
-                            visibleTarget.parentAppSessionId,
-                            visibleTarget.childSessionId,
-                          );
-                        }
-                      : undefined,
-                }
-              : undefined
-          }
+          sub={chatHeaderSub}
         />
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
-        {activeSession && timelineAnchors.length >= 2 && (
+        {activeSession && !isTimelinePriming && timelineAnchors.length >= 2 && (
           <ConversationTimeline scrollRef={scrollRef} anchors={timelineAnchors} />
         )}
         <div
@@ -491,91 +612,10 @@ export default function ChatView({ rightInset = false }: { rightInset?: boolean 
           style={{
             paddingRight: rightInset ? 312 : undefined,
             transition: 'padding-right 0.2s ease',
+            overflowAnchor: 'none',
           }}
         >
-          {activeSession && transcript.length > 0 ? (
-            <motion.div
-              key={`${activeAppSessionId ?? 'none'}:${viewingChildSession ? String(selectedChildSessionId) : 'primary'}`}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-              className="mx-auto min-w-0 px-6 py-6 max-w-2xl"
-            >
-              {!viewingChildSession && restore?.status === 'failed' && (
-                <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
-              )}
-              {!viewingChildSession && loadingOlder && (
-                <div className="mb-4 flex justify-center">
-                  <span className="text-[11px] text-droid-text-muted">
-                    Loading earlier messages…
-                  </span>
-                </div>
-              )}
-              <MessageFeed
-                events={transcript}
-                items={feedItems}
-                pending={live}
-                cwd={activeSession.cwd}
-                onOpenDiff={openDiff}
-                onOpenReviewFile={openReviewFile}
-                onOpenChildSession={openChildSession}
-                childSessionActivity={childSessionActivity}
-                subagentsDock={subagentsDock}
-                specContent={specContent}
-                onOpenSpecWiki={
-                  activeAppSessionId
-                    ? () => {
-                        dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeAppSessionId });
-                      }
-                    : undefined
-                }
-                createdWorktreePath={!viewingChildSession ? createdWorktreePath : undefined}
-              />
-            </motion.div>
-          ) : activeSession && restore?.status === 'failed' ? (
-            <RestoreFailedState message={restore.error} onRetry={retryRestore} />
-          ) : activeSession && viewingChildSession ? (
-            <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center gap-4 px-8 text-center">
-              {selectedChildSession?.prompt && (
-                <div className="max-w-lg rounded-xl bg-droid-elevated/40 px-4 py-3 text-left">
-                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-droid-text-muted">
-                    Task
-                  </div>
-                  <div className="text-[12.5px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
-                    {selectedChildSession.prompt}
-                  </div>
-                </div>
-              )}
-              {visibleTarget.kind === 'child' && visibleTarget.canInterrupt ? (
-                <WorkingIndicator
-                  label={`${selectedChildLabel} is working`}
-                  startTs={visibleTarget.child.startedAt}
-                />
-              ) : selectedChildOpening ? (
-                <WorkingIndicator label={`Loading ${selectedChildLabel} activity`} />
-              ) : (
-                <span className="text-[13px] text-droid-text-muted">
-                  No activity captured for {selectedChildLabel}.
-                </span>
-              )}
-            </div>
-          ) : activeSession && restore?.status === 'loading' ? (
-            <RestoringState />
-          ) : startingCompose ? (
-            <div className="mx-auto min-w-0 max-w-2xl px-6 py-6">
-              <UserBubble event={startingCompose} />
-              <div className="mt-5">
-                <ChatSkeleton />
-              </div>
-            </div>
-          ) : (
-            <WelcomeScreen
-              folder={draftFolder}
-              onSeedPrompt={(text) => {
-                dispatch({ type: 'SEED_COMPOSER', text });
-              }}
-            />
-          )}
+          {conversationContent}
         </div>
       </div>
     </div>

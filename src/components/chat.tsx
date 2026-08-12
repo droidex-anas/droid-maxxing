@@ -18,7 +18,15 @@ import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridg
 import { Markdown } from './Markdown';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
-import { extractFileChange, type FileChange } from '../lib/diff';
+import {
+  extractFileChange,
+  MAX_DIFF_CARDS_PER_COMMIT,
+  createDiffDisclosure,
+  mountNextRevealedDiffCards,
+  reopenDiffDisclosure,
+  revealNextDiffCards,
+  type FileChange,
+} from '../lib/diff';
 import { DiffCard } from './DiffView';
 import { SubagentsDock, type SubagentsDockData } from './SubagentsDock';
 import {
@@ -55,6 +63,7 @@ import {
 import { openExternal } from '../lib/onboarding';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
+import { feedItemTailId, feedRowId } from '../hooks/conversationViewportAnchor';
 
 // Open a link in the OS default browser rather than inside the Electron window.
 function openLink(e: React.MouseEvent, url: string) {
@@ -79,8 +88,12 @@ function useElapsed(startTs: number | undefined, active: boolean): number {
   useEffect(() => {
     if (!active || !visible) return;
     setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    const id = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      clearInterval(id);
+    };
   }, [active, visible]);
   return startTs != null ? Math.max(0, now - startTs) : 0;
 }
@@ -209,6 +222,7 @@ function Expand({ open, children }: { open: boolean; children: React.ReactNode }
           exit={{ height: 0, opacity: 0 }}
           transition={{ duration: 0.2, ease: EASE }}
           className="overflow-hidden"
+          style={{ contain: 'layout paint' }}
         >
           {children}
         </motion.div>
@@ -241,7 +255,9 @@ function ThinkingItem({
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex items-center gap-1.5 text-left"
       >
         <Caret open={open} />
@@ -318,13 +334,24 @@ function argStr(args: unknown, key: string): string | undefined {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current ?? undefined);
+    },
+    [],
+  );
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
         void navigator.clipboard?.writeText(text);
         setCopied(true);
-        setTimeout(() => setCopied(false), 1200);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => {
+          timer.current = null;
+          setCopied(false);
+        }, 1200);
       }}
       title="Copy"
       className="p-1 rounded-md text-droid-text-muted/60 hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
@@ -345,13 +372,15 @@ function linkify(text: string): React.ReactNode {
   while ((m = URL_RE.exec(text)) !== null) {
     if (m.index > last) nodes.push(text.slice(last, m.index));
     let url = m[0];
-    const tail = url.match(/[.,;:!?)\]}]+$/)?.[0] ?? '';
+    const tail = /[.,;:!?)\]}]+$/.exec(url)?.[0] ?? '';
     if (tail) url = url.slice(0, url.length - tail.length);
     nodes.push(
       <a
         key={m.index}
         href={url}
-        onClick={(e) => openLink(e, url)}
+        onClick={(e) => {
+          openLink(e, url);
+        }}
         className="underline underline-offset-2 hover:opacity-80 break-all"
         style={{ color: ACCENT }}
       >
@@ -396,7 +425,9 @@ function ErrorLine({ text }: { text: string }) {
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] leading-relaxed"
       >
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color: RED }} />
@@ -405,12 +436,14 @@ function ErrorLine({ text }: { text: string }) {
         <Caret open={open} />
       </button>
       <Expand open={open}>
-        <pre
-          className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-          style={{ backgroundColor: RED_TINT, color: RED }}
-        >
-          {linkify(body)}
-        </pre>
+        {open ? (
+          <pre
+            className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+            style={{ backgroundColor: RED_TINT, color: RED }}
+          >
+            {linkify(body)}
+          </pre>
+        ) : null}
       </Expand>
     </div>
   );
@@ -457,7 +490,9 @@ function CommandCard({
         style={{ borderColor: 'color-mix(in srgb, var(--droid-red) 30%, var(--droid-border))' }}
       >
         <button
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setOpen((o) => !o);
+          }}
           className="group flex w-full items-center gap-2 h-8 px-3 bg-droid-surface/60 border-b border-droid-border text-left"
         >
           <Terminal className="w-3.5 h-3.5 shrink-0" style={{ color: RED }} />
@@ -467,7 +502,7 @@ function CommandCard({
           <ErrorTag />
           <Caret open={open} />
         </button>
-        <Expand open={open}>{body}</Expand>
+        <Expand open={open}>{open ? body : null}</Expand>
       </div>
     );
   }
@@ -524,7 +559,9 @@ function ToolLine({
     return (
       <div>
         <button
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setOpen((o) => !o);
+          }}
           className="group flex w-full items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0 text-left"
         >
           {label}
@@ -533,12 +570,14 @@ function ToolLine({
         </button>
         {out && (
           <Expand open={open}>
-            <pre
-              className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-              style={{ backgroundColor: RED_TINT, color: RED }}
-            >
-              {out}
-            </pre>
+            {open ? (
+              <pre
+                className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+                style={{ backgroundColor: RED_TINT, color: RED }}
+              >
+                {out}
+              </pre>
+            ) : null}
           </Expand>
         )}
       </div>
@@ -568,7 +607,9 @@ function Favicon({ url }: { url: string }) {
       alt=""
       loading="lazy"
       className="h-3.5 w-3.5 shrink-0 rounded-sm"
-      onError={() => setFailed(true)}
+      onError={() => {
+        setFailed(true);
+      }}
     />
   );
 }
@@ -588,7 +629,14 @@ function WebSourceRow({
   const href = httpHref(url);
   return (
     <a
-      {...(href ? { href, onClick: (e: React.MouseEvent) => openLink(e, href) } : {})}
+      {...(href
+        ? {
+            href,
+            onClick: (e: React.MouseEvent) => {
+              openLink(e, href);
+            },
+          }
+        : {})}
       className={`block rounded-lg px-3 py-2 transition-colors hover:bg-droid-elevated/60 ${
         emphasize ? 'bg-droid-elevated/40' : ''
       }`}
@@ -698,9 +746,9 @@ function WebSearchCard({
   running?: boolean;
 }) {
   const query = argStr(event.toolArgs, 'query') ?? '';
-  const { results, count } = parseWebSearch(output ?? '');
+  const { results, count } = useMemo(() => parseWebSearch(output ?? ''), [output]);
   const total = count ?? results.length;
-  const raw = output ? stripAnsi(output).trim() : '';
+  const raw = useMemo(() => (output ? stripAnsi(output).trim() : ''), [output]);
   const [open, setOpen] = useState(false);
   const isX = toolArgStringArray(event.toolArgs, 'includeDomains').some((d) =>
     /(^|\.)(x|twitter)\.com$/i.test(d),
@@ -709,7 +757,7 @@ function WebSearchCard({
   const trailing = searchTrailing(error, total);
 
   let body: React.ReactNode = null;
-  if (results.length > 0) {
+  if (open && results.length > 0) {
     body = (
       <div className="mt-2 space-y-1">
         {results.map((r, i) => (
@@ -723,7 +771,7 @@ function WebSearchCard({
         ))}
       </div>
     );
-  } else if (raw) {
+  } else if (open && raw) {
     body = (
       <pre className="mt-1.5 max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
         {linkify(raw)}
@@ -757,7 +805,7 @@ function WebSearchCard({
         {trailing}
         <Caret open={open} />
       </button>
-      <Expand open={open}>{body}</Expand>
+      <Expand open={open}>{open ? body : null}</Expand>
     </div>
   );
 }
@@ -869,12 +917,18 @@ function WebFetchCard({
     argStr(event.toolArgs, 'uri') ??
     argStr(event.toolArgs, 'href') ??
     '';
-  const page = parseWebFetch(output ?? '', urlArg.length > 0 ? urlArg : undefined);
+  const page = useMemo(
+    () => parseWebFetch(output ?? '', urlArg.length > 0 ? urlArg : undefined),
+    [output, urlArg],
+  );
   const url = page.url ?? urlArg;
   const hasBody = page.body.length > 0;
   const [open, setOpen] = useState(false);
   const displayTitle = page.title ?? (url.length > 0 ? webSourceName(url) : 'Page');
-  const snippet = hasBody ? fetchSnippet(page.body) : '';
+  const snippet = useMemo(
+    () => (open && hasBody ? fetchSnippet(page.body) : ''),
+    [open, hasBody, page.body],
+  );
   const badge = fetchSizeBadge(page.chars, page.truncatedChars);
   const trailing = fetchTrailing(error, badge);
 
@@ -901,14 +955,16 @@ function WebFetchCard({
         <Caret open={open} />
       </button>
       <Expand open={open}>
-        <WebFetchBody
-          error={error}
-          hasBody={hasBody}
-          body={page.body}
-          url={url}
-          title={displayTitle}
-          snippet={snippet}
-        />
+        {open ? (
+          <WebFetchBody
+            error={error}
+            hasBody={hasBody}
+            body={page.body}
+            url={url}
+            title={displayTitle}
+            snippet={snippet}
+          />
+        ) : null}
       </Expand>
     </div>
   );
@@ -946,7 +1002,7 @@ function TodoChecklist({ event }: { event: TranscriptEvent }) {
 // their results); fall back to adjacency only when neither side has an id (the
 // live stream emits each result immediately after its call).
 export function isResultFor(call: TranscriptEvent, next: TranscriptEvent | undefined): boolean {
-  if (!next || next.kind !== 'tool_result') return false;
+  if (next?.kind !== 'tool_result') return false;
   // A failed result must always surface so the user sees the failure, even when
   // it correlates to the call we are otherwise hiding (e.g. a failed TodoWrite).
   if (next.isError) return false;
@@ -979,7 +1035,7 @@ export function correlateResults(events: TranscriptEvent[]): {
       result = resultById.get(call.toolUseId);
     } else {
       const next = events[i + 1];
-      if (next && next.kind === 'tool_result' && !next.toolUseId) result = next;
+      if (next?.kind === 'tool_result' && !next.toolUseId) result = next;
     }
     if (!result || consumed.has(result)) continue;
     // A failed plan result must surface (the checklist cannot convey a failure),
@@ -1086,11 +1142,13 @@ function ToolGroupItem({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const summary = summarizeTools(events);
+  const summary = useMemo(() => summarizeTools(events), [events]);
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex items-center gap-1.5 text-left"
       >
         <Caret open={open} />
@@ -1103,7 +1161,9 @@ function ToolGroupItem({
         )}
       </button>
       <Expand open={open}>
-        <div className="mt-2 pl-[18px] space-y-2.5">{renderToolEvents(events, active)}</div>
+        {open ? (
+          <div className="mt-2 pl-[18px] space-y-2.5">{renderToolEvents(events, active)}</div>
+        ) : null}
       </Expand>
     </div>
   );
@@ -1123,16 +1183,23 @@ export type FeedItem =
   | { type: 'child_sessions'; key: string; events: TranscriptEvent[] }
   | { type: 'tools'; key: string; events: TranscriptEvent[] }
   | { type: 'worked'; key: string; items: FeedItem[]; durationMs: number }
-  | { type: 'turnChanges'; key: string; files: TurnFile[]; added: number; removed: number };
+  | {
+      type: 'turnChanges';
+      key: string;
+      tailEventId: string;
+      files: TurnFile[];
+      added: number;
+      removed: number;
+    };
 
 // One file touched during a completed turn, aggregated across every edit the
 // agent made to it that turn.
-export type TurnFile = {
+export interface TurnFile {
   path: string;
   added: number;
   removed: number;
   verb: FileChange['verb'];
-};
+}
 
 // Collect the files a turn's run edited, folding repeated edits to the same
 // path into a single entry (summed line counts). Order follows first touch.
@@ -1151,7 +1218,10 @@ export function collectTurnFiles(run: FeedItem[]): TurnFile[] {
   };
   for (const it of run) {
     if (it.type === 'diff') consider(it.change);
-    else if (it.type === 'diffs') it.changes.forEach((c) => consider(c.change));
+    else if (it.type === 'diffs')
+      it.changes.forEach((c) => {
+        consider(c.change);
+      });
   }
   return [...byPath.values()];
 }
@@ -1445,9 +1515,10 @@ function dedupePlanUpdates(events: TranscriptEvent[]): TranscriptEvent[] {
   ).id;
   // toolUseIds of superseded plan calls, so their own results are dropped no
   // matter where they sit in the group (replay batches calls before results).
-  const supersededIds = new Set(
-    plans.filter((p) => p.id !== keepId && p.toolUseId).map((p) => p.toolUseId as string),
-  );
+  const supersededIds = new Set<string>();
+  for (const plan of plans) {
+    if (plan.id !== keepId && plan.toolUseId) supersededIds.add(plan.toolUseId);
+  }
   const out: TranscriptEvent[] = [];
   for (let j = 0; j < events.length; j++) {
     const e = events[j];
@@ -1605,8 +1676,14 @@ function spanOf(items: FeedItem[]): { start: number; end: number } {
     end = Math.max(end, endTs ?? ts);
   };
   for (const it of items) {
-    if (it.type === 'tools') it.events.forEach((e) => consider(e.ts, e.endTs));
-    else if (it.type === 'diffs') it.changes.forEach((c) => consider(c.event.ts, c.event.endTs));
+    if (it.type === 'tools')
+      it.events.forEach((e) => {
+        consider(e.ts, e.endTs);
+      });
+    else if (it.type === 'diffs')
+      it.changes.forEach((c) => {
+        consider(c.event.ts, c.event.endTs);
+      });
     else if (it.type === 'child_sessions')
       it.events.forEach((e) => {
         consider(e.ts, e.endTs);
@@ -1649,11 +1726,12 @@ function mergeAssistantMessages(
     .filter(Boolean)
     .join('\n\n');
   return {
-    ...prev,
+    ...next,
+    key: prev.key,
     event: {
-      ...prev.event,
+      ...next.event,
       text,
-      endTs: next.event.endTs ?? next.event.ts ?? prev.event.endTs,
+      ts: prev.event.ts,
     },
   };
 }
@@ -1773,6 +1851,7 @@ export function groupTurns(
           out.push({
             type: 'turnChanges',
             key: `changes-${run[0].key}`,
+            tailEventId: feedItemTailId(run[run.length - 1]),
             files,
             added: files.reduce((s, f) => s + f.added, 0),
             removed: files.reduce((s, f) => s + f.removed, 0),
@@ -1889,7 +1968,7 @@ const InlineSpecCard = memo(function InlineSpecCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const title = useMemo(
-    () => content.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim() ?? 'Specification',
+    () => /^#{1,3}\s+(.+)$/m.exec(content)?.[1]?.trim() ?? 'Specification',
     [content],
   );
   const sections = useMemo(() => (content.match(/^#{1,3}\s+/gm) ?? []).length, [content]);
@@ -1898,7 +1977,9 @@ const InlineSpecCard = memo(function InlineSpecCard({
     <div className="rounded-xl border border-droid-border bg-droid-elevated/20 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <button
-          onClick={() => setExpanded((e) => !e)}
+          onClick={() => {
+            setExpanded((e) => !e);
+          }}
           className="flex items-center gap-2 flex-1 min-w-0 text-left group"
         >
           <ChevronRight
@@ -2177,7 +2258,13 @@ const FeedItemView = memo(function FeedItemView({
       return (
         <DiffCard
           change={item.change}
-          onOpen={onOpenDiff ? () => onOpenDiff(item.change) : undefined}
+          onOpen={
+            onOpenDiff
+              ? () => {
+                  onOpenDiff(item.change);
+                }
+              : undefined
+          }
         />
       );
     case 'diffs':
@@ -2222,7 +2309,9 @@ function WorkedGroup({
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex items-center gap-1.5 text-left"
       >
         <span className="text-[13px] text-droid-text-muted group-hover:text-droid-text-secondary transition-colors">
@@ -2231,28 +2320,29 @@ function WorkedGroup({
         <Caret open={open} />
       </button>
       <Expand open={open}>
-        <div className="mt-3 space-y-4 border-l border-droid-border pl-4">
-          {item.items.map((child) => (
-            <FeedItemView
-              key={child.key}
-              item={child}
-              live={false}
-              onOpenDiff={onOpenDiff}
-              onOpenChildSession={onOpenChildSession}
-              childSessionActivity={childSessionActivity}
-              subagentsDock={subagentsDock}
-              specContent={specContent}
-              expandGroups
-            />
-          ))}
-        </div>
+        {open ? (
+          <div className="mt-3 space-y-4 border-l border-droid-border pl-4">
+            {item.items.map((child) => (
+              <FeedItemView
+                key={child.key}
+                item={child}
+                live={false}
+                onOpenDiff={onOpenDiff}
+                onOpenChildSession={onOpenChildSession}
+                childSessionActivity={childSessionActivity}
+                subagentsDock={subagentsDock}
+                specContent={specContent}
+                expandGroups
+              />
+            ))}
+          </div>
+        ) : null}
       </Expand>
     </div>
   );
 }
 
 /* ── Folded run of file edits: one collapsible header over individual diffs ── */
-const MAX_DIFF_CARDS = 50;
 function DiffGroup({
   changes,
   onOpenDiff,
@@ -2263,6 +2353,7 @@ function DiffGroup({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [disclosure, setDisclosure] = useState(() => createDiffDisclosure(changes.length));
   const added = changes.reduce((s, c) => s + c.change.added, 0);
   const removed = changes.reduce((s, c) => s + c.change.removed, 0);
   const files = new Set(changes.map((c) => c.change.path));
@@ -2271,14 +2362,32 @@ function DiffGroup({
     files.size <= 1
       ? `Edited ${baseName(changes[0].change.path)} · ${edits}`
       : `Edited ${files.size} files · ${edits}`;
-  // Cap how many diff cards render at once so a genuinely large multi-edit run
-  // can't flood the feed with hundreds of cards; the rest stay summarized.
-  const shown = changes.slice(0, MAX_DIFF_CARDS);
+  // Mount bounded chunks so neither opening nor disclosing a genuinely huge
+  // edit run creates one long renderer commit. No diff content is discarded.
+  const shown = changes.slice(0, disclosure.mountedCount);
   const hiddenCount = changes.length - shown.length;
+  const revealCount = Math.min(MAX_DIFF_CARDS_PER_COMMIT, hiddenCount);
+  const canRevealMore = hiddenCount > 0 && disclosure.mountedCount >= disclosure.revealedCount;
+
+  useEffect(() => {
+    if (!open || disclosure.mountedCount >= disclosure.revealedCount) return;
+    const frame = requestAnimationFrame(() => {
+      setDisclosure((current) => mountNextRevealedDiffCards(current, changes.length));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [changes.length, disclosure.mountedCount, disclosure.revealedCount, open]);
+
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) {
+            setDisclosure((current) => reopenDiffDisclosure(current, changes.length));
+          }
+          setOpen((current) => !current);
+        }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left"
       >
         <ChevronRight
@@ -2298,20 +2407,35 @@ function DiffGroup({
         </span>
       </button>
       <Expand open={open}>
-        <div className="mt-2 space-y-2 border-l border-droid-border pl-3">
-          {shown.map((c) => (
-            <DiffCard
-              key={c.event.id}
-              change={c.change}
-              onOpen={onOpenDiff ? () => onOpenDiff(c.change) : undefined}
-            />
-          ))}
-          {hiddenCount > 0 && (
-            <div className="text-[11px] text-droid-text-muted/70">
-              +{hiddenCount} more {hiddenCount === 1 ? 'edit' : 'edits'}
-            </div>
-          )}
-        </div>
+        {open ? (
+          <div className="mt-2 space-y-2 border-l border-droid-border pl-3">
+            {shown.map((c) => (
+              <DiffCard
+                key={c.event.id}
+                change={c.change}
+                onOpen={
+                  onOpenDiff
+                    ? () => {
+                        onOpenDiff(c.change);
+                      }
+                    : undefined
+                }
+              />
+            ))}
+            {canRevealMore && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDisclosure((current) => revealNextDiffCards(current, changes.length));
+                }}
+                className="text-[11px] text-droid-text-muted/70 transition-colors hover:text-droid-text-secondary"
+              >
+                Show next {revealCount} {revealCount === 1 ? 'edit' : 'edits'} ({hiddenCount}{' '}
+                remaining)
+              </button>
+            )}
+          </div>
+        ) : null}
       </Expand>
     </div>
   );
@@ -2353,7 +2477,9 @@ function TurnChangesPanel({
   return (
     <div className="overflow-hidden rounded-xl border border-droid-border bg-droid-surface">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
         className="group flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-droid-elevated/40"
         aria-expanded={open}
       >
@@ -2369,29 +2495,33 @@ function TurnChangesPanel({
         </span>
       </button>
       <Expand open={open}>
-        <div className="border-t border-droid-border">
-          {files.map((f) => {
-            const display = displayEditPath(f.path, cwd);
-            const slash = display.lastIndexOf('/');
-            const dir = slash >= 0 ? display.slice(0, slash) : '';
-            const name = slash >= 0 ? display.slice(slash + 1) : display;
-            return (
-              <button
-                key={f.path}
-                onClick={() => onOpenFile?.(f.path)}
-                disabled={!onOpenFile}
-                title={f.path}
-                className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/40 disabled:cursor-default"
-              >
-                <span className="min-w-0 flex-1 truncate text-[12.5px]">
-                  <span className="text-droid-text-secondary">{name}</span>
-                  {dir && <span className="ml-2 text-[11px] text-droid-text-muted/60">{dir}</span>}
-                </span>
-                <ChangeCount added={f.added} removed={f.removed} />
-              </button>
-            );
-          })}
-        </div>
+        {open ? (
+          <div className="border-t border-droid-border">
+            {files.map((f) => {
+              const display = displayEditPath(f.path, cwd);
+              const slash = display.lastIndexOf('/');
+              const dir = slash >= 0 ? display.slice(0, slash) : '';
+              const name = slash >= 0 ? display.slice(slash + 1) : display;
+              return (
+                <button
+                  key={f.path}
+                  onClick={() => onOpenFile?.(f.path)}
+                  disabled={!onOpenFile}
+                  title={f.path}
+                  className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/40 disabled:cursor-default"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[12.5px]">
+                    <span className="text-droid-text-secondary">{name}</span>
+                    {dir && (
+                      <span className="ml-2 text-[11px] text-droid-text-muted/60">{dir}</span>
+                    )}
+                  </span>
+                  <ChangeCount added={f.added} removed={f.removed} />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </Expand>
     </div>
   );
@@ -2444,7 +2574,9 @@ function ChildSessionLine({
       <div className="group flex items-center gap-1.5 text-[13px]">
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setOpen((o) => !o);
+          }}
           className="flex items-center"
           aria-label="Toggle child session activity"
         >
@@ -2528,6 +2660,18 @@ export function appendedFeedItemKeys(
   }
   return appended;
 }
+
+// Offscreen feed rows skip layout and paint entirely (content-visibility) so
+// long transcripts scroll and chat switches render at the cost of the visible
+// screen only. The browser keeps DOM, component state, and animation timelines
+// alive: a row scrolling back in repaints the same frame with its shimmer or
+// caret exactly where the shared timeline puts it, so nothing ever looks
+// paused. The intrinsic-size hint sizes never-rendered rows for the scrollbar;
+// 'auto' remembers each row's real height once it has been rendered.
+const FEED_ROW_RENDER_STYLE = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 96px',
+} as const;
 
 /* ── The activity feed (list only; parent owns the scroll container) ── */
 export function MessageFeed({
@@ -2707,7 +2851,9 @@ export function MessageFeed({
         return (
           <Fragment key={item.key}>
             <motion.div
+              data-feed-row-id={feedRowId(item)}
               {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
+              style={FEED_ROW_RENDER_STYLE}
               initial={isNewItem ? { opacity: 0, y: 4 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, ease: EASE }}

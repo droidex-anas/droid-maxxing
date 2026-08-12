@@ -55,3 +55,49 @@ test('mark all sessions read ignores stale IDs in session order', () => {
 
   assert.deepEqual(next.sessionLastSeen, { 'sess-a': 5_000 });
 });
+
+test('batched actions preserve sequential reducer ordering', () => {
+  const state: AppState = {
+    ...initialState,
+    sessions: {
+      'sess-a': session('sess-a', 3_000),
+      'sess-b': session('sess-b', 7_000),
+    },
+    sessionOrder: ['sess-a', 'sess-b'],
+    sessionLastSeen: {},
+  };
+  const actions = [
+    {
+      type: 'QUEUE_PROMPT' as const,
+      appSessionId: 'sess-a',
+      prompt: { id: 'prompt-1', text: 'queued', skills: [], files: [] },
+    },
+    { type: 'REMOVE_QUEUED_PROMPT' as const, appSessionId: 'sess-a', id: 'prompt-1' },
+  ];
+
+  const sequential = actions.reduce(reducer, state);
+  const batched = reducer(state, { type: 'BATCH', actions });
+
+  assert.deepEqual(batched, sequential);
+});
+
+test('session creation records the exact request-to-session settlement', () => {
+  const state: AppState = {
+    ...initialState,
+    pendingCompose: {
+      'client-1': { text: 'hello', skills: [], files: [] },
+    },
+  };
+
+  const created = reducer(state, {
+    type: 'SESSION_CREATED',
+    clientRef: 'client-1',
+    session: session('created-session', 3_000),
+  });
+
+  assert.deepEqual(created.lastCreatedSessionRequest, {
+    clientRef: 'client-1',
+    appSessionId: 'created-session',
+  });
+  assert.equal(created.pendingCompose['client-1'], undefined);
+});

@@ -11,6 +11,7 @@ import {
   type CompactionRetuneTarget,
 } from './SessionCompaction.js';
 import { errMsg, isUserCancellation } from './sessionHelpers.js';
+import { isReportedStreamingTranscriptError } from './SessionTimeline.js';
 import {
   applyChildLaunchSettings,
   childAcceptsWork,
@@ -38,13 +39,24 @@ import {
 } from './ChildSessionState.js';
 import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
 
-type ChildOperation = 'open' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 type ChildSettingsCommand = Extract<ClientCommand, { type: 'child.updateSettings' }>;
+type ChildLoadHistoryCommand = Extract<ClientCommand, { type: 'child.loadHistory' }>;
 
 const CHILD_OPEN_CANCELLED = Symbol('child-open-cancelled');
 const ignoreError = (): undefined => undefined;
 const runCleanup = (operation: () => void | Promise<void>) =>
   Promise.resolve().then(operation).catch(ignoreError);
+
+function childHistoryProviderSessionIds(
+  child: ChildSessionState | PersistedChildSession,
+): string[] {
+  const previous =
+    'identity' in child
+      ? [...child.retiredProviderSessionIds]
+      : (child.previousProviderSessionIds ?? []);
+  return [...previous, ...(child.providerSessionId ? [child.providerSessionId] : [])];
+}
 
 export class ChildSessions {
   private readonly parents = new Map<string, ParentChildSessions>();
@@ -219,6 +231,58 @@ export class ChildSessions {
   async open(command: Extract<ClientCommand, { type: 'child.open' }>): Promise<void> {
     const { parentAppSessionId, childSessionId, requestId } = command;
     await this.openFor(parentAppSessionId, childSessionId, requestId, 'open');
+  }
+
+  async loadHistory(command: ChildLoadHistoryCommand): Promise<void> {
+    const identity = childIdentity(command.parentAppSessionId, command.childSessionId);
+    const parent = this.parents.get(command.parentAppSessionId);
+    const child = parent?.children.get(command.childSessionId);
+    if (parent && this.isCurrentParent(parent) && child) {
+      if (child.mutationTail) {
+        await child.mutationTail;
+        if (!this.isCurrentParent(parent)) return;
+        const current = parent.children.get(command.childSessionId);
+        if (!current) return;
+        this.d.timeline.loadChildHistory({
+          appSessionId: command.parentAppSessionId,
+          childSessionId: command.childSessionId,
+          childProviderSessionIds: childHistoryProviderSessionIds(current),
+          role: current.role,
+          cursor: command.cursor,
+          limit: command.limit,
+        });
+        return;
+      }
+      this.d.timeline.loadChildHistory({
+        appSessionId: command.parentAppSessionId,
+        childSessionId: command.childSessionId,
+        childProviderSessionIds: childHistoryProviderSessionIds(child),
+        role: child.role,
+        cursor: command.cursor,
+        limit: command.limit,
+      });
+      return;
+    }
+
+    const record = this.d.history.childSession(command.parentAppSessionId, command.childSessionId);
+    if (!record) {
+      this.emitError(
+        identity,
+        'loadHistory',
+        null,
+        'child.not_in_session',
+        `Child session ${command.childSessionId} is not tied to session ${command.parentAppSessionId}.`,
+      );
+      return;
+    }
+    this.d.timeline.loadChildHistory({
+      appSessionId: command.parentAppSessionId,
+      childSessionId: command.childSessionId,
+      childProviderSessionIds: childHistoryProviderSessionIds(record),
+      role: record.role,
+      cursor: command.cursor,
+      limit: command.limit,
+    });
   }
 
   async send(identity: ChildIdentity, text: string): Promise<void> {
@@ -476,7 +540,12 @@ export class ChildSessions {
       // Paint persisted history immediately. This is deliberately best effort:
       // a live child may not have flushed history yet, but its provider runtime
       // must still open without waiting for that file.
-      this.d.timeline.replayChild(parentAppSessionId, childSessionId, child.providerSessionId);
+      this.d.timeline.loadChildHistory({
+        appSessionId: parentAppSessionId,
+        childSessionId,
+        childProviderSessionIds: childHistoryProviderSessionIds(child),
+        role: child.role,
+      });
       const admitted = await this.awaitOpenStep(
         attempt,
         this.reserveCapacity(parent, child, operation, requestId),
@@ -598,11 +667,12 @@ export class ChildSessions {
       );
       return;
     }
-    this.d.timeline.replayChild(
-      record.parentAppSessionId,
-      record.childSessionId,
-      record.providerSessionId,
-    );
+    this.d.timeline.loadChildHistory({
+      appSessionId: record.parentAppSessionId,
+      childSessionId: record.childSessionId,
+      childProviderSessionIds: childHistoryProviderSessionIds(record),
+      role: record.role,
+    });
     if (requestId)
       this.d.emit({
         type: 'child.updated',
@@ -672,8 +742,10 @@ export class ChildSessions {
           child.identity.childSessionId,
           child.role,
         );
-      else if (!(child.turn.interrupting && isUserCancellation(error)))
+      else if (!(child.turn.interrupting && isUserCancellation(error))) {
+        this.flushStreaming(child.identity);
         this.emitError(child.identity, 'send', null, 'child.send_failed', errMsg(error));
+      }
     } finally {
       await this.settleTurn(parent, child, runtime, turnGeneration);
     }
@@ -685,8 +757,11 @@ export class ChildSessions {
     runtime: ChildRuntimeState,
     turnGeneration: number,
   ): Promise<void> {
-    this.d.context.stopPolling(this.contextTarget(parent, child, runtime));
     if (!this.isCurrentTurn(parent, child, runtime, turnGeneration)) return;
+    // Deliver only this runtime generation's buffered tail before it reads as
+    // settled. A retired turn must not settle its replacement's shared source.
+    this.settleStreaming(child.identity);
+    this.d.context.stopPolling(this.contextTarget(parent, child, runtime));
     child.turn.interruptingForSteer = false;
     child.turn.interrupting = false;
     if (child.closeWhenIdle && !child.turn.autoCompacting) {
@@ -708,6 +783,33 @@ export class ChildSessions {
     }
     child.status = 'paused';
     this.commit(child);
+  }
+
+  private flushStreaming(identity: ChildIdentity): void {
+    try {
+      this.d.timeline.flushStreamingFor(identity.parentAppSessionId, identity.childSessionId);
+    } catch (error) {
+      this.reportStreamingPersistenceFailure(identity, error);
+    }
+  }
+
+  private settleStreaming(identity: ChildIdentity): void {
+    try {
+      this.d.timeline.settleStreaming(identity.parentAppSessionId, identity.childSessionId);
+    } catch (error) {
+      this.reportStreamingPersistenceFailure(identity, error);
+    }
+  }
+
+  private reportStreamingPersistenceFailure(identity: ChildIdentity, error: unknown): void {
+    if (isReportedStreamingTranscriptError(error)) return;
+    this.emitError(
+      identity,
+      'send',
+      null,
+      'child.transcript_persist_failed',
+      `Unable to persist buffered child output: ${errMsg(error)}`,
+    );
   }
 
   private async performSettingsUpdate(

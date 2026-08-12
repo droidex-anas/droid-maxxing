@@ -83,6 +83,7 @@ export class SessionContext {
   // resurrect the old meter.
   private readonly pendingCompactionResets = new Set<string>();
   private readonly recordedCompactions = new Map<string, Map<string, number>>();
+  private readonly usagePersistenceRetries = new Set<string>();
   private readonly pollers = new Map<string, ContextPoller>();
   private epoch = 0;
 
@@ -109,6 +110,23 @@ export class SessionContext {
       sourceSessionId === stableAppSessionId &&
       !this.pendingCompactionResets.has(primaryResourceKey(stableAppSessionId));
     const currentContextTokens = canPublishContext ? usage.contextTokens : undefined;
+
+    // Providers repeat identical usage many times per turn. Re-publishing an
+    // unchanged reading would persist and broadcast a no-op summary update, so
+    // settle for the reading already on record.
+    const summaryBefore = liveSession.summary;
+    const contextUnchanged =
+      currentContextTokens === undefined ||
+      (currentContextTokens === summaryBefore.contextTokens &&
+        (currentContextTokens <= 0 || summaryBefore.contextAccuracy === 'exact'));
+    if (
+      !this.usagePersistenceRetries.has(stableAppSessionId) &&
+      nextSummary.tokensIn === summaryBefore.tokensIn &&
+      nextSummary.tokensOut === summaryBefore.tokensOut &&
+      contextUnchanged
+    )
+      return;
+
     if (currentContextTokens !== undefined) {
       nextSummary.contextTokens = currentContextTokens;
       if (currentContextTokens > 0) {
@@ -137,8 +155,10 @@ export class SessionContext {
         },
         { touchActivity: false },
       );
+      this.usagePersistenceRetries.delete(stableAppSessionId);
     } catch {
       // Usage telemetry must not fail the active provider turn.
+      this.usagePersistenceRetries.add(stableAppSessionId);
       liveSession.summary = nextSummary;
       this.dependencies.emit({
         type: 'session.updated',
@@ -290,6 +310,7 @@ export class SessionContext {
     this.providerUsageBaselines.delete(key);
     this.latestProviderUsage.delete(key);
     this.pendingCompactionResets.delete(key);
+    this.usagePersistenceRetries.delete(appSessionId);
     this.forgetRecordedCompactions(key);
   }
 
@@ -303,6 +324,7 @@ export class SessionContext {
     this.latestProviderUsage.clear();
     this.pendingCompactionResets.clear();
     this.recordedCompactions.clear();
+    this.usagePersistenceRetries.clear();
     this.usageOffsets.clear();
   }
 
@@ -354,22 +376,32 @@ export class SessionContext {
       : applyExactUsage(normalizedProviderSnapshot, liveSession.summary);
 
     if (!target.isCurrent()) return;
+    // The in-turn poller repeats the same provider reading every tick; an
+    // unchanged snapshot would only fan out no-op renders. Still synchronize
+    // the primary summary below: an exact usage event may have updated the
+    // cached snapshot without filling derived summary fields such as remaining.
+    // Settlement refreshes (persist !== false) always publish so summaries
+    // settle authoritatively.
+    const skipTelemetry =
+      options.persist === false && sameContextReading(this.snapshots.get(key), snapshot);
     // Do NOT clear pendingCompactionResets here: a late pre-compaction usage
     // event delivered after this provider reading could resurrect the old meter.
     // The guard is cleared at the stream-settlement boundary (beginTurn) instead.
-    this.snapshots.set(key, snapshot);
-    this.dependencies.emit({
-      type: 'context.updated',
-      appSessionId: target.appSessionId,
-      sourceSessionId: target.sourceSessionId,
-      ...(isChildTarget(target)
-        ? {
-            parentAppSessionId: target.parentAppSessionId,
-            childSessionId: target.childSessionId,
-          }
-        : {}),
-      stats: snapshot,
-    });
+    if (!skipTelemetry) {
+      this.snapshots.set(key, snapshot);
+      this.dependencies.emit({
+        type: 'context.updated',
+        appSessionId: target.appSessionId,
+        sourceSessionId: target.sourceSessionId,
+        ...(isChildTarget(target)
+          ? {
+              parentAppSessionId: target.parentAppSessionId,
+              childSessionId: target.childSessionId,
+            }
+          : {}),
+        stats: snapshot,
+      });
+    }
 
     if (isChildTarget(target)) return;
     const contextPatch = {
@@ -380,9 +412,16 @@ export class SessionContext {
       contextAccuracy: snapshot.accuracy,
       contextUpdatedAt: snapshot.updatedAt,
     };
-    if (options.persist === false)
-      liveSession.summary = { ...liveSession.summary, ...contextPatch };
-    else
+    if (options.persist === false) {
+      if (
+        liveSession.summary.contextTokens !== contextPatch.contextTokens ||
+        liveSession.summary.contextRemainingTokens !== contextPatch.contextRemainingTokens ||
+        liveSession.summary.maxContextTokens !== contextPatch.maxContextTokens ||
+        liveSession.summary.contextAccuracy !== contextPatch.contextAccuracy ||
+        liveSession.summary.contextUpdatedAt !== contextPatch.contextUpdatedAt
+      )
+        liveSession.summary = { ...liveSession.summary, ...contextPatch };
+    } else
       this.dependencies.registry.updateSummary(target.appSessionId, contextPatch, {
         touchActivity: false,
       });
@@ -414,6 +453,7 @@ export class SessionContext {
       updatedAt: new Date().toISOString(),
       breakdown,
     };
+    if (sameContextReading(previous, snapshot)) return;
     this.snapshots.set(resourceKey, snapshot);
     this.dependencies.emit({
       type: 'context.updated',
@@ -494,4 +534,21 @@ function contextResourceKey(target: ContextOperationTarget): string {
 function compactionRetryKey(target: ContextOperationTarget): string {
   const providerSessionId = target.providerSessionId;
   return `${contextResourceKey(target)}:provider:${String(providerSessionId.length)}:${providerSessionId}`;
+}
+
+// Same context reading in every observable field; only updatedAt (stamped per
+// emission) is ignored, so a repeated reading is a publishable no-op.
+function sameContextReading(
+  previous: ContextStatsSnapshot | undefined,
+  next: ContextStatsSnapshot,
+): boolean {
+  if (!previous) return false;
+  return (
+    previous.used === next.used &&
+    previous.remaining === next.remaining &&
+    previous.limit === next.limit &&
+    previous.accuracy === next.accuracy &&
+    previous.compactions === next.compactions &&
+    JSON.stringify(previous.breakdown) === JSON.stringify(next.breakdown)
+  );
 }

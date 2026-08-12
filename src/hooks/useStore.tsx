@@ -1,5 +1,16 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useReducer, useState, useEffect } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
@@ -37,6 +48,7 @@ import type {
   DesignReference,
 } from '../types/bridge';
 import { addWorkspaceCwd } from '../lib/workspaces';
+import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
 import {
   applyFactoryCompactionDefaults,
@@ -48,7 +60,7 @@ import {
   saveCompactionTokenLimitPerModel,
 } from '../lib/compactionSettings';
 import { sanitizeForLog } from '../lib/sensitiveLogRedaction';
-import { composePrompt } from '../lib/composePrompt';
+import { sessionIsLive } from '../lib/sessions';
 import {
   addSessionNote,
   loadSessionNotes,
@@ -85,6 +97,23 @@ import {
   type UtilityTool,
 } from '../lib/utilityPanel';
 import type { ImagePasteQuality } from '../lib/images';
+import {
+  estimateTranscriptCost,
+  INACTIVE_TRANSCRIPT_POLICY,
+  VIEWPORT_TRANSCRIPT_POLICY,
+} from '../lib/transcriptWindow';
+import {
+  appendTranscriptEvent,
+  pruneRemovedSessionState,
+  releaseSessionChildTranscriptWindow,
+  releaseSessionTranscriptWindow,
+  withUpdatedTranscript,
+} from '../lib/transcriptStoreMemory';
+import {
+  reconcilePrependedTranscript,
+  reconcileRestoredTranscript,
+  reconcileTranscriptSourcePage,
+} from '../lib/transcriptHistory';
 
 export type AgentKind = 'primary' | 'worker' | 'validator';
 export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
@@ -162,6 +191,13 @@ export interface SessionRestore {
   error?: string;
 }
 
+export interface ChildHistoryState extends SessionRestore {
+  isLoaded: boolean;
+  isLoadingOlder: boolean;
+  olderCursor?: string;
+  isViewportPinned: boolean;
+}
+
 export interface AppState {
   // Connection
   connection: 'idle' | 'connecting' | 'connected' | 'error';
@@ -186,6 +222,12 @@ export interface AppState {
   // persisted in localStorage; the harness session data is never touched.
   chatMetadata: ChatMetadataMap;
   transcripts: Record<string, TranscriptEvent[]>;
+  // Relative retained-payload estimate for each in-memory transcript window.
+  // This is budgeting telemetry, not a claim about exact V8 heap bytes.
+  transcriptRetainedCost: Record<string, number>;
+  // Primary transcript viewport state. Normal eviction is allowed only after
+  // the viewport is bottom-pinned; scrolled-up reading stays resident.
+  transcriptViewportPinned: Partial<Record<string, boolean>>;
   progress: Record<string, ProgressEntry[]>;
   childSessions: Record<string, Record<string, ChildSessionInfo>>;
   historyLoaded: Record<string, boolean>;
@@ -199,7 +241,11 @@ export interface AppState {
   // is loading, partially loaded (older pages remain), fully loaded, or failed.
   // Lets the chat show an honest restoring/partial/retry surface instead of a
   // blank or silently truncated transcript (#29).
-  sessionRestore: Record<string, SessionRestore>;
+  sessionRestore: Partial<Record<string, SessionRestore>>;
+  // Child transcripts share the parent event array for live rendering, but
+  // each logical child owns an independent persisted-history cursor and
+  // viewport lifecycle.
+  childHistory: Record<string, Record<string, ChildHistoryState>>;
   childAccess: Record<string, Record<string, ChildAccess>>;
   childRuntime: Record<string, Record<string, ChildRuntimeState>>;
   pendingPermission: PermissionRequest | null;
@@ -311,9 +357,14 @@ export interface AppState {
 
   // Attachments for the first message of a not-yet-created session, keyed by clientRef.
   pendingCompose: Partial<Record<string, { text: string; skills: string[]; files: string[] }>>;
+  // Bounded settlement identity for the latest successful foreground create.
+  // PromptInput uses it to distinguish that activation from a failure followed
+  // by the user selecting an unrelated existing session.
+  lastCreatedSessionRequest: { clientRef: string; appSessionId: string } | null;
 }
 
 type Action =
+  | { type: 'BATCH'; actions: Action[] }
   // Connection
   | {
       type: 'SET_CONNECTION';
@@ -370,7 +421,7 @@ type Action =
       parentAppSessionId: string;
       childSessionId: string;
       requestId: string | null;
-      operation: 'open' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+      operation: 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
       message: string;
     }
   | {
@@ -390,6 +441,8 @@ type Action =
       stats: ContextStatsSnapshot;
     }
   | { type: 'SESSION_TRANSCRIPT'; event: TranscriptEvent }
+  | { type: 'TRANSCRIPT_VIEWPORT'; appSessionId: string; pinned: boolean }
+  | { type: 'TRANSCRIPT_RELEASE_VIEWPORT'; appSessionId: string }
   | { type: 'QUEUE_PROMPT'; appSessionId: string; prompt: QueuedPrompt }
   | { type: 'REMOVE_QUEUED_PROMPT'; appSessionId: string; id: string }
   | { type: 'REORDER_QUEUE'; appSessionId: string; from: number; to: number }
@@ -409,6 +462,7 @@ type Action =
   | {
       type: 'SESSION_HISTORY';
       appSessionId: string;
+      childSessionId?: string;
       progress: ProgressEntry[];
       transcripts: TranscriptEvent[];
       childSessions?: ChildSessionSummary[];
@@ -418,8 +472,34 @@ type Action =
       hasMore?: boolean;
     }
   | { type: 'SESSION_RESTORE_START'; appSessionId: string }
-  | { type: 'SESSION_HISTORY_FAILED'; appSessionId: string; message: string }
+  | {
+      type: 'SESSION_HISTORY_FAILED';
+      appSessionId: string;
+      childSessionId?: string;
+      message: string;
+    }
   | { type: 'SESSION_HISTORY_LOADING_OLDER'; appSessionId: string }
+  | {
+      type: 'CHILD_HISTORY_LOADING';
+      parentAppSessionId: string;
+      childSessionId: string;
+    }
+  | {
+      type: 'CHILD_HISTORY_LOADING_OLDER';
+      parentAppSessionId: string;
+      childSessionId: string;
+    }
+  | {
+      type: 'CHILD_TRANSCRIPT_VIEWPORT';
+      parentAppSessionId: string;
+      childSessionId: string;
+      pinned: boolean;
+    }
+  | {
+      type: 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT';
+      parentAppSessionId: string;
+      childSessionId: string;
+    }
   | { type: 'CLEAR_PERMISSION' }
   | { type: 'CLEAR_QUESTION' }
 
@@ -988,12 +1068,21 @@ export const initialState: AppState = {
   transcripts: sessionSnapshot?.transcript
     ? { [sessionSnapshot.transcript.appSessionId]: sessionSnapshot.transcript.events }
     : {},
+  transcriptRetainedCost: sessionSnapshot?.transcript
+    ? {
+        [sessionSnapshot.transcript.appSessionId]: estimateTranscriptCost(
+          sessionSnapshot.transcript.events,
+        ),
+      }
+    : {},
+  transcriptViewportPinned: {},
   progress: {},
   childSessions: {},
   historyLoaded: {},
   historyCursor: {},
   historyLoadingOlder: {},
   sessionRestore: {},
+  childHistory: {},
   childAccess: {},
   childRuntime: {},
   pendingPermission: null,
@@ -1044,6 +1133,7 @@ export const initialState: AppState = {
   skillsProviderSessionId: undefined,
   agentConfig: loadAgentConfig(),
   pendingCompose: {},
+  lastCreatedSessionRequest: null,
 };
 
 function progressKey(entry: ProgressEntry): string {
@@ -1081,21 +1171,6 @@ function clearBrowserOpenKey(keys: Record<string, boolean>, key: string): Record
 
 // Re-derive `browserOpen` from the per-session open set and the active session.
 // Applied after every reducer pass so the convenience flag never goes stale.
-// How close in time a live event and a restored page entry must be to count as
-// the same (persisted) event. A twin is logged within moments of the live emit,
-// while a coincidental same-text repeat is typically much further apart.
-const REPLAY_DEDUP_TOLERANCE_MS = 5_000;
-
-// An optimistic user echo stores the raw input, but history persists the
-// composed prompt (raw text plus skill/file context). Match against both so a
-// skill/file prompt is recognized as superseded instead of duplicating.
-function echoMatchesPersisted(e: TranscriptEvent, persisted: Set<string | undefined>): boolean {
-  if (!e.text) return false;
-  if (persisted.has(e.text)) return true;
-  const composed = composePrompt(e.text, e.skills ?? [], e.files ?? []);
-  return composed !== e.text && persisted.has(composed);
-}
-
 function syncBrowserOpen(state: AppState): AppState {
   const key = activeBrowserKey(state);
   const open = key ? Boolean(state.browserOpenKeys[key]) : false;
@@ -1157,6 +1232,53 @@ function withChildRuntime(
   };
 }
 
+function withChildHistory(
+  state: AppState,
+  parentAppSessionId: string,
+  childSessionId: string,
+  history: ChildHistoryState,
+): AppState {
+  return {
+    ...state,
+    childHistory: {
+      ...state.childHistory,
+      [parentAppSessionId]: {
+        ...state.childHistory[parentAppSessionId],
+        [childSessionId]: history,
+      },
+    },
+  };
+}
+
+function releaseInactiveChildTranscript(
+  state: AppState,
+  parentAppSessionId: string,
+  childSessionId: string,
+): AppState {
+  // These keyed renderer maps are intentionally sparse at runtime despite
+  // their long-standing Record types.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+  const history = state.childHistory[parentAppSessionId]?.[childSessionId];
+  if (history && (!history.isLoaded || !history.isViewportPinned)) return state;
+  const child = state.childSessions[parentAppSessionId]?.[childSessionId];
+  const runtime = state.childRuntime[parentAppSessionId]?.[childSessionId];
+  if (child?.status === 'running' && runtime?.available) return state;
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+  return releaseSessionChildTranscriptWindow(
+    state,
+    parentAppSessionId,
+    childSessionId,
+    INACTIVE_TRANSCRIPT_POLICY,
+  );
+}
+
+function releaseInactiveSelectedChild(state: AppState): AppState {
+  const selected = state.selectedChild;
+  return selected
+    ? releaseInactiveChildTranscript(state, selected.parentAppSessionId, selected.childSessionId)
+    : state;
+}
+
 function invalidateSelectedChildOpening(state: AppState): AppState {
   const selected = state.selectedChild;
   if (!selected) return state;
@@ -1208,22 +1330,10 @@ function withHistoricalCompactionGeneration(
 }
 
 export function reducer(state: AppState, action: Action): AppState {
+  if (action.type === 'BATCH') {
+    return action.actions.reduce(reducer, state);
+  }
   return syncBrowserOpen(baseReducer(state, action));
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-// Merge a streamed tool_call delta's args onto the accumulated args. One tool
-// call streams as many partial deltas: a Task spawn sends subagent_type and
-// description in separate deltas, and Todo/edit deltas can be payload-less or
-// carry only some fields. Replacing wholesale would drop earlier-streamed
-// fields, so shallow-merge when both are objects (latest field value wins) and
-// only fall back to a non-object/absent delta when there is nothing to merge.
-function mergeToolArgs(prev: unknown, next: unknown): unknown {
-  if (isPlainRecord(prev) && isPlainRecord(next)) return { ...prev, ...next };
-  return next ?? prev;
 }
 
 function baseReducer(state: AppState, action: Action): AppState {
@@ -1263,6 +1373,7 @@ function baseReducer(state: AppState, action: Action): AppState {
       // Seed the first user message: the goal is the user's opening prompt and the
       // backend never echoes it back, so without this the first message never shows.
       let transcripts = state.transcripts;
+      let transcriptRetainedCost = state.transcriptRetainedCost;
       const hasTranscript = (state.transcripts[action.session.appSessionId]?.length ?? 0) > 0;
       if (action.session.goal && !hasTranscript) {
         const seed: TranscriptEvent = {
@@ -1278,6 +1389,10 @@ function baseReducer(state: AppState, action: Action): AppState {
           files: pending?.files.length ? pending.files : undefined,
         };
         transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
+        transcriptRetainedCost = {
+          ...state.transcriptRetainedCost,
+          [action.session.appSessionId]: estimateTranscriptCost([seed]),
+        };
       }
 
       const pendingCompose = pending
@@ -1297,6 +1412,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         },
         sessionOrder: order,
         transcripts,
+        transcriptRetainedCost,
         activeAppSessionId: shouldActivate ? action.session.appSessionId : state.activeAppSessionId,
         draftChat: shouldActivate ? null : state.draftChat,
         draftAutonomy: shouldActivate ? null : state.draftAutonomy,
@@ -1310,6 +1426,9 @@ function baseReducer(state: AppState, action: Action): AppState {
         childAccess,
         childRuntime,
         pendingCompose,
+        lastCreatedSessionRequest: shouldActivate
+          ? { clientRef: action.clientRef, appSessionId: action.session.appSessionId }
+          : state.lastCreatedSessionRequest,
         // A foreground chat just created by this renderer is already seen.
         sessionLastSeen: shouldActivate
           ? {
@@ -1378,12 +1497,22 @@ function baseReducer(state: AppState, action: Action): AppState {
             Object.entries(state.pendingAutonomy).filter(([id]) => id !== m.appSessionId),
           )
         : state.pendingAutonomy;
-      return {
+      const next = {
         ...state,
         sessions: { ...state.sessions, [m.appSessionId]: m },
         contextStats,
         pendingAutonomy,
       };
+      if (
+        !previous ||
+        !sessionIsLive(previous) ||
+        sessionIsLive(m) ||
+        m.updatedAt <= previous.updatedAt ||
+        state.activeAppSessionId === m.appSessionId ||
+        state.transcriptViewportPinned[m.appSessionId] === false
+      )
+        return next;
+      return releaseSessionTranscriptWindow(next, m.appSessionId, INACTIVE_TRANSCRIPT_POLICY);
     }
 
     case 'SESSION_CLOSED': {
@@ -1470,10 +1599,18 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'SESSION_CHILD': {
       const child = action.child;
       const parent = state.childSessions[child.parentAppSessionId] ?? {};
+      const previousChild = parent[child.childSessionId];
       const runtimeParent = state.childRuntime[child.parentAppSessionId] ?? {};
       const previousRuntime = runtimeParent[child.childSessionId];
       if (previousRuntime && action.runtimeGeneration < previousRuntime.runtimeGeneration)
         return state;
+      const settledWhileInactive =
+        previousChild?.status === 'running' &&
+        previousRuntime?.available &&
+        (child.status !== 'running' || !action.runtimeAvailable) &&
+        (state.activeAppSessionId !== child.parentAppSessionId ||
+          state.selectedChild?.parentAppSessionId !== child.parentAppSessionId ||
+          state.selectedChild.childSessionId !== child.childSessionId);
       const clearContext =
         !action.runtimeAvailable ||
         (previousRuntime !== undefined &&
@@ -1502,40 +1639,41 @@ function baseReducer(state: AppState, action: Action): AppState {
             }
           : state.contextStats,
       };
-      if (
+      const runtimeUnchanged =
         // Keep the existence guard because the following comparison dereferences previousRuntime.
         // eslint-disable-next-line @typescript-eslint/prefer-optional-chain
         previousRuntime &&
         action.runtimeGeneration === previousRuntime.runtimeGeneration &&
-        action.runtimeAvailable === previousRuntime.available
-      )
-        return next;
-      next = {
-        ...next,
-        childRuntime: {
-          ...state.childRuntime,
-          [child.parentAppSessionId]: {
-            ...runtimeParent,
-            [child.childSessionId]: {
-              available: action.runtimeAvailable,
-              runtimeGeneration: action.runtimeGeneration,
+        action.runtimeAvailable === previousRuntime.available;
+      if (!runtimeUnchanged) {
+        next = {
+          ...next,
+          childRuntime: {
+            ...state.childRuntime,
+            [child.parentAppSessionId]: {
+              ...runtimeParent,
+              [child.childSessionId]: {
+                available: action.runtimeAvailable,
+                runtimeGeneration: action.runtimeGeneration,
+              },
             },
           },
-        },
-      };
-      const access = state.childAccess[child.parentAppSessionId]?.[child.childSessionId];
-      if (!access) return next;
-      if (!action.runtimeAvailable && (access.state === 'opening' || access.state === 'ready'))
-        return withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-          state: 'closed',
-          requestId: null,
-        });
-      if (action.runtimeAvailable && access.state === 'ready')
-        return withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-          ...access,
-          runtimeGeneration: action.runtimeGeneration,
-        });
-      return next;
+        };
+        const access = state.childAccess[child.parentAppSessionId]?.[child.childSessionId];
+        if (!action.runtimeAvailable && (access?.state === 'opening' || access?.state === 'ready'))
+          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
+            state: 'closed',
+            requestId: null,
+          });
+        else if (action.runtimeAvailable && access?.state === 'ready')
+          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
+            ...access,
+            runtimeGeneration: action.runtimeGeneration,
+          });
+      }
+      return settledWhileInactive
+        ? releaseInactiveChildTranscript(next, child.parentAppSessionId, child.childSessionId)
+        : next;
     }
 
     case 'CHILD_UPDATED': {
@@ -1575,6 +1713,22 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'CHILD_ERROR': {
+      if (action.operation === 'loadHistory') {
+        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+        const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+        const next = withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
+          status: 'failed',
+          loadedCount: previous?.loadedCount ?? 0,
+          hasMore: previous?.hasMore ?? false,
+          error: action.message,
+          isLoaded: previous?.isLoaded ?? false,
+          isLoadingOlder: false,
+          olderCursor: previous?.olderCursor,
+          isViewportPinned: previous?.isViewportPinned ?? true,
+        });
+        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+        return next;
+      }
       if (action.operation !== 'open' || !action.requestId) return state;
       if (
         state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
@@ -1648,59 +1802,68 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
     }
 
-    case 'SESSION_TRANSCRIPT': {
-      const ev = action.event;
-      const mid = ev.appSessionId;
-      const prev = state.transcripts[mid] ?? [];
-      if (prev.some((event) => event.id === ev.id)) return state;
+    case 'SESSION_TRANSCRIPT':
+      return appendTranscriptEvent(state, action.event);
 
-      // Delta merging: if the last event has the same kind + sourceSessionId, append text
-      // Only merge backend streaming deltas (author is absent); do NOT merge explicit user echoes
-      const last = prev[prev.length - 1];
-      if (
-        last &&
-        !ev.author && // backend streaming delta (user echoes have author:'user')
-        last.kind === ev.kind &&
-        last.sourceSessionId === ev.sourceSessionId &&
-        last.author === ev.author &&
-        (ev.kind === 'text' || ev.kind === 'thinking') &&
-        ev.text &&
-        !ev.toolName
-      ) {
-        const merged = [...prev];
-        merged[merged.length - 1] = { ...last, text: (last.text ?? '') + ev.text, endTs: ev.ts };
-        return { ...state, transcripts: { ...state.transcripts, [mid]: merged } };
-      }
+    case 'TRANSCRIPT_VIEWPORT':
+      return state.transcriptViewportPinned[action.appSessionId] === action.pinned
+        ? state
+        : {
+            ...state,
+            transcriptViewportPinned: {
+              ...state.transcriptViewportPinned,
+              [action.appSessionId]: action.pinned,
+            },
+          };
 
-      // Coalesce tool_call deltas: a single tool call streams as many partial
-      // tool_call events sharing one toolUseId. Collapse them onto the prior
-      // event (keeping its stable id, adopting the latest args) so live render
-      // matches replay's one-event-per-tool-use shape and edit stats are not
-      // inflated by counting every partial snapshot.
-      if (
-        last &&
-        !ev.author &&
-        ev.kind === 'tool_call' &&
-        last.kind === 'tool_call' &&
-        last.sourceSessionId === ev.sourceSessionId &&
-        !!ev.toolUseId &&
-        last.toolUseId === ev.toolUseId
-      ) {
-        const merged = [...prev];
-        merged[merged.length - 1] = {
-          ...last,
-          toolName: ev.toolName ?? last.toolName,
-          toolArgs: mergeToolArgs(last.toolArgs, ev.toolArgs),
-          endTs: ev.ts,
-        };
-        return { ...state, transcripts: { ...state.transcripts, [mid]: merged } };
-      }
+    /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+    case 'TRANSCRIPT_RELEASE_VIEWPORT': {
+      if (state.activeAppSessionId !== action.appSessionId) return state;
+      if (state.transcriptViewportPinned[action.appSessionId] === false) return state;
+      const session = state.sessions[action.appSessionId];
+      if (!session || sessionIsLive(session)) return state;
+      return releaseSessionTranscriptWindow(state, action.appSessionId, VIEWPORT_TRANSCRIPT_POLICY);
+    }
 
+    case 'CHILD_TRANSCRIPT_VIEWPORT': {
+      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      if (!previous || previous.isViewportPinned === action.pinned) return state;
       return {
         ...state,
-        transcripts: { ...state.transcripts, [mid]: [...prev, ev] },
+        childHistory: {
+          ...state.childHistory,
+          [action.parentAppSessionId]: {
+            ...state.childHistory[action.parentAppSessionId],
+            [action.childSessionId]: {
+              ...previous,
+              isViewportPinned: action.pinned,
+            },
+          },
+        },
       };
     }
+
+    case 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT': {
+      if (
+        state.activeAppSessionId !== action.parentAppSessionId ||
+        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
+        state.selectedChild.childSessionId !== action.childSessionId
+      ) {
+        return state;
+      }
+      const history = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      if (!history?.isLoaded || !history.isViewportPinned) return state;
+      const child = state.childSessions[action.parentAppSessionId]?.[action.childSessionId];
+      const runtime = state.childRuntime[action.parentAppSessionId]?.[action.childSessionId];
+      if (child?.status === 'running' && runtime?.available) return state;
+      return releaseSessionChildTranscriptWindow(
+        state,
+        action.parentAppSessionId,
+        action.childSessionId,
+        VIEWPORT_TRANSCRIPT_POLICY,
+      );
+    }
+    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
     case 'QUEUE_PROMPT': {
       const prev = state.promptQueue[action.appSessionId] ?? [];
@@ -1804,6 +1967,10 @@ function baseReducer(state: AppState, action: Action): AppState {
             ([clientRef]) => clientRef !== action.clientRef,
           ),
         ),
+        lastCreatedSessionRequest:
+          state.lastCreatedSessionRequest?.clientRef === action.clientRef
+            ? null
+            : state.lastCreatedSessionRequest,
       };
 
     case 'SESSION_ERROR': {
@@ -1849,10 +2016,12 @@ function baseReducer(state: AppState, action: Action): AppState {
       ]
         .filter((id) => map[id])
         .sort((a, b) => map[b].updatedAt - map[a].updatedAt);
+      const retainedSessionIds = new Set(Object.keys(map));
+      const retainedState = pruneRemovedSessionState(state, retainedSessionIds);
       // Seed last-seen for sessions this client has never tracked so existing
       // history is not retroactively marked unread; only activity that arrives
       // after this point (a newer updatedAt) flips a row to unread.
-      const seededLastSeen = { ...state.sessionLastSeen };
+      const seededLastSeen = { ...retainedState.sessionLastSeen };
       for (const m of action.sessions) {
         if (seededLastSeen[m.appSessionId] === undefined) {
           seededLastSeen[m.appSessionId] = m.updatedAt;
@@ -1880,7 +2049,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         );
       }
       return {
-        ...state,
+        ...retainedState,
         sessions: map,
         sessionOrder: order,
         sessionLastSeen: seededLastSeen,
@@ -1895,6 +2064,29 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: true },
       };
+
+    /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+    case 'CHILD_HISTORY_LOADING': {
+      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
+        status: 'loading',
+        loadedCount: previous?.loadedCount ?? 0,
+        hasMore: previous?.hasMore ?? false,
+        isLoaded: false,
+        isLoadingOlder: false,
+        olderCursor: undefined,
+        isViewportPinned: previous?.isViewportPinned ?? true,
+      });
+    }
+
+    case 'CHILD_HISTORY_LOADING_OLDER': {
+      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
+      if (!previous || previous.isLoadingOlder) return state;
+      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
+        ...previous,
+        isLoadingOlder: true,
+      });
+    }
 
     case 'SESSION_RESTORE_START': {
       const prev = state.sessionRestore[action.appSessionId];
@@ -1912,6 +2104,19 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'SESSION_HISTORY_FAILED': {
+      if (action.childSessionId) {
+        const prev = state.childHistory[action.appSessionId]?.[action.childSessionId];
+        return withChildHistory(state, action.appSessionId, action.childSessionId, {
+          status: 'failed',
+          loadedCount: prev?.loadedCount ?? 0,
+          hasMore: prev?.hasMore ?? false,
+          error: action.message,
+          isLoaded: prev?.isLoaded ?? false,
+          isLoadingOlder: false,
+          olderCursor: prev?.olderCursor,
+          isViewportPinned: prev?.isViewportPinned ?? true,
+        });
+      }
       const prev = state.sessionRestore[action.appSessionId];
       return {
         ...state,
@@ -1930,154 +2135,73 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     case 'SESSION_HISTORY': {
       const existing = state.transcripts[action.appSessionId] ?? [];
-      // An older page prepends its events to the front of the existing scrollback
-      // (deduping by id so a trimmed/overlapping boundary never doubles a message).
-      if (action.mode === 'prepend') {
-        // Drop optimistic user echoes (seed-/local-) now superseded by the real
-        // persisted prompt arriving in this older page. They were kept above a
-        // partial page during the initial restore; without this they would
-        // duplicate and misorder the opening prompt once it pages in (their ids
-        // differ from the persisted prompt, so id-dedup alone misses them).
-        const olderUserText = new Set(
-          action.transcripts.filter((e) => e.author === 'user' && e.text).map((e) => e.text),
+      const hasMore = Boolean(action.olderCursor);
+
+      if (action.childSessionId) {
+        const reconciled = reconcileTranscriptSourcePage(
+          existing,
+          action.childSessionId,
+          action.transcripts,
+          action.mode ?? 'replace',
+          hasMore,
         );
-        const olderLastTs =
-          action.transcripts.length > 0 ? action.transcripts[action.transcripts.length - 1].ts : 0;
-        const supersededEcho = (e: TranscriptEvent) =>
-          (e.id.startsWith('seed-') || e.id.startsWith('local-')) &&
-          e.author === 'user' &&
-          !!e.text &&
-          e.ts <= olderLastTs &&
-          echoMatchesPersisted(e, olderUserText);
-        const kept = existing.filter((e) => !supersededEcho(e));
-        const have = new Set(kept.map((e) => e.id));
-        const older = action.transcripts.filter((e) => !have.has(e.id));
-        const changed = older.length > 0 || kept.length !== existing.length;
-        const merged = changed ? [...older, ...kept] : existing;
-        const hasMore = Boolean(action.olderCursor);
-        return withHistoricalCompactionGeneration(
-          {
-            ...state,
-            transcripts: changed
-              ? { ...state.transcripts, [action.appSessionId]: merged }
-              : state.transcripts,
-            historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-            historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-            sessionRestore: {
-              ...state.sessionRestore,
-              [action.appSessionId]: {
-                status: hasMore ? 'paged' : 'loaded',
-                loadedCount: merged.length,
-                hasMore,
-              },
+        const transcriptChanged = reconciled.transcript !== existing;
+        const previousHistory = state.childHistory[action.appSessionId]?.[action.childSessionId];
+        const historyState = withChildHistory(state, action.appSessionId, action.childSessionId, {
+          status: hasMore ? 'paged' : 'loaded',
+          loadedCount: reconciled.sourceEvents.length,
+          hasMore,
+          isLoaded: true,
+          isLoadingOlder: false,
+          olderCursor: action.olderCursor,
+          isViewportPinned: previousHistory?.isViewportPinned ?? true,
+        });
+        const next = transcriptChanged
+          ? withUpdatedTranscript(
+              historyState,
+              action.appSessionId,
+              reconciled.transcript,
+              estimateTranscriptCost(reconciled.transcript),
+              action.childSessionId,
+            )
+          : historyState;
+        const isSelected =
+          next.selectedChild?.parentAppSessionId === action.appSessionId &&
+          next.selectedChild.childSessionId === action.childSessionId;
+        return isSelected
+          ? next
+          : releaseInactiveChildTranscript(next, action.appSessionId, action.childSessionId);
+      }
+
+      if (action.mode === 'prepend') {
+        const mergedTranscript = reconcilePrependedTranscript(existing, action.transcripts);
+        const transcriptChanged = mergedTranscript !== existing;
+        const historyState: AppState = {
+          ...state,
+          historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
+          historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
+          sessionRestore: {
+            ...state.sessionRestore,
+            [action.appSessionId]: {
+              status: hasMore ? 'paged' : 'loaded',
+              loadedCount: mergedTranscript.length,
+              hasMore,
             },
           },
-          action.appSessionId,
-          merged,
-        );
+        };
+        const next = transcriptChanged
+          ? withUpdatedTranscript(
+              historyState,
+              action.appSessionId,
+              mergedTranscript,
+              estimateTranscriptCost(mergedTranscript),
+            )
+          : historyState;
+        return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
       }
-      // No-clobber replace: reconcile the authoritative, correctly-ordered
-      // replay page with any live events already in state (a reconnect to a
-      // running session can deliver live events first, and a brand-new session
-      // carries a locally seeded opening prompt).
-      //   - Shared ids: the page wins.
-      //   - Optimistic user echoes (seed-/local- ids) the page already contains
-      //     (matched by author + text within the page's time window) are dropped
-      //     so the opening prompt never double-renders once history arrives.
-      //     Echoes newer than the whole page (a prompt sent during restore) are
-      //     kept, as are echoes older than a PARTIAL page (paged restore): there
-      //     the matching text is a later message, not this echo, so dropping it
-      //     would lose the opening prompt that belongs above the page.
-      //   - Live events that duplicate a replayed one by content are dropped:
-      //     live ids are transient (nextId) and live ts is receipt-time, so a
-      //     reconnect-race event and its persisted twin share neither id nor ts
-      //     and would otherwise both render. They are matched by a content
-      //     signature (sourceSessionId + toolUseId for tools, else
-      //     sourceSessionId + author/role + kind + text) consumed once per page
-      //     occurrence so a genuinely repeated message is kept. Scoping by
-      //     sourceSessionId stops one child session's output masking another's.
-      //   - Remaining live-only events keep their place by timestamp relative to
-      //     the page: an un-persisted opening prompt stays above it, a just-sent
-      //     prompt (reconnect race) stays below it.
-      // The page's internal order (seq) is preserved by never re-sorting it.
-      const page = action.transcripts;
-      const pageIds = new Set(page.map((e) => e.id));
-      const pageUserText = new Set(
-        page.filter((e) => e.author === 'user' && e.text).map((e) => e.text),
-      );
-      const firstTs = page.length > 0 ? page[0].ts : 0;
-      const lastTs = page.length > 0 ? page[page.length - 1].ts : 0;
-      // A partial page (older history still pages in) does not contain anything
-      // older than firstTs, so an earlier echo must not be deduped against it.
-      // A complete page (no older cursor) spans the whole conversation, so the
-      // lower bound is relaxed to also catch a seed whose createdAt slightly
-      // predates the first persisted message.
-      const pageIsComplete = !action.olderCursor;
-      const supersededEcho = (e: TranscriptEvent) =>
-        (e.id.startsWith('seed-') || e.id.startsWith('local-')) &&
-        e.author === 'user' &&
-        !!e.text &&
-        e.ts <= lastTs &&
-        (pageIsComplete || e.ts >= firstTs) &&
-        echoMatchesPersisted(e, pageUserText);
-      // Live primary events carry the current provider identity while restored
-      // history canonicalizes that source to 'primary' (mirroring the
-      // sidecar). Normalize so a reconnect-race twin matches instead of both the
-      // live and persisted copy surviving and duplicating main-agent output.
-      const sessionKey = (e: TranscriptEvent) =>
-        e.role === 'primary' && e.sourceSessionId !== 'user' ? 'primary' : e.sourceSessionId;
-      const contentSig = (e: TranscriptEvent) =>
-        e.toolUseId
-          ? `tool:${sessionKey(e)}:${e.kind}:${e.toolUseId}`
-          : `${sessionKey(e)}:${e.author ?? e.role}:${e.kind}:${e.text ?? ''}`;
-      // Index page entries by content signature -> their timestamps so a live
-      // event is matched to the persisted twin nearest in time rather than to
-      // any same-text occurrence anywhere in restored history.
-      const pageSig = new Map<string, number[]>();
-      for (const e of page) {
-        const k = contentSig(e);
-        const at = pageSig.get(k);
-        if (at) at.push(e.ts);
-        else pageSig.set(k, [e.ts]);
-      }
-      const isReplayedDuplicate = (e: TranscriptEvent) => {
-        // Optimistic user echoes are governed solely by supersededEcho above; do
-        // not let content-dedup drop one the echo logic intentionally keeps.
-        if (e.id.startsWith('seed-') || e.id.startsWith('local-')) return false;
-        const at = pageSig.get(contentSig(e));
-        if (!at || at.length === 0) return false;
-        // A persisted twin is logged within moments of the live event; a page
-        // entry far from this event's time is a different occurrence (e.g. a
-        // repeated "ok"). Consume only the closest twin within tolerance so a
-        // brand-new live output that merely repeats old text is never dropped.
-        // Streamed text/thinking keep the first-chunk ts but advance endTs, while
-        // history timestamps near completion, so compare against the whole live
-        // [ts, endTs] span rather than just the start.
-        const lo = Math.min(e.ts, e.endTs ?? e.ts);
-        const hi = Math.max(e.ts, e.endTs ?? e.ts);
-        let bestIdx = -1;
-        let bestDiff = Infinity;
-        for (let i = 0; i < at.length; i++) {
-          const t = at[i];
-          const diff = t < lo ? lo - t : t > hi ? t - hi : 0;
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            bestIdx = i;
-          }
-        }
-        if (bestIdx >= 0 && bestDiff <= REPLAY_DEDUP_TOLERANCE_MS) {
-          at.splice(bestIdx, 1);
-          return true;
-        }
-        return false;
-      };
-      const liveOnly = existing.filter(
-        (e) => !pageIds.has(e.id) && !supersededEcho(e) && !isReplayedDuplicate(e),
-      );
-      const before = liveOnly.filter((e) => e.ts < firstTs);
-      const after = liveOnly.filter((e) => e.ts >= firstTs);
-      const mergedTranscript = page.length > 0 ? [...before, ...page, ...after] : existing;
-      const transcripts = { ...state.transcripts, [action.appSessionId]: mergedTranscript };
+
+      const mergedTranscript = reconcileRestoredTranscript(existing, action.transcripts, !hasMore);
+      const transcriptChanged = mergedTranscript !== existing;
       const historicalChildren = action.childSessions ?? [];
       const existingChildSessions = state.childSessions[action.appSessionId] ?? {};
       let childSessions = state.childSessions;
@@ -2090,34 +2214,38 @@ function baseReducer(state: AppState, action: Action): AppState {
           [action.appSessionId]: byChild,
         };
       }
-      const hasMore = Boolean(action.olderCursor);
       // An empty restore (e.g. a live session with no persisted history yet)
       // must not wipe progress already delivered by live events; only adopt the
       // replayed progress when it actually carries entries.
       const existingProgress = state.progress[action.appSessionId] ?? [];
       const mergedProgress = action.progress.length > 0 ? action.progress : existingProgress;
-      return withHistoricalCompactionGeneration(
-        {
-          ...state,
-          progress: { ...state.progress, [action.appSessionId]: mergedProgress },
-          transcripts,
-          childSessions,
-          historyLoaded: { ...state.historyLoaded, [action.appSessionId]: true },
-          historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-          historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-          sessionRestore: {
-            ...state.sessionRestore,
-            [action.appSessionId]: {
-              status: hasMore ? 'paged' : 'loaded',
-              loadedCount: mergedTranscript.length,
-              hasMore,
-            },
+      const historyState: AppState = {
+        ...state,
+        progress: { ...state.progress, [action.appSessionId]: mergedProgress },
+        childSessions,
+        historyLoaded: { ...state.historyLoaded, [action.appSessionId]: true },
+        historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
+        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
+        sessionRestore: {
+          ...state.sessionRestore,
+          [action.appSessionId]: {
+            status: hasMore ? 'paged' : 'loaded',
+            loadedCount: mergedTranscript.length,
+            hasMore,
           },
         },
-        action.appSessionId,
-        mergedTranscript,
-      );
+      };
+      const next = transcriptChanged
+        ? withUpdatedTranscript(
+            historyState,
+            action.appSessionId,
+            mergedTranscript,
+            estimateTranscriptCost(mergedTranscript),
+          )
+        : historyState;
+      return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
     }
+    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
     case 'CLEAR_PERMISSION':
       return { ...state, pendingPermission: null };
@@ -2135,7 +2263,24 @@ function baseReducer(state: AppState, action: Action): AppState {
         sessionLastSeen[state.activeAppSessionId] = now;
       }
       if (action.id) sessionLastSeen[action.id] = now;
-      const next = invalidateSelectedChildOpening(state);
+      let next = invalidateSelectedChildOpening(releaseInactiveSelectedChild(state));
+      const outgoingAppSessionId = state.activeAppSessionId;
+      const outgoingSession = outgoingAppSessionId
+        ? state.sessions[outgoingAppSessionId]
+        : undefined;
+      if (
+        outgoingAppSessionId &&
+        outgoingAppSessionId !== action.id &&
+        outgoingSession &&
+        !sessionIsLive(outgoingSession) &&
+        state.transcriptViewportPinned[outgoingAppSessionId] !== false
+      ) {
+        next = releaseSessionTranscriptWindow(
+          next,
+          outgoingAppSessionId,
+          INACTIVE_TRANSCRIPT_POLICY,
+        );
+      }
       return {
         ...next,
         activeAppSessionId: action.id,
@@ -2599,7 +2744,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         previous &&
         (action.selection?.parentAppSessionId !== previous.parentAppSessionId ||
           action.selection.childSessionId !== previous.childSessionId)
-          ? invalidateSelectedChildOpening(state)
+          ? invalidateSelectedChildOpening(releaseInactiveSelectedChild(state))
           : state;
       if (!action.selection) return { ...next, selectedChild: null };
       const { parentAppSessionId, childSessionId } = action.selection;
@@ -2609,11 +2754,27 @@ function baseReducer(state: AppState, action: Action): AppState {
       )
         return { ...next, selectedChild: null };
       next = { ...next, selectedChild: action.selection };
-      if (action.requestId)
-        return withChildAccess(next, parentAppSessionId, childSessionId, {
+      if (action.requestId) {
+        const opening = withChildAccess(next, parentAppSessionId, childSessionId, {
           state: 'opening',
           requestId: action.requestId,
         });
+        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
+        const history = opening.childHistory[parentAppSessionId]?.[childSessionId];
+        if (history?.isLoaded) return opening;
+        const loadedCount = (opening.transcripts[parentAppSessionId] ?? []).filter(
+          (event) => event.sourceSessionId === childSessionId,
+        ).length;
+        return withChildHistory(opening, parentAppSessionId, childSessionId, {
+          status: 'loading',
+          loadedCount,
+          hasMore: false,
+          isLoaded: false,
+          isLoadingOlder: false,
+          isViewportPinned: history?.isViewportPinned ?? true,
+        });
+        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+      }
       const access = next.childAccess[parentAppSessionId]?.[childSessionId];
       return access?.state === 'failed' || access?.state === 'closed'
         ? withoutChildAccess(next, parentAppSessionId, childSessionId)
@@ -2973,6 +3134,7 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       return {
         type: 'SESSION_HISTORY',
         appSessionId: ev.appSessionId,
+        childSessionId: ev.childSessionId,
         progress: ev.progress,
         transcripts: ev.transcripts,
         childSessions: ev.childSessions,
@@ -2982,7 +3144,12 @@ export function adaptEvent(ev: ServerEvent): Action | null {
         hasMore: ev.hasMore,
       };
     case 'session.history.error':
-      return { type: 'SESSION_HISTORY_FAILED', appSessionId: ev.appSessionId, message: ev.message };
+      return {
+        type: 'SESSION_HISTORY_FAILED',
+        appSessionId: ev.appSessionId,
+        childSessionId: ev.childSessionId,
+        message: ev.message,
+      };
     case 'context.updated':
       return {
         type: 'CONTEXT_UPDATED',
@@ -3022,15 +3189,41 @@ export function adaptEvent(ev: ServerEvent): Action | null {
   }
 }
 
-// Exported so tests can mount a component against a reducer-built state
-// without standing up the full provider side effects (persistence, bridge).
-export const StoreContext = createContext<{
-  state: AppState;
+interface StoreContextValue {
+  getState: () => AppState;
+  subscribe: (listener: () => void) => () => void;
   dispatch: React.Dispatch<Action>;
-} | null>(null);
+}
+
+const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState, syncBrowserOpen);
+  const [state, reduceDispatch] = useReducer(reducer, initialState, syncBrowserOpen);
+  const stateRef = useRef(state);
+  const listenersRef = useRef(new Set<() => void>());
+  const bridgeActionBatcherRef = useRef<OrderedActionBatcher<Action> | null>(null);
+  const dispatch = useCallback<React.Dispatch<Action>>((action) => {
+    // A bridge event received before this local action must reduce first even
+    // when it is waiting in the current frame's follower batch.
+    const batcher = bridgeActionBatcherRef.current;
+    if (batcher) batcher.dispatchLocal(action);
+    else reduceDispatch(action);
+  }, []);
+  const [store] = useState<StoreContextValue>(() => ({
+    getState: () => stateRef.current,
+    subscribe: (listener) => {
+      listenersRef.current.add(listener);
+      return () => {
+        listenersRef.current.delete(listener);
+      };
+    },
+    dispatch,
+  }));
+
+  useLayoutEffect(() => {
+    stateRef.current = state;
+    for (const listener of listenersRef.current) listener();
+  }, [state]);
 
   useEffect(() => {
     savePersistedUiState(state);
@@ -3098,6 +3291,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    // Concurrent streams can deliver many bridge events per frame (token
+    // deltas, usage and context telemetry, child updates), and every dispatch
+    // still notifies each selective subscriber. Batch per frame with a leading
+    // edge: the first event after an idle gap dispatches immediately
+    // (interactive round-trips stay instant), followers arriving within the
+    // same 16ms window flush together as one ordered state transition.
+    const batcher = createOrderedActionBatcher<Action, number>({
+      dispatchOne: reduceDispatch,
+      dispatchBatch: (actions) => {
+        reduceDispatch({ type: 'BATCH', actions });
+      },
+      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cancel: (timer) => {
+        window.clearTimeout(timer);
+      },
+      delayMs: 16,
+    });
+    bridgeActionBatcherRef.current = batcher;
     const unsub = bridge.subscribe((ev) => {
       // Verbose per-event logging runs on every streaming token and eagerly
       // deep-clones + redacts the whole event, so keep it to dev builds only;
@@ -3106,26 +3317,98 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const toastMessage = toastMessageForEvent(ev);
       if (toastMessage !== undefined) toast.error(toastMessage);
       const action = adaptEvent(ev);
-      if (action) dispatch(action);
+      if (!action) return;
+      batcher.pushBridge(action);
     });
     return () => {
       unsub();
+      // StrictMode remounts this effect in dev; deliver anything in flight so
+      // no event is lost across the resubscribe.
+      batcher.dispose();
+      if (bridgeActionBatcherRef.current === batcher) bridgeActionBatcherRef.current = null;
     };
   }, []);
 
-  // Memoize the context value so a StoreProvider re-render with unchanged
-  // state (parent re-render, StrictMode double-render) doesn't hand consumers
-  // a fresh { state, dispatch } identity. Dispatches still re-render every
-  // consumer, since the reducer returns a new state object; this only removes
-  // the same-state case. dispatch is stable from useReducer, so [state] is the
-  // correct key.
-  const value = useMemo(() => ({ state, dispatch }), [state]);
-
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
 
-export function useStore() {
+export function StaticStoreProvider({
+  state,
+  dispatch,
+  children,
+}: {
+  state: AppState;
+  dispatch: React.Dispatch<Action>;
+  children: ReactNode;
+}) {
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const [store] = useState<StoreContextValue>(() => ({
+    getState: () => stateRef.current,
+    subscribe: () => () => undefined,
+    dispatch,
+  }));
+  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+}
+
+function useStoreContext(): StoreContextValue {
   const context = useContext(StoreContext);
   if (!context) throw new Error('useStore must be used within StoreProvider');
   return context;
+}
+
+export function useStoreApi(): Pick<StoreContextValue, 'getState'> {
+  return useStoreContext();
+}
+
+export function useStoreDispatch(): React.Dispatch<Action> {
+  return useStoreContext().dispatch;
+}
+
+export function useStoreSelector<Selected>(
+  selector: (state: AppState) => Selected,
+  isEqual: (left: Selected, right: Selected) => boolean = Object.is,
+): Selected {
+  const store = useStoreContext();
+  const committedSelectionRef = useRef<{ hasValue: false } | { hasValue: true; value: Selected }>({
+    hasValue: false,
+  });
+  const getSelection = useMemo(() => {
+    let hasMemo = false;
+    let memoizedState: AppState;
+    let memoizedSelection: Selected;
+    return () => {
+      const nextState = store.getState();
+      if (!hasMemo) {
+        hasMemo = true;
+        memoizedState = nextState;
+        const nextSelection = selector(nextState);
+        const committed = committedSelectionRef.current;
+        if (committed.hasValue && isEqual(committed.value, nextSelection)) {
+          memoizedSelection = committed.value;
+          return committed.value;
+        }
+        memoizedSelection = nextSelection;
+        return nextSelection;
+      }
+      if (Object.is(memoizedState, nextState)) return memoizedSelection;
+      const nextSelection = selector(nextState);
+      memoizedState = nextState;
+      if (isEqual(memoizedSelection, nextSelection)) return memoizedSelection;
+      memoizedSelection = nextSelection;
+      return nextSelection;
+    };
+  }, [isEqual, selector, store]);
+  const selection = useSyncExternalStore(store.subscribe, getSelection, getSelection);
+  useEffect(() => {
+    committedSelectionRef.current = { hasValue: true, value: selection };
+  }, [selection]);
+  return selection;
+}
+
+export function shallowEqual<T extends Record<string, unknown>>(left: T, right: T): boolean {
+  if (Object.is(left, right)) return true;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => Object.is(left[key], right[key]));
 }

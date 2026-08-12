@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useStore } from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { useGitEnvironment } from '../hooks/useGitEnvironment';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
@@ -23,8 +23,25 @@ import {
 } from '../lib/childSessions';
 
 export default function RightPanel() {
-  const { state, dispatch } = useStore();
-  const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
+  const dispatch = useStoreDispatch();
+  const state = useStoreSelector((current) => {
+    const activeSession = current.activeAppSessionId
+      ? current.sessions[current.activeAppSessionId]
+      : null;
+    return {
+      activeSession,
+      activeTranscript: activeSession ? current.transcripts[activeSession.appSessionId] : undefined,
+      agentConfig: current.agentConfig,
+      childAccess: current.childAccess,
+      childRuntime: current.childRuntime,
+      childSessions: current.childSessions,
+      models: current.models,
+      selectedChild: current.selectedChild,
+      selectedFeatureId: current.selectedFeatureId,
+      sessionSpecs: current.sessionSpecs,
+    };
+  }, shallowEqual);
+  const activeSession = state.activeSession;
   const cwd = useSessionWorkingDirectory(activeSession);
 
   const [diffMode, setDiffMode] = useState<DiffStatMode>('worktree');
@@ -62,7 +79,7 @@ export default function RightPanel() {
   // the feed's subagents card is, so both surfaces list a new agent at the same
   // moment instead of the panel waiting for the store to register it.
   const activeAppSessionId = activeSession?.appSessionId;
-  const transcript = activeAppSessionId ? state.transcripts[activeAppSessionId] : undefined;
+  const transcript = state.activeTranscript;
   const childSessions = useMemo(
     () =>
       activeAppSessionId

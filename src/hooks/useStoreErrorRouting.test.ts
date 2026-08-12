@@ -62,6 +62,14 @@ test('non-open child command failures are routed to user-visible toast feedback'
   assert.equal(
     toastMessageForEvent({
       ...failure,
+      code: 'child.not_in_session',
+      operation: 'loadHistory',
+    }),
+    failure.message,
+  );
+  assert.equal(
+    toastMessageForEvent({
+      ...failure,
       code: 'child.open_failed',
       operation: 'open',
     }),

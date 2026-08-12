@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStore } from '../hooks/useStore';
+import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondQuestion } from '../lib/commands';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 const ACCENT = 'var(--droid-accent)';
 
 export default function AskUserModal() {
-  const { state, dispatch } = useStore();
-  const question = state.pendingQuestion;
+  const dispatch = useStoreDispatch();
+  const question = useStoreSelector((state) => state.pendingQuestion);
 
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -25,7 +25,9 @@ export default function AskUserModal() {
   useEffect(() => {
     if (customOpen[question?.questions[current]?.index ?? -1]) {
       const t = setTimeout(() => inputRef.current?.focus(), 40);
-      return () => clearTimeout(t);
+      return () => {
+        clearTimeout(t);
+      };
     }
   }, [customOpen, current, question]);
 
@@ -35,7 +37,7 @@ export default function AskUserModal() {
   const total = question.questions.length;
   const isLast = current === total - 1;
   const answer = (answers[q.index] ?? '').trim();
-  const typing = !!customOpen[q.index];
+  const typing = customOpen[q.index];
   const canAdvance = answer.length > 0;
 
   const pickOption = (opt: string) => {
@@ -43,7 +45,9 @@ export default function AskUserModal() {
     setCustomOpen((p) => ({ ...p, [q.index]: false }));
   };
 
-  const openCustom = () => setCustomOpen((p) => ({ ...p, [q.index]: true }));
+  const openCustom = () => {
+    setCustomOpen((p) => ({ ...p, [q.index]: true }));
+  };
 
   const next = () => {
     if (!canAdvance) return;
@@ -93,8 +97,10 @@ export default function AskUserModal() {
               const selected = !typing && answer === opt.trim();
               return (
                 <button
-                  key={`${opt}-${i}`}
-                  onClick={() => pickOption(opt)}
+                  key={`${opt}-${String(i)}`}
+                  onClick={() => {
+                    pickOption(opt);
+                  }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors border border-dashed ${
                     selected
                       ? 'border-droid-border-hover bg-droid-elevated/40'
@@ -133,7 +139,9 @@ export default function AskUserModal() {
                   ref={inputRef}
                   type="text"
                   value={answers[q.index] ?? ''}
-                  onChange={(e) => setAnswers((p) => ({ ...p, [q.index]: e.target.value }))}
+                  onChange={(e) => {
+                    setAnswers((p) => ({ ...p, [q.index]: e.target.value }));
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -158,7 +166,9 @@ export default function AskUserModal() {
           <div className="flex items-center justify-end gap-2 mt-3">
             {current > 0 && (
               <button
-                onClick={() => setCurrent((c) => c - 1)}
+                onClick={() => {
+                  setCurrent((c) => c - 1);
+                }}
                 className="px-3.5 py-1.5 rounded-lg text-[12.5px] uppercase tracking-wide text-droid-text-secondary hover:bg-droid-elevated/60 transition-colors"
               >
                 Back

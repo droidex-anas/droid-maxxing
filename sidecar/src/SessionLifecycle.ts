@@ -99,6 +99,7 @@ export interface SessionLifecycleDependencies {
   forgetInteractions: (appSessionId: string) => void;
   forgetEventFlow: (appSessionId: string) => void;
   forgetMissionControl: (appSessionId: string) => void;
+  forgetPendingSettings: (appSessionId: string) => void;
   closeBrowserSession: (appSessionId: string) => Promise<void>;
   emit: (event: ServerEvent) => void;
   emitError: (error: LifecycleError) => void;
@@ -502,6 +503,9 @@ export class SessionLifecycle {
       await run(() => {
         d.forgetMissionControl(liveSession.summary.appSessionId);
       });
+      await run(() => {
+        d.forgetPendingSettings(liveSession.summary.appSessionId);
+      });
       d.emit({ type: 'session.closed', appSessionId: liveSession.summary.appSessionId });
       await run(() => {
         d.forgetInteractions(liveSession.summary.appSessionId);
@@ -605,6 +609,7 @@ export class SessionLifecycle {
         this.dependencies.forgetInteractions(liveSession.summary.appSessionId);
         this.dependencies.forgetEventFlow(liveSession.summary.appSessionId);
         this.dependencies.forgetMissionControl(liveSession.summary.appSessionId);
+        this.dependencies.forgetPendingSettings(liveSession.summary.appSessionId);
       }
     }
   }

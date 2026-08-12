@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { initialState, reducer, StoreContext, type AppState } from '../hooks/useStore.js';
+import { initialState, reducer, StaticStoreProvider, type AppState } from '../hooks/useStore.js';
 import type { AppIconMode } from '../lib/appIcon.js';
 import { CUSTOM_THEME_ID } from '../lib/theme.js';
 import { AppearanceSection } from './AppearanceSettings.js';
@@ -22,8 +22,8 @@ function renderAppearance(appIconMode: AppIconMode): string {
   };
   return renderToStaticMarkup(
     createElement(
-      StoreContext.Provider,
-      { value: { state, dispatch: () => undefined } },
+      StaticStoreProvider,
+      { state, dispatch: () => undefined },
       createElement(AppearanceSection),
     ),
   );
@@ -76,8 +76,8 @@ test('theme dropdown lists an unsaved custom entry for hand-tuned colors', () =>
   };
   const html = renderToStaticMarkup(
     createElement(
-      StoreContext.Provider,
-      { value: { state, dispatch: () => undefined } },
+      StaticStoreProvider,
+      { state, dispatch: () => undefined },
       createElement(AppearanceSection),
     ),
   );
@@ -134,8 +134,8 @@ test('settings renders when the persisted active session is absent from the snap
   assert.doesNotThrow(() =>
     renderToStaticMarkup(
       createElement(
-        StoreContext.Provider,
-        { value: { state, dispatch: () => undefined } },
+        StaticStoreProvider,
+        { state, dispatch: () => undefined },
         createElement(SettingsPanel),
       ),
     ),

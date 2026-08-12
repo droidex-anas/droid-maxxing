@@ -63,7 +63,9 @@ export function ConversationTimeline({
       },
       { root, rootMargin: '0px 0px -65% 0px', threshold: 0 },
     );
-    els.forEach((el) => observer.observe(el));
+    els.forEach((el) => {
+      observer.observe(el);
+    });
     return () => {
       observer.disconnect();
       seen.clear();
@@ -89,12 +91,16 @@ export function ConversationTimeline({
             <button
               key={a.id}
               type="button"
-              onClick={() => jump(a.id)}
+              onClick={() => {
+                jump(a.id);
+              }}
               onMouseEnter={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
                 setHover({ label: a.label, top: r.top + r.height / 2, left: r.right + 8 });
               }}
-              onMouseLeave={() => setHover(null)}
+              onMouseLeave={() => {
+                setHover(null);
+              }}
               className="group/dot flex items-center py-0.5"
               aria-label={a.label}
             >

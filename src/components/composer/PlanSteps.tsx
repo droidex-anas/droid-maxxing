@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown } from 'lucide-react';
-import { useStore } from '../../hooks/useStore';
+import { shallowEqual, useStoreSelector, type AppState } from '../../hooks/useStore';
 import { useSessionLive } from '../../hooks/useSessionLive';
 import {
   activeTodoIndex,
@@ -11,8 +11,19 @@ import {
 } from '../../lib/tools';
 import { scopeTranscriptToAgent } from '../../lib/transcript';
 import { visibleSessionTarget } from '../../lib/childSessions';
+import type { TranscriptEvent } from '../../types/bridge';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
+const EMPTY_TRANSCRIPT: TranscriptEvent[] = [];
+
+function sameTodoItems(left: readonly TodoItem[], right: readonly TodoItem[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (item, index) => item.text === right[index]?.text && item.status === right[index]?.status,
+    )
+  );
+}
 
 function stepTone(item: TodoItem, isActive: boolean): string {
   if (isActive) return 'text-droid-text font-medium';
@@ -51,25 +62,40 @@ function StepRing({
 // The model's plan for the active session, tucked behind the composer. Mission
 // control owns its own feature progress, so this stays out of those sessions.
 export default function PlanSteps() {
-  const { state } = useStore();
-  const activeSession = state.activeAppSessionId ? state.sessions[state.activeAppSessionId] : null;
-  const appSessionId = activeSession?.appSessionId ?? null;
-  const isMissionControl = activeSession?.sessionPurpose === 'mission-control';
-  const transcripts = state.transcripts;
-  const visibleTarget = visibleSessionTarget(
-    activeSession?.appSessionId,
-    state.selectedChild,
-    state.childSessions,
-    state.childAccess,
-  );
-  const selectedAgent = visibleTarget.kind === 'child' ? visibleTarget.childSessionId : null;
+  const { appSessionId, isMissionControl, selectedAgent } = useStoreSelector((state) => {
+    const activeSession = state.activeAppSessionId
+      ? state.sessions[state.activeAppSessionId]
+      : null;
+    const visibleTarget = visibleSessionTarget(
+      activeSession?.appSessionId,
+      state.selectedChild,
+      state.childSessions,
+      state.childAccess,
+    );
+    return {
+      appSessionId: activeSession?.appSessionId ?? null,
+      isMissionControl: activeSession?.sessionPurpose === 'mission-control',
+      selectedAgent: visibleTarget.kind === 'child' ? visibleTarget.childSessionId : null,
+    };
+  }, shallowEqual);
   const isLive = useSessionLive(appSessionId);
 
-  const steps = useMemo(() => {
-    if (!appSessionId || isMissionControl) return [];
-    const transcript = transcripts[appSessionId] ?? [];
-    return latestTodoSnapshot(scopeTranscriptToAgent(transcript, selectedAgent)).todos;
-  }, [appSessionId, isMissionControl, transcripts, selectedAgent]);
+  const selectSteps = useMemo(() => {
+    let previousTranscript: readonly TranscriptEvent[] | null = null;
+    let previousSteps: TodoItem[] = [];
+    return (state: AppState): TodoItem[] => {
+      const transcript =
+        appSessionId && !isMissionControl
+          ? (state.transcripts[appSessionId] ?? EMPTY_TRANSCRIPT)
+          : EMPTY_TRANSCRIPT;
+      if (transcript === previousTranscript) return previousSteps;
+      previousTranscript = transcript;
+      const nextSteps = latestTodoSnapshot(scopeTranscriptToAgent(transcript, selectedAgent)).todos;
+      if (!sameTodoItems(previousSteps, nextSteps)) previousSteps = nextSteps;
+      return previousSteps;
+    };
+  }, [appSessionId, isMissionControl, selectedAgent]);
+  const steps = useStoreSelector(selectSteps);
 
   return (
     <PlanStepsPanel

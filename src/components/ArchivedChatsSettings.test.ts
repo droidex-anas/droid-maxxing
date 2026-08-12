@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { initialState, StoreContext, type AppState } from '../hooks/useStore';
+import { initialState, StaticStoreProvider, type AppState } from '../hooks/useStore';
 import type { SessionSummary } from '../types/bridge';
 import { ArchivedChatsSettings } from './ArchivedChatsSettings';
 
@@ -30,8 +30,8 @@ function makeSession(appSessionId: string, title: string): SessionSummary {
 function renderSection(state: AppState): string {
   return renderToStaticMarkup(
     createElement(
-      StoreContext.Provider,
-      { value: { state, dispatch: () => undefined } },
+      StaticStoreProvider,
+      { state, dispatch: () => undefined },
       createElement(ArchivedChatsSettings),
     ),
   );

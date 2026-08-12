@@ -4,6 +4,7 @@ import test from 'node:test';
 import { ChildSessions } from './ChildSessions.js';
 import { MissionControlPolicy } from './MissionControlPolicy.js';
 import { SessionLifecycle } from './SessionLifecycle.js';
+import { SessionTimeline } from './SessionTimeline.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 
 test(
@@ -35,6 +36,33 @@ test(
       SessionLifecycle.prototype.closeAll = closeAll;
       ChildSessions.prototype.shutdown = shutdownChildren;
       MissionControlPolicy.prototype.clear = clearMission;
+      await harness.dispose();
+    }
+  },
+);
+
+test(
+  'shutdown drains timeline buffers before closing authoritative history',
+  { concurrency: false },
+  async () => {
+    const order: string[] = [];
+    const flushStreaming = SessionTimeline.prototype.flushStreaming;
+    SessionTimeline.prototype.flushStreaming = function () {
+      order.push('timeline.flushStreaming');
+      flushStreaming.call(this);
+    };
+
+    const harness = createSessionManagerTestContext();
+    const historyClose = harness.history.close.bind(harness.history);
+    harness.history.close = () => {
+      order.push('history.close');
+      historyClose();
+    };
+    try {
+      await harness.shutdown();
+      assert.deepEqual(order, ['timeline.flushStreaming', 'history.close']);
+    } finally {
+      SessionTimeline.prototype.flushStreaming = flushStreaming;
       await harness.dispose();
     }
   },

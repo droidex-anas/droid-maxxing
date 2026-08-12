@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStore } from '../hooks/useStore';
+import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondPermission } from '../lib/commands';
 import type { PermissionOutcome, PermissionKind } from '../types/bridge';
 
@@ -26,8 +26,8 @@ function cleanDetail(detail: string | undefined): string {
 }
 
 export default function PermissionInline() {
-  const { state, dispatch } = useStore();
-  const req = state.pendingPermission;
+  const dispatch = useStoreDispatch();
+  const req = useStoreSelector((state) => state.pendingPermission);
 
   // Spec/mission plans use the dedicated approval bar (<PlanApprovalInline />).
   if (!req || req.kind === 'spec' || req.kind === 'mission_plan') return null;
@@ -80,19 +80,25 @@ export default function PermissionInline() {
 
         <div className="flex flex-wrap items-center justify-end gap-1.5 border-t border-droid-border px-3 py-2">
           <button
-            onClick={() => respond('cancel')}
+            onClick={() => {
+              respond('cancel');
+            }}
             className="rounded-lg px-2.5 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-surface/70"
           >
             Deny
           </button>
           <button
-            onClick={() => respond('proceed_always')}
+            onClick={() => {
+              respond('proceed_always');
+            }}
             className="rounded-lg px-2.5 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-surface/70"
           >
             Always allow
           </button>
           <button
-            onClick={() => respond('proceed_once')}
+            onClick={() => {
+              respond('proceed_once');
+            }}
             className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-droid-bg transition-opacity hover:opacity-90"
             style={{ background: ACCENT }}
           >

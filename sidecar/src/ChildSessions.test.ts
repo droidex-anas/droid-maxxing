@@ -26,6 +26,7 @@ import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 interface Harness {
   calls: RecordedCall[];
   events: ServerEvent[];
+  sequence: string[];
   history: FakeHistoryIndex;
   runtime: FakeFactoryRuntime;
   owner: ChildSessions;
@@ -41,16 +42,21 @@ function createHarness(
     maxOpenSessions?: number;
     failForgetChild?: string;
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
+    failFlushStreamingOnce?: boolean;
+    failSettleStreamingOnce?: boolean;
     missReplayChildOnce?: boolean;
   } = {},
 ): Harness {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
+  const sequence: string[] = [];
   const history = new FakeHistoryIndex(calls);
   const runtime = new FakeFactoryRuntime(calls);
   const parentId = 'parent';
   let missReplayChildOnce = options.missReplayChildOnce;
   let failDriveSetup = options.failDriveSetup;
+  let failFlushStreaming = options.failFlushStreamingOnce;
+  let failSettleStreaming = options.failSettleStreamingOnce;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
     if (failDriveSetup !== stage) return;
     failDriveSetup = undefined;
@@ -74,12 +80,24 @@ function createHarness(
       appendStatus: (...args) => {
         calls.push({ target: 'protocol', method: 'timeline.status', args });
       },
-      replayChild: (...args) => {
+      flushStreamingFor: () => {
+        sequence.push('timeline.flushStreaming');
+        if (!failFlushStreaming) return;
+        failFlushStreaming = false;
+        throw new Error('flush failed');
+      },
+      settleStreaming: () => {
+        sequence.push('timeline.settleStreaming');
+        if (!failSettleStreaming) return;
+        failSettleStreaming = false;
+        throw new Error('settle failed');
+      },
+      loadChildHistory: (...args) => {
         if (missReplayChildOnce) {
           missReplayChildOnce = false;
           return;
         }
-        calls.push({ target: 'protocol', method: 'timeline.replayChild', args });
+        calls.push({ target: 'protocol', method: 'timeline.loadChildHistory', args });
       },
     },
     eventFlow: {
@@ -109,6 +127,7 @@ function createHarness(
       refresh: () => Promise.resolve(),
       startPolling: () => throwDriveSetup('startPolling'),
       stopPolling: (target) => {
+        sequence.push('context.stopPolling');
         calls.push({
           target: 'cleanup',
           method: 'context.stopPolling',
@@ -141,7 +160,10 @@ function createHarness(
       reasoningEffort: ReasoningEffort.Low,
     }),
     isShutdownStarted: () => false,
-    emit: (event) => events.push(event),
+    emit: (event) => {
+      events.push(event);
+      if (event.type === 'child.error') sequence.push(`child.error:${event.code}`);
+    },
     nextChildSessionId: () => 'generated-child',
     maxOpenSessions: options.maxOpenSessions ?? 4,
     now: () => 100,
@@ -151,6 +173,7 @@ function createHarness(
   const harness: Harness = {
     calls,
     events,
+    sequence,
     history,
     runtime,
     owner,
@@ -542,7 +565,7 @@ test('opening a child the harness is still driving keeps it running', async () =
   await h.open(record);
 
   const replayIndex = h.calls.findIndex(
-    (call) => call.target === 'protocol' && call.method === 'timeline.replayChild',
+    (call) => call.target === 'protocol' && call.method === 'timeline.loadChildHistory',
   );
   const loadIndex = h.calls.findIndex(
     (call) => call.target === 'runtime' && call.method === 'loadSession',
@@ -722,6 +745,43 @@ test('turn setup failures settle cleanly and permit the next send', async () => 
     assert.deepEqual(runtime.prompts, [`recover after ${failDriveSetup}`], failDriveSetup);
     assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused', failDriveSetup);
   }
+});
+
+test('child stream failures flush buffered output before publishing the terminal error', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  const runtime = await h.open(record);
+  runtime.nextStreamError = new Error('stream failed');
+  h.sequence.length = 0;
+
+  await h.owner.send(record, 'fail after output');
+
+  assert.deepEqual(h.sequence, [
+    'timeline.flushStreaming',
+    'child.error:child.send_failed',
+    'timeline.settleStreaming',
+    'context.stopPolling',
+  ]);
+  assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused');
+});
+
+test('child settlement stops polling and returns idle when streaming persistence fails', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { failSettleStreamingOnce: true });
+  const runtime = await h.open(record);
+  runtime.nextStreamError = new Error('stream failed');
+  h.sequence.length = 0;
+
+  await h.owner.send(record, 'fail after output');
+
+  assert.deepEqual(h.sequence, [
+    'timeline.flushStreaming',
+    'child.error:child.send_failed',
+    'timeline.settleStreaming',
+    'child.error:child.transcript_persist_failed',
+    'context.stopPolling',
+  ]);
+  assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused');
 });
 
 test('completion invalidates a role observation queued behind settings', async () => {
@@ -1051,7 +1111,26 @@ test('rapid provider replacements retire every intermediate identity', async () 
     h.history.childSession(h.parentId, record.childSessionId)?.providerSessionId,
     'provider-c',
   );
+  assert.deepEqual(
+    h.history.childSession(h.parentId, record.childSessionId)?.previousProviderSessionIds,
+    ['provider-a', 'provider-b'],
+  );
   assert.equal(h.owner.list(h.parentId)[0]?.role, 'worker');
+  await h.owner.loadHistory({
+    type: 'child.loadHistory',
+    parentAppSessionId: h.parentId,
+    childSessionId: record.childSessionId,
+  });
+  const historyCall = h.calls.findLast(
+    (call) => call.target === 'protocol' && call.method === 'timeline.loadChildHistory',
+  );
+  const historyRequest = historyCall?.args[0];
+  assert.ok(isChildHistoryRequest(historyRequest));
+  assert.deepEqual(historyRequest.childProviderSessionIds, [
+    'provider-a',
+    'provider-b',
+    'provider-c',
+  ]);
   const replacement = { ...record, providerSessionId: 'provider-c' };
   await h.open(replacement, new FakeFactorySession('provider-c', {}, h.calls));
   const before = mutationCount(h);
@@ -1065,6 +1144,33 @@ test('rapid provider replacements retire every intermediate identity', async () 
   assert.equal(observed, undefined);
   assert.equal(mutationCount(h), before);
   assert.equal(h.target(record.childSessionId).providerSessionId, 'provider-c');
+});
+
+function isChildHistoryRequest(value: unknown): value is { childProviderSessionIds: unknown } {
+  return (
+    typeof value === 'object' && value !== null && Object.hasOwn(value, 'childProviderSessionIds')
+  );
+}
+
+test('missing child history uses the loadHistory operation for visible retry feedback', async () => {
+  const h = createHarness([]);
+
+  await h.owner.loadHistory({
+    type: 'child.loadHistory',
+    parentAppSessionId: h.parentId,
+    childSessionId: 'missing-child',
+  });
+
+  assert.equal(
+    h.events.some(
+      (event) =>
+        event.type === 'child.error' &&
+        event.childSessionId === 'missing-child' &&
+        event.operation === 'loadHistory' &&
+        event.code === 'child.not_in_session',
+    ),
+    true,
+  );
 });
 
 test('runtime close invalidates immediately and waits for in-flight settings teardown', async () => {
@@ -1296,8 +1402,10 @@ test('stale interrupt and turn settlement cannot make a replacement turn idle', 
     const active = h.owner.send(record, 'replacement turn');
     await replacement.waitForPrompts(1);
 
+    h.sequence.length = 0;
     releaseStale.resolve();
     await stale;
+    if (kind === 'settlement') assert.deepEqual(h.sequence, []);
     await h.owner.send(record, 'must queue');
     assert.deepEqual(replacement.prompts, ['replacement turn'], kind);
 

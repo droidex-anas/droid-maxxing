@@ -125,12 +125,13 @@ function nonAssistantBlockEvent(
       toolUseId: stringValue(block.tool_use_id ?? block.toolUseId) ?? undefined,
     });
   }
-  if (messageRole === 'user' && base.role === 'primary' && type === 'text') {
+  if (messageRole === 'user' && type === 'text') {
     const rawText = trimText(nonEmpty(stringValue(block.text)));
     const display = designPromptDisplayFromText(rawText);
     const text = display?.text ?? rawText;
     if (!text || isSystemText(text)) return null;
-    return event({ ...base, sourceProviderSessionId: 'user', role: 'primary' }, index, 'text', {
+    const sourceProviderSessionId = base.role === 'primary' ? 'user' : base.sourceProviderSessionId;
+    return event({ ...base, sourceProviderSessionId }, index, 'text', {
       text,
       author: 'user',
       browserRefs: display?.browserRefs,
@@ -184,6 +185,9 @@ export function parseSessionLineEvents(
     ts,
   };
   const messageRole = message?.role;
+  if (role !== 'primary' && messageRole === 'user' && message?.visibility === 'user_only') {
+    return [];
+  }
 
   const activation =
     role === 'primary' && messageRole === 'user' && message?.visibility === 'user_only'

@@ -124,14 +124,20 @@ export function restoredChildStatus(
 }
 
 export function childStateFromRecord(record: PersistedChildSession): ChildSessionState {
-  const { parentAppSessionId, childSessionId, updatedAt: _updatedAt, ...persisted } = record;
+  const {
+    parentAppSessionId,
+    childSessionId,
+    previousProviderSessionIds,
+    updatedAt: _updatedAt,
+    ...persisted
+  } = record;
   return {
     identity: childIdentity(parentAppSessionId, childSessionId),
     ...persisted,
     status: restoredChildStatus(persisted.status),
     runtimeGeneration: 1,
     configurationGeneration: 1,
-    retiredProviderSessionIds: new Set(),
+    retiredProviderSessionIds: new Set(previousProviderSessionIds),
     turn: {
       generation: 0,
       phase: 'idle',
@@ -184,6 +190,9 @@ export function persistedChild(child: ChildSessionState): PersistedChildSession 
     transcriptAvailable: child.transcriptAvailable,
     updatedAt: 0,
     ...(child.providerSessionId ? { providerSessionId: child.providerSessionId } : {}),
+    ...(child.retiredProviderSessionIds.size > 0
+      ? { previousProviderSessionIds: [...child.retiredProviderSessionIds] }
+      : {}),
     ...(child.label ? { label: child.label } : {}),
     ...(child.prompt ? { prompt: child.prompt } : {}),
     ...(child.reasoningEffort ? { reasoningEffort: child.reasoningEffort } : {}),
@@ -194,7 +203,12 @@ export function persistedChild(child: ChildSessionState): PersistedChildSession 
 
 export function childSummary(child: ChildSessionState | PersistedChildSession) {
   const record = 'identity' in child ? persistedChild(child) : child;
-  const { providerSessionId: _provider, updatedAt: _updatedAt, ...summary } = record;
+  const {
+    providerSessionId: _provider,
+    previousProviderSessionIds: _previousProviders,
+    updatedAt: _updatedAt,
+    ...summary
+  } = record;
   // Activity is live-only state, so it comes from the in-memory child rather
   // than the persisted record.
   const live = 'identity' in child ? child : undefined;

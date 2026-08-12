@@ -271,8 +271,23 @@ export const listSessions = (options?: {
   bridge.send({ type: 'sessions.list', ...options });
 };
 
-export const loadSessionHistory = (appSessionId: string, cursor?: string) => {
-  bridge.send({ type: 'session.loadHistory', appSessionId, cursor });
+export const loadSessionHistory = (appSessionId: string, cursor?: string, limit?: number) => {
+  bridge.send({ type: 'session.loadHistory', appSessionId, cursor, limit });
+};
+
+export const loadChildHistory = (
+  parentAppSessionId: string,
+  childSessionId: string,
+  cursor?: string,
+  limit?: number,
+) => {
+  bridge.send({
+    type: 'child.loadHistory',
+    parentAppSessionId,
+    childSessionId,
+    cursor,
+    limit,
+  });
 };
 
 // Transcript content search; the matching sessions.searchResults event

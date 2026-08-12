@@ -83,6 +83,7 @@ export function createSessionManagerTestContext(
     defaults?: Protocol.FactoryDefaultSettings;
     getFactoryDefaults?: () => Promise<Protocol.FactoryDefaultSettings>;
     startSessionFileWatcher?: SessionManagerDependencies['startSessionFileWatcher'];
+    streamingCoalesceMs?: number;
   } = {},
 ): SessionManagerTestContext {
   const calls: RecordedCall[] = [];
@@ -113,6 +114,9 @@ export function createSessionManagerTestContext(
       },
     },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
+    // Integration assertions read appended events synchronously; the timer
+    // coalescing behavior is covered by SessionTimeline unit tests.
+    streamingCoalesceMs: options.streamingCoalesceMs ?? 0,
     ...(options.getFactoryDefaults ? { getFactoryDefaults: options.getFactoryDefaults } : {}),
     ...(options.startSessionFileWatcher
       ? { startSessionFileWatcher: options.startSessionFileWatcher }

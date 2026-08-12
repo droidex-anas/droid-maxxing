@@ -113,3 +113,41 @@ test('SESSION_HISTORY_LOADING_OLDER marks the in-flight prefetch', () => {
   });
   assert.equal(next.historyLoadingOlder.m1, true);
 });
+
+test('child history failures preserve the retry cursor and settle only that child', () => {
+  const seeded = {
+    ...initialState,
+    childHistory: {
+      m1: {
+        'child-1': {
+          status: 'paged',
+          loadedCount: 120,
+          hasMore: true,
+          isLoaded: true,
+          isLoadingOlder: true,
+          olderCursor: 'child-older',
+          isViewportPinned: false,
+        },
+      },
+    },
+  } as unknown as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY_FAILED',
+    appSessionId: 'm1',
+    childSessionId: 'child-1',
+    message: 'history unavailable',
+  });
+
+  assert.deepEqual(next.childHistory.m1['child-1'], {
+    status: 'failed',
+    loadedCount: 120,
+    hasMore: true,
+    error: 'history unavailable',
+    isLoaded: true,
+    isLoadingOlder: false,
+    olderCursor: 'child-older',
+    isViewportPinned: false,
+  });
+  assert.equal(next.sessionRestore.m1, undefined);
+});

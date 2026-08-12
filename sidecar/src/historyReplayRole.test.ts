@@ -8,7 +8,8 @@ const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-role-'));
 process.env.HOME = home;
 
-const { loadSessionPage } = await import('./history.js');
+const { invalidateSessionIndex, loadSessionPage, loadSessionTranscriptWindow } =
+  await import('./history.js');
 
 test.after(() => {
   if (originalHome === undefined) delete process.env.HOME;
@@ -16,19 +17,26 @@ test.after(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function writeTranscript(id: string, start: Record<string, unknown>): void {
-  const dir = join(home, '.factory', 'sessions', '2026', '06');
-  mkdirSync(dir, { recursive: true });
-  const lines = [
-    JSON.stringify({ type: 'session_start', cwd: home, sessionTitle: 'S', ...start }),
-    JSON.stringify({
+function writeTranscript(
+  id: string,
+  start: Record<string, unknown>,
+  messages: Record<string, unknown>[] = [
+    {
       type: 'message',
       id: 'm1',
       timestamp: '2026-06-12T00:00:00.000Z',
       message: { role: 'assistant', content: [{ type: 'text', text: 'hello from worker' }] },
-    }),
+    },
+  ],
+): void {
+  const dir = join(home, '.factory', 'sessions', '2026', '06');
+  mkdirSync(dir, { recursive: true });
+  const lines = [
+    JSON.stringify({ type: 'session_start', cwd: home, sessionTitle: 'S', ...start }),
+    ...messages.map((message) => JSON.stringify(message)),
   ];
   writeFileSync(join(dir, `${id}.jsonl`), `${lines.join('\n')}\n`);
+  invalidateSessionIndex();
 }
 
 test('loadSessionPage replays a marker-only Task child with worker role keyed to its provider id', () => {
@@ -68,4 +76,34 @@ test('loadSessionPage never reclassifies a Task child as a top-level session', (
   assert.ok(text, 'expected a text event');
   assert.equal(text!.role, 'worker');
   assert.equal(text!.sourceSessionId, 'orphan-child');
+});
+
+test('transcript windows parse child-only skill messages with the child role', () => {
+  writeTranscript(
+    'child-skill',
+    {
+      callingSessionId: 'parent-session',
+      callingToolUseId: 'tool-skill',
+    },
+    [
+      {
+        type: 'message',
+        id: 'skill-1',
+        timestamp: '2026-06-12T00:00:00.000Z',
+        message: {
+          role: 'user',
+          visibility: 'user_only',
+          content: [{ type: 'text', text: 'Skill "review" activated: child task' }],
+        },
+      },
+    ],
+  );
+
+  const primary = loadSessionTranscriptWindow('parent-app', ['child-skill'], {
+    role: 'primary',
+  });
+  const child = loadSessionTranscriptWindow('parent-app', ['child-skill'], { role: 'worker' });
+
+  assert.equal(primary.events.length, 2);
+  assert.deepEqual(child.events, []);
 });

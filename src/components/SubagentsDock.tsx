@@ -10,6 +10,7 @@ import {
   type ChildSessionActivity,
   type ChildSessionTarget,
 } from '../lib/childSessions';
+import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { formatDuration } from '../lib/tools';
 import { ModelIcon, providerOf } from './ModelIcon';
 
@@ -111,11 +112,13 @@ function buildRows(
   });
 }
 
-// Ticks once per second while any subagent may still accrue time.
+// Ticks once per second while any subagent may still accrue time and the
+// window is visible; a hidden window resyncs the clock the moment it returns.
 function useNow(active: boolean): number {
+  const visible = useDocumentVisible();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!active) return;
+    if (!active || !visible) return;
     setNow(Date.now());
     const id = setInterval(() => {
       setNow(Date.now());
@@ -123,7 +126,7 @@ function useNow(active: boolean): number {
     return () => {
       clearInterval(id);
     };
-  }, [active]);
+  }, [active, visible]);
   return now;
 }
 

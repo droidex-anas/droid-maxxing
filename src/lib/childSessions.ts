@@ -187,6 +187,10 @@ export function shouldOpenSelectedChild(access: ChildAccess | undefined): boolea
   return access === undefined;
 }
 
+export function shouldRequestReleasedChildHistory(access: ChildAccess | undefined): boolean {
+  return access?.state !== 'opening';
+}
+
 export function childSessionIdForFeature(
   progress: ProgressEntry[],
   featureId: string,
