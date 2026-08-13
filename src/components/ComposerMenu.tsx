@@ -1,5 +1,4 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, FileText, Hexagon, Terminal } from 'lucide-react';
 import { Fragment, type MouseEvent } from 'react';
 
 import type { SkillInfo, SkillLocation } from '../types/bridge';
@@ -85,16 +84,18 @@ export default function ComposerMenu({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 6 }}
           transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute bottom-full left-0 right-0 mb-2 z-50 rounded-xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/40 overflow-hidden py-1 max-h-72 overflow-y-auto"
+          className="absolute bottom-full left-0 right-0 z-50 mb-2 max-h-72 overflow-y-auto rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
         >
           {triggerKind === 'file' && (
-            <div className="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-droid-text-muted/60">
-              <FileText className="w-3 h-3" /> Files{filesLoading ? ' — loading…' : ''}
+            <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/55">
+              Files{filesLoading ? ' · Loading' : ''}
             </div>
           )}
           {items.map((item, i) => {
             const on = i === Math.min(activeIndex, items.length - 1);
-            const base = `w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${on ? 'bg-droid-surface' : 'hover:bg-droid-surface/50'}`;
+            const base = `flex w-full min-w-0 items-center gap-4 rounded-lg px-2.5 py-2 text-left transition-colors ${
+              on ? 'bg-droid-surface' : 'hover:bg-droid-surface/55'
+            }`;
             const section = menuSection(triggerKind, i, firstCommandIndex, firstSkillIndex);
             // Mouse users run the row on mousedown (preventDefault keeps focus
             // in the textarea). Keyboard and assistive-technology activation
@@ -105,7 +106,9 @@ export default function ComposerMenu({
             };
             const sectionHeader = section ? (
               <div
-                className={`px-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-droid-text-muted/50 ${i === 0 ? 'pt-1.5' : 'pt-2.5'}`}
+                className={`px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/50 ${
+                  i === 0 ? 'pt-1' : 'pt-2.5'
+                }`}
               >
                 {section}
               </div>
@@ -125,11 +128,10 @@ export default function ComposerMenu({
                     onClick={runOnKeyboardClick}
                     className={base}
                   >
-                    <Terminal className="w-4 h-4 shrink-0 text-droid-text-muted/70" />
-                    <span className="shrink-0 text-[12.5px] font-medium text-droid-text">
+                    <span className="shrink-0 text-[13px] font-medium text-droid-text">
                       {commandLabel(item.command.cmd)}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-droid-text-muted">
+                    <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/75">
                       {item.command.desc}
                     </span>
                   </button>
@@ -152,26 +154,22 @@ export default function ComposerMenu({
                     onClick={runOnKeyboardClick}
                     className={base}
                   >
-                    <Hexagon className="w-4 h-4 shrink-0 text-droid-text-muted/70" />
-                    <span className="shrink-0 text-[12.5px] font-medium text-droid-text">
+                    <span className="shrink-0 text-[13px] font-medium text-droid-text">
                       {item.skill.name}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-droid-text-muted">
-                      {item.skill.description}
+                    <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/75">
+                      {[item.skill.description, LOCATION_LABEL[item.skill.location]]
+                        .filter(Boolean)
+                        .join(' · ')}
                     </span>
                     {added && (
-                      <>
-                        <Check
-                          className="w-3.5 h-3.5 shrink-0"
-                          style={{ color: ACCENT }}
-                          aria-hidden="true"
-                        />
-                        <span className="sr-only">added</span>
-                      </>
+                      <span
+                        className="shrink-0 text-[10.5px] font-medium"
+                        style={{ color: ACCENT }}
+                      >
+                        Added
+                      </span>
                     )}
-                    <span className="shrink-0 text-[10.5px] text-droid-text-muted/60">
-                      {LOCATION_LABEL[item.skill.location]}
-                    </span>
                   </button>
                 </Fragment>
               );
@@ -189,23 +187,12 @@ export default function ComposerMenu({
                 onClick={runOnKeyboardClick}
                 className={base}
               >
-                <FileText className="w-3.5 h-3.5 shrink-0 text-droid-text-muted" />
-                <span className="shrink-0 text-[12px] font-medium text-droid-text">
+                <span className="shrink-0 text-[12.5px] font-medium text-droid-text">
                   {basename(item.path)}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[11.5px] text-droid-text-muted/70">
-                  {item.path}
+                <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/65">
+                  {attachedFiles.includes(item.path) ? `Attached · ${item.path}` : item.path}
                 </span>
-                {attachedFiles.includes(item.path) && (
-                  <>
-                    <Check
-                      className="w-3 h-3 shrink-0"
-                      style={{ color: ACCENT }}
-                      aria-hidden="true"
-                    />
-                    <span className="sr-only">attached</span>
-                  </>
-                )}
               </button>
             );
           })}
