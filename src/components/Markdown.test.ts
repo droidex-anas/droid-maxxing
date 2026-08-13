@@ -121,6 +121,21 @@ test('uppercase fences stay ordinary code without shifting a later App completio
   assert.doesNotMatch(html, /<iframe/i);
 });
 
+test('completed App fences inside quotes and lists keep their completed streaming state', () => {
+  const sources = [
+    ['> ```app', '> <main>Quoted app</main>', '> ```'].join('\n'),
+    ['- ```app', '  <main>Listed app</main>', '  ```'].join('\n'),
+  ];
+
+  for (const source of sources) {
+    const html = renderToStaticMarkup(
+      createElement(Markdown, { autoPlayAppBlocks: true, buildingAppBlocks: true }, source),
+    );
+    assert.match(html, /<iframe/i);
+    assert.doesNotMatch(html, />Building interactive app</);
+  }
+});
+
 test('copy gracefully declines when the Clipboard API is unavailable', async () => {
   const markdown = (await import('./Markdown')) as unknown as {
     copyMarkdownCode?: (
