@@ -83,6 +83,7 @@ test('a skill prompt renders the skill inline in blue before the user text', () 
   );
   assert.match(html, /text-droid-skill[^>]*>.*review/);
   assert.ok(html.indexOf('review') < html.indexOf('PR #100'));
+  assert.ok(!html.includes('<svg'));
   assert.ok(!html.includes('violet'));
 });
 

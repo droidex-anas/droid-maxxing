@@ -12,7 +12,6 @@ import {
   PenLine,
   Globe,
   AlertTriangle,
-  Hexagon,
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
@@ -1929,14 +1928,7 @@ export function UserBubble({
       {(event.text || skills.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-relaxed text-droid-text">
           {skills.map((skill) => (
-            <span
-              key={skill}
-              title={`Skill: ${skill}`}
-              className="inline-flex items-center gap-1.5 font-medium text-droid-skill"
-            >
-              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-droid-text">
-                <Hexagon className="h-2.5 w-2.5 fill-droid-accent text-droid-accent" />
-              </span>
+            <span key={skill} title={`Skill: ${skill}`} className="font-medium text-droid-skill">
               {skill}
             </span>
           ))}
