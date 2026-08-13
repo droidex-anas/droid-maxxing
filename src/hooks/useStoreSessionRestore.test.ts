@@ -305,6 +305,39 @@ test('#29 a replace keeps one full live event when persisted history truncates i
   assert.equal(next.transcripts.m1[1].text, fullText);
 });
 
+test('#29 a replace drops a live App response missing one streamed middle chunk', () => {
+  const prefix = 'Here is the visualization.\n\n```app\n<main><script>const points = [';
+  const missingChunk = '1, 2, 3];</script></main>\n```\n\n';
+  const suffix =
+    'The points rise together, and the complete response keeps this explanatory tail intact.';
+  const fullText = `${prefix}${missingChunk}${suffix}`;
+  const incompleteLiveText = `${prefix}${suffix}`;
+  const live = {
+    ...ev('live-app-with-gap', 900, incompleteLiveText),
+    endTs: 1000,
+    sourceSessionId: 'provider-m1',
+  };
+  const seeded = {
+    ...initialState,
+    transcripts: { m1: [live] },
+  } as unknown as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [ev('persisted-complete-app', 1001, fullText)],
+    mode: 'replace',
+    hasMore: false,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1.map((event) => event.id),
+    ['persisted-complete-app'],
+  );
+  assert.equal(next.transcripts.m1[0].text, fullText);
+});
+
 test('#29 a replace keeps a live event from a different worker with identical text', () => {
   // Same role/kind/text but a different sourceSessionId is a distinct worker's
   // output; scoping the signature by sourceSessionId must not drop it.

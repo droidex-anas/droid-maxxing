@@ -5,6 +5,7 @@ import { composePrompt } from './composePrompt';
 // events further apart are independent occurrences and must both survive.
 const REPLAY_DEDUP_TOLERANCE_MS = 5_000;
 const TRUNCATED_TEXT_TAIL = /\n\n\[truncated (\d+) chars\]$/;
+const PARTIAL_REPLAY_ANCHOR_CHARS = 64;
 
 function isOptimisticEcho(event: TranscriptEvent): boolean {
   return event.id.startsWith('seed-') || event.id.startsWith('local-');
@@ -81,6 +82,41 @@ function isUnpersistedTextPrefix(
   );
 }
 
+function replayedTextSupersedesLiveGap(live: TranscriptEvent, replayed: TranscriptEvent): boolean {
+  if (replayScope(live) !== replayScope(replayed)) return false;
+  if (typeof live.text !== 'string' || typeof replayed.text !== 'string') return false;
+  if (
+    live.text.length >= replayed.text.length ||
+    replayTimeDifferenceMs(live, replayed) > REPLAY_DEDUP_TOLERANCE_MS
+  ) {
+    return false;
+  }
+
+  let prefixLength = 0;
+  while (
+    prefixLength < live.text.length &&
+    live.text[prefixLength] === replayed.text[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+  const suffix = live.text.slice(prefixLength);
+  return (
+    prefixLength >= PARTIAL_REPLAY_ANCHOR_CHARS &&
+    suffix.length >= PARTIAL_REPLAY_ANCHOR_CHARS &&
+    replayed.text.endsWith(suffix)
+  );
+}
+
+function supersededLiveGapIds(existing: TranscriptEvent[], page: TranscriptEvent[]): Set<string> {
+  const ids = new Set<string>();
+  for (const replayed of page) {
+    for (const live of existing) {
+      if (replayedTextSupersedesLiveGap(live, replayed)) ids.add(live.id);
+    }
+  }
+  return ids;
+}
+
 export function reconcilePrependedTranscript(
   existing: TranscriptEvent[],
   olderPage: TranscriptEvent[],
@@ -110,7 +146,7 @@ export function reconcileRestoredTranscript(
   // its replay twin instead of rendering both versions as separate answers.
   const supersededPageIds = new Set<string>();
   const matchedLiveIds = new Set<string>();
-  const supersededLiveIds = new Set<string>();
+  const supersededLiveIds = supersededLiveGapIds(existing, page);
   for (const replayed of page) {
     let closestLive: TranscriptEvent | undefined;
     let closestDifferenceMs = Infinity;

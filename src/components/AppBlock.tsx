@@ -70,7 +70,7 @@ export function RunningAppFrame({ source, instanceId }: { source: string; instan
       referrerPolicy="no-referrer"
       loading="lazy"
       srcDoc={document}
-      className="block w-full bg-transparent transition-[height] duration-200 ease-out motion-reduce:transition-none"
+      className="block min-w-0 w-full border-0 bg-transparent transition-[height] duration-200 ease-out motion-reduce:transition-none"
       style={{ height }}
     />
   );
@@ -100,21 +100,23 @@ export function AppBlock({ source, autoPlay = false }: { source: string; autoPla
           animate={{ opacity: 1, y: 0 }}
           exit={reduceMotion ? undefined : { opacity: 0, y: 4 }}
           transition={transition}
-          className="group/app relative my-3 min-w-0 overflow-hidden"
+          className="group/app my-3 min-w-0"
         >
-          <button
-            type="button"
-            aria-label="Stop app"
-            title="Stop app"
-            onClick={() => {
-              dispatch('stop');
-            }}
-            className="pointer-events-none absolute right-2 top-2 z-10 flex h-7 items-center gap-1.5 rounded-lg border border-droid-border bg-droid-bg/90 px-2 text-[10.5px] font-medium text-droid-text-secondary opacity-0 shadow-sm backdrop-blur transition group-hover/app:pointer-events-auto group-hover/app:opacity-70 hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-          >
-            <Square className="h-2.5 w-2.5 fill-current" />
-            Stop
-          </button>
           <RunningAppFrame source={source} instanceId={instanceId} />
+          <div className="flex h-7 items-end justify-end">
+            <button
+              type="button"
+              aria-label="Stop app"
+              title="Stop app"
+              onClick={() => {
+                dispatch('stop');
+              }}
+              className="flex h-6 items-center gap-1.5 rounded-md px-2 text-[10.5px] font-medium text-droid-text-muted opacity-45 transition-[color,background-color,opacity] hover:bg-droid-surface hover:text-droid-text-secondary hover:opacity-100 focus-visible:bg-droid-surface focus-visible:text-droid-text-secondary focus-visible:opacity-100 focus-visible:outline-none"
+            >
+              <Square className="h-2.5 w-2.5 fill-current" />
+              Stop
+            </button>
+          </div>
         </motion.div>
       ) : (
         <motion.button

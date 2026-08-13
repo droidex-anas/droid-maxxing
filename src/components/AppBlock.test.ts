@@ -49,6 +49,7 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /--app-foreground: #202020/);
   assert.match(document, /--app-accent: #2f6fed/);
   assert.match(document, /background: transparent/);
+  assert.match(document, /html, body \{ background: var\(--app-background\) !important/);
   assert.match(document, /padding: 0/);
   assert.match(document, /\[data-droidex-app-root\]/);
   assert.match(document, /\[data-droidex-app-canvas\]/);
@@ -63,7 +64,8 @@ test('the running document is self-contained and blocks network and nested conte
 test('reported app heights grow with the chat instead of creating a short nested scroller', () => {
   assert.equal(normalizeAppBlockHeight(40), 240);
   assert.equal(normalizeAppBlockHeight(412.2), 413);
-  assert.equal(normalizeAppBlockHeight(4_000), 1_400);
+  assert.equal(normalizeAppBlockHeight(4_000), 4_000);
+  assert.equal(normalizeAppBlockHeight(20_000), 12_000);
   assert.equal(normalizeAppBlockHeight(Number.NaN), 360);
 });
 
@@ -85,8 +87,9 @@ test('a freshly completed app opens directly on the chat canvas', () => {
 
   assert.match(html, /<iframe/i);
   assert.match(html, /aria-label="Stop app"/);
-  assert.match(html, /opacity-0/);
-  assert.match(html, /group-hover\/app:opacity-70/);
+  assert.ok(html.indexOf('<iframe') < html.indexOf('aria-label="Stop app"'));
+  assert.doesNotMatch(html, /overflow-hidden/);
+  assert.doesNotMatch(html, /absolute right-2 top-2/);
   assert.doesNotMatch(html, />App<\/span>/);
 });
 

@@ -3,7 +3,7 @@ export type AppBlockAction = 'play' | 'stop';
 
 export const DEFAULT_APP_HEIGHT = 360;
 const MIN_APP_HEIGHT = 240;
-const MAX_APP_HEIGHT = 1_400;
+const MAX_APP_HEIGHT = 12_000;
 const MAX_APP_MATH_CHARS = 20_000;
 
 export interface AppBlockMathRequest {
@@ -210,7 +210,7 @@ button, input, select, textarea {
 <body>
 ${source}
 <style data-droidex-app-host>
-html, body { background: transparent !important; overflow: hidden !important; }
+html, body { background: var(--app-background) !important; overflow: hidden !important; }
 body { min-height: 0 !important; padding: 0 !important; }
 [data-droidex-app-root] {
   width: 100% !important;
