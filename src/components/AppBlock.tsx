@@ -76,24 +76,57 @@ export function RunningAppFrame({ source, instanceId }: { source: string; instan
   );
 }
 
-export function AppBlock({ source, autoPlay = false }: { source: string; autoPlay?: boolean }) {
+export function AppBlock({
+  source,
+  autoPlay = false,
+  isBuilding = false,
+}: {
+  source: string;
+  autoPlay?: boolean;
+  isBuilding?: boolean;
+}) {
   const [state, dispatch] = useReducer(appBlockReducer, autoPlay ? 'running' : 'idle');
-  const isRunning = state === 'running';
   const instanceId = useId();
   const previousAutoPlay = useRef(autoPlay);
+  const isRunning = !isBuilding && (state === 'running' || (autoPlay && !previousAutoPlay.current));
   const reduceMotion = useReducedMotion();
   const transition: Transition = reduceMotion
     ? { duration: 0 }
     : { duration: 0.22, ease: [0.16, 1, 0.3, 1] };
 
   useEffect(() => {
-    if (autoPlay && !previousAutoPlay.current) dispatch('play');
+    if (!isBuilding && autoPlay && !previousAutoPlay.current) dispatch('play');
     previousAutoPlay.current = autoPlay;
-  }, [autoPlay]);
+  }, [autoPlay, isBuilding]);
 
   return (
     <AnimatePresence initial={false} mode="wait">
-      {isRunning ? (
+      {isBuilding ? (
+        <motion.div
+          key="building"
+          role="status"
+          aria-live="polite"
+          aria-label="Building interactive app"
+          initial={reduceMotion ? false : { opacity: 0, y: -3 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
+          transition={transition}
+          className="my-3 flex w-full items-center gap-3 overflow-hidden rounded-xl border border-droid-border bg-droid-surface/55 p-3"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-droid-bg text-droid-text-muted ring-1 ring-inset ring-droid-border">
+            <AppWindow className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="shimmer-text block text-[13px] font-medium">
+              Building interactive app
+            </span>
+            <span className="block text-[11.5px] text-droid-text-muted">
+              Generating the interface
+            </span>
+          </span>
+          <span className="shimmer-text shrink-0 text-[11px] font-medium">Building</span>
+        </motion.div>
+      ) : isRunning ? (
         <motion.div
           key="running"
           initial={reduceMotion ? false : { opacity: 0, y: 4 }}

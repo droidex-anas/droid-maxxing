@@ -316,11 +316,13 @@ function MarkdownImpl({
   specMode,
   allowGeneratedContent = true,
   autoPlayAppBlocks = false,
+  buildingAppBlocks = false,
 }: {
   children: string;
   specMode?: boolean;
   allowGeneratedContent?: boolean;
   autoPlayAppBlocks?: boolean;
+  buildingAppBlocks?: boolean;
 }) {
   return (
     <div
@@ -441,7 +443,13 @@ function MarkdownImpl({
             const codeText = typeof children === 'string' ? children : '';
 
             if (allowGeneratedContent && isAppLang(className)) {
-              return <AppBlock source={codeText} autoPlay={autoPlayAppBlocks} />;
+              return (
+                <AppBlock
+                  source={codeText}
+                  autoPlay={autoPlayAppBlocks}
+                  isBuilding={buildingAppBlocks}
+                />
+              );
             }
 
             if (allowGeneratedContent && isMermaidLang(className)) {

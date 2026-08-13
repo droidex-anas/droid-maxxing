@@ -806,6 +806,33 @@ test('App responses receive a wider chat canvas while ordinary rows stay readabl
   assert.match(textHtml, /max-w-2xl/);
 });
 
+test('an incomplete live App owns its building state without exposing Play or a trailing caret', () => {
+  const incompleteApp = [
+    'Preparing the visualization.',
+    '',
+    '```app',
+    '<main><script>const points = [',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst(incompleteApp)], pending: true }),
+  );
+
+  assert.match(html, /max-w-4xl/);
+  assert.match(html, /Building interactive app/);
+  assert.match(html, /role="status"/);
+  assert.doesNotMatch(html, /aria-label="Play app"/);
+  assert.doesNotMatch(html, /caret-blink/);
+  assert.doesNotMatch(html, /<iframe/i);
+});
+
+test('ordinary live prose keeps the trailing streaming caret', () => {
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst('Still writing')], pending: true }),
+  );
+
+  assert.match(html, /caret-blink/);
+});
+
 test('live thinking stays collapsed until the user opens it', () => {
   const events = [
     userMsg('inspect this'),

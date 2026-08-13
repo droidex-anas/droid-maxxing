@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
-import { hasCompleteAppBlock } from './appBlockRuntime';
+import { hasAppBlock, hasCompleteAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
@@ -2008,9 +2008,15 @@ const MessageBody = memo(function MessageBody({ text, live }: { text: string; li
   // Strip the history "[truncated N chars]" sentinel so the raw marker never
   // shows; the cut itself is intentionally not surfaced.
   const { body } = parseTruncatedTail(text);
-  const autoPlayAppBlocks = live && hasCompleteAppBlock(body);
+  const hasCompleteApp = hasCompleteAppBlock(body);
+  const buildingAppBlocks = live && hasAppBlock(body) && !hasCompleteApp;
+  const autoPlayAppBlocks = live && hasCompleteApp;
   if (!hasJsonRender(body))
-    return <Markdown autoPlayAppBlocks={autoPlayAppBlocks}>{body}</Markdown>;
+    return (
+      <Markdown autoPlayAppBlocks={autoPlayAppBlocks} buildingAppBlocks={buildingAppBlocks}>
+        {body}
+      </Markdown>
+    );
   const segments = splitJsonRender(body);
   return (
     <>
@@ -2018,7 +2024,11 @@ const MessageBody = memo(function MessageBody({ text, live }: { text: string; li
         seg.type === 'json-render' ? (
           <JsonRender key={i} source={seg.value} />
         ) : seg.value.trim() ? (
-          <Markdown key={i} autoPlayAppBlocks={autoPlayAppBlocks}>
+          <Markdown
+            key={i}
+            autoPlayAppBlocks={autoPlayAppBlocks}
+            buildingAppBlocks={buildingAppBlocks}
+          >
             {seg.value}
           </Markdown>
         ) : null,
@@ -2173,12 +2183,14 @@ const FeedItemView = memo(function FeedItemView({
       // only when it is exactly that spec text (avoid double-rendering the same
       // plan); never hide other prose just because spec mode is active (#14).
       if (specContent && text.trim() && text.trim() === specContent.trim()) return null;
+      const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
           <MessageBody text={text} live={live} />
-          {live ? (
+          {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
+            !live &&
             isFinalResponse &&
             text.trim() && (
               <div className="mt-1.5 -ml-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -2761,7 +2773,7 @@ export function MessageFeed({
               className={`mx-auto min-w-0 ${
                 item.type === 'message' &&
                 item.event.author !== 'user' &&
-                hasCompleteAppBlock(item.event.text ?? '')
+                hasAppBlock(item.event.text ?? '')
                   ? 'max-w-4xl'
                   : 'max-w-2xl'
               }`}

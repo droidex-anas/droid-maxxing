@@ -8,6 +8,7 @@ import {
   appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppDocument,
+  hasAppBlock,
   hasCompleteAppBlock,
   normalizeAppBlockHeight,
   renderAppBlockMath,
@@ -19,9 +20,29 @@ test('Play starts an app and Stop releases it back to the inert preview', () => 
 });
 
 test('only a closed app fence is ready for automatic playback', () => {
+  assert.equal(hasAppBlock('```app\n<main>Streaming'), true);
+  assert.equal(hasAppBlock('```app\r\n<main>Streaming'), true);
+  assert.equal(hasAppBlock('```application\nnope\n```'), false);
   assert.equal(hasCompleteAppBlock('```app\n<main>Streaming'), false);
   assert.equal(hasCompleteAppBlock('```app\n<main>Complete</main>\n```'), true);
+  assert.equal(hasCompleteAppBlock('```app\r\n<main>Complete</main>\r\n```'), true);
   assert.equal(hasCompleteAppBlock('```application\nnope\n```'), false);
+});
+
+test('an app under construction is a status surface with no executable control', () => {
+  const html = renderToStaticMarkup(
+    createElement(AppBlock, {
+      source: '<main><script>const points = [',
+      isBuilding: true,
+    }),
+  );
+
+  assert.match(html, /role="status"/);
+  assert.match(html, /Building interactive app/);
+  assert.match(html, /shimmer-text/);
+  assert.doesNotMatch(html, /aria-label="Play app"/);
+  assert.doesNotMatch(html, /<iframe/i);
+  assert.doesNotMatch(html, /const points/);
 });
 
 test('the running document is self-contained and blocks network and nested content', () => {

@@ -70,7 +70,11 @@ export function appBlockReducer(_state: AppBlockState, action: AppBlockAction): 
 }
 
 export function hasCompleteAppBlock(markdown: string): boolean {
-  return /(?:^|\n)```app[ \t]*\n[\s\S]*?```(?:\n|$)/i.test(markdown);
+  return /(?:^|\n)```app[ \t]*\r?\n[\s\S]*?```(?:\r?\n|$)/i.test(markdown);
+}
+
+export function hasAppBlock(markdown: string): boolean {
+  return /(?:^|\n)```app[ \t]*(?:\r?\n|$)/i.test(markdown);
 }
 
 export function normalizeAppBlockHeight(value: number): number {
