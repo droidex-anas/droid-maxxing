@@ -4,6 +4,8 @@ import { MAX_CHAT_TITLE_LENGTH } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
 import { SESSION_MENU_WIDTH } from './SessionContextMenu';
 import type { SessionSummary } from '../types/bridge';
+import type { SessionAttentionKind } from '../lib/sessionAttention';
+import { SessionAttentionBadge } from './SessionAttentionBadge';
 
 // Simple, smooth ring spinner shown on the left of a row while its model
 // works. motion-safe keeps it static for reduced-motion users.
@@ -25,6 +27,7 @@ export interface SessionRowProps {
   active: boolean;
   unread: boolean;
   running: boolean;
+  attention: SessionAttentionKind | null;
   renaming: boolean;
   now: number;
   onSelect: (appSessionId: string) => void;
@@ -41,6 +44,7 @@ export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowP
     prev.active === next.active &&
     prev.unread === next.unread &&
     prev.running === next.running &&
+    prev.attention === next.attention &&
     prev.renaming === next.renaming &&
     prev.now === next.now &&
     prev.onSelect === next.onSelect &&
@@ -57,6 +61,7 @@ export const SessionRow = memo(function SessionRow({
   active,
   unread,
   running,
+  attention,
   renaming,
   now,
   onSelect,
@@ -166,9 +171,14 @@ export const SessionRow = memo(function SessionRow({
         <span
           className={`w-3 flex items-center justify-center shrink-0 ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
         >
-          {running && <WorkingSpinner />}
+          {!attention && running ? <WorkingSpinner /> : null}
         </span>
         {unread && <span className="sr-only">Unread:</span>}
+        {attention && (
+          <span className="sr-only">
+            {attention === 'approval' ? 'Waiting for approval:' : 'Waiting for an answer:'}
+          </span>
+        )}
         <span
           className="min-w-0 flex-1 overflow-hidden"
           style={
@@ -195,14 +205,18 @@ export const SessionRow = memo(function SessionRow({
             {title}
           </span>
         </span>
-        {timeLabel && (
-          <span
-            className={`shrink-0 text-[10.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
-              unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
-            }`}
-          >
-            {timeLabel}
-          </span>
+        {attention ? (
+          <SessionAttentionBadge kind={attention} />
+        ) : (
+          timeLabel && (
+            <span
+              className={`shrink-0 text-[10.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
+                unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
+              }`}
+            >
+              {timeLabel}
+            </span>
+          )
         )}
       </button>
       {/* On hover the timestamp becomes the "..." menu trigger (rename, pin,

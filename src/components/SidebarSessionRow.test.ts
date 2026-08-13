@@ -33,6 +33,7 @@ function makeProps(overrides: Partial<SessionRowProps> = {}): SessionRowProps {
     active: false,
     unread: false,
     running: false,
+    attention: null,
     renaming: false,
     now: 5_000,
     onSelect: () => undefined,
@@ -108,6 +109,14 @@ test('areSessionRowPropsEqual: running change is not equal', () => {
   );
 });
 
+test('areSessionRowPropsEqual: attention change is not equal', () => {
+  const props = makeProps();
+  assert.equal(
+    areSessionRowPropsEqual({ ...props, attention: null }, { ...props, attention: 'approval' }),
+    false,
+  );
+});
+
 test('areSessionRowPropsEqual: now change is not equal', () => {
   const props = makeProps();
   assert.equal(areSessionRowPropsEqual({ ...props, now: 5_000 }, { ...props, now: 35_000 }), false);
@@ -164,6 +173,22 @@ test('SessionRow: a running row shows the spinner alongside the timestamp', () =
   // motion-safe keeps the spinner still for reduced-motion users.
   assert.match(html, /motion-safe:animate-spin/);
   assert.match(html, />now</);
+});
+
+test('SessionRow: attention replaces both the working spinner and timestamp', () => {
+  const html = render(makeProps({ running: true, attention: 'approval', now: 60_000 }));
+  assert.match(html, /Waiting for approval:/);
+  assert.match(html, />Awaiting approval</);
+  assert.match(html, /bg-droid-green\/15/);
+  assert.match(html, /text-droid-green/);
+  assert.doesNotMatch(html, /animate-spin/);
+  assert.doesNotMatch(html, />now</);
+});
+
+test('SessionRow: question attention uses the question label', () => {
+  const html = render(makeProps({ attention: 'question' }));
+  assert.match(html, /Waiting for an answer:/);
+  assert.match(html, />Awaiting answer</);
 });
 
 test('SessionRow: an idle row shows the relative timestamp and no spinner', () => {

@@ -41,6 +41,7 @@ import { toast } from '../lib/toast';
 import { SessionContextMenu } from './SessionContextMenu';
 import { SessionRow } from './SidebarSessionRow';
 import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
+import { sessionAttention } from '../lib/sessionAttention';
 import { useAppUpdate } from '../lib/appUpdate';
 import type { SessionSummary } from '../types/bridge';
 
@@ -159,6 +160,8 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
       activeAppSessionId: current.activeAppSessionId,
       chatMetadata: current.chatMetadata,
       draftChat: current.draftChat,
+      pendingPermissions: current.pendingPermissions,
+      pendingQuestions: current.pendingQuestions,
       sessionLastSeen: current.sessionLastSeen,
       sessionOrder: current.sessionOrder,
       sessions: current.sessions,
@@ -397,6 +400,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
       active={state.activeAppSessionId === m.appSessionId}
       unread={isUnread(m)}
       running={sessionIsLive(m)}
+      attention={sessionAttention(m.appSessionId, state.pendingPermissions, state.pendingQuestions)}
       renaming={renamingId === m.appSessionId}
       now={now}
       onSelect={handleSelectSession}
