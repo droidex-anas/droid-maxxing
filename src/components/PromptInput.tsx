@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, type SetStateAction 
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   shallowEqual,
+  useStoreApi,
   useStoreDispatch,
   useStoreSelector,
   type QueuedPrompt,
@@ -84,7 +85,7 @@ import PermissionInline from './PermissionInline';
 import PlanApprovalInline from './PlanApprovalInline';
 import { ModelIcon, providerOf } from './ModelIcon';
 import { StartInBar } from './environment/StartInBar';
-import type { Autonomy, SkillInfo } from '../types/bridge';
+import type { Autonomy, SkillInfo, TranscriptEvent } from '../types/bridge';
 import { feedbackDraftFromCommand } from '../lib/feedbackReport';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
 import { toast } from '../lib/toast';
@@ -97,6 +98,19 @@ const oppositeSubmitMode = (mode: SubmitMode): SubmitMode => (mode === 'queue' ?
 
 export function shouldShowTurnStarting(isLive: boolean): boolean {
   return !isLive;
+}
+
+export function hasAppContextForTranscript(
+  events: TranscriptEvent[],
+  childSessionId: string | null,
+): boolean {
+  return events.some((event) => {
+    if (event.kind !== 'text' || event.author === 'user') return false;
+    const belongsToTarget = childSessionId
+      ? event.sourceSessionId === childSessionId
+      : event.role === 'primary';
+    return belongsToTarget && hasCompleteAppBlock(event.text ?? '');
+  });
 }
 
 export function shouldStopTurnStarting({
@@ -206,6 +220,7 @@ export default function PromptInput({
     }),
     shallowEqual,
   );
+  const store = useStoreApi();
   const composerRevisionRef = useRef(0);
   const [input, setInputState] = useState('');
   const setInput = (value: SetStateAction<string>) => {
@@ -286,13 +301,7 @@ export default function PromptInput({
   const hasAppContext = useStoreSelector((current) => {
     if (!activeSession) return false;
     const events = current.transcripts[activeSession.appSessionId] ?? [];
-    return events.some((event) => {
-      if (event.kind !== 'text' || event.author === 'user') return false;
-      const belongsToVisibleTarget = targetChildSessionId
-        ? event.sourceSessionId === targetChildSessionId
-        : event.role === 'primary';
-      return belongsToVisibleTarget && hasCompleteAppBlock(event.text ?? '');
-    });
+    return hasAppContextForTranscript(events, targetChildSessionId);
   });
   const primaryWorkingDirectory = useSessionWorkingDirectory(activeSession);
   const childWorkingDirectory = useSessionWorkingDirectory(
@@ -1054,10 +1063,11 @@ export default function PromptInput({
     }
 
     try {
+      const primaryTranscript = store.getState().transcripts[activeSession.appSessionId] ?? [];
       sendToSession(
         activeSession.appSessionId,
         composeFrom(head.text, head.skills, head.files),
-        responseFormatForPrompt(head.text, hasAppContext),
+        responseFormatForPrompt(head.text, hasAppContextForTranscript(primaryTranscript, null)),
       );
     } catch (err) {
       // Keep the prompt staged and skip the transcript echo so a send failure

@@ -305,6 +305,58 @@ test('#29 a replace keeps one full live event when persisted history truncates i
   assert.equal(next.transcripts.m1[1].text, fullText);
 });
 
+test('#29 a full live App keeps the position of its truncated replay twin', () => {
+  const fullText = `Visualization\n\n\`\`\`app\n${'x'.repeat(96)}\n\`\`\``;
+  const retainedPrefix = fullText.slice(0, 40);
+  const persistedText = `${retainedPrefix}\n\n[truncated ${String(fullText.length - retainedPrefix.length)} chars]`;
+  const seeded = {
+    ...initialState,
+    transcripts: { m1: [ev('live-app', 195, fullText)] },
+  } as unknown as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [
+      userEv('user-before', 100, '/visualize'),
+      ev('truncated-app', 200, persistedText),
+      userEv('user-after', 300, 'make it blue'),
+    ],
+    mode: 'replace',
+    hasMore: false,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1.map((event) => event.id),
+    ['user-before', 'live-app', 'user-after'],
+  );
+});
+
+test('#29 removing a leading truncated twin does not move intervening live events after history', () => {
+  const fullText = `Visualization\n\n\`\`\`app\n${'x'.repeat(96)}\n\`\`\``;
+  const retainedPrefix = fullText.slice(0, 40);
+  const persistedText = `${retainedPrefix}\n\n[truncated ${String(fullText.length - retainedPrefix.length)} chars]`;
+  const seeded = {
+    ...initialState,
+    transcripts: { m1: [ev('live-app', 95, fullText), ev('live-between', 150, 'still here')] },
+  } as unknown as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [ev('truncated-app', 100, persistedText), ev('history-after', 200, 'later')],
+    mode: 'replace',
+    hasMore: false,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1.map((event) => event.id),
+    ['live-app', 'live-between', 'history-after'],
+  );
+});
+
 test('#29 a replace drops a live App response missing one streamed middle chunk', () => {
   const prefix = 'Here is the visualization.\n\n```app\n<main><script>const points = [';
   const missingChunk = '1, 2, 3];</script></main>\n```\n\n';
@@ -336,6 +388,31 @@ test('#29 a replace drops a live App response missing one streamed middle chunk'
     ['persisted-complete-app'],
   );
   assert.equal(next.transcripts.m1[0].text, fullText);
+});
+
+test('#29 similar complete App answers are not mistaken for one gapped stream', () => {
+  const prefix = `Here is the visualization.\n\n\`\`\`app\n<main>${'a'.repeat(80)}`;
+  const suffix = `${'z'.repeat(80)}</main>\n\`\`\``;
+  const shorter = `${prefix}<p>First answer</p>${suffix}`;
+  const longer = `${prefix}<p>A distinct and intentionally longer second answer</p>${suffix}`;
+  const seeded = {
+    ...initialState,
+    transcripts: { m1: [ev('live-first', 1000, shorter)] },
+  } as unknown as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [ev('persisted-second', 1001, longer)],
+    mode: 'replace',
+    hasMore: false,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1.map((event) => event.id),
+    ['live-first', 'persisted-second'],
+  );
 });
 
 test('#29 a replace keeps a live event from a different worker with identical text', () => {

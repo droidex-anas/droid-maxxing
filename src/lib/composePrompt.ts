@@ -7,8 +7,12 @@ export function isVisualizeCommand(text: string): boolean {
   return /^\/visualize(?:\s|$)/i.test(text.trim());
 }
 
-export function responseFormatForPrompt(text: string, hasAppContext: boolean): 'app' | undefined {
-  return isVisualizeCommand(text) || hasAppContext ? 'app' : undefined;
+export function responseFormatForPrompt(
+  text: string,
+  hasAppContext: boolean,
+): 'app-create' | 'app-followup' | undefined {
+  if (isVisualizeCommand(text)) return 'app-create';
+  return hasAppContext ? 'app-followup' : undefined;
 }
 
 // Builds the prompt text actually sent to a session from the raw user input plus

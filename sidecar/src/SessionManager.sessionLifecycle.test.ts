@@ -74,7 +74,7 @@ test('App response format enriches the provider prompt without changing the user
       clientRef: 'app-format-create',
       title: 'App request',
       goal: '/visualize compare renderer timings',
-      responseFormat: 'app',
+      responseFormat: 'app-create',
       interactionMode: 'auto',
       autonomy: 'low',
     });
@@ -88,7 +88,7 @@ test('App response format enriches the provider prompt without changing the user
       type: 'session.send',
       appSessionId: 'provider-1',
       text: '/visualize turn this into a timeline',
-      responseFormat: 'app',
+      responseFormat: 'app-create',
     });
     await h.provider.waitForPrompts('provider-1', 2);
 

@@ -1,9 +1,21 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useMemo, useEffect, useRef, useState, memo } from 'react';
-import { Copy, Check } from 'lucide-react';
+import {
+  Children,
+  isValidElement,
+  useMemo,
+  useEffect,
+  useRef,
+  useState,
+  memo,
+  type ReactNode,
+} from 'react';
 import type { Mermaid } from 'mermaid';
 import { AppBlock } from './AppBlock';
+import { appFencesInMarkdown } from '../lib/appBlocks';
+import { CodeCard } from './MarkdownCode';
+
+export { copyMarkdownCode } from './MarkdownCode';
 
 let mermaidPromise: Promise<Mermaid> | null = null;
 function loadMermaid(): Promise<Mermaid> {
@@ -31,6 +43,14 @@ function slugify(text: string): string {
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function reactText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (!isValidElement<{ children?: ReactNode }>(node)) {
+    return Children.toArray(node).map(reactText).join('');
+  }
+  return reactText(node.props.children);
 }
 
 function hasLanguage(className: string | undefined, language: string): boolean {
@@ -219,98 +239,6 @@ function SvgCodeBlock({ content }: { content: string }) {
   );
 }
 
-const LANG_LABEL: Record<string, string> = {
-  sh: 'Bash',
-  shell: 'Bash',
-  bash: 'Bash',
-  zsh: 'Bash',
-  console: 'Bash',
-  shellsession: 'Bash',
-  js: 'JavaScript',
-  jsx: 'JSX',
-  ts: 'TypeScript',
-  tsx: 'TSX',
-  py: 'Python',
-  rb: 'Ruby',
-  rs: 'Rust',
-  yml: 'YAML',
-  yaml: 'YAML',
-  md: 'Markdown',
-};
-
-function langLabel(className?: string): string {
-  const m = className?.match(/lang(?:uage)?-([\w+#.-]+)/i);
-  if (!m) return 'Code';
-  const l = m[1].toLowerCase();
-  return LANG_LABEL[l] ?? l.charAt(0).toUpperCase() + l.slice(1);
-}
-
-function CodeCopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      clearTimeout(timer.current ?? undefined);
-    },
-    [],
-  );
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard
-          .writeText(text)
-          .then(() => {
-            setCopied(true);
-            clearTimeout(timer.current ?? undefined);
-            timer.current = setTimeout(() => {
-              setCopied(false);
-            }, 1200);
-          })
-          .catch(() => undefined);
-      }}
-      className="flex items-center gap-1 text-[10.5px] text-droid-text-muted hover:text-droid-text transition-colors"
-      title="Copy"
-    >
-      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  );
-}
-
-// Fenced code block in a clean, theme-adaptive card: a grey header with the
-// language label and a copy action, then the code (syntax-highlighted for JSON).
-function CodeCard({
-  code,
-  className,
-  specMode,
-  highlighted,
-}: {
-  code: string;
-  className?: string;
-  specMode?: boolean;
-  highlighted?: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-xl border border-droid-border overflow-hidden bg-droid-elevated/40 ${specMode ? 'my-4' : 'my-2.5'}`}
-    >
-      <div className="flex items-center justify-between h-7 px-3 bg-droid-surface/60 border-b border-droid-border">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
-          {langLabel(className)}
-        </span>
-        <CodeCopyButton text={code} />
-      </div>
-      <pre className={`overflow-x-auto ${specMode ? 'p-4' : 'p-3.5'}`}>
-        <code
-          className={`font-mono leading-[1.65] text-droid-text-secondary whitespace-pre ${specMode ? 'text-[13px]' : 'text-[12px]'}`}
-        >
-          {highlighted ?? code}
-        </code>
-      </pre>
-    </div>
-  );
-}
-
 function MarkdownImpl({
   children,
   specMode,
@@ -324,6 +252,8 @@ function MarkdownImpl({
   autoPlayAppBlocks?: boolean;
   buildingAppBlocks?: boolean;
 }) {
+  const appFences = appFencesInMarkdown(children);
+  let appFenceIndex = 0;
   return (
     <div
       className={`text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[13.5px] leading-[1.7] space-y-3'}`}
@@ -332,7 +262,7 @@ function MarkdownImpl({
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => {
-            const text = typeof children === 'string' ? children : '';
+            const text = reactText(children);
             const id = slugify(text);
             return specMode ? (
               <h1
@@ -348,7 +278,7 @@ function MarkdownImpl({
             );
           },
           h2: ({ children }) => {
-            const text = typeof children === 'string' ? children : '';
+            const text = reactText(children);
             const id = slugify(text);
             return specMode ? (
               <h2
@@ -364,7 +294,7 @@ function MarkdownImpl({
             );
           },
           h3: ({ children }) => {
-            const text = typeof children === 'string' ? children : '';
+            const text = reactText(children);
             const id = slugify(text);
             return specMode ? (
               <h3
@@ -428,7 +358,21 @@ function MarkdownImpl({
           ),
           // Every fenced renderer below owns its frame and preformatted region.
           // Removing react-markdown's wrapper avoids invalid <pre><div> nesting.
-          pre: ({ children }) => <>{children}</>,
+          pre: ({ children, node }) => {
+            const child = node?.children.at(0);
+            const className =
+              child && 'properties' in child ? child.properties.className : undefined;
+            const hasFenceLanguage = Array.isArray(className)
+              ? className.length > 0
+              : typeof className === 'string' && className.length > 0;
+            return hasFenceLanguage ? (
+              <>{children}</>
+            ) : (
+              <pre className="my-2.5 overflow-x-auto rounded-xl border border-droid-border bg-droid-elevated/40 p-3.5 whitespace-pre">
+                {children}
+              </pre>
+            );
+          },
           code: ({ className, children }) => {
             const inline = !className;
             if (inline)
@@ -443,11 +387,13 @@ function MarkdownImpl({
             const codeText = typeof children === 'string' ? children : '';
 
             if (allowGeneratedContent && isAppLang(className)) {
+              const fence = appFences[appFenceIndex++];
+              const isComplete = fence.complete;
               return (
                 <AppBlock
                   source={codeText}
-                  autoPlay={autoPlayAppBlocks}
-                  isBuilding={buildingAppBlocks}
+                  autoPlay={autoPlayAppBlocks && isComplete}
+                  isBuilding={buildingAppBlocks && !isComplete}
                 />
               );
             }

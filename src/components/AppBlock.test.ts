@@ -27,6 +27,8 @@ test('only a closed app fence is ready for automatic playback', () => {
   assert.equal(hasCompleteAppBlock('```app\n<main>Complete</main>\n```'), true);
   assert.equal(hasCompleteAppBlock('```app\r\n<main>Complete</main>\r\n```'), true);
   assert.equal(hasCompleteAppBlock('```application\nnope\n```'), false);
+  assert.equal(hasAppBlock('````markdown\n```app\nexample\n```\n````'), false);
+  assert.equal(hasCompleteAppBlock('````markdown\n```app\nexample\n```\n````'), false);
 });
 
 test('an app under construction is a status surface with no executable control', () => {
@@ -64,6 +66,9 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /form-action 'none'/);
   assert.match(document, /<meta name="viewport"/);
   assert.match(document, /droidex:app-height/);
+  assert.match(document, /bridgeToken/);
+  assert.match(document, /requestAnimationFrame/);
+  assert.match(document, /observer\.observe\(document\.body\)/);
   assert.match(document, /"app-1"/);
   assert.match(document, /color-scheme: light/);
   assert.match(document, /--app-background: #f7f7f5/);
@@ -171,6 +176,63 @@ test('the host accepts height updates only for the mounted app instance', () => 
     undefined,
   );
   assert.equal(appBlockHeightFromMessage(null, 'app-3'), undefined);
+});
+
+test('the host bridge rejects messages without the initial document token', () => {
+  assert.equal(
+    appBlockHeightFromMessage(
+      { type: 'droidex:app-height', instanceId: 'app-3', bridgeToken: 'wrong', height: 420 },
+      'app-3',
+      'expected',
+    ),
+    undefined,
+  );
+  assert.equal(
+    appBlockMathRequestFromMessage(
+      {
+        type: 'droidex:render-math',
+        instanceId: 'app-4',
+        bridgeToken: 'wrong',
+        requestId: 'math-1',
+        latex: 'x',
+        displayMode: false,
+      },
+      'app-4',
+      'expected',
+    ),
+    undefined,
+  );
+});
+
+test('the App bridge bounds math work and deduplicates repeated heights', async () => {
+  type Guard = {
+    acceptHeight: (height: number) => boolean;
+    startMath: () => boolean;
+    finishMath: () => void;
+  };
+  const runtime = (await import('./appBlockRuntime')) as unknown as {
+    createAppBridgeGuard?: (mathBudget: number, mathConcurrency: number) => Guard;
+  };
+  const guard = runtime.createAppBridgeGuard?.(2, 1);
+  assert.ok(guard);
+  assert.equal(guard.acceptHeight(400), true);
+  assert.equal(guard.acceptHeight(400), false);
+  assert.equal(guard.startMath(), true);
+  assert.equal(guard.startMath(), false);
+  guard.finishMath();
+  assert.equal(guard.startMath(), true);
+  guard.finishMath();
+  assert.equal(guard.startMath(), false);
+});
+
+test('short and functional CSS colors select the correct canvas scheme', async () => {
+  const runtime = (await import('./appBlockRuntime')) as unknown as {
+    appColorScheme?: (color: string) => 'light' | 'dark';
+  };
+  assert.equal(runtime.appColorScheme?.('#fff'), 'light');
+  assert.equal(runtime.appColorScheme?.('rgb(250, 250, 250)'), 'light');
+  assert.equal(runtime.appColorScheme?.('hsl(0, 0%, 5%)'), 'dark');
+  assert.equal(runtime.appColorScheme?.('#111111ff'), 'dark');
 });
 
 test('the math bridge accepts only bounded requests for the mounted App', () => {

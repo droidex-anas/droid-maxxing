@@ -57,3 +57,48 @@ test('only the exact app fence activates an App block', () => {
   assert.match(html, /&lt;p&gt;Ordinary code&lt;\/p&gt;/);
   assert.doesNotMatch(html, /aria-label="Play app"/);
 });
+
+test('plain fenced blocks preserve preformatted multiline layout', () => {
+  const html = renderToStaticMarkup(
+    createElement(Markdown, null, '```\nfirst line\nsecond line\n```'),
+  );
+
+  assert.match(html, /<pre[^>]*>/);
+  assert.match(html, /first line\nsecond line/);
+});
+
+test('formatted spec headings keep a usable text slug', () => {
+  const html = renderToStaticMarkup(
+    createElement(Markdown, { specMode: true }, '## The `--app-surface` *color*'),
+  );
+
+  assert.match(html, /id="the-app-surface-color"/);
+  assert.doesNotMatch(html, /id=""/);
+});
+
+test('each live App fence owns its own completion state', () => {
+  const source = [
+    '```app',
+    '<main>Complete</main>',
+    '```',
+    '',
+    '```app',
+    '<main>Still streaming',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(Markdown, { autoPlayAppBlocks: true, buildingAppBlocks: true }, source),
+  );
+
+  assert.equal(html.match(/<iframe/g)?.length, 1);
+  assert.equal(html.match(/>Building interactive app</g)?.length, 1);
+});
+
+test('copy gracefully declines when the Clipboard API is unavailable', async () => {
+  const markdown = (await import('./Markdown')) as unknown as {
+    copyMarkdownCode?: (
+      clipboard: Pick<Clipboard, 'writeText'> | undefined,
+      text: string,
+    ) => Promise<boolean>;
+  };
+  assert.equal(await markdown.copyMarkdownCode?.(undefined, 'sample'), false);
+});

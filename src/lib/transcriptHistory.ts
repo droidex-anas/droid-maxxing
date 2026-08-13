@@ -1,5 +1,6 @@
 import type { TranscriptEvent } from '../types/bridge';
 import { composePrompt } from './composePrompt';
+import { hasAppBlock, hasCompleteAppBlock } from './appBlocks';
 
 // A persisted twin is emitted within moments of its live event. Same-content
 // events further apart are independent occurrences and must both survive.
@@ -87,7 +88,10 @@ function replayedTextSupersedesLiveGap(live: TranscriptEvent, replayed: Transcri
   if (typeof live.text !== 'string' || typeof replayed.text !== 'string') return false;
   if (
     live.text.length >= replayed.text.length ||
-    replayTimeDifferenceMs(live, replayed) > REPLAY_DEDUP_TOLERANCE_MS
+    replayTimeDifferenceMs(live, replayed) > REPLAY_DEDUP_TOLERANCE_MS ||
+    !hasAppBlock(live.text) ||
+    hasCompleteAppBlock(live.text) ||
+    !hasCompleteAppBlock(replayed.text)
   ) {
     return false;
   }
@@ -144,7 +148,7 @@ export function reconcileRestoredTranscript(
   // Persisted history deliberately caps very large text blocks. When a live
   // event still carries that block in full, keep the lossless event and remove
   // its replay twin instead of rendering both versions as separate answers.
-  const supersededPageIds = new Set<string>();
+  const liveReplacementByPageId = new Map<string, TranscriptEvent>();
   const matchedLiveIds = new Set<string>();
   const supersededLiveIds = supersededLiveGapIds(existing, page);
   for (const replayed of page) {
@@ -161,7 +165,7 @@ export function reconcileRestoredTranscript(
       }
     }
     if (!closestLive) continue;
-    supersededPageIds.add(replayed.id);
+    liveReplacementByPageId.set(replayed.id, closestLive);
     matchedLiveIds.add(closestLive.id);
     for (const candidate of existing) {
       if (
@@ -172,15 +176,15 @@ export function reconcileRestoredTranscript(
       }
     }
   }
-  const authoritativePage = page.filter((event) => !supersededPageIds.has(event.id));
+  const authoritativePage = page.map((event) => liveReplacementByPageId.get(event.id) ?? event);
   const pageIds = new Set(authoritativePage.map((event) => event.id));
   const pageUserText = new Set(
     authoritativePage
       .filter((event) => event.author === 'user' && event.text)
       .map((event) => event.text),
   );
-  const firstTs = page[0]?.ts ?? 0;
-  const lastTs = page.at(-1)?.ts ?? 0;
+  const firstTs = authoritativePage[0]?.ts ?? 0;
+  const lastTs = authoritativePage.at(-1)?.ts ?? 0;
   const supersededEcho = (event: TranscriptEvent) =>
     isOptimisticEcho(event) &&
     event.author === 'user' &&
@@ -231,9 +235,14 @@ export function reconcileRestoredTranscript(
       !supersededEcho(event) &&
       !isReplayedDuplicate(event),
   );
-  const before = liveOnly.filter((event) => event.ts < firstTs);
-  const after = liveOnly.filter((event) => event.ts >= firstTs);
-  return page.length > 0 ? [...before, ...authoritativePage, ...after] : existing;
+  if (page.length === 0) return existing;
+  const merged = [...authoritativePage];
+  for (const event of liveOnly) {
+    const insertionIndex = merged.findIndex((candidate) => candidate.ts > event.ts);
+    if (insertionIndex < 0) merged.push(event);
+    else merged.splice(insertionIndex, 0, event);
+  }
+  return merged;
 }
 
 export function reconcileTranscriptPage(

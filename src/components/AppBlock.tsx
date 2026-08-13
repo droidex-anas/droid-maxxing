@@ -12,9 +12,11 @@ import { AnimatePresence, motion, useReducedMotion, type Transition } from 'fram
 import { AppWindow, Play, Square } from 'lucide-react';
 import {
   DEFAULT_APP_HEIGHT,
+  appBlockReadyFromMessage,
   appBlockHeightFromMessage,
   appBlockMathRequestFromMessage,
   appBlockReducer,
+  createAppBridgeGuard,
   createAppDocument,
   currentAppBlockTheme,
   renderAppBlockMath,
@@ -30,27 +32,70 @@ export function RunningAppFrame({
   onMeasured?: () => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const bridgeTokenRef = useRef(crypto.randomUUID());
+  const bridgeReadyRef = useRef(false);
+  const readyBeforeLoadRef = useRef(false);
+  const bridgeGuardRef = useRef(createAppBridgeGuard());
   const [{ height, measurement }, setFrameSize] = useState({
     height: DEFAULT_APP_HEIGHT,
     measurement: 0,
   });
   const theme = useMemo(currentAppBlockTheme, []);
   const document = useMemo(
-    () => createAppDocument(source, instanceId, theme),
+    () => createAppDocument(source, instanceId, theme, bridgeTokenRef.current),
     [instanceId, source, theme],
   );
 
   useEffect(() => {
+    let heightFrame = 0;
+    let pendingHeight: number | undefined;
+    const scheduleHeight = (nextHeight: number) => {
+      pendingHeight = nextHeight;
+      if (heightFrame) return;
+      heightFrame = requestAnimationFrame(() => {
+        heightFrame = 0;
+        if (pendingHeight === undefined) return;
+        const measuredHeight = pendingHeight;
+        pendingHeight = undefined;
+        setFrameSize((current) => ({
+          height: measuredHeight,
+          measurement: current.measurement + 1,
+        }));
+      });
+    };
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow;
       if (!frameWindow || event.source !== frameWindow) return;
-      const nextHeight = appBlockHeightFromMessage(event.data, instanceId);
-      if (nextHeight !== undefined) {
-        setFrameSize((current) => ({ height: nextHeight, measurement: current.measurement + 1 }));
+      if (appBlockReadyFromMessage(event.data, instanceId, bridgeTokenRef.current)) {
+        bridgeReadyRef.current = true;
+        readyBeforeLoadRef.current = true;
         return;
       }
-      const mathRequest = appBlockMathRequestFromMessage(event.data, instanceId);
+      if (!bridgeReadyRef.current) return;
+      const nextHeight = appBlockHeightFromMessage(event.data, instanceId, bridgeTokenRef.current);
+      if (nextHeight !== undefined) {
+        if (!bridgeGuardRef.current.acceptHeight(nextHeight)) return;
+        scheduleHeight(nextHeight);
+        return;
+      }
+      const mathRequest = appBlockMathRequestFromMessage(
+        event.data,
+        instanceId,
+        bridgeTokenRef.current,
+      );
       if (!mathRequest) return;
+      if (!bridgeGuardRef.current.startMath()) {
+        frameWindow.postMessage(
+          {
+            type: 'droidex:math-rendered',
+            instanceId,
+            bridgeToken: bridgeTokenRef.current,
+            requestId: mathRequest.requestId,
+          },
+          '*',
+        );
+        return;
+      }
       void renderAppBlockMath(mathRequest)
         .then((html) => {
           if (iframeRef.current?.contentWindow !== frameWindow) return;
@@ -58,6 +103,7 @@ export function RunningAppFrame({
             {
               type: 'droidex:math-rendered',
               instanceId,
+              bridgeToken: bridgeTokenRef.current,
               requestId: mathRequest.requestId,
               html,
             },
@@ -70,14 +116,19 @@ export function RunningAppFrame({
             {
               type: 'droidex:math-rendered',
               instanceId,
+              bridgeToken: bridgeTokenRef.current,
               requestId: mathRequest.requestId,
             },
             '*',
           );
+        })
+        .finally(() => {
+          bridgeGuardRef.current.finishMath();
         });
     };
     window.addEventListener('message', onMessage);
     return () => {
+      if (heightFrame) cancelAnimationFrame(heightFrame);
       window.removeEventListener('message', onMessage);
     };
   }, [instanceId]);
@@ -89,6 +140,10 @@ export function RunningAppFrame({
   return (
     <iframe
       ref={iframeRef}
+      onLoad={() => {
+        if (!readyBeforeLoadRef.current) bridgeReadyRef.current = false;
+        readyBeforeLoadRef.current = false;
+      }}
       title="Interactive App block"
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"

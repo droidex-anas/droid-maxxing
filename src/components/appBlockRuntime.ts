@@ -1,3 +1,5 @@
+export { hasAppBlock, hasCompleteAppBlock } from '../lib/appBlocks';
+
 export type AppBlockState = 'idle' | 'running';
 export type AppBlockAction = 'play' | 'stop';
 
@@ -5,6 +7,8 @@ export const DEFAULT_APP_HEIGHT = 360;
 const MIN_APP_HEIGHT = 240;
 const MAX_APP_HEIGHT = 12_000;
 const MAX_APP_MATH_CHARS = 20_000;
+export const MAX_APP_MATH_REQUESTS = 64;
+export const MAX_CONCURRENT_APP_MATH_REQUESTS = 2;
 
 export interface AppBlockMathRequest {
   requestId: string;
@@ -22,6 +26,37 @@ export interface AppBlockTheme {
   accent: string;
 }
 
+export interface AppBridgeGuard {
+  acceptHeight: (height: number) => boolean;
+  startMath: () => boolean;
+  finishMath: () => void;
+}
+
+export function createAppBridgeGuard(
+  mathBudget = MAX_APP_MATH_REQUESTS,
+  mathConcurrency = MAX_CONCURRENT_APP_MATH_REQUESTS,
+): AppBridgeGuard {
+  let lastHeight: number | undefined;
+  let mathStarted = 0;
+  let mathInFlight = 0;
+  return {
+    acceptHeight(height) {
+      if (height === lastHeight) return false;
+      lastHeight = height;
+      return true;
+    },
+    startMath() {
+      if (mathStarted >= mathBudget || mathInFlight >= mathConcurrency) return false;
+      mathStarted += 1;
+      mathInFlight += 1;
+      return true;
+    },
+    finishMath() {
+      mathInFlight = Math.max(0, mathInFlight - 1);
+    },
+  };
+}
+
 const DEFAULT_APP_THEME: AppBlockTheme = {
   colorScheme: 'dark',
   background: '#0a0a0a',
@@ -32,20 +67,69 @@ const DEFAULT_APP_THEME: AppBlockTheme = {
   accent: '#f2f2f2',
 };
 
-const SAFE_COLOR = /^(#[\da-f]{3,8}|rgba?\([\d.,\s%/]+\)|hsla?\([\d.,\s%/]+\))$/i;
+const SAFE_COLOR =
+  /^(#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})|rgba?\([\d.,\s%/]+\)|hsla?\([\d.,\s%/]+\))$/i;
 
 function safeColor(value: string, fallback: string): string {
   const color = value.trim();
   return SAFE_COLOR.test(color) ? color : fallback;
 }
 
-function isDarkColor(color: string): boolean {
-  const hex = /^#([\da-f]{6})$/i.exec(color)?.[1];
-  if (!hex) return true;
-  const red = Number.parseInt(hex.slice(0, 2), 16);
-  const green = Number.parseInt(hex.slice(2, 4), 16);
-  const blue = Number.parseInt(hex.slice(4, 6), 16);
-  return red * 0.299 + green * 0.587 + blue * 0.114 < 128;
+function colorChannels(color: string): [number, number, number] | undefined {
+  const hex = /^#([\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.exec(color)?.[1];
+  if (hex) {
+    const expanded =
+      hex.length === 3 || hex.length === 4
+        ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+        : hex.slice(0, 6);
+    return [
+      Number.parseInt(expanded.slice(0, 2), 16),
+      Number.parseInt(expanded.slice(2, 4), 16),
+      Number.parseInt(expanded.slice(4, 6), 16),
+    ];
+  }
+
+  const rgb = /^rgba?\((.*)\)$/i.exec(color)?.[1];
+  if (rgb) {
+    const channels = rgb
+      .split(/[,\s/]+/)
+      .filter(Boolean)
+      .slice(0, 3);
+    if (channels.length !== 3) return undefined;
+    const channelValue = (channel: string) =>
+      channel.endsWith('%') ? (Number.parseFloat(channel) / 100) * 255 : Number.parseFloat(channel);
+    return [channelValue(channels[0]), channelValue(channels[1]), channelValue(channels[2])];
+  }
+
+  const hsl = /^hsla?\((.*)\)$/i.exec(color)?.[1];
+  if (!hsl) return undefined;
+  const channels = hsl.split(/[,\s/]+/).filter(Boolean);
+  if (channels.length < 3) return undefined;
+  const hue = ((Number.parseFloat(channels[0]) % 360) + 360) % 360;
+  const saturation = Number.parseFloat(channels[1]) / 100;
+  const lightness = Number.parseFloat(channels[2]) / 100;
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const segment = hue / 60;
+  const secondary = chroma * (1 - Math.abs((segment % 2) - 1));
+  const [red, green, blue] =
+    segment < 1
+      ? [chroma, secondary, 0]
+      : segment < 2
+        ? [secondary, chroma, 0]
+        : segment < 3
+          ? [0, chroma, secondary]
+          : segment < 4
+            ? [0, secondary, chroma]
+            : segment < 5
+              ? [secondary, 0, chroma]
+              : [chroma, 0, secondary];
+  const match = lightness - chroma / 2;
+  return [(red + match) * 255, (green + match) * 255, (blue + match) * 255];
+}
+
+export function appColorScheme(color: string): 'light' | 'dark' {
+  const [red, green, blue] = colorChannels(color) ?? [0, 0, 0];
+  return red * 0.299 + green * 0.587 + blue * 0.114 < 128 ? 'dark' : 'light';
 }
 
 export function currentAppBlockTheme(): AppBlockTheme {
@@ -55,7 +139,7 @@ export function currentAppBlockTheme(): AppBlockTheme {
     safeColor(styles.getPropertyValue(name), fallback);
   const background = color('--droid-bg', DEFAULT_APP_THEME.background);
   return {
-    colorScheme: isDarkColor(background) ? 'dark' : 'light',
+    colorScheme: appColorScheme(background),
     background,
     surface: color('--droid-surface', DEFAULT_APP_THEME.surface),
     foreground: color('--droid-text', DEFAULT_APP_THEME.foreground),
@@ -69,14 +153,6 @@ export function appBlockReducer(_state: AppBlockState, action: AppBlockAction): 
   return action === 'play' ? 'running' : 'idle';
 }
 
-export function hasCompleteAppBlock(markdown: string): boolean {
-  return /(?:^|\n)```app[ \t]*\r?\n[\s\S]*?```(?:\r?\n|$)/i.test(markdown);
-}
-
-export function hasAppBlock(markdown: string): boolean {
-  return /(?:^|\n)```app[ \t]*(?:\r?\n|$)/i.test(markdown);
-}
-
 export function normalizeAppBlockHeight(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_APP_HEIGHT;
   return Math.min(MAX_APP_HEIGHT, Math.max(MIN_APP_HEIGHT, Math.ceil(value)));
@@ -86,8 +162,10 @@ export function createAppDocument(
   source: string,
   instanceId: string,
   theme: AppBlockTheme = DEFAULT_APP_THEME,
+  bridgeToken = instanceId,
 ): string {
   const serializedId = JSON.stringify(instanceId).replaceAll('<', '\\u003c');
+  const serializedBridgeToken = JSON.stringify(bridgeToken).replaceAll('<', '\\u003c');
   const contentSecurityPolicy = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",
@@ -136,11 +214,20 @@ button, input, select, textarea {
 <script>
 (() => {
   const instanceId = ${serializedId};
+  const bridgeToken = ${serializedBridgeToken};
   const pendingMath = new Map();
   let mathSequence = 0;
+  let heightFrame = 0;
+  let lastHeight = -1;
   const reportHeight = () => {
-    const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
-    parent.postMessage({ type: 'droidex:app-height', instanceId, height }, '*');
+    if (heightFrame) return;
+    heightFrame = requestAnimationFrame(() => {
+      heightFrame = 0;
+      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
+      if (height === lastHeight) return;
+      lastHeight = height;
+      parent.postMessage({ type: 'droidex:app-height', instanceId, bridgeToken, height }, '*');
+    });
   };
   const renderMath = (target, latex, options = {}) => {
     const element = typeof target === 'string' ? document.querySelector(target) : target;
@@ -151,6 +238,7 @@ button, input, select, textarea {
       parent.postMessage({
         type: 'droidex:render-math',
         instanceId,
+        bridgeToken,
         requestId,
         latex,
         displayMode: options.displayMode === true || element.hasAttribute('data-display'),
@@ -169,6 +257,7 @@ button, input, select, textarea {
       !data ||
       data.type !== 'droidex:math-rendered' ||
       data.instanceId !== instanceId ||
+      data.bridgeToken !== bridgeToken ||
       typeof data.requestId !== 'string'
     ) return;
     const pending = pendingMath.get(data.requestId);
@@ -197,11 +286,14 @@ button, input, select, textarea {
         visualRegions[0].setAttribute('data-droidex-app-canvas', '');
       }
     }
+    parent.postMessage({ type: 'droidex:app-ready', instanceId, bridgeToken }, '*');
     void renderAllMath();
     reportHeight();
     const observer = new ResizeObserver(reportHeight);
-    observer.observe(document.documentElement);
+    observer.observe(document.body);
+    if (root && root !== document.body) observer.observe(root);
     addEventListener('pagehide', () => {
+      if (heightFrame) cancelAnimationFrame(heightFrame);
       observer.disconnect();
       removeEventListener('message', onMathMessage);
       for (const pending of pendingMath.values()) pending.resolve(false);
@@ -237,10 +329,39 @@ body { min-height: 0 !important; padding: 0 !important; }
 </html>`;
 }
 
-export function appBlockHeightFromMessage(data: unknown, instanceId: string): number | undefined {
-  if (typeof data !== 'object' || data === null) return undefined;
-  if (!('type' in data) || data.type !== 'droidex:app-height') return undefined;
-  if (!('instanceId' in data) || data.instanceId !== instanceId) return undefined;
+function appBridgeMessageMatches(data: unknown, instanceId: string, bridgeToken?: string): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  if (!('instanceId' in data) || data.instanceId !== instanceId) return false;
+  return bridgeToken === undefined || ('bridgeToken' in data && data.bridgeToken === bridgeToken);
+}
+
+export function appBlockReadyFromMessage(
+  data: unknown,
+  instanceId: string,
+  bridgeToken: string,
+): boolean {
+  return (
+    appBridgeMessageMatches(data, instanceId, bridgeToken) &&
+    typeof data === 'object' &&
+    data !== null &&
+    'type' in data &&
+    data.type === 'droidex:app-ready'
+  );
+}
+
+export function appBlockHeightFromMessage(
+  data: unknown,
+  instanceId: string,
+  bridgeToken?: string,
+): number | undefined {
+  if (!appBridgeMessageMatches(data, instanceId, bridgeToken)) return undefined;
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    !('type' in data) ||
+    data.type !== 'droidex:app-height'
+  )
+    return undefined;
   if (!('height' in data) || typeof data.height !== 'number' || !Number.isFinite(data.height)) {
     return undefined;
   }
@@ -250,10 +371,11 @@ export function appBlockHeightFromMessage(data: unknown, instanceId: string): nu
 export function appBlockMathRequestFromMessage(
   data: unknown,
   instanceId: string,
+  bridgeToken?: string,
 ): AppBlockMathRequest | undefined {
+  if (!appBridgeMessageMatches(data, instanceId, bridgeToken)) return undefined;
   if (typeof data !== 'object' || data === null) return undefined;
   if (!('type' in data) || data.type !== 'droidex:render-math') return undefined;
-  if (!('instanceId' in data) || data.instanceId !== instanceId) return undefined;
   if (
     !('requestId' in data) ||
     typeof data.requestId !== 'string' ||

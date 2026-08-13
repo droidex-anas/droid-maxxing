@@ -2017,7 +2017,7 @@ const MessageBody = memo(function MessageBody({
   // shows; the cut itself is intentionally not surfaced.
   const { body } = parseTruncatedTail(text);
   const hasCompleteApp = hasCompleteAppBlock(body);
-  const buildingAppBlocks = live && hasAppBlock(body) && !hasCompleteApp;
+  const buildingAppBlocks = live && hasAppBlock(body);
   const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
   if (!hasJsonRender(body))
     return (
@@ -2590,7 +2590,7 @@ export interface FreshAppResponseState {
   texts: Set<string>;
 }
 
-function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
+export function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
   let latestPromptIndex = -1;
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
@@ -2599,6 +2599,7 @@ function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
       break;
     }
   }
+  if (latestPromptIndex < 0) return [];
 
   const responses: string[] = [];
   for (let i = latestPromptIndex + 1; i < items.length; i++) {
@@ -2726,13 +2727,14 @@ export function MessageFeed({
   );
   const feedIdentity = `${events[0]?.appSessionId ?? ''}:${events[0]?.sourceSessionId ?? ''}`;
   const freshAppResponsesRef = useRef<FreshAppResponseState | null>(null);
-  freshAppResponsesRef.current = rememberFreshAppResponses(
-    freshAppResponsesRef.current,
-    feedIdentity,
-    items,
-    pending,
+  const freshAppResponseState = useMemo(
+    () => rememberFreshAppResponses(freshAppResponsesRef.current, feedIdentity, items, pending),
+    [feedIdentity, items, pending],
   );
-  const freshAppResponseTexts = freshAppResponsesRef.current.texts;
+  useEffect(() => {
+    freshAppResponsesRef.current = freshAppResponseState;
+  }, [freshAppResponseState]);
+  const freshAppResponseTexts = freshAppResponseState.texts;
   const renderedFeedRef = useRef<{ identity: string; keys: Set<string> } | null>(null);
   const previousFeed = renderedFeedRef.current;
   useEffect(() => {

@@ -12,6 +12,7 @@ import type {
   SessionSummary,
   ModelInfo,
   ReasoningEffort,
+  ResponseFormat,
   ServerEvent,
   SessionInteractionMode,
 } from './protocol.js';
@@ -83,6 +84,11 @@ import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 import { formatAppPrompt } from './appPrompt.js';
 
 type Emit = (event: ServerEvent) => void;
+
+function formatResponsePrompt(text: string, responseFormat?: ResponseFormat): string {
+  if (!responseFormat) return text;
+  return formatAppPrompt(text, responseFormat === 'app-create' ? 'create' : 'followup');
+}
 
 type SessionHistory = Pick<
   HistoryIndex,
@@ -507,19 +513,19 @@ export class SessionManager {
       case 'session.create':
         await this.lifecycle.create({
           ...cmd,
-          goal: cmd.responseFormat === 'app' ? formatAppPrompt(cmd.goal) : cmd.goal,
+          goal: formatResponsePrompt(cmd.goal, cmd.responseFormat),
         });
         return;
       case 'session.send':
         await this.lifecycle.send(
           cmd.appSessionId,
-          cmd.responseFormat === 'app' ? formatAppPrompt(cmd.text) : cmd.text,
+          formatResponsePrompt(cmd.text, cmd.responseFormat),
         );
         return;
       case 'session.sendNow':
         await this.lifecycle.sendNow(
           cmd.appSessionId,
-          cmd.responseFormat === 'app' ? formatAppPrompt(cmd.text) : cmd.text,
+          formatResponsePrompt(cmd.text, cmd.responseFormat),
         );
         return;
       case 'approval.respond':
@@ -540,16 +546,10 @@ export class SessionManager {
         await this.childSessions.open(cmd);
         return;
       case 'child.send':
-        await this.childSessions.send(
-          cmd,
-          cmd.responseFormat === 'app' ? formatAppPrompt(cmd.text) : cmd.text,
-        );
+        await this.childSessions.send(cmd, formatResponsePrompt(cmd.text, cmd.responseFormat));
         return;
       case 'child.sendNow':
-        await this.childSessions.sendNow(
-          cmd,
-          cmd.responseFormat === 'app' ? formatAppPrompt(cmd.text) : cmd.text,
-        );
+        await this.childSessions.sendNow(cmd, formatResponsePrompt(cmd.text, cmd.responseFormat));
         return;
       case 'child.interrupt':
         await this.childSessions.interrupt(cmd);

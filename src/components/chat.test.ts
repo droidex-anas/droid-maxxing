@@ -871,6 +871,18 @@ test('a freshly generated App stays eligible for autoplay when history replaces 
   assert.deepEqual([...reopenedState.texts], []);
 });
 
+test('assistant Apps without a user prompt are never treated as fresh autoplay responses', async () => {
+  const chatModule = (await import('./chat')) as unknown as {
+    completeAppResponsesInLatestTurn?: (items: FeedItem[]) => string[];
+  };
+  const completeApps = chatModule.completeAppResponsesInLatestTurn;
+  assert.equal(typeof completeApps, 'function');
+  if (!completeApps) return;
+
+  const historical = groupTurns(buildFeed([asst('```app\n<main>Historical</main>\n```')]), false);
+  assert.deepEqual(completeApps(historical), []);
+});
+
 test('live thinking stays collapsed until the user opens it', () => {
   const events = [
     userMsg('inspect this'),

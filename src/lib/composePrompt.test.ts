@@ -49,7 +49,10 @@ test('/visualize remains an app command even when a provider skill has the same 
 });
 
 test('an existing App keeps follow-up prompts App-capable without another slash command', async () => {
-  type ResponseFormatForPrompt = (text: string, hasAppContext: boolean) => 'app' | undefined;
+  type ResponseFormatForPrompt = (
+    text: string,
+    hasAppContext: boolean,
+  ) => 'app-create' | 'app-followup' | undefined;
   const promptModule = (await import('./composePrompt')) as unknown as {
     responseFormatForPrompt?: ResponseFormatForPrompt;
   };
@@ -57,7 +60,7 @@ test('an existing App keeps follow-up prompts App-capable without another slash 
   assert.equal(typeof responseFormatForPrompt, 'function');
   if (!responseFormatForPrompt) return;
 
-  assert.equal(responseFormatForPrompt('make the points larger', true), 'app');
+  assert.equal(responseFormatForPrompt('make the points larger', true), 'app-followup');
   assert.equal(responseFormatForPrompt('ordinary question', false), undefined);
-  assert.equal(responseFormatForPrompt('/visualize a histogram', false), 'app');
+  assert.equal(responseFormatForPrompt('/visualize a histogram', false), 'app-create');
 });

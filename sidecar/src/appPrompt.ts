@@ -26,10 +26,8 @@ const APP_GUIDANCE = [
   'Use the DROIDEX theme variables --app-background, --app-surface, --app-foreground, --app-muted, --app-border, and --app-accent. Do not use network requests, external libraries, external assets, or nested frames.',
 ].join('\n');
 
-export function formatAppPrompt(request: string): string {
-  const guidance = /^\/visualize(?:\s|$)/i.test(request.trim())
-    ? APP_CREATION_GUIDANCE
-    : APP_FOLLOWUP_GUIDANCE;
+export function formatAppPrompt(request: string, mode: 'create' | 'followup'): string {
+  const guidance = mode === 'create' ? APP_CREATION_GUIDANCE : APP_FOLLOWUP_GUIDANCE;
   return [APP_PROMPT_HEADER, request.trim(), '', APP_GUIDANCE_HEADER, guidance, APP_GUIDANCE].join(
     '\n',
   );
