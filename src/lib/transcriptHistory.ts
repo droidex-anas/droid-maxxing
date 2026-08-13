@@ -1,6 +1,6 @@
 import type { TranscriptEvent } from '../types/bridge';
 import { composePrompt } from './composePrompt';
-import { hasAppBlock, hasCompleteAppBlock } from './appBlocks';
+import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlocks';
 
 // A persisted twin is emitted within moments of its live event. Same-content
 // events further apart are independent occurrences and must both survive.
@@ -90,8 +90,9 @@ function replayedTextSupersedesLiveGap(live: TranscriptEvent, replayed: Transcri
     live.text.length >= replayed.text.length ||
     replayTimeDifferenceMs(live, replayed) > REPLAY_DEDUP_TOLERANCE_MS ||
     !hasAppBlock(live.text) ||
-    hasCompleteAppBlock(live.text) ||
-    !hasCompleteAppBlock(replayed.text)
+    !hasIncompleteAppBlock(live.text) ||
+    !hasCompleteAppBlock(replayed.text) ||
+    hasIncompleteAppBlock(replayed.text)
   ) {
     return false;
   }

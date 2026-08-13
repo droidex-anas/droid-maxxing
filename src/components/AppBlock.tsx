@@ -16,7 +16,7 @@ import {
   appBlockHeightFromMessage,
   appBlockMathRequestFromMessage,
   appBlockReducer,
-  createAppBridgeGuard,
+  createAppBridgeSession,
   createAppDocument,
   currentAppBlockTheme,
   renderAppBlockMath,
@@ -32,21 +32,19 @@ export function RunningAppFrame({
   onMeasured?: () => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const bridgeTokenRef = useRef(crypto.randomUUID());
-  const bridgeReadyRef = useRef(false);
-  const readyBeforeLoadRef = useRef(false);
-  const bridgeGuardRef = useRef(createAppBridgeGuard());
   const [{ height, measurement }, setFrameSize] = useState({
     height: DEFAULT_APP_HEIGHT,
     measurement: 0,
   });
   const theme = useMemo(currentAppBlockTheme, []);
+  const bridge = useMemo(createAppBridgeSession, [instanceId, source, theme]);
   const document = useMemo(
-    () => createAppDocument(source, instanceId, theme, bridgeTokenRef.current),
-    [instanceId, source, theme],
+    () => createAppDocument(source, instanceId, theme, bridge.token),
+    [bridge.token, instanceId, source, theme],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    let bridgeReady = false;
     let heightFrame = 0;
     let pendingHeight: number | undefined;
     const scheduleHeight = (nextHeight: number) => {
@@ -66,30 +64,25 @@ export function RunningAppFrame({
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow;
       if (!frameWindow || event.source !== frameWindow) return;
-      if (appBlockReadyFromMessage(event.data, instanceId, bridgeTokenRef.current)) {
-        bridgeReadyRef.current = true;
-        readyBeforeLoadRef.current = true;
+      if (appBlockReadyFromMessage(event.data, instanceId, bridge.token)) {
+        bridgeReady = true;
         return;
       }
-      if (!bridgeReadyRef.current) return;
-      const nextHeight = appBlockHeightFromMessage(event.data, instanceId, bridgeTokenRef.current);
+      if (!bridgeReady) return;
+      const nextHeight = appBlockHeightFromMessage(event.data, instanceId, bridge.token);
       if (nextHeight !== undefined) {
-        if (!bridgeGuardRef.current.acceptHeight(nextHeight)) return;
+        if (!bridge.guard.acceptHeight(nextHeight)) return;
         scheduleHeight(nextHeight);
         return;
       }
-      const mathRequest = appBlockMathRequestFromMessage(
-        event.data,
-        instanceId,
-        bridgeTokenRef.current,
-      );
+      const mathRequest = appBlockMathRequestFromMessage(event.data, instanceId, bridge.token);
       if (!mathRequest) return;
-      if (!bridgeGuardRef.current.startMath()) {
+      if (!bridge.guard.startMath()) {
         frameWindow.postMessage(
           {
             type: 'droidex:math-rendered',
             instanceId,
-            bridgeToken: bridgeTokenRef.current,
+            bridgeToken: bridge.token,
             requestId: mathRequest.requestId,
           },
           '*',
@@ -103,7 +96,7 @@ export function RunningAppFrame({
             {
               type: 'droidex:math-rendered',
               instanceId,
-              bridgeToken: bridgeTokenRef.current,
+              bridgeToken: bridge.token,
               requestId: mathRequest.requestId,
               html,
             },
@@ -116,14 +109,14 @@ export function RunningAppFrame({
             {
               type: 'droidex:math-rendered',
               instanceId,
-              bridgeToken: bridgeTokenRef.current,
+              bridgeToken: bridge.token,
               requestId: mathRequest.requestId,
             },
             '*',
           );
         })
         .finally(() => {
-          bridgeGuardRef.current.finishMath();
+          bridge.guard.finishMath();
         });
     };
     window.addEventListener('message', onMessage);
@@ -131,7 +124,7 @@ export function RunningAppFrame({
       if (heightFrame) cancelAnimationFrame(heightFrame);
       window.removeEventListener('message', onMessage);
     };
-  }, [instanceId]);
+  }, [bridge, instanceId]);
 
   useLayoutEffect(() => {
     if (measurement > 0) onMeasured?.();
@@ -141,8 +134,14 @@ export function RunningAppFrame({
     <iframe
       ref={iframeRef}
       onLoad={() => {
-        if (!readyBeforeLoadRef.current) bridgeReadyRef.current = false;
-        readyBeforeLoadRef.current = false;
+        iframeRef.current?.contentWindow?.postMessage(
+          {
+            type: 'droidex:host-ready',
+            instanceId,
+            bridgeToken: bridge.token,
+          },
+          '*',
+        );
       }}
       title="Interactive App block"
       sandbox="allow-scripts"

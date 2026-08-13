@@ -81,11 +81,12 @@ import { normalizeCompactionTokenLimit } from './compaction.js';
 import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfiguration.js';
 import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
-import { formatAppPrompt } from './appPrompt.js';
+import { assertValidResponseFormat, formatAppPrompt } from './appPrompt.js';
 
 type Emit = (event: ServerEvent) => void;
 
 function formatResponsePrompt(text: string, responseFormat?: ResponseFormat): string {
+  assertValidResponseFormat(responseFormat);
   if (!responseFormat) return text;
   return formatAppPrompt(text, responseFormat === 'app-create' ? 'create' : 'followup');
 }

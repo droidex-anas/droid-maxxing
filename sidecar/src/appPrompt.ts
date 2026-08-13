@@ -1,3 +1,5 @@
+import type { ResponseFormat } from './protocol.js';
+
 export const APP_PROMPT_HEADER = 'DROIDEX App request:';
 const APP_GUIDANCE_HEADER = 'Private generation guidance:';
 
@@ -31,6 +33,14 @@ export function formatAppPrompt(request: string, mode: 'create' | 'followup'): s
   return [APP_PROMPT_HEADER, request.trim(), '', APP_GUIDANCE_HEADER, guidance, APP_GUIDANCE].join(
     '\n',
   );
+}
+
+export function assertValidResponseFormat(
+  value: unknown,
+): asserts value is ResponseFormat | undefined {
+  if (value === undefined || value === 'app-create' || value === 'app-followup') return;
+  const description = typeof value === 'string' ? value : typeof value;
+  throw new Error(`Unsupported response format: ${description}`);
 }
 
 export function appPromptDisplayFromText(text: string): string | null {

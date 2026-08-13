@@ -19,10 +19,11 @@ export function appFencesInMarkdown(markdown: string): MarkdownAppFence[] {
     const opening = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/.exec(line);
     if (!opening) continue;
     const marker = opening[1].startsWith('`') ? '`' : '~';
+    const infoWord = opening[2].trim().split(/\s+/, 1)[0] ?? '';
     open = {
       marker,
       length: opening[1].length,
-      isApp: opening[2].trim().toLowerCase() === 'app',
+      isApp: infoWord === 'app',
     };
   }
 
@@ -36,4 +37,8 @@ export function hasAppBlock(markdown: string): boolean {
 
 export function hasCompleteAppBlock(markdown: string): boolean {
   return appFencesInMarkdown(markdown).some((fence) => fence.complete);
+}
+
+export function hasIncompleteAppBlock(markdown: string): boolean {
+  return appFencesInMarkdown(markdown).some((fence) => !fence.complete);
 }

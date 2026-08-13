@@ -387,8 +387,7 @@ function MarkdownImpl({
             const codeText = typeof children === 'string' ? children : '';
 
             if (allowGeneratedContent && isAppLang(className)) {
-              const fence = appFences[appFenceIndex++];
-              const isComplete = fence.complete;
+              const isComplete = appFences.at(appFenceIndex++)?.complete ?? !buildingAppBlocks;
               return (
                 <AppBlock
                   source={codeText}

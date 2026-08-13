@@ -225,6 +225,36 @@ test('the App bridge bounds math work and deduplicates repeated heights', async 
   assert.equal(guard.startMath(), false);
 });
 
+test('each iframe document gets an independent bridge token and work budget', async () => {
+  type BridgeSession = {
+    token: string;
+    guard: {
+      startMath: () => boolean;
+      finishMath: () => void;
+    };
+  };
+  const runtime = (await import('./appBlockRuntime')) as unknown as {
+    createAppBridgeSession?: () => BridgeSession;
+  };
+  assert.equal(typeof runtime.createAppBridgeSession, 'function');
+  if (!runtime.createAppBridgeSession) return;
+
+  const first = runtime.createAppBridgeSession();
+  const second = runtime.createAppBridgeSession();
+  assert.notEqual(first.token, second.token);
+  assert.equal(first.guard.startMath(), true);
+  assert.equal(first.guard.startMath(), true);
+  assert.equal(first.guard.startMath(), false);
+  assert.equal(second.guard.startMath(), true);
+});
+
+test('the iframe document repeats readiness when the host handshakes after load', () => {
+  const document = createAppDocument('<main>Ready</main>', 'app-ready', undefined, 'token');
+
+  assert.match(document, /droidex:host-ready/);
+  assert.match(document, /postReady/);
+});
+
 test('short and functional CSS colors select the correct canvas scheme', async () => {
   const runtime = (await import('./appBlockRuntime')) as unknown as {
     appColorScheme?: (color: string) => 'light' | 'dark';

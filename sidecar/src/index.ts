@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { SessionManager } from './SessionManager.js';
 import type { ClientCommand, ServerEvent } from './protocol.js';
+import { assertValidResponseFormat } from './appPrompt.js';
 import { resolveBrowserAssetPath } from './browser/browserPaths.js';
 
 const REQUESTED_PORT = bridgePort(process.env.BRIDGE_PORT ?? '0');
@@ -71,9 +72,9 @@ wss.on('connection', (ws, req) => {
 });
 
 async function handleMessage(ws: WebSocket, raw: RawData): Promise<void> {
-  let cmd: ClientCommand;
+  let parsed: unknown;
   try {
-    cmd = JSON.parse(messageText(raw)) as ClientCommand;
+    parsed = JSON.parse(messageText(raw));
   } catch {
     ws.send(
       JSON.stringify({
@@ -84,7 +85,10 @@ async function handleMessage(ws: WebSocket, raw: RawData): Promise<void> {
     return;
   }
   try {
-    await manager.handle(cmd);
+    if (typeof parsed === 'object' && parsed !== null && 'responseFormat' in parsed) {
+      assertValidResponseFormat(parsed.responseFormat);
+    }
+    await manager.handle(parsed as ClientCommand);
   } catch (err) {
     ws.send(
       JSON.stringify({

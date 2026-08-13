@@ -390,6 +390,42 @@ test('#29 a replace drops a live App response missing one streamed middle chunk'
   assert.equal(next.transcripts.m1[0].text, fullText);
 });
 
+test('#29 a completed App does not hide a later App that is still missing a streamed chunk', () => {
+  const firstApp = '```app\n<main>First app</main>\n```\n\n';
+  const secondPrefix = '```app\n<main><script>const points = [';
+  const missingChunk = '1, 2, 3];</script></main>\n```\n\n';
+  const suffix =
+    'The complete replay keeps this explanatory tail long enough to identify the same streamed response.';
+  const fullText = `${firstApp}${secondPrefix}${missingChunk}${suffix}`;
+  const incompleteLiveText = `${firstApp}${secondPrefix}${suffix}`;
+  const seeded = {
+    ...initialState,
+    transcripts: {
+      m1: [
+        {
+          ...ev('live-mixed-apps', 900, incompleteLiveText),
+          endTs: 1000,
+          sourceSessionId: 'provider-m1',
+        },
+      ],
+    },
+  } as unknown as AppState;
+
+  const next = reducer(seeded, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'm1',
+    progress: [],
+    transcripts: [ev('persisted-complete-mixed-apps', 1001, fullText)],
+    mode: 'replace',
+    hasMore: false,
+  });
+
+  assert.deepEqual(
+    next.transcripts.m1.map((event) => event.id),
+    ['persisted-complete-mixed-apps'],
+  );
+});
+
 test('#29 similar complete App answers are not mistaken for one gapped stream', () => {
   const prefix = `Here is the visualization.\n\n\`\`\`app\n<main>${'a'.repeat(80)}`;
   const suffix = `${'z'.repeat(80)}</main>\n\`\`\``;

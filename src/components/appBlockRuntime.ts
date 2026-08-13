@@ -32,6 +32,11 @@ export interface AppBridgeGuard {
   finishMath: () => void;
 }
 
+export interface AppBridgeSession {
+  token: string;
+  guard: AppBridgeGuard;
+}
+
 export function createAppBridgeGuard(
   mathBudget = MAX_APP_MATH_REQUESTS,
   mathConcurrency = MAX_CONCURRENT_APP_MATH_REQUESTS,
@@ -54,6 +59,13 @@ export function createAppBridgeGuard(
     finishMath() {
       mathInFlight = Math.max(0, mathInFlight - 1);
     },
+  };
+}
+
+export function createAppBridgeSession(): AppBridgeSession {
+  return {
+    token: crypto.randomUUID(),
+    guard: createAppBridgeGuard(),
   };
 }
 
@@ -250,16 +262,22 @@ button, input, select, textarea {
       renderMath(element, element.getAttribute('data-latex') ?? '')
     )
   );
-  const onMathMessage = (event) => {
+  const postReady = () => {
+    parent.postMessage({ type: 'droidex:app-ready', instanceId, bridgeToken }, '*');
+  };
+  const onHostMessage = (event) => {
     const data = event.data;
     if (
       event.source !== parent ||
       !data ||
-      data.type !== 'droidex:math-rendered' ||
       data.instanceId !== instanceId ||
-      data.bridgeToken !== bridgeToken ||
-      typeof data.requestId !== 'string'
+      data.bridgeToken !== bridgeToken
     ) return;
+    if (data.type === 'droidex:host-ready') {
+      postReady();
+      return;
+    }
+    if (data.type !== 'droidex:math-rendered' || typeof data.requestId !== 'string') return;
     const pending = pendingMath.get(data.requestId);
     if (!pending) return;
     pendingMath.delete(data.requestId);
@@ -272,7 +290,7 @@ button, input, select, textarea {
     }
     reportHeight();
   };
-  addEventListener('message', onMathMessage);
+  addEventListener('message', onHostMessage);
   window.droidex = Object.freeze({ renderMath, renderAllMath });
   addEventListener('DOMContentLoaded', () => {
     const root = document.querySelector('[data-droidex-app-root]') ??
@@ -286,7 +304,7 @@ button, input, select, textarea {
         visualRegions[0].setAttribute('data-droidex-app-canvas', '');
       }
     }
-    parent.postMessage({ type: 'droidex:app-ready', instanceId, bridgeToken }, '*');
+    postReady();
     void renderAllMath();
     reportHeight();
     const observer = new ResizeObserver(reportHeight);
@@ -295,7 +313,7 @@ button, input, select, textarea {
     addEventListener('pagehide', () => {
       if (heightFrame) cancelAnimationFrame(heightFrame);
       observer.disconnect();
-      removeEventListener('message', onMathMessage);
+      removeEventListener('message', onHostMessage);
       for (const pending of pendingMath.values()) pending.resolve(false);
       pendingMath.clear();
     }, { once: true });

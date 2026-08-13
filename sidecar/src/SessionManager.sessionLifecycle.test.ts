@@ -100,6 +100,34 @@ test('App response format enriches the provider prompt without changing the user
   }
 });
 
+test('unsupported App response formats fail before reaching the provider', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'invalid-app-format',
+      title: 'App request',
+      goal: 'hello',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+
+    await assert.rejects(
+      h.handle({
+        type: 'session.send',
+        appSessionId: 'provider-1',
+        text: 'keep going',
+        responseFormat: 'future-app-format',
+      } as never),
+      /Unsupported response format: future-app-format/,
+    );
+    assert.deepEqual(h.provider.session('provider-1').prompts, ['hello']);
+  } finally {
+    await h.dispose();
+  }
+});
+
 test('[L2] Spec create', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
 

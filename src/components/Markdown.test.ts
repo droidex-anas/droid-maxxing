@@ -93,6 +93,34 @@ test('each live App fence owns its own completion state', () => {
   assert.equal(html.match(/>Building interactive app</g)?.length, 1);
 });
 
+test('App fences with an info-string title use the same completion state as react-markdown', () => {
+  const source = '```app title="Latency explorer"\n<main>Still streaming';
+  const html = renderToStaticMarkup(
+    createElement(Markdown, { autoPlayAppBlocks: true, buildingAppBlocks: true }, source),
+  );
+
+  assert.match(html, />Building interactive app</);
+  assert.doesNotMatch(html, /<iframe/i);
+});
+
+test('uppercase fences stay ordinary code without shifting a later App completion state', () => {
+  const source = [
+    '```App',
+    '<main>Ordinary code</main>',
+    '```',
+    '',
+    '```app',
+    '<main>Still streaming',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(Markdown, { autoPlayAppBlocks: true, buildingAppBlocks: true }, source),
+  );
+
+  assert.match(html, /&lt;main&gt;Ordinary code&lt;\/main&gt;/);
+  assert.match(html, />Building interactive app</);
+  assert.doesNotMatch(html, /<iframe/i);
+});
+
 test('copy gracefully declines when the Clipboard API is unavailable', async () => {
   const markdown = (await import('./Markdown')) as unknown as {
     copyMarkdownCode?: (
