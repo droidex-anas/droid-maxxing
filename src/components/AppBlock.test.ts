@@ -70,7 +70,9 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /--app-foreground: #202020/);
   assert.match(document, /--app-accent: #2f6fed/);
   assert.match(document, /background: transparent/);
-  assert.match(document, /html, body \{ background: var\(--app-background\) !important/);
+  assert.doesNotMatch(document, /background: var\(--app-background\) !important/);
+  assert.doesNotMatch(document, /\[data-droidex-app-root\] \{[\s\S]*?\n {2}background:/);
+  assert.doesNotMatch(document, /\[data-droidex-app-canvas\] \{[\s\S]*?\n {2}background:/);
   assert.match(document, /padding: 0/);
   assert.match(document, /\[data-droidex-app-root\]/);
   assert.match(document, /\[data-droidex-app-canvas\]/);

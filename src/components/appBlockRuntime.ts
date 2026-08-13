@@ -214,14 +214,13 @@ button, input, select, textarea {
 <body>
 ${source}
 <style data-droidex-app-host>
-html, body { background: var(--app-background) !important; overflow: hidden !important; }
+html, body { overflow: hidden !important; }
 body { min-height: 0 !important; padding: 0 !important; }
 [data-droidex-app-root] {
   width: 100% !important;
   max-width: none !important;
   margin: 0 !important;
   padding: 0 !important;
-  background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
@@ -229,7 +228,6 @@ body { min-height: 0 !important; padding: 0 !important; }
 [data-droidex-app-canvas] {
   margin-inline: 0 !important;
   padding: 0 !important;
-  background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;

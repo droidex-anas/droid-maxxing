@@ -12,6 +12,13 @@ test('formatAppPrompt keeps the request recoverable and adds broad internal App 
   assert.match(prompt, /fenced `app` block/);
   assert.match(prompt, /--app-background/);
   assert.match(prompt, /transparent chat canvas/);
+  assert.match(prompt, /transparent by default/);
+  assert.match(
+    prompt,
+    /may intentionally give the whole App or selected regions soft theme-aware backgrounds/,
+  );
+  assert.match(prompt, /Avoid accidental hard black or white page slabs/);
+  assert.doesNotMatch(prompt, /keep that region transparent and unframed/);
   assert.match(prompt, /data-droidex-app-root/);
   assert.match(prompt, /data-droidex-app-canvas/);
   assert.match(prompt, /no outer max-width, page padding, border, radius, or shadow/);

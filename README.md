@@ -34,23 +34,6 @@ For renderer-only development, use:
 npm run dev
 ```
 
-## App blocks
-
-Type `/visualize` in the composer to ask the model for a self-contained
-interactive App: a chart, diagram, timeline, calculator, simulator, or another
-useful interface. Fresh Apps open directly in the chat; restored chats show a
-compact **Play** card until you choose to run them again.
-
-````markdown
-```app
-<button onclick="this.textContent = 'Done'">Run</button>
-```
-````
-
-App blocks can use inline HTML, CSS, JavaScript, SVG, and Canvas. They run
-offline on the chat canvas and receive DROIDEX theme colors through the
-`--app-*` CSS variables.
-
 ## GitHub pull requests
 
 For GitHub repositories, the Context panel shows pull requests, checks, and

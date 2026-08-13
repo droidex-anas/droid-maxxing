@@ -15,7 +15,7 @@ const APP_FOLLOWUP_GUIDANCE = [
 
 const APP_GUIDANCE = [
   '',
-  'The DROIDEX host owns the transparent chat canvas. Begin with one `<main data-droidex-app-root>` at full width with no outer max-width, page padding, border, radius, or shadow. Mark the primary chart or content region with `data-droidex-app-canvas`; keep that region transparent and unframed. Use surfaces only for compact controls, grouped data, or individual stat tiles. Let content height grow naturally without nested scrolling, and adapt fluidly at narrow widths.',
+  'The DROIDEX host supplies a transparent chat canvas. Begin with one `<main data-droidex-app-root>` at full width with no outer max-width, page padding, border, radius, or shadow. Mark the primary chart or content region with `data-droidex-app-canvas`. Keep the root and primary content transparent by default so they adapt to the current chat background. When visual hierarchy or a complex explanation benefits from it, you may intentionally give the whole App or selected regions soft theme-aware backgrounds using the App variables, `color-mix()`, or a restrained local palette. Avoid accidental hard black or white page slabs. Let content height grow naturally without nested scrolling, and adapt fluidly at narrow widths.',
   '',
   'Choose freely among bar, line, area, scatter, bubble, histogram, box, heatmap, network, timeline, and other suitable views. Combine coordinated mixed views when they reveal more than one chart alone, while keeping the result focused. Support illustrations, annotated processes, infographics, diagrams, and responsive wireframes when those communicate the idea better than data marks.',
   '',
