@@ -28,6 +28,12 @@ function basename(p: string): string {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+// Commands are stored with their '/' trigger for matching and insertion; the
+// menu shows the bare name.
+function commandLabel(cmd: string): string {
+  return cmd.startsWith('/') ? cmd.slice(1) : cmd;
+}
+
 // Slash-menu section for a row: the first command and first skill each open
 // their labeled group. findIndex returns -1 for a missing group, which no row
 // index can match.
@@ -121,7 +127,7 @@ export default function ComposerMenu({
                   >
                     <Terminal className="w-4 h-4 shrink-0 text-droid-text-muted/70" />
                     <span className="shrink-0 text-[12.5px] font-medium text-droid-text">
-                      {item.command.cmd}
+                      {commandLabel(item.command.cmd)}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[11.5px] text-droid-text-muted">
                       {item.command.desc}
