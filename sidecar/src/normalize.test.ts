@@ -261,12 +261,12 @@ test('classifyPermission reads the SDK toolUses shape for exec', () => {
     toolUses: [
       {
         confirmationType: 'exec',
-        details: { type: 'exec', command: 'rm -rf build', fullCommand: 'rm -rf build' },
+        details: { type: 'exec', command: 'rtk', fullCommand: 'rtk rm -rf build' },
         toolUse: {
           type: 'tool_use',
           id: 't2',
           name: 'Execute',
-          input: { command: 'rm -rf build' },
+          input: { command: 'rtk rm -rf build' },
         },
       },
     ],
@@ -275,8 +275,8 @@ test('classifyPermission reads the SDK toolUses shape for exec', () => {
   const req = classifyPermission('m1', 'r2', params);
   assert.equal(req.kind, 'exec');
   assert.equal(req.title, 'Run command');
-  assert.equal(req.detail, 'rm -rf build');
-  assert.equal(permissionSignature(params), 'exec::rm -rf build');
+  assert.equal(req.detail, 'rtk rm -rf build');
+  assert.equal(permissionSignature(params), 'exec::rtk rm -rf build');
 });
 
 test('captures Task prompt metadata before the subagent session id exists', () => {

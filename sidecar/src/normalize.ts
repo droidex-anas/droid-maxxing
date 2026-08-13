@@ -496,10 +496,13 @@ export function classifyPermission(
       detail = `Running missions: ${c.runningMissionCount ?? 0}`;
       kind = 'other';
       break;
-    case 'exec':
+    case 'exec': {
       title = 'Run command';
-      detail = (c.command as string) ?? JSON.stringify(c);
+      const fullCommand = typeof c.fullCommand === 'string' ? c.fullCommand : '';
+      const command = typeof c.command === 'string' ? c.command : '';
+      detail = fullCommand || command || JSON.stringify(c);
       break;
+    }
     case 'edit':
     case 'create':
       title = type === 'create' ? 'Create file' : 'Edit file';
@@ -546,8 +549,11 @@ export function permissionSignature(params: RequestPermissionRequestParams): str
   const c = primaryConfirmation(params);
   const type = String(c.type ?? 'other');
   switch (type) {
-    case 'exec':
-      return `exec::${String(c.command ?? '')}`;
+    case 'exec': {
+      const fullCommand = typeof c.fullCommand === 'string' ? c.fullCommand : '';
+      const command = typeof c.command === 'string' ? c.command : '';
+      return `exec::${fullCommand || command}`;
+    }
     case 'mcp_tool':
       return `mcp::${String(c.serverName ?? '')}::${String(c.toolName ?? '')}`;
     case 'edit':
