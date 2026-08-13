@@ -2004,16 +2004,24 @@ const InlineSpecCard = memo(function InlineSpecCard({
 });
 
 /* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({ text, live }: { text: string; live: boolean }) {
+const MessageBody = memo(function MessageBody({
+  text,
+  live,
+  autoPlayAppBlocks,
+}: {
+  text: string;
+  live: boolean;
+  autoPlayAppBlocks: boolean;
+}) {
   // Strip the history "[truncated N chars]" sentinel so the raw marker never
   // shows; the cut itself is intentionally not surfaced.
   const { body } = parseTruncatedTail(text);
   const hasCompleteApp = hasCompleteAppBlock(body);
   const buildingAppBlocks = live && hasAppBlock(body) && !hasCompleteApp;
-  const autoPlayAppBlocks = live && hasCompleteApp;
+  const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
   if (!hasJsonRender(body))
     return (
-      <Markdown autoPlayAppBlocks={autoPlayAppBlocks} buildingAppBlocks={buildingAppBlocks}>
+      <Markdown autoPlayAppBlocks={shouldAutoPlayAppBlocks} buildingAppBlocks={buildingAppBlocks}>
         {body}
       </Markdown>
     );
@@ -2026,7 +2034,7 @@ const MessageBody = memo(function MessageBody({ text, live }: { text: string; li
         ) : seg.value.trim() ? (
           <Markdown
             key={i}
-            autoPlayAppBlocks={autoPlayAppBlocks}
+            autoPlayAppBlocks={shouldAutoPlayAppBlocks}
             buildingAppBlocks={buildingAppBlocks}
           >
             {seg.value}
@@ -2040,6 +2048,7 @@ const MessageBody = memo(function MessageBody({ text, live }: { text: string; li
 interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
+  autoPlayAppBlocks?: boolean;
   // True while the whole turn is still streaming, regardless of where this item
   // sits. Subagent waves need this rather than `live`: work continues after the
   // wave stops being the last item (a plan update or assistant text follows it),
@@ -2102,6 +2111,7 @@ function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): b
     return false;
   return (
     prev.live === next.live &&
+    prev.autoPlayAppBlocks === next.autoPlayAppBlocks &&
     prev.sessionLive === next.sessionLive &&
     prev.compacting === next.compacting &&
     prev.liveTiming === next.liveTiming &&
@@ -2162,6 +2172,7 @@ const ChildSessionsWave = memo(
 const FeedItemView = memo(function FeedItemView({
   item,
   live,
+  autoPlayAppBlocks = false,
   sessionLive,
   compacting,
   cwd,
@@ -2186,7 +2197,7 @@ const FeedItemView = memo(function FeedItemView({
       const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
-          <MessageBody text={text} live={live} />
+          <MessageBody text={text} live={live} autoPlayAppBlocks={autoPlayAppBlocks} />
           {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
@@ -2573,6 +2584,49 @@ export function appendedFeedItemKeys(
   return appended;
 }
 
+export interface FreshAppResponseState {
+  identity: string;
+  wasPending: boolean;
+  texts: Set<string>;
+}
+
+function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
+  let latestPromptIndex = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type === 'message' && item.event.author === 'user') {
+      latestPromptIndex = i;
+      break;
+    }
+  }
+
+  const responses: string[] = [];
+  for (let i = latestPromptIndex + 1; i < items.length; i++) {
+    const item = items[i];
+    if (item.type !== 'message' || item.event.author === 'user') continue;
+    const text = item.event.text ?? '';
+    if (hasCompleteAppBlock(text)) responses.push(text);
+  }
+  return responses;
+}
+
+export function rememberFreshAppResponses(
+  previous: FreshAppResponseState | null,
+  identity: string,
+  items: FeedItem[],
+  pending: boolean,
+): FreshAppResponseState {
+  const sameSession = previous?.identity === identity;
+  const texts = new Set(sameSession ? previous.texts : []);
+  const justSettled = sameSession && previous.wasPending && !pending;
+
+  if (pending || justSettled) {
+    for (const text of completeAppResponsesInLatestTurn(items)) texts.add(text);
+  }
+
+  return { identity, wasPending: pending, texts };
+}
+
 // Offscreen feed rows skip layout and paint entirely (content-visibility) so
 // long transcripts scroll and chat switches render at the cost of the visible
 // screen only. The browser keeps DOM, component state, and animation timelines
@@ -2671,6 +2725,14 @@ export function MessageFeed({
     [providedItems, events, pending, rich, changes, specContent, dockEnabled],
   );
   const feedIdentity = `${events[0]?.appSessionId ?? ''}:${events[0]?.sourceSessionId ?? ''}`;
+  const freshAppResponsesRef = useRef<FreshAppResponseState | null>(null);
+  freshAppResponsesRef.current = rememberFreshAppResponses(
+    freshAppResponsesRef.current,
+    feedIdentity,
+    items,
+    pending,
+  );
+  const freshAppResponseTexts = freshAppResponsesRef.current.texts;
   const renderedFeedRef = useRef<{ identity: string; keys: Set<string> } | null>(null);
   const previousFeed = renderedFeedRef.current;
   useEffect(() => {
@@ -2784,6 +2846,11 @@ export function MessageFeed({
               <FeedItemView
                 item={item}
                 live={pending && idx === lastIdx && !subagentPoll}
+                autoPlayAppBlocks={
+                  item.type === 'message' &&
+                  item.event.author !== 'user' &&
+                  freshAppResponseTexts.has(item.event.text ?? '')
+                }
                 sessionLive={pending}
                 compacting={compacting && idx === lastIdx}
                 cwd={cwd}

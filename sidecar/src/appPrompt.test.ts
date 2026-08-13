@@ -36,3 +36,12 @@ test('appPromptDisplayFromText reveals only what the user typed', () => {
   assert.equal(appPromptDisplayFromText(prompt), '/visualize compare renderer timings');
   assert.equal(appPromptDisplayFromText('ordinary prompt'), null);
 });
+
+test('a conversational App follow-up can revise the existing block without forcing one', () => {
+  const prompt = formatAppPrompt('the hover interaction is not working, fix it');
+
+  assert.match(prompt, /chat already contains an interactive App/i);
+  assert.match(prompt, /return a complete revised fenced `app` block/i);
+  assert.match(prompt, /otherwise respond normally/i);
+  assert.match(prompt, /the hover interaction is not working, fix it/);
+});

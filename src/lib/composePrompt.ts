@@ -7,6 +7,10 @@ export function isVisualizeCommand(text: string): boolean {
   return /^\/visualize(?:\s|$)/i.test(text.trim());
 }
 
+export function responseFormatForPrompt(text: string, hasAppContext: boolean): 'app' | undefined {
+  return isVisualizeCommand(text) || hasAppContext ? 'app' : undefined;
+}
+
 // Builds the prompt text actually sent to a session from the raw user input plus
 // the selected skills and @file mentions. Shared so the optimistic echo dedup
 // can reconstruct the same composed string that gets persisted to history.

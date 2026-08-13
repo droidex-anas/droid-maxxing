@@ -833,6 +833,44 @@ test('ordinary live prose keeps the trailing streaming caret', () => {
   assert.match(html, /caret-blink/);
 });
 
+test('a freshly generated App stays eligible for autoplay when history replaces its event id', async () => {
+  type FreshAppState = {
+    identity: string;
+    wasPending: boolean;
+    texts: Set<string>;
+  };
+  type RememberFreshApps = (
+    previous: FreshAppState | null,
+    identity: string,
+    items: FeedItem[],
+    pending: boolean,
+  ) => FreshAppState;
+  const chatModule = (await import('./chat')) as unknown as {
+    rememberFreshAppResponses?: RememberFreshApps;
+  };
+  const remember = chatModule.rememberFreshAppResponses;
+  assert.equal(typeof remember, 'function');
+  if (!remember) return;
+
+  const prompt = userMsg('Visualize this');
+  const incomplete = asst('```app\n<main><script>const points = [');
+  const liveItems = groupTurns(buildFeed([prompt, incomplete]), true);
+  const liveState = remember(null, 'session-1', liveItems, true);
+  assert.deepEqual([...liveState.texts], []);
+
+  const completeText = '```app\n<main>Complete App</main>\n```';
+  const authoritative = {
+    ...asst(completeText),
+    id: 'authoritative-history-id',
+  };
+  const settledItems = groupTurns(buildFeed([prompt, authoritative]), false);
+  const settledState = remember(liveState, 'session-1', settledItems, false);
+  assert.deepEqual([...settledState.texts], [completeText]);
+
+  const reopenedState = remember(null, 'session-1', settledItems, false);
+  assert.deepEqual([...reopenedState.texts], []);
+});
+
 test('live thinking stays collapsed until the user opens it', () => {
   const events = [
     userMsg('inspect this'),

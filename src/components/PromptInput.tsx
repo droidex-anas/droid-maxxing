@@ -46,8 +46,10 @@ import {
   composePrompt,
   isVisualizeCommand,
   parseSlashSkillInvocation,
+  responseFormatForPrompt,
   VISUALIZE_COMMAND,
 } from '../lib/composePrompt';
+import { hasCompleteAppBlock } from './appBlockRuntime';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
 import { resetComposerAfterSubmit } from '../lib/composerReset';
@@ -281,6 +283,17 @@ export default function PromptInput({
   visibleTargetRef.current = visibleTarget;
   const targetChild = visibleTarget.kind === 'child' ? visibleTarget.child : undefined;
   const targetChildSessionId = targetChild?.childSessionId ?? null;
+  const hasAppContext = useStoreSelector((current) => {
+    if (!activeSession) return false;
+    const events = current.transcripts[activeSession.appSessionId] ?? [];
+    return events.some((event) => {
+      if (event.kind !== 'text' || event.author === 'user') return false;
+      const belongsToVisibleTarget = targetChildSessionId
+        ? event.sourceSessionId === targetChildSessionId
+        : event.role === 'primary';
+      return belongsToVisibleTarget && hasCompleteAppBlock(event.text ?? '');
+    });
+  });
   const primaryWorkingDirectory = useSessionWorkingDirectory(activeSession);
   const childWorkingDirectory = useSessionWorkingDirectory(
     targetChild ? activeSession : null,
@@ -802,7 +815,7 @@ export default function PromptInput({
         ? parseSlashSkillInvocation(text, invocableSkills)
         : undefined;
     const displayText = slashSkill?.prompt ?? text;
-    const responseFormat = isVisualizeCommand(displayText) ? 'app' : undefined;
+    const responseFormat = responseFormatForPrompt(displayText, hasAppContext);
     const skillNames = slashSkill
       ? [slashSkill.skillName]
       : activeSkills.map((skill) => skill.name);
@@ -1044,7 +1057,7 @@ export default function PromptInput({
       sendToSession(
         activeSession.appSessionId,
         composeFrom(head.text, head.skills, head.files),
-        isVisualizeCommand(head.text) ? 'app' : undefined,
+        responseFormatForPrompt(head.text, hasAppContext),
       );
     } catch (err) {
       // Keep the prompt staged and skip the transcript echo so a send failure

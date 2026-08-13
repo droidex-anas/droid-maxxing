@@ -47,3 +47,17 @@ test('/visualize remains an app command even when a provider skill has the same 
   assert.equal(isVisualizeCommand('/visualize chart these results'), true);
   assert.equal(isVisualizeCommand('/visualizer is a different prompt'), false);
 });
+
+test('an existing App keeps follow-up prompts App-capable without another slash command', async () => {
+  type ResponseFormatForPrompt = (text: string, hasAppContext: boolean) => 'app' | undefined;
+  const promptModule = (await import('./composePrompt')) as unknown as {
+    responseFormatForPrompt?: ResponseFormatForPrompt;
+  };
+  const responseFormatForPrompt = promptModule.responseFormatForPrompt;
+  assert.equal(typeof responseFormatForPrompt, 'function');
+  if (!responseFormatForPrompt) return;
+
+  assert.equal(responseFormatForPrompt('make the points larger', true), 'app');
+  assert.equal(responseFormatForPrompt('ordinary question', false), undefined);
+  assert.equal(responseFormatForPrompt('/visualize a histogram', false), 'app');
+});

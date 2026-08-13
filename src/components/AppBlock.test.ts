@@ -114,6 +114,26 @@ test('a freshly completed app opens directly on the chat canvas', () => {
   assert.doesNotMatch(html, />App<\/span>/);
 });
 
+test('manual Play reveals the stable App anchor at the top of the viewport', async () => {
+  type RevealAppBlock = (element: HTMLElement | null, reduceMotion: boolean) => void;
+  const appBlockModule = (await import('./AppBlock')) as unknown as {
+    revealAppBlock?: RevealAppBlock;
+  };
+  const reveal = appBlockModule.revealAppBlock;
+  assert.equal(typeof reveal, 'function');
+  if (!reveal) return;
+
+  const calls: ScrollIntoViewOptions[] = [];
+  const element = {
+    scrollIntoView(options: ScrollIntoViewOptions) {
+      calls.push(options);
+    },
+  } as HTMLElement;
+  reveal(element, false);
+
+  assert.deepEqual(calls, [{ behavior: 'smooth', block: 'start', inline: 'nearest' }]);
+});
+
 test('the running frame keeps app code inside a script-only sandbox', () => {
   const html = renderToStaticMarkup(
     createElement(RunningAppFrame, {

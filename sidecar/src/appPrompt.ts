@@ -1,10 +1,19 @@
 export const APP_PROMPT_HEADER = 'DROIDEX App request:';
 const APP_GUIDANCE_HEADER = 'Private generation guidance:';
 
-const APP_GUIDANCE = [
+const APP_CREATION_GUIDANCE = [
   'Build the most useful interactive in-chat App for this request. Choose the interface that best explains or operates on the subject; it may be a chart, diagram, timeline, calculator, simulator, comparison, explorable explanation, dashboard, or another focused interactive tool.',
   '',
   'Return a concise explanation followed by one self-contained fenced `app` block. Put inline HTML, CSS, and JavaScript inside that fence. Use SVG or Canvas when useful and add meaningful native interaction where it improves understanding.',
+].join('\n');
+
+const APP_FOLLOWUP_GUIDANCE = [
+  'This chat already contains an interactive App. Treat this request as a conversational follow-up with access to the existing App source in the conversation.',
+  '',
+  'If the user is asking to fix, revise, extend, or restyle that App, return a complete revised fenced `app` block that replaces it, preceded by a concise explanation. Include all inline HTML, CSS, and JavaScript needed to run the revision. Otherwise respond normally and do not force or emit an App block.',
+].join('\n');
+
+const APP_GUIDANCE = [
   '',
   'The DROIDEX host owns the transparent chat canvas. Begin with one `<main data-droidex-app-root>` at full width with no outer max-width, page padding, border, radius, or shadow. Mark the primary chart or content region with `data-droidex-app-canvas`; keep that region transparent and unframed. Use surfaces only for compact controls, grouped data, or individual stat tiles. Let content height grow naturally without nested scrolling, and adapt fluidly at narrow widths.',
   '',
@@ -18,7 +27,12 @@ const APP_GUIDANCE = [
 ].join('\n');
 
 export function formatAppPrompt(request: string): string {
-  return [APP_PROMPT_HEADER, request.trim(), '', APP_GUIDANCE_HEADER, APP_GUIDANCE].join('\n');
+  const guidance = /^\/visualize(?:\s|$)/i.test(request.trim())
+    ? APP_CREATION_GUIDANCE
+    : APP_FOLLOWUP_GUIDANCE;
+  return [APP_PROMPT_HEADER, request.trim(), '', APP_GUIDANCE_HEADER, guidance, APP_GUIDANCE].join(
+    '\n',
+  );
 }
 
 export function appPromptDisplayFromText(text: string): string | null {
