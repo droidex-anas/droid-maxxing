@@ -125,6 +125,7 @@ test('completed App fences inside quotes and lists keep their completed streamin
   const sources = [
     ['> ```app', '> <main>Quoted app</main>', '> ```'].join('\n'),
     ['- ```app', '  <main>Listed app</main>', '  ```'].join('\n'),
+    ['- > ```app', '  > <main>Quoted list app</main>', '  > ```'].join('\n'),
   ];
 
   for (const source of sources) {

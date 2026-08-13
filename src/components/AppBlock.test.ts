@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import vm from 'node:vm';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppBlock, RunningAppFrame } from './AppBlock';
@@ -248,11 +249,53 @@ test('each iframe document gets an independent bridge token and work budget', as
   assert.equal(second.guard.startMath(), true);
 });
 
-test('the iframe document repeats readiness when the host handshakes after load', () => {
+test('the iframe document repeats readiness for each valid host handshake', () => {
   const document = createAppDocument('<main>Ready</main>', 'app-ready', undefined, 'token');
+  const script = /<script>([\s\S]*?)<\/script>/.exec(document)?.[1];
+  assert.ok(script);
+  const listeners = new Map<string, (event: { source: object; data: unknown }) => void>();
+  const messages: unknown[] = [];
+  const parent = {
+    postMessage(message: unknown) {
+      messages.push(message);
+    },
+  };
 
-  assert.match(document, /droidex:host-ready/);
-  assert.match(document, /postReady/);
+  vm.runInNewContext(script, {
+    parent,
+    window: {},
+    Element: class {},
+    document: {},
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame: () => undefined,
+    ResizeObserver: class {},
+    addEventListener(type: string, listener: (event: { source: object; data: unknown }) => void) {
+      listeners.set(type, listener);
+    },
+    removeEventListener: () => undefined,
+  });
+
+  const onMessage = listeners.get('message');
+  assert.ok(onMessage);
+  const handshake = {
+    source: parent,
+    data: {
+      type: 'droidex:host-ready',
+      instanceId: 'app-ready',
+      bridgeToken: 'token',
+    },
+  };
+  onMessage(handshake);
+  onMessage(handshake);
+  onMessage({
+    ...handshake,
+    data: { ...handshake.data, bridgeToken: 'wrong' },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [
+    { type: 'droidex:app-ready', instanceId: 'app-ready', bridgeToken: 'token' },
+    { type: 'droidex:app-ready', instanceId: 'app-ready', bridgeToken: 'token' },
+  ]);
 });
 
 test('short and functional CSS colors select the correct canvas scheme', async () => {

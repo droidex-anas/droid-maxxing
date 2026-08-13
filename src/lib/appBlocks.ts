@@ -4,36 +4,41 @@ export interface MarkdownAppFence {
 
 interface FenceContainer {
   content: string;
-  quoteDepth: number;
-  listIndent: number;
+  prefixes: FenceContainerPrefix[];
 }
+
+type FenceContainerPrefix = { kind: 'quote' } | { kind: 'list'; indent: number };
 
 function openingFenceContainer(line: string): FenceContainer {
-  const quotePrefix = /^ {0,3}((?:>[ \t]?)+)/.exec(line)?.[1] ?? '';
-  const quoteDepth = quotePrefix.match(/>/g)?.length ?? 0;
-  const afterQuote = line.slice(quotePrefix.length);
-  const listPrefix = /^( {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)/.exec(afterQuote)?.[1] ?? '';
-  return {
-    content: afterQuote.slice(listPrefix.length),
-    quoteDepth,
-    listIndent: listPrefix.length,
-  };
+  const prefixes: FenceContainerPrefix[] = [];
+  let content = line;
+  for (;;) {
+    const quotePrefix = /^ {0,3}>[ \t]?/.exec(content)?.[0];
+    if (quotePrefix) {
+      prefixes.push({ kind: 'quote' });
+      content = content.slice(quotePrefix.length);
+      continue;
+    }
+    const listPrefix = /^( {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)/.exec(content)?.[1];
+    if (!listPrefix) break;
+    prefixes.push({ kind: 'list', indent: listPrefix.length });
+    content = content.slice(listPrefix.length);
+  }
+  return { content, prefixes };
 }
 
-function closingFenceContent(
-  line: string,
-  container: Pick<FenceContainer, 'quoteDepth' | 'listIndent'>,
-): string | null {
+function closingFenceContent(line: string, prefixes: FenceContainerPrefix[]): string | null {
   let content = line;
-  for (let depth = 0; depth < container.quoteDepth; depth += 1) {
-    const quote = /^ {0,3}>[ \t]?/.exec(content)?.[0];
-    if (!quote) return null;
-    content = content.slice(quote.length);
-  }
-  if (container.listIndent > 0) {
+  for (const prefix of prefixes) {
+    if (prefix.kind === 'quote') {
+      const quote = /^ {0,3}>[ \t]?/.exec(content)?.[0];
+      if (!quote) return null;
+      content = content.slice(quote.length);
+      continue;
+    }
     const indent = /^[ \t]+/.exec(content)?.[0] ?? '';
-    if (indent.length < container.listIndent) return null;
-    content = content.slice(container.listIndent);
+    if (indent.length < prefix.indent) return null;
+    content = content.slice(prefix.indent);
   }
   return content;
 }
@@ -44,13 +49,12 @@ export function appFencesInMarkdown(markdown: string): MarkdownAppFence[] {
     marker: '`' | '~';
     length: number;
     isApp: boolean;
-    quoteDepth: number;
-    listIndent: number;
+    prefixes: FenceContainerPrefix[];
   } | null = null;
 
   for (const line of markdown.split(/\r?\n/)) {
     if (open) {
-      const content = closingFenceContent(line, open);
+      const content = closingFenceContent(line, open.prefixes);
       const closing = content ? /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(content) : null;
       if (closing?.[1][0] === open.marker && closing[1].length >= open.length) {
         if (open.isApp) fences.push({ complete: true });
@@ -68,8 +72,7 @@ export function appFencesInMarkdown(markdown: string): MarkdownAppFence[] {
       marker,
       length: opening[1].length,
       isApp: infoWord === 'app',
-      quoteDepth: container.quoteDepth,
-      listIndent: container.listIndent,
+      prefixes: container.prefixes,
     };
   }
 
