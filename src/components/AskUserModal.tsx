@@ -8,7 +8,11 @@ const ACCENT = 'var(--droid-accent)';
 
 export default function AskUserModal() {
   const dispatch = useStoreDispatch();
-  const question = useStoreSelector((state) => state.pendingQuestion);
+  // Questions are session-scoped: only surface the one belonging to the chat
+  // the user is looking at.
+  const question = useStoreSelector((state) =>
+    state.activeAppSessionId ? state.pendingQuestions[state.activeAppSessionId] : undefined,
+  );
 
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -58,7 +62,7 @@ export default function AskUserModal() {
         answer: (answers[qq.index] ?? '').trim(),
       }));
       respondQuestion(question.appSessionId, question.requestId, false, payload);
-      dispatch({ type: 'CLEAR_QUESTION' });
+      dispatch({ type: 'CLEAR_QUESTION', appSessionId: question.appSessionId });
     } else {
       setCurrent((c) => c + 1);
     }
@@ -66,7 +70,7 @@ export default function AskUserModal() {
 
   const cancel = () => {
     respondQuestion(question.appSessionId, question.requestId, true, []);
-    dispatch({ type: 'CLEAR_QUESTION' });
+    dispatch({ type: 'CLEAR_QUESTION', appSessionId: question.appSessionId });
   };
 
   return (

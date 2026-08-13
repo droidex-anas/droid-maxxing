@@ -103,7 +103,9 @@ export default function App() {
       childAccess: current.childAccess,
       commandPaletteOpen: current.commandPaletteOpen,
       customThemes: current.customThemes,
-      hasPendingQuestion: Boolean(current.pendingQuestion),
+      hasPendingQuestion: Boolean(
+        current.activeAppSessionId && current.pendingQuestions[current.activeAppSessionId],
+      ),
       hasSessionContent: Boolean(
         activeSession && (current.transcripts[activeSession.appSessionId] ?? []).length > 0,
       ),

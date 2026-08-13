@@ -248,8 +248,11 @@ export interface AppState {
   childHistory: Record<string, Record<string, ChildHistoryState>>;
   childAccess: Record<string, Record<string, ChildAccess>>;
   childRuntime: Record<string, Record<string, ChildRuntimeState>>;
-  pendingPermission: PermissionRequest | null;
-  pendingQuestion: SessionQuestion | null;
+  // Pending permission requests are scoped to the session that asked, so a
+  // request from one chat never appears (or gets answered) in another.
+  pendingPermissions: Record<string, PermissionRequest>;
+  // Same scoping for AskUser questions: keyed by the asking session.
+  pendingQuestions: Record<string, SessionQuestion>;
   contextStats: {
     primary: Record<string, ContextStatsSnapshot>;
     child: Record<string, Record<string, ContextStatsSnapshot>>;
@@ -500,8 +503,8 @@ type Action =
       parentAppSessionId: string;
       childSessionId: string;
     }
-  | { type: 'CLEAR_PERMISSION' }
-  | { type: 'CLEAR_QUESTION' }
+  | { type: 'CLEAR_PERMISSION'; appSessionId: string }
+  | { type: 'CLEAR_QUESTION'; appSessionId: string }
 
   // UI
   | { type: 'SET_ACTIVE_SESSION'; id: string | null }
@@ -579,7 +582,11 @@ type Action =
 
   // Models / per-agent config
   | { type: 'MODELS_LIST'; models: ModelInfo[] }
-  | { type: 'SKILLS_LIST'; skills: SkillInfo[]; providerSessionId: string | null }
+  | {
+      type: 'SKILLS_LIST';
+      skills: SkillInfo[];
+      providerSessionId: string | null;
+    }
   | { type: 'FACTORY_DEFAULTS'; defaults: FactoryDefaultSettings }
   | { type: 'SET_AGENT_MODEL'; agent: AgentKind; modelId?: string }
   | { type: 'SET_AGENT_REASONING'; agent: AgentKind; reasoning: ReasoningEffort }
@@ -1085,8 +1092,8 @@ export const initialState: AppState = {
   childHistory: {},
   childAccess: {},
   childRuntime: {},
-  pendingPermission: null,
-  pendingQuestion: null,
+  pendingPermissions: {},
+  pendingQuestions: {},
   contextStats: { primary: {}, child: {} },
   specPlans: {},
   sessionSpecs: {},
@@ -1526,6 +1533,12 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         childAccess,
         childRuntime,
+        pendingPermissions: Object.fromEntries(
+          Object.entries(state.pendingPermissions).filter(([id]) => id !== action.appSessionId),
+        ),
+        pendingQuestions: Object.fromEntries(
+          Object.entries(state.pendingQuestions).filter(([id]) => id !== action.appSessionId),
+        ),
         contextStats: { ...state.contextStats, child: childContext },
         pendingAutonomy: Object.fromEntries(
           Object.entries(state.pendingAutonomy).filter(([id]) => id !== action.appSessionId),
@@ -1953,11 +1966,22 @@ function baseReducer(state: AppState, action: Action): AppState {
               [r.appSessionId]: { path: existingSpec?.path, title: r.title, content: r.plan },
             }
           : state.sessionSpecs;
-      return { ...state, pendingPermission: r, specPlans, sessionSpecs };
+      return {
+        ...state,
+        pendingPermissions: { ...state.pendingPermissions, [r.appSessionId]: r },
+        specPlans,
+        sessionSpecs,
+      };
     }
 
     case 'SESSION_QUESTION':
-      return { ...state, pendingQuestion: action.question };
+      return {
+        ...state,
+        pendingQuestions: {
+          ...state.pendingQuestions,
+          [action.question.appSessionId]: action.question,
+        },
+      };
 
     case 'SESSION_CREATE_FAILED':
       return {
@@ -2247,11 +2271,23 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
     /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
-    case 'CLEAR_PERMISSION':
-      return { ...state, pendingPermission: null };
+    case 'CLEAR_PERMISSION': {
+      return {
+        ...state,
+        pendingPermissions: Object.fromEntries(
+          Object.entries(state.pendingPermissions).filter(([id]) => id !== action.appSessionId),
+        ),
+      };
+    }
 
-    case 'CLEAR_QUESTION':
-      return { ...state, pendingQuestion: null };
+    case 'CLEAR_QUESTION': {
+      return {
+        ...state,
+        pendingQuestions: Object.fromEntries(
+          Object.entries(state.pendingQuestions).filter(([id]) => id !== action.appSessionId),
+        ),
+      };
+    }
 
     case 'SET_ACTIVE_SESSION': {
       // Stamp "seen now" on both the session being left (so responses received
@@ -2789,7 +2825,11 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
 
     case 'SKILLS_LIST':
-      return { ...state, skills: action.skills, skillsProviderSessionId: action.providerSessionId };
+      return {
+        ...state,
+        skills: action.skills,
+        skillsProviderSessionId: action.providerSessionId,
+      };
 
     case 'FACTORY_DEFAULTS': {
       const next = sanitizeAgentConfig(
