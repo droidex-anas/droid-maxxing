@@ -27,13 +27,31 @@ export interface OnboardingController {
 }
 
 const onboardingStateListeners = new Set<(state: OnboardingState) => void>();
+let publishedOnboardingState: OnboardingState | null = null;
+let publishedOnboardingRevision = 0;
+
+export function onboardingStateRevision(): number {
+  return publishedOnboardingRevision;
+}
+
+export function resolveOnboardingRead(
+  initialRevision: number,
+  state: OnboardingState,
+): OnboardingState {
+  return initialRevision === publishedOnboardingRevision
+    ? state
+    : (publishedOnboardingState ?? state);
+}
 
 export function publishOnboardingState(state: OnboardingState): void {
+  publishedOnboardingState = state;
+  publishedOnboardingRevision += 1;
   for (const listener of onboardingStateListeners) listener(state);
 }
 
 export function subscribeOnboardingState(listener: (state: OnboardingState) => void): () => void {
   onboardingStateListeners.add(listener);
+  if (publishedOnboardingState) listener(publishedOnboardingState);
   return () => {
     onboardingStateListeners.delete(listener);
   };
@@ -101,14 +119,16 @@ export function useOnboarding(): OnboardingController {
 
   useEffect(() => {
     let cancelled = false;
+    const initialRevision = onboardingStateRevision();
     void getOnboarding()
       .then((state) => {
         if (cancelled) return;
-        setOnboardingState(state);
+        const currentState = resolveOnboardingRead(initialRevision, state);
+        setOnboardingState(currentState);
         setReady(true);
         onboardingReady.current = true;
-        deferEnvDetect.current = state.completed;
-        scheduleDetect(state.completed);
+        deferEnvDetect.current = currentState.completed;
+        scheduleDetect(currentState.completed);
       })
       .catch(() => {
         // A failed onboarding read must not skip env detection entirely;

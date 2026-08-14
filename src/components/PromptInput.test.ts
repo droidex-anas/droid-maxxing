@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { shouldShowTurnStarting, shouldStopTurnStarting } from './PromptInput';
+import {
+  shouldResumeQueuedPromptAfterUpdate,
+  shouldShowTurnStarting,
+  shouldStopTurnStarting,
+} from './PromptInput';
 import type { TranscriptEvent } from '../types/bridge';
 
 test('turn-start feedback does not replace controls for an already-live target', () => {
   assert.equal(shouldShowTurnStarting(false), true);
   assert.equal(shouldShowTurnStarting(true), false);
+});
+
+test('an idle queued prompt resumes when a presented update returns control', () => {
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, false, true), true);
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(false, false, false, true), false);
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, true, true), false);
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, false, false), false);
 });
 
 test('queued primary delivery reads App context from the primary transcript', async () => {

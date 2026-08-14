@@ -404,14 +404,24 @@ export function appBlockErrorFromMessage(
   return message;
 }
 
-export function appBlockStartupErrorFromMessage(
+export type AppBlockStartupState = 'waiting' | 'ready' | 'failed';
+
+export interface AppBlockStartupTransition {
+  state: AppBlockStartupState;
+  error?: string;
+}
+
+export function appBlockStartupTransition(
+  state: AppBlockStartupState,
   data: unknown,
   instanceId: string,
   bridgeToken: string,
-  isReady: boolean,
-): string | undefined {
-  if (isReady) return undefined;
-  return appBlockErrorFromMessage(data, instanceId, bridgeToken);
+): AppBlockStartupTransition {
+  if (state !== 'waiting') return { state };
+  const error = appBlockErrorFromMessage(data, instanceId, bridgeToken);
+  if (error) return { state: 'failed', error };
+  if (appBlockReadyFromMessage(data, instanceId, bridgeToken)) return { state: 'ready' };
+  return { state };
 }
 
 export function appBlockReadyFromMessage(

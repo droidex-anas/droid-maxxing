@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   hasSetupBlocker,
+  onboardingStateRevision,
   publishOnboardingState,
+  resolveOnboardingRead,
   scheduleEnvDetect,
   shouldShowOnboarding,
   subscribeOnboardingState,
@@ -109,9 +111,25 @@ test('onboarding preference changes notify every mounted controller', () => {
     seen.push(state.appAutoUpdate ?? true);
   });
 
+  const before = onboardingStateRevision();
   publishOnboardingState({ completed: true, version: 1, appAutoUpdate: false });
+  assert.equal(onboardingStateRevision(), before + 1);
   unsubscribe();
   publishOnboardingState({ completed: true, version: 1, appAutoUpdate: true });
 
   assert.deepEqual(seen, [false]);
+});
+
+test('a stale onboarding read cannot overwrite a newer preference publication', () => {
+  const readStartedAt = onboardingStateRevision();
+  publishOnboardingState({ completed: true, version: 1, appAutoUpdate: false });
+
+  assert.deepEqual(
+    resolveOnboardingRead(readStartedAt, {
+      completed: true,
+      version: 1,
+      appAutoUpdate: true,
+    }),
+    { completed: true, version: 1, appAutoUpdate: false },
+  );
 });

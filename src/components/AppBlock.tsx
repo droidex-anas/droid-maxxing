@@ -13,7 +13,7 @@ import { AppWindow, Play, Square } from 'lucide-react';
 import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
   DEFAULT_APP_HEIGHT,
-  appBlockStartupErrorFromMessage,
+  appBlockStartupTransition,
   appBlockReadyFromMessage,
   appBlockHeightFromMessage,
   appBlockMathRequestFromMessage,
@@ -22,6 +22,7 @@ import {
   createAppDocument,
   currentAppBlockTheme,
   renderAppBlockMath,
+  type AppBlockStartupState,
 } from './appBlockRuntime';
 
 export function RunningAppFrame({
@@ -47,7 +48,7 @@ export function RunningAppFrame({
   );
 
   useLayoutEffect(() => {
-    let bridgeReady = false;
+    let startupState: AppBlockStartupState = 'waiting';
     let heightFrame = 0;
     let pendingHeight: number | undefined;
     const scheduleHeight = (nextHeight: number) => {
@@ -67,22 +68,17 @@ export function RunningAppFrame({
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow;
       if (!frameWindow || event.source !== frameWindow) return;
-      const error = appBlockStartupErrorFromMessage(
-        event.data,
-        instanceId,
-        bridge.token,
-        bridgeReady,
-      );
-      if (error) {
+      const startup = appBlockStartupTransition(startupState, event.data, instanceId, bridge.token);
+      startupState = startup.state;
+      if (startup.error) {
         bridge.guard.fail();
-        setRuntimeError({ token: bridge.token, message: error });
+        setRuntimeError({ token: bridge.token, message: startup.error });
         return;
       }
       if (appBlockReadyFromMessage(event.data, instanceId, bridge.token)) {
-        bridgeReady = true;
         return;
       }
-      if (!bridgeReady) return;
+      if (startupState !== 'ready') return;
       const nextHeight = appBlockHeightFromMessage(event.data, instanceId, bridge.token);
       if (nextHeight !== undefined) {
         if (!bridge.guard.acceptHeight(nextHeight)) return;

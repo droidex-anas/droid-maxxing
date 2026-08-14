@@ -7,7 +7,7 @@ import { AppBlock, RunningAppFrame } from './AppBlock';
 import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
   appBlockHeightFromMessage,
-  appBlockStartupErrorFromMessage,
+  appBlockStartupTransition,
   appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppDocument,
@@ -216,18 +216,30 @@ test('a script failure is reported before the App can announce readiness', () =>
 });
 
 test('a working App is not torn down by a later interaction error', () => {
-  const message = {
-    type: 'droidex:app-error',
-    instanceId: 'app-error',
-    bridgeToken: 'token',
-    message: 'Click handler failed',
-  };
-
-  assert.equal(
-    appBlockStartupErrorFromMessage(message, 'app-error', 'token', false),
-    'Click handler failed',
+  const ready = appBlockStartupTransition(
+    'waiting',
+    {
+      type: 'droidex:app-ready',
+      instanceId: 'app-error',
+      bridgeToken: 'token',
+    },
+    'app-error',
+    'token',
   );
-  assert.equal(appBlockStartupErrorFromMessage(message, 'app-error', 'token', true), undefined);
+  assert.deepEqual(ready, { state: 'ready' });
+
+  const afterInteractionError = appBlockStartupTransition(
+    ready.state,
+    {
+      type: 'droidex:app-error',
+      instanceId: 'app-error',
+      bridgeToken: 'token',
+      message: 'Click handler failed',
+    },
+    'app-error',
+    'token',
+  );
+  assert.deepEqual(afterInteractionError, { state: 'ready' });
 });
 
 test('the host accepts bounded runtime errors only from the mounted App document', async () => {

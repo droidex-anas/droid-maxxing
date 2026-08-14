@@ -36,23 +36,26 @@ export function mergeChildSessionSpawn(
   };
 }
 
-export type ChildSessionLatest = {
+export interface ChildSessionLatest {
   kind: TranscriptEvent['kind'];
   text?: string;
   toolName?: string;
   toolArgs?: unknown;
   isError?: boolean;
-};
+}
 
-export type ChildSessionTarget = { toolUseId?: string; label?: string };
+export interface ChildSessionTarget {
+  toolUseId?: string;
+  label?: string;
+}
 
-export type ChildSessionActivity = {
+export interface ChildSessionActivity {
   // The store's child status passes through verbatim; autonomous subagents
   // never open a runtime, so nothing here demotes running to paused.
   status?: ChildStatus;
   startedAt?: number;
   latest?: ChildSessionLatest;
-};
+}
 
 export type VisibleSessionTarget =
   | { kind: 'primary' }
@@ -67,11 +70,11 @@ export type VisibleSessionTarget =
       settingsReadiness: 'opening' | 'ready' | 'failed';
     };
 
-export type ChildRuntimeSubmitTarget = {
+export interface ChildRuntimeSubmitTarget {
   parentAppSessionId: string;
   childSessionId: string;
   runtimeGeneration: number;
-};
+}
 
 export function childRuntimeSubmitTarget(
   target: VisibleSessionTarget,
@@ -91,6 +94,7 @@ export async function commitChildPromptAfterBaseline({
   waitForBaseline,
   currentTarget,
   currentComposerRevision,
+  canCommit = () => true,
   appendTranscript,
   resetComposer,
   sendCommand,
@@ -100,6 +104,7 @@ export async function commitChildPromptAfterBaseline({
   waitForBaseline: () => Promise<void>;
   currentTarget: () => VisibleSessionTarget;
   currentComposerRevision: () => number;
+  canCommit?: () => boolean;
   appendTranscript: () => void;
   resetComposer: () => void;
   sendCommand: () => void;
@@ -107,6 +112,7 @@ export async function commitChildPromptAfterBaseline({
   await waitForBaseline();
   const current = childRuntimeSubmitTarget(currentTarget());
   if (
+    !canCommit() ||
     current?.parentAppSessionId !== capturedTarget.parentAppSessionId ||
     current.childSessionId !== capturedTarget.childSessionId ||
     current.runtimeGeneration !== capturedTarget.runtimeGeneration
@@ -121,7 +127,7 @@ export async function commitChildPromptAfterBaseline({
 export function selectedChildForParent(
   activeAppSessionId: string | undefined,
   selection: { parentAppSessionId: string; childSessionId: string } | null,
-  childrenByParent: Record<string, Record<string, ChildSessionInfo>>,
+  childrenByParent: Partial<Record<string, Record<string, ChildSessionInfo>>>,
 ): ChildSessionInfo | undefined {
   if (!activeAppSessionId || selection?.parentAppSessionId !== activeAppSessionId) return undefined;
   return childrenByParent[activeAppSessionId]?.[selection.childSessionId];
@@ -130,8 +136,8 @@ export function selectedChildForParent(
 export function visibleSessionTarget(
   activeAppSessionId: string | undefined,
   selection: { parentAppSessionId: string; childSessionId: string } | null,
-  childrenByParent: Record<string, Record<string, ChildSessionInfo>>,
-  accessByParent: Record<string, Record<string, ChildAccess>>,
+  childrenByParent: Partial<Record<string, Record<string, ChildSessionInfo>>>,
+  accessByParent: Partial<Record<string, Record<string, ChildAccess>>>,
 ): VisibleSessionTarget {
   const child = selectedChildForParent(activeAppSessionId, selection, childrenByParent);
   if (!activeAppSessionId || !selection || !child) return { kind: 'primary' };
@@ -235,7 +241,7 @@ export function childSessionIsLive(
 export function childSessionLabel(childSession: ChildSessionInfo, index: number): string {
   if (childSession.label) return childSession.label;
   const role = childSession.role === 'validator' ? 'Validator' : 'Worker';
-  return `${role} ${index + 1}`;
+  return `${role} ${String(index + 1)}`;
 }
 
 export function childSessionMeta(
@@ -328,7 +334,11 @@ const STATUS_PRIORITY: Record<ChildStatus, number> = {
   completed: 3,
 };
 
-export type NamedChildSession = { child: ChildSessionInfo; name: string; key: string };
+export interface NamedChildSession {
+  child: ChildSessionInfo;
+  name: string;
+  key: string;
+}
 
 // Panel display order: whatever is still working sits on top, so a live agent is
 // never pushed behind the fold by agents that already finished.
@@ -425,9 +435,10 @@ export function childSessionLatest(
   // successful results), so render it as a failure instead of stale "Working".
   if (latest.isError || latest.kind === 'error') {
     const { detail } = toolMeta(latest.toolName, latest.toolArgs);
+    const body = previewLine(latest.text) ?? detail;
     return {
       head: latest.kind === 'tool_result' ? 'Failed' : 'Error',
-      body: previewLine(latest.text) || detail || latest.toolName,
+      body: body.length > 0 ? body : latest.toolName,
     };
   }
   switch (latest.kind) {

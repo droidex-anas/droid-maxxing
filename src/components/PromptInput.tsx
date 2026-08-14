@@ -101,6 +101,15 @@ export function shouldShowTurnStarting(isLive: boolean): boolean {
   return !isLive;
 }
 
+export function shouldResumeQueuedPromptAfterUpdate(
+  wasInstalling: boolean,
+  isInstalling: boolean,
+  isLive: boolean,
+  hasQueuedPrompt: boolean,
+): boolean {
+  return wasInstalling && !isInstalling && !isLive && hasQueuedPrompt;
+}
+
 export function hasAppContextForTranscript(
   events: TranscriptEvent[],
   childSessionId: string | null,
@@ -771,10 +780,12 @@ export default function PromptInput({
   };
 
   const runSubmit = async (mode: SubmitMode = 'queue', autonomyOverride?: Autonomy) => {
-    if (isAppUpdateInstalling()) {
+    const updateInterruptedSubmit = () => {
+      if (!isAppUpdateInstalling()) return false;
       toast.info('DROIDEX is installing an update. New turns will resume after restart.');
-      return;
-    }
+      return true;
+    };
+    if (updateInterruptedSubmit()) return;
     const text = input.trim();
     // Snapshot the composer revision before the settle wait: text, files, and
     // skills are render-closure snapshots, so anything typed or staged while
@@ -784,6 +795,7 @@ export default function PromptInput({
     // Pasted/dropped images encode asynchronously; wait out any in-flight adds
     // so they make this prompt instead of surfacing on the next one via clear().
     const readyImages = await imageAttachments.whenSettled();
+    if (updateInterruptedSubmit()) return;
     const allFiles = [...attachedFiles, ...readyImages.map((i) => i.path)];
     const hasPayload = text || activeSkills.length > 0 || allFiles.length > 0;
     if (!hasPayload) return;
@@ -859,6 +871,7 @@ export default function PromptInput({
       }
       const selectedDir = state.draftChat?.cwd ?? (await pickDirectory());
       if (!selectedDir) return;
+      if (updateInterruptedSubmit()) return;
       const { primary, worker, validator } = state.agentConfig;
       const clientRef = newClientRef();
       const title = (displayText || skillNames[0] || 'Mission').slice(0, 48);
@@ -869,13 +882,15 @@ export default function PromptInput({
         return;
       }
       const dir = preparation.path;
-      registerPending(clientRef);
-      // Clear the composer before the git-baseline await below so a prompt the
-      // user starts typing during that delay is never wiped by a late clear.
-      clearAfterSubmit();
       // Snapshot the tree before the agent's first turn so the Review "Last
       // turn" scope only attributes changes this session actually makes.
       await markGitTurnStart(dir, clientRef);
+      if (updateInterruptedSubmit()) {
+        stopTurnStarting();
+        return;
+      }
+      registerPending(clientRef);
+      clearAfterSubmit();
       try {
         createSession({
           clientRef,
@@ -918,10 +933,13 @@ export default function PromptInput({
         return;
       }
       const dir = preparation.path;
-      registerPending(clientRef);
-      // Clear before the baseline await (see above) so fast typing isn't lost.
-      clearAfterSubmit();
       if (dir) await markGitTurnStart(dir, clientRef);
+      if (updateInterruptedSubmit()) {
+        stopTurnStarting();
+        return;
+      }
+      registerPending(clientRef);
+      clearAfterSubmit();
       try {
         createSession({
           clientRef,
@@ -1008,6 +1026,7 @@ export default function PromptInput({
         waitForBaseline: () => markGitTurnStart(workingDirectory, activeSession.appSessionId),
         currentTarget: () => visibleTargetRef.current,
         currentComposerRevision: () => composerRevisionRef.current,
+        canCommit: () => !isAppUpdateInstalling(),
         appendTranscript,
         resetComposer: clearAfterSubmit,
         sendCommand,
@@ -1016,14 +1035,19 @@ export default function PromptInput({
       return;
     }
 
-    if (shouldShowTurnStarting(isLive)) startTurnStarting();
-    appendTranscript();
-    clearAfterSubmit();
+    const showTurnStarting = shouldShowTurnStarting(isLive);
+    if (showTurnStarting) startTurnStarting();
 
     // Capture the last-turn baseline before the agent can touch the tree;
     // a fire-and-forget call here races the first edit and corrupts the diff.
     if (!childRuntimeTarget && workingDirectory)
       await markGitTurnStart(workingDirectory, activeSession.appSessionId);
+    if (updateInterruptedSubmit()) {
+      if (showTurnStarting) stopTurnStarting();
+      return;
+    }
+    appendTranscript();
+    clearAfterSubmit();
     sendCommand();
   };
 
@@ -1042,6 +1066,7 @@ export default function PromptInput({
     // included) so the Review tab diffs the turn from the right starting point.
     if (primaryWorkingDirectory)
       await markGitTurnStart(primaryWorkingDirectory, activeSession.appSessionId);
+    if (isAppUpdateInstalling()) return;
     // The queue stays editable while that runs, so deliver whatever is now at
     // the head: this honors deletes and edits (both remove the item) as well as
     // reorders, and never sends a stale prompt out of the visible order.
@@ -1119,6 +1144,20 @@ export default function PromptInput({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primaryIsLive, activeSession?.appSessionId]);
+
+  const previousAppUpdateInstalling = useRef(appUpdateInstalling);
+  useEffect(() => {
+    const shouldResume = shouldResumeQueuedPromptAfterUpdate(
+      previousAppUpdateInstalling.current,
+      appUpdateInstalling,
+      primaryIsLive,
+      queue.length > 0,
+    );
+    previousAppUpdateInstalling.current = appUpdateInstalling;
+    if (shouldResume) void deliverPrompt();
+    // deliverPrompt intentionally reads the latest queue through promptQueueRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appUpdateInstalling]);
 
   const editQueuedInComposer = (p: QueuedPrompt) => {
     if (!activeSession) return;
