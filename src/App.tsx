@@ -129,6 +129,7 @@ export default function App() {
     null,
   );
   const cliLaunchHandled = useRef(false);
+  const appUpdateLaunchCheckHandled = useRef(false);
   const showWizard =
     !embedded && onboard.ready && (forceWizard || shouldShowOnboarding(onboard.onboarding));
   // Desktop-only: toast when a model turn finishes (snippet + optional sound).
@@ -290,7 +291,9 @@ export default function App() {
     if (!onboard.ready || !onboard.onboarding?.completed) return;
     if (onboard.onboarding.appAutoUpdate === false) return;
     return startAutomaticAppUpdateChecks(() => {
-      void checkForAppUpdateAutomatically();
+      const resumeDeferred = !appUpdateLaunchCheckHandled.current;
+      appUpdateLaunchCheckHandled.current = true;
+      void checkForAppUpdateAutomatically(resumeDeferred);
     });
   }, [embedded, onboard.ready, onboard.onboarding?.completed, onboard.onboarding?.appAutoUpdate]);
 

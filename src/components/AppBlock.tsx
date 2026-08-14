@@ -13,7 +13,7 @@ import { AppWindow, Play, Square } from 'lucide-react';
 import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
   DEFAULT_APP_HEIGHT,
-  appBlockErrorFromMessage,
+  appBlockStartupErrorFromMessage,
   appBlockReadyFromMessage,
   appBlockHeightFromMessage,
   appBlockMathRequestFromMessage,
@@ -67,7 +67,12 @@ export function RunningAppFrame({
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow;
       if (!frameWindow || event.source !== frameWindow) return;
-      const error = appBlockErrorFromMessage(event.data, instanceId, bridge.token);
+      const error = appBlockStartupErrorFromMessage(
+        event.data,
+        instanceId,
+        bridge.token,
+        bridgeReady,
+      );
       if (error) {
         bridge.guard.fail();
         setRuntimeError({ token: bridge.token, message: error });

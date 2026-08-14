@@ -26,6 +26,19 @@ export interface OnboardingController {
   patch: (p: Partial<OnboardingState>) => Promise<void>;
 }
 
+const onboardingStateListeners = new Set<(state: OnboardingState) => void>();
+
+export function publishOnboardingState(state: OnboardingState): void {
+  for (const listener of onboardingStateListeners) listener(state);
+}
+
+export function subscribeOnboardingState(listener: (state: OnboardingState) => void): () => void {
+  onboardingStateListeners.add(listener);
+  return () => {
+    onboardingStateListeners.delete(listener);
+  };
+}
+
 // Env detection spawns CLI and package-manager probes on the sidecar, so for
 // returning users it is deferred past first paint instead of competing with
 // the session list and history traffic that paints the app. The onboarding
@@ -80,6 +93,10 @@ export function useOnboarding(): OnboardingController {
   const scheduleDetect = useCallback((defer: boolean) => {
     cancelScheduledEnvDetect.current?.();
     cancelScheduledEnvDetect.current = scheduleEnvDetect(defer);
+  }, []);
+
+  useEffect(() => {
+    return subscribeOnboardingState(setOnboardingState);
   }, []);
 
   useEffect(() => {
@@ -148,7 +165,7 @@ export function useOnboarding(): OnboardingController {
     setLastResult(null);
     setInstalling('install');
     // Remember the channel so later CLI updates use the matching updater path.
-    void setOnboarding({ installChannel: channel }).then(setOnboardingState);
+    void setOnboarding({ installChannel: channel }).then(publishOnboardingState);
     installCli(channel);
   }, []);
 
@@ -166,8 +183,7 @@ export function useOnboarding(): OnboardingController {
   }, []);
 
   const patch = useCallback(async (p: Partial<OnboardingState>) => {
-    const next = await setOnboarding(p);
-    setOnboardingState(next);
+    publishOnboardingState(await setOnboarding(p));
   }, []);
 
   return {

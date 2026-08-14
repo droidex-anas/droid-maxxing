@@ -7,6 +7,7 @@ import { AppBlock, RunningAppFrame } from './AppBlock';
 import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
   appBlockHeightFromMessage,
+  appBlockStartupErrorFromMessage,
   appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppDocument,
@@ -201,6 +202,32 @@ test('a script failure is reported before the App can announce readiness', () =>
       message: 'Invalid or unexpected token',
     },
   ]);
+
+  messages.length = 0;
+  listeners.get('unhandledrejection')?.({ reason: new Error('   ') });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [
+    {
+      type: 'droidex:app-error',
+      instanceId: 'app-error',
+      bridgeToken: 'token',
+      message: 'The interactive App failed to start.',
+    },
+  ]);
+});
+
+test('a working App is not torn down by a later interaction error', () => {
+  const message = {
+    type: 'droidex:app-error',
+    instanceId: 'app-error',
+    bridgeToken: 'token',
+    message: 'Click handler failed',
+  };
+
+  assert.equal(
+    appBlockStartupErrorFromMessage(message, 'app-error', 'token', false),
+    'Click handler failed',
+  );
+  assert.equal(appBlockStartupErrorFromMessage(message, 'app-error', 'token', true), undefined);
 });
 
 test('the host accepts bounded runtime errors only from the mounted App document', async () => {

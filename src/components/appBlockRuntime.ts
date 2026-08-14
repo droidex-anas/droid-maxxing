@@ -241,8 +241,9 @@ button, input, select, textarea {
   let lastHeight = -1;
   let lastError = '';
   const postError = (message) => {
-    const normalized = typeof message === 'string' ? message.trim().slice(0, ${String(MAX_APP_ERROR_CHARS)}) : '';
-    if (!normalized || normalized === lastError) return;
+    const reported = typeof message === 'string' ? message.trim() : '';
+    const normalized = (reported || 'The interactive App failed to start.').slice(0, ${String(MAX_APP_ERROR_CHARS)});
+    if (normalized === lastError) return;
     lastError = normalized;
     parent.postMessage({
       type: 'droidex:app-error',
@@ -256,7 +257,10 @@ button, input, select, textarea {
   };
   const onUnhandledRejection = (event) => {
     const reason = event?.reason;
-    postError(reason instanceof Error ? reason.message : String(reason || 'Unhandled App error'));
+    const message = reason && typeof reason === 'object' && 'message' in reason
+      ? String(reason.message)
+      : String(reason || '');
+    postError(message);
   };
   addEventListener('error', onRuntimeError);
   addEventListener('unhandledrejection', onUnhandledRejection);
@@ -398,6 +402,16 @@ export function appBlockErrorFromMessage(
   const message = data.message.trim();
   if (!message || message.length > MAX_APP_ERROR_CHARS) return undefined;
   return message;
+}
+
+export function appBlockStartupErrorFromMessage(
+  data: unknown,
+  instanceId: string,
+  bridgeToken: string,
+  isReady: boolean,
+): string | undefined {
+  if (isReady) return undefined;
+  return appBlockErrorFromMessage(data, instanceId, bridgeToken);
 }
 
 export function appBlockReadyFromMessage(

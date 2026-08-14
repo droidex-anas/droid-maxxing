@@ -5,6 +5,7 @@ import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useSt
 import { respondPermission, sendToSession, sendToSessionNow } from '../lib/commands';
 import type { Autonomy, PermissionOutcome } from '../types/bridge';
 import { ComposerRequestShell } from './ComposerRequestShell';
+import { isAppUpdateInstalling, useAppUpdate } from '../lib/appUpdate';
 
 const ACCENT = 'var(--droid-accent)';
 
@@ -20,6 +21,7 @@ const AUTONOMY: { value: Autonomy; label: string; outcome: PermissionOutcome }[]
 // decision (implement vs keep iterating) plus an optional steered comment.
 export default function PlanApprovalInline() {
   const dispatch = useStoreDispatch();
+  const { downloading: appUpdateInstalling } = useAppUpdate();
   // Plan approvals are session-scoped: only surface the one belonging to the
   // chat the user is looking at.
   const state = useStoreSelector(
@@ -52,6 +54,7 @@ export default function PlanApprovalInline() {
   // Implement: approve at the chosen autonomy (spec) or proceed once (mission),
   // then steer the comment into the turn the model is about to start.
   const implement = () => {
+    if (isAppUpdateInstalling()) return;
     const autonomyOption = AUTONOMY.find((option) => option.value === autonomy);
     if (isSpec && !autonomyOption) return;
     const outcome: PermissionOutcome = isSpec
@@ -72,6 +75,7 @@ export default function PlanApprovalInline() {
   // Keep iterating: reject the plan and (optionally) hand the comment back as a
   // normal message so planning continues with the feedback.
   const iterate = () => {
+    if (isAppUpdateInstalling()) return;
     respondPermission(req.appSessionId, req.requestId, 'cancel');
     if (text) sendToSession(req.appSessionId, text);
     finish();
@@ -158,14 +162,18 @@ export default function PlanApprovalInline() {
             <button
               type="button"
               onClick={iterate}
-              className="rounded-lg border border-droid-border px-2.5 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text"
+              disabled={appUpdateInstalling}
+              title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
+              className="rounded-lg border border-droid-border px-2.5 py-1.5 text-[12px] text-droid-text-secondary transition-colors enabled:hover:border-droid-border-hover enabled:hover:text-droid-text disabled:cursor-not-allowed disabled:opacity-40"
             >
               Keep iterating
             </button>
             <button
               type="button"
               onClick={implement}
-              className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-droid-bg transition-opacity hover:opacity-90"
+              disabled={appUpdateInstalling}
+              title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
+              className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               style={{ background: ACCENT }}
             >
               {text ? 'Implement with comment' : 'Implement'}

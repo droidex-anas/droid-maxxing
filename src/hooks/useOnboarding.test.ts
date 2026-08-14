@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hasSetupBlocker, scheduleEnvDetect, shouldShowOnboarding } from './useOnboarding';
+import {
+  hasSetupBlocker,
+  publishOnboardingState,
+  scheduleEnvDetect,
+  shouldShowOnboarding,
+  subscribeOnboardingState,
+} from './useOnboarding';
 import type { EnvironmentReport } from '../types/bridge';
 
 function env(partial: Partial<EnvironmentReport>): EnvironmentReport {
@@ -95,4 +101,17 @@ test('cancelling a deferred scheduleEnvDetect prevents the probe', () => {
   cancel();
   assert.equal(cancelled, true);
   assert.equal(calls, 0);
+});
+
+test('onboarding preference changes notify every mounted controller', () => {
+  const seen: boolean[] = [];
+  const unsubscribe = subscribeOnboardingState((state) => {
+    seen.push(state.appAutoUpdate ?? true);
+  });
+
+  publishOnboardingState({ completed: true, version: 1, appAutoUpdate: false });
+  unsubscribe();
+  publishOnboardingState({ completed: true, version: 1, appAutoUpdate: true });
+
+  assert.deepEqual(seen, [false]);
 });

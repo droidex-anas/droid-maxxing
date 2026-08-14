@@ -26,6 +26,10 @@ export function getAppUpdate(): AppUpdateInfo | null {
   return info;
 }
 
+export function isAppUpdateInstalling(): boolean {
+  return downloading;
+}
+
 export async function refreshAppUpdate(
   options: AppUpdateCheckOptions,
 ): Promise<AppUpdateInfo | null> {
@@ -80,7 +84,14 @@ export function prepareAppUpdateRequest(
     ),
   storage: UpdateStorage = window.localStorage,
 ): boolean {
-  if (!hasActiveWork) return true;
+  if (!hasActiveWork) {
+    try {
+      storage.removeItem(DEFERRED_APP_UPDATE_KEY);
+    } catch {
+      // Installation can still proceed when renderer storage is unavailable.
+    }
+    return true;
+  }
   if (confirmRestart()) {
     try {
       storage.removeItem(DEFERRED_APP_UPDATE_KEY);
@@ -122,10 +133,16 @@ export async function requestAppUpdate(
   await startAppUpdate(target);
 }
 
-export async function checkForAppUpdateAutomatically(): Promise<void> {
-  const update = await refreshAppUpdate({ interactive: false, automaticChecks: true });
-  if (update?.updateAvailable && consumeDeferredAppUpdate(true)) {
-    await startAppUpdate(update);
+export async function checkForAppUpdateAutomatically(
+  resumeDeferred = false,
+  check: () => Promise<AppUpdateInfo | null> = () =>
+    refreshAppUpdate({ interactive: false, automaticChecks: true }),
+  install: (target: AppUpdateInfo) => Promise<void> = startAppUpdate,
+  storage: UpdateStorage = window.localStorage,
+): Promise<void> {
+  const update = await check();
+  if (resumeDeferred && update?.updateAvailable && consumeDeferredAppUpdate(true, storage)) {
+    await install(update);
   }
 }
 

@@ -81,10 +81,11 @@ test('an idle app installs immediately without showing a restart warning', async
   assert.equal(typeof module.prepareAppUpdateRequest, 'function');
   if (!module.prepareAppUpdateRequest) return;
   let prompted = false;
+  const values = new Map([['droidex.app-update.deferred', '1']]);
   const storage = {
-    getItem: () => null,
-    setItem: () => undefined,
-    removeItem: () => undefined,
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   };
 
   assert.equal(
@@ -99,6 +100,103 @@ test('an idle app installs immediately without showing a restart warning', async
     true,
   );
   assert.equal(prompted, false);
+  assert.equal(values.has('droidex.app-update.deferred'), false);
+});
+
+test('only the launch check may resume a deferred update', async () => {
+  const module = (await import('./appUpdate')) as unknown as {
+    checkForAppUpdateAutomatically?: (
+      resumeDeferred: boolean,
+      check: () => Promise<{
+        current: string;
+        latest: string;
+        updateAvailable: boolean;
+        arch: string;
+        platform: string;
+        installMode: 'automatic';
+      }>,
+      install: () => Promise<void>,
+      storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
+    ) => Promise<void>;
+  };
+  assert.equal(typeof module.checkForAppUpdateAutomatically, 'function');
+  if (!module.checkForAppUpdateAutomatically) return;
+  const values = new Map([['droidex.app-update.deferred', '1']]);
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+  let installs = 0;
+  const check = async () => ({
+    current: '1.1.3',
+    latest: '1.1.4',
+    updateAvailable: true,
+    arch: 'arm64',
+    platform: 'darwin',
+    installMode: 'automatic' as const,
+  });
+  const install = async () => {
+    installs += 1;
+  };
+
+  await module.checkForAppUpdateAutomatically(false, check, install, storage);
+  assert.equal(installs, 0);
+  assert.equal(values.get('droidex.app-update.deferred'), '1');
+  await module.checkForAppUpdateAutomatically(true, check, install, storage);
+  assert.equal(installs, 1);
+  assert.equal(values.has('droidex.app-update.deferred'), false);
+});
+
+test('new agent work is blocked for the full automatic update transaction', async () => {
+  const updateModule = await import('./appUpdate');
+  const commands = await import('./commands');
+  const previousWindow = globalThis.window;
+  let finishDownload: (() => void) | undefined;
+  const download = new Promise<null>((resolve) => {
+    finishDownload = () => {
+      resolve(null);
+    };
+  });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      droidControl: {
+        downloadAppUpdate: () => download,
+      },
+    },
+  });
+
+  try {
+    const installing = updateModule.startAppUpdate({
+      current: '1.1.3',
+      latest: '1.1.4',
+      updateAvailable: true,
+      arch: 'arm64',
+      platform: 'darwin',
+      installMode: 'automatic',
+    });
+    assert.equal(updateModule.isAppUpdateInstalling(), true);
+    assert.throws(
+      () =>
+        commands.createSession({
+          clientRef: 'blocked',
+          title: 'Blocked during update',
+          goal: 'Do not send',
+          sessionPurpose: 'chat',
+          autonomy: 'off',
+        }),
+      /new agent work is paused until restart/,
+    );
+    finishDownload?.();
+    await installing;
+    assert.equal(updateModule.isAppUpdateInstalling(), false);
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: previousWindow,
+    });
+  }
 });
 
 test('sidebar download button only appears for a discovered update', async () => {

@@ -37,6 +37,7 @@ import { FeedbackModal } from './FeedbackModal';
 import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
 import { markGitTurnStart } from '../lib/git';
+import { isAppUpdateInstalling, useAppUpdate } from '../lib/appUpdate';
 import {
   chatWorktreeName,
   prepareChatWorkingDirectory,
@@ -189,6 +190,7 @@ export default function PromptInput({
   onOverlayChange?: (open: boolean) => void;
 }) {
   const dispatch = useStoreDispatch();
+  const { downloading: appUpdateInstalling } = useAppUpdate();
   const state = useStoreSelector(
     (current) => ({
       activeAppSessionId: current.activeAppSessionId,
@@ -769,6 +771,10 @@ export default function PromptInput({
   };
 
   const runSubmit = async (mode: SubmitMode = 'queue', autonomyOverride?: Autonomy) => {
+    if (isAppUpdateInstalling()) {
+      toast.info('DROIDEX is installing an update. New turns will resume after restart.');
+      return;
+    }
     const text = input.trim();
     // Snapshot the composer revision before the settle wait: text, files, and
     // skills are render-closure snapshots, so anything typed or staged while
@@ -1031,7 +1037,7 @@ export default function PromptInput({
   promptQueueRef.current = state.promptQueue;
 
   const deliverPrompt = async () => {
-    if (!activeSession) return;
+    if (!activeSession || isAppUpdateInstalling()) return;
     // Capture the Last-turn git baseline before sending ANY prompt (design
     // included) so the Review tab diffs the turn from the right starting point.
     if (primaryWorkingDirectory)
@@ -1638,7 +1644,9 @@ export default function PromptInput({
                 </AnimatePresence>
                 <button
                   onClick={() => void handleSubmit(enterSteers ? 'now' : 'queue')}
-                  className="p-2 rounded-full text-droid-bg transition-opacity hover:opacity-90"
+                  disabled={appUpdateInstalling}
+                  title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
+                  className="p-2 rounded-full text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   style={{ background: ACCENT }}
                 >
                   <ArrowUp className="w-3.5 h-3.5" />
@@ -1647,8 +1655,8 @@ export default function PromptInput({
             ) : (
               <button
                 onClick={() => void handleSubmit()}
-                disabled={!hasContent || !childActionsEnabled}
-                title={idleSendTooltip}
+                disabled={!hasContent || !childActionsEnabled || appUpdateInstalling}
+                title={appUpdateInstalling ? 'Installing DROIDEX update' : idleSendTooltip}
                 className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-25 disabled:cursor-not-allowed shrink-0"
                 style={{ background: ACCENT }}
               >
