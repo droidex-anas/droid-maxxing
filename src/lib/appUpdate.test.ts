@@ -199,41 +199,6 @@ test('new agent work is blocked for the full automatic update transaction', asyn
   }
 });
 
-test('the update transaction exposes whether control returns to the running app', async () => {
-  const updateModule = await import('./appUpdate');
-  const previousWindow = globalThis.window;
-  let status: 'downloaded' | 'presented' = 'downloaded';
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: {
-      droidControl: {
-        downloadAppUpdate: async () => ({ status }),
-      },
-    },
-  });
-  const update = {
-    current: '1.1.3',
-    latest: '1.1.4',
-    updateAvailable: true,
-    arch: 'arm64',
-    platform: 'darwin',
-    installMode: 'automatic' as const,
-  };
-
-  try {
-    await updateModule.startAppUpdate(update);
-    assert.equal(updateModule.getAppUpdateInstallResult(), 'downloaded');
-    status = 'presented';
-    await updateModule.startAppUpdate(update);
-    assert.equal(updateModule.getAppUpdateInstallResult(), 'presented');
-  } finally {
-    Object.defineProperty(globalThis, 'window', {
-      configurable: true,
-      value: previousWindow,
-    });
-  }
-});
-
 test('sidebar download button only appears for a discovered update', async () => {
   const module = (await import('../components/SidebarAppUpdateButton')) as unknown as {
     AppUpdateButtonView?: (props: {

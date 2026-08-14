@@ -3,21 +3,33 @@ import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridg
 export const newQueueId = () => `q-${String(Date.now())}-${Math.random().toString(36).slice(2, 7)}`;
 
 export interface PromptQueueDeliveryGuard {
-  run: (deliver: () => Promise<void>) => Promise<boolean>;
+  run: (deliver: () => Promise<void>) => Promise<void>;
 }
 
 export function createPromptQueueDeliveryGuard(): PromptQueueDeliveryGuard {
-  let isDelivering = false;
+  let activeDelivery: Promise<void> | null = null;
+  let nextDelivery: (() => Promise<void>) | null = null;
   return {
-    async run(deliver) {
-      if (isDelivering) return false;
-      isDelivering = true;
-      try {
-        await deliver();
-        return true;
-      } finally {
-        isDelivering = false;
-      }
+    run(deliver) {
+      nextDelivery = deliver;
+      if (activeDelivery) return activeDelivery;
+      activeDelivery = (async () => {
+        let lastFailure: Error | undefined;
+        while (nextDelivery) {
+          const currentDelivery = nextDelivery;
+          nextDelivery = null;
+          try {
+            await currentDelivery();
+            lastFailure = undefined;
+          } catch (error) {
+            lastFailure = error instanceof Error ? error : new Error(String(error));
+          }
+        }
+        if (lastFailure !== undefined) throw lastFailure;
+      })().finally(() => {
+        activeDelivery = null;
+      });
+      return activeDelivery;
     },
   };
 }

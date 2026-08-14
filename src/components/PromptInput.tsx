@@ -1071,76 +1071,82 @@ export default function PromptInput({
 
   const deliverPrompt = async () => {
     if (!activeSession || isAppUpdateInstalling()) return;
-    await promptQueueDelivery.run(async () => {
-      // Capture the Last-turn git baseline before sending ANY prompt (design
-      // included) so the Review tab diffs the turn from the right starting point.
-      if (primaryWorkingDirectory)
-        await markGitTurnStart(primaryWorkingDirectory, activeSession.appSessionId);
-      if (isAppUpdateInstalling()) return;
-      // The queue stays editable while that runs, so deliver whatever is now at
-      // the head: this honors deletes and edits (both remove the item) as well as
-      // reorders, and never sends a stale prompt out of the visible order.
-      const head = (promptQueueRef.current[activeSession.appSessionId] ?? []).at(0);
-      if (!head) return;
+    try {
+      await promptQueueDelivery.run(async () => {
+        // Capture the Last-turn git baseline before sending ANY prompt (design
+        // included) so the Review tab diffs the turn from the right starting point.
+        if (primaryWorkingDirectory)
+          await markGitTurnStart(primaryWorkingDirectory, activeSession.appSessionId);
+        if (isAppUpdateInstalling()) return;
+        // The queue stays editable while that runs, so deliver whatever is now at
+        // the head: this honors deletes and edits (both remove the item) as well as
+        // reorders, and never sends a stale prompt out of the visible order.
+        const head = (promptQueueRef.current[activeSession.appSessionId] ?? []).at(0);
+        if (!head) return;
 
-      if (head.design) {
-        try {
-          sendDesignPrompt(head.design.browserKey, head.text, head.design.referenceIds);
-        } catch (err) {
-          console.error('[PromptInput] queued design send failed:', err);
+        if (head.design) {
+          try {
+            sendDesignPrompt(head.design.browserKey, head.text, head.design.referenceIds);
+          } catch (err) {
+            console.error('[PromptInput] queued design send failed:', err);
+            return;
+          }
+          const browserRefs = browserTranscriptReferencesFromDesignReferences(
+            head.design.references,
+          );
+          dispatch({
+            type: 'SESSION_TRANSCRIPT',
+            event: createLocalDesignTranscriptEvent(
+              activeSession.appSessionId,
+              head.text,
+              browserRefs,
+            ),
+          });
+          dispatch({
+            type: 'REMOVE_QUEUED_PROMPT',
+            appSessionId: activeSession.appSessionId,
+            id: head.id,
+          });
           return;
         }
-        const browserRefs = browserTranscriptReferencesFromDesignReferences(head.design.references);
+
+        try {
+          const primaryTranscript = store.getState().transcripts[activeSession.appSessionId] ?? [];
+          sendToSession(
+            activeSession.appSessionId,
+            composeFrom(head.text, head.skills, head.files),
+            responseFormatForPrompt(head.text, hasAppContextForTranscript(primaryTranscript, null)),
+          );
+        } catch (err) {
+          // Keep the prompt staged and skip the transcript echo so a send failure
+          // neither loses queued input nor leaves a duplicate user message behind.
+          console.error('[PromptInput] queued send failed:', err);
+          return;
+        }
         dispatch({
           type: 'SESSION_TRANSCRIPT',
-          event: createLocalDesignTranscriptEvent(
-            activeSession.appSessionId,
-            head.text,
-            browserRefs,
-          ),
+          event: {
+            id: `local-${String(Date.now())}`,
+            appSessionId: activeSession.appSessionId,
+            sourceSessionId: 'user',
+            role: 'primary',
+            ts: Date.now(),
+            kind: 'text',
+            text: head.text,
+            author: 'user',
+            skills: head.skills,
+            files: head.files,
+          },
         });
         dispatch({
           type: 'REMOVE_QUEUED_PROMPT',
           appSessionId: activeSession.appSessionId,
           id: head.id,
         });
-        return;
-      }
-
-      try {
-        const primaryTranscript = store.getState().transcripts[activeSession.appSessionId] ?? [];
-        sendToSession(
-          activeSession.appSessionId,
-          composeFrom(head.text, head.skills, head.files),
-          responseFormatForPrompt(head.text, hasAppContextForTranscript(primaryTranscript, null)),
-        );
-      } catch (err) {
-        // Keep the prompt staged and skip the transcript echo so a send failure
-        // neither loses queued input nor leaves a duplicate user message behind.
-        console.error('[PromptInput] queued send failed:', err);
-        return;
-      }
-      dispatch({
-        type: 'SESSION_TRANSCRIPT',
-        event: {
-          id: `local-${String(Date.now())}`,
-          appSessionId: activeSession.appSessionId,
-          sourceSessionId: 'user',
-          role: 'primary',
-          ts: Date.now(),
-          kind: 'text',
-          text: head.text,
-          author: 'user',
-          skills: head.skills,
-          files: head.files,
-        },
       });
-      dispatch({
-        type: 'REMOVE_QUEUED_PROMPT',
-        appSessionId: activeSession.appSessionId,
-        id: head.id,
-      });
-    });
+    } catch (error) {
+      console.error('[PromptInput] queued delivery preparation failed:', error);
+    }
   };
 
   // When the current turn finishes, deliver the next staged prompt. Delivering

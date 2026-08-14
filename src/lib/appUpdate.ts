@@ -32,10 +32,6 @@ export function isAppUpdateInstalling(): boolean {
   return downloading;
 }
 
-export function getAppUpdateInstallResult(): AppUpdateResult['status'] | null {
-  return installResult;
-}
-
 export async function refreshAppUpdate(
   options: AppUpdateCheckOptions,
 ): Promise<AppUpdateInfo | null> {
