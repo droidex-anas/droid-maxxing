@@ -583,6 +583,36 @@ test('child prompt commit preserves a composer revised during git baseline', asy
   assert.equal(commandEffects, 1);
 });
 
+test('child prompt commit preserves the composer when an update starts during baseline capture', async () => {
+  const target = {
+    kind: 'child' as const,
+    parentAppSessionId: 'parent-a',
+    childSessionId: 'child-a',
+    role: 'worker' as const,
+    label: 'Worker',
+    canSend: true,
+    access: { state: 'ready' as const, requestId: 'ready', runtimeGeneration: 1 },
+  };
+  const captured = childRuntimeSubmitTarget(target);
+  assert.ok(captured);
+  const effects: string[] = [];
+
+  const committed = await commitChildPromptAfterBaseline({
+    capturedTarget: captured,
+    capturedComposerRevision: 1,
+    waitForBaseline: async () => undefined,
+    currentTarget: () => target,
+    currentComposerRevision: () => 1,
+    canCommit: () => false,
+    appendTranscript: () => effects.push('append'),
+    resetComposer: () => effects.push('reset'),
+    sendCommand: () => effects.push('send'),
+  });
+
+  assert.equal(committed, false);
+  assert.deepEqual(effects, []);
+});
+
 test('primary and exact child transcripts remain isolated while switching', () => {
   const transcript = [
     ev({

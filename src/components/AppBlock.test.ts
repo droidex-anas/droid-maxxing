@@ -4,8 +4,10 @@ import vm from 'node:vm';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppBlock, RunningAppFrame } from './AppBlock';
+import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
   appBlockHeightFromMessage,
+  appBlockStartupTransition,
   appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppDocument,
@@ -156,6 +158,151 @@ test('the running frame keeps app code inside a script-only sandbox', () => {
   assert.doesNotMatch(html, /allow-same-origin/);
   assert.match(html, /referrerPolicy="no-referrer"/i);
   assert.match(html, /title="Interactive App block"/);
+  assert.doesNotMatch(html, /transition-\[height\]/);
+});
+
+test('a script failure is reported before the App can announce readiness', () => {
+  const document = createAppDocument(
+    '<script>const broken = ;</script>',
+    'app-error',
+    undefined,
+    'token',
+  );
+  const script = /<script>([\s\S]*?)<\/script>/.exec(document)?.[1];
+  assert.ok(script);
+  const listeners = new Map<string, (event: unknown) => void>();
+  const messages: unknown[] = [];
+  const parent = {
+    postMessage(message: unknown) {
+      messages.push(message);
+    },
+  };
+
+  vm.runInNewContext(script, {
+    parent,
+    window: {},
+    Element: class {},
+    document: {},
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame: () => undefined,
+    ResizeObserver: class {},
+    addEventListener(type: string, listener: (event: unknown) => void) {
+      listeners.set(type, listener);
+    },
+    removeEventListener: () => undefined,
+  });
+
+  listeners.get('error')?.({ message: 'Invalid or unexpected token' });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [
+    {
+      type: 'droidex:app-error',
+      instanceId: 'app-error',
+      bridgeToken: 'token',
+      message: 'Invalid or unexpected token',
+    },
+  ]);
+
+  messages.length = 0;
+  listeners.get('unhandledrejection')?.({ reason: new Error('   ') });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [
+    {
+      type: 'droidex:app-error',
+      instanceId: 'app-error',
+      bridgeToken: 'token',
+      message: 'The interactive App failed to start.',
+    },
+  ]);
+});
+
+test('a working App is not torn down by a later interaction error', () => {
+  const ready = appBlockStartupTransition(
+    'waiting',
+    {
+      type: 'droidex:app-ready',
+      instanceId: 'app-error',
+      bridgeToken: 'token',
+    },
+    'app-error',
+    'token',
+  );
+  assert.deepEqual(ready, { state: 'ready' });
+
+  const afterInteractionError = appBlockStartupTransition(
+    ready.state,
+    {
+      type: 'droidex:app-error',
+      instanceId: 'app-error',
+      bridgeToken: 'token',
+      message: 'Click handler failed',
+    },
+    'app-error',
+    'token',
+  );
+  assert.deepEqual(afterInteractionError, { state: 'ready' });
+});
+
+test('the host accepts bounded runtime errors only from the mounted App document', async () => {
+  const runtime = (await import('./appBlockRuntime')) as unknown as {
+    appBlockErrorFromMessage?: (
+      data: unknown,
+      instanceId: string,
+      bridgeToken: string,
+    ) => string | undefined;
+  };
+  const appBlockErrorFromMessage = runtime.appBlockErrorFromMessage;
+  assert.equal(typeof appBlockErrorFromMessage, 'function');
+  if (!appBlockErrorFromMessage) return;
+  assert.equal(
+    appBlockErrorFromMessage(
+      {
+        type: 'droidex:app-error',
+        instanceId: 'app-error',
+        bridgeToken: 'token',
+        message: 'Invalid or unexpected token',
+      },
+      'app-error',
+      'token',
+    ),
+    'Invalid or unexpected token',
+  );
+  assert.equal(
+    appBlockErrorFromMessage(
+      {
+        type: 'droidex:app-error',
+        instanceId: 'app-error',
+        bridgeToken: 'wrong',
+        message: 'Invalid or unexpected token',
+      },
+      'app-error',
+      'token',
+    ),
+    undefined,
+  );
+  assert.equal(
+    appBlockErrorFromMessage(
+      {
+        type: 'droidex:app-error',
+        instanceId: 'app-error',
+        bridgeToken: 'token',
+        message: 'x'.repeat(501),
+      },
+      'app-error',
+      'token',
+    ),
+    undefined,
+  );
+});
+
+test('a failed App renders a compact recovery surface instead of a blank canvas', () => {
+  const html = renderToStaticMarkup(
+    createElement(AppBlockErrorFallback, {
+      message: 'Invalid or unexpected token',
+    }),
+  );
+  assert.match(html, /Interactive App couldn’t start/);
+  assert.match(html, /Ask Droid to fix this visualization/);
+  assert.match(html, /Invalid or unexpected token/);
 });
 
 test('the host accepts height updates only for the mounted app instance', () => {
@@ -225,6 +372,23 @@ test('the App bridge bounds math work and deduplicates repeated heights', async 
   assert.equal(guard.startMath(), true);
   guard.finishMath();
   assert.equal(guard.startMath(), false);
+});
+
+test('a failed App cannot resize the chat after its recovery surface is selected', async () => {
+  type Guard = {
+    acceptHeight: (height: number) => boolean;
+    fail?: () => void;
+  };
+  const runtime = (await import('./appBlockRuntime')) as unknown as {
+    createAppBridgeGuard?: () => Guard;
+  };
+  const guard = runtime.createAppBridgeGuard?.();
+  assert.ok(guard);
+  assert.equal(typeof guard.fail, 'function');
+  if (!guard.fail) return;
+
+  guard.fail();
+  assert.equal(guard.acceptHeight(1_366), false);
 });
 
 test('each iframe document gets an independent bridge token and work budget', async () => {

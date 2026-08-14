@@ -1,4 +1,5 @@
 import { bridge } from './bridge';
+import { isAppUpdateInstalling } from './appUpdate';
 import type {
   Autonomy,
   BrowserNativeResult,
@@ -17,6 +18,12 @@ import type {
 } from '../types/bridge';
 
 let refCounter = 0;
+
+function requireAgentWorkAvailable(): void {
+  if (isAppUpdateInstalling()) {
+    throw new Error('DROIDEX is installing an update; new agent work is paused until restart.');
+  }
+}
 
 export const newClientRef = () => `c-${Date.now().toString(36)}-${String(refCounter++)}`;
 
@@ -43,6 +50,7 @@ export const createSession = (input: {
   validatorReasoning?: ReasoningEffort;
   responseFormat?: ResponseFormat;
 }) => {
+  requireAgentWorkAvailable();
   bridge.send({ type: 'session.create', ...input });
 };
 
@@ -104,6 +112,7 @@ export const sendToSession = (
   text: string,
   responseFormat?: ResponseFormat,
 ) => {
+  requireAgentWorkAvailable();
   bridge.send({
     type: 'session.send',
     appSessionId,
@@ -117,6 +126,7 @@ export const sendToSessionNow = (
   text: string,
   responseFormat?: ResponseFormat,
 ) => {
+  requireAgentWorkAvailable();
   bridge.send({
     type: 'session.sendNow',
     appSessionId,
@@ -131,6 +141,7 @@ export const sendToChild = (
   text: string,
   responseFormat?: ResponseFormat,
 ) => {
+  requireAgentWorkAvailable();
   bridge.send({
     type: 'child.send',
     parentAppSessionId,
@@ -146,6 +157,7 @@ export const sendToChildNow = (
   text: string,
   responseFormat?: ResponseFormat,
 ) => {
+  requireAgentWorkAvailable();
   bridge.send({
     type: 'child.sendNow',
     parentAppSessionId,

@@ -10,8 +10,10 @@ import {
 } from 'react';
 import { AnimatePresence, motion, useReducedMotion, type Transition } from 'framer-motion';
 import { AppWindow, Play, Square } from 'lucide-react';
+import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
   DEFAULT_APP_HEIGHT,
+  appBlockStartupTransition,
   appBlockReadyFromMessage,
   appBlockHeightFromMessage,
   appBlockMathRequestFromMessage,
@@ -20,6 +22,7 @@ import {
   createAppDocument,
   currentAppBlockTheme,
   renderAppBlockMath,
+  type AppBlockStartupState,
 } from './appBlockRuntime';
 
 export function RunningAppFrame({
@@ -36,6 +39,7 @@ export function RunningAppFrame({
     height: DEFAULT_APP_HEIGHT,
     measurement: 0,
   });
+  const [runtimeError, setRuntimeError] = useState<{ token: string; message: string } | null>(null);
   const theme = useMemo(currentAppBlockTheme, []);
   const bridge = useMemo(createAppBridgeSession, [instanceId, source, theme]);
   const document = useMemo(
@@ -44,7 +48,7 @@ export function RunningAppFrame({
   );
 
   useLayoutEffect(() => {
-    let bridgeReady = false;
+    let startupState: AppBlockStartupState = 'waiting';
     let heightFrame = 0;
     let pendingHeight: number | undefined;
     const scheduleHeight = (nextHeight: number) => {
@@ -64,11 +68,17 @@ export function RunningAppFrame({
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow;
       if (!frameWindow || event.source !== frameWindow) return;
-      if (appBlockReadyFromMessage(event.data, instanceId, bridge.token)) {
-        bridgeReady = true;
+      const startup = appBlockStartupTransition(startupState, event.data, instanceId, bridge.token);
+      startupState = startup.state;
+      if (startup.error) {
+        bridge.guard.fail();
+        setRuntimeError({ token: bridge.token, message: startup.error });
         return;
       }
-      if (!bridgeReady) return;
+      if (appBlockReadyFromMessage(event.data, instanceId, bridge.token)) {
+        return;
+      }
+      if (startupState !== 'ready') return;
       const nextHeight = appBlockHeightFromMessage(event.data, instanceId, bridge.token);
       if (nextHeight !== undefined) {
         if (!bridge.guard.acceptHeight(nextHeight)) return;
@@ -130,6 +140,10 @@ export function RunningAppFrame({
     if (measurement > 0) onMeasured?.();
   }, [measurement, onMeasured]);
 
+  if (runtimeError?.token === bridge.token) {
+    return <AppBlockErrorFallback message={runtimeError.message} />;
+  }
+
   return (
     <iframe
       ref={iframeRef}
@@ -148,7 +162,7 @@ export function RunningAppFrame({
       referrerPolicy="no-referrer"
       loading="lazy"
       srcDoc={document}
-      className="block min-w-0 w-full border-0 bg-transparent transition-[height] duration-200 ease-out motion-reduce:transition-none"
+      className="block min-w-0 w-full border-0 bg-transparent"
       style={{ height }}
     />
   );

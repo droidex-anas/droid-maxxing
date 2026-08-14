@@ -36,6 +36,8 @@ test('formatAppPrompt keeps the request recoverable and adds broad internal App 
   assert.match(prompt, /Never clip axis titles, tick labels, legends, or annotations/);
   assert.match(prompt, /wireframes/);
   assert.match(prompt, /Do not use network requests/);
+  assert.match(prompt, /verify that every inline script parses/);
+  assert.match(prompt, /SVG or Canvas initialization runs without errors/);
 });
 
 test('appPromptDisplayFromText reveals only what the user typed', () => {

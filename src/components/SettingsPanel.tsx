@@ -16,7 +16,8 @@ import type { ModelInfo } from '../types/bridge';
 import { useOnboarding } from '../hooks/useOnboarding';
 import { Switch } from './Switch';
 import { getAppVersion, type AppUpdateInfo } from '../lib/onboarding';
-import { refreshAppUpdate, startAppUpdate } from '../lib/appUpdate';
+import { refreshAppUpdate, requestAppUpdate } from '../lib/appUpdate';
+import { hasActiveSessionWork } from '../lib/sessions';
 import { applyTheme } from '../lib/theme';
 import { AppearanceSection } from './AppearanceSettings';
 import { DiagnosticsSettings } from './DiagnosticsSettings';
@@ -589,6 +590,7 @@ function SetupSection({ onClose }: { onClose: () => void }) {
   const [appVersion, setAppVersion] = useState('');
   const [update, setUpdate] = useState<AppUpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
+  const hasActiveWork = useStoreSelector(hasActiveSessionWork);
 
   useEffect(() => {
     void getAppVersion().then(setAppVersion);
@@ -695,7 +697,7 @@ function SetupSection({ onClose }: { onClose: () => void }) {
             {update?.updateAvailable && update.installMode !== 'sparkle' && (
               <button
                 onClick={() => {
-                  void startAppUpdate(update);
+                  void requestAppUpdate(update, hasActiveWork);
                 }}
                 className="px-2.5 h-7 rounded-md bg-droid-accent text-droid-bg text-[12px] hover:opacity-90 transition-opacity"
               >

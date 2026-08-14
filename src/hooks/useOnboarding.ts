@@ -26,6 +26,37 @@ export interface OnboardingController {
   patch: (p: Partial<OnboardingState>) => Promise<void>;
 }
 
+const onboardingStateListeners = new Set<(state: OnboardingState) => void>();
+let publishedOnboardingState: OnboardingState | null = null;
+let publishedOnboardingRevision = 0;
+
+export function onboardingStateRevision(): number {
+  return publishedOnboardingRevision;
+}
+
+export function resolveOnboardingRead(
+  initialRevision: number,
+  state: OnboardingState,
+): OnboardingState {
+  return initialRevision === publishedOnboardingRevision
+    ? state
+    : (publishedOnboardingState ?? state);
+}
+
+export function publishOnboardingState(state: OnboardingState): void {
+  publishedOnboardingState = state;
+  publishedOnboardingRevision += 1;
+  for (const listener of onboardingStateListeners) listener(state);
+}
+
+export function subscribeOnboardingState(listener: (state: OnboardingState) => void): () => void {
+  onboardingStateListeners.add(listener);
+  if (publishedOnboardingState) listener(publishedOnboardingState);
+  return () => {
+    onboardingStateListeners.delete(listener);
+  };
+}
+
 // Env detection spawns CLI and package-manager probes on the sidecar, so for
 // returning users it is deferred past first paint instead of competing with
 // the session list and history traffic that paints the app. The onboarding
@@ -83,15 +114,21 @@ export function useOnboarding(): OnboardingController {
   }, []);
 
   useEffect(() => {
+    return subscribeOnboardingState(setOnboardingState);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
+    const initialRevision = onboardingStateRevision();
     void getOnboarding()
       .then((state) => {
         if (cancelled) return;
-        setOnboardingState(state);
+        const currentState = resolveOnboardingRead(initialRevision, state);
+        setOnboardingState(currentState);
         setReady(true);
         onboardingReady.current = true;
-        deferEnvDetect.current = state.completed;
-        scheduleDetect(state.completed);
+        deferEnvDetect.current = currentState.completed;
+        scheduleDetect(currentState.completed);
       })
       .catch(() => {
         // A failed onboarding read must not skip env detection entirely;
@@ -148,7 +185,7 @@ export function useOnboarding(): OnboardingController {
     setLastResult(null);
     setInstalling('install');
     // Remember the channel so later CLI updates use the matching updater path.
-    void setOnboarding({ installChannel: channel }).then(setOnboardingState);
+    void setOnboarding({ installChannel: channel }).then(publishOnboardingState);
     installCli(channel);
   }, []);
 
@@ -166,8 +203,7 @@ export function useOnboarding(): OnboardingController {
   }, []);
 
   const patch = useCallback(async (p: Partial<OnboardingState>) => {
-    const next = await setOnboarding(p);
-    setOnboardingState(next);
+    publishOnboardingState(await setOnboarding(p));
   }, []);
 
   return {

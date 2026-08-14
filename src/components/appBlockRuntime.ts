@@ -9,6 +9,7 @@ const MAX_APP_HEIGHT = 12_000;
 const MAX_APP_MATH_CHARS = 20_000;
 export const MAX_APP_MATH_REQUESTS = 64;
 export const MAX_CONCURRENT_APP_MATH_REQUESTS = 2;
+const MAX_APP_ERROR_CHARS = 500;
 
 export interface AppBlockMathRequest {
   requestId: string;
@@ -30,6 +31,7 @@ export interface AppBridgeGuard {
   acceptHeight: (height: number) => boolean;
   startMath: () => boolean;
   finishMath: () => void;
+  fail: () => void;
 }
 
 export interface AppBridgeSession {
@@ -44,13 +46,16 @@ export function createAppBridgeGuard(
   let lastHeight: number | undefined;
   let mathStarted = 0;
   let mathInFlight = 0;
+  let failed = false;
   return {
     acceptHeight(height) {
+      if (failed) return false;
       if (height === lastHeight) return false;
       lastHeight = height;
       return true;
     },
     startMath() {
+      if (failed) return false;
       if (mathStarted >= mathBudget || mathInFlight >= mathConcurrency) return false;
       mathStarted += 1;
       mathInFlight += 1;
@@ -58,6 +63,9 @@ export function createAppBridgeGuard(
     },
     finishMath() {
       mathInFlight = Math.max(0, mathInFlight - 1);
+    },
+    fail() {
+      failed = true;
     },
   };
 }
@@ -231,6 +239,31 @@ button, input, select, textarea {
   let mathSequence = 0;
   let heightFrame = 0;
   let lastHeight = -1;
+  let lastError = '';
+  const postError = (message) => {
+    const reported = typeof message === 'string' ? message.trim() : '';
+    const normalized = (reported || 'The interactive App failed to start.').slice(0, ${String(MAX_APP_ERROR_CHARS)});
+    if (normalized === lastError) return;
+    lastError = normalized;
+    parent.postMessage({
+      type: 'droidex:app-error',
+      instanceId,
+      bridgeToken,
+      message: normalized,
+    }, '*');
+  };
+  const onRuntimeError = (event) => {
+    postError(event?.message || 'The interactive App failed to start.');
+  };
+  const onUnhandledRejection = (event) => {
+    const reason = event?.reason;
+    const message = reason && typeof reason === 'object' && 'message' in reason
+      ? String(reason.message)
+      : String(reason || '');
+    postError(message);
+  };
+  addEventListener('error', onRuntimeError);
+  addEventListener('unhandledrejection', onUnhandledRejection);
   const reportHeight = () => {
     if (heightFrame) return;
     heightFrame = requestAnimationFrame(() => {
@@ -314,6 +347,8 @@ button, input, select, textarea {
       if (heightFrame) cancelAnimationFrame(heightFrame);
       observer.disconnect();
       removeEventListener('message', onHostMessage);
+      removeEventListener('error', onRuntimeError);
+      removeEventListener('unhandledrejection', onUnhandledRejection);
       for (const pending of pendingMath.values()) pending.resolve(false);
       pendingMath.clear();
     }, { once: true });
@@ -346,10 +381,47 @@ body { min-height: 0 !important; padding: 0 !important; }
 </html>`;
 }
 
-function appBridgeMessageMatches(data: unknown, instanceId: string, bridgeToken?: string): boolean {
+function appBridgeMessageMatches(
+  data: unknown,
+  instanceId: string,
+  bridgeToken?: string,
+): data is Record<string, unknown> {
   if (typeof data !== 'object' || data === null) return false;
   if (!('instanceId' in data) || data.instanceId !== instanceId) return false;
   return bridgeToken === undefined || ('bridgeToken' in data && data.bridgeToken === bridgeToken);
+}
+
+export function appBlockErrorFromMessage(
+  data: unknown,
+  instanceId: string,
+  bridgeToken: string,
+): string | undefined {
+  if (!appBridgeMessageMatches(data, instanceId, bridgeToken)) return undefined;
+  if (!('type' in data) || data.type !== 'droidex:app-error') return undefined;
+  if (!('message' in data) || typeof data.message !== 'string') return undefined;
+  const message = data.message.trim();
+  if (!message || message.length > MAX_APP_ERROR_CHARS) return undefined;
+  return message;
+}
+
+export type AppBlockStartupState = 'waiting' | 'ready' | 'failed';
+
+export interface AppBlockStartupTransition {
+  state: AppBlockStartupState;
+  error?: string;
+}
+
+export function appBlockStartupTransition(
+  state: AppBlockStartupState,
+  data: unknown,
+  instanceId: string,
+  bridgeToken: string,
+): AppBlockStartupTransition {
+  if (state !== 'waiting') return { state };
+  const error = appBlockErrorFromMessage(data, instanceId, bridgeToken);
+  if (error) return { state: 'failed', error };
+  if (appBlockReadyFromMessage(data, instanceId, bridgeToken)) return { state: 'ready' };
+  return { state };
 }
 
 export function appBlockReadyFromMessage(
@@ -359,8 +431,6 @@ export function appBlockReadyFromMessage(
 ): boolean {
   return (
     appBridgeMessageMatches(data, instanceId, bridgeToken) &&
-    typeof data === 'object' &&
-    data !== null &&
     'type' in data &&
     data.type === 'droidex:app-ready'
   );
@@ -372,13 +442,7 @@ export function appBlockHeightFromMessage(
   bridgeToken?: string,
 ): number | undefined {
   if (!appBridgeMessageMatches(data, instanceId, bridgeToken)) return undefined;
-  if (
-    typeof data !== 'object' ||
-    data === null ||
-    !('type' in data) ||
-    data.type !== 'droidex:app-height'
-  )
-    return undefined;
+  if (!('type' in data) || data.type !== 'droidex:app-height') return undefined;
   if (!('height' in data) || typeof data.height !== 'number' || !Number.isFinite(data.height)) {
     return undefined;
   }
@@ -391,7 +455,6 @@ export function appBlockMathRequestFromMessage(
   bridgeToken?: string,
 ): AppBlockMathRequest | undefined {
   if (!appBridgeMessageMatches(data, instanceId, bridgeToken)) return undefined;
-  if (typeof data !== 'object' || data === null) return undefined;
   if (!('type' in data) || data.type !== 'droidex:render-math') return undefined;
   if (
     !('requestId' in data) ||

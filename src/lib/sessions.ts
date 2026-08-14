@@ -20,6 +20,19 @@ export function sessionIsLive(session: Pick<SessionSummary, 'phase' | 'streaming
   return CLEARLY_ACTIVE.includes(session.phase);
 }
 
+export function hasActiveSessionWork(opts: {
+  sessions: Record<string, Pick<SessionSummary, 'phase' | 'streaming'>>;
+  childSessions: Record<string, Record<string, Pick<ChildSessionSummary, 'status'>>>;
+  childRuntime: Partial<Record<string, Record<string, { available: boolean }>>>;
+}): boolean {
+  if (Object.values(opts.sessions).some(sessionIsLive)) return true;
+  return Object.entries(opts.childSessions).some(([appSessionId, children]) =>
+    Object.entries(children).some(([childSessionId, childSession]) =>
+      childSessionIsLive(childSession, opts.childRuntime[appSessionId]?.[childSessionId]),
+    ),
+  );
+}
+
 // Whether a session reads as unread in the sidebar: the model finished newer
 // activity than the last time the user opened the session. The active session
 // is always considered read, and a session with a turn in flight shows its

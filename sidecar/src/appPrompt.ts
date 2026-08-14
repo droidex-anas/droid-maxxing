@@ -25,6 +25,8 @@ const APP_GUIDANCE = [
   '',
   "Use responsive SVG for charts, diagrams, and illustrations; Canvas for dense or animated plots; and semantic HTML/CSS for controls, calculators, and wireframes. Build standard charts directly with SVG or Canvas. Give charts useful scales, labels, legends, hover or focus details, and data-driven controls such as filters, toggles, sliders, or selection only when they improve understanding. Use a coherent, high-contrast, color-blind-safe palette and never rely on color alone; the App may define its own local series colors and offer palette or series-color controls when color choice is genuinely useful. For real local LaTeX, put TeX in an element's `data-latex` attribute (add `data-display` for display math), or call `window.droidex.renderMath(elementOrSelector, latex, { displayMode: true })` when values change. Do not hand-build math notation with CSS.",
   '',
+  'Before emitting the App block, verify that every inline script parses and that SVG or Canvas initialization runs without errors. Prefer straightforward JavaScript and declarative SVG over fragile generated abstractions.',
+  '',
   'Use the DROIDEX theme variables --app-background, --app-surface, --app-foreground, --app-muted, --app-border, and --app-accent. Do not use network requests, external libraries, external assets, or nested frames.',
 ].join('\n');
 
