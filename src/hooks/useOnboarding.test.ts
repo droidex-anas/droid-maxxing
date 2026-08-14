@@ -111,13 +111,16 @@ test('onboarding preference changes notify every mounted controller', () => {
     seen.push(state.appAutoUpdate ?? true);
   });
 
+  const seenBeforePublish = seen.length;
   const before = onboardingStateRevision();
   publishOnboardingState({ completed: true, version: 1, appAutoUpdate: false });
   assert.equal(onboardingStateRevision(), before + 1);
+  assert.equal(seen.length, seenBeforePublish + 1);
+  assert.equal(seen.at(-1), false);
   unsubscribe();
   publishOnboardingState({ completed: true, version: 1, appAutoUpdate: true });
 
-  assert.deepEqual(seen, [false]);
+  assert.equal(seen.length, seenBeforePublish + 1);
 });
 
 test('a stale onboarding read cannot overwrite a newer preference publication', () => {

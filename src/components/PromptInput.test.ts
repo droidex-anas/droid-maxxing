@@ -12,11 +12,12 @@ test('turn-start feedback does not replace controls for an already-live target',
   assert.equal(shouldShowTurnStarting(true), false);
 });
 
-test('an idle queued prompt resumes when a presented update returns control', () => {
-  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, false, true), true);
-  assert.equal(shouldResumeQueuedPromptAfterUpdate(false, false, false, true), false);
-  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, true, true), false);
-  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, false, false), false);
+test('an idle queued prompt resumes only when an update window returns control', () => {
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, false, true, 'presented'), true);
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, false, true, 'downloaded'), false);
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(false, false, false, true, 'presented'), false);
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, true, true, 'presented'), false);
+  assert.equal(shouldResumeQueuedPromptAfterUpdate(true, false, false, false, 'presented'), false);
 });
 
 test('queued primary delivery reads App context from the primary transcript', async () => {

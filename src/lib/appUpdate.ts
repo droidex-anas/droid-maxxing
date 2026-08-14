@@ -4,6 +4,7 @@ import {
   downloadAppUpdate as ipcDownload,
   type AppUpdateCheckOptions,
   type AppUpdateInfo,
+  type AppUpdateResult,
 } from './onboarding';
 import { toast } from './toast';
 
@@ -16,6 +17,7 @@ type UpdateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 let info: AppUpdateInfo | null = null;
 let checking = false;
 let downloading = false;
+let installResult: AppUpdateResult['status'] | null = null;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -28,6 +30,10 @@ export function getAppUpdate(): AppUpdateInfo | null {
 
 export function isAppUpdateInstalling(): boolean {
   return downloading;
+}
+
+export function getAppUpdateInstallResult(): AppUpdateResult['status'] | null {
+  return installResult;
 }
 
 export async function refreshAppUpdate(
@@ -60,9 +66,11 @@ export async function checkForAppUpdate(): Promise<AppUpdateInfo | null> {
 export async function startAppUpdate(target: AppUpdateInfo | null = info): Promise<void> {
   if (downloading || !target?.updateAvailable) return;
   downloading = true;
+  installResult = null;
   emit();
   try {
     const result = await ipcDownload();
+    installResult = result?.status ?? null;
     if (result?.status === 'downloaded') {
       toast.info('Update downloaded. Restarting DROIDEX…');
     } else if (result?.status === 'presented') {
@@ -165,6 +173,7 @@ export function useAppUpdate(): {
   update: AppUpdateInfo | null;
   checking: boolean;
   downloading: boolean;
+  installResult: AppUpdateResult['status'] | null;
   check: () => Promise<void>;
   start: () => Promise<void>;
 } {
@@ -182,6 +191,7 @@ export function useAppUpdate(): {
     update: info,
     checking,
     downloading,
+    installResult,
     check: async () => {
       await checkForAppUpdate();
     },
