@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Search, X } from 'lucide-react';
 
@@ -33,7 +34,7 @@ export default function PaletteShell({
     inputRef.current?.focus();
   }, []);
 
-  return (
+  const shell = (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -99,4 +100,7 @@ export default function PaletteShell({
       </motion.div>
     </motion.div>
   );
+
+  if (typeof document === 'undefined') return shell;
+  return createPortal(shell, document.getElementById('app-root') ?? document.body);
 }

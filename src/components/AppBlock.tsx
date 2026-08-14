@@ -46,6 +46,7 @@ export function RunningAppFrame({
     () => createAppDocument(source, instanceId, theme, bridge.token),
     [bridge.token, instanceId, source, theme],
   );
+  const isMeasured = measurement > 0;
 
   useLayoutEffect(() => {
     let startupState: AppBlockStartupState = 'waiting';
@@ -145,26 +146,51 @@ export function RunningAppFrame({
   }
 
   return (
-    <iframe
-      ref={iframeRef}
-      onLoad={() => {
-        iframeRef.current?.contentWindow?.postMessage(
-          {
-            type: 'droidex:host-ready',
-            instanceId,
-            bridgeToken: bridge.token,
-          },
-          '*',
-        );
-      }}
-      title="Interactive App block"
-      sandbox="allow-scripts"
-      referrerPolicy="no-referrer"
-      loading="lazy"
-      srcDoc={document}
-      className="block min-w-0 w-full border-0 bg-transparent"
-      style={{ height }}
-    />
+    <div className="relative min-w-0">
+      {!isMeasured && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex w-full items-center gap-3 rounded-xl border border-droid-border bg-droid-surface/55 p-3"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-droid-bg text-droid-text-muted ring-1 ring-inset ring-droid-border">
+            <AppWindow className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="shimmer-text block text-[13px] font-medium">
+              Preparing interactive app
+            </span>
+            <span className="block text-[11.5px] text-droid-text-muted">
+              Measuring the interface
+            </span>
+          </span>
+        </div>
+      )}
+      <iframe
+        ref={iframeRef}
+        onLoad={() => {
+          iframeRef.current?.contentWindow?.postMessage(
+            {
+              type: 'droidex:host-ready',
+              instanceId,
+              bridgeToken: bridge.token,
+            },
+            '*',
+          );
+        }}
+        title="Interactive App block"
+        sandbox="allow-scripts"
+        referrerPolicy="no-referrer"
+        loading="eager"
+        srcDoc={document}
+        aria-hidden={!isMeasured}
+        tabIndex={isMeasured ? undefined : -1}
+        className={`min-w-0 w-full border-0 bg-transparent ${
+          isMeasured ? 'block' : 'absolute inset-x-0 top-0 invisible pointer-events-none'
+        }`}
+        style={{ height }}
+      />
+    </div>
   );
 }
 
