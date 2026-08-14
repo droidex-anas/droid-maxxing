@@ -332,7 +332,6 @@ body { min-height: 0 !important; padding: 0 !important; }
   margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
-  border-radius: 0 !important;
   box-shadow: none !important;
 }
 [data-droidex-app-canvas] {

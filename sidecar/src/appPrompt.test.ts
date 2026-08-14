@@ -17,11 +17,12 @@ test('formatAppPrompt keeps the request recoverable and adds broad internal App 
     prompt,
     /may intentionally give the whole App or selected regions soft theme-aware backgrounds/,
   );
+  assert.match(prompt, /give that outer surface a restrained radius and clip its contents/);
   assert.match(prompt, /Avoid accidental hard black or white page slabs/);
   assert.doesNotMatch(prompt, /keep that region transparent and unframed/);
   assert.match(prompt, /data-droidex-app-root/);
   assert.match(prompt, /data-droidex-app-canvas/);
-  assert.match(prompt, /no outer max-width, page padding, border, radius, or shadow/);
+  assert.match(prompt, /no outer max-width, page padding, border, or shadow/);
   assert.match(prompt, /data-latex/);
   assert.match(prompt, /window\.droidex\.renderMath/);
   assert.match(prompt, /responsive SVG/);

@@ -83,6 +83,7 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /\[data-droidex-app-root\]/);
   assert.match(document, /\[data-droidex-app-canvas\]/);
   assert.match(document, /max-width: none !important/);
+  assert.doesNotMatch(document, /\[data-droidex-app-root\] \{[^}]*border-radius:\s*0\s*!important/);
   assert.match(document, /window\.droidex/);
   assert.match(document, /\[data-latex\]/);
   assert.match(document, /droidex:render-math/);
