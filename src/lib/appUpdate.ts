@@ -7,6 +7,10 @@ import {
 } from './onboarding';
 import { toast } from './toast';
 
+const APP_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000;
+const DEFERRED_APP_UPDATE_KEY = 'droidex.app-update.deferred';
+type UpdateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
 // Shared, subscribable app-update state so the sidebar footer button, the
 // settings panel, and the launch check all read the same source of truth.
 let info: AppUpdateInfo | null = null;
@@ -66,6 +70,78 @@ export async function startAppUpdate(target: AppUpdateInfo | null = info): Promi
     downloading = false;
     emit();
   }
+}
+
+export function prepareAppUpdateRequest(
+  hasActiveWork: boolean,
+  confirmRestart: () => boolean = () =>
+    window.confirm(
+      'A DROIDEX session is still running. Restart now to install the update?\n\nChoose Cancel to wait. DROIDEX will continue the update the next time you launch the app.',
+    ),
+  storage: UpdateStorage = window.localStorage,
+): boolean {
+  if (!hasActiveWork) return true;
+  if (confirmRestart()) {
+    try {
+      storage.removeItem(DEFERRED_APP_UPDATE_KEY);
+    } catch {
+      // Installation can still proceed when renderer storage is unavailable.
+    }
+    return true;
+  }
+  try {
+    storage.setItem(DEFERRED_APP_UPDATE_KEY, '1');
+  } catch {
+    // The visible update button remains available even without persistence.
+  }
+  return false;
+}
+
+export function consumeDeferredAppUpdate(
+  updateAvailable: boolean,
+  storage: UpdateStorage = window.localStorage,
+): boolean {
+  if (!updateAvailable) return false;
+  try {
+    if (storage.getItem(DEFERRED_APP_UPDATE_KEY) !== '1') return false;
+    storage.removeItem(DEFERRED_APP_UPDATE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function requestAppUpdate(
+  target: AppUpdateInfo | null,
+  hasActiveWork: boolean,
+): Promise<void> {
+  if (!prepareAppUpdateRequest(hasActiveWork)) {
+    toast.info('Update deferred. DROIDEX will continue it after your next launch.');
+    return;
+  }
+  await startAppUpdate(target);
+}
+
+export async function checkForAppUpdateAutomatically(): Promise<void> {
+  const update = await refreshAppUpdate({ interactive: false, automaticChecks: true });
+  if (update?.updateAvailable && consumeDeferredAppUpdate(true)) {
+    await startAppUpdate(update);
+  }
+}
+
+export function startAutomaticAppUpdateChecks(
+  check: () => void,
+  schedule: (callback: () => void, intervalMs: number) => number = (callback, intervalMs) =>
+    window.setInterval(callback, intervalMs),
+  cancel: (handle: number) => void = (handle) => {
+    window.clearInterval(handle);
+  },
+): () => void {
+  check();
+  const handle = schedule(check, APP_UPDATE_CHECK_INTERVAL_MS);
+  return () => {
+    cancel(handle);
+  };
 }
 
 export function useAppUpdate(): {

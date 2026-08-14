@@ -10,8 +10,10 @@ import {
 } from 'react';
 import { AnimatePresence, motion, useReducedMotion, type Transition } from 'framer-motion';
 import { AppWindow, Play, Square } from 'lucide-react';
+import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
   DEFAULT_APP_HEIGHT,
+  appBlockErrorFromMessage,
   appBlockReadyFromMessage,
   appBlockHeightFromMessage,
   appBlockMathRequestFromMessage,
@@ -36,6 +38,7 @@ export function RunningAppFrame({
     height: DEFAULT_APP_HEIGHT,
     measurement: 0,
   });
+  const [runtimeError, setRuntimeError] = useState<{ token: string; message: string } | null>(null);
   const theme = useMemo(currentAppBlockTheme, []);
   const bridge = useMemo(createAppBridgeSession, [instanceId, source, theme]);
   const document = useMemo(
@@ -64,6 +67,12 @@ export function RunningAppFrame({
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow;
       if (!frameWindow || event.source !== frameWindow) return;
+      const error = appBlockErrorFromMessage(event.data, instanceId, bridge.token);
+      if (error) {
+        bridge.guard.fail();
+        setRuntimeError({ token: bridge.token, message: error });
+        return;
+      }
       if (appBlockReadyFromMessage(event.data, instanceId, bridge.token)) {
         bridgeReady = true;
         return;
@@ -130,6 +139,10 @@ export function RunningAppFrame({
     if (measurement > 0) onMeasured?.();
   }, [measurement, onMeasured]);
 
+  if (runtimeError?.token === bridge.token) {
+    return <AppBlockErrorFallback message={runtimeError.message} />;
+  }
+
   return (
     <iframe
       ref={iframeRef}
@@ -148,7 +161,7 @@ export function RunningAppFrame({
       referrerPolicy="no-referrer"
       loading="lazy"
       srcDoc={document}
-      className="block min-w-0 w-full border-0 bg-transparent transition-[height] duration-200 ease-out motion-reduce:transition-none"
+      className="block min-w-0 w-full border-0 bg-transparent"
       style={{ height }}
     />
   );

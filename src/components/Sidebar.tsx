@@ -17,17 +17,7 @@ import { dismissSidebarCard, loadSidebarCardSeen } from '../lib/sidebarCards';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
-import {
-  Folder,
-  FolderOpen,
-  Plus,
-  Search,
-  Settings,
-  ChevronRight,
-  Download,
-  Loader2,
-  SquarePen,
-} from 'lucide-react';
+import { Folder, FolderOpen, Plus, Search, Settings, ChevronRight, SquarePen } from 'lucide-react';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import {
   buildWorkspaceSections,
@@ -42,33 +32,8 @@ import { SessionContextMenu } from './SessionContextMenu';
 import { SessionRow } from './SidebarSessionRow';
 import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
 import { sessionAttention } from '../lib/sessionAttention';
-import { useAppUpdate } from '../lib/appUpdate';
 import type { SessionSummary } from '../types/bridge';
-
-// Blue download glyph docked beside Settings when a newer DROIDEX build is
-// available; spins while the artifact is on its way.
-function UpdateButton() {
-  const { update, downloading, start } = useAppUpdate();
-  if (!update?.updateAvailable) return null;
-  const actionLabel = `Review DROIDEX ${update.latest} update`;
-  return (
-    <button
-      onClick={() => {
-        void start();
-      }}
-      disabled={downloading}
-      title={actionLabel}
-      aria-label={actionLabel}
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-500 transition-colors hover:bg-droid-elevated disabled:opacity-60"
-    >
-      {downloading ? (
-        <Loader2 className="w-4 h-4 animate-spin" />
-      ) : (
-        <Download className="w-4 h-4" />
-      )}
-    </button>
-  );
-}
+import { SidebarAppUpdateButton } from './SidebarAppUpdateButton';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -686,7 +651,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
             <Settings className="w-4 h-4 shrink-0" />
             <span className="text-[13px] font-medium">Settings</span>
           </button>
-          <UpdateButton />
+          <SidebarAppUpdateButton />
         </div>
       </div>
 

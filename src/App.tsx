@@ -41,7 +41,7 @@ import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/us
 import OnboardingWizard from './components/onboarding/OnboardingWizard';
 import SetupBanner from './components/onboarding/SetupBanner';
 import { updateCli } from './lib/commands';
-import { refreshAppUpdate } from './lib/appUpdate';
+import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
 import { TerminalWorkspace } from './components/terminal/TerminalWorkspace';
@@ -128,7 +128,7 @@ export default function App() {
   const [expandedBrowserAppSessionId, setExpandedBrowserAppSessionId] = useState<string | null>(
     null,
   );
-  const launchHandled = useRef(false);
+  const cliLaunchHandled = useRef(false);
   const showWizard =
     !embedded && onboard.ready && (forceWizard || shouldShowOnboarding(onboard.onboarding));
   // Desktop-only: toast when a model turn finishes (snippet + optional sound).
@@ -283,21 +283,29 @@ export default function App() {
     listSessions({ workspaceCwds, includePlainChats: true });
   }, [embedded, workspaceScopes, workspaceScopesReady]);
 
-  // Post-onboarding launch tasks: optional CLI maintenance plus a non-blocking
-  // app update check. App installation always requires an explicit user action.
+  // App update discovery must never wait on CLI/env probing: that work can be
+  // slow or unavailable, while the verified appcast is independent.
   useEffect(() => {
-    if (embedded || launchHandled.current) return;
+    if (embedded) return;
+    if (!onboard.ready || !onboard.onboarding?.completed) return;
+    if (onboard.onboarding.appAutoUpdate === false) return;
+    return startAutomaticAppUpdateChecks(() => {
+      void checkForAppUpdateAutomatically();
+    });
+  }, [embedded, onboard.ready, onboard.onboarding?.completed, onboard.onboarding?.appAutoUpdate]);
+
+  // Optional CLI maintenance still waits for environment detection, but it no
+  // longer gates app update discovery or the sidebar update button.
+  useEffect(() => {
+    if (embedded || cliLaunchHandled.current) return;
     if (!onboard.ready || !onboard.onboarding?.completed) return;
     // Defer until env detection lands so the CLI auto-update isn't skipped by a
     // race where this runs before `env` arrives.
     const wantsCliAutoUpdate = onboard.onboarding.cliAutoUpdate !== false;
     if (wantsCliAutoUpdate && !onboard.env) return;
-    launchHandled.current = true;
+    cliLaunchHandled.current = true;
     if (wantsCliAutoUpdate && onboard.env?.cli.present) {
       updateCli(onboard.onboarding.installChannel);
-    }
-    if (onboard.onboarding.appAutoUpdate !== false) {
-      void refreshAppUpdate({ interactive: false, automaticChecks: true });
     }
   }, [embedded, onboard.ready, onboard.onboarding, onboard.env]);
 
