@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
+import { hasAppBlock, hasCompleteAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
@@ -871,7 +872,7 @@ function FetchBodyContent({ body }: { body: string }) {
     <div className="max-h-96 overflow-auto rounded-lg bg-droid-elevated/30 px-3.5 py-2.5">
       {/* Fetched pages are untrusted: diagrams must stay off so an ```svg fence
           in the body can never reach SvgCodeBlock's dangerouslySetInnerHTML. */}
-      <Markdown allowDiagrams={false}>{body}</Markdown>
+      <Markdown allowGeneratedContent={false}>{body}</Markdown>
     </div>
   );
 }
@@ -2003,11 +2004,27 @@ const InlineSpecCard = memo(function InlineSpecCard({
 });
 
 /* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({ text }: { text: string }) {
+const MessageBody = memo(function MessageBody({
+  text,
+  live,
+  autoPlayAppBlocks,
+}: {
+  text: string;
+  live: boolean;
+  autoPlayAppBlocks: boolean;
+}) {
   // Strip the history "[truncated N chars]" sentinel so the raw marker never
   // shows; the cut itself is intentionally not surfaced.
   const { body } = parseTruncatedTail(text);
-  if (!hasJsonRender(body)) return <Markdown>{body}</Markdown>;
+  const hasCompleteApp = hasCompleteAppBlock(body);
+  const buildingAppBlocks = live && hasAppBlock(body);
+  const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
+  if (!hasJsonRender(body))
+    return (
+      <Markdown autoPlayAppBlocks={shouldAutoPlayAppBlocks} buildingAppBlocks={buildingAppBlocks}>
+        {body}
+      </Markdown>
+    );
   const segments = splitJsonRender(body);
   return (
     <>
@@ -2015,7 +2032,13 @@ const MessageBody = memo(function MessageBody({ text }: { text: string }) {
         seg.type === 'json-render' ? (
           <JsonRender key={i} source={seg.value} />
         ) : seg.value.trim() ? (
-          <Markdown key={i}>{seg.value}</Markdown>
+          <Markdown
+            key={i}
+            autoPlayAppBlocks={shouldAutoPlayAppBlocks}
+            buildingAppBlocks={buildingAppBlocks}
+          >
+            {seg.value}
+          </Markdown>
         ) : null,
       )}
     </>
@@ -2025,6 +2048,7 @@ const MessageBody = memo(function MessageBody({ text }: { text: string }) {
 interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
+  autoPlayAppBlocks?: boolean;
   // True while the whole turn is still streaming, regardless of where this item
   // sits. Subagent waves need this rather than `live`: work continues after the
   // wave stops being the last item (a plan update or assistant text follows it),
@@ -2087,6 +2111,7 @@ function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): b
     return false;
   return (
     prev.live === next.live &&
+    prev.autoPlayAppBlocks === next.autoPlayAppBlocks &&
     prev.sessionLive === next.sessionLive &&
     prev.compacting === next.compacting &&
     prev.liveTiming === next.liveTiming &&
@@ -2147,6 +2172,7 @@ const ChildSessionsWave = memo(
 const FeedItemView = memo(function FeedItemView({
   item,
   live,
+  autoPlayAppBlocks = false,
   sessionLive,
   compacting,
   cwd,
@@ -2168,12 +2194,14 @@ const FeedItemView = memo(function FeedItemView({
       // only when it is exactly that spec text (avoid double-rendering the same
       // plan); never hide other prose just because spec mode is active (#14).
       if (specContent && text.trim() && text.trim() === specContent.trim()) return null;
+      const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
-          <MessageBody text={text} />
-          {live ? (
+          <MessageBody text={text} live={live} autoPlayAppBlocks={autoPlayAppBlocks} />
+          {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
+            !live &&
             isFinalResponse &&
             text.trim() && (
               <div className="mt-1.5 -ml-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -2556,6 +2584,50 @@ export function appendedFeedItemKeys(
   return appended;
 }
 
+export interface FreshAppResponseState {
+  identity: string;
+  wasPending: boolean;
+  texts: Set<string>;
+}
+
+export function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
+  let latestPromptIndex = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type === 'message' && item.event.author === 'user') {
+      latestPromptIndex = i;
+      break;
+    }
+  }
+  if (latestPromptIndex < 0) return [];
+
+  const responses: string[] = [];
+  for (let i = latestPromptIndex + 1; i < items.length; i++) {
+    const item = items[i];
+    if (item.type !== 'message' || item.event.author === 'user') continue;
+    const text = item.event.text ?? '';
+    if (hasCompleteAppBlock(text)) responses.push(text);
+  }
+  return responses;
+}
+
+export function rememberFreshAppResponses(
+  previous: FreshAppResponseState | null,
+  identity: string,
+  items: FeedItem[],
+  pending: boolean,
+): FreshAppResponseState {
+  const sameSession = previous?.identity === identity;
+  const texts = new Set(sameSession ? previous.texts : []);
+  const justSettled = sameSession && previous.wasPending && !pending;
+
+  if (pending || justSettled) {
+    for (const text of completeAppResponsesInLatestTurn(items)) texts.add(text);
+  }
+
+  return { identity, wasPending: pending, texts };
+}
+
 // Offscreen feed rows skip layout and paint entirely (content-visibility) so
 // long transcripts scroll and chat switches render at the cost of the visible
 // screen only. The browser keeps DOM, component state, and animation timelines
@@ -2654,6 +2726,15 @@ export function MessageFeed({
     [providedItems, events, pending, rich, changes, specContent, dockEnabled],
   );
   const feedIdentity = `${events[0]?.appSessionId ?? ''}:${events[0]?.sourceSessionId ?? ''}`;
+  const freshAppResponsesRef = useRef<FreshAppResponseState | null>(null);
+  const freshAppResponseState = useMemo(
+    () => rememberFreshAppResponses(freshAppResponsesRef.current, feedIdentity, items, pending),
+    [feedIdentity, items, pending],
+  );
+  useEffect(() => {
+    freshAppResponsesRef.current = freshAppResponseState;
+  }, [freshAppResponseState]);
+  const freshAppResponseTexts = freshAppResponseState.texts;
   const renderedFeedRef = useRef<{ identity: string; keys: Set<string> } | null>(null);
   const previousFeed = renderedFeedRef.current;
   useEffect(() => {
@@ -2739,7 +2820,11 @@ export function MessageFeed({
 
   return (
     <div className="space-y-4">
-      {showSpecCard && <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />}
+      {showSpecCard && (
+        <div className="mx-auto min-w-0 max-w-2xl">
+          <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
+        </div>
+      )}
 
       {items.map((item, idx) => {
         const isNewItem = animateKeys.has(item.key);
@@ -2749,6 +2834,13 @@ export function MessageFeed({
               data-feed-row-id={feedRowId(item)}
               {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
               style={FEED_ROW_RENDER_STYLE}
+              className={`mx-auto min-w-0 ${
+                item.type === 'message' &&
+                item.event.author !== 'user' &&
+                hasAppBlock(item.event.text ?? '')
+                  ? 'max-w-4xl'
+                  : 'max-w-2xl'
+              }`}
               initial={isNewItem ? { opacity: 0, y: 4 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, ease: EASE }}
@@ -2756,6 +2848,11 @@ export function MessageFeed({
               <FeedItemView
                 item={item}
                 live={pending && idx === lastIdx && !subagentPoll}
+                autoPlayAppBlocks={
+                  item.type === 'message' &&
+                  item.event.author !== 'user' &&
+                  freshAppResponseTexts.has(item.event.text ?? '')
+                }
                 sessionLive={pending}
                 compacting={compacting && idx === lastIdx}
                 cwd={cwd}
@@ -2770,13 +2867,19 @@ export function MessageFeed({
               />
             </motion.div>
             {idx === worktreeInsertAfter && createdWorktreePath && (
-              <WorktreeCreatedCard path={createdWorktreePath} />
+              <div className="mx-auto min-w-0 max-w-2xl">
+                <WorktreeCreatedCard path={createdWorktreePath} />
+              </div>
             )}
           </Fragment>
         );
       })}
 
-      {showWorking && <WorkingIndicator label={workingLabel} startTs={workingStart} />}
+      {showWorking && (
+        <div className="mx-auto min-w-0 max-w-2xl">
+          <WorkingIndicator label={workingLabel} startTs={workingStart} />
+        </div>
+      )}
     </div>
   );
 }

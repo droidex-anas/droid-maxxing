@@ -225,7 +225,11 @@ function CommentCard({ comment }: { comment: PrComment }) {
             className="overflow-hidden"
           >
             <div className="border-t border-droid-border/60 px-3 py-2.5 break-words text-xs leading-[1.5] text-droid-text-secondary [&>div]:!space-y-2 [&>div]:!text-xs [&>div]:!leading-[1.5] [&_code]:!text-[11px]">
-              {body ? <Markdown allowDiagrams={false}>{body}</Markdown> : 'No written comment.'}
+              {body ? (
+                <Markdown allowGeneratedContent={false}>{body}</Markdown>
+              ) : (
+                'No written comment.'
+              )}
             </div>
           </motion.div>
         )}

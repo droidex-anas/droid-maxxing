@@ -793,6 +793,96 @@ test('restored feed rows render immediately instead of replaying entrance motion
   assert.doesNotMatch(html, /translateY\(4px\)/);
 });
 
+test('App responses receive a wider chat canvas while ordinary rows stay readable', () => {
+  const app = 'Here is the result.\n\n```app\n<main>Wide App</main>\n```';
+  const appHtml = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst(app)], pending: false }),
+  );
+  const textHtml = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst('Ordinary answer')], pending: false }),
+  );
+
+  assert.match(appHtml, /max-w-4xl/);
+  assert.match(textHtml, /max-w-2xl/);
+});
+
+test('an incomplete live App owns its building state without exposing Play or a trailing caret', () => {
+  const incompleteApp = [
+    'Preparing the visualization.',
+    '',
+    '```app',
+    '<main><script>const points = [',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst(incompleteApp)], pending: true }),
+  );
+
+  assert.match(html, /max-w-4xl/);
+  assert.match(html, /Building interactive app/);
+  assert.match(html, /role="status"/);
+  assert.doesNotMatch(html, /aria-label="Play app"/);
+  assert.doesNotMatch(html, /caret-blink/);
+  assert.doesNotMatch(html, /<iframe/i);
+});
+
+test('ordinary live prose keeps the trailing streaming caret', () => {
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst('Still writing')], pending: true }),
+  );
+
+  assert.match(html, /caret-blink/);
+});
+
+test('a freshly generated App stays eligible for autoplay when history replaces its event id', async () => {
+  type FreshAppState = {
+    identity: string;
+    wasPending: boolean;
+    texts: Set<string>;
+  };
+  type RememberFreshApps = (
+    previous: FreshAppState | null,
+    identity: string,
+    items: FeedItem[],
+    pending: boolean,
+  ) => FreshAppState;
+  const chatModule = (await import('./chat')) as unknown as {
+    rememberFreshAppResponses?: RememberFreshApps;
+  };
+  const remember = chatModule.rememberFreshAppResponses;
+  assert.equal(typeof remember, 'function');
+  if (!remember) return;
+
+  const prompt = userMsg('Visualize this');
+  const incomplete = asst('```app\n<main><script>const points = [');
+  const liveItems = groupTurns(buildFeed([prompt, incomplete]), true);
+  const liveState = remember(null, 'session-1', liveItems, true);
+  assert.deepEqual([...liveState.texts], []);
+
+  const completeText = '```app\n<main>Complete App</main>\n```';
+  const authoritative = {
+    ...asst(completeText),
+    id: 'authoritative-history-id',
+  };
+  const settledItems = groupTurns(buildFeed([prompt, authoritative]), false);
+  const settledState = remember(liveState, 'session-1', settledItems, false);
+  assert.deepEqual([...settledState.texts], [completeText]);
+
+  const reopenedState = remember(null, 'session-1', settledItems, false);
+  assert.deepEqual([...reopenedState.texts], []);
+});
+
+test('assistant Apps without a user prompt are never treated as fresh autoplay responses', async () => {
+  const chatModule = (await import('./chat')) as unknown as {
+    completeAppResponsesInLatestTurn?: (items: FeedItem[]) => string[];
+  };
+  const completeApps = chatModule.completeAppResponsesInLatestTurn;
+  assert.equal(typeof completeApps, 'function');
+  if (!completeApps) return;
+
+  const historical = groupTurns(buildFeed([asst('```app\n<main>Historical</main>\n```')]), false);
+  assert.deepEqual(completeApps(historical), []);
+});
+
 test('live thinking stays collapsed until the user opens it', () => {
   const events = [
     userMsg('inspect this'),

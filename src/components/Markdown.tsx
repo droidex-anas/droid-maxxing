@@ -1,25 +1,36 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useMemo, useEffect, useRef, useState, memo } from 'react';
-import { Copy, Check } from 'lucide-react';
+import {
+  Children,
+  isValidElement,
+  useMemo,
+  useEffect,
+  useRef,
+  useState,
+  memo,
+  type ReactNode,
+} from 'react';
 import type { Mermaid } from 'mermaid';
+import { AppBlock } from './AppBlock';
+import { appFencesInMarkdown } from '../lib/appBlocks';
+import { CodeCard } from './MarkdownCode';
+
+export { copyMarkdownCode } from './MarkdownCode';
 
 let mermaidPromise: Promise<Mermaid> | null = null;
 function loadMermaid(): Promise<Mermaid> {
-  if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'loose',
-        theme: 'dark',
-        themeVariables: {
-          fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-          fontSize: '13px',
-        },
-      });
-      return mermaid;
+  mermaidPromise ??= import('mermaid').then(({ default: mermaid }) => {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'dark',
+      themeVariables: {
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        fontSize: '13px',
+      },
     });
-  }
+    return mermaid;
+  });
   return mermaidPromise;
 }
 
@@ -27,7 +38,6 @@ let mermaidSeq = 0;
 
 function slugify(text: string): string {
   return text
-    .toString()
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
@@ -35,18 +45,26 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-/* ── JSON syntax highlighting ── */
-function isJsonLang(className?: string) {
-  return className?.includes('language-json') || className?.includes('lang-json');
+function reactText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (!isValidElement<{ children?: ReactNode }>(node)) {
+    return Children.toArray(node).map(reactText).join('');
+  }
+  return reactText(node.props.children);
 }
 
-function isSvgLang(className?: string) {
-  return className?.includes('language-svg') || className?.includes('lang-svg');
+function hasLanguage(className: string | undefined, language: string): boolean {
+  return (
+    className
+      ?.split(/\s+/)
+      .some((name) => name === `language-${language}` || name === `lang-${language}`) ?? false
+  );
 }
 
-function isMermaidLang(className?: string) {
-  return className?.includes('language-mermaid') || className?.includes('lang-mermaid');
-}
+const isJsonLang = (className?: string) => hasLanguage(className, 'json');
+const isSvgLang = (className?: string) => hasLanguage(className, 'svg');
+const isMermaidLang = (className?: string) => hasLanguage(className, 'mermaid');
+const isAppLang = (className?: string) => hasLanguage(className, 'app');
 
 // Models frequently emit flowchart syntax mermaid rejects (unquoted special
 // characters in subgraph titles, and `[/text]` which mermaid reads as a
@@ -56,7 +74,7 @@ function sanitizeMermaid(src: string): string {
   return src
     .split('\n')
     .map((line) => {
-      const sg = line.match(/^(\s*subgraph\s+)(.+?)\s*$/i);
+      const sg = /^(\s*subgraph\s+)(.+?)\s*$/i.exec(line);
       if (sg) {
         const title = sg[2].trim();
         const alreadySafe = title.startsWith('"') || /^[\w-]+(\[.*\]|\(.*\))?$/.test(title);
@@ -71,11 +89,10 @@ function sanitizeMermaid(src: string): string {
     .join('\n');
 }
 
-/* ── Mermaid diagram renderer ── */
 const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string>('');
-  const idRef = useRef(`mmd-${++mermaidSeq}`);
+  const idRef = useRef(`mmd-${String(++mermaidSeq)}`);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,8 +112,8 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
           setError('');
         }
       })
-      .catch((err) => {
-        if (!cancelled) setError(String(err?.message ?? err));
+      .catch((error: unknown) => {
+        if (!cancelled) setError(error instanceof Error ? error.message : String(error));
       });
     return () => {
       cancelled = true;
@@ -140,12 +157,12 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
 function HighlightJson({ code }: { code: string }) {
   const nodes = useMemo(() => {
     const tokens = code.split(
-      /("(?:\\.|[^"\\])*"|:|true|false|null|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[\[\]{}!,])/g,
+      /("(?:\\.|[^"\\])*"|:|true|false|null|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[[\]{}!,])/g,
     );
     return tokens.map((token, i) => {
-      if (token.match(/^"(?:\\.|[^"\\])*"$/)) {
-        const next = tokens[i + 1]?.trimStart();
-        if (next?.startsWith(':')) {
+      if (/^"(?:\\.|[^"\\])*"$/.exec(token)) {
+        const next = tokens[i + 1].trimStart();
+        if (next.startsWith(':')) {
           return (
             <span key={i} style={{ color: 'var(--droid-accent)' }}>
               {token}
@@ -170,13 +187,13 @@ function HighlightJson({ code }: { code: string }) {
             {token}
           </span>
         );
-      if (token.match(/^\d/))
+      if (/^\d/.exec(token))
         return (
           <span key={i} style={{ color: 'var(--droid-orange)' }}>
             {token}
           </span>
         );
-      if (/^[{}\[\],:!]$/.test(token))
+      if (/^[{}[\],:!]$/.test(token))
         return (
           <span key={i} style={{ color: 'var(--droid-text-muted)' }}>
             {token}
@@ -222,100 +239,21 @@ function SvgCodeBlock({ content }: { content: string }) {
   );
 }
 
-const LANG_LABEL: Record<string, string> = {
-  sh: 'Bash',
-  shell: 'Bash',
-  bash: 'Bash',
-  zsh: 'Bash',
-  console: 'Bash',
-  shellsession: 'Bash',
-  js: 'JavaScript',
-  jsx: 'JSX',
-  ts: 'TypeScript',
-  tsx: 'TSX',
-  py: 'Python',
-  rb: 'Ruby',
-  rs: 'Rust',
-  yml: 'YAML',
-  yaml: 'YAML',
-  md: 'Markdown',
-};
-
-function langLabel(className?: string): string {
-  const m = className?.match(/lang(?:uage)?-([\w+#.-]+)/i);
-  if (!m) return 'Code';
-  const l = m[1].toLowerCase();
-  return LANG_LABEL[l] ?? l.charAt(0).toUpperCase() + l.slice(1);
-}
-
-function CodeCopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard
-          ?.writeText(text)
-          .then(() => {
-            setCopied(true);
-            clearTimeout(timer.current ?? undefined);
-            timer.current = setTimeout(() => setCopied(false), 1200);
-          })
-          .catch(() => {});
-      }}
-      className="flex items-center gap-1 text-[10.5px] text-droid-text-muted hover:text-droid-text transition-colors"
-      title="Copy"
-    >
-      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  );
-}
-
-// Fenced code block in a clean, theme-adaptive card: a grey header with the
-// language label and a copy action, then the code (syntax-highlighted for JSON).
-function CodeCard({
-  code,
-  className,
-  specMode,
-  highlighted,
-}: {
-  code: string;
-  className?: string;
-  specMode?: boolean;
-  highlighted?: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-xl border border-droid-border overflow-hidden bg-droid-elevated/40 ${specMode ? 'my-4' : 'my-2.5'}`}
-    >
-      <div className="flex items-center justify-between h-7 px-3 bg-droid-surface/60 border-b border-droid-border">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
-          {langLabel(className)}
-        </span>
-        <CodeCopyButton text={code} />
-      </div>
-      <pre className={`overflow-x-auto ${specMode ? 'p-4' : 'p-3.5'}`}>
-        <code
-          className={`font-mono leading-[1.65] text-droid-text-secondary whitespace-pre ${specMode ? 'text-[13px]' : 'text-[12px]'}`}
-        >
-          {highlighted ?? code}
-        </code>
-      </pre>
-    </div>
-  );
-}
-
 function MarkdownImpl({
   children,
   specMode,
-  allowDiagrams = true,
+  allowGeneratedContent = true,
+  autoPlayAppBlocks = false,
+  buildingAppBlocks = false,
 }: {
   children: string;
   specMode?: boolean;
-  allowDiagrams?: boolean;
+  allowGeneratedContent?: boolean;
+  autoPlayAppBlocks?: boolean;
+  buildingAppBlocks?: boolean;
 }) {
+  const appFences = appFencesInMarkdown(children);
+  let appFenceIndex = 0;
   return (
     <div
       className={`text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[13.5px] leading-[1.7] space-y-3'}`}
@@ -324,7 +262,7 @@ function MarkdownImpl({
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => {
-            const text = String(children ?? '');
+            const text = reactText(children);
             const id = slugify(text);
             return specMode ? (
               <h1
@@ -340,7 +278,7 @@ function MarkdownImpl({
             );
           },
           h2: ({ children }) => {
-            const text = String(children ?? '');
+            const text = reactText(children);
             const id = slugify(text);
             return specMode ? (
               <h2
@@ -356,7 +294,7 @@ function MarkdownImpl({
             );
           },
           h3: ({ children }) => {
-            const text = String(children ?? '');
+            const text = reactText(children);
             const id = slugify(text);
             return specMode ? (
               <h3
@@ -389,7 +327,7 @@ function MarkdownImpl({
             </ol>
           ),
           li: ({ children }) => (
-            <li className={`${specMode ? 'leading-[1.75] pl-1' : 'leading-[1.65] pl-0.5'}`}>
+            <li className={specMode ? 'leading-[1.75] pl-1' : 'leading-[1.65] pl-0.5'}>
               {children}
             </li>
           ),
@@ -418,6 +356,23 @@ function MarkdownImpl({
           hr: () => (
             <hr className={`border-0 h-px bg-droid-border/25 ${specMode ? 'my-8' : 'my-4'}`} />
           ),
+          // Every fenced renderer below owns its frame and preformatted region.
+          // Removing react-markdown's wrapper avoids invalid <pre><div> nesting.
+          pre: ({ children, node }) => {
+            const child = node?.children.at(0);
+            const className =
+              child && 'properties' in child ? child.properties.className : undefined;
+            const hasFenceLanguage = Array.isArray(className)
+              ? className.length > 0
+              : typeof className === 'string' && className.length > 0;
+            return hasFenceLanguage ? (
+              <>{children}</>
+            ) : (
+              <pre className="my-2.5 overflow-x-auto rounded-xl border border-droid-border bg-droid-elevated/40 p-3.5 whitespace-pre">
+                {children}
+              </pre>
+            );
+          },
           code: ({ className, children }) => {
             const inline = !className;
             if (inline)
@@ -429,13 +384,24 @@ function MarkdownImpl({
                 </code>
               );
 
-            const codeText = String(children ?? '');
+            const codeText = typeof children === 'string' ? children : '';
 
-            if (allowDiagrams && isMermaidLang(className)) {
+            if (allowGeneratedContent && isAppLang(className)) {
+              const isComplete = appFences.at(appFenceIndex++)?.complete ?? !buildingAppBlocks;
+              return (
+                <AppBlock
+                  source={codeText}
+                  autoPlay={autoPlayAppBlocks && isComplete}
+                  isBuilding={buildingAppBlocks && !isComplete}
+                />
+              );
+            }
+
+            if (allowGeneratedContent && isMermaidLang(className)) {
               return <MermaidBlock code={codeText} />;
             }
 
-            if (allowDiagrams && isSvgLang(className)) {
+            if (allowGeneratedContent && isSvgLang(className)) {
               return <SvgCodeBlock content={codeText} />;
             }
 

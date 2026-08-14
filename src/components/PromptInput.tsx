@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, type SetStateAction 
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   shallowEqual,
+  useStoreApi,
   useStoreDispatch,
   useStoreSelector,
   type QueuedPrompt,
@@ -42,7 +43,14 @@ import {
   type ChatWorkingDirectoryResult,
 } from '../lib/chatWorkspace';
 import { createLocalDesignTranscriptEvent, newQueueId } from '../lib/promptQueue';
-import { composePrompt, parseSlashSkillInvocation } from '../lib/composePrompt';
+import {
+  composePrompt,
+  isVisualizeCommand,
+  parseSlashSkillInvocation,
+  responseFormatForPrompt,
+  VISUALIZE_COMMAND,
+} from '../lib/composePrompt';
+import { hasCompleteAppBlock } from './appBlockRuntime';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
 import { resetComposerAfterSubmit } from '../lib/composerReset';
@@ -77,7 +85,7 @@ import PermissionInline from './PermissionInline';
 import PlanApprovalInline from './PlanApprovalInline';
 import { ModelIcon, providerOf } from './ModelIcon';
 import { StartInBar } from './environment/StartInBar';
-import type { Autonomy, SkillInfo } from '../types/bridge';
+import type { Autonomy, SkillInfo, TranscriptEvent } from '../types/bridge';
 import { feedbackDraftFromCommand } from '../lib/feedbackReport';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
 import { toast } from '../lib/toast';
@@ -90,6 +98,19 @@ const oppositeSubmitMode = (mode: SubmitMode): SubmitMode => (mode === 'queue' ?
 
 export function shouldShowTurnStarting(isLive: boolean): boolean {
   return !isLive;
+}
+
+export function hasAppContextForTranscript(
+  events: TranscriptEvent[],
+  childSessionId: string | null,
+): boolean {
+  return events.some((event) => {
+    if (event.kind !== 'text' || event.author === 'user') return false;
+    const belongsToTarget = childSessionId
+      ? event.sourceSessionId === childSessionId
+      : event.role === 'primary';
+    return belongsToTarget && hasCompleteAppBlock(event.text ?? '');
+  });
 }
 
 export function shouldStopTurnStarting({
@@ -199,6 +220,7 @@ export default function PromptInput({
     }),
     shallowEqual,
   );
+  const store = useStoreApi();
   const composerRevisionRef = useRef(0);
   const [input, setInputState] = useState('');
   const setInput = (value: SetStateAction<string>) => {
@@ -276,6 +298,11 @@ export default function PromptInput({
   visibleTargetRef.current = visibleTarget;
   const targetChild = visibleTarget.kind === 'child' ? visibleTarget.child : undefined;
   const targetChildSessionId = targetChild?.childSessionId ?? null;
+  const hasAppContext = useStoreSelector((current) => {
+    if (!activeSession) return false;
+    const events = current.transcripts[activeSession.appSessionId] ?? [];
+    return hasAppContextForTranscript(events, targetChildSessionId);
+  });
   const primaryWorkingDirectory = useSessionWorkingDirectory(activeSession);
   const childWorkingDirectory = useSessionWorkingDirectory(
     targetChild ? activeSession : null,
@@ -375,6 +402,10 @@ export default function PromptInput({
   };
 
   const slashCommands: SlashCommand[] = [
+    {
+      ...VISUALIZE_COMMAND,
+      replacement: `${VISUALIZE_COMMAND.cmd} `,
+    },
     {
       cmd: '/bug',
       desc: 'Send a private bug report',
@@ -691,6 +722,10 @@ export default function PromptInput({
   };
 
   const runCommand = (s: SlashCommand) => {
+    if (s.replacement !== undefined) {
+      replaceTrigger(s.replacement);
+      return;
+    }
     replaceTrigger('');
     s.run();
   };
@@ -785,8 +820,11 @@ export default function PromptInput({
     if (!childActionsEnabled) return;
 
     const slashSkill =
-      activeSkills.length === 0 ? parseSlashSkillInvocation(text, invocableSkills) : undefined;
+      activeSkills.length === 0 && !isVisualizeCommand(text)
+        ? parseSlashSkillInvocation(text, invocableSkills)
+        : undefined;
     const displayText = slashSkill?.prompt ?? text;
+    const responseFormat = responseFormatForPrompt(displayText, hasAppContext);
     const skillNames = slashSkill
       ? [slashSkill.skillName]
       : activeSkills.map((skill) => skill.name);
@@ -851,6 +889,7 @@ export default function PromptInput({
           workerReasoning: worker.reasoning,
           validatorModel: validator.modelId,
           validatorReasoning: validator.reasoning,
+          ...(responseFormat ? { responseFormat } : {}),
         });
         armTurnStartingTimeout();
       } catch (error) {
@@ -891,6 +930,7 @@ export default function PromptInput({
           compactionModel:
             state.compactionModel === 'current-model' ? undefined : state.compactionModel,
           ...compactionSettingsSnapshot(compactionSettingsInput),
+          ...(responseFormat ? { responseFormat } : {}),
         });
         armTurnStartingTimeout();
       } catch (error) {
@@ -934,10 +974,17 @@ export default function PromptInput({
       try {
         if (targetChildSessionId) {
           if (mode === 'now')
-            sendToChildNow(activeSession.appSessionId, targetChildSessionId, composed);
-          else sendToChild(activeSession.appSessionId, targetChildSessionId, composed);
-        } else if (mode === 'now') sendToSessionNow(activeSession.appSessionId, composed);
-        else sendToSession(activeSession.appSessionId, composed);
+            sendToChildNow(
+              activeSession.appSessionId,
+              targetChildSessionId,
+              composed,
+              responseFormat,
+            );
+          else
+            sendToChild(activeSession.appSessionId, targetChildSessionId, composed, responseFormat);
+        } else if (mode === 'now')
+          sendToSessionNow(activeSession.appSessionId, composed, responseFormat);
+        else sendToSession(activeSession.appSessionId, composed, responseFormat);
         armTurnStartingTimeout();
       } catch (err) {
         stopTurnStarting();
@@ -1016,7 +1063,12 @@ export default function PromptInput({
     }
 
     try {
-      sendToSession(activeSession.appSessionId, composeFrom(head.text, head.skills, head.files));
+      const primaryTranscript = store.getState().transcripts[activeSession.appSessionId] ?? [];
+      sendToSession(
+        activeSession.appSessionId,
+        composeFrom(head.text, head.skills, head.files),
+        responseFormatForPrompt(head.text, hasAppContextForTranscript(primaryTranscript, null)),
+      );
     } catch (err) {
       // Keep the prompt staged and skip the transcript echo so a send failure
       // neither loses queued input nor leaves a duplicate user message behind.
