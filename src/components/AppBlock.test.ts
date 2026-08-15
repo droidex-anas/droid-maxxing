@@ -525,6 +525,7 @@ test('the iframe reports its initial height only after built-in math settles', a
   const listeners = new Map<string, (event?: { source?: object; data?: unknown }) => void>();
   const messages: Record<string, unknown>[] = [];
   const frames: FrameRequestCallback[] = [];
+  let observerCallback: (() => void) | undefined;
   const parent = {
     postMessage(message: Record<string, unknown>) {
       messages.push(message);
@@ -542,6 +543,9 @@ test('the iframe reports its initial height only after built-in math settles', a
     },
     cancelAnimationFrame: () => undefined,
     ResizeObserver: class {
+      constructor(callback: () => void) {
+        observerCallback = callback;
+      }
       observe() {}
       disconnect() {}
     },
@@ -555,6 +559,8 @@ test('the iframe reports its initial height only after built-in math settles', a
   });
 
   listeners.get('DOMContentLoaded')?.();
+  assert.ok(observerCallback);
+  observerCallback();
   while (frames.length > 0) frames.shift()?.(0);
   assert.equal(
     messages.some((message) => message.type === 'droidex:app-height'),

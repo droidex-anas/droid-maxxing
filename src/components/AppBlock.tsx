@@ -7,6 +7,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { AnimatePresence, motion, useReducedMotion, type Transition } from 'framer-motion';
 import { AppWindow, Play, Square } from 'lucide-react';
@@ -24,6 +25,34 @@ import {
   renderAppBlockMath,
   type AppBlockStartupState,
 } from './appBlockRuntime';
+
+function AppLoadingSurface({
+  title,
+  subtitle,
+  trailing,
+}: {
+  title: string;
+  subtitle: string;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={title}
+      className="flex w-full items-center gap-3 rounded-xl border border-droid-border bg-droid-surface/55 p-3"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-droid-bg text-droid-text-muted ring-1 ring-inset ring-droid-border">
+        <AppWindow className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="shimmer-text block text-[13px] font-medium">{title}</span>
+        <span className="block text-[11.5px] text-droid-text-muted">{subtitle}</span>
+      </span>
+      {trailing}
+    </div>
+  );
+}
 
 export function RunningAppFrame({
   source,
@@ -148,23 +177,7 @@ export function RunningAppFrame({
   return (
     <div className="relative min-w-0">
       {!isMeasured && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex w-full items-center gap-3 rounded-xl border border-droid-border bg-droid-surface/55 p-3"
-        >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-droid-bg text-droid-text-muted ring-1 ring-inset ring-droid-border">
-            <AppWindow className="h-4 w-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="shimmer-text block text-[13px] font-medium">
-              Preparing interactive app
-            </span>
-            <span className="block text-[11.5px] text-droid-text-muted">
-              Measuring the interface
-            </span>
-          </span>
-        </div>
+        <AppLoadingSurface title="Preparing interactive app" subtitle="Measuring the interface" />
       )}
       <iframe
         ref={iframeRef}
@@ -239,27 +252,19 @@ export function AppBlock({
         {isBuilding ? (
           <motion.div
             key="building"
-            role="status"
-            aria-live="polite"
-            aria-label="Building interactive app"
             initial={reduceMotion ? false : { opacity: 0, y: -3 }}
             animate={{ opacity: 1, y: 0 }}
             exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
             transition={transition}
-            className="my-3 flex w-full items-center gap-3 overflow-hidden rounded-xl border border-droid-border bg-droid-surface/55 p-3"
+            className="my-3"
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-droid-bg text-droid-text-muted ring-1 ring-inset ring-droid-border">
-              <AppWindow className="h-4 w-4" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="shimmer-text block text-[13px] font-medium">
-                Building interactive app
-              </span>
-              <span className="block text-[11.5px] text-droid-text-muted">
-                Generating the interface
-              </span>
-            </span>
-            <span className="shimmer-text shrink-0 text-[11px] font-medium">Building</span>
+            <AppLoadingSurface
+              title="Building interactive app"
+              subtitle="Generating the interface"
+              trailing={
+                <span className="shimmer-text shrink-0 text-[11px] font-medium">Building</span>
+              }
+            />
           </motion.div>
         ) : isRunning ? (
           <motion.div
@@ -271,6 +276,7 @@ export function AppBlock({
             className="group/app my-3 min-w-0"
           >
             <RunningAppFrame
+              key={`${instanceId}:${source}`}
               source={source}
               instanceId={instanceId}
               onMeasured={revealAfterMeasurement}
