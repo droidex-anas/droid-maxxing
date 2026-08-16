@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { buildFeed, groupTurns, MessageFeed, trailingSubagentPoll } from './chat';
-import { SubagentsDock, subagentRowTitle } from './SubagentsDock';
+import {
+  DOCK_VISIBLE_ROW_LIMIT,
+  foldedDockRows,
+  SubagentsDock,
+  subagentRowTitle,
+} from './SubagentsDock';
 import { isPendingChildPlaceholder, resolveWaveSessions } from '../lib/childSessions';
 import { childSessionInfo } from '../lib/tools';
 import type { ChildSessionSummary, ChildStatus, TranscriptEvent } from '../types/bridge';
@@ -577,6 +582,25 @@ test('a registered row keeps the spawn event time as its true start', () => {
   assert.equal(resolveWaveSessions([spawnEvent], [late])[0].startedAt, 5_000);
   const early = { ...childSession('explorer', 't1', 'running'), startedAt: 4_000 };
   assert.equal(resolveWaveSessions([spawnEvent], [early])[0].startedAt, 4_000);
+});
+
+// Paging older history can reveal a wave with dozens of spawns; the expanded
+// card folds everything past the first rows behind "Show N more subagents"
+// instead of dumping (and stagger-animating) the full list at once.
+test('an expanded wave folds rows past the visible limit, preserving spawn order', () => {
+  const rows = Array.from({ length: DOCK_VISIBLE_ROW_LIMIT + 4 }, (_, i) => `agent-${String(i)}`);
+  const folded = foldedDockRows(rows, false);
+  assert.equal(folded.length, DOCK_VISIBLE_ROW_LIMIT);
+  // A head slice, so visible rows keep their indices into the full row list
+  // (names and duration lookups stay aligned).
+  assert.deepEqual(folded, rows.slice(0, DOCK_VISIBLE_ROW_LIMIT));
+  // "Show N more" reveals the rest in the same order.
+  assert.deepEqual(foldedDockRows(rows, true), rows);
+});
+
+test('a wave at or under the visible limit shows every row with no fold', () => {
+  const rows = Array.from({ length: DOCK_VISIBLE_ROW_LIMIT }, (_, i) => `agent-${String(i)}`);
+  assert.deepEqual(foldedDockRows(rows, false), rows);
 });
 
 test('a replayed spawn stays neutral until exact child status is known', () => {

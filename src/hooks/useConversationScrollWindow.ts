@@ -10,6 +10,10 @@ import {
 
 const PREFETCH_PX = 2400;
 const HISTORY_PAGE_EVENT_LIMIT = 240;
+// One explicit "Load earlier messages" click pulls a large page so reaching the
+// start of a long thread takes a few clicks, not dozens. Protocol mirror of
+// sidecar/src/SessionTimeline.ts MAX_HISTORY_PAGE_EVENTS.
+export const MANUAL_HISTORY_PAGE_EVENT_LIMIT = 1_600;
 const MAX_SCROLL_SNAPSHOTS = 100;
 
 type ScrollDispatch = (
@@ -157,7 +161,7 @@ export function useConversationScrollWindow({
   dispatch,
 }: ConversationScrollWindowOptions): {
   onScroll: () => void;
-  requestOlderHistory: () => void;
+  requestOlderHistory: (limit?: number) => void;
 } {
   const viewportAnchor = useRef<ViewportAnchor | null>(null);
   const isRestoringViewport = useRef(false);
@@ -225,47 +229,45 @@ export function useConversationScrollWindow({
     visibleConversationKey,
   ]);
 
-  const requestOlderHistory = useCallback(() => {
-    if (!historyAppSessionId || !olderCursor || isLoadingOlder || isOlderRequestPending.current)
-      return;
-    isOlderRequestPending.current = true;
-    const element = scrollRef.current;
-    if (element && visibleConversationKey) {
-      if (!isPinned.current) viewportAnchor.current = captureViewportAnchor(element, true);
-      pendingHistoryPrepend.current = {
-        conversationKey: visibleConversationKey,
-        requestedCursor: olderCursor,
-        transcriptLength,
-      };
-    } else {
-      pendingHistoryPrepend.current = null;
-    }
-    if (historyChildSessionId) {
-      dispatch({
-        type: 'CHILD_HISTORY_LOADING_OLDER',
-        parentAppSessionId: historyAppSessionId,
-        childSessionId: historyChildSessionId,
-      });
-      loadChildHistory(
-        historyAppSessionId,
-        historyChildSessionId,
-        olderCursor,
-        HISTORY_PAGE_EVENT_LIMIT,
-      );
-    } else {
-      dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
-      loadSessionHistory(historyAppSessionId, olderCursor, HISTORY_PAGE_EVENT_LIMIT);
-    }
-  }, [
-    dispatch,
-    historyAppSessionId,
-    historyChildSessionId,
-    isLoadingOlder,
-    olderCursor,
-    scrollRef,
-    transcriptLength,
-    visibleConversationKey,
-  ]);
+  const requestOlderHistory = useCallback(
+    (limit: number = HISTORY_PAGE_EVENT_LIMIT) => {
+      if (!historyAppSessionId || !olderCursor || isLoadingOlder || isOlderRequestPending.current)
+        return;
+      isOlderRequestPending.current = true;
+      const element = scrollRef.current;
+      if (element && visibleConversationKey) {
+        if (!isPinned.current) viewportAnchor.current = captureViewportAnchor(element, true);
+        pendingHistoryPrepend.current = {
+          conversationKey: visibleConversationKey,
+          requestedCursor: olderCursor,
+          transcriptLength,
+        };
+      } else {
+        pendingHistoryPrepend.current = null;
+      }
+      if (historyChildSessionId) {
+        dispatch({
+          type: 'CHILD_HISTORY_LOADING_OLDER',
+          parentAppSessionId: historyAppSessionId,
+          childSessionId: historyChildSessionId,
+        });
+        loadChildHistory(historyAppSessionId, historyChildSessionId, olderCursor, limit);
+      } else {
+        dispatch({ type: 'SESSION_HISTORY_LOADING_OLDER', appSessionId: historyAppSessionId });
+        loadSessionHistory(historyAppSessionId, olderCursor, limit);
+      }
+    },
+    [
+      dispatch,
+      historyAppSessionId,
+      historyChildSessionId,
+      isLoadingOlder,
+      olderCursor,
+      scrollRef,
+      transcriptLength,
+      visibleConversationKey,
+    ],
+  );
 
   const onScroll = useCallback(() => {
     const element = scrollRef.current;

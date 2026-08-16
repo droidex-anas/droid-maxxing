@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { promptAnchorsFromItems, type ConversationAnchor, type FeedItem } from '../components/chat';
+import { promptAnchorsFromItems, type FeedItem } from '../components/chat';
 import type { SessionRestoreStatus } from './useStore';
 
 const TIMELINE_TARGET_ANCHORS = 12;
@@ -10,13 +10,6 @@ export function restoreStatusForConversationTimeline(
   restorationEnabled: boolean,
 ): SessionRestoreStatus {
   return restoreStatus ?? (restorationEnabled ? 'loading' : 'loaded');
-}
-
-export function recentConversationAnchors(
-  anchors: ConversationAnchor[],
-  limit: number,
-): ConversationAnchor[] {
-  return anchors.length > limit ? anchors.slice(-limit) : anchors;
 }
 
 export function shouldPrimeConversationTimeline({
@@ -85,13 +78,11 @@ export function useConversationTimeline({
   isTimelinePriming: boolean;
   isAutoPagingOlderHistory: boolean;
 } {
-  const allTimelineAnchors = useMemo(
+  // Every loaded prompt gets a dot so the rail mirrors the whole reachable
+  // thread; the rail itself scrolls once the dot list outgrows its gutter.
+  const timelineAnchors = useMemo(
     () => (isViewingChildSession ? [] : promptAnchorsFromItems(feedItems)),
     [feedItems, isViewingChildSession],
-  );
-  const timelineAnchors = useMemo(
-    () => recentConversationAnchors(allTimelineAnchors, TIMELINE_TARGET_ANCHORS),
-    [allTimelineAnchors],
   );
   const capacityBlockedConversationsRef = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
@@ -106,7 +97,7 @@ export function useConversationTimeline({
     Boolean(conversationKey && capacityBlockedConversationsRef.current.has(conversationKey));
   const isTimelinePriming = shouldPrimeConversationTimeline({
     isViewingChildSession,
-    anchorCount: allTimelineAnchors.length,
+    anchorCount: timelineAnchors.length,
     targetAnchorCount: TIMELINE_TARGET_ANCHORS,
     restoreStatus,
     isTranscriptWindowAtCapacity: isTimelineCapacityBlocked,

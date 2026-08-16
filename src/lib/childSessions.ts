@@ -327,33 +327,36 @@ export function childSessionKey(child: ChildSessionInfo): string {
   return child.spawnLink?.kind === 'tool-use' ? child.spawnLink.id : child.childSessionId;
 }
 
-const STATUS_PRIORITY: Record<ChildStatus, number> = {
-  running: 0,
-  pending: 1,
-  paused: 2,
-  completed: 3,
-};
-
 export interface NamedChildSession {
   child: ChildSessionInfo;
   name: string;
   key: string;
 }
 
-// Panel display order: whatever is still working sits on top, so a live agent is
-// never pushed behind the fold by agents that already finished.
+// Panel display order: whatever is still working sits on top so a live agent is
+// never pushed behind the fold, then newest spawn first. Recency (not status)
+// ranks the rest so paging older history in — which reveals old spawns that
+// often resolve to nothing more than "Awaiting status" placeholders — appends
+// them behind the fold instead of reshuffling the visible rows.
 export function workingFirstChildSessions(
   childSessions: readonly ChildSessionInfo[],
 ): NamedChildSession[] {
-  // Fallback names are numbered from spawn order, so reordering by status must
-  // not renumber anyone: "Worker 2" stays Worker 2 when Worker 1 finishes.
+  // Fallback names are numbered from spawn order, so reordering must not
+  // renumber anyone: "Worker 2" stays Worker 2 when Worker 1 finishes.
   return orderedChildSessions(childSessions)
     .map((child, index) => ({
       child,
       name: childSessionLabel(child, index),
       key: childSessionKey(child),
     }))
-    .sort((a, b) => STATUS_PRIORITY[a.child.status] - STATUS_PRIORITY[b.child.status]);
+    .sort((a, b) => {
+      const runningRank = (row: NamedChildSession) => (row.child.status === 'running' ? 0 : 1);
+      return (
+        runningRank(a) - runningRank(b) ||
+        (b.child.startedAt ?? 0) - (a.child.startedAt ?? 0) ||
+        a.child.childSessionId.localeCompare(b.child.childSessionId)
+      );
+    });
 }
 
 // Placeholder ids carry this prefix; unresolved spawns can't be opened.
@@ -435,10 +438,10 @@ export function childSessionLatest(
   // successful results), so render it as a failure instead of stale "Working".
   if (latest.isError || latest.kind === 'error') {
     const { detail } = toolMeta(latest.toolName, latest.toolArgs);
-    const body = previewLine(latest.text) ?? detail;
     return {
       head: latest.kind === 'tool_result' ? 'Failed' : 'Error',
-      body: body.length > 0 ? body : latest.toolName,
+      // First non-empty wins; empty strings are placeholders, not values.
+      body: [previewLine(latest.text), detail, latest.toolName].find((text) => Boolean(text)),
     };
   }
   switch (latest.kind) {

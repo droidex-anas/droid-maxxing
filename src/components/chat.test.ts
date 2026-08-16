@@ -21,7 +21,7 @@ import {
   appendedFeedItemKeys,
   type FeedItem,
 } from './chat';
-import { EarlierHistoryStatus } from './ChatView';
+import { EarlierHistoryControl } from './ChatView';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
   createDiffDisclosure,
@@ -998,15 +998,27 @@ test('diff disclosure preserves reveal progress while remounting in bounded comm
 });
 
 test('history paging uses a persistent live region whose text changes in place', () => {
-  const idle = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: false }));
-  const loading = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: true }));
+  const noop = () => undefined;
+  const idle = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: true, loading: false, onLoadOlder: noop }),
+  );
+  const loading = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: true, loading: true, onLoadOlder: noop }),
+  );
+  const exhausted = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: false, loading: false, onLoadOlder: noop }),
+  );
 
-  for (const markup of [idle, loading]) {
+  for (const markup of [idle, loading, exhausted]) {
     assert.match(markup, /aria-atomic="true"/);
     assert.match(markup, /aria-live="polite"/);
   }
+  assert.match(idle, /Load earlier messages/);
   assert.doesNotMatch(idle, /Loading earlier messages/);
   assert.match(loading, /Loading earlier messages…/);
+  assert.doesNotMatch(loading, /<button/);
+  assert.doesNotMatch(exhausted, /Load earlier messages/);
+  assert.doesNotMatch(exhausted, /<button/);
 });
 
 test('a singleton diff keeps its viewport identity when an older edit joins the group', () => {
