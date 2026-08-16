@@ -29,10 +29,7 @@ import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
 import { isEmbedded } from '../lib/embed';
-import {
-  MANUAL_HISTORY_PAGE_EVENT_LIMIT,
-  useConversationScrollWindow,
-} from '../hooks/useConversationScrollWindow';
+import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
 import {
   restoreStatusForConversationTimeline,
   useConversationTimeline,
@@ -68,18 +65,15 @@ function RestoreFailedState({ message, onRetry }: { message?: string; onRetry: (
   );
 }
 
-// One affordance owns the feed's top edge: a button while older history exists,
-// its loading text while a page is in flight, and nothing once the thread start
-// is loaded. The row keeps one height across those states so paging never
-// nudges the reader's scroll position.
+// Older history loads by itself once the reader settles near the top, so the
+// feed's top edge only announces the load in flight. The row keeps one height
+// while more history exists so pages never nudge the reader's scroll position.
 export function EarlierHistoryControl({
   hasMore,
   loading,
-  onLoadOlder,
 }: {
   hasMore: boolean;
   loading: boolean;
-  onLoadOlder: () => void;
 }) {
   return (
     <div
@@ -87,15 +81,6 @@ export function EarlierHistoryControl({
         hasMore || loading ? 'flex h-9 items-start justify-center pb-2 text-center' : 'text-center'
       }
     >
-      {hasMore && !loading && (
-        <button
-          type="button"
-          onClick={onLoadOlder}
-          className="rounded-full border border-droid-border/70 px-3 py-1 text-[11px] text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text-secondary"
-        >
-          Load earlier messages
-        </button>
-      )}
       <div
         aria-atomic="true"
         aria-live="polite"
@@ -509,10 +494,6 @@ export default function ChatView({
     requestOlderHistory();
   }, [isAutoPagingOlderHistory, requestOlderHistory]);
 
-  const loadEarlierMessages = useCallback(() => {
-    requestOlderHistory(MANUAL_HISTORY_PAGE_EVENT_LIMIT);
-  }, [requestOlderHistory]);
-
   const stopSelectedChild =
     visibleTarget.kind === 'child' && visibleTarget.canInterrupt
       ? () => {
@@ -567,11 +548,7 @@ export default function ChatView({
         {restore?.status === 'failed' && (
           <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
         )}
-        <EarlierHistoryControl
-          hasMore={Boolean(olderCursor)}
-          loading={loadingOlder}
-          onLoadOlder={loadEarlierMessages}
-        />
+        <EarlierHistoryControl hasMore={Boolean(olderCursor)} loading={loadingOlder} />
         <MessageFeed
           events={transcript}
           items={feedItems}

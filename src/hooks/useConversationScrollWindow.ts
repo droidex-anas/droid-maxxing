@@ -9,10 +9,14 @@ import {
 } from './conversationViewportAnchor';
 
 const HISTORY_PAGE_EVENT_LIMIT = 240;
-// One explicit "Load earlier messages" click pulls a large page so reaching the
-// start of a long thread takes a few clicks, not dozens. Protocol mirror of
+// Reading near the thread's top pulls a large page so reaching the start of a
+// long thread takes a few loads, not dozens. Protocol mirror of
 // sidecar/src/SessionTimeline.ts MAX_HISTORY_PAGE_EVENTS.
-export const MANUAL_HISTORY_PAGE_EVENT_LIMIT = 1_600;
+const OLDER_HISTORY_PAGE_EVENT_LIMIT = 1_600;
+const TOP_AUTO_LOAD_PX = 600;
+// Prepending while a flick is still in motion fights the reader's momentum and
+// feels laggy; a prepend against a settled viewport restores with zero drift.
+const SCROLL_SETTLE_MS = 200;
 const MAX_SCROLL_SNAPSHOTS = 100;
 
 type ScrollDispatch = (
@@ -129,6 +133,16 @@ export function shouldReleaseConversationTranscript(options: {
   );
 }
 
+// Older history loads only once the reader has settled near the top: close
+// enough to want more, with no page already on the way.
+export function shouldLoadOlderHistoryAtTop(options: {
+  scrollTop: number;
+  hasOlderCursor: boolean;
+  isLoadingOlder: boolean;
+}): boolean {
+  return options.hasOlderCursor && !options.isLoadingOlder && options.scrollTop < TOP_AUTO_LOAD_PX;
+}
+
 export function didCommitRequestedHistoryPrepend({
   requestedCursor,
   currentCursor,
@@ -171,7 +185,16 @@ export function useConversationScrollWindow({
   const isPinned = useRef(true);
   const reportedPinned = useRef<{ conversationKey: string; pinned: boolean } | null>(null);
   const isOlderRequestPending = useRef(false);
+  const settledTopLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scrollSnapshots] = useState(() => new Map<string, ScrollSnapshot>());
+
+  const cancelSettledTopLoad = useCallback(() => {
+    if (settledTopLoadTimer.current === null) return;
+    clearTimeout(settledTopLoadTimer.current);
+    settledTopLoadTimer.current = null;
+  }, []);
+
+  useEffect(() => cancelSettledTopLoad, [cancelSettledTopLoad, visibleConversationKey]);
 
   useEffect(() => {
     if (isLoadingOlder) return;
@@ -312,12 +335,35 @@ export function useConversationScrollWindow({
         );
       }
     }
+
+    // Every scroll event pushes the load out until the viewport settles, so a
+    // page never prepends mid-flick.
+    cancelSettledTopLoad();
+    if (
+      historyAppSessionId &&
+      shouldLoadOlderHistoryAtTop({
+        scrollTop: element.scrollTop,
+        hasOlderCursor: Boolean(olderCursor),
+        isLoadingOlder,
+      })
+    ) {
+      settledTopLoadTimer.current = setTimeout(() => {
+        settledTopLoadTimer.current = null;
+        const settled = scrollRef.current;
+        if (!settled || settled.scrollTop >= TOP_AUTO_LOAD_PX) return;
+        requestOlderHistory(OLDER_HISTORY_PAGE_EVENT_LIMIT);
+      }, SCROLL_SETTLE_MS);
+    }
   }, [
     activeAppSessionId,
+    cancelSettledTopLoad,
     dispatch,
     historyChildSessionId,
+    historyAppSessionId,
     isLoadingOlder,
     isViewingChildSession,
+    olderCursor,
+    requestOlderHistory,
     scrollRef,
     scrollSnapshots,
     visibleConversationKey,

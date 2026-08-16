@@ -998,27 +998,27 @@ test('diff disclosure preserves reveal progress while remounting in bounded comm
 });
 
 test('history paging uses a persistent live region whose text changes in place', () => {
-  const noop = () => undefined;
   const idle = renderToStaticMarkup(
-    createElement(EarlierHistoryControl, { hasMore: true, loading: false, onLoadOlder: noop }),
+    createElement(EarlierHistoryControl, { hasMore: true, loading: false }),
   );
   const loading = renderToStaticMarkup(
-    createElement(EarlierHistoryControl, { hasMore: true, loading: true, onLoadOlder: noop }),
+    createElement(EarlierHistoryControl, { hasMore: true, loading: true }),
   );
   const exhausted = renderToStaticMarkup(
-    createElement(EarlierHistoryControl, { hasMore: false, loading: false, onLoadOlder: noop }),
+    createElement(EarlierHistoryControl, { hasMore: false, loading: false }),
   );
 
   for (const markup of [idle, loading, exhausted]) {
     assert.match(markup, /aria-atomic="true"/);
     assert.match(markup, /aria-live="polite"/);
+    assert.doesNotMatch(markup, /<button/);
   }
-  assert.match(idle, /Load earlier messages/);
+  // While more history exists the row holds its height so an arriving page
+  // never nudges the reading position; only the in-flight state speaks.
+  assert.match(idle, /h-9/);
   assert.doesNotMatch(idle, /Loading earlier messages/);
   assert.match(loading, /Loading earlier messages…/);
-  assert.doesNotMatch(loading, /<button/);
-  assert.doesNotMatch(exhausted, /Load earlier messages/);
-  assert.doesNotMatch(exhausted, /<button/);
+  assert.doesNotMatch(exhausted, /Loading earlier messages/);
 });
 
 test('a singleton diff keeps its viewport identity when an older edit joins the group', () => {
