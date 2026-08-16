@@ -8,7 +8,6 @@ import {
   type ViewportAnchor,
 } from './conversationViewportAnchor';
 
-const PREFETCH_PX = 2400;
 const HISTORY_PAGE_EVENT_LIMIT = 240;
 // One explicit "Load earlier messages" click pulls a large page so reaching the
 // start of a long thread takes a few clicks, not dozens. Protocol mirror of
@@ -313,19 +312,12 @@ export function useConversationScrollWindow({
         );
       }
     }
-
-    if (historyAppSessionId && olderCursor && !isLoadingOlder && element.scrollTop < PREFETCH_PX) {
-      requestOlderHistory();
-    }
   }, [
     activeAppSessionId,
     dispatch,
     historyChildSessionId,
-    historyAppSessionId,
     isLoadingOlder,
     isViewingChildSession,
-    olderCursor,
-    requestOlderHistory,
     scrollRef,
     scrollSnapshots,
     visibleConversationKey,
