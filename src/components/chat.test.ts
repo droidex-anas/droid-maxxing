@@ -21,7 +21,7 @@ import {
   appendedFeedItemKeys,
   type FeedItem,
 } from './chat';
-import { EarlierHistoryStatus } from './ChatView';
+import { EarlierHistoryControl, isConversationOpeningSettling } from './ChatView';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
   createDiffDisclosure,
@@ -997,16 +997,51 @@ test('diff disclosure preserves reveal progress while remounting in bounded comm
   }
 });
 
-test('history paging uses a persistent live region whose text changes in place', () => {
-  const idle = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: false }));
-  const loading = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: true }));
+test('opening an old chat keeps the skeleton up until timeline priming settles', () => {
+  const settling = {
+    isConversationLive: false,
+    isViewingChildSession: false,
+    isTimelinePriming: true,
+    hasOlderHistory: true,
+    isLoadingOlder: false,
+  };
+  assert.equal(isConversationOpeningSettling(settling), true);
+  // The last priming page is still in flight after the cursor was consumed.
+  assert.equal(
+    isConversationOpeningSettling({ ...settling, hasOlderHistory: false, isLoadingOlder: true }),
+    true,
+  );
+  // Enough anchors: the rail is ready, the feed takes over.
+  assert.equal(isConversationOpeningSettling({ ...settling, isTimelinePriming: false }), false);
+  // History exhausted with nothing in flight: a short thread never re-covers.
+  assert.equal(isConversationOpeningSettling({ ...settling, hasOlderHistory: false }), false);
+  // Streaming output outranks a quiet open.
+  assert.equal(isConversationOpeningSettling({ ...settling, isConversationLive: true }), false);
+  assert.equal(isConversationOpeningSettling({ ...settling, isViewingChildSession: true }), false);
+});
 
-  for (const markup of [idle, loading]) {
+test('history paging uses a persistent live region whose text changes in place', () => {
+  const idle = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: true, loading: false }),
+  );
+  const loading = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: true, loading: true }),
+  );
+  const exhausted = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: false, loading: false }),
+  );
+
+  for (const markup of [idle, loading, exhausted]) {
     assert.match(markup, /aria-atomic="true"/);
     assert.match(markup, /aria-live="polite"/);
+    assert.doesNotMatch(markup, /<button/);
   }
+  // While more history exists the row holds its height so an arriving page
+  // never nudges the reading position; only the in-flight state speaks.
+  assert.match(idle, /h-9/);
   assert.doesNotMatch(idle, /Loading earlier messages/);
   assert.match(loading, /Loading earlier messages…/);
+  assert.doesNotMatch(exhausted, /Loading earlier messages/);
 });
 
 test('a singleton diff keeps its viewport identity when an older edit joins the group', () => {

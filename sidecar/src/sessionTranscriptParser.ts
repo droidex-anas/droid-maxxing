@@ -60,8 +60,8 @@ function nonEmpty(...values: (string | undefined)[]): string {
 }
 
 // Builds one TranscriptEvent from the shared per-line context. Exported so
-// the reader can synthesize the oversized-trim status head event with the
-// same canonical id / sourceSessionId rules.
+// the eager full parse can synthesize the oversized-trim status head event
+// with the same canonical id / sourceSessionId rules.
 export function event(
   base: EventBase,
   index: number,
@@ -152,8 +152,8 @@ export function parseSessionLineEvents(
 ): TranscriptEvent[] {
   // In-place daemon auto-compaction appends a compaction_state marker to the
   // SAME session file, so a mid-file record marks a summarize-away boundary
-  // that must replay as a divider (leading records are handled by the
-  // segment's head read, which the reader dedupes against).
+  // that must replay as a divider (a leading record replays the same way when
+  // paging reaches the head of the segment).
   if (line.type === 'compaction_state') {
     const raw = line as Record<string, unknown>;
     const ts = dateMs(stringValue(raw.timestamp)) || 0;

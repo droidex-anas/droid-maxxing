@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } fro
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector, type SessionRestore } from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   MessageFeed,
   WorkingIndicator,
@@ -65,14 +65,48 @@ function RestoreFailedState({ message, onRetry }: { message?: string; onRetry: (
   );
 }
 
-export function EarlierHistoryStatus({ loading }: { loading: boolean }) {
+// Opening an old chat first restores a window, then the timeline primer pages
+// in older history until the rail has enough dots. Watching that assembly is
+// noisy, so the skeleton stays over the feed until the opening settles. Live
+// conversations are never covered: streaming output outranks a quiet open.
+export function isConversationOpeningSettling(options: {
+  isConversationLive: boolean;
+  isViewingChildSession: boolean;
+  isTimelinePriming: boolean;
+  hasOlderHistory: boolean;
+  isLoadingOlder: boolean;
+}): boolean {
+  return (
+    !options.isConversationLive &&
+    !options.isViewingChildSession &&
+    options.isTimelinePriming &&
+    (options.hasOlderHistory || options.isLoadingOlder)
+  );
+}
+
+// Older history loads by itself once the reader settles near the top, so the
+// feed's top edge only announces the load in flight. The row keeps one height
+// while more history exists so pages never nudge the reader's scroll position.
+export function EarlierHistoryControl({
+  hasMore,
+  loading,
+}: {
+  hasMore: boolean;
+  loading: boolean;
+}) {
   return (
     <div
-      aria-atomic="true"
-      aria-live="polite"
-      className={loading ? 'pb-2 text-center text-[11px] text-droid-text-muted/70' : ''}
+      className={
+        hasMore || loading ? 'flex h-9 items-start justify-center pb-2 text-center' : 'text-center'
+      }
     >
-      {loading ? 'Loading earlier messages…' : ''}
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className={loading ? 'py-1 text-[11px] text-droid-text-muted/70' : ''}
+      >
+        {loading ? 'Loading earlier messages…' : ''}
+      </div>
     </div>
   );
 }
@@ -533,7 +567,7 @@ export default function ChatView({
         {restore?.status === 'failed' && (
           <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
         )}
-        <EarlierHistoryStatus loading={loadingOlder} />
+        <EarlierHistoryControl hasMore={Boolean(olderCursor)} loading={loadingOlder} />
         <MessageFeed
           events={transcript}
           items={feedItems}
@@ -617,6 +651,26 @@ export default function ChatView({
         >
           {conversationContent}
         </div>
+        <AnimatePresence>
+          {transcript.length > 0 &&
+            isConversationOpeningSettling({
+              isConversationLive: live,
+              isViewingChildSession: viewingChildSession,
+              isTimelinePriming,
+              hasOlderHistory: Boolean(olderCursor),
+              isLoadingOlder: loadingOlder,
+            }) && (
+              <motion.div
+                key="opening-settling-skeleton"
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="absolute inset-0 z-10 overflow-hidden bg-droid-bg"
+                style={{ paddingRight: rightInset ? 312 : undefined }}
+              >
+                <RestoringState />
+              </motion.div>
+            )}
+        </AnimatePresence>
       </div>
     </div>
   );

@@ -129,8 +129,10 @@ test('a spawn the store has not registered yet renders but cannot be opened', ()
 });
 
 test('the open agent stays visible even when it belongs behind the fold', () => {
+  // Oldest spawn sorts last under the newest-first order, so it lives behind
+  // the fold unless selection keeps it visible.
+  const target = child('completed', { label: 'first-finisher' });
   const rest = Array.from({ length: 6 }, () => child('completed'));
-  const target = child('completed', { label: 'last-finisher' });
   const html = renderSection([...rest, target], {
     selectedChildSessionId: target.childSessionId,
   });

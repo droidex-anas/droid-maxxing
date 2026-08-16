@@ -1,32 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  recentConversationAnchors,
   rememberTimelineCapacityBlock,
   restoreStatusForConversationTimeline,
   shouldPrimeConversationTimeline,
 } from '../hooks/useConversationTimeline';
-import type { ConversationAnchor } from './chat';
-
-function anchors(ids: string[]): ConversationAnchor[] {
-  return ids.map((id) => ({ id, label: id }));
-}
-
-test('older history prepends do not rebuild the visible timeline window', () => {
-  const recent = anchors(Array.from({ length: 12 }, (_, index) => `recent-${String(index)}`));
-  const before = recentConversationAnchors(recent, 12);
-  const after = recentConversationAnchors(
-    [...anchors(['older-0', 'older-1', 'older-2']), ...recent],
-    12,
-  );
-
-  assert.deepEqual(after, before);
-});
-
-test('short conversations keep every available timeline anchor', () => {
-  const short = anchors(['one', 'two', 'three']);
-  assert.equal(recentConversationAnchors(short, 12), short);
-});
 
 test('timeline capacity blocks survive conversation switches', () => {
   let blocked = rememberTimelineCapacityBlock(new Set(), 'app-1:primary', true);

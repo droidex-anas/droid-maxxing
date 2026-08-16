@@ -269,7 +269,7 @@ test('spawned sessions keep a child whose spawn is outside the loaded transcript
   );
 });
 
-test('the panel order pins working agents above finished ones without renumbering', () => {
+test('the panel order pins working agents on top, then newest first, without renumbering', () => {
   const base = {
     parentAppSessionId: 'app-1',
     role: 'worker' as const,
@@ -286,15 +286,40 @@ test('the panel order pins working agents above finished ones without renumberin
   assert.deepEqual(
     rows.map((row) => [row.child.childSessionId, row.name]),
     [
-      // Working first, then queued, then idle, then done; spawn order (and the
-      // name it numbered) survives inside each group.
-      ['c2', 'Worker 2'],
+      // Running first, then newest spawn first; the spawn-order numbering (and
+      // the name it produced) survives the reordering.
       ['c5', 'Worker 5'],
+      ['c2', 'Worker 2'],
       ['c4', 'Worker 4'],
       ['c3', 'Worker 3'],
       ['c1', 'Worker 1'],
     ],
   );
+});
+
+// Paging older history reveals earlier spawns (often unresolved "Awaiting
+// status" placeholders). They must join the list *behind* the newest rows so
+// the visible head of the panel never reshuffles while the user reads.
+test('older spawns revealed by history paging sort behind the existing rows', () => {
+  const base = {
+    parentAppSessionId: 'app-1',
+    role: 'worker' as const,
+    modelId: 'model-default',
+    transcriptAvailable: true,
+  };
+  const recent = [
+    { ...base, childSessionId: 'new-1', status: 'completed' as const, startedAt: 100 },
+    { ...base, childSessionId: 'new-2', status: 'completed' as const, startedAt: 200 },
+  ];
+  const before = workingFirstChildSessions(recent).map((row) => row.child.childSessionId);
+  const paged = [
+    { ...base, childSessionId: 'pending-old-1', status: 'pending' as const, startedAt: 1 },
+    { ...base, childSessionId: 'pending-old-2', status: 'pending' as const, startedAt: 2 },
+    ...recent,
+  ];
+  const after = workingFirstChildSessions(paged).map((row) => row.child.childSessionId);
+  assert.deepEqual(after.slice(0, before.length), before);
+  assert.deepEqual(after.slice(before.length), ['pending-old-2', 'pending-old-1']);
 });
 
 test('running child activity stays running even without an open runtime', () => {

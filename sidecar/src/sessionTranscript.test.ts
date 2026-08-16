@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   MAX_SESSION_BYTES,
   SessionTranscriptReader,
   parseFullSessionTranscript,
+  readSessionRawWindow,
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
 import type { TranscriptEvent } from './protocol.js';
@@ -254,10 +255,9 @@ test('a leading compaction_state without a timestamp still dedupes to one divide
 });
 
 test('a non-object JSONL literal in the head does not crash the reader', () => {
-  // Regression: readCompactionState dereferenced row.type on every parsed
-  // row, so a syntactically valid `null` (or number/boolean/array) literal
-  // between session_start and compaction_state threw and aborted reader
-  // construction. Non-object rows are noise and must be skipped.
+  // A syntactically valid `null` (or number/boolean/array) literal between
+  // session_start and compaction_state is noise and must be skipped, not
+  // crash the parse by dereferencing null.
   const path = writeSession(['null', '42', compactionState(9), assistant('after')]);
   assert.doesNotThrow(() => reader(path));
   const dividers = collectAll(path, 100).filter((e) => e.kind === 'compaction');
@@ -265,8 +265,11 @@ test('a non-object JSONL literal in the head does not crash the reader', () => {
   assert.equal(dividers[0].removedCount, 9);
 });
 
-test('an oversized file serves the tail first and the trim status + divider only at the top', () => {
-  // ~6 MB across many lines so the tail window holds whole newer lines.
+test('an oversized file pages back to its very first message without trimming', () => {
+  // Regression: files above MAX_SESSION_BYTES used to be tail-windowed with a
+  // "Loaded latest 5 MB" status, so older messages were unreachable. The
+  // reader now indexes line offsets across the whole file: paging serves the
+  // tail first and walks all the way to the leading record.
   const filler = 'x'.repeat(30_000);
   const lines: string[] = [compactionState(42)];
   for (let i = 0; i < 200; i++) lines.push(assistant(`${i}-${filler}`));
@@ -278,26 +281,16 @@ test('an oversized file serves the tail first and the trim status + divider only
   assert.ok(first.events.every((e) => e.kind === 'text'));
   assert.ok(first.older, 'expected more history below the first window');
 
-  // Walk to the top: the last page must carry the head-read divider and the
-  // oversized-trim status, divider first (matching the eager-reader order).
-  let from: TranscriptWindowCursor | undefined = first.older;
-  let top: TranscriptEvent[] = [];
-  let guard = 0;
-  while (from) {
-    const window = r.windowBackward(500, 0, from);
-    top = window.events;
-    from = window.older;
-    guard += 1;
-    assert.ok(guard < 20, 'pagination did not terminate');
-  }
-  assert.equal(top[0]?.kind, 'compaction');
-  assert.equal(top[0]?.removedCount, 42);
-  assert.equal(top[1]?.kind, 'status');
-  assert.match(top[1]?.text ?? '', /oversized session/);
-  // The divider exists exactly once across the whole walk.
   const all = collectAll(path, 500);
+  const texts = all.filter((e) => e.kind === 'text');
+  assert.equal(texts.length, 200, 'every stored message must be reachable');
+  assert.match(texts[0]?.text ?? '', /^0-x/);
+  // The leading compaction_state parses in position as the oldest event, and
+  // no trim status exists anywhere in the walk.
+  assert.equal(all[0]?.kind, 'compaction');
+  assert.equal(all[0]?.removedCount, 42);
   assert.equal(all.filter((e) => e.kind === 'compaction').length, 1);
-  assert.equal(all.filter((e) => e.kind === 'status').length, 1);
+  assert.equal(all.filter((e) => e.kind === 'status').length, 0);
 });
 
 test('parseFullSessionTranscript stays eager: trim status first, no head-read divider', () => {
@@ -323,13 +316,24 @@ test('parseFullSessionTranscript replays a mid-file compaction marker in positio
   );
 });
 
-test('MAX_SESSION_BYTES tail window drops the partial first line', () => {
-  // A single message whose text spans the window boundary must not parse.
+test('a single message larger than MAX_SESSION_BYTES still parses in the reader', () => {
+  // Regression: the old tail window dropped the partial first line, losing
+  // the message entirely. The lazy reader preads the whole line.
   const huge = 'z'.repeat(MAX_SESSION_BYTES + 1000);
   const path = writeSession([assistant(huge), assistant('tail')]);
-  const all = collectAll(path, 100);
-  assert.deepEqual(
-    all.filter((e) => e.kind === 'text').map((e) => e.text),
-    ['tail'],
-  );
+  const texts = collectAll(path, 100).filter((e) => e.kind === 'text');
+  assert.equal(texts.length, 2);
+  assert.match(texts[0]?.text ?? '', /^z+/);
+  assert.equal(texts[1]?.text, 'tail');
+});
+
+test('readSessionRawWindow tail window drops the partial first line', () => {
+  // The eager window (search / legacy history.page) stays byte-capped; the
+  // partial first line inside the window must not survive as garbage.
+  const huge = 'z'.repeat(MAX_SESSION_BYTES + 1000);
+  const path = writeSession([assistant(huge), assistant('tail')]);
+  const window = readSessionRawWindow(path, statSync(path).size);
+  assert.equal(window.trimmed, true);
+  assert.ok(window.text.startsWith('{'), 'window must begin on a whole line');
+  assert.match(window.text, /"tail"/);
 });

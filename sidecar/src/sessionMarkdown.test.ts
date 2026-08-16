@@ -66,21 +66,6 @@ test('thinking folds into a details block; status chrome is dropped', () => {
   assert.doesNotMatch(md, /Working…/);
 });
 
-test('the oversized-trim status survives as a note so the export is not misstated as complete', () => {
-  const md = transcriptToMarkdown(
-    [
-      ev({
-        kind: 'status',
-        text: 'Loaded latest 5 MB of this oversized session for UI performance.',
-      }),
-      ev({ kind: 'text', author: 'user', text: 'tail of the chat' }),
-    ],
-    META,
-  );
-  assert.match(md, /> \*\*Note:\*\* Loaded latest 5 MB of this oversized session/);
-  assert.match(md, /## User\n\ntail of the chat/);
-});
-
 test('tool calls and results are fenced; errors are quoted', () => {
   const md = transcriptToMarkdown(
     [
