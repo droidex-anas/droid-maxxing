@@ -9,6 +9,28 @@ test('loads the Droid Control shell', async ({ page }) => {
   await expect(page.locator('#root')).toBeVisible();
 });
 
+test('session search stays viewport-wide with a translucent sidebar', async ({ page }) => {
+  await page.goto(appUrl);
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--sidebar-blur', 'blur(6px)');
+  });
+
+  await page.getByRole('button', { name: 'Search sessions and messages' }).click();
+
+  const searchInput = page.getByRole('textbox', { name: 'Search sessions and messages' });
+  const overlay = page.locator('.fixed.inset-0').filter({ has: searchInput });
+  await expect(searchInput).toBeFocused();
+  await expect(overlay).toBeVisible();
+
+  const bounds = await overlay.boundingBox();
+  const viewport = page.viewportSize();
+  expect(bounds).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  if (!bounds || !viewport) return;
+  expect(bounds.x).toBeLessThanOrEqual(1);
+  expect(bounds.width).toBeGreaterThanOrEqual(viewport.width - 2);
+});
+
 test('slash feedback returns a durable copyable report receipt', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto(appUrl);
