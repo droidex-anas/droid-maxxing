@@ -38,19 +38,26 @@ export function startWorkspaceDiscovery(options: WorkspaceDiscoveryLoopOptions):
 
   const discover = () => {
     retryTimer = undefined;
-    void discoverWorkspaceScopes(options.workspaceCwds, options.loadWorktrees).then((result) => {
-      if (cancelled) return;
-      const canonicalCwds = result.scopes.map((scope) => scope.cwd);
-      const canonicalKey = JSON.stringify(canonicalCwds);
-      options.publish({ key: canonicalKey, ...result });
-      if (canonicalKey !== options.key) {
-        // The canonical cwds re-key the caller's state; the loop for the new
-        // key owns any further discovery.
-        options.onCanonicalCwds(canonicalCwds);
-        return;
-      }
-      if (!result.complete) retryTimer = setTimeout(discover, options.retryDelayMs);
-    });
+    void discoverWorkspaceScopes(options.workspaceCwds, options.loadWorktrees).then(
+      (result) => {
+        if (cancelled) return;
+        const canonicalCwds = result.scopes.map((scope) => scope.cwd);
+        const canonicalKey = JSON.stringify(canonicalCwds);
+        options.publish({ key: canonicalKey, ...result });
+        if (canonicalKey !== options.key) {
+          // The canonical cwds re-key the caller's state; the loop for the new
+          // key owns any further discovery.
+          options.onCanonicalCwds(canonicalCwds);
+          return;
+        }
+        if (!result.complete) retryTimer = setTimeout(discover, options.retryDelayMs);
+      },
+      // A rejected pass must re-arm the loop: nothing else reschedules it, so
+      // without this one bad `loadWorktrees` would end discovery permanently.
+      () => {
+        if (!cancelled) retryTimer = setTimeout(discover, options.retryDelayMs);
+      },
+    );
   };
 
   if (options.startDelayMs === null) discover();

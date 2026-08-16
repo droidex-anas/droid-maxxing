@@ -135,6 +135,10 @@ export function parseFullSessionTranscript(
 
 // Byte offset of every line start in the file, bounded to `size` so bytes
 // appended after the stat are ignored (the reader cache re-keys on stat).
+// The scan is synchronous and O(file size), and the cache re-keys on every
+// append, so a live session pays it again on the next window request. That is
+// milliseconds for the tens-of-MB sessions this app produces; if sessions ever
+// reach GB scale this must move off the event loop or cap the indexed range.
 function scanLineStarts(path: string, size: number): number[] {
   if (size <= 0) return [];
   const starts = [0];

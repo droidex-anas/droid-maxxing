@@ -77,6 +77,8 @@ export function ConversationTimeline({
   // Long threads outgrow the rail's gutter, so keep the "you are here" dot
   // inside the rail's own scroller. Scroll only the rail element directly:
   // scrollIntoView could also move ancestor scrollers, including the feed.
+  // Re-run when the dot set changes too: an older-history page prepends dots
+  // above the active one, sliding it down without any activeId change.
   useEffect(() => {
     const rail = railRef.current;
     if (!rail || !activeId) return;
@@ -92,7 +94,7 @@ export function ConversationTimeline({
         behavior: 'smooth',
       });
     }
-  }, [activeId]);
+  }, [activeId, anchorKey]);
 
   if (anchors.length < 2) return null;
 

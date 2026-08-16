@@ -61,6 +61,59 @@ test('an incomplete discovery keeps retrying without depending on snapshot churn
   assert.equal(published[0].complete, false);
 });
 
+test('a rejected discovery pass re-arms the retry loop instead of ending it', async () => {
+  // Regression: `discover` only rescheduled itself from the fulfillment
+  // handler, so a single rejected `loadWorktrees` killed discovery permanently
+  // (and surfaced as an unhandled rejection).
+  let loads = 0;
+  const published: WorkspaceDiscoverySnapshot[] = [];
+  const cancel = startWorkspaceDiscovery({
+    workspaceCwds: ['/repo/app'],
+    key: JSON.stringify(['/repo/app']),
+    startDelayMs: null,
+    retryDelayMs: 1,
+    loadWorktrees: () => {
+      loads += 1;
+      return loads < 3
+        ? Promise.reject(new Error('git unavailable'))
+        : Promise.resolve([worktree('/repo/app')]);
+    },
+    publish: (snapshot) => published.push(snapshot),
+    onCanonicalCwds: () => assert.fail('canonical cwds did not change'),
+  });
+  try {
+    await waitFor(() => published.length === 1);
+  } finally {
+    cancel();
+  }
+  assert.equal(loads, 3);
+  assert.equal(published[0].complete, true);
+});
+
+test('cancel during a rejected pass stops the loop', async () => {
+  let reject: ((reason: Error) => void) | undefined;
+  let loads = 0;
+  const cancel = startWorkspaceDiscovery({
+    workspaceCwds: ['/repo/app'],
+    key: JSON.stringify(['/repo/app']),
+    startDelayMs: null,
+    retryDelayMs: 1,
+    loadWorktrees: () => {
+      loads += 1;
+      return new Promise((_resolve, rejectLoad) => {
+        reject = rejectLoad;
+      });
+    },
+    publish: () => assert.fail('nothing publishes on rejection'),
+    onCanonicalCwds: () => {},
+  });
+  await waitFor(() => reject !== undefined);
+  cancel();
+  reject?.(new Error('git unavailable'));
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(loads, 1);
+});
+
 test('a complete discovery publishes once and stops', async () => {
   const published: WorkspaceDiscoverySnapshot[] = [];
   const cancel = startWorkspaceDiscovery({
