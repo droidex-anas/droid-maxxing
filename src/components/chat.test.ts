@@ -21,7 +21,7 @@ import {
   appendedFeedItemKeys,
   type FeedItem,
 } from './chat';
-import { EarlierHistoryControl } from './ChatView';
+import { EarlierHistoryControl, isConversationOpeningSettling } from './ChatView';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
   createDiffDisclosure,
@@ -995,6 +995,29 @@ test('diff disclosure preserves reveal progress while remounting in bounded comm
     assert.equal(disclosure.mountedCount, count + 50);
     assert.equal(disclosure.revealedCount, 200);
   }
+});
+
+test('opening an old chat keeps the skeleton up until timeline priming settles', () => {
+  const settling = {
+    isConversationLive: false,
+    isViewingChildSession: false,
+    isTimelinePriming: true,
+    hasOlderHistory: true,
+    isLoadingOlder: false,
+  };
+  assert.equal(isConversationOpeningSettling(settling), true);
+  // The last priming page is still in flight after the cursor was consumed.
+  assert.equal(
+    isConversationOpeningSettling({ ...settling, hasOlderHistory: false, isLoadingOlder: true }),
+    true,
+  );
+  // Enough anchors: the rail is ready, the feed takes over.
+  assert.equal(isConversationOpeningSettling({ ...settling, isTimelinePriming: false }), false);
+  // History exhausted with nothing in flight: a short thread never re-covers.
+  assert.equal(isConversationOpeningSettling({ ...settling, hasOlderHistory: false }), false);
+  // Streaming output outranks a quiet open.
+  assert.equal(isConversationOpeningSettling({ ...settling, isConversationLive: true }), false);
+  assert.equal(isConversationOpeningSettling({ ...settling, isViewingChildSession: true }), false);
 });
 
 test('history paging uses a persistent live region whose text changes in place', () => {

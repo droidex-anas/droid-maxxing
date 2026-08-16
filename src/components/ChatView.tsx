@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } fro
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector, type SessionRestore } from '../hooks/useStore';
 import { useSessionLive } from '../hooks/useSessionLive';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   MessageFeed,
   WorkingIndicator,
@@ -62,6 +62,25 @@ function RestoreFailedState({ message, onRetry }: { message?: string; onRetry: (
         Retry
       </button>
     </div>
+  );
+}
+
+// Opening an old chat first restores a window, then the timeline primer pages
+// in older history until the rail has enough dots. Watching that assembly is
+// noisy, so the skeleton stays over the feed until the opening settles. Live
+// conversations are never covered: streaming output outranks a quiet open.
+export function isConversationOpeningSettling(options: {
+  isConversationLive: boolean;
+  isViewingChildSession: boolean;
+  isTimelinePriming: boolean;
+  hasOlderHistory: boolean;
+  isLoadingOlder: boolean;
+}): boolean {
+  return (
+    !options.isConversationLive &&
+    !options.isViewingChildSession &&
+    options.isTimelinePriming &&
+    (options.hasOlderHistory || options.isLoadingOlder)
   );
 }
 
@@ -632,6 +651,26 @@ export default function ChatView({
         >
           {conversationContent}
         </div>
+        <AnimatePresence>
+          {transcript.length > 0 &&
+            isConversationOpeningSettling({
+              isConversationLive: live,
+              isViewingChildSession: viewingChildSession,
+              isTimelinePriming,
+              hasOlderHistory: Boolean(olderCursor),
+              isLoadingOlder: loadingOlder,
+            }) && (
+              <motion.div
+                key="opening-settling-skeleton"
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="absolute inset-0 z-10 overflow-hidden bg-droid-bg"
+                style={{ paddingRight: rightInset ? 312 : undefined }}
+              >
+                <RestoringState />
+              </motion.div>
+            )}
+        </AnimatePresence>
       </div>
     </div>
   );
