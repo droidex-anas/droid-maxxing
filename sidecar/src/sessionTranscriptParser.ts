@@ -12,7 +12,13 @@ import { appPromptDisplayFromText } from './appPrompt.js';
 import { parseSkillActivation } from './skillSignals.js';
 import type { SessionRole, TranscriptEvent } from './protocol.js';
 
-const MAX_TEXT_CHARS = 12_000;
+// Tool results carry machine output that can be arbitrarily large, so they stay
+// tightly capped. Message text is the conversation itself: an interactive App
+// answer routinely runs past 30k chars and only runs when its `app` fence
+// survives whole, so cutting message text at the tool-result cap replayed a
+// half-written App that rendered dead after a restart.
+const MAX_TOOL_RESULT_CHARS = 12_000;
+const MAX_MESSAGE_TEXT_CHARS = 64_000;
 
 export function isLlmOnlyMessage(message: unknown): boolean {
   return objectValue(message)?.visibility === 'llm_only';
@@ -89,11 +95,14 @@ function assistantBlockEvent(
 ): TranscriptEvent | null {
   const type = stringValue(block.type);
   if (type === 'thinking') {
-    const text = trimText(nonEmpty(stringValue(block.thinking), stringValue(block.text)));
+    const text = trimText(
+      nonEmpty(stringValue(block.thinking), stringValue(block.text)),
+      MAX_MESSAGE_TEXT_CHARS,
+    );
     return text ? event(base, index, 'thinking', { text }) : null;
   }
   if (type === 'text') {
-    const text = trimText(nonEmpty(stringValue(block.text)));
+    const text = trimText(nonEmpty(stringValue(block.text)), MAX_MESSAGE_TEXT_CHARS);
     return text ? event(base, index, 'text', { text }) : null;
   }
   if (type === 'tool_use') {
@@ -118,7 +127,7 @@ function nonAssistantBlockEvent(
   if (type === 'tool_result') {
     return event(base, index, 'tool_result', {
       toolName: stringValue(block.name),
-      text: trimText(stringifyToolResult(block.content)),
+      text: trimText(stringifyToolResult(block.content), MAX_TOOL_RESULT_CHARS),
       isError: Boolean(block.is_error ?? block.isError),
       // Carry the originating call's id so the renderer can correlate a
       // result to its tool_call exactly (result blocks have no name and
@@ -127,7 +136,7 @@ function nonAssistantBlockEvent(
     });
   }
   if (messageRole === 'user' && type === 'text') {
-    const rawText = trimText(nonEmpty(stringValue(block.text)));
+    const rawText = trimText(nonEmpty(stringValue(block.text)), MAX_MESSAGE_TEXT_CHARS);
     const designDisplay = designPromptDisplayFromText(rawText);
     const text = designDisplay?.text ?? appPromptDisplayFromText(rawText) ?? rawText;
     if (!text || isSystemText(text)) return null;
@@ -241,9 +250,9 @@ function stringifyToolResult(value: unknown): string {
   return safeStringify(value);
 }
 
-function trimText(text: string): string {
-  if (text.length <= MAX_TEXT_CHARS) return text;
-  return `${text.slice(0, MAX_TEXT_CHARS)}\n\n[truncated ${String(text.length - MAX_TEXT_CHARS)} chars]`;
+function trimText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n\n[truncated ${String(text.length - max)} chars]`;
 }
 
 function isSystemText(text: string): boolean {

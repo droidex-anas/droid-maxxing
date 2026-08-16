@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
-import { hasAppBlock, hasCompleteAppBlock } from './appBlockRuntime';
+import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
@@ -2015,13 +2015,21 @@ const MessageBody = memo(function MessageBody({
 }) {
   // Strip the history "[truncated N chars]" sentinel so the raw marker never
   // shows; the cut itself is intentionally not surfaced.
-  const { body } = parseTruncatedTail(text);
+  const { body, truncatedChars } = parseTruncatedTail(text);
   const hasCompleteApp = hasCompleteAppBlock(body);
   const buildingAppBlocks = live && hasAppBlock(body);
+  // History caps message text. When that cut landed inside an App fence the
+  // source can never run, so the block says so instead of offering a Play
+  // control that would start an empty App.
+  const cutOffAppBlocks = truncatedChars !== null && hasIncompleteAppBlock(body);
   const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
   if (!hasJsonRender(body))
     return (
-      <Markdown autoPlayAppBlocks={shouldAutoPlayAppBlocks} buildingAppBlocks={buildingAppBlocks}>
+      <Markdown
+        autoPlayAppBlocks={shouldAutoPlayAppBlocks}
+        buildingAppBlocks={buildingAppBlocks}
+        cutOffAppBlocks={cutOffAppBlocks}
+      >
         {body}
       </Markdown>
     );
@@ -2036,6 +2044,7 @@ const MessageBody = memo(function MessageBody({
             key={i}
             autoPlayAppBlocks={shouldAutoPlayAppBlocks}
             buildingAppBlocks={buildingAppBlocks}
+            cutOffAppBlocks={cutOffAppBlocks}
           >
             {seg.value}
           </Markdown>

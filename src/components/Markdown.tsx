@@ -245,12 +245,14 @@ function MarkdownImpl({
   allowGeneratedContent = true,
   autoPlayAppBlocks = false,
   buildingAppBlocks = false,
+  cutOffAppBlocks = false,
 }: {
   children: string;
   specMode?: boolean;
   allowGeneratedContent?: boolean;
   autoPlayAppBlocks?: boolean;
   buildingAppBlocks?: boolean;
+  cutOffAppBlocks?: boolean;
 }) {
   const appFences = appFencesInMarkdown(children);
   let appFenceIndex = 0;
@@ -393,6 +395,7 @@ function MarkdownImpl({
                   source={codeText}
                   autoPlay={autoPlayAppBlocks && isComplete}
                   isBuilding={buildingAppBlocks && !isComplete}
+                  isCutOff={cutOffAppBlocks && !isComplete}
                 />
               );
             }

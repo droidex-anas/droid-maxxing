@@ -1,4 +1,4 @@
-export { hasAppBlock, hasCompleteAppBlock } from '../lib/appBlocks';
+export { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from '../lib/appBlocks';
 
 export type AppBlockState = 'idle' | 'running';
 export type AppBlockAction = 'play' | 'stop';

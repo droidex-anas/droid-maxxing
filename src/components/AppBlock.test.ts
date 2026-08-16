@@ -50,6 +50,21 @@ test('an app under construction is a status surface with no executable control',
   assert.doesNotMatch(html, /const points/);
 });
 
+test('an App with a cut-off source offers no playback control', () => {
+  const html = renderToStaticMarkup(
+    createElement(AppBlock, {
+      source: '<main><script>const points = [',
+      isCutOff: true,
+    }),
+  );
+
+  assert.match(html, /role="alert"/);
+  assert.match(html, /Saved history kept only part/);
+  assert.doesNotMatch(html, /aria-label="Play app"/);
+  assert.doesNotMatch(html, /<iframe/i);
+  assert.doesNotMatch(html, /const points/);
+});
+
 test('the running document is self-contained and blocks network and nested content', () => {
   const source =
     '<main><h1>Responsive app</h1></main><script>document.body.dataset.ready="yes"</script>';

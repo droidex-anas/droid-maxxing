@@ -180,10 +180,14 @@ export function AppBlock({
   source,
   autoPlay = false,
   isBuilding = false,
+  isCutOff = false,
 }: {
   source: string;
   autoPlay?: boolean;
   isBuilding?: boolean;
+  // The stored source lost its closing fence, so this App can never run. It
+  // outranks every other state: there is nothing to build and nothing to play.
+  isCutOff?: boolean;
 }) {
   const [state, dispatch] = useReducer(appBlockReducer, autoPlay ? 'running' : 'idle');
   const blockRef = useRef<HTMLDivElement>(null);
@@ -206,6 +210,10 @@ export function AppBlock({
     manualRevealPending.current = false;
     revealAppBlock(blockRef.current, reduceMotion === true);
   }, [reduceMotion]);
+
+  if (isCutOff) {
+    return <AppBlockErrorFallback message="Saved history kept only part of this App's source." />;
+  }
 
   return (
     <div ref={blockRef} className="scroll-mt-16">
