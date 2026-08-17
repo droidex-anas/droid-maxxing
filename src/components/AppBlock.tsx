@@ -22,12 +22,12 @@ import {
   appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppBridgeSession,
-  createAppDocument,
   currentAppBlockTheme,
   isAppFrameVisible,
   renderAppBlockMath,
   type AppBlockStartupState,
 } from './appBlockRuntime';
+import { createAppDocument } from './appBlockDocument';
 
 // Shared chrome for the App's pre-run states, matching the Play card's shape so
 // each swap changes wording rather than layout.

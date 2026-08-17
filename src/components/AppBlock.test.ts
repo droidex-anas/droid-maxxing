@@ -13,12 +13,12 @@ import {
   isAppFrameVisible,
   appBlockMathRequestFromMessage,
   appBlockReducer,
-  createAppDocument,
   hasAppBlock,
   hasCompleteAppBlock,
   normalizeAppBlockHeight,
   renderAppBlockMath,
 } from './appBlockRuntime';
+import { createAppDocument } from './appBlockDocument';
 
 test('Play starts an app and Stop releases it back to the inert preview', () => {
   assert.equal(appBlockReducer('idle', 'play'), 'running');
