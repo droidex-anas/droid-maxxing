@@ -285,7 +285,6 @@ button, input, select, textarea {
   };
   addEventListener('error', onRuntimeError);
   addEventListener('unhandledrejection', onUnhandledRejection);
-  // The host keeps the frame hidden until the first height arrives, so that
   // The host shows a started App at its first reported height, so that report
   // has to describe the finished layout: math is rendered by the host and lands
   // later, and nothing is worth reporting once the document is going away.
