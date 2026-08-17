@@ -256,7 +256,7 @@ button, input, select, textarea {
   const bridgeToken = ${serializedBridgeToken};
   const pendingMath = new Map();
   let mathSequence = 0;
-  let heightFrame = 0;
+  let heightTimer = 0;
   let lastHeight = -1;
   let lastError = '';
   let initialRenderComplete = false;
@@ -286,13 +286,16 @@ button, input, select, textarea {
   addEventListener('error', onRuntimeError);
   addEventListener('unhandledrejection', onUnhandledRejection);
   // The host keeps the frame hidden until the first height arrives, so that
-  // first report has to describe the finished layout: math is rendered by the
-  // host and lands a frame later, and nothing is worth reporting once the
-  // document is going away.
+  // The host shows a started App at its first reported height, so that report
+  // has to describe the finished layout: math is rendered by the host and lands
+  // later, and nothing is worth reporting once the document is going away.
+  // Reports coalesce on a timer, never an animation frame: the frame is hidden
+  // until this first report arrives, and a hidden frame runs no animation
+  // frames, so rAF would deadlock the report that reveals it.
   const reportHeight = () => {
-    if (!initialRenderComplete || disposed || heightFrame) return;
-    heightFrame = requestAnimationFrame(() => {
-      heightFrame = 0;
+    if (!initialRenderComplete || disposed || heightTimer) return;
+    heightTimer = setTimeout(() => {
+      heightTimer = 0;
       const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
       if (height === lastHeight) return;
       lastHeight = height;
@@ -372,7 +375,7 @@ button, input, select, textarea {
     });
     addEventListener('pagehide', () => {
       disposed = true;
-      if (heightFrame) cancelAnimationFrame(heightFrame);
+      if (heightTimer) clearTimeout(heightTimer);
       observer.disconnect();
       removeEventListener('message', onHostMessage);
       removeEventListener('error', onRuntimeError);

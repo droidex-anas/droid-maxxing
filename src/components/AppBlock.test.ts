@@ -88,7 +88,9 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /<meta name="viewport"/);
   assert.match(document, /droidex:app-height/);
   assert.match(document, /bridgeToken/);
-  assert.match(document, /requestAnimationFrame/);
+  // The host hides the frame until it reports a height, and a hidden frame runs
+  // no animation frames, so the report must not wait for one.
+  assert.doesNotMatch(document, /requestAnimationFrame/);
   assert.match(document, /observer\.observe\(document\.body\)/);
   assert.match(document, /"app-1"/);
   assert.match(document, /color-scheme: light/);
@@ -237,8 +239,8 @@ test('a script failure is reported before the App can announce readiness', () =>
     window: {},
     Element: class {},
     document: {},
-    requestAnimationFrame: () => 1,
-    cancelAnimationFrame: () => undefined,
+    setTimeout: () => 1,
+    clearTimeout: () => undefined,
     ResizeObserver: class {},
     addEventListener(type: string, listener: (event: unknown) => void) {
       listeners.set(type, listener);
@@ -485,8 +487,8 @@ test('the iframe document repeats readiness for each valid host handshake', () =
     window: {},
     Element: class {},
     document: {},
-    requestAnimationFrame: () => 1,
-    cancelAnimationFrame: () => undefined,
+    setTimeout: () => 1,
+    clearTimeout: () => undefined,
     ResizeObserver: class {},
     addEventListener(type: string, listener: (event: { source: object; data: unknown }) => void) {
       listeners.set(type, listener);
@@ -564,7 +566,7 @@ test('the iframe reports its initial height only after built-in math settles', a
   };
   const listeners = new Map<string, (event?: { source?: object; data?: unknown }) => void>();
   const messages: Record<string, unknown>[] = [];
-  const frames: FrameRequestCallback[] = [];
+  const pendingReports: (() => void)[] = [];
   let observerCallback: (() => void) | undefined;
   const parent = {
     postMessage(message: Record<string, unknown>) {
@@ -577,11 +579,11 @@ test('the iframe reports its initial height only after built-in math settles', a
     window: {},
     Element: TestElement,
     document: runtimeDocument,
-    requestAnimationFrame(callback: FrameRequestCallback) {
-      frames.push(callback);
-      return frames.length;
+    setTimeout(callback: () => void) {
+      pendingReports.push(callback);
+      return pendingReports.length;
     },
-    cancelAnimationFrame: () => undefined,
+    clearTimeout: () => undefined,
     ResizeObserver: class {
       constructor(callback: () => void) {
         observerCallback = callback;
@@ -603,7 +605,7 @@ test('the iframe reports its initial height only after built-in math settles', a
   // A resize before math settles must not publish the pre-math layout: the host
   // shows the App at its first reported height.
   observerCallback();
-  while (frames.length > 0) frames.shift()?.(0);
+  while (pendingReports.length > 0) pendingReports.shift()?.();
   assert.equal(
     messages.some((message) => message.type === 'droidex:app-height'),
     false,
@@ -623,7 +625,7 @@ test('the iframe reports its initial height only after built-in math settles', a
   });
   await Promise.resolve();
   await Promise.resolve();
-  while (frames.length > 0) frames.shift()?.(0);
+  while (pendingReports.length > 0) pendingReports.shift()?.();
 
   assert.deepEqual(
     JSON.parse(JSON.stringify(messages.filter((message) => message.type === 'droidex:app-height'))),
