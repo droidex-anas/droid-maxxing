@@ -11,6 +11,12 @@ test('hasAppFence recognizes the App answer shape the guidance asks for', () => 
   assert.equal(hasAppFence('~~~~app\nbody'), true);
   assert.equal(hasAppFence('> ```app\n> <main></main>'), true);
   assert.equal(hasAppFence('- ```app\n  <main></main>'), true);
+  // The renderer's scanner splits lines on \r?\n and strips any run of
+  // blockquote or list prefixes, so the probe has to reach those shapes too.
+  assert.equal(hasAppFence('Here it is.\r\n\r\n```app\r\n<main></main>\r\n```'), true);
+  assert.equal(hasAppFence('- > ```app\n  > <main></main>'), true);
+  assert.equal(hasAppFence('>\t```app\n>\t<main></main>'), true);
+  assert.equal(hasAppFence('```app title=lab\n<main></main>\n```'), true);
 
   assert.equal(hasAppFence('```ts\nconst app = 1;\n```'), false);
   assert.equal(hasAppFence('```application\nnot an app fence\n```'), false);
