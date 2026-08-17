@@ -2020,8 +2020,9 @@ const MessageBody = memo(function MessageBody({
   const buildingAppBlocks = live && hasAppBlock(body);
   // History caps message text. When that cut landed inside an App fence the
   // source can never run, so the block says so instead of offering a Play
-  // control that would start an empty App.
-  const cutOffAppBlocks = truncatedChars !== null && hasIncompleteAppBlock(body);
+  // control that would start an empty App. Only replayed text can be cut: a
+  // live answer whose tail merely looks like the sentinel is still streaming.
+  const cutOffAppBlocks = !live && truncatedChars !== null && hasIncompleteAppBlock(body);
   const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
   if (!hasJsonRender(body))
     return (

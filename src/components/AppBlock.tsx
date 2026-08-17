@@ -89,9 +89,17 @@ export function RunningAppFrame({
   // The frame stays hidden while the App boots so the reveal lands at its real
   // measured height instead of jumping from the default one.
   const [build, setBuild] = useState({ floorElapsed: false, expired: false });
+  // A failed App shows its error instead of a frame, so it never reveals.
+  const hasFailed = runtimeError?.token === bridge.token;
   const isVisible = isAppFrameVisible({ ...build, measured: measurement > 0 });
 
   useEffect(() => {
+    if (hasFailed) return;
+    // A different document is a different App: its size and build state start
+    // over so the reveal cannot inherit the previous App's measurement.
+    setFrameSize((current) =>
+      current.measurement === 0 ? current : { height: DEFAULT_APP_HEIGHT, measurement: 0 },
+    );
     setBuild({ floorElapsed: false, expired: false });
     const floor = setTimeout(() => {
       setBuild((current) => ({ ...current, floorElapsed: true }));
@@ -103,7 +111,7 @@ export function RunningAppFrame({
       clearTimeout(floor);
       clearTimeout(ceiling);
     };
-  }, [buildFloorMs, frameDocument]);
+  }, [buildFloorMs, frameDocument, hasFailed]);
 
   useLayoutEffect(() => {
     let startupState: AppBlockStartupState = 'waiting';
@@ -184,11 +192,20 @@ export function RunningAppFrame({
     };
   }, [bridge, instanceId]);
 
+  // Announce a reveal once per running frame: the callback scrolls the block
+  // into view, and a parent re-render must not scroll it again.
+  const announcedVisible = useRef(false);
   useLayoutEffect(() => {
-    if (isVisible) onVisible?.();
-  }, [isVisible, onVisible]);
+    if (!isVisible || hasFailed) {
+      announcedVisible.current = false;
+      return;
+    }
+    if (announcedVisible.current) return;
+    announcedVisible.current = true;
+    onVisible?.();
+  }, [hasFailed, isVisible, onVisible]);
 
-  if (runtimeError?.token === bridge.token) {
+  if (hasFailed) {
     return <AppBlockErrorFallback message={runtimeError.message} />;
   }
 
