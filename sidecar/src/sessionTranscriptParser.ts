@@ -95,11 +95,14 @@ function assistantBlockEvent(
 ): TranscriptEvent | null {
   const type = stringValue(block.type);
   if (type === 'thinking') {
-    const text = trimMessageText(nonEmpty(stringValue(block.thinking), stringValue(block.text)));
+    const text = trimText(
+      nonEmpty(stringValue(block.thinking), stringValue(block.text)),
+      MAX_TEXT_CHARS,
+    );
     return text ? event(base, index, 'thinking', { text }) : null;
   }
   if (type === 'text') {
-    const text = trimMessageText(nonEmpty(stringValue(block.text)));
+    const text = trimAnswerText(nonEmpty(stringValue(block.text)));
     return text ? event(base, index, 'text', { text }) : null;
   }
   if (type === 'tool_use') {
@@ -134,7 +137,8 @@ function nonAssistantBlockEvent(
     });
   }
   if (messageRole === 'user' && type === 'text') {
-    const rawText = trimMessageText(nonEmpty(stringValue(block.text)));
+    // A user bubble renders as plain text, never as a runnable App.
+    const rawText = trimText(nonEmpty(stringValue(block.text)), MAX_TEXT_CHARS);
     const designDisplay = designPromptDisplayFromText(rawText);
     const text = designDisplay?.text ?? appPromptDisplayFromText(rawText) ?? rawText;
     if (!text || isSystemText(text)) return null;
@@ -253,9 +257,9 @@ function trimText(text: string, max: number): string {
   return `${text.slice(0, max)}\n\n[truncated ${String(text.length - max)} chars]`;
 }
 
-// Conversation text: an App answer keeps its own bound, everything else stays
-// at the shared cap.
-function trimMessageText(text: string): string {
+// Only an assistant answer becomes a runnable App, so only its text earns the
+// larger bound. Thinking, user text, and tool output keep the shared cap.
+function trimAnswerText(text: string): string {
   return trimText(text, hasAppFence(text) ? MAX_APP_ANSWER_CHARS : MAX_TEXT_CHARS);
 }
 

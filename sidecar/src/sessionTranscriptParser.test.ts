@@ -101,6 +101,34 @@ test('an App answer keeps its own bound while prose keeps the shared cap', () =>
   assert.equal(toolEvents[0].text?.length, 12_000 + '\n\n[truncated 1007 chars]'.length);
 });
 
+test('only an assistant answer earns the App bound', () => {
+  // An `app` fence outside an assistant answer never becomes a runnable App:
+  // thinking has its own surface and a user bubble renders as plain text. Those
+  // blocks keep the shared cap so replay stays bounded.
+  const fence = '```app\n';
+  const oversized = `${fence}${'y'.repeat(13_000)}`;
+
+  const thinking = parseSessionLineEvents(
+    'app',
+    'provider',
+    'primary',
+    JSON.parse(
+      messageLine({ role: 'assistant', content: [{ type: 'thinking', thinking: oversized }] }),
+    ),
+  );
+  assert.equal(thinking[0].kind, 'thinking');
+  assert.equal(thinking[0].text?.length, 12_000 + '\n\n[truncated 1007 chars]'.length);
+
+  const user = parseSessionLineEvents(
+    'app',
+    'provider',
+    'primary',
+    JSON.parse(messageLine({ role: 'user', content: [{ type: 'text', text: oversized }] })),
+  );
+  assert.equal(user[0].author, 'user');
+  assert.equal(user[0].text?.length, 12_000 + '\n\n[truncated 1007 chars]'.length);
+});
+
 test('llm_only user messages stay hidden (filtering lives in the parser)', () => {
   const visible = parseSessionLineEvents(
     'app',
