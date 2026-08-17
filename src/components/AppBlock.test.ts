@@ -194,7 +194,9 @@ test('a started App builds behind a status surface until it reports its size', (
   assert.match(html, /loading="eager"/);
   assert.match(html, /aria-hidden="true"/);
   assert.match(html, /tabindex="-1"/i);
-  assert.match(html, /invisible/);
+  // Off-layout, so the hidden frame's default height cannot reserve space the
+  // measured App will not use.
+  assert.match(html, /invisible pointer-events-none absolute inset-x-0 top-0/);
 });
 
 test('the build surface waits for a measurement but never hides a silent App', () => {
@@ -513,6 +515,127 @@ test('the iframe document repeats readiness for each valid host handshake', () =
     { type: 'droidex:app-ready', instanceId: 'app-ready', bridgeToken: 'token' },
     { type: 'droidex:app-ready', instanceId: 'app-ready', bridgeToken: 'token' },
   ]);
+});
+
+test('the iframe reports its initial height only after built-in math settles', async () => {
+  const documentHtml = createAppDocument(
+    '<main><span data-latex="x^2">x²</span></main>',
+    'app-math-height',
+    undefined,
+    'token',
+  );
+  const script = /<script>([\s\S]*?)<\/script>/.exec(documentHtml)?.[1];
+  assert.ok(script);
+
+  class TestElement {
+    innerHTML = '';
+    textContent = '';
+    tagName = 'SPAN';
+    children: TestElement[] = [];
+    scrollHeight = 500;
+
+    getAttribute(name: string) {
+      return name === 'data-latex' ? 'x^2' : null;
+    }
+    hasAttribute() {
+      return false;
+    }
+    matches() {
+      return false;
+    }
+    querySelector() {
+      return null;
+    }
+    querySelectorAll() {
+      return [];
+    }
+    setAttribute() {}
+  }
+
+  const mathElement = new TestElement();
+  const body = new TestElement();
+  body.tagName = 'BODY';
+  const documentElement = { scrollHeight: 500 };
+  const runtimeDocument = {
+    body,
+    documentElement,
+    querySelector: () => null,
+    querySelectorAll: (selector: string) => (selector === '[data-latex]' ? [mathElement] : []),
+  };
+  const listeners = new Map<string, (event?: { source?: object; data?: unknown }) => void>();
+  const messages: Record<string, unknown>[] = [];
+  const frames: FrameRequestCallback[] = [];
+  let observerCallback: (() => void) | undefined;
+  const parent = {
+    postMessage(message: Record<string, unknown>) {
+      messages.push(message);
+    },
+  };
+
+  vm.runInNewContext(script, {
+    parent,
+    window: {},
+    Element: TestElement,
+    document: runtimeDocument,
+    requestAnimationFrame(callback: FrameRequestCallback) {
+      frames.push(callback);
+      return frames.length;
+    },
+    cancelAnimationFrame: () => undefined,
+    ResizeObserver: class {
+      constructor(callback: () => void) {
+        observerCallback = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+    addEventListener(
+      type: string,
+      listener: (event?: { source?: object; data?: unknown }) => void,
+    ) {
+      listeners.set(type, listener);
+    },
+    removeEventListener: () => undefined,
+  });
+
+  listeners.get('DOMContentLoaded')?.();
+  assert.ok(observerCallback);
+  // A resize before math settles must not publish the pre-math layout: the host
+  // shows the App at its first reported height.
+  observerCallback();
+  while (frames.length > 0) frames.shift()?.(0);
+  assert.equal(
+    messages.some((message) => message.type === 'droidex:app-height'),
+    false,
+  );
+
+  body.scrollHeight = 600;
+  documentElement.scrollHeight = 600;
+  listeners.get('message')?.({
+    source: parent,
+    data: {
+      type: 'droidex:math-rendered',
+      instanceId: 'app-math-height',
+      bridgeToken: 'token',
+      requestId: 'app-math-height-math-1',
+      html: '<math></math>',
+    },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  while (frames.length > 0) frames.shift()?.(0);
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(messages.filter((message) => message.type === 'droidex:app-height'))),
+    [
+      {
+        type: 'droidex:app-height',
+        instanceId: 'app-math-height',
+        bridgeToken: 'token',
+        height: 600,
+      },
+    ],
+  );
 });
 
 test('short and functional CSS colors select the correct canvas scheme', async () => {

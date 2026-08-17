@@ -259,6 +259,8 @@ button, input, select, textarea {
   let heightFrame = 0;
   let lastHeight = -1;
   let lastError = '';
+  let initialRenderComplete = false;
+  let disposed = false;
   const postError = (message) => {
     const reported = typeof message === 'string' ? message.trim() : '';
     const normalized = (reported || 'The interactive App failed to start.').slice(0, ${String(MAX_APP_ERROR_CHARS)});
@@ -283,8 +285,12 @@ button, input, select, textarea {
   };
   addEventListener('error', onRuntimeError);
   addEventListener('unhandledrejection', onUnhandledRejection);
+  // The host keeps the frame hidden until the first height arrives, so that
+  // first report has to describe the finished layout: math is rendered by the
+  // host and lands a frame later, and nothing is worth reporting once the
+  // document is going away.
   const reportHeight = () => {
-    if (heightFrame) return;
+    if (!initialRenderComplete || disposed || heightFrame) return;
     heightFrame = requestAnimationFrame(() => {
       heightFrame = 0;
       const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
@@ -357,12 +363,15 @@ button, input, select, textarea {
       }
     }
     postReady();
-    void renderAllMath();
-    reportHeight();
     const observer = new ResizeObserver(reportHeight);
     observer.observe(document.body);
     if (root && root !== document.body) observer.observe(root);
+    void renderAllMath().finally(() => {
+      initialRenderComplete = true;
+      reportHeight();
+    });
     addEventListener('pagehide', () => {
+      disposed = true;
       if (heightFrame) cancelAnimationFrame(heightFrame);
       observer.disconnect();
       removeEventListener('message', onHostMessage);
