@@ -3,6 +3,25 @@ export { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from '../lib/
 export type AppBlockState = 'idle' | 'running';
 export type AppBlockAction = 'play' | 'stop';
 
+// Shortest time the build surface stays up once shown, so an App that starts in
+// a frame or two reads as a deliberate build instead of a flicker.
+export const MIN_APP_BUILD_MS = 180;
+// A started App reports its height as soon as it renders. If one never does,
+// the frame is revealed at its default height instead of staying hidden behind
+// the build surface forever.
+export const APP_BUILD_TIMEOUT_MS = 2_000;
+
+// A running frame is revealed once the App has reported a height and the build
+// floor has passed, so the reveal lands at the real measured size without
+// flashing. The timeout is the escape hatch for an App that never reports.
+export function isAppFrameVisible(build: {
+  measured: boolean;
+  floorElapsed: boolean;
+  expired: boolean;
+}): boolean {
+  return (build.measured && build.floorElapsed) || build.expired;
+}
+
 export const DEFAULT_APP_HEIGHT = 360;
 const MIN_APP_HEIGHT = 240;
 const MAX_APP_HEIGHT = 12_000;

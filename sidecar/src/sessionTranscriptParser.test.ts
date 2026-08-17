@@ -51,39 +51,38 @@ test('a tool_result with a null JSON literal in its content array is not dropped
   assert.equal(result.text, 'done');
 });
 
-test('an oversized App answer replays with its fence closed', () => {
-  // Regression: message text was capped at the tool-result limit (12k), so a
-  // real /visualize answer (25k-35k chars) replayed without the closing fence.
-  // After a restart the App rendered its markup with a half-written script:
-  // no interactivity, an empty canvas, and nothing the renderer could recover.
-  const app = `Here is the lab.\n\n\`\`\`app\n<main data-droidex-app-root>${'<p>chart</p>'.repeat(2_000)}</main>\n\`\`\`\n\nSuggested exercise: set a = 6.`;
-  assert.ok(app.length > 12_000 && app.length < 64_000);
-
-  const events = parseSessionLineEvents(
+function assistantText(text: string): TranscriptEvent[] {
+  return parseSessionLineEvents(
     'app',
     'provider',
     'primary',
-    JSON.parse(messageLine({ role: 'assistant', content: [{ type: 'text', text: app }] })),
+    JSON.parse(messageLine({ role: 'assistant', content: [{ type: 'text', text }] })),
   );
+}
+
+test('an oversized App answer replays with its fence closed', () => {
+  // Regression: every replayed text block shared the 12k cap, so a real
+  // /visualize answer (25k-35k chars) came back without its closing fence.
+  // After a restart the App rendered its markup with a half-written script:
+  // no interactivity, an empty canvas, and nothing the renderer could recover.
+  const app = `Here is the lab.\n\n\`\`\`app\n<main data-droidex-app-root>${'<p>chart</p>'.repeat(2_000)}</main>\n\`\`\`\n\nSuggested exercise: set a = 6.`;
+  assert.ok(app.length > 12_000);
+
+  const events = assistantText(app);
 
   assert.equal(events.length, 1);
   assert.equal(events[0].text, app);
   assert.doesNotMatch(events[0].text ?? '', /\[truncated/);
 });
 
-test('message text stays bounded and tool output keeps the tighter cap', () => {
-  const events = parseSessionLineEvents(
-    'app',
-    'provider',
-    'primary',
-    JSON.parse(
-      messageLine({
-        role: 'assistant',
-        content: [{ type: 'text', text: 'x'.repeat(70_000) }],
-      }),
-    ),
-  );
-  assert.equal(events[0].text, `${'x'.repeat(64_000)}\n\n[truncated 6000 chars]`);
+test('an App answer keeps its own bound while prose keeps the shared cap', () => {
+  const prose = assistantText('x'.repeat(13_000));
+  assert.equal(prose[0].text, `${'x'.repeat(12_000)}\n\n[truncated 1000 chars]`);
+
+  const fence = '```app\n';
+  const app = assistantText(`${fence}${'y'.repeat(257_000 - fence.length)}`);
+  assert.equal(app[0].text?.length, 256_000 + '\n\n[truncated 1000 chars]'.length);
+  assert.match(app[0].text ?? '', /\[truncated 1000 chars\]$/);
 
   const toolEvents = parseSessionLineEvents(
     'app',
@@ -92,11 +91,14 @@ test('message text stays bounded and tool output keeps the tighter cap', () => {
     JSON.parse(
       messageLine({
         role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: 't3', content: 'y'.repeat(13_000) }],
+        // An `app` fence inside machine output is not a runnable App.
+        content: [
+          { type: 'tool_result', tool_use_id: 't3', content: `${fence}${'z'.repeat(13_000)}` },
+        ],
       }),
     ),
   );
-  assert.equal(toolEvents[0].text, `${'y'.repeat(12_000)}\n\n[truncated 1000 chars]`);
+  assert.equal(toolEvents[0].text?.length, 12_000 + '\n\n[truncated 1007 chars]'.length);
 });
 
 test('llm_only user messages stay hidden (filtering lives in the parser)', () => {

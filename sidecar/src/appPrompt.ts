@@ -45,6 +45,18 @@ export function assertValidResponseFormat(
   throw new Error(`Unsupported response format: ${description}`);
 }
 
+// Opens a fence whose info word is `app`, allowing the blockquote and list
+// prefixes the renderer's fence scanner accepts. This only decides how much of
+// a message replays, so it stays deliberately permissive: a false positive
+// grants one message a larger cap, while the renderer remains the authority on
+// which fences actually run.
+const APP_FENCE_OPENER =
+  /(?:^|\n)[ \t]*(?:> ?)*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?(?:`{3,}|~{3,})[ \t]*app(?:[ \t][^\n]*)?[ \t]*(?:\n|$)/;
+
+export function hasAppFence(text: string): boolean {
+  return APP_FENCE_OPENER.test(text);
+}
+
 export function appPromptDisplayFromText(text: string): string | null {
   if (!text.startsWith(APP_PROMPT_HEADER)) return null;
   const guidanceIndex = text.lastIndexOf(`\n\n${APP_GUIDANCE_HEADER}`);

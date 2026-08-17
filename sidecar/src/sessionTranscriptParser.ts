@@ -8,17 +8,17 @@
 // shares.
 import { dateMs, numberValue, objectValue, safeStringify, stringValue } from './values.js';
 import { designPromptDisplayFromText } from './browser/designPromptDisplay.js';
-import { appPromptDisplayFromText } from './appPrompt.js';
+import { appPromptDisplayFromText, hasAppFence } from './appPrompt.js';
 import { parseSkillActivation } from './skillSignals.js';
 import type { SessionRole, TranscriptEvent } from './protocol.js';
 
-// Tool results carry machine output that can be arbitrarily large, so they stay
-// tightly capped. Message text is the conversation itself: an interactive App
-// answer routinely runs past 30k chars and only runs when its `app` fence
-// survives whole, so cutting message text at the tool-result cap replayed a
-// half-written App that rendered dead after a restart.
-const MAX_TOOL_RESULT_CHARS = 12_000;
-const MAX_MESSAGE_TEXT_CHARS = 64_000;
+// Replayed text is capped so one enormous message cannot dominate a history
+// page. An App answer is the exception: it is a document that only runs when
+// its `app` fence survives whole, so it carries its own far larger bound. At
+// the shared cap a real /visualize answer (25k-35k chars) replayed with the
+// fence cut mid-script and rendered dead after a restart.
+const MAX_TEXT_CHARS = 12_000;
+const MAX_APP_ANSWER_CHARS = 256_000;
 
 export function isLlmOnlyMessage(message: unknown): boolean {
   return objectValue(message)?.visibility === 'llm_only';
@@ -95,14 +95,11 @@ function assistantBlockEvent(
 ): TranscriptEvent | null {
   const type = stringValue(block.type);
   if (type === 'thinking') {
-    const text = trimText(
-      nonEmpty(stringValue(block.thinking), stringValue(block.text)),
-      MAX_MESSAGE_TEXT_CHARS,
-    );
+    const text = trimMessageText(nonEmpty(stringValue(block.thinking), stringValue(block.text)));
     return text ? event(base, index, 'thinking', { text }) : null;
   }
   if (type === 'text') {
-    const text = trimText(nonEmpty(stringValue(block.text)), MAX_MESSAGE_TEXT_CHARS);
+    const text = trimMessageText(nonEmpty(stringValue(block.text)));
     return text ? event(base, index, 'text', { text }) : null;
   }
   if (type === 'tool_use') {
@@ -127,7 +124,8 @@ function nonAssistantBlockEvent(
   if (type === 'tool_result') {
     return event(base, index, 'tool_result', {
       toolName: stringValue(block.name),
-      text: trimText(stringifyToolResult(block.content), MAX_TOOL_RESULT_CHARS),
+      // Machine output, never a runnable App: the shared cap always applies.
+      text: trimText(stringifyToolResult(block.content), MAX_TEXT_CHARS),
       isError: Boolean(block.is_error ?? block.isError),
       // Carry the originating call's id so the renderer can correlate a
       // result to its tool_call exactly (result blocks have no name and
@@ -136,7 +134,7 @@ function nonAssistantBlockEvent(
     });
   }
   if (messageRole === 'user' && type === 'text') {
-    const rawText = trimText(nonEmpty(stringValue(block.text)), MAX_MESSAGE_TEXT_CHARS);
+    const rawText = trimMessageText(nonEmpty(stringValue(block.text)));
     const designDisplay = designPromptDisplayFromText(rawText);
     const text = designDisplay?.text ?? appPromptDisplayFromText(rawText) ?? rawText;
     if (!text || isSystemText(text)) return null;
@@ -253,6 +251,12 @@ function stringifyToolResult(value: unknown): string {
 function trimText(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n\n[truncated ${String(text.length - max)} chars]`;
+}
+
+// Conversation text: an App answer keeps its own bound, everything else stays
+// at the shared cap.
+function trimMessageText(text: string): string {
+  return trimText(text, hasAppFence(text) ? MAX_APP_ANSWER_CHARS : MAX_TEXT_CHARS);
 }
 
 function isSystemText(text: string): boolean {

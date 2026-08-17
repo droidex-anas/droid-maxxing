@@ -6,8 +6,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AppBlock, RunningAppFrame } from './AppBlock';
 import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
+  APP_BUILD_TIMEOUT_MS,
+  MIN_APP_BUILD_MS,
   appBlockHeightFromMessage,
   appBlockStartupTransition,
+  isAppFrameVisible,
   appBlockMathRequestFromMessage,
   appBlockReducer,
   createAppDocument,
@@ -174,6 +177,40 @@ test('the running frame keeps app code inside a script-only sandbox', () => {
   assert.match(html, /referrerPolicy="no-referrer"/i);
   assert.match(html, /title="Interactive App block"/);
   assert.doesNotMatch(html, /transition-\[height\]/);
+});
+
+test('a started App builds behind a status surface until it reports its size', () => {
+  const html = renderToStaticMarkup(
+    createElement(RunningAppFrame, {
+      source: '<button>Slow app</button>',
+      instanceId: 'app-build',
+    }),
+  );
+
+  assert.match(html, /role="status"/);
+  assert.match(html, /Starting interactive app/);
+  // The frame still loads while hidden, and stays out of the reading and tab
+  // order until it is revealed at its measured height.
+  assert.match(html, /loading="eager"/);
+  assert.match(html, /aria-hidden="true"/);
+  assert.match(html, /tabindex="-1"/i);
+  assert.match(html, /invisible/);
+});
+
+test('the build surface waits for a measurement but never hides a silent App', () => {
+  assert.equal(
+    isAppFrameVisible({ measured: true, floorElapsed: false, expired: false }),
+    false,
+    'a measurement inside the build floor must not flash the frame open',
+  );
+  assert.equal(isAppFrameVisible({ measured: false, floorElapsed: true, expired: false }), false);
+  assert.equal(isAppFrameVisible({ measured: true, floorElapsed: true, expired: false }), true);
+  assert.equal(
+    isAppFrameVisible({ measured: false, floorElapsed: true, expired: true }),
+    true,
+    'an App that never reports a height is still revealed',
+  );
+  assert.ok(MIN_APP_BUILD_MS < APP_BUILD_TIMEOUT_MS);
 });
 
 test('a script failure is reported before the App can announce readiness', () => {
