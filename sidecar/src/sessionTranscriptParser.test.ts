@@ -75,6 +75,22 @@ test('an oversized App answer replays with its fence closed', () => {
   assert.doesNotMatch(events[0].text ?? '', /\[truncated/);
 });
 
+test('an App answer replays whole with either line ending', () => {
+  // Regression: the fence probe required a bare newline after the info word, so
+  // the same answer with CRLF endings replayed at the shared cap and came back
+  // cut mid-script, while the renderer's scanner would have run it.
+  const body = `<main data-droidex-app-root>${'<p>chart</p>'.repeat(2_500)}</main>`;
+  const lf = `Here is the lab.\n\n\`\`\`app\n${body}\n\`\`\`\n`;
+  const crlf = lf.replaceAll('\n', '\r\n');
+  assert.ok(lf.length > 12_000);
+
+  for (const answer of [lf, crlf]) {
+    const events = assistantText(answer);
+    assert.equal(events[0].text, answer);
+    assert.doesNotMatch(events[0].text ?? '', /\[truncated/);
+  }
+});
+
 test('an App answer keeps its own bound while prose keeps the shared cap', () => {
   const prose = assistantText('x'.repeat(13_000));
   assert.equal(prose[0].text, `${'x'.repeat(12_000)}\n\n[truncated 1000 chars]`);
