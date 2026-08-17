@@ -22,6 +22,39 @@ export function isAppFrameVisible(build: {
   return (build.measured && build.floorElapsed) || build.expired;
 }
 
+export interface AppHeightScheduler {
+  schedule: (height: number) => void;
+  cancel: () => void;
+}
+
+// Folds a burst of height reports into one application, keeping the newest.
+// Deliberately not an animation frame: a hidden or minimized host window runs
+// none, and the frame stays behind its build surface until a height lands.
+export function createAppHeightScheduler(
+  applyHeight: (height: number) => void,
+): AppHeightScheduler {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let pending: number | undefined;
+  return {
+    schedule(height) {
+      pending = height;
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (pending === undefined) return;
+        const next = pending;
+        pending = undefined;
+        applyHeight(next);
+      });
+    },
+    cancel() {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      pending = undefined;
+    },
+  };
+}
+
 export const DEFAULT_APP_HEIGHT = 360;
 const MIN_APP_HEIGHT = 240;
 const MAX_APP_HEIGHT = 12_000;

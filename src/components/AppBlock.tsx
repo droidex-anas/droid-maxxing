@@ -16,6 +16,7 @@ import {
   APP_BUILD_TIMEOUT_MS,
   DEFAULT_APP_HEIGHT,
   MIN_APP_BUILD_MS,
+  createAppHeightScheduler,
   appBlockStartupTransition,
   appBlockReadyFromMessage,
   appBlockHeightFromMessage,
@@ -81,7 +82,7 @@ export function RunningAppFrame({
   const [runtimeError, setRuntimeError] = useState<{ token: string; message: string } | null>(null);
   const theme = useMemo(currentAppBlockTheme, []);
   const bridge = useMemo(createAppBridgeSession, [instanceId, source, theme]);
-  const document = useMemo(
+  const frameDocument = useMemo(
     () => createAppDocument(source, instanceId, theme, bridge.token),
     [bridge.token, instanceId, source, theme],
   );
@@ -102,26 +103,16 @@ export function RunningAppFrame({
       clearTimeout(floor);
       clearTimeout(ceiling);
     };
-  }, [buildFloorMs, document]);
+  }, [buildFloorMs, frameDocument]);
 
   useLayoutEffect(() => {
     let startupState: AppBlockStartupState = 'waiting';
-    let heightFrame = 0;
-    let pendingHeight: number | undefined;
-    const scheduleHeight = (nextHeight: number) => {
-      pendingHeight = nextHeight;
-      if (heightFrame) return;
-      heightFrame = requestAnimationFrame(() => {
-        heightFrame = 0;
-        if (pendingHeight === undefined) return;
-        const measuredHeight = pendingHeight;
-        pendingHeight = undefined;
-        setFrameSize((current) => ({
-          height: measuredHeight,
-          measurement: current.measurement + 1,
-        }));
-      });
-    };
+    const heights = createAppHeightScheduler((measuredHeight) => {
+      setFrameSize((current) => ({
+        height: measuredHeight,
+        measurement: current.measurement + 1,
+      }));
+    });
     const onMessage = (event: MessageEvent) => {
       const frameWindow = iframeRef.current?.contentWindow;
       if (!frameWindow || event.source !== frameWindow) return;
@@ -139,7 +130,7 @@ export function RunningAppFrame({
       const nextHeight = appBlockHeightFromMessage(event.data, instanceId, bridge.token);
       if (nextHeight !== undefined) {
         if (!bridge.guard.acceptHeight(nextHeight)) return;
-        scheduleHeight(nextHeight);
+        heights.schedule(nextHeight);
         return;
       }
       const mathRequest = appBlockMathRequestFromMessage(event.data, instanceId, bridge.token);
@@ -188,7 +179,7 @@ export function RunningAppFrame({
     };
     window.addEventListener('message', onMessage);
     return () => {
-      if (heightFrame) cancelAnimationFrame(heightFrame);
+      heights.cancel();
       window.removeEventListener('message', onMessage);
     };
   }, [bridge, instanceId]);
@@ -224,8 +215,8 @@ export function RunningAppFrame({
         // The hidden frame must still load: a lazy one below the fold would
         // never boot, and the build surface would never end.
         loading="eager"
-        srcDoc={document}
-        aria-hidden={!isVisible}
+        srcDoc={frameDocument}
+        aria-hidden={isVisible ? undefined : true}
         tabIndex={isVisible ? undefined : -1}
         className={`min-w-0 w-full border-0 bg-transparent ${
           isVisible ? 'block' : 'invisible pointer-events-none absolute inset-x-0 top-0'

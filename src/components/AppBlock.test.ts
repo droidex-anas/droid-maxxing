@@ -13,6 +13,7 @@ import {
   isAppFrameVisible,
   appBlockMathRequestFromMessage,
   appBlockReducer,
+  createAppHeightScheduler,
   hasAppBlock,
   hasCompleteAppBlock,
   normalizeAppBlockHeight,
@@ -215,6 +216,32 @@ test('the build surface waits for a measurement but never hides a silent App', (
     'an App that never reports a height is still revealed',
   );
   assert.ok(MIN_APP_BUILD_MS < APP_BUILD_TIMEOUT_MS);
+});
+
+test('height reports coalesce on a timer so a hidden host window still measures', () => {
+  // Regression: the host applied measured heights on an animation frame, which
+  // a hidden or minimized window never runs. The frame stays behind its build
+  // surface until a height lands, so that report cannot depend on painting.
+  const applied: number[] = [];
+  const scheduler = createAppHeightScheduler((height) => applied.push(height));
+
+  scheduler.schedule(400);
+  scheduler.schedule(520);
+  scheduler.schedule(610);
+  assert.deepEqual(applied, [], 'a burst applies nothing synchronously');
+
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      assert.deepEqual(applied, [610], 'a burst collapses into the newest height');
+
+      scheduler.schedule(700);
+      scheduler.cancel();
+      setTimeout(() => {
+        assert.deepEqual(applied, [610], 'a cancelled scheduler applies nothing');
+        resolve();
+      });
+    });
+  });
 });
 
 test('a script failure is reported before the App can announce readiness', () => {
