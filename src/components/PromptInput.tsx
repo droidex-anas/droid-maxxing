@@ -86,6 +86,7 @@ import {
   buildVisibleChildSettingsTarget,
   childSettingsReadinessLabel,
 } from '../lib/exactChildSettings';
+import AskUserInline from './AskUserInline';
 import PermissionInline from './PermissionInline';
 import PlanApprovalInline from './PlanApprovalInline';
 import { ModelIcon, providerOf } from './ModelIcon';
@@ -1325,6 +1326,7 @@ export default function PromptInput({
 
         <PlanApprovalInline />
         <PermissionInline />
+        <AskUserInline />
 
         {missionPreview ? (
           <div
