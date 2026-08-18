@@ -142,14 +142,19 @@ export default function PlanApprovalInline() {
 
         <div className="flex flex-wrap items-center gap-2 px-4 pb-3.5">
           {isSpec && (
-            <div className="flex items-center gap-0.5 rounded-full border border-droid-border p-0.5">
+            <div
+              role="radiogroup"
+              aria-label="Implementation autonomy"
+              className="flex items-center gap-0.5 rounded-full border border-droid-border p-0.5"
+            >
               {AUTONOMY.map((a) => {
                 const active = autonomy === a.value;
                 return (
                   <button
                     key={a.value}
                     type="button"
-                    aria-pressed={active}
+                    role="radio"
+                    aria-checked={active}
                     onClick={() => {
                       setAutonomy(a.value);
                     }}
