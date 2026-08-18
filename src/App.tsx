@@ -24,6 +24,7 @@ import type { ChildAccess } from './hooks/useStore';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import MissionControl from './components/MissionControl';
+import { PullRequestsView } from './features/pull-requests/PullRequestsView';
 import PromptInput from './components/PromptInput';
 import RightPanel from './components/RightPanel';
 import { ReviewPanel } from './components/environment/ReviewPanel';
@@ -106,6 +107,7 @@ export default function App() {
         activeSession && (current.transcripts[activeSession.appSessionId] ?? []).length > 0,
       ),
       historyLoaded: current.historyLoaded,
+      mainView: current.mainView,
       rightPanelOpen: current.rightPanelOpen,
       selectedChild: current.selectedChild,
       sessionRestore: current.sessionRestore,
@@ -497,7 +499,9 @@ export default function App() {
                 browserExpanded ? 'pointer-events-none' : ''
               }`}
             >
-              {isMissionControlView ? (
+              {!embedded && state.mainView === 'pull-requests' ? (
+                <PullRequestsView />
+              ) : isMissionControlView ? (
                 <motion.div
                   key="mission-control"
                   className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"

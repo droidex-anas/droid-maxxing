@@ -74,6 +74,8 @@ test('loadPersistedUiState sanitizes persisted shell fields', () => {
       },
       selectedFeatureId: 'f1',
       settingsOpen: true,
+      mainView: 'pull-requests',
+      prWorkspaceCwd: '/repo',
     }),
     () => {
       assert.deepEqual(loadPersistedUiState(), {
@@ -103,9 +105,19 @@ test('loadPersistedUiState sanitizes persisted shell fields', () => {
           },
         },
         selectedFeatureId: 'f1',
+        mainView: 'pull-requests',
+        prWorkspaceCwd: '/repo',
       });
     },
   );
+});
+
+test('loadPersistedUiState accepts only the pull-requests main view and a string cwd', () => {
+  withLocalStorage(JSON.stringify({ mainView: 'nope', prWorkspaceCwd: 12 }), () => {
+    const loaded = loadPersistedUiState();
+    assert.equal(loaded.mainView, undefined);
+    assert.equal(loaded.prWorkspaceCwd, undefined);
+  });
 });
 
 test('factory defaults do not restore a cleared per-model compaction override', () => {

@@ -1,13 +1,13 @@
 // File-size exception (AGENTS.md): this file is the sidebar's single
 // composition root — brand header, tool buttons, workspace/chat/pinned section
 // wiring, unread/search chrome, update prompt, and the row menu/rename glue
-// handlers. ~650 lines. The interactive row (SessionRow, marquee, inline
-// rename) already lives in SidebarSessionRow.tsx; further splitting was
-// rejected because the remaining handlers are composition glue that fail the
-// deletion test (extracting them would only forward store state), and the
-// Expand/WorkspaceFolderIcon primitives are too small to justify their own
-// modules. Reviewed ceiling: ~700 lines; extract the workspace section if it
-// grows past that.
+// handlers. ~730 lines after the Pull requests nav row. The interactive row
+// (SessionRow, marquee, inline rename) already lives in SidebarSessionRow.tsx;
+// further splitting was rejected because the remaining handlers are composition
+// glue that fail the deletion test (extracting them would only forward store
+// state), and the Expand/WorkspaceFolderIcon primitives are too small to
+// justify their own modules. Reviewed ceiling: ~750 lines; extract the
+// workspace section if it grows past that.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
@@ -17,7 +17,17 @@ import { dismissSidebarCard, loadSidebarCardSeen } from '../lib/sidebarCards';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
-import { Folder, FolderOpen, Plus, Search, Settings, ChevronRight, SquarePen } from 'lucide-react';
+import {
+  Folder,
+  FolderOpen,
+  Plus,
+  Search,
+  Settings,
+  ChevronRight,
+  SquarePen,
+  GitPullRequest,
+} from 'lucide-react';
+import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import {
   buildWorkspaceSections,
@@ -125,11 +135,14 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
       activeAppSessionId: current.activeAppSessionId,
       chatMetadata: current.chatMetadata,
       draftChat: current.draftChat,
+      mainView: current.mainView,
       pendingPermissions: current.pendingPermissions,
       pendingQuestions: current.pendingQuestions,
+      prWorkspaceCwd: current.prWorkspaceCwd,
       sessionLastSeen: current.sessionLastSeen,
       sessionOrder: current.sessionOrder,
       sessions: current.sessions,
+      workspaceCwds: current.workspaceCwds,
     }),
     shallowEqual,
   );
@@ -471,6 +484,29 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
         >
           <SquarePen className="w-[18px] h-[18px] shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text" />
           New chat
+        </button>
+        <button
+          data-testid="pull-requests-nav"
+          onClick={() => {
+            const cwd = resolvePrWorkspaceCwd({
+              boundCwd: state.prWorkspaceCwd,
+              activeCwd: activeSession?.cwd,
+              workspaceKind: activeSession?.workspaceKind,
+              workspaceCwds: state.workspaceCwds,
+            });
+            dispatch({ type: 'OPEN_PULL_REQUESTS', cwd });
+          }}
+          className={`group mt-0.5 w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-medium transition-colors ${
+            state.mainView === 'pull-requests'
+              ? 'bg-droid-active text-droid-text'
+              : 'text-droid-text hover:bg-droid-elevated'
+          }`}
+        >
+          <GitPullRequest
+            className="h-[18px] w-[18px] shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text"
+            strokeWidth={1.75}
+          />
+          Pull requests
         </button>
       </div>
 

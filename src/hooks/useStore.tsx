@@ -286,6 +286,9 @@ export interface AppState {
   reviewFocusRequestId: number;
   diffView: DiffViewMode;
   sidebarCollapsed: boolean;
+  mainView: 'session' | 'pull-requests';
+  prWorkspaceCwd: string | null;
+  prWorkspaceNumber: number | null;
   specMode: boolean;
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
@@ -546,6 +549,8 @@ type Action =
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
+  | { type: 'OPEN_PULL_REQUESTS'; cwd?: string | null; number?: number | null }
+  | { type: 'CLOSE_PULL_REQUESTS' }
   | {
       type: 'START_CHAT';
       cwd: string;
@@ -831,6 +836,8 @@ interface PersistedUiState {
   browsers: Record<string, BrowserState>;
   browserOpenKeys: Record<string, boolean>;
   selectedFeatureId: string | null;
+  mainView?: 'session' | 'pull-requests';
+  prWorkspaceCwd?: string | null;
 }
 
 function loadCompactionModel(): string {
@@ -975,6 +982,14 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
       browserOpenKeys: loadPersistedBrowserOpenKeys(parsed.browserOpenKeys),
       selectedFeatureId:
         typeof parsed.selectedFeatureId === 'string' ? parsed.selectedFeatureId : null,
+      mainView:
+        parsed.mainView === 'session' || parsed.mainView === 'pull-requests'
+          ? parsed.mainView
+          : undefined,
+      prWorkspaceCwd:
+        typeof parsed.prWorkspaceCwd === 'string' && parsed.prWorkspaceCwd
+          ? parsed.prWorkspaceCwd
+          : undefined,
     };
   } catch {
     return {};
@@ -992,6 +1007,8 @@ function savePersistedUiState(state: AppState): void {
     browsers: persistBrowsers(state.browsers),
     browserOpenKeys: state.browserOpenKeys,
     selectedFeatureId: state.selectedFeatureId,
+    mainView: state.mainView,
+    prWorkspaceCwd: state.prWorkspaceCwd,
   };
   try {
     getLocalStorage()?.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
@@ -1103,6 +1120,9 @@ export const initialState: AppState = {
   rightPanelOpen: persistedUiState.rightPanelOpen ?? true,
   utilityPanels: persistedUiState.utilityPanels ?? {},
   sidebarCollapsed: persistedUiState.sidebarCollapsed ?? false,
+  mainView: persistedUiState.mainView ?? 'session',
+  prWorkspaceCwd: persistedUiState.prWorkspaceCwd ?? null,
+  prWorkspaceNumber: null,
   specMode: persistedUiState.specMode ?? false,
   settingsOpen: false,
   commandPaletteOpen: false,
@@ -2329,6 +2349,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         // A pending review-focus request belongs to the session that issued
         // it; never let it fire in another session's panel after a switch.
         reviewFocusPath: action.id === state.activeAppSessionId ? state.reviewFocusPath : null,
+        mainView: 'session',
       };
     }
 
@@ -2558,6 +2579,16 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'TOGGLE_MISSION_CONTROL':
       return { ...state, missionControlMode: !state.missionControlMode };
 
+    case 'OPEN_PULL_REQUESTS':
+      return {
+        ...state,
+        mainView: 'pull-requests',
+        prWorkspaceCwd: action.cwd === undefined ? state.prWorkspaceCwd : action.cwd,
+        prWorkspaceNumber: action.number === undefined ? state.prWorkspaceNumber : action.number,
+      };
+    case 'CLOSE_PULL_REQUESTS':
+      return state.mainView === 'session' ? state : { ...state, mainView: 'session' };
+
     case 'START_CHAT': {
       // Stamp the session being left so model output produced while it was
       // open doesn't surface as an unread badge after starting a new chat.
@@ -2580,6 +2611,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         // Leaving for a fresh draft orphans any pending review-focus request.
         reviewFocusPath: null,
         sessionLastSeen,
+        mainView: 'session',
       };
     }
 
@@ -3285,6 +3317,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.selectedChild,
     state.selectedFeatureId,
     state.sidebarCollapsed,
+    state.mainView,
+    state.prWorkspaceCwd,
     state.specMode,
   ]);
 
