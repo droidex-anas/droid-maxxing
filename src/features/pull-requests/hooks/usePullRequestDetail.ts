@@ -46,7 +46,7 @@ function commentsSectionError(
   return sectionError(true, result.message, 'Could not load PR comments', showErrors, previous);
 }
 
-function resolveMeta(
+export function resolveMeta(
   generation: number,
   results: {
     view: PullRequestViewResult;
@@ -55,25 +55,12 @@ function resolveMeta(
   },
   prev: PrDetailState,
   showErrors: boolean,
-):
-  | { kind: 'failure'; message: string }
-  | { kind: 'success'; pr: PullRequestDetail | null; event: MetaSuccessFields } {
+): { pr: PullRequestDetail | null; event: MetaSuccessFields } {
   const viewRes = results.view;
   const checksRes = results.checks;
   const commentsRes = results.comments;
   const viewed = viewRes.ok ? viewRes.pr : null;
-  if (!viewed && !checksRes.ok && !commentsRes.ok) {
-    return {
-      kind: 'failure',
-      message:
-        viewRes.message ??
-        checksRes.message ??
-        commentsRes.message ??
-        'Could not load pull request',
-    };
-  }
   return {
-    kind: 'success',
     pr: viewed,
     event: {
       generation,
@@ -130,12 +117,6 @@ export function usePullRequestDetail(
           prev,
           showErrors,
         );
-        if (resolved.kind === 'failure') {
-          if (showErrors) {
-            dispatch({ type: 'meta-failure', generation, message: resolved.message });
-          }
-          return;
-        }
         if (resolved.pr) setPr(resolved.pr);
         dispatch({ type: 'meta-success', ...resolved.event });
       });

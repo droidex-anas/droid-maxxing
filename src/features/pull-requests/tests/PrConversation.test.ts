@@ -3,8 +3,9 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import type { PrComment } from '../../../types/vcs';
+import type { PrComment, PullRequest } from '../../../types/vcs';
 import { PrConversation } from '../components/PrConversation';
+import { PrSummary } from '../components/PrSummary';
 
 const comments: PrComment[] = [
   {
@@ -54,4 +55,65 @@ test('renders review and inline comments as an unbordered timeline', () => {
   assert.match(html, /Please rename this\./);
   assert.match(html, /Comment on this PR…/);
   assert.doesNotMatch(html, /border-droid-border/);
+});
+
+const samplePr: PullRequest = {
+  number: 1,
+  title: 'Ship it',
+  state: 'open',
+  url: '',
+  isDraft: false,
+  headRefName: 'f',
+  baseRefName: 'main',
+  mergeable: null,
+  reviewDecision: null,
+  additions: 1,
+  deletions: 0,
+  changedFiles: 1,
+  createdAt: null,
+  updatedAt: null,
+  author: 'ana',
+  reviewRequests: [],
+  reviews: [],
+};
+
+test('all-fail first load surfaces checks and comments errors, not empty-state copy', () => {
+  const html = renderToStaticMarkup(
+    createElement(PrSummary, {
+      pr: samplePr,
+      number: 1,
+      body: '',
+      loaded: true,
+      loading: false,
+      metaError: 'Could not load pull request',
+      checks: [],
+      checksError: 'Could not load PR checks',
+      comments: [],
+      commentsError: 'Could not load PR comments',
+      draft: '',
+      posting: false,
+      onDraftChange: noop,
+      onSubmit: noop,
+    }),
+  );
+  assert.match(html, /Could not load PR checks/);
+  assert.match(html, /Could not load PR comments/);
+  assert.doesNotMatch(html, /No checks reported/);
+  assert.doesNotMatch(html, /No comments yet/);
+});
+
+test('empty comments with an error show the error, not the empty-state copy', () => {
+  const html = renderToStaticMarkup(
+    createElement(PrConversation, {
+      comments: [],
+      loading: false,
+      error: 'Could not load PR comments',
+      draft: '',
+      posting: false,
+      onDraftChange: noop,
+      onSubmit: noop,
+    }),
+  );
+  assert.match(html, /Could not load PR comments/);
+  assert.doesNotMatch(html, /No comments yet/);
 });

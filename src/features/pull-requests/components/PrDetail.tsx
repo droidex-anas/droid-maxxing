@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 
 import { openExternal } from '../../../lib/onboarding';
@@ -8,6 +8,15 @@ import { PrConversation } from './PrConversation';
 import { PrSummary } from './PrSummary';
 
 export type PrDetailTab = 'summary' | 'code' | 'chat';
+
+export function applyCommentPostSettlement(
+  submitted: { cwd: string; number: number },
+  current: { cwd: string; number: number },
+  resultOk: boolean,
+): { clearDraft: boolean; posting: false } | null {
+  if (submitted.cwd !== current.cwd || submitted.number !== current.number) return null;
+  return { clearDraft: resultOk, posting: false };
+}
 
 const TABS: { id: PrDetailTab; label: string; key: string }[] = [
   { id: 'summary', label: 'Summary', key: '1' },
@@ -32,6 +41,8 @@ export function PrDetail({
   const [tab, setTab] = useState<PrDetailTab>('summary');
   const [draft, setDraft] = useState('');
   const [posting, setPosting] = useState(false);
+  const identityRef = useRef({ cwd, number });
+  identityRef.current = { cwd, number };
   const detail = usePullRequestDetail(cwd, number, {
     active: true,
     loadDiff: tab === 'code',
@@ -40,6 +51,7 @@ export function PrDetail({
 
   useEffect(() => {
     setDraft('');
+    setPosting(false);
   }, [cwd, number]);
 
   useEffect(() => {
@@ -64,10 +76,18 @@ export function PrDetail({
   const submit = () => {
     const body = draft.trim();
     if (!body) return;
+    const submittedCwd = cwd;
+    const submittedNumber = number;
     setPosting(true);
     void detail.submitComment(body).then((result) => {
-      if (result.ok) setDraft('');
-      setPosting(false);
+      const settlement = applyCommentPostSettlement(
+        { cwd: submittedCwd, number: submittedNumber },
+        identityRef.current,
+        result.ok,
+      );
+      if (!settlement) return;
+      if (settlement.clearDraft) setDraft('');
+      setPosting(settlement.posting);
     });
   };
 
