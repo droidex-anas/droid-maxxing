@@ -1,10 +1,32 @@
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { useGitEnvironment } from '../../hooks/useGitEnvironment';
 import { useGithubSetup } from '../../hooks/useGithubSetup';
+import type { PullRequest } from '../../types/vcs';
+import { PrDetail } from './components/PrDetail';
 import { PrInbox } from './components/PrInbox';
 import { PrWorkspaceEmpty } from './components/PrWorkspaceEmpty';
 import { usePullRequestList } from './hooks/usePullRequestList';
 import { resolvePrWorkspaceCwd } from './lib/prWorkspaceCwd';
+
+function WorkspaceDetail({
+  cwd,
+  number,
+  prs,
+}: {
+  cwd: string;
+  number: number | null;
+  prs: PullRequest[];
+}) {
+  if (number == null) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center px-8">
+        <p className="text-[13px] text-droid-text-muted">Select a pull request</p>
+      </div>
+    );
+  }
+  const selected = prs.find((item) => item.number === number) ?? null;
+  return <PrDetail cwd={cwd} number={number} pr={selected} />;
+}
 
 export function PullRequestsView() {
   const dispatch = useStoreDispatch();
@@ -30,7 +52,7 @@ export function PullRequestsView() {
   const canList = Boolean(cwd && git.env?.isGitHub && setup.isReady);
   const list = usePullRequestList(cwd, canList);
 
-  if (!canList) {
+  if (!canList || !cwd) {
     return (
       <div data-testid="pull-requests-workspace" className="flex h-full min-h-0">
         <PrWorkspaceEmpty cwd={cwd} isGitHub={git.env?.isGitHub} />
@@ -53,9 +75,7 @@ export function PullRequestsView() {
           onRetry={list.refresh}
         />
       </div>
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center px-8">
-        <p className="text-[13px] text-droid-text-muted">Select a pull request</p>
-      </div>
+      <WorkspaceDetail cwd={cwd} number={state.prWorkspaceNumber} prs={list.prs} />
     </div>
   );
 }
