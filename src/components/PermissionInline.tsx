@@ -1,23 +1,29 @@
-import { AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondPermission } from '../lib/commands';
-import { permissionPurpose } from '../lib/permissionPurpose';
 import type { PermissionKind, PermissionOutcome } from '../types/bridge';
-import { ComposerRequestShell } from './ComposerRequestShell';
 
+const EASE = [0.16, 1, 0.3, 1] as const;
 const ACCENT = 'var(--droid-accent)';
+// Permission asks are an attention signal: a small warning dot marks the ask
+// while the card itself stays on the standard elevated surface.
+const WARN = 'var(--droid-orange)';
 
-const ACTION_TITLE: Record<PermissionKind, string> = {
-  exec: 'Allow Droid to run this command?',
-  edit: 'Allow Droid to edit this file?',
-  create: 'Allow Droid to create this file?',
-  apply_patch: 'Allow Droid to apply this patch?',
-  mcp: 'Allow Droid to use this tool?',
-  spec: 'Allow Droid to finish planning?',
-  mission_plan: 'Allow Droid to start this mission?',
-  other: 'Allow Droid to continue?',
+// A plain-language explanation of what Droid is asking to do, so the prompt
+// is never just a bare "Permission required".
+const KIND_PROMPT: Record<PermissionKind, string> = {
+  exec: 'Droid wants to run a terminal command',
+  edit: 'Droid wants to edit a file',
+  create: 'Droid wants to create a file',
+  apply_patch: 'Droid wants to apply a code patch',
+  mcp: 'Droid wants to use an external tool',
+  spec: 'Droid wants to finish planning',
+  mission_plan: 'Droid proposed a mission plan',
+  other: 'Droid is requesting permission to proceed',
 };
 
+// Backend titles that only restate the kind add nothing under the reason
+// line; meaningful ones (e.g. MCP "server · tool") are shown as a subtitle.
 const GENERIC_TITLES = new Set([
   'Permission required',
   'Run command',
@@ -34,11 +40,8 @@ function cleanDetail(detail: string | undefined): string {
 
 function CommandDetail({ command }: { command: string }) {
   return (
-    <div className="max-h-36 overflow-y-auto rounded-xl border border-droid-border bg-droid-bg/55 px-3 py-2.5 font-mono text-[11.5px] leading-[1.6]">
-      <div className="flex gap-2 break-words">
-        <span className="select-none text-droid-text-muted">$</span>
-        <span className="whitespace-pre-wrap text-droid-text">{command}</span>
-      </div>
+    <div className="max-h-32 overflow-y-auto rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed">
+      <span className="whitespace-pre-wrap break-words text-droid-text">{command}</span>
     </div>
   );
 }
@@ -49,7 +52,7 @@ function FileDetail({ path }: { path: string }) {
   const dir = hasDir ? path.slice(0, slash + 1) : '';
   const name = hasDir ? path.slice(slash + 1) : path;
   return (
-    <div className="rounded-xl border border-droid-border bg-droid-bg/55 px-3 py-2.5 font-mono text-[11.5px] leading-[1.6]">
+    <div className="rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed">
       <span className="break-all">
         {dir && <span className="text-droid-text-muted/60">{dir}</span>}
         <span className="text-droid-text">{name}</span>
@@ -64,9 +67,9 @@ function Detail({ kind, detail }: { kind: PermissionKind; detail: string }) {
     return <FileDetail path={detail} />;
   }
   return (
-    <pre className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-droid-border bg-droid-bg/55 px-3 py-2.5 font-mono text-[11.5px] leading-[1.55] text-droid-text-secondary">
+    <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-droid-text-secondary">
       {detail}
-    </pre>
+    </div>
   );
 }
 
@@ -78,9 +81,6 @@ export default function PermissionInline() {
     (current) => ({
       activeAppSessionId: current.activeAppSessionId,
       pendingPermissions: current.pendingPermissions,
-      activeTranscript: current.activeAppSessionId
-        ? current.transcripts[current.activeAppSessionId]
-        : undefined,
     }),
     shallowEqual,
   );
@@ -91,8 +91,8 @@ export default function PermissionInline() {
   if (!req || req.kind === 'spec' || req.kind === 'mission_plan') return null;
 
   const detail = cleanDetail(req.detail);
-  const purpose = permissionPurpose(req.kind, state.activeTranscript);
-  const context = req.title && !GENERIC_TITLES.has(req.title) ? req.title : '';
+  const reason = KIND_PROMPT[req.kind];
+  const subtitle = req.title && !GENERIC_TITLES.has(req.title) ? req.title : '';
 
   const respond = (outcome: PermissionOutcome) => {
     respondPermission(req.appSessionId, req.requestId, outcome);
@@ -101,50 +101,66 @@ export default function PermissionInline() {
 
   return (
     <AnimatePresence>
-      <ComposerRequestShell
+      <motion.div
         key={req.requestId}
-        label="Permission"
-        title={ACTION_TITLE[req.kind]}
-        description={
-          <>
-            {purpose}
-            {context && <span className="mt-1 block text-droid-text-muted">{context}</span>}
-          </>
-        }
-        detail={detail ? <Detail kind={req.kind} detail={detail} /> : undefined}
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                respond('cancel');
-              }}
-              className="rounded-lg px-2.5 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-bg/50 hover:text-droid-text"
-            >
-              Deny
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                respond('proceed_always');
-              }}
-              className="rounded-lg border border-droid-border px-2.5 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text"
-            >
-              Always allow
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                respond('proceed_once');
-              }}
-              className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-droid-bg transition-opacity hover:opacity-90"
-              style={{ background: ACCENT }}
-            >
-              Allow once
-            </button>
-          </>
-        }
-      />
+        initial={{ opacity: 0, y: 8, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.985 }}
+        transition={{ duration: 0.22, ease: EASE }}
+        className="mb-2.5 overflow-hidden rounded-2xl border border-droid-border bg-droid-elevated shadow-[0_10px_32px_rgba(0,0,0,0.35)]"
+      >
+        <div className="px-4 pt-3.5 pb-3">
+          <div className="flex items-center gap-2">
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: WARN }}
+              aria-hidden
+            />
+            <div className="min-w-0 text-[13px] font-medium leading-snug text-droid-text break-words">
+              {reason}
+            </div>
+          </div>
+          {subtitle && (
+            <div className="mt-0.5 truncate pl-3.5 text-[11.5px] text-droid-text-muted">
+              {subtitle}
+            </div>
+          )}
+        </div>
+
+        {detail && (
+          <div className="px-4 pb-3">
+            <Detail kind={req.kind} detail={detail} />
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-3.5">
+          <button
+            onClick={() => {
+              respond('cancel');
+            }}
+            className="rounded-full px-3.5 py-1.5 text-[12px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-surface hover:text-droid-text"
+          >
+            Deny
+          </button>
+          <button
+            onClick={() => {
+              respond('proceed_always');
+            }}
+            className="rounded-full border border-droid-border bg-droid-bg/40 px-3.5 py-1.5 text-[12px] font-medium text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text"
+          >
+            Always allow
+          </button>
+          <button
+            onClick={() => {
+              respond('proceed_once');
+            }}
+            className="rounded-full px-4 py-1.5 text-[12px] font-semibold text-droid-bg transition-opacity hover:opacity-90"
+            style={{ background: ACCENT }}
+          >
+            Allow once
+          </button>
+        </div>
+      </motion.div>
     </AnimatePresence>
   );
 }
