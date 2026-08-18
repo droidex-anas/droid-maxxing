@@ -1,12 +1,18 @@
-import { shallowEqual, useStoreSelector } from '../../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
+import { useGitEnvironment } from '../../hooks/useGitEnvironment';
+import { useGithubSetup } from '../../hooks/useGithubSetup';
+import { PrInbox } from './components/PrInbox';
 import { PrWorkspaceEmpty } from './components/PrWorkspaceEmpty';
+import { usePullRequestList } from './hooks/usePullRequestList';
 import { resolvePrWorkspaceCwd } from './lib/prWorkspaceCwd';
 
 export function PullRequestsView() {
+  const dispatch = useStoreDispatch();
   const state = useStoreSelector(
     (current) => ({
       activeAppSessionId: current.activeAppSessionId,
       prWorkspaceCwd: current.prWorkspaceCwd,
+      prWorkspaceNumber: current.prWorkspaceNumber,
       sessions: current.sessions,
       workspaceCwds: current.workspaceCwds,
     }),
@@ -19,9 +25,37 @@ export function PullRequestsView() {
     workspaceKind: active?.workspaceKind,
     workspaceCwds: state.workspaceCwds,
   });
+  const git = useGitEnvironment(cwd ?? '', 'worktree');
+  const setup = useGithubSetup(Boolean(cwd), cwd ?? 'none');
+  const canList = Boolean(cwd && git.env?.isGitHub && setup.isReady);
+  const list = usePullRequestList(cwd, canList);
+
+  if (!canList) {
+    return (
+      <div data-testid="pull-requests-workspace" className="flex h-full min-h-0">
+        <PrWorkspaceEmpty cwd={cwd} isGitHub={git.env?.isGitHub} />
+      </div>
+    );
+  }
+
   return (
     <div data-testid="pull-requests-workspace" className="flex h-full min-h-0">
-      <PrWorkspaceEmpty cwd={cwd} />
+      <div className="flex h-full min-h-0 w-[360px] shrink-0 flex-col">
+        <PrInbox
+          prs={list.prs}
+          viewerLogin={list.viewerLogin}
+          selectedNumber={state.prWorkspaceNumber}
+          loading={list.loading || !list.loaded}
+          error={list.error}
+          onSelect={(number) => {
+            dispatch({ type: 'OPEN_PULL_REQUESTS', number });
+          }}
+          onRetry={list.refresh}
+        />
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center px-8">
+        <p className="text-[13px] text-droid-text-muted">Select a pull request</p>
+      </div>
     </div>
   );
 }
