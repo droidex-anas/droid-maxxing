@@ -24,6 +24,22 @@ export function isImagePath(reference: string): boolean {
   return withoutQuery.includes('.') && LOCAL_IMAGE_EXTENSIONS.includes(ext);
 }
 
+/**
+ * Splits attachment paths into displayable images and everything else, keeping
+ * each group in its original order. Prompts carry both kinds in one list, so
+ * every surface that shows attachments (composer chips, queued rows) needs the
+ * same split to render images as thumbnails and the rest as file chips.
+ */
+export function partitionImagePaths(paths: readonly string[]): {
+  images: string[];
+  files: string[];
+} {
+  const images: string[] = [];
+  const files: string[] = [];
+  for (const path of paths) (isImagePath(path) ? images : files).push(path);
+  return { images, files };
+}
+
 /** Absolute filesystem path behind a reference, or null when it is not local. */
 export function localImageFilePath(reference: string): string | null {
   if (reference.startsWith('file://')) {

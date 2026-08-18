@@ -33,6 +33,8 @@ import { useImageAttachments } from '../hooks/useImageAttachments';
 import { useImageFileDrop } from '../hooks/useImageFileDrop';
 import { ImageChip } from './composer/ImageChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
+import { ImageLightbox } from './media/ImageLightbox';
+import { imageSrc, partitionImagePaths } from '../lib/localImage';
 import { FeedbackModal } from './FeedbackModal';
 import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
@@ -264,6 +266,9 @@ export default function PromptInput({
   const imageAttachments = useImageAttachments(state.imagePasteQuality);
   const fileDrop = useImageFileDrop(imageAttachments.addBlob);
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
+  // A path-only attachment has no staged copy to crop, so it opens the
+  // read-only lightbox instead of the composer's image viewer.
+  const [viewerPath, setViewerPath] = useState<string | null>(null);
   const [feedbackReport, setFeedbackReport] = useState<FeedbackReportRequest | null>(null);
   const [activeSkills, setActiveSkillsState] = useState<SkillInfo[]>([]);
   const setActiveSkills = (value: SetStateAction<SkillInfo[]>) => {
@@ -1189,6 +1194,8 @@ export default function PromptInput({
     // their temp files — no prompt ever referenced them.
     imageAttachments.clearAndDiscard();
     setInput(p.text);
+    // Its own attachments come back as chips: images among them render as
+    // thumbnails again, so the restored draft looks like the one that was queued.
     setAttachedFiles(p.files);
     setActiveSkills(invocableSkills.filter((s) => p.skills.includes(s.name)));
     dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id: p.id });
@@ -1289,6 +1296,12 @@ export default function PromptInput({
   const hasChips =
     activeSkills.length > 0 || attachedFiles.length > 0 || imageAttachments.images.length > 0;
   const viewerImage = imageAttachments.images.find((i) => i.id === viewerImageId) ?? null;
+  // Files attached as paths (the @ menu, the picker, or a queued prompt brought
+  // back for editing) show as thumbnails when they are displayable images, so a
+  // pasted image looks the same before queueing and after reopening it.
+  const { images: attachedImagePaths, files: attachedDocumentPaths } =
+    partitionImagePaths(attachedFiles);
+  const viewerSrc = viewerPath === null ? null : imageSrc(viewerPath);
   // The "Start in" repo/worktree/branch row only applies while drafting a brand
   // new chat; it renders as the top section of the composer card.
   const showStartIn = !activeSession && !missionPreview && !!cwd;
@@ -1373,7 +1386,8 @@ export default function PromptInput({
               {imageAttachments.images.map((img) => (
                 <ImageChip
                   key={img.id}
-                  image={img}
+                  src={img.preview}
+                  label={basename(img.path)}
                   onOpen={() => {
                     setViewerImageId(img.id);
                   }}
@@ -1382,6 +1396,25 @@ export default function PromptInput({
                   }}
                 />
               ))}
+              {attachedImagePaths.map((path) => {
+                const src = imageSrc(path);
+                if (src === null) return null;
+                return (
+                  <ImageChip
+                    key={path}
+                    src={src}
+                    label={basename(path)}
+                    onOpen={() => {
+                      setViewerPath(path);
+                    }}
+                    onRemove={() => {
+                      // No discard: the file was written for an already-composed
+                      // prompt, and the attachments store sweeps it on its own.
+                      setAttachedFiles((prev) => prev.filter((x) => x !== path));
+                    }}
+                  />
+                );
+              })}
               {activeSkills.map((skill) => (
                 <span
                   key={skill.filePath}
@@ -1405,7 +1438,7 @@ export default function PromptInput({
                   </button>
                 </span>
               ))}
-              {attachedFiles.map((f) => (
+              {attachedDocumentPaths.map((f) => (
                 <span
                   key={f}
                   className="group flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg text-[11px] bg-droid-bg/60 text-droid-text-secondary border border-droid-border"
@@ -1737,6 +1770,15 @@ export default function PromptInput({
             setViewerImageId(null);
           }}
           onCrop={imageAttachments.applyCrop}
+        />
+      )}
+      {viewerPath !== null && viewerSrc !== null && (
+        <ImageLightbox
+          src={viewerSrc}
+          label={viewerPath}
+          onClose={() => {
+            setViewerPath(null);
+          }}
         />
       )}
       {feedbackReport && (

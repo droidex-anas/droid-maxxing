@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { imageSrc, isImagePath, localImageFilePath, pathBaseName } from './localImage';
+import {
+  imageSrc,
+  isImagePath,
+  localImageFilePath,
+  partitionImagePaths,
+  pathBaseName,
+} from './localImage';
 
 test('isImagePath accepts known extensions and rejects everything else', () => {
   assert.equal(isImagePath('/tmp/a.PNG'), true);
@@ -13,6 +19,17 @@ test('pathBaseName drops directories and query strings', () => {
   assert.equal(pathBaseName('/var/folders/T/paste-1-ab.png'), 'paste-1-ab.png');
   assert.equal(pathBaseName('https://x.test/a/b.png?v=2'), 'b.png');
   assert.equal(pathBaseName('shot.png'), 'shot.png');
+});
+
+test('partitionImagePaths splits attachments and keeps each order', () => {
+  const { images, files } = partitionImagePaths([
+    '/tmp/b.png',
+    '/src/index.ts',
+    '/tmp/a.jpeg',
+    '/README.md',
+  ]);
+  assert.deepEqual(images, ['/tmp/b.png', '/tmp/a.jpeg']);
+  assert.deepEqual(files, ['/src/index.ts', '/README.md']);
 });
 
 test('localImageFilePath resolves absolute, ~ and file:// references only', () => {
