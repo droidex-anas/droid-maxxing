@@ -5,6 +5,7 @@ import { openExternal } from '../../../lib/onboarding';
 import type { PullRequest } from '../../../types/vcs';
 import { usePullRequestDetail } from '../hooks/usePullRequestDetail';
 import { PrConversation } from './PrConversation';
+import { PrDiff } from './PrDiff';
 import { PrSummary } from './PrSummary';
 
 export type PrDetailTab = 'summary' | 'code' | 'chat';
@@ -27,6 +28,22 @@ const TABS: { id: PrDetailTab; label: string; key: string }[] = [
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+function CodePane({ diff, diffError }: { diff: string; diffError: string | null }) {
+  if (diff) return <PrDiff diff={diff} />;
+  if (diffError) {
+    return (
+      <div className="flex h-full items-center justify-center px-8">
+        <p className="text-[13px] text-droid-text-muted">{diffError}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full items-center justify-center px-8">
+      <div className="h-16 w-full max-w-2xl rounded-xl bg-droid-elevated/40" />
+    </div>
+  );
 }
 
 export function PrDetail({
@@ -161,11 +178,7 @@ export function PrDetail({
             onSubmit={conversation.onSubmit}
           />
         ) : null}
-        {tab === 'code' ? (
-          <div className="flex h-full items-center justify-center px-8">
-            <p className="text-[13px] text-droid-text-muted">Select Code after the diff lands</p>
-          </div>
-        ) : null}
+        {tab === 'code' ? <CodePane diff={detail.diff} diffError={detail.diffError} /> : null}
         {tab === 'chat' ? <PrConversation {...conversation} /> : null}
       </div>
     </div>
