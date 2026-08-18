@@ -27,6 +27,9 @@ import {
   revealNextDiffCards,
   type FileChange,
 } from '../lib/diff';
+import { ImageAttachmentChip } from './media/ImageAttachmentChip';
+import { isImagePath } from '../lib/localImage';
+import { userMessageAttachments } from '../lib/promptMentions';
 import { DiffCard } from './DiffView';
 import { SubagentsDock, type SubagentsDockData } from './SubagentsDock';
 import TurnChangesPanel, { type TurnChangesItem, type TurnFile } from './TurnChangesPanel';
@@ -1888,9 +1891,13 @@ export function UserBubble({
   event: Pick<TranscriptEvent, 'text' | 'skills' | 'files' | 'browserRefs' | 'steered'>;
 }) {
   const skills = event.skills ?? [];
-  const files = event.files ?? [];
   const browserRefs = event.browserRefs ?? [];
-  const hasAttachments = files.length > 0 || browserRefs.length > 0;
+  // A replayed message has no files metadata, only the composed text it was sent
+  // as, so attachments are recovered from its trailing @mention block.
+  const message = userMessageAttachments(event.text, event.files);
+  const images = message.files.filter((f) => isImagePath(f));
+  const files = message.files.filter((f) => !isImagePath(f));
+  const hasAttachments = message.files.length > 0 || browserRefs.length > 0;
   return (
     <div className="flex flex-col items-end gap-1.5 py-1">
       {event.steered && (
@@ -1914,6 +1921,9 @@ export function UserBubble({
           {browserRefs.map((reference) => (
             <BrowserReferenceChip key={`${reference.kind}:${reference.id}`} reference={reference} />
           ))}
+          {images.map((f) => (
+            <ImageAttachmentChip key={f} path={f} />
+          ))}
           {files.map((f) => (
             <span
               key={f}
@@ -1926,14 +1936,14 @@ export function UserBubble({
           ))}
         </div>
       )}
-      {(event.text || skills.length > 0) && (
+      {(message.text || skills.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-relaxed text-droid-text">
           {skills.map((skill) => (
             <span key={skill} title={`Skill: ${skill}`} className="font-medium text-droid-skill">
               {skill}
             </span>
           ))}
-          {event.text && <span className="whitespace-pre-wrap break-words">{event.text}</span>}
+          {message.text && <span className="whitespace-pre-wrap break-words">{message.text}</span>}
         </div>
       )}
     </div>

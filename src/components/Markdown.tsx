@@ -14,6 +14,7 @@ import type { Mermaid } from 'mermaid';
 import { AppBlock } from './AppBlock';
 import { appFencesInMarkdown } from '../lib/appBlocks';
 import { CodeCard } from './MarkdownCode';
+import { TranscriptImage } from './media/TranscriptImage';
 
 export { copyMarkdownCode } from './MarkdownCode';
 
@@ -355,6 +356,11 @@ function MarkdownImpl({
               {children}
             </blockquote>
           ),
+          // Without this, react-markdown emits a bare <img src="/abs/path">,
+          // which the renderer origin cannot resolve; TranscriptImage routes
+          // local paths through the desktop image source and bounds the preview.
+          img: ({ src, alt }) =>
+            typeof src === 'string' ? <TranscriptImage reference={src} alt={alt} /> : null,
           hr: () => (
             <hr className={`border-0 h-px bg-droid-border/25 ${specMode ? 'my-8' : 'my-4'}`} />
           ),
