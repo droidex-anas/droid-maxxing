@@ -117,3 +117,65 @@ test('empty comments with an error show the error, not the empty-state copy', ()
   assert.match(html, /Could not load PR comments/);
   assert.doesNotMatch(html, /No comments yet/);
 });
+
+test('PR comments expose reactions next to the composer', () => {
+  const html = renderToStaticMarkup(
+    createElement(PrConversation, {
+      comments: [
+        {
+          id: 'comment-1',
+          kind: 'comment',
+          author: 'reviewer',
+          body: 'Looks good to me',
+          createdAt: '2026-08-04T10:01:00Z',
+          url: 'https://example.test/comment/1',
+          state: null,
+          reactions: [
+            { content: 'THUMBS_UP', count: 3 },
+            { content: 'EYES', count: 1 },
+          ],
+        },
+      ],
+      loading: false,
+      error: null,
+      draft: '',
+      posting: false,
+      onDraftChange: noop,
+      onSubmit: noop,
+    }),
+  );
+
+  assert.match(html, /Looks good to me/);
+  assert.match(html, /👍/);
+  assert.match(html, /👀/);
+  assert.match(html, />3</);
+  assert.match(html, /Comment on this PR…/);
+});
+
+test('partial comment failures stay visible beside successfully loaded comments', () => {
+  const html = renderToStaticMarkup(
+    createElement(PrConversation, {
+      comments: [
+        {
+          id: 'comment-1',
+          kind: 'comment',
+          author: 'reviewer',
+          body: 'Loaded comment',
+          createdAt: '2026-08-04T10:01:00Z',
+          url: 'https://example.test/comment/1',
+          state: null,
+          reactions: [],
+        },
+      ],
+      loading: false,
+      error: 'Some PR comments could not be loaded',
+      draft: '',
+      posting: false,
+      onDraftChange: noop,
+      onSubmit: noop,
+    }),
+  );
+
+  assert.match(html, /Some PR comments could not be loaded/);
+  assert.match(html, /Loaded comment/);
+});
