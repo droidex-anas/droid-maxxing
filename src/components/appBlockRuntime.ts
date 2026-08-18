@@ -1,7 +1,59 @@
-export { hasAppBlock, hasCompleteAppBlock } from '../lib/appBlocks';
+export { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from '../lib/appBlocks';
 
 export type AppBlockState = 'idle' | 'running';
 export type AppBlockAction = 'play' | 'stop';
+
+// Shortest time the build surface stays up once shown, so an App that starts in
+// a frame or two reads as a deliberate build instead of a flicker.
+export const MIN_APP_BUILD_MS = 180;
+// A started App reports its height as soon as it renders. If one never does,
+// the frame is revealed at its default height instead of staying hidden behind
+// the build surface forever.
+export const APP_BUILD_TIMEOUT_MS = 2_000;
+
+// A running frame is revealed once the App has reported a height and the build
+// floor has passed, so the reveal lands at the real measured size without
+// flashing. The timeout is the escape hatch for an App that never reports.
+export function isAppFrameVisible(build: {
+  measured: boolean;
+  floorElapsed: boolean;
+  expired: boolean;
+}): boolean {
+  return (build.measured && build.floorElapsed) || build.expired;
+}
+
+export interface AppHeightScheduler {
+  schedule: (height: number) => void;
+  cancel: () => void;
+}
+
+// Folds a burst of height reports into one application, keeping the newest.
+// Deliberately not an animation frame: a hidden or minimized host window runs
+// none, and the frame stays behind its build surface until a height lands.
+export function createAppHeightScheduler(
+  applyHeight: (height: number) => void,
+): AppHeightScheduler {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let pending: number | undefined;
+  return {
+    schedule(height) {
+      pending = height;
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (pending === undefined) return;
+        const next = pending;
+        pending = undefined;
+        applyHeight(next);
+      });
+    },
+    cancel() {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      pending = undefined;
+    },
+  };
+}
 
 export const DEFAULT_APP_HEIGHT = 360;
 const MIN_APP_HEIGHT = 240;
@@ -9,7 +61,7 @@ const MAX_APP_HEIGHT = 12_000;
 const MAX_APP_MATH_CHARS = 20_000;
 export const MAX_APP_MATH_REQUESTS = 64;
 export const MAX_CONCURRENT_APP_MATH_REQUESTS = 2;
-const MAX_APP_ERROR_CHARS = 500;
+export const MAX_APP_ERROR_CHARS = 500;
 
 export interface AppBlockMathRequest {
   requestId: string;
@@ -77,7 +129,7 @@ export function createAppBridgeSession(): AppBridgeSession {
   };
 }
 
-const DEFAULT_APP_THEME: AppBlockTheme = {
+export const DEFAULT_APP_THEME: AppBlockTheme = {
   colorScheme: 'dark',
   background: '#0a0a0a',
   surface: '#111111',
@@ -176,209 +228,6 @@ export function appBlockReducer(_state: AppBlockState, action: AppBlockAction): 
 export function normalizeAppBlockHeight(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_APP_HEIGHT;
   return Math.min(MAX_APP_HEIGHT, Math.max(MIN_APP_HEIGHT, Math.ceil(value)));
-}
-
-export function createAppDocument(
-  source: string,
-  instanceId: string,
-  theme: AppBlockTheme = DEFAULT_APP_THEME,
-  bridgeToken = instanceId,
-): string {
-  const serializedId = JSON.stringify(instanceId).replaceAll('<', '\\u003c');
-  const serializedBridgeToken = JSON.stringify(bridgeToken).replaceAll('<', '\\u003c');
-  const contentSecurityPolicy = [
-    "default-src 'none'",
-    "script-src 'unsafe-inline'",
-    "style-src 'unsafe-inline'",
-    'img-src data: blob:',
-    'media-src data: blob:',
-    "connect-src 'none'",
-    "frame-src 'none'",
-    "object-src 'none'",
-    "base-uri 'none'",
-    "form-action 'none'",
-  ].join('; ');
-
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">
-<style>
-:root {
-  color-scheme: ${theme.colorScheme};
-  --app-background: ${theme.background};
-  --app-surface: ${theme.surface};
-  --app-foreground: ${theme.foreground};
-  --app-muted: ${theme.muted};
-  --app-border: ${theme.border};
-  --app-accent: ${theme.accent};
-  font-family: ui-sans-serif, system-ui, sans-serif;
-}
-html, body { margin: 0; min-width: 0; background: transparent; }
-body { box-sizing: border-box; padding: 0; color: var(--app-foreground); overflow-wrap: anywhere; }
-*, *::before, *::after { box-sizing: inherit; }
-img, svg, canvas, video { display: block; max-width: 100%; height: auto; }
-a { color: var(--app-accent); }
-button, input, select, textarea {
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  background: var(--app-surface);
-  color: var(--app-foreground);
-  font: inherit;
-}
-::selection { background: color-mix(in srgb, var(--app-accent) 24%, transparent); }
-</style>
-<script>
-(() => {
-  const instanceId = ${serializedId};
-  const bridgeToken = ${serializedBridgeToken};
-  const pendingMath = new Map();
-  let mathSequence = 0;
-  let heightFrame = 0;
-  let lastHeight = -1;
-  let lastError = '';
-  const postError = (message) => {
-    const reported = typeof message === 'string' ? message.trim() : '';
-    const normalized = (reported || 'The interactive App failed to start.').slice(0, ${String(MAX_APP_ERROR_CHARS)});
-    if (normalized === lastError) return;
-    lastError = normalized;
-    parent.postMessage({
-      type: 'droidex:app-error',
-      instanceId,
-      bridgeToken,
-      message: normalized,
-    }, '*');
-  };
-  const onRuntimeError = (event) => {
-    postError(event?.message || 'The interactive App failed to start.');
-  };
-  const onUnhandledRejection = (event) => {
-    const reason = event?.reason;
-    const message = reason && typeof reason === 'object' && 'message' in reason
-      ? String(reason.message)
-      : String(reason || '');
-    postError(message);
-  };
-  addEventListener('error', onRuntimeError);
-  addEventListener('unhandledrejection', onUnhandledRejection);
-  const reportHeight = () => {
-    if (heightFrame) return;
-    heightFrame = requestAnimationFrame(() => {
-      heightFrame = 0;
-      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
-      if (height === lastHeight) return;
-      lastHeight = height;
-      parent.postMessage({ type: 'droidex:app-height', instanceId, bridgeToken, height }, '*');
-    });
-  };
-  const renderMath = (target, latex, options = {}) => {
-    const element = typeof target === 'string' ? document.querySelector(target) : target;
-    if (!(element instanceof Element) || typeof latex !== 'string') return Promise.resolve(false);
-    const requestId = instanceId + '-math-' + String(++mathSequence);
-    return new Promise((resolve) => {
-      pendingMath.set(requestId, { element, resolve });
-      parent.postMessage({
-        type: 'droidex:render-math',
-        instanceId,
-        bridgeToken,
-        requestId,
-        latex,
-        displayMode: options.displayMode === true || element.hasAttribute('data-display'),
-      }, '*');
-    });
-  };
-  const renderAllMath = (root = document) => Promise.all(
-    [...root.querySelectorAll('[data-latex]')].map((element) =>
-      renderMath(element, element.getAttribute('data-latex') ?? '')
-    )
-  );
-  const postReady = () => {
-    parent.postMessage({ type: 'droidex:app-ready', instanceId, bridgeToken }, '*');
-  };
-  const onHostMessage = (event) => {
-    const data = event.data;
-    if (
-      event.source !== parent ||
-      !data ||
-      data.instanceId !== instanceId ||
-      data.bridgeToken !== bridgeToken
-    ) return;
-    if (data.type === 'droidex:host-ready') {
-      postReady();
-      return;
-    }
-    if (data.type !== 'droidex:math-rendered' || typeof data.requestId !== 'string') return;
-    const pending = pendingMath.get(data.requestId);
-    if (!pending) return;
-    pendingMath.delete(data.requestId);
-    if (typeof data.html === 'string') {
-      pending.element.innerHTML = data.html;
-      pending.resolve(true);
-    } else {
-      pending.element.textContent = 'Unable to render this expression.';
-      pending.resolve(false);
-    }
-    reportHeight();
-  };
-  addEventListener('message', onHostMessage);
-  window.droidex = Object.freeze({ renderMath, renderAllMath });
-  addEventListener('DOMContentLoaded', () => {
-    const root = document.querySelector('[data-droidex-app-root]') ??
-      [...document.body.children].find((element) => !['SCRIPT', 'STYLE'].includes(element.tagName));
-    root?.setAttribute('data-droidex-app-root', '');
-    if (root && !root.querySelector('[data-droidex-app-canvas]')) {
-      const visualRegions = [...root.children].filter((element) =>
-        element.matches('svg, canvas') || element.querySelector('svg, canvas')
-      );
-      if (visualRegions.length === 1) {
-        visualRegions[0].setAttribute('data-droidex-app-canvas', '');
-      }
-    }
-    postReady();
-    void renderAllMath();
-    reportHeight();
-    const observer = new ResizeObserver(reportHeight);
-    observer.observe(document.body);
-    if (root && root !== document.body) observer.observe(root);
-    addEventListener('pagehide', () => {
-      if (heightFrame) cancelAnimationFrame(heightFrame);
-      observer.disconnect();
-      removeEventListener('message', onHostMessage);
-      removeEventListener('error', onRuntimeError);
-      removeEventListener('unhandledrejection', onUnhandledRejection);
-      for (const pending of pendingMath.values()) pending.resolve(false);
-      pendingMath.clear();
-    }, { once: true });
-  }, { once: true });
-})();
-</script>
-</head>
-<body>
-${source}
-<style data-droidex-app-host>
-html, body { overflow: hidden !important; }
-body { min-height: 0 !important; padding: 0 !important; }
-[data-droidex-app-root] {
-  width: 100% !important;
-  max-width: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-[data-droidex-app-canvas] {
-  margin-inline: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-</style>
-</body>
-</html>`;
 }
 
 function appBridgeMessageMatches(

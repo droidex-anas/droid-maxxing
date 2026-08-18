@@ -51,6 +51,100 @@ test('a tool_result with a null JSON literal in its content array is not dropped
   assert.equal(result.text, 'done');
 });
 
+function assistantText(text: string): TranscriptEvent[] {
+  return parseSessionLineEvents(
+    'app',
+    'provider',
+    'primary',
+    JSON.parse(messageLine({ role: 'assistant', content: [{ type: 'text', text }] })),
+  );
+}
+
+test('an oversized App answer replays with its fence closed', () => {
+  // Regression: every replayed text block shared the 12k cap, so a real
+  // /visualize answer (25k-35k chars) came back without its closing fence.
+  // After a restart the App rendered its markup with a half-written script:
+  // no interactivity, an empty canvas, and nothing the renderer could recover.
+  const app = `Here is the lab.\n\n\`\`\`app\n<main data-droidex-app-root>${'<p>chart</p>'.repeat(2_000)}</main>\n\`\`\`\n\nSuggested exercise: set a = 6.`;
+  assert.ok(app.length > 12_000);
+
+  const events = assistantText(app);
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].text, app);
+  assert.doesNotMatch(events[0].text ?? '', /\[truncated/);
+});
+
+test('an App answer replays whole with either line ending', () => {
+  // Regression: the fence probe required a bare newline after the info word, so
+  // the same answer with CRLF endings replayed at the shared cap and came back
+  // cut mid-script, while the renderer's scanner would have run it.
+  const body = `<main data-droidex-app-root>${'<p>chart</p>'.repeat(2_500)}</main>`;
+  const lf = `Here is the lab.\n\n\`\`\`app\n${body}\n\`\`\`\n`;
+  const crlf = lf.replaceAll('\n', '\r\n');
+  assert.ok(lf.length > 12_000);
+
+  for (const answer of [lf, crlf]) {
+    const events = assistantText(answer);
+    assert.equal(events[0].text, answer);
+    assert.doesNotMatch(events[0].text ?? '', /\[truncated/);
+  }
+});
+
+test('an App answer keeps its own bound while prose keeps the shared cap', () => {
+  const prose = assistantText('x'.repeat(13_000));
+  assert.equal(prose[0].text, `${'x'.repeat(12_000)}\n\n[truncated 1000 chars]`);
+
+  const fence = '```app\n';
+  const app = assistantText(`${fence}${'y'.repeat(257_000 - fence.length)}`);
+  assert.equal(app[0].text?.length, 256_000 + '\n\n[truncated 1000 chars]'.length);
+  assert.match(app[0].text ?? '', /\[truncated 1000 chars\]$/);
+
+  const toolEvents = parseSessionLineEvents(
+    'app',
+    'provider',
+    'primary',
+    JSON.parse(
+      messageLine({
+        role: 'user',
+        // An `app` fence inside machine output is not a runnable App.
+        content: [
+          { type: 'tool_result', tool_use_id: 't3', content: `${fence}${'z'.repeat(13_000)}` },
+        ],
+      }),
+    ),
+  );
+  assert.equal(toolEvents[0].text?.length, 12_000 + '\n\n[truncated 1007 chars]'.length);
+});
+
+test('only an assistant answer earns the App bound', () => {
+  // An `app` fence outside an assistant answer never becomes a runnable App:
+  // thinking has its own surface and a user bubble renders as plain text. Those
+  // blocks keep the shared cap so replay stays bounded.
+  const fence = '```app\n';
+  const oversized = `${fence}${'y'.repeat(13_000)}`;
+
+  const thinking = parseSessionLineEvents(
+    'app',
+    'provider',
+    'primary',
+    JSON.parse(
+      messageLine({ role: 'assistant', content: [{ type: 'thinking', thinking: oversized }] }),
+    ),
+  );
+  assert.equal(thinking[0].kind, 'thinking');
+  assert.equal(thinking[0].text?.length, 12_000 + '\n\n[truncated 1007 chars]'.length);
+
+  const user = parseSessionLineEvents(
+    'app',
+    'provider',
+    'primary',
+    JSON.parse(messageLine({ role: 'user', content: [{ type: 'text', text: oversized }] })),
+  );
+  assert.equal(user[0].author, 'user');
+  assert.equal(user[0].text?.length, 12_000 + '\n\n[truncated 1007 chars]'.length);
+});
+
 test('llm_only user messages stay hidden (filtering lives in the parser)', () => {
   const visible = parseSessionLineEvents(
     'app',

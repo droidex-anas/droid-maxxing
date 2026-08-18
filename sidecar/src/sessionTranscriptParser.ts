@@ -8,11 +8,17 @@
 // shares.
 import { dateMs, numberValue, objectValue, safeStringify, stringValue } from './values.js';
 import { designPromptDisplayFromText } from './browser/designPromptDisplay.js';
-import { appPromptDisplayFromText } from './appPrompt.js';
+import { appPromptDisplayFromText, hasAppFence } from './appPrompt.js';
 import { parseSkillActivation } from './skillSignals.js';
 import type { SessionRole, TranscriptEvent } from './protocol.js';
 
+// Replayed text is capped so one enormous message cannot dominate a history
+// page. An App answer is the exception: it is a document that only runs when
+// its `app` fence survives whole, so it carries its own far larger bound. At
+// the shared cap a real /visualize answer (25k-35k chars) replayed with the
+// fence cut mid-script and rendered dead after a restart.
 const MAX_TEXT_CHARS = 12_000;
+const MAX_APP_ANSWER_CHARS = 256_000;
 
 export function isLlmOnlyMessage(message: unknown): boolean {
   return objectValue(message)?.visibility === 'llm_only';
@@ -89,11 +95,14 @@ function assistantBlockEvent(
 ): TranscriptEvent | null {
   const type = stringValue(block.type);
   if (type === 'thinking') {
-    const text = trimText(nonEmpty(stringValue(block.thinking), stringValue(block.text)));
+    const text = trimText(
+      nonEmpty(stringValue(block.thinking), stringValue(block.text)),
+      MAX_TEXT_CHARS,
+    );
     return text ? event(base, index, 'thinking', { text }) : null;
   }
   if (type === 'text') {
-    const text = trimText(nonEmpty(stringValue(block.text)));
+    const text = trimAnswerText(nonEmpty(stringValue(block.text)));
     return text ? event(base, index, 'text', { text }) : null;
   }
   if (type === 'tool_use') {
@@ -118,7 +127,8 @@ function nonAssistantBlockEvent(
   if (type === 'tool_result') {
     return event(base, index, 'tool_result', {
       toolName: stringValue(block.name),
-      text: trimText(stringifyToolResult(block.content)),
+      // Machine output, never a runnable App: the shared cap always applies.
+      text: trimText(stringifyToolResult(block.content), MAX_TEXT_CHARS),
       isError: Boolean(block.is_error ?? block.isError),
       // Carry the originating call's id so the renderer can correlate a
       // result to its tool_call exactly (result blocks have no name and
@@ -127,7 +137,8 @@ function nonAssistantBlockEvent(
     });
   }
   if (messageRole === 'user' && type === 'text') {
-    const rawText = trimText(nonEmpty(stringValue(block.text)));
+    // A user bubble renders as plain text, never as a runnable App.
+    const rawText = trimText(nonEmpty(stringValue(block.text)), MAX_TEXT_CHARS);
     const designDisplay = designPromptDisplayFromText(rawText);
     const text = designDisplay?.text ?? appPromptDisplayFromText(rawText) ?? rawText;
     if (!text || isSystemText(text)) return null;
@@ -241,9 +252,15 @@ function stringifyToolResult(value: unknown): string {
   return safeStringify(value);
 }
 
-function trimText(text: string): string {
-  if (text.length <= MAX_TEXT_CHARS) return text;
-  return `${text.slice(0, MAX_TEXT_CHARS)}\n\n[truncated ${String(text.length - MAX_TEXT_CHARS)} chars]`;
+function trimText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n\n[truncated ${String(text.length - max)} chars]`;
+}
+
+// Only an assistant answer becomes a runnable App, so only its text earns the
+// larger bound. Thinking, user text, and tool output keep the shared cap.
+function trimAnswerText(text: string): string {
+  return trimText(text, hasAppFence(text) ? MAX_APP_ANSWER_CHARS : MAX_TEXT_CHARS);
 }
 
 function isSystemText(text: string): boolean {

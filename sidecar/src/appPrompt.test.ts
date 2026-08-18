@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { appPromptDisplayFromText, formatAppPrompt } from './appPrompt.js';
+import { appPromptDisplayFromText, formatAppPrompt, hasAppFence } from './appPrompt.js';
+
+test('hasAppFence recognizes the App answer shape the guidance asks for', () => {
+  assert.equal(hasAppFence('Here it is.\n\n```app\n<main></main>\n```'), true);
+  // Streaming or replay can hand over an answer whose fence is still open.
+  assert.equal(hasAppFence('Here it is.\n\n```app\n<main>'), true);
+  assert.equal(hasAppFence('```app\n<main></main>\n```'), true);
+  assert.equal(hasAppFence('~~~~app\nbody'), true);
+  assert.equal(hasAppFence('> ```app\n> <main></main>'), true);
+  assert.equal(hasAppFence('- ```app\n  <main></main>'), true);
+  // The renderer's scanner splits lines on \r?\n and strips any run of
+  // blockquote or list prefixes, so the probe has to reach those shapes too.
+  assert.equal(hasAppFence('Here it is.\r\n\r\n```app\r\n<main></main>\r\n```'), true);
+  assert.equal(hasAppFence('- > ```app\n  > <main></main>'), true);
+  assert.equal(hasAppFence('>\t```app\n>\t<main></main>'), true);
+  assert.equal(hasAppFence('```app title=lab\n<main></main>\n```'), true);
+
+  assert.equal(hasAppFence('```ts\nconst app = 1;\n```'), false);
+  assert.equal(hasAppFence('```application\nnot an app fence\n```'), false);
+  assert.equal(hasAppFence('the app fence lives inside prose ```app``` inline'), false);
+  assert.equal(hasAppFence('no fences here at all'), false);
+});
 
 test('formatAppPrompt keeps the request recoverable and adds broad internal App guidance', () => {
   const prompt = formatAppPrompt('/visualize compare renderer timings', 'create');

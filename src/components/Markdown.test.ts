@@ -25,6 +25,31 @@ test('restored app fences stay inert behind a compact Play card', () => {
   assert.doesNotMatch(html, /srcdoc=/i);
 });
 
+test('an App fence that saved history cut short reports the loss instead of offering Play', () => {
+  const source = '```app\n<main data-droidex-app-root><script>const points = [';
+  const html = renderToStaticMarkup(createElement(Markdown, { cutOffAppBlocks: true }, source));
+
+  assert.match(html, /role="alert"/);
+  assert.match(html, /Saved history kept only part/);
+  assert.doesNotMatch(html, /aria-label="Play app"/);
+  assert.doesNotMatch(html, /<iframe/i);
+});
+
+test('a cut-off message keeps its earlier complete App playable', () => {
+  const source = [
+    '```app',
+    '<main>Complete</main>',
+    '```',
+    '',
+    '```app',
+    '<main>Cut off<script>const points = [',
+  ].join('\n');
+  const html = renderToStaticMarkup(createElement(Markdown, { cutOffAppBlocks: true }, source));
+
+  assert.equal(html.match(/aria-label="Play app"/g)?.length, 1);
+  assert.equal(html.match(/role="alert"/g)?.length, 1);
+});
+
 test('a complete app fence in the live response opens automatically', () => {
   const source = '```app\n<main>Live app</main>\n```';
   const html = renderToStaticMarkup(createElement(Markdown, { autoPlayAppBlocks: true }, source));

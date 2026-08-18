@@ -6,16 +6,20 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AppBlock, RunningAppFrame } from './AppBlock';
 import { AppBlockErrorFallback } from './AppBlockErrorFallback';
 import {
+  APP_BUILD_TIMEOUT_MS,
+  MIN_APP_BUILD_MS,
   appBlockHeightFromMessage,
   appBlockStartupTransition,
+  isAppFrameVisible,
   appBlockMathRequestFromMessage,
   appBlockReducer,
-  createAppDocument,
+  createAppHeightScheduler,
   hasAppBlock,
   hasCompleteAppBlock,
   normalizeAppBlockHeight,
   renderAppBlockMath,
 } from './appBlockRuntime';
+import { createAppDocument } from './appBlockDocument';
 
 test('Play starts an app and Stop releases it back to the inert preview', () => {
   assert.equal(appBlockReducer('idle', 'play'), 'running');
@@ -50,6 +54,21 @@ test('an app under construction is a status surface with no executable control',
   assert.doesNotMatch(html, /const points/);
 });
 
+test('an App with a cut-off source offers no playback control', () => {
+  const html = renderToStaticMarkup(
+    createElement(AppBlock, {
+      source: '<main><script>const points = [',
+      isCutOff: true,
+    }),
+  );
+
+  assert.match(html, /role="alert"/);
+  assert.match(html, /Saved history kept only part/);
+  assert.doesNotMatch(html, /aria-label="Play app"/);
+  assert.doesNotMatch(html, /<iframe/i);
+  assert.doesNotMatch(html, /const points/);
+});
+
 test('the running document is self-contained and blocks network and nested content', () => {
   const source =
     '<main><h1>Responsive app</h1></main><script>document.body.dataset.ready="yes"</script>';
@@ -70,7 +89,9 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /<meta name="viewport"/);
   assert.match(document, /droidex:app-height/);
   assert.match(document, /bridgeToken/);
-  assert.match(document, /requestAnimationFrame/);
+  // The host hides the frame until it reports a height, and a hidden frame runs
+  // no animation frames, so the report must not wait for one.
+  assert.doesNotMatch(document, /requestAnimationFrame/);
   assert.match(document, /observer\.observe\(document\.body\)/);
   assert.match(document, /"app-1"/);
   assert.match(document, /color-scheme: light/);
@@ -161,6 +182,68 @@ test('the running frame keeps app code inside a script-only sandbox', () => {
   assert.doesNotMatch(html, /transition-\[height\]/);
 });
 
+test('a started App builds behind a status surface until it reports its size', () => {
+  const html = renderToStaticMarkup(
+    createElement(RunningAppFrame, {
+      source: '<button>Slow app</button>',
+      instanceId: 'app-build',
+    }),
+  );
+
+  assert.match(html, /role="status"/);
+  assert.match(html, /Starting interactive app/);
+  // The frame still loads while hidden, and stays out of the reading and tab
+  // order until it is revealed at its measured height.
+  assert.match(html, /loading="eager"/);
+  assert.match(html, /aria-hidden="true"/);
+  assert.match(html, /tabindex="-1"/i);
+  // Off-layout, so the hidden frame's default height cannot reserve space the
+  // measured App will not use.
+  assert.match(html, /invisible pointer-events-none absolute inset-x-0 top-0/);
+});
+
+test('the build surface waits for a measurement but never hides a silent App', () => {
+  assert.equal(
+    isAppFrameVisible({ measured: true, floorElapsed: false, expired: false }),
+    false,
+    'a measurement inside the build floor must not flash the frame open',
+  );
+  assert.equal(isAppFrameVisible({ measured: false, floorElapsed: true, expired: false }), false);
+  assert.equal(isAppFrameVisible({ measured: true, floorElapsed: true, expired: false }), true);
+  assert.equal(
+    isAppFrameVisible({ measured: false, floorElapsed: true, expired: true }),
+    true,
+    'an App that never reports a height is still revealed',
+  );
+  assert.ok(MIN_APP_BUILD_MS < APP_BUILD_TIMEOUT_MS);
+});
+
+test('height reports coalesce on a timer so a hidden host window still measures', () => {
+  // Regression: the host applied measured heights on an animation frame, which
+  // a hidden or minimized window never runs. The frame stays behind its build
+  // surface until a height lands, so that report cannot depend on painting.
+  const applied: number[] = [];
+  const scheduler = createAppHeightScheduler((height) => applied.push(height));
+
+  scheduler.schedule(400);
+  scheduler.schedule(520);
+  scheduler.schedule(610);
+  assert.deepEqual(applied, [], 'a burst applies nothing synchronously');
+
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      assert.deepEqual(applied, [610], 'a burst collapses into the newest height');
+
+      scheduler.schedule(700);
+      scheduler.cancel();
+      setTimeout(() => {
+        assert.deepEqual(applied, [610], 'a cancelled scheduler applies nothing');
+        resolve();
+      });
+    });
+  });
+});
+
 test('a script failure is reported before the App can announce readiness', () => {
   const document = createAppDocument(
     '<script>const broken = ;</script>',
@@ -183,8 +266,8 @@ test('a script failure is reported before the App can announce readiness', () =>
     window: {},
     Element: class {},
     document: {},
-    requestAnimationFrame: () => 1,
-    cancelAnimationFrame: () => undefined,
+    setTimeout: () => 1,
+    clearTimeout: () => undefined,
     ResizeObserver: class {},
     addEventListener(type: string, listener: (event: unknown) => void) {
       listeners.set(type, listener);
@@ -431,8 +514,8 @@ test('the iframe document repeats readiness for each valid host handshake', () =
     window: {},
     Element: class {},
     document: {},
-    requestAnimationFrame: () => 1,
-    cancelAnimationFrame: () => undefined,
+    setTimeout: () => 1,
+    clearTimeout: () => undefined,
     ResizeObserver: class {},
     addEventListener(type: string, listener: (event: { source: object; data: unknown }) => void) {
       listeners.set(type, listener);
@@ -461,6 +544,127 @@ test('the iframe document repeats readiness for each valid host handshake', () =
     { type: 'droidex:app-ready', instanceId: 'app-ready', bridgeToken: 'token' },
     { type: 'droidex:app-ready', instanceId: 'app-ready', bridgeToken: 'token' },
   ]);
+});
+
+test('the iframe reports its initial height only after built-in math settles', async () => {
+  const documentHtml = createAppDocument(
+    '<main><span data-latex="x^2">x²</span></main>',
+    'app-math-height',
+    undefined,
+    'token',
+  );
+  const script = /<script>([\s\S]*?)<\/script>/.exec(documentHtml)?.[1];
+  assert.ok(script);
+
+  class TestElement {
+    innerHTML = '';
+    textContent = '';
+    tagName = 'SPAN';
+    children: TestElement[] = [];
+    scrollHeight = 500;
+
+    getAttribute(name: string) {
+      return name === 'data-latex' ? 'x^2' : null;
+    }
+    hasAttribute() {
+      return false;
+    }
+    matches() {
+      return false;
+    }
+    querySelector() {
+      return null;
+    }
+    querySelectorAll() {
+      return [];
+    }
+    setAttribute() {}
+  }
+
+  const mathElement = new TestElement();
+  const body = new TestElement();
+  body.tagName = 'BODY';
+  const documentElement = { scrollHeight: 500 };
+  const runtimeDocument = {
+    body,
+    documentElement,
+    querySelector: () => null,
+    querySelectorAll: (selector: string) => (selector === '[data-latex]' ? [mathElement] : []),
+  };
+  const listeners = new Map<string, (event?: { source?: object; data?: unknown }) => void>();
+  const messages: Record<string, unknown>[] = [];
+  const pendingReports: (() => void)[] = [];
+  let observerCallback: (() => void) | undefined;
+  const parent = {
+    postMessage(message: Record<string, unknown>) {
+      messages.push(message);
+    },
+  };
+
+  vm.runInNewContext(script, {
+    parent,
+    window: {},
+    Element: TestElement,
+    document: runtimeDocument,
+    setTimeout(callback: () => void) {
+      pendingReports.push(callback);
+      return pendingReports.length;
+    },
+    clearTimeout: () => undefined,
+    ResizeObserver: class {
+      constructor(callback: () => void) {
+        observerCallback = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+    addEventListener(
+      type: string,
+      listener: (event?: { source?: object; data?: unknown }) => void,
+    ) {
+      listeners.set(type, listener);
+    },
+    removeEventListener: () => undefined,
+  });
+
+  listeners.get('DOMContentLoaded')?.();
+  assert.ok(observerCallback);
+  // A resize before math settles must not publish the pre-math layout: the host
+  // shows the App at its first reported height.
+  observerCallback();
+  while (pendingReports.length > 0) pendingReports.shift()?.();
+  assert.equal(
+    messages.some((message) => message.type === 'droidex:app-height'),
+    false,
+  );
+
+  body.scrollHeight = 600;
+  documentElement.scrollHeight = 600;
+  listeners.get('message')?.({
+    source: parent,
+    data: {
+      type: 'droidex:math-rendered',
+      instanceId: 'app-math-height',
+      bridgeToken: 'token',
+      requestId: 'app-math-height-math-1',
+      html: '<math></math>',
+    },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  while (pendingReports.length > 0) pendingReports.shift()?.();
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(messages.filter((message) => message.type === 'droidex:app-height'))),
+    [
+      {
+        type: 'droidex:app-height',
+        instanceId: 'app-math-height',
+        bridgeToken: 'token',
+        height: 600,
+      },
+    ],
+  );
 });
 
 test('short and functional CSS colors select the correct canvas scheme', async () => {
