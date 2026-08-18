@@ -34,7 +34,6 @@ import { useDocumentVisible } from './hooks/useDocumentVisible';
 import CommandPalette from './components/CommandPalette';
 import SettingsPanel from './components/SettingsPanel';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
-import AskUserModal from './components/AskUserModal';
 import SpecWikiModal from './components/SpecWikiModal';
 import { BrowserFocusWorkspace } from './components/browser/BrowserFocusWorkspace';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
@@ -103,9 +102,6 @@ export default function App() {
       childAccess: current.childAccess,
       commandPaletteOpen: current.commandPaletteOpen,
       customThemes: current.customThemes,
-      hasPendingQuestion: Boolean(
-        current.activeAppSessionId && current.pendingQuestions[current.activeAppSessionId],
-      ),
       hasSessionContent: Boolean(
         activeSession && (current.transcripts[activeSession.appSessionId] ?? []).length > 0,
       ),
@@ -634,7 +630,6 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
-            {state.hasPendingQuestion && <AskUserModal />}
           </div>
         </main>
 
