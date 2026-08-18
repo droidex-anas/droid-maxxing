@@ -46,6 +46,14 @@ function commentsSectionError(
   return sectionError(true, result.message, 'Could not load PR comments', showErrors, previous);
 }
 
+export function prevForSettledMeta(
+  live: PrDetailState,
+  cwd: string | null,
+  number: number | null,
+): PrDetailState {
+  return live.cwd === cwd && live.number === number ? live : initialPrDetailState;
+}
+
 export function resolveMeta(
   generation: number,
   results: {
@@ -102,8 +110,6 @@ export function usePullRequestDetail(
     (userInitiated: boolean) => {
       if (!cwd || number == null || !active) return;
       const generation = generationRef.current;
-      const prev = stateRef.current;
-      const showErrors = !prev.loaded || userInitiated;
       if (userInitiated) dispatch({ type: 'meta-start', generation });
       void Promise.all([
         viewPullRequest(cwd, number),
@@ -111,6 +117,9 @@ export function usePullRequestDetail(
         getPrComments(cwd, number),
       ]).then(([viewRes, checksRes, commentsRes]) => {
         if (generation !== generationRef.current) return;
+        const live = stateRef.current;
+        const prev = prevForSettledMeta(live, cwd, number);
+        const showErrors = !prev.loaded || userInitiated;
         const resolved = resolveMeta(
           generation,
           { view: viewRes, checks: checksRes, comments: commentsRes },

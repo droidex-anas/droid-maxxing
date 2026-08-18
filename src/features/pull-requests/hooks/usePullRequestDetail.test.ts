@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { PrCheck, PrComment } from '../../../types/vcs';
 import { initialPrDetailState } from '../lib/prDetailState';
-import { resolveMeta } from './usePullRequestDetail';
+import { prevForSettledMeta, resolveMeta } from './usePullRequestDetail';
 
 const failedView = { ok: false as const, message: 'view down', pr: null };
 const failedChecks = { ok: false as const, message: 'checks down', checks: [] };
@@ -70,6 +70,36 @@ test('all-fail refresh keeps last good rows and surfaces section errors', () => 
   assert.equal(resolved.event.metaError, 'view down');
   assert.equal(resolved.event.checksError, 'checks down');
   assert.equal(resolved.event.commentsError, 'comments down');
+});
+
+test('prev from /repo#1 is not kept for /repo#2', () => {
+  const liveFromOne = {
+    ...initialPrDetailState,
+    cwd: '/repo',
+    number: 1,
+    loaded: true,
+    body: 'PR 1 body',
+    checks: [sampleCheck],
+    comments: [sampleComment],
+    checksError: null,
+    commentsError: null,
+    metaError: null,
+  };
+  const prev = prevForSettledMeta(liveFromOne, '/repo', 2);
+  const showErrors = !prev.loaded || false;
+  const resolved = resolveMeta(
+    4,
+    { view: failedView, checks: failedChecks, comments: failedComments },
+    prev,
+    showErrors,
+  );
+  assert.equal(prev, initialPrDetailState);
+  assert.equal(resolved.event.body, '');
+  assert.deepEqual(resolved.event.checks, []);
+  assert.deepEqual(resolved.event.comments, []);
+  assert.equal(resolved.event.checksError, 'checks down');
+  assert.equal(resolved.event.commentsError, 'comments down');
+  assert.equal(resolved.event.metaError, 'view down');
 });
 
 test('poll all-fail after success keeps last good rows and previous errors', () => {
