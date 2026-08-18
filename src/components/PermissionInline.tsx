@@ -2,8 +2,8 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondPermission } from '../lib/commands';
 import type { PermissionKind, PermissionOutcome } from '../types/bridge';
+import { inlineCardMotion } from './inlineCardMotion';
 
-const EASE = [0.16, 1, 0.3, 1] as const;
 const ACCENT = 'var(--droid-accent)';
 // Permission asks are an attention signal: a small warning dot marks the ask
 // while the card itself stays on the standard elevated surface.
@@ -104,10 +104,7 @@ export default function PermissionInline() {
     <AnimatePresence>
       <motion.div
         key={req.requestId}
-        initial={{ opacity: 0, y: 8, scale: 0.985 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.985 }}
-        transition={{ duration: reduceMotion ? 0 : 0.22, ease: EASE }}
+        {...inlineCardMotion(reduceMotion)}
         className="mb-2.5 overflow-hidden rounded-2xl border border-droid-border bg-droid-elevated shadow-[0_10px_32px_rgba(0,0,0,0.35)]"
       >
         <div className="px-4 pt-3.5 pb-3">

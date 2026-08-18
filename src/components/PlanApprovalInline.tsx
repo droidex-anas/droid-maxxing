@@ -5,8 +5,8 @@ import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useSt
 import { respondPermission, sendToSession, sendToSessionNow } from '../lib/commands';
 import type { Autonomy, PermissionOutcome } from '../types/bridge';
 import { isAppUpdateInstalling, useAppUpdate } from '../lib/appUpdate';
+import { inlineCardMotion } from './inlineCardMotion';
 
-const EASE = [0.16, 1, 0.3, 1] as const;
 const ACCENT = 'var(--droid-accent)';
 
 const AUTONOMY: { value: Autonomy; label: string; outcome: PermissionOutcome }[] = [
@@ -103,10 +103,7 @@ export default function PlanApprovalInline() {
     <AnimatePresence>
       <motion.div
         key={req.requestId}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 8 }}
-        transition={{ duration: reduceMotion ? 0 : 0.22, ease: EASE }}
+        {...inlineCardMotion(reduceMotion)}
         className="mb-2.5 overflow-hidden rounded-2xl border border-droid-border bg-droid-elevated shadow-[0_10px_32px_rgba(0,0,0,0.35)]"
       >
         <div className="flex items-center gap-2 px-4 pt-3.5 pb-3">

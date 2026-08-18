@@ -1,10 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondQuestion } from '../lib/commands';
 import type { SessionQuestion } from '../types/bridge';
+import { inlineCardMotion } from './inlineCardMotion';
+import {
+  answerFor,
+  canAdvance,
+  createStepper,
+  isLastStep,
+  isTyping,
+  stepperReducer,
+  submissionAnswers,
+} from './askUserStepper';
 
-const EASE = [0.16, 1, 0.3, 1] as const;
 const ACCENT = 'var(--droid-accent)';
 
 // Inline question card shown above the composer when Droid asks the user
@@ -66,17 +75,16 @@ export function QuestionCard({
   onCancel: () => void;
 }) {
   const reduceMotion = useReducedMotion();
-  const [current, setCurrent] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [customOpen, setCustomOpen] = useState<Record<number, boolean>>({});
+  const total = question.questions.length;
+  const [stepper, dispatchStep] = useReducer(stepperReducer, total, createStepper);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const q = question.questions[current];
-  const total = question.questions.length;
-  const isLast = current === total - 1;
-  const answer = (answers[q.index] ?? '').trim();
-  const typing = customOpen[q.index] ?? false;
-  const canAdvance = answer.length > 0;
+  const step = stepper.current;
+  const q = question.questions[step];
+  const isLast = isLastStep(stepper);
+  const answer = answerFor(stepper, q.index);
+  const typing = isTyping(stepper, q.index);
+  const advanceEnabled = canAdvance(stepper, q.index);
 
   useEffect(() => {
     if (typing) {
@@ -85,38 +93,25 @@ export function QuestionCard({
         clearTimeout(t);
       };
     }
-  }, [typing, current]);
+  }, [typing, step]);
 
   const pickOption = (opt: string) => {
-    setAnswers((p) => ({ ...p, [q.index]: opt }));
-    setCustomOpen((p) => ({ ...p, [q.index]: false }));
+    dispatchStep({ type: 'pickOption', questionIndex: q.index, option: opt });
   };
 
   const openCustom = () => {
-    setCustomOpen((p) => ({ ...p, [q.index]: true }));
+    dispatchStep({ type: 'openCustomAnswer', questionIndex: q.index });
   };
 
   const next = () => {
-    if (!canAdvance) return;
-    if (isLast) {
-      onAnswer(
-        question.questions.map((qq) => ({
-          index: qq.index,
-          question: qq.question,
-          answer: (answers[qq.index] ?? '').trim(),
-        })),
-      );
-    } else {
-      setCurrent((c) => c + 1);
-    }
+    if (!advanceEnabled) return;
+    if (isLast) onAnswer(submissionAnswers(question.questions, stepper));
+    else dispatchStep({ type: 'forward' });
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8, scale: 0.985 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 8, scale: 0.985 }}
-      transition={{ duration: reduceMotion ? 0 : 0.22, ease: EASE }}
+      {...inlineCardMotion(reduceMotion)}
       className="mb-2.5 overflow-hidden rounded-2xl border border-droid-border bg-droid-elevated shadow-[0_10px_32px_rgba(0,0,0,0.35)]"
     >
       <div className="flex items-start gap-2 px-4 pt-3.5">
@@ -130,7 +125,7 @@ export function QuestionCard({
         </div>
         {total > 1 && (
           <span className="shrink-0 pt-px text-[11px] text-droid-text-muted">
-            {current + 1} of {total}
+            {step + 1} of {total}
           </span>
         )}
       </div>
@@ -190,9 +185,9 @@ export function QuestionCard({
             <input
               ref={inputRef}
               type="text"
-              value={answers[q.index] ?? ''}
+              value={stepper.answers[q.index] ?? ''}
               onChange={(e) => {
-                setAnswers((p) => ({ ...p, [q.index]: e.target.value }));
+                dispatchStep({ type: 'typeAnswer', questionIndex: q.index, value: e.target.value });
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -216,11 +211,11 @@ export function QuestionCard({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 px-4 pt-2.5 pb-3.5">
-        {current > 0 && (
+        {step > 0 && (
           <button
             type="button"
             onClick={() => {
-              setCurrent((c) => c - 1);
+              dispatchStep({ type: 'back' });
             }}
             className="rounded-full px-3.5 py-1.5 text-[12px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-surface hover:text-droid-text"
           >
@@ -237,7 +232,7 @@ export function QuestionCard({
         <button
           type="button"
           onClick={next}
-          disabled={!canAdvance}
+          disabled={!advanceEnabled}
           className="rounded-full px-4 py-1.5 text-[12px] font-semibold text-droid-bg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
           style={{ background: ACCENT }}
         >
