@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { respondPermission, sendToSession, sendToSessionNow } from '../lib/commands';
@@ -21,6 +21,7 @@ const AUTONOMY: { value: Autonomy; label: string; outcome: PermissionOutcome }[]
 // decision (implement vs keep iterating) plus an optional steered comment.
 export default function PlanApprovalInline() {
   const dispatch = useStoreDispatch();
+  const reduceMotion = useReducedMotion();
   const { downloading: appUpdateInstalling } = useAppUpdate();
   // Plan approvals are session-scoped: only surface the one belonging to the
   // chat the user is looking at.
@@ -92,7 +93,7 @@ export default function PlanApprovalInline() {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 8 }}
-        transition={{ duration: 0.22, ease: EASE }}
+        transition={{ duration: reduceMotion ? 0 : 0.22, ease: EASE }}
         className="mb-2.5 overflow-hidden rounded-2xl border border-droid-border bg-droid-elevated shadow-[0_10px_32px_rgba(0,0,0,0.35)]"
       >
         <div className="flex items-center gap-2 px-4 pt-3.5 pb-3">
@@ -148,6 +149,7 @@ export default function PlanApprovalInline() {
                   <button
                     key={a.value}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => {
                       setAutonomy(a.value);
                     }}
