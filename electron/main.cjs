@@ -377,6 +377,9 @@ function registerIpc() {
   ipcMain.handle('github-detect-pr', (_event, { dir, options }) =>
     githubVcs.detectPr(dir, options),
   );
+  ipcMain.handle('github-list-prs', (_event, { dir, options }) => githubVcs.listPrs(dir, options));
+  ipcMain.handle('github-view-pr', (_event, { dir, options }) => githubVcs.viewPr(dir, options));
+  ipcMain.handle('github-pr-diff', (_event, { dir, options }) => githubVcs.prDiff(dir, options));
   ipcMain.handle('github-pr-checks', (_event, { dir, options }) =>
     githubVcs.prChecks(dir, options),
   );

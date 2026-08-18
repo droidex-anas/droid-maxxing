@@ -108,7 +108,52 @@ const PR_FIELDS = [
   'createdAt',
   'updatedAt',
   'author',
+  'reviewRequests',
+  'reviews',
 ].join(',');
+
+function loginOf(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  return value.login || value.name || null;
+}
+
+function normalizeReviewRequests(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(loginOf).filter(Boolean);
+}
+
+function normalizeReviews(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ({
+      author: loginOf(item?.author) || '',
+      state: String(item?.state || '').toLowerCase(),
+    }))
+    .filter((item) => item.author);
+}
+
+function normalizePr(pr) {
+  return {
+    number: pr.number,
+    title: pr.title || '',
+    state: String(pr.state || '').toLowerCase(),
+    url: pr.url || '',
+    isDraft: !!pr.isDraft,
+    headRefName: pr.headRefName || null,
+    baseRefName: pr.baseRefName || null,
+    mergeable: pr.mergeable ? String(pr.mergeable).toLowerCase() : null,
+    reviewDecision: pr.reviewDecision ? String(pr.reviewDecision).toLowerCase() : null,
+    additions: pr.additions ?? 0,
+    deletions: pr.deletions ?? 0,
+    changedFiles: pr.changedFiles ?? 0,
+    createdAt: pr.createdAt || null,
+    updatedAt: pr.updatedAt || null,
+    author: loginOf(pr.author),
+    reviewRequests: normalizeReviewRequests(pr.reviewRequests),
+    reviews: normalizeReviews(pr.reviews),
+  };
+}
 
 // Distinguishes "queried successfully, no PR" ({ ok: true, pr: null }) from a
 // failed query ({ ok: false }), so a transient gh error never erases a PR the
@@ -146,24 +191,76 @@ async function detectPr(dir, { branch } = {}) {
     pr = parseJson(res.stdout, null);
   }
   if (!pr || typeof pr.number !== 'number') return { ok: true, pr: null };
-  const normalized = {
-    number: pr.number,
-    title: pr.title || '',
-    state: String(pr.state || '').toLowerCase(), // open | closed | merged
-    url: pr.url || '',
-    isDraft: !!pr.isDraft,
-    headRefName: pr.headRefName || null,
-    baseRefName: pr.baseRefName || null,
-    mergeable: pr.mergeable ? String(pr.mergeable).toLowerCase() : null,
-    reviewDecision: pr.reviewDecision ? String(pr.reviewDecision).toLowerCase() : null,
-    additions: pr.additions ?? 0,
-    deletions: pr.deletions ?? 0,
-    changedFiles: pr.changedFiles ?? 0,
-    createdAt: pr.createdAt || null,
-    updatedAt: pr.updatedAt || null,
-    author: pr.author?.login || null,
+  return { ok: true, pr: normalizePr(pr) };
+}
+
+async function listPrs(dir, { state = 'open', limit = 50 } = {}, runGh = gh) {
+  const list = await runGh(dir, [
+    'pr',
+    'list',
+    '--state',
+    state,
+    '--limit',
+    String(limit),
+    '--json',
+    PR_FIELDS,
+  ]);
+  if (list.spawnFailed) {
+    return { ok: false, reason: 'gh_unavailable', viewerLogin: null, prs: [] };
+  }
+  if (list.code !== 0) {
+    return {
+      ok: false,
+      reason: 'gh_error',
+      message: list.stderr.trim(),
+      viewerLogin: null,
+      prs: [],
+    };
+  }
+  const rows = parseJson(list.stdout, null);
+  if (!Array.isArray(rows)) {
+    return {
+      ok: false,
+      reason: 'gh_error',
+      message: 'invalid list payload',
+      viewerLogin: null,
+      prs: [],
+    };
+  }
+  const user = await runGh(dir, ['api', 'user', '--jq', '.login']);
+  const viewerLogin = user.code === 0 ? String(user.stdout || '').trim() || null : null;
+  return {
+    ok: true,
+    viewerLogin,
+    prs: rows.filter((row) => typeof row?.number === 'number').map(normalizePr),
   };
-  return { ok: true, pr: normalized };
+}
+
+async function viewPr(dir, { prNumber } = {}, runGh = gh) {
+  const selector = prSelector(prNumber);
+  if (selector == null) return { ok: false, reason: 'missing_pr', pr: null };
+  const res = await runGh(dir, ['pr', 'view', '--json', `${PR_FIELDS},body`, '--', selector]);
+  if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable', pr: null };
+  if (res.code !== 0) {
+    return { ok: false, reason: 'gh_error', message: res.stderr.trim(), pr: null };
+  }
+  const raw = parseJson(res.stdout, null);
+  if (!raw || typeof raw.number !== 'number') return { ok: true, pr: null };
+  return {
+    ok: true,
+    pr: { ...normalizePr(raw), body: typeof raw.body === 'string' ? raw.body : '' },
+  };
+}
+
+async function prDiff(dir, { prNumber } = {}, runGh = gh) {
+  const selector = prSelector(prNumber);
+  if (selector == null) return { ok: false, reason: 'missing_pr', diff: '' };
+  const res = await runGh(dir, ['pr', 'diff', '--', selector], { timeout: 30000 });
+  if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable', diff: '' };
+  if (res.code !== 0) {
+    return { ok: false, reason: 'gh_error', message: res.stderr.trim(), diff: '' };
+  }
+  return { ok: true, diff: String(res.stdout || '') };
 }
 
 async function prChecks(dir, { prNumber } = {}) {
@@ -340,8 +437,12 @@ module.exports = {
   resolveGhExecutable,
   // Exported for unit tests: the validation boundary for PR selectors.
   prSelector,
+  normalizePr,
   normalizePrComments,
   detectPr,
+  listPrs,
+  viewPr,
+  prDiff,
   prChecks,
   prComments,
   createPr,

@@ -8,11 +8,14 @@ const {
   cancelSetup,
   install,
   isGithubDeviceUrl,
+  listPrs,
   normalizePrComments,
   prComments,
+  prDiff,
   prSelector,
   resolveBrewExecutable,
   resolveGhExecutable,
+  viewPr,
 } = require('./github.cjs');
 const { runSetupFile } = require('./githubSetup.cjs');
 
@@ -946,4 +949,101 @@ test('PR comments fail only when neither source succeeds', async () => {
   assert.deepEqual(result.comments, []);
   assert.match(result.message, /pr failed/);
   assert.match(result.message, /api failed/);
+});
+
+test('listPrs returns normalized rows and the viewer login', async () => {
+  const runGh = async (_cwd, args) => {
+    runGh.calls.push(args);
+    if (args[0] === 'api') return ghResult({ stdout: 'octocat\n' });
+    return ghResult({
+      stdout: JSON.stringify([
+        {
+          number: 12,
+          title: 'Add inbox',
+          state: 'OPEN',
+          url: 'https://example.test/pull/12',
+          isDraft: false,
+          headRefName: 'feat',
+          baseRefName: 'main',
+          mergeable: 'MERGEABLE',
+          reviewDecision: 'REVIEW_REQUIRED',
+          additions: 4,
+          deletions: 1,
+          changedFiles: 2,
+          createdAt: '2026-08-18T00:00:00Z',
+          updatedAt: '2026-08-18T01:00:00Z',
+          author: { login: 'ana' },
+          reviewRequests: [{ login: 'octocat' }],
+          reviews: [{ author: { login: 'dev' }, state: 'COMMENTED' }],
+        },
+      ]),
+    });
+  };
+  runGh.calls = [];
+  const result = await listPrs('/repo', { state: 'open', limit: 50 }, runGh);
+  assert.equal(result.ok, true);
+  assert.equal(result.viewerLogin, 'octocat');
+  assert.equal(result.prs[0].number, 12);
+  assert.deepEqual(result.prs[0].reviewRequests, ['octocat']);
+  assert.deepEqual(result.prs[0].reviews, [{ author: 'dev', state: 'commented' }]);
+  assert.ok(runGh.calls[0].includes('--json'));
+});
+
+test('listPrs failed gh keeps no invented rows', async () => {
+  const runGh = async (_cwd, args) => {
+    if (args[0] === 'api') return ghResult({ stdout: 'octocat\n' });
+    return ghResult({ code: 1, stderr: 'boom' });
+  };
+  const result = await listPrs('/repo', {}, runGh);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.prs, []);
+  assert.equal(result.viewerLogin, null);
+});
+
+test('viewPr rejects a non-integer selector before spawning gh', async () => {
+  let spawned = false;
+  const runGh = async () => {
+    spawned = true;
+    return ghResult();
+  };
+  const result = await viewPr('/repo', { prNumber: 'https://github.com/o/r/pull/1' }, runGh);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'missing_pr');
+  assert.equal(result.pr, null);
+  assert.equal(spawned, false);
+});
+
+test('viewPr returns body on the detail payload', async () => {
+  const runGh = async () =>
+    ghResult({
+      stdout: JSON.stringify({
+        number: 12,
+        title: 'Add inbox',
+        state: 'OPEN',
+        url: 'https://example.test/pull/12',
+        isDraft: false,
+        headRefName: 'feat',
+        baseRefName: 'main',
+        body: 'Hello',
+        author: { login: 'ana' },
+        reviewRequests: [],
+        reviews: [],
+      }),
+    });
+  const result = await viewPr('/repo', { prNumber: 12 }, runGh);
+  assert.equal(result.ok, true);
+  assert.equal(result.pr.body, 'Hello');
+  assert.deepEqual(result.pr.reviewRequests, []);
+});
+
+test('prDiff rejects a non-integer selector and returns patch text on success', async () => {
+  const bad = await prDiff('/repo', { prNumber: '--repo=evil' }, async () => ghResult());
+  assert.equal(bad.ok, false);
+  assert.equal(bad.diff, '');
+  const good = await prDiff('/repo', { prNumber: 12 }, async (_cwd, args) => {
+    assert.deepEqual(args.slice(-2), ['--', '12']);
+    return ghResult({ stdout: 'diff --git a/a.ts b/a.ts\n' });
+  });
+  assert.equal(good.ok, true);
+  assert.match(good.diff, /diff --git/);
 });

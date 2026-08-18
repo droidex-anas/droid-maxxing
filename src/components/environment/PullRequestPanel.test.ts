@@ -21,6 +21,8 @@ const pr: PullRequest = {
   createdAt: '2026-08-04T10:00:00Z',
   updatedAt: '2026-08-04T10:00:00Z',
   author: 'author',
+  reviewRequests: [],
+  reviews: [],
 };
 
 test('PR comments expose reactions in collapsed cards with a send control', () => {

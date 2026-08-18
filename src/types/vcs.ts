@@ -151,6 +151,11 @@ export interface PushOptions {
   force?: boolean;
 }
 
+export interface PullRequestReviewRef {
+  author: string;
+  state: string;
+}
+
 export interface PullRequest {
   number: number;
   title: string;
@@ -167,6 +172,34 @@ export interface PullRequest {
   createdAt: string | null;
   updatedAt: string | null;
   author: string | null;
+  reviewRequests: string[];
+  reviews: PullRequestReviewRef[];
+}
+
+export interface PullRequestListResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  viewerLogin: string | null;
+  prs: PullRequest[];
+}
+
+export interface PullRequestDetail extends PullRequest {
+  body: string;
+}
+
+export interface PullRequestViewResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  pr: PullRequestDetail | null;
+}
+
+export interface PullRequestDiffResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  diff: string;
 }
 
 // `ok: false` means the lookup itself failed (gh missing, network, auth), not

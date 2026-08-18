@@ -9,6 +9,9 @@ import type {
   PrChecksResult,
   PrCommentsResult,
   PullRequest,
+  PullRequestDiffResult,
+  PullRequestListResult,
+  PullRequestViewResult,
 } from '../types/vcs';
 
 export function isGithubAuthCodeCopied(
@@ -96,6 +99,45 @@ export async function detectPullRequest(dir: string, branch?: string): Promise<D
     return await api.githubDetectPr(dir, { branch });
   } catch {
     return { ok: false, pr: null };
+  }
+}
+
+export async function listPullRequests(
+  dir: string,
+  options: { state?: string; limit?: number } = {},
+): Promise<PullRequestListResult> {
+  const api = githubApi();
+  if (!api || !dir) return { ok: true, viewerLogin: null, prs: [] };
+  try {
+    return await api.githubListPrs(dir, options);
+  } catch {
+    return { ok: false, reason: 'error', viewerLogin: null, prs: [] };
+  }
+}
+
+export async function viewPullRequest(
+  dir: string,
+  prNumber: number,
+): Promise<PullRequestViewResult> {
+  const api = githubApi();
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', pr: null };
+  try {
+    return await api.githubViewPr(dir, { prNumber });
+  } catch {
+    return { ok: false, reason: 'error', pr: null };
+  }
+}
+
+export async function getPullRequestDiff(
+  dir: string,
+  prNumber: number,
+): Promise<PullRequestDiffResult> {
+  const api = githubApi();
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', diff: '' };
+  try {
+    return await api.githubPrDiff(dir, { prNumber });
+  } catch {
+    return { ok: false, reason: 'error', diff: '' };
   }
 }
 
