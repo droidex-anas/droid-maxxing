@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
@@ -37,6 +37,19 @@ export default function PlanApprovalInline() {
   const [autonomy, setAutonomy] = useState<Autonomy>('high');
   const [comment, setComment] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const autonomyRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Radio-group keyboard contract: only the checked option is a tab stop and
+  // the arrow keys move focus and selection together.
+  const onAutonomyKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const forward = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+    const backward = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+    if (!forward && !backward) return;
+    e.preventDefault();
+    const nextIndex = (index + (forward ? 1 : -1) + AUTONOMY.length) % AUTONOMY.length;
+    setAutonomy(AUTONOMY[nextIndex].value);
+    autonomyRefs.current[nextIndex]?.focus();
+  };
 
   const requestId = req?.requestId;
   useEffect(() => {
@@ -147,7 +160,7 @@ export default function PlanApprovalInline() {
               aria-label="Implementation autonomy"
               className="flex items-center gap-0.5 rounded-full border border-droid-border p-0.5"
             >
-              {AUTONOMY.map((a) => {
+              {AUTONOMY.map((a, i) => {
                 const active = autonomy === a.value;
                 return (
                   <button
@@ -155,8 +168,15 @@ export default function PlanApprovalInline() {
                     type="button"
                     role="radio"
                     aria-checked={active}
+                    tabIndex={active ? 0 : -1}
+                    ref={(el) => {
+                      autonomyRefs.current[i] = el;
+                    }}
                     onClick={() => {
                       setAutonomy(a.value);
+                    }}
+                    onKeyDown={(e) => {
+                      onAutonomyKeyDown(e, i);
                     }}
                     title={`Implement with ${a.label.toLowerCase()} autonomy`}
                     className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
