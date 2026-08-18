@@ -1,12 +1,14 @@
+import { useState } from 'react';
+
+import { GithubAuthPromptContent } from '../../../components/environment/GithubSetupCard';
 import { useStoreDispatch } from '../../../hooks/useStore';
 import { useGithubSetup, type GithubSetupController } from '../../../hooks/useGithubSetup';
 import { pickDirectory } from '../../../lib/desktop';
+import { isGithubAuthCodeCopied } from '../../../lib/github';
 
 function setupActionLabel(setup: GithubSetupController): string {
   if (setup.action === 'installing') return 'Installing…';
-  if (setup.action === 'authenticating') {
-    return setup.authCode ? 'Show sign-in code' : 'Waiting for GitHub…';
-  }
+  if (setup.action === 'authenticating') return 'Waiting for GitHub…';
   if (setup.availability?.installed) return 'Sign in to GitHub';
   if (setup.availability?.installMethod === 'manual' && setup.manualGuideOpened) {
     return 'Check installation';
@@ -14,9 +16,80 @@ function setupActionLabel(setup: GithubSetupController): string {
   return 'Install GitHub CLI';
 }
 
+function setupEmptyCopy(setup: GithubSetupController): string {
+  if (setup.authCode) return 'GitHub is waiting for the one-time code shown here.';
+  if (setup.availability?.installed) return 'Sign in through GitHub CLI to load pull requests.';
+  return 'Install GitHub CLI to load pull requests.';
+}
+
 function EmptyCopy({ children }: { children: string }) {
   return (
     <p className="max-w-sm text-center text-[13px] leading-5 text-droid-text-muted">{children}</p>
+  );
+}
+
+export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) {
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [copyFailedCode, setCopyFailedCode] = useState<string | null>(null);
+  const busy = setup.action !== 'idle' && !setup.authCode;
+  const copied = isGithubAuthCodeCopied(setup.authCode, copiedCode);
+  const copyFailed = isGithubAuthCodeCopied(setup.authCode, copyFailedCode);
+
+  const copyCode = async () => {
+    if (!setup.authCode) return;
+    setCopyFailedCode(null);
+    try {
+      await navigator.clipboard.writeText(setup.authCode);
+      setCopiedCode(setup.authCode);
+    } catch {
+      setCopiedCode(null);
+      setCopyFailedCode(setup.authCode);
+    }
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center px-8">
+      <EmptyCopy>{setupEmptyCopy(setup)}</EmptyCopy>
+      {setup.error && (
+        <p className="mt-2 max-w-sm text-center text-[12px] leading-4 text-droid-red">
+          {setup.error}
+        </p>
+      )}
+      {setup.authCode ? (
+        <div className="mt-4 w-full max-w-sm">
+          <GithubAuthPromptContent
+            code={setup.authCode}
+            copied={copied}
+            copyFailed={copyFailed}
+            onCopy={() => void copyCode()}
+            onCancel={() => {
+              setup.closeAuthPrompt();
+              setup.cancelAuthentication();
+            }}
+          />
+        </div>
+      ) : (
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={setup.runPrimaryAction}
+            className="rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {setupActionLabel(setup)}
+          </button>
+          {busy && (
+            <button
+              type="button"
+              onClick={setup.cancelAuthentication}
+              className="rounded-xl px-3 py-2 text-[13px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
+            >
+              {setup.action === 'installing' ? 'Cancel installation' : 'Cancel sign-in'}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -57,29 +130,7 @@ export function PrWorkspaceEmpty({ cwd, isGitHub }: { cwd: string | null; isGitH
   }
 
   if (setup.availability && !setup.isReady) {
-    const busy = setup.action !== 'idle' && !setup.authCode;
-    return (
-      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center px-8">
-        <EmptyCopy>
-          {setup.availability.installed
-            ? 'Sign in through GitHub CLI to load pull requests.'
-            : 'Install GitHub CLI to load pull requests.'}
-        </EmptyCopy>
-        {setup.error && (
-          <p className="mt-2 max-w-sm text-center text-[12px] leading-4 text-droid-red">
-            {setup.error}
-          </p>
-        )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={setup.runPrimaryAction}
-          className="mt-4 rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {setupActionLabel(setup)}
-        </button>
-      </div>
-    );
+    return <PrGithubSetupEmpty setup={setup} />;
   }
 
   return (
