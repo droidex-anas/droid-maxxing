@@ -25,6 +25,44 @@ const sampleComment: PrComment = {
   reactions: [],
 };
 
+test('initial and bind start with a null diff, not an empty string', () => {
+  assert.equal(initialPrDetailState.diff, null);
+  const bound = reducePrDetail(initialPrDetailState, { type: 'bind', cwd: '/repo', number: 1 });
+  assert.equal(bound.diff, null);
+});
+
+test('diff-success stores an empty remote patch as an empty string', () => {
+  const bound = reducePrDetail(initialPrDetailState, { type: 'bind', cwd: '/repo', number: 1 });
+  const asked = reducePrDetail(bound, { type: 'diff-request', generation: bound.generation });
+  const empty = reducePrDetail(asked, {
+    type: 'diff-success',
+    generation: bound.generation,
+    diff: '',
+  });
+  assert.equal(empty.diff, '');
+  assert.equal(empty.diffError, null);
+});
+
+test('diff-request and diff-failure keep the last good diff', () => {
+  const bound = reducePrDetail(initialPrDetailState, { type: 'bind', cwd: '/repo', number: 1 });
+  const asked = reducePrDetail(bound, { type: 'diff-request', generation: bound.generation });
+  const loaded = reducePrDetail(asked, {
+    type: 'diff-success',
+    generation: bound.generation,
+    diff: '',
+  });
+  const refresh = reducePrDetail(loaded, { type: 'diff-request', generation: bound.generation });
+  assert.equal(refresh.diff, '');
+  assert.equal(refresh.diffError, null);
+  const failed = reducePrDetail(refresh, {
+    type: 'diff-failure',
+    generation: bound.generation,
+    message: 'Could not load pull request diff',
+  });
+  assert.equal(failed.diff, '');
+  assert.equal(failed.diffError, 'Could not load pull request diff');
+});
+
 test('number change drops body, checks, comments, and cached diff', () => {
   const loaded = reducePrDetail(initialPrDetailState, {
     type: 'meta-success',
@@ -37,7 +75,7 @@ test('number change drops body, checks, comments, and cached diff', () => {
   });
   const next = reducePrDetail(loaded, { type: 'bind', cwd: '/repo', number: 2 });
   assert.equal(next.body, '');
-  assert.equal(next.diff, '');
+  assert.equal(next.diff, null);
   assert.equal(next.loaded, false);
 });
 
@@ -55,7 +93,7 @@ test('failed section keeps prior rows; diff success is ignored until requested',
     generation: bound.generation,
     diff: 'x',
   });
-  assert.equal(unsolicited.diff, '');
+  assert.equal(unsolicited.diff, null);
   const asked = reducePrDetail(failed, { type: 'diff-request', generation: bound.generation });
   const got = reducePrDetail(asked, {
     type: 'diff-success',

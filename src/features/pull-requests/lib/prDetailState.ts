@@ -10,7 +10,7 @@ export interface PrDetailState {
   checksError: string | null;
   commentsError: string | null;
   metaError: string | null;
-  diff: string;
+  diff: string | null;
   diffError: string | null;
   diffRequested: boolean;
   loading: boolean;
@@ -27,7 +27,7 @@ export const initialPrDetailState: PrDetailState = {
   checksError: null,
   commentsError: null,
   metaError: null,
-  diff: '',
+  diff: null,
   diffError: null,
   diffRequested: false,
   loading: false,

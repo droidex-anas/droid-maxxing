@@ -30,8 +30,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
 }
 
-function CodePane({ diff, diffError }: { diff: string; diffError: string | null }) {
-  if (diff) return <PrDiff diff={diff} />;
+export function CodePane({ diff, diffError }: { diff: string | null; diffError: string | null }) {
+  if (diff !== null) return <PrDiff diff={diff} />;
   if (diffError) {
     return (
       <div className="flex h-full items-center justify-center px-8">
