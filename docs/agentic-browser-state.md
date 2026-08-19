@@ -47,7 +47,7 @@ The tracker keeps a bounded revision history and returns deltas:
   page: { scrollChanged: true },
   entities: {
     added: [],
-    updated: ['@b-12ab34cd'],
+    updated: [{ id: '@b-12ab34cd' }],
     removed: [],
   },
 }
