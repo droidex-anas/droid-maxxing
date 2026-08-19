@@ -67,10 +67,7 @@ test(
     assert.equal(result.ok, true);
     assert.equal(result.snapshot?.refs[0]?.name, 'Save');
     assert.equal(getNativeBrowserSemanticState('browser-1')?.revision, 1);
-    assert.equal(
-      getNativeBrowserSemanticState('browser-1')?.entities[0]?.kind,
-      'button',
-    );
+    assert.equal(getNativeBrowserSemanticState('browser-1')?.entities[0]?.kind, 'button');
   },
 );
 
@@ -81,9 +78,7 @@ test('semantic request wrapper returns only changes since the caller revision', 
     perform: async (input) => success(input, snapshot(label)),
   });
 
-  const first = await performNativeBrowserRequestWithSemanticState(
-    request('snapshot', 'req-1'),
-  );
+  const first = await performNativeBrowserRequestWithSemanticState(request('snapshot', 'req-1'));
   label = 'Save changes';
   const second = await performNativeBrowserRequestWithSemanticState(
     request('snapshot', 'req-2'),
@@ -116,9 +111,7 @@ test('closing a browser session clears its semantic history', async () => {
   await performNativeBrowserRequest(request('close', 'req-2'));
   assert.equal(getNativeBrowserSemanticState('browser-1'), undefined);
 
-  const reopened = await performNativeBrowserRequestWithSemanticState(
-    request('snapshot', 'req-3'),
-  );
+  const reopened = await performNativeBrowserRequestWithSemanticState(request('snapshot', 'req-3'));
   dispose();
 
   assert.equal(reopened.observation?.state.revision, 1);
