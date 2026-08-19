@@ -187,8 +187,5 @@ test('BrowserSemanticStateTracker falls back to a reset when history was pruned'
   assert.equal(observation.state.revision, 3);
   assert.equal(observation.delta.fromRevision, 1);
   assert.equal(observation.delta.reset, true);
-  assert.deepEqual(
-    observation.delta.entities.added.map((entity) => entity.id),
-    ['@a', '@b', '@c'],
-  );
+  assert.deepEqual(observation.delta.entities.added.map((entity) => entity.id), ['@a', '@b', '@c']);
 });
