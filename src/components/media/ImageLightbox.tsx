@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 
@@ -7,8 +8,17 @@ import { X } from 'lucide-react';
  * inspect it, Escape or a backdrop click to leave. The composer's
  * ImageViewerModal stays separate because it owns cropping of a staged
  * attachment; this one only displays.
+ *
+ * Portalled to the body like every other overlay in the app: the thumbnails
+ * that open it live inside animated (transformed) transcript rows, and a
+ * transformed ancestor becomes the containing block for `position: fixed`, so
+ * rendering in place would pin the overlay inside a chat bubble.
  */
-export function ImageLightbox({
+export function ImageLightbox(props: { src: string; label: string; onClose: () => void }) {
+  return createPortal(<ImageLightboxContent {...props} />, document.body);
+}
+
+function ImageLightboxContent({
   src,
   label,
   onClose,
