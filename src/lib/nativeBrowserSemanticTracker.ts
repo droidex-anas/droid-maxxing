@@ -107,9 +107,7 @@ export class BrowserSemanticStateTracker {
   private latestDelta: BrowserSemanticDelta | undefined;
 
   constructor(historyLimit = 20) {
-    this.historyLimit = Number.isFinite(historyLimit)
-      ? Math.max(1, Math.trunc(historyLimit))
-      : 20;
+    this.historyLimit = Number.isFinite(historyLimit) ? Math.max(1, Math.trunc(historyLimit)) : 20;
   }
 
   get current(): BrowserSemanticState | undefined {
