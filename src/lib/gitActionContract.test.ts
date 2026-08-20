@@ -7,7 +7,7 @@ import {
   prepareChatWorkingDirectory,
   resolveMainCheckout,
 } from './chatWorkspace';
-import { createPullRequest, detectPullRequest, postPrComment } from './github';
+import { createPullRequest, detectPullRequest, mergePullRequest, postPrComment } from './github';
 
 // These wrappers promise one error contract: IPC-level rejections surface as
 // structured failures, never as rejected promises. Simulate the desktop bridge
@@ -220,4 +220,18 @@ test('createPullRequest and postPrComment convert IPC rejections into failed res
     reason: 'error',
   });
   assert.deepEqual(await postPrComment('/repo', 12, 'hello'), { ok: false, reason: 'error' });
+});
+
+test('mergePullRequest reports a bridge failure instead of rejecting', async () => {
+  assert.deepEqual(await mergePullRequest('/repo', 12, 'squash'), {
+    ok: false,
+    reason: 'not_desktop',
+    message: 'Merging a pull request is available in the desktop app.',
+  });
+  withBridge({ githubMergePr: () => Promise.reject(new Error('bridge down')) });
+  assert.deepEqual(await mergePullRequest('/repo', 12, 'squash'), {
+    ok: false,
+    reason: 'error',
+    message: 'Could not merge pull request',
+  });
 });

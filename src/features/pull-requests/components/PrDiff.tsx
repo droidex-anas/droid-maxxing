@@ -36,7 +36,7 @@ function FileRow({
         {dir ? <span className="text-droid-text-muted/70">{dir}</span> : null}
         <span className="text-droid-text">{name}</span>
       </span>
-      <span className="shrink-0 font-mono text-[10.5px]">
+      <span className="shrink-0 text-[11px] tabular-nums">
         {file.additions > 0 ? (
           <span style={{ color: 'var(--diff-add-fg)' }}>+{file.additions}</span>
         ) : null}{' '}

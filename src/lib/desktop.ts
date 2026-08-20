@@ -39,6 +39,8 @@ import type {
   PostCommentResult,
   PrChecksResult,
   PrCommentsResult,
+  PrMergeMethod,
+  PrMergeResult,
   PullRequestDiffResult,
   PullRequestListResult,
   PullRequestViewResult,
@@ -219,6 +221,10 @@ interface DroidControlApi {
     dir: string,
     options: { prNumber: number; body: string },
   ) => Promise<PostCommentResult>;
+  githubMergePr: (
+    dir: string,
+    options: { prNumber: number; method: PrMergeMethod },
+  ) => Promise<PrMergeResult>;
   getOnboarding: () => Promise<OnboardingState>;
   setOnboarding: (patch: Partial<OnboardingState>) => Promise<OnboardingState>;
   appVersion: () => Promise<string>;

@@ -184,8 +184,26 @@ export interface PullRequestListResult {
   prs: PullRequest[];
 }
 
+// One commit on the pull request's head branch. `author` is the GitHub login
+// when the commit author is a linked account, otherwise the git author name.
+export interface PrCommit {
+  oid: string;
+  headline: string;
+  committedDate: string | null;
+  author: string | null;
+}
+
 export interface PullRequestDetail extends PullRequest {
   body: string;
+  commits: PrCommit[];
+}
+
+export type PrMergeMethod = 'merge' | 'squash' | 'rebase';
+
+export interface PrMergeResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
 }
 
 export interface PullRequestViewResult {
@@ -245,6 +263,10 @@ export interface PrComment {
   path?: string | null;
   line?: number | null;
   diffHunk?: string | null;
+  // Review-thread verdict; only inline comments belong to a thread.
+  resolved?: boolean;
+  outdated?: boolean;
+  resolvedBy?: string | null;
 }
 
 export interface PrReaction {

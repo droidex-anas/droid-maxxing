@@ -392,6 +392,7 @@ function registerIpc() {
   ipcMain.handle('github-post-comment', (_event, { dir, options }) =>
     githubVcs.postComment(dir, options),
   );
+  ipcMain.handle('github-merge-pr', (_event, { dir, options }) => githubVcs.mergePr(dir, options));
 
   ipcMain.handle('onboarding-get', getOnboarding);
   ipcMain.handle('onboarding-set', (_event, { patch }) => setOnboarding(patch));

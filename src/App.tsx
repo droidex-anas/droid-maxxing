@@ -166,11 +166,15 @@ export default function App() {
   // The context toggle is meaningful in Mission Control (always) and in a normal
   // chat only after it has content; otherwise there is nothing to open.
   const canToggleContext = isMissionControlView || hasSessionContent;
+  // The pull request workspace owns the whole content area and the top-right
+  // corner of its own toolbar, so the session-scoped overlays (Context panel)
+  // and floating window buttons stay out of it instead of covering its header.
+  const prWorkspaceView = !embedded && state.mainView === 'pull-requests';
   // The context panel floats *over* the chat as an overlay (it does not shrink
   // the main scroll area), so the page scrollbar stays pinned to the window's
   // right edge instead of sliding inward and looking like a divider.
   const rightPanelVisible =
-    !focused && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
+    !focused && !prWorkspaceView && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
   const requestedHistory = useRef(new Set<string>());
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
@@ -676,7 +680,7 @@ export default function App() {
         </button>
       </div>
 
-      {!showUtilityPane && (
+      {!showUtilityPane && !prWorkspaceView && (
         <div
           data-electron-drag-region
           className="absolute top-0 right-0 h-9 z-40 flex items-center gap-1 pr-3"

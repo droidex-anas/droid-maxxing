@@ -1,10 +1,11 @@
-import type { PrCheck, PrComment } from '../../../types/vcs';
+import type { PrCheck, PrComment, PrCommit } from '../../../types/vcs';
 
 export interface PrDetailState {
   cwd: string | null;
   number: number | null;
   generation: number;
   body: string;
+  commits: PrCommit[];
   checks: PrCheck[];
   comments: PrComment[];
   checksError: string | null;
@@ -22,6 +23,7 @@ export const initialPrDetailState: PrDetailState = {
   number: null,
   generation: 0,
   body: '',
+  commits: [],
   checks: [],
   comments: [],
   checksError: null,
@@ -37,6 +39,7 @@ export const initialPrDetailState: PrDetailState = {
 export interface MetaSuccessFields {
   generation: number;
   body: string;
+  commits: PrCommit[];
   checks: PrCheck[];
   comments: PrComment[];
   checksError: string | null;
@@ -76,6 +79,7 @@ export function reducePrDetail(state: PrDetailState, event: PrDetailEvent): PrDe
       loaded: true,
       metaError: event.metaError ?? null,
       body: event.body,
+      commits: event.commits,
       checks: event.checks,
       comments: event.comments,
       checksError: event.checksError,

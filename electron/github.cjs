@@ -133,6 +133,25 @@ function normalizeReviews(value) {
     .filter((item) => item.author);
 }
 
+// `gh pr view --json commits` reports every commit on the head branch with its
+// GitHub author when one is linked; plain git authors only carry a name.
+function normalizePrCommits(value) {
+  if (!Array.isArray(value)) return [];
+  const commits = [];
+  for (const commit of value) {
+    const oid = typeof commit?.oid === 'string' ? commit.oid : '';
+    if (!oid) continue;
+    const authors = Array.isArray(commit.authors) ? commit.authors : [];
+    commits.push({
+      oid,
+      headline: String(commit.messageHeadline || '').trim(),
+      committedDate: commit.committedDate || null,
+      author: loginOf(authors[0]),
+    });
+  }
+  return commits;
+}
+
 function normalizePr(pr) {
   return {
     number: pr.number,
@@ -239,7 +258,14 @@ async function listPrs(dir, { state = 'open', limit = 50 } = {}, runGh = gh) {
 async function viewPr(dir, { prNumber } = {}, runGh = gh) {
   const selector = prSelector(prNumber);
   if (selector == null) return { ok: false, reason: 'missing_pr', pr: null };
-  const res = await runGh(dir, ['pr', 'view', '--json', `${PR_FIELDS},body`, '--', selector]);
+  const res = await runGh(dir, [
+    'pr',
+    'view',
+    '--json',
+    `${PR_FIELDS},body,commits`,
+    '--',
+    selector,
+  ]);
   if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable', pr: null };
   if (res.code !== 0) {
     return { ok: false, reason: 'gh_error', message: res.stderr.trim(), pr: null };
@@ -248,7 +274,11 @@ async function viewPr(dir, { prNumber } = {}, runGh = gh) {
   if (!raw || typeof raw.number !== 'number') return { ok: true, pr: null };
   return {
     ok: true,
-    pr: { ...normalizePr(raw), body: typeof raw.body === 'string' ? raw.body : '' },
+    pr: {
+      ...normalizePr(raw),
+      body: typeof raw.body === 'string' ? raw.body : '',
+      commits: normalizePrCommits(raw.commits),
+    },
   };
 }
 
@@ -295,7 +325,33 @@ async function prChecks(dir, { prNumber } = {}) {
   return { ok: true, checks };
 }
 
-function normalizePrComments(data, inlineRows = []) {
+// Resolution lives on the review thread, which `gh pr view --json` cannot
+// report, so it comes from GraphQL. gh expands {owner}/{repo} in field values,
+// which keeps this a single call with no repository lookup of our own.
+const REVIEW_THREADS_QUERY =
+  'query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)' +
+  '{pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated ' +
+  'resolvedBy{login} comments(first:100){nodes{databaseId}}}}}}}';
+
+// Thread status keyed by the REST comment id, so every comment in a resolved
+// thread carries the same verdict.
+function normalizeReviewThreads(payload) {
+  const nodes = payload?.data?.repository?.pullRequest?.reviewThreads?.nodes;
+  const byCommentId = new Map();
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    const status = {
+      resolved: node?.isResolved === true,
+      outdated: node?.isOutdated === true,
+      resolvedBy: node?.resolvedBy?.login || null,
+    };
+    for (const comment of Array.isArray(node?.comments?.nodes) ? node.comments.nodes : []) {
+      if (comment?.databaseId != null) byCommentId.set(String(comment.databaseId), status);
+    }
+  }
+  return byCommentId;
+}
+
+function normalizePrComments(data, inlineRows = [], threadStatus = new Map()) {
   const normalizeReactionGroups = (groups) => {
     if (!Array.isArray(groups)) return [];
     return groups
@@ -343,19 +399,25 @@ function normalizePrComments(data, inlineRows = []) {
       state: r.state ? String(r.state).toLowerCase() : null,
       reactions: normalizeReactionGroups(r.reactionGroups),
     }));
-  const inline = (Array.isArray(inlineRows) ? inlineRows : []).map((comment, i) => ({
-    id: `inline-${String(comment.id || `${i}-${comment.created_at || ''}`)}`,
-    kind: 'inline',
-    author: comment.user?.login || 'unknown',
-    body: comment.body || '',
-    createdAt: comment.created_at || null,
-    url: comment.html_url || null,
-    state: null,
-    path: comment.path || null,
-    line: comment.line ?? comment.original_line ?? null,
-    diffHunk: comment.diff_hunk || null,
-    reactions: normalizeRestReactions(comment.reactions),
-  }));
+  const inline = (Array.isArray(inlineRows) ? inlineRows : []).map((comment, i) => {
+    const status = threadStatus.get(String(comment.id)) ?? null;
+    return {
+      id: `inline-${String(comment.id || `${i}-${comment.created_at || ''}`)}`,
+      kind: 'inline',
+      author: comment.user?.login || 'unknown',
+      body: comment.body || '',
+      createdAt: comment.created_at || null,
+      url: comment.html_url || null,
+      state: null,
+      path: comment.path || null,
+      line: comment.line ?? comment.original_line ?? null,
+      diffHunk: comment.diff_hunk || null,
+      resolved: status?.resolved === true,
+      outdated: status?.outdated === true,
+      resolvedBy: status?.resolvedBy ?? null,
+      reactions: normalizeRestReactions(comment.reactions),
+    };
+  });
   return [...comments, ...reviews, ...inline].sort(
     (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
   );
@@ -364,12 +426,25 @@ function normalizePrComments(data, inlineRows = []) {
 async function prComments(dir, { prNumber } = {}, runGh = gh) {
   const selector = prSelector(prNumber);
   if (selector == null) return { ok: false, reason: 'missing_pr', comments: [] };
-  const [view, inline] = await Promise.all([
+  const [view, inline, threads] = await Promise.all([
     runGh(dir, ['pr', 'view', '--json', 'comments,reviews', '--', selector]),
     runGh(dir, ['api', '--paginate', '--slurp', `repos/{owner}/{repo}/pulls/${selector}/comments`]),
+    runGh(dir, [
+      'api',
+      'graphql',
+      '-F',
+      'owner={owner}',
+      '-F',
+      'repo={repo}',
+      '-F',
+      `number=${selector}`,
+      '-f',
+      `query=${REVIEW_THREADS_QUERY}`,
+    ]),
   ]);
   const viewSucceeded = !view.spawnFailed && view.code === 0;
   const inlineSucceeded = !inline.spawnFailed && inline.code === 0;
+  const threadsSucceeded = !threads.spawnFailed && threads.code === 0;
   if (!viewSucceeded && !inlineSucceeded) {
     const message = [view.stderr, inline.stderr]
       .map((value) => value.trim())
@@ -392,11 +467,20 @@ async function prComments(dir, { prNumber } = {}, runGh = gh) {
   const failures = [
     ...(viewSucceeded ? [] : [view.stderr.trim() || 'Could not load PR conversation comments']),
     ...(inlineSucceeded ? [] : [inline.stderr.trim() || 'Could not load inline review comments']),
+    // Only worth reporting when there are inline comments whose status is now
+    // missing; without them the thread query has nothing to say.
+    ...(threadsSucceeded || !inlineSucceeded || inlineRows.length === 0
+      ? []
+      : [threads.stderr.trim() || 'Could not load review thread status']),
   ];
   return {
     ok: true,
     ...(failures.length === 0 ? {} : { partial: true, message: failures.join('\n') }),
-    comments: normalizePrComments(data, inlineRows),
+    comments: normalizePrComments(
+      data,
+      inlineRows,
+      threadsSucceeded ? normalizeReviewThreads(parseJson(threads.stdout, null)) : new Map(),
+    ),
   };
 }
 
@@ -412,6 +496,22 @@ async function createPr(dir, { title, body = '', base, draft = false, head } = {
   const url = (res.stdout.match(/https?:\/\/\S+/) || [])[0] || null;
   const detected = await detectPr(dir, head ? { branch: head } : {});
   return { ok: true, url, number: detected.pr?.number ?? null, pr: detected.pr };
+}
+
+const MERGE_FLAGS = { merge: '--merge', squash: '--squash', rebase: '--rebase' };
+
+// Merging is irreversible from the app's side, so the strategy must be one gh
+// understands; passing an unknown method through would let gh fall back to its
+// interactive prompt and hang the invisible child process.
+async function mergePr(dir, { prNumber, method } = {}, runGh = gh) {
+  const selector = prSelector(prNumber);
+  if (selector == null) return { ok: false, reason: 'missing_pr' };
+  const flag = MERGE_FLAGS[String(method)];
+  if (!flag) return { ok: false, reason: 'invalid_method' };
+  const res = await runGh(dir, ['pr', 'merge', flag, '--', selector], { timeout: 60000 });
+  if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable' };
+  if (res.code !== 0) return { ok: false, reason: 'gh_error', message: res.stderr.trim() };
+  return { ok: true };
 }
 
 async function postComment(dir, { prNumber, body } = {}) {
@@ -438,7 +538,9 @@ module.exports = {
   // Exported for unit tests: the validation boundary for PR selectors.
   prSelector,
   normalizePr,
+  normalizePrCommits,
   normalizePrComments,
+  normalizeReviewThreads,
   detectPr,
   listPrs,
   viewPr,
@@ -447,4 +549,5 @@ module.exports = {
   prComments,
   createPr,
   postComment,
+  mergePr,
 };

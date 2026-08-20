@@ -8,6 +8,8 @@ import type {
   PrCheck,
   PrChecksResult,
   PrCommentsResult,
+  PrMergeMethod,
+  PrMergeResult,
   PullRequest,
   PullRequestDiffResult,
   PullRequestListResult,
@@ -185,6 +187,26 @@ export async function postPrComment(
     return await api.githubPostComment(dir, { prNumber, body });
   } catch {
     return { ok: false, reason: 'error' };
+  }
+}
+
+export async function mergePullRequest(
+  dir: string,
+  prNumber: number,
+  method: PrMergeMethod,
+): Promise<PrMergeResult> {
+  const api = githubApi();
+  if (!api) {
+    return {
+      ok: false,
+      reason: 'not_desktop',
+      message: 'Merging a pull request is available in the desktop app.',
+    };
+  }
+  try {
+    return await api.githubMergePr(dir, { prNumber, method });
+  } catch {
+    return { ok: false, reason: 'error', message: 'Could not merge pull request' };
   }
 }
 

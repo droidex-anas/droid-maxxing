@@ -18,6 +18,7 @@ import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCar
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import {
+  CirclePlus,
   Folder,
   FolderOpen,
   Plus,
@@ -25,8 +26,8 @@ import {
   Settings,
   ChevronRight,
   SquarePen,
-  GitPullRequest,
 } from 'lucide-react';
+import { GitPullRequestIcon } from './environment/GithubIcons';
 import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import {
@@ -477,14 +478,34 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
         </div>
       </div>
 
+      {/* Navigation rows sit at session-row scale so the sidebar reads as one
+          list instead of a banner above it. */}
       <div className="px-2 pb-1.5">
-        <button
-          onClick={newChat}
-          className="group w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-medium text-droid-text hover:bg-droid-elevated transition-colors"
-        >
-          <SquarePen className="w-[18px] h-[18px] shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text" />
-          New chat
-        </button>
+        {/* The plus overlays the row's right edge, like a session row's menu,
+            so the whole row still highlights as one target. */}
+        <div className="group relative">
+          <button
+            onClick={newChat}
+            className="flex w-full items-center gap-2.5 rounded-xl py-1.5 pr-8 pl-2.5 text-left text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-elevated"
+          >
+            <SquarePen
+              className="h-4 w-4 shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text"
+              strokeWidth={1.75}
+            />
+            New chat
+          </button>
+          <button
+            data-testid="new-workspaceless-chat"
+            onClick={() => {
+              startChat('');
+            }}
+            title="New chat without a workspace"
+            aria-label="New chat without a workspace"
+            className="absolute top-1/2 right-1.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
+          >
+            <CirclePlus className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </div>
         <button
           data-testid="pull-requests-nav"
           onClick={() => {
@@ -496,16 +517,21 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
             });
             dispatch({ type: 'OPEN_PULL_REQUESTS', cwd });
           }}
-          className={`group mt-0.5 w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-medium transition-colors ${
+          className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
             state.mainView === 'pull-requests'
               ? 'bg-droid-active text-droid-text'
               : 'text-droid-text hover:bg-droid-elevated'
           }`}
         >
-          <GitPullRequest
-            className="h-[18px] w-[18px] shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text"
-            strokeWidth={1.75}
-          />
+          <span
+            className={`flex h-4 w-4 shrink-0 items-center justify-center transition-colors ${
+              state.mainView === 'pull-requests'
+                ? 'text-droid-text'
+                : 'text-droid-text-secondary group-hover:text-droid-text'
+            }`}
+          >
+            <GitPullRequestIcon size={15} />
+          </span>
           Pull requests
         </button>
       </div>

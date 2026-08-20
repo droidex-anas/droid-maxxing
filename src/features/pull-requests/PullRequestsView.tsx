@@ -6,16 +6,24 @@ import { PrDetail } from './components/PrDetail';
 import { PrInbox } from './components/PrInbox';
 import { PrWorkspaceEmpty } from './components/PrWorkspaceEmpty';
 import { usePullRequestList } from './hooks/usePullRequestList';
+import { prChatSeed } from './lib/prChatSeed';
+import { droidReviewSeed } from './lib/prReview';
 import { resolvePrWorkspaceCwd } from './lib/prWorkspaceCwd';
 
 function WorkspaceDetail({
   cwd,
   number,
   prs,
+  viewerLogin,
+  onOpenChat,
+  onReviewWithDroid,
 }: {
   cwd: string;
   number: number | null;
   prs: PullRequest[];
+  viewerLogin: string | null;
+  onOpenChat: (pr: PullRequest) => void;
+  onReviewWithDroid: (pr: PullRequest) => void;
 }) {
   if (number == null) {
     return (
@@ -25,7 +33,16 @@ function WorkspaceDetail({
     );
   }
   const selected = prs.find((item) => item.number === number) ?? null;
-  return <PrDetail cwd={cwd} number={number} pr={selected} />;
+  return (
+    <PrDetail
+      cwd={cwd}
+      number={number}
+      pr={selected}
+      viewerLogin={viewerLogin}
+      onOpenChat={onOpenChat}
+      onReviewWithDroid={onReviewWithDroid}
+    />
+  );
 }
 
 export function PullRequestsView() {
@@ -75,7 +92,25 @@ export function PullRequestsView() {
           onRetry={list.refresh}
         />
       </div>
-      <WorkspaceDetail cwd={cwd} number={state.prWorkspaceNumber} prs={list.prs} />
+      <WorkspaceDetail
+        cwd={cwd}
+        number={state.prWorkspaceNumber}
+        prs={list.prs}
+        viewerLogin={list.viewerLogin}
+        onOpenChat={(pr) => {
+          // The chat opens with the pull request already typed into the prompt
+          // bar; sending stays the user's decision.
+          dispatch({ type: 'SEED_COMPOSER', text: prChatSeed(pr) });
+          dispatch({ type: 'CLOSE_PULL_REQUESTS' });
+        }}
+        onReviewWithDroid={(pr) => {
+          // A local review starts as its own chat in this checkout, opened with
+          // the review skill and the pull request already typed in.
+          dispatch({ type: 'CLOSE_PULL_REQUESTS' });
+          dispatch({ type: 'START_CHAT', cwd, executionMode: 'local' });
+          dispatch({ type: 'SEED_COMPOSER', text: droidReviewSeed(pr) });
+        }}
+      />
     </div>
   );
 }

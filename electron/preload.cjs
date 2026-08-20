@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('droidControl', {
   githubPrComments: (dir, options) => ipcRenderer.invoke('github-pr-comments', { dir, options }),
   githubCreatePr: (dir, options) => ipcRenderer.invoke('github-create-pr', { dir, options }),
   githubPostComment: (dir, options) => ipcRenderer.invoke('github-post-comment', { dir, options }),
+  githubMergePr: (dir, options) => ipcRenderer.invoke('github-merge-pr', { dir, options }),
 
   getOnboarding: () => ipcRenderer.invoke('onboarding-get'),
   setOnboarding: (patch) => ipcRenderer.invoke('onboarding-set', { patch }),

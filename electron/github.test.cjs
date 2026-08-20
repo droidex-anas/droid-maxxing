@@ -9,7 +9,9 @@ const {
   install,
   isGithubDeviceUrl,
   listPrs,
+  mergePr,
   normalizePrComments,
+  normalizeReviewThreads,
   prComments,
   prDiff,
   prSelector,
@@ -915,6 +917,7 @@ test('PR comments keep conversation comments when inline pagination fails', asyn
 test('PR comments keep inline comments when conversation lookup fails', async () => {
   const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
     if (args[0] === 'pr') return ghResult({ code: 1, stderr: 'GraphQL unavailable' });
+    if (args[1] === 'graphql') return ghResult({ stdout: '{}' });
     return ghResult({
       stdout: JSON.stringify([
         [
@@ -937,6 +940,130 @@ test('PR comments keep inline comments when conversation lookup fails', async ()
     result.comments.map((comment) => comment.body),
     ['inline available'],
   );
+});
+
+test('inline comments carry the resolved verdict of their review thread', async () => {
+  const inlineRows = [
+    [
+      { id: 30, user: { login: 'reviewer' }, body: 'first', path: 'a.ts', line: 1 },
+      { id: 31, user: { login: 'reviewer' }, body: 'reply in the same thread' },
+      { id: 32, user: { login: 'reviewer' }, body: 'still open', path: 'b.ts', line: 2 },
+    ],
+  ];
+  const threads = {
+    data: {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [
+              {
+                isResolved: true,
+                isOutdated: true,
+                resolvedBy: { login: 'ana' },
+                comments: { nodes: [{ databaseId: 30 }, { databaseId: 31 }] },
+              },
+              {
+                isResolved: false,
+                isOutdated: false,
+                resolvedBy: null,
+                comments: { nodes: [{ databaseId: 32 }] },
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+  const calls = [];
+  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
+    calls.push(args);
+    if (args[0] === 'pr')
+      return ghResult({ stdout: JSON.stringify({ comments: [], reviews: [] }) });
+    if (args[1] === 'graphql') return ghResult({ stdout: JSON.stringify(threads) });
+    return ghResult({ stdout: JSON.stringify(inlineRows) });
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, undefined);
+  assert.deepEqual(
+    result.comments.map(({ body, resolved, outdated, resolvedBy }) => ({
+      body,
+      resolved,
+      outdated,
+      resolvedBy,
+    })),
+    [
+      { body: 'first', resolved: true, outdated: true, resolvedBy: 'ana' },
+      { body: 'reply in the same thread', resolved: true, outdated: true, resolvedBy: 'ana' },
+      { body: 'still open', resolved: false, outdated: false, resolvedBy: null },
+    ],
+  );
+  const graphql = calls.find((args) => args[1] === 'graphql');
+  assert.deepEqual(graphql.slice(2, 8), [
+    '-F',
+    'owner={owner}',
+    '-F',
+    'repo={repo}',
+    '-F',
+    'number=79',
+  ]);
+  assert.match(graphql.at(-1), /reviewThreads/);
+});
+
+test('a failed thread lookup reports itself and leaves the comments unresolved', async () => {
+  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
+    if (args[0] === 'pr')
+      return ghResult({ stdout: JSON.stringify({ comments: [], reviews: [] }) });
+    if (args[1] === 'graphql') return ghResult({ code: 1, stderr: 'graphql rate limited\n' });
+    return ghResult({
+      stdout: JSON.stringify([[{ id: 30, user: { login: 'reviewer' }, body: 'inline' }]]),
+    });
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, true);
+  assert.match(result.message, /graphql rate limited/);
+  assert.deepEqual(
+    result.comments.map(({ resolved, outdated, resolvedBy }) => ({
+      resolved,
+      outdated,
+      resolvedBy,
+    })),
+    [{ resolved: false, outdated: false, resolvedBy: null }],
+  );
+});
+
+test('a failed thread lookup stays quiet when there are no inline comments', async () => {
+  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
+    if (args[0] === 'pr') {
+      return ghResult({
+        stdout: JSON.stringify({
+          comments: [{ databaseId: 10, author: { login: 'author' }, body: 'top level' }],
+          reviews: [],
+        }),
+      });
+    }
+    if (args[1] === 'graphql') return ghResult({ code: 1, stderr: 'graphql rate limited' });
+    return ghResult({ stdout: '[]' });
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, undefined);
+  assert.equal(result.message, undefined);
+});
+
+test('review threads without comment ids are ignored instead of throwing', () => {
+  const status = normalizeReviewThreads({
+    data: {
+      repository: {
+        pullRequest: {
+          reviewThreads: { nodes: [{ isResolved: true, comments: { nodes: [{}] } }, null] },
+        },
+      },
+    },
+  });
+  assert.equal(status.size, 0);
+  assert.equal(normalizeReviewThreads(null).size, 0);
 });
 
 test('PR comments fail only when neither source succeeds', async () => {
@@ -1034,6 +1161,92 @@ test('viewPr returns body on the detail payload', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.pr.body, 'Hello');
   assert.deepEqual(result.pr.reviewRequests, []);
+});
+
+test('viewPr returns the head branch commits with their GitHub authors', async () => {
+  const runGh = async (_cwd, args) => {
+    assert.match(args[3], /,commits$/);
+    return ghResult({
+      stdout: JSON.stringify({
+        number: 12,
+        title: 'Add inbox',
+        state: 'OPEN',
+        body: '',
+        author: { login: 'ana' },
+        reviewRequests: [],
+        reviews: [],
+        commits: [
+          {
+            oid: '1111111111111111',
+            messageHeadline: ' Add the inbox ',
+            committedDate: '2026-08-04T09:00:00Z',
+            authors: [{ name: 'Ana', login: 'ana' }],
+          },
+          {
+            oid: '2222222222222222',
+            messageHeadline: 'Vendor bump',
+            committedDate: '2026-08-04T10:00:00Z',
+            authors: [{ name: 'Release Bot', login: '' }],
+          },
+          { messageHeadline: 'no oid, dropped' },
+        ],
+      }),
+    });
+  };
+  const result = await viewPr('/repo', { prNumber: 12 }, runGh);
+  assert.deepEqual(result.pr.commits, [
+    {
+      oid: '1111111111111111',
+      headline: 'Add the inbox',
+      committedDate: '2026-08-04T09:00:00Z',
+      author: 'ana',
+    },
+    {
+      oid: '2222222222222222',
+      headline: 'Vendor bump',
+      committedDate: '2026-08-04T10:00:00Z',
+      author: 'Release Bot',
+    },
+  ]);
+});
+
+test('mergePr requires a known strategy and a bare PR number before spawning gh', async () => {
+  let spawned = false;
+  const runGh = async () => {
+    spawned = true;
+    return ghResult();
+  };
+  const badSelector = await mergePr('/repo', { prNumber: '--repo=evil', method: 'squash' }, runGh);
+  assert.deepEqual(badSelector, { ok: false, reason: 'missing_pr' });
+  const badMethod = await mergePr('/repo', { prNumber: 12, method: 'fast-forward' }, runGh);
+  assert.deepEqual(badMethod, { ok: false, reason: 'invalid_method' });
+  const noMethod = await mergePr('/repo', { prNumber: 12 }, runGh);
+  assert.deepEqual(noMethod, { ok: false, reason: 'invalid_method' });
+  assert.equal(spawned, false);
+});
+
+test('mergePr passes the chosen strategy to gh and reports its refusal', async () => {
+  const calls = [];
+  const ok = await mergePr('/repo', { prNumber: 12, method: 'squash' }, async (_cwd, args) => {
+    calls.push(args);
+    return ghResult();
+  });
+  assert.deepEqual(ok, { ok: true });
+  assert.deepEqual(calls[0], ['pr', 'merge', '--squash', '--', '12']);
+
+  const refused = await mergePr('/repo', { prNumber: 12, method: 'rebase' }, async () =>
+    ghResult({ code: 1, stderr: 'Pull request is not mergeable\n' }),
+  );
+  assert.deepEqual(refused, {
+    ok: false,
+    reason: 'gh_error',
+    message: 'Pull request is not mergeable',
+  });
+
+  const missingGh = await mergePr('/repo', { prNumber: 12, method: 'merge' }, async () =>
+    ghResult({ code: 1, spawnFailed: true }),
+  );
+  assert.deepEqual(missingGh, { ok: false, reason: 'gh_unavailable' });
 });
 
 test('prDiff rejects a non-integer selector and returns patch text on success', async () => {

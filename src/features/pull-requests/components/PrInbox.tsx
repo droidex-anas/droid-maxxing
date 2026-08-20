@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
-import { RefreshCw, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 
-import { PrStateIcon } from '../../../components/environment/GithubIcons';
+import { Octicon, PrStateIcon } from '../../../components/environment/GithubIcons';
 import { prKind } from '../../../lib/github';
-import { formatRelativeTime } from '../../../lib/time';
 import type { PullRequest } from '../../../types/vcs';
 import { filterPullRequests, searchPullRequests, type PrInboxTab } from '../lib/prInbox';
+import { displayLogin } from '../lib/prIdentity';
+import { prAbsoluteTime, prRelativeTime } from '../lib/prTime';
+import { GithubAvatar } from './GithubAvatar';
 
 const TABS: { id: PrInboxTab; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -19,17 +21,6 @@ const EMPTY_COPY: Record<PrInboxTab, string> = {
   authored: 'You have not opened any.',
 };
 
-function relativeTime(iso: string | null): string {
-  if (!iso) return '';
-  const ts = Date.parse(iso);
-  return Number.isFinite(ts) ? formatRelativeTime(ts) : '';
-}
-
-function branchPair(pr: PullRequest): string | null {
-  if (!pr.baseRefName && !pr.headRefName) return null;
-  return `${pr.baseRefName ?? ''} ← ${pr.headRefName ?? ''}`;
-}
-
 function PrInboxRow({
   pr,
   selected,
@@ -39,8 +30,7 @@ function PrInboxRow({
   selected: boolean;
   onSelect: (number: number) => void;
 }) {
-  const time = relativeTime(pr.updatedAt ?? pr.createdAt);
-  const branches = branchPair(pr);
+  const time = prRelativeTime(pr.updatedAt ?? pr.createdAt);
   return (
     <button
       type="button"
@@ -56,17 +46,30 @@ function PrInboxRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-start justify-between gap-2">
-          <span className="min-w-0 truncate text-[13px] font-medium leading-snug text-droid-text">
+          <span className="min-w-0 truncate text-[13px] leading-snug font-medium text-droid-text">
             {pr.title}
           </span>
-          {time ? <span className="shrink-0 text-[11px] text-droid-text-muted">{time}</span> : null}
+          {time ? (
+            <span
+              title={prAbsoluteTime(pr.updatedAt ?? pr.createdAt)}
+              className="shrink-0 text-[11px] text-droid-text-muted"
+            >
+              {time}
+            </span>
+          ) : null}
         </span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-droid-text-muted">
-          {pr.author ? <span>{pr.author}</span> : null}
-          {pr.author && branches ? <span aria-hidden="true">·</span> : null}
-          {branches ? <span>{branches}</span> : null}
+        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-droid-text-muted">
+          <GithubAvatar login={pr.author} size={16} />
+          <span className="shrink-0 text-droid-text-secondary">{displayLogin(pr.author)}</span>
+          <span className="shrink-0 tabular-nums">#{pr.number}</span>
+          {pr.headRefName ? (
+            <>
+              <Octicon name="git-branch" size={11} className="shrink-0" />
+              <span className="truncate">{pr.headRefName}</span>
+            </>
+          ) : null}
         </span>
-        <span className="mt-0.5 block font-mono text-[10.5px]">
+        <span className="mt-1 block text-[11px] tabular-nums">
           <span style={{ color: 'var(--diff-add-fg)' }}>+{pr.additions}</span>{' '}
           <span style={{ color: 'var(--diff-del-fg)' }}>−{pr.deletions}</span>
         </span>
@@ -164,9 +167,14 @@ export function PrInbox({
           type="button"
           onClick={onRetry}
           title="Refresh"
-          className="ml-auto rounded-xl p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
+          className="ml-auto rounded-lg p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
         >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          <Octicon
+            name="sync"
+            size={14}
+            label="Refresh"
+            className={loading ? 'animate-spin' : ''}
+          />
         </button>
       </div>
 

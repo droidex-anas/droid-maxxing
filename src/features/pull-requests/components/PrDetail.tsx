@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, RefreshCw } from 'lucide-react';
 
+import { Octicon, PrStateIcon } from '../../../components/environment/GithubIcons';
+import { prKind } from '../../../lib/github';
 import { openExternal } from '../../../lib/onboarding';
 import type { PullRequest } from '../../../types/vcs';
 import { usePullRequestDetail } from '../hooks/usePullRequestDetail';
-import { PrConversation } from './PrConversation';
+import { isCubicRemembered, rememberCubic } from '../lib/cubicMemory';
+import { CUBIC_REVIEW_MENTION, hasCubicActivity, repoKeyFromPrUrl } from '../lib/prReview';
 import { PrDiff } from './PrDiff';
+import { PrMergeButton } from './PrMergeButton';
+import { PrReviewButton } from './PrReviewButton';
 import { PrSummary } from './PrSummary';
 
-export type PrDetailTab = 'summary' | 'code' | 'chat';
+export type PrDetailTab = 'summary' | 'code';
 
 export function applyCommentPostSettlement(
   submitted: { cwd: string; number: number },
@@ -22,7 +26,6 @@ export function applyCommentPostSettlement(
 const TABS: { id: PrDetailTab; label: string; key: string }[] = [
   { id: 'summary', label: 'Summary', key: '1' },
   { id: 'code', label: 'Code', key: '2' },
-  { id: 'chat', label: 'Chat', key: '3' },
 ];
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -46,18 +49,51 @@ export function CodePane({ diff, diffError }: { diff: string | null; diffError: 
   );
 }
 
+function ToolbarIconButton({
+  label,
+  icon,
+  disabled,
+  spinning,
+  onClick,
+}: {
+  label: string;
+  icon: 'link-external' | 'sync';
+  disabled?: boolean;
+  spinning?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="rounded-lg p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:opacity-40"
+    >
+      <Octicon name={icon} size={14} label={label} className={spinning ? 'animate-spin' : ''} />
+    </button>
+  );
+}
+
 export function PrDetail({
   cwd,
   number,
   pr,
+  viewerLogin,
+  onOpenChat,
+  onReviewWithDroid,
 }: {
   cwd: string;
   number: number;
   pr: PullRequest | null;
+  viewerLogin: string | null;
+  onOpenChat: (pr: PullRequest) => void;
+  onReviewWithDroid: (pr: PullRequest) => void;
 }) {
   const [tab, setTab] = useState<PrDetailTab>('summary');
   const [draft, setDraft] = useState('');
   const [posting, setPosting] = useState(false);
+  const [requestingReview, setRequestingReview] = useState(false);
   const identityRef = useRef({ cwd, number });
   identityRef.current = { cwd, number };
   const detail = usePullRequestDetail(cwd, number, {
@@ -66,10 +102,20 @@ export function PrDetail({
   });
   const headerPr = detail.pr ?? pr;
 
+  const repoKey = repoKeyFromPrUrl(headerPr?.url);
+  const cubicActive = hasCubicActivity(detail.comments);
+
   useEffect(() => {
     setDraft('');
     setPosting(false);
+    setRequestingReview(false);
   }, [cwd, number]);
+
+  // Cubic reviewing this repository once is proof it is installed, so the
+  // invitation never returns for it.
+  useEffect(() => {
+    if (cubicActive) rememberCubic(repoKey);
+  }, [cubicActive, repoKey]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -108,10 +154,22 @@ export function PrDetail({
     });
   };
 
-  const conversation = {
-    comments: detail.comments,
-    loading: detail.loading && !detail.loaded,
-    error: detail.commentsError,
+  const runCubicReview = () => {
+    const submittedCwd = cwd;
+    const submittedNumber = number;
+    setRequestingReview(true);
+    void detail.submitComment(CUBIC_REVIEW_MENTION, 'Cubic review requested').then(() => {
+      if (
+        identityRef.current.cwd !== submittedCwd ||
+        identityRef.current.number !== submittedNumber
+      )
+        return;
+      setRequestingReview(false);
+    });
+  };
+
+  const composer = {
+    viewerLogin,
     draft,
     posting,
     onDraftChange: setDraft,
@@ -120,43 +178,75 @@ export function PrDetail({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex items-center gap-4 px-8 pt-4 pb-2">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => {
-              setTab(item.id);
-            }}
-            className={`text-[13px] font-medium transition-colors ${
-              tab === item.id
-                ? 'text-droid-text'
-                : 'text-droid-text-muted hover:text-droid-text-secondary'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            title="Open on GitHub"
+      {/* This strip sits where the window's title bar would be, so it carries
+          the drag region the session view gets from its floating controls. */}
+      <div data-electron-drag-region className="flex items-center gap-2 px-8 pt-4 pb-2">
+        {headerPr ? (
+          <span className="shrink-0">
+            <PrStateIcon kind={prKind(headerPr)} size={16} />
+          </span>
+        ) : null}
+        <div className="flex items-center gap-0.5 rounded-lg bg-droid-elevated/50 p-0.5">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setTab(item.id);
+              }}
+              className={`rounded-md px-2.5 py-1 text-[12.5px] font-medium transition-colors ${
+                tab === item.id
+                  ? 'bg-droid-surface text-droid-text shadow-sm'
+                  : 'text-droid-text-muted hover:text-droid-text-secondary'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <ToolbarIconButton
+            label="Refresh"
+            icon="sync"
+            spinning={detail.loading}
+            onClick={detail.refresh}
+          />
+          <ToolbarIconButton
+            label="Open on GitHub"
+            icon="link-external"
             disabled={!headerPr?.url}
             onClick={() => {
               if (headerPr?.url) void openExternal(headerPr.url);
             }}
-            className="rounded-xl p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:opacity-40"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </button>
+          />
           <button
             type="button"
-            title="Refresh"
-            onClick={detail.refresh}
-            className="rounded-xl p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
+            title="Start a chat about this pull request"
+            disabled={!headerPr}
+            onClick={() => {
+              if (headerPr) onOpenChat(headerPr);
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-droid-border px-2.5 py-1.5 text-[12.5px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:opacity-40"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${detail.loading ? 'animate-spin' : ''}`} />
+            <Octicon name="comment-discussion" size={13} />
+            Chat
           </button>
+          <PrReviewButton
+            pr={headerPr}
+            cubicInstalled={cubicActive || isCubicRemembered(repoKey)}
+            requesting={requestingReview}
+            onRunCubicReview={runCubicReview}
+            onReviewWithDroid={() => {
+              if (headerPr) onReviewWithDroid(headerPr);
+            }}
+          />
+          <PrMergeButton
+            pr={headerPr}
+            merging={detail.merging}
+            onMerge={(method) => {
+              void detail.merge(method);
+            }}
+          />
         </div>
       </div>
       <div className="min-h-0 flex-1">
@@ -170,16 +260,13 @@ export function PrDetail({
             metaError={detail.metaError}
             checks={detail.checks}
             checksError={detail.checksError}
-            comments={conversation.comments}
-            commentsError={conversation.error}
-            draft={conversation.draft}
-            posting={conversation.posting}
-            onDraftChange={conversation.onDraftChange}
-            onSubmit={conversation.onSubmit}
+            comments={detail.comments}
+            commentsError={detail.commentsError}
+            commits={detail.commits}
+            {...composer}
           />
         ) : null}
         {tab === 'code' ? <CodePane diff={detail.diff} diffError={detail.diffError} /> : null}
-        {tab === 'chat' ? <PrConversation {...conversation} /> : null}
       </div>
     </div>
   );

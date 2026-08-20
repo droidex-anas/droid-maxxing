@@ -4,6 +4,7 @@ import {
   getPrChecks,
   getPrComments,
   getPullRequestDiff,
+  mergePullRequest,
   postPrComment,
   viewPullRequest,
 } from '../../../lib/github';
@@ -12,6 +13,8 @@ import type {
   PostCommentResult,
   PrChecksResult,
   PrCommentsResult,
+  PrMergeMethod,
+  PrMergeResult,
   PullRequestDetail,
   PullRequestViewResult,
 } from '../../../types/vcs';
@@ -73,6 +76,7 @@ export function resolveMeta(
     event: {
       generation,
       body: viewed ? viewed.body : prev.body,
+      commits: viewed ? viewed.commits : prev.commits,
       checks: checksRes.ok ? checksRes.checks : prev.checks,
       comments: commentsRes.ok ? commentsRes.comments : prev.comments,
       checksError: sectionError(
@@ -102,6 +106,7 @@ export function usePullRequestDetail(
   const { active, loadDiff } = options;
   const [state, dispatch] = useReducer(reducePrDetail, initialPrDetailState);
   const [pr, setPr] = useState<PullRequestDetail | null>(null);
+  const [merging, setMerging] = useState(false);
   const generationRef = useRef(state.generation);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -155,6 +160,7 @@ export function usePullRequestDetail(
     dispatch({ type: 'bind', cwd, number });
     generationRef.current += 1;
     setPr(null);
+    setMerging(false);
   }, [cwd, number]);
 
   useLayoutEffect(() => {
@@ -187,7 +193,7 @@ export function usePullRequestDetail(
   }, [loadDiffNow, loadMeta]);
 
   const submitComment = useCallback(
-    async (body: string): Promise<PostCommentResult> => {
+    async (body: string, successMessage = 'Comment posted'): Promise<PostCommentResult> => {
       if (!cwd || number == null) {
         return { ok: false, reason: 'error', message: 'Could not post comment' };
       }
@@ -198,7 +204,7 @@ export function usePullRequestDetail(
           toast.error(result.message ?? 'Could not post comment');
           return result;
         }
-        toast.success('Comment posted');
+        toast.success(successMessage);
         if (generation === generationRef.current) loadMeta(false);
         return result;
       } catch {
@@ -209,9 +215,32 @@ export function usePullRequestDetail(
     [cwd, loadMeta, number],
   );
 
+  // Merging is user-initiated and irreversible, so its outcome is always
+  // reported; only the in-flight flag and the reload are dropped when the
+  // workspace moved on to another pull request while gh was running.
+  const merge = useCallback(
+    async (method: PrMergeMethod): Promise<PrMergeResult> => {
+      if (!cwd || number == null) {
+        return { ok: false, reason: 'error', message: 'Could not merge pull request' };
+      }
+      const generation = generationRef.current;
+      setMerging(true);
+      const result = await mergePullRequest(cwd, number, method);
+      if (result.ok) toast.success(`Pull request #${String(number)} merged`);
+      else toast.error(result.message ?? 'Could not merge pull request');
+      if (generation === generationRef.current) {
+        setMerging(false);
+        if (result.ok) loadMeta(true);
+      }
+      return result;
+    },
+    [cwd, loadMeta, number],
+  );
+
   return {
     pr,
     body: state.body,
+    commits: state.commits,
     checks: state.checks,
     comments: state.comments,
     checksError: state.checksError,
@@ -222,7 +251,9 @@ export function usePullRequestDetail(
     diffRequested: state.diffRequested,
     loading: state.loading,
     loaded: state.loaded,
+    merging,
     refresh,
     submitComment,
+    merge,
   };
 }
