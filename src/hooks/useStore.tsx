@@ -61,7 +61,7 @@ import {
 } from '../lib/compactionSettings';
 import { sanitizeForLog } from '../lib/sensitiveLogRedaction';
 import { sessionIsLive } from '../lib/sessions';
-import { noteStoreCommitted } from '../lib/rendererPerf';
+import { noteStoreCommitted, discardPendingBridgeEvent } from '../lib/rendererPerf';
 import {
   addSessionNote,
   loadSessionNotes,
@@ -3360,7 +3360,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const toastMessage = toastMessageForEvent(ev);
       if (toastMessage !== undefined) toast.error(toastMessage);
       const action = adaptEvent(ev);
-      if (!action) return;
+      if (!action) {
+        // No reducer work means no commit: drop the perf leg instead of
+        // closing it against the next unrelated commit.
+        discardPendingBridgeEvent(ev);
+        return;
+      }
       batcher.pushBridge(action);
     });
     return () => {

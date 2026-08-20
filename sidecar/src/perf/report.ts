@@ -75,8 +75,8 @@ export function renderReportMarkdown(report: ReplayReport): string {
       '',
       '## Session-length drift (long-history)',
       '',
-      '| Half | p50 ms | p95 ms | p99 ms | count |',
-      '| --- | --- | --- | --- | --- |',
+      '| Half | p50 ms | p95 ms | p99 ms | max ms | count |',
+      '| --- | --- | --- | --- | --- | --- |',
       stageRow('first half', report.drift.firstHalfToReceiveMs),
       stageRow('second half', report.drift.secondHalfToReceiveMs),
     );

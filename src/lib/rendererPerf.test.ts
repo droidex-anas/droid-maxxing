@@ -6,6 +6,7 @@ import {
   getRendererPerfSnapshot,
   noteBridgeEventReceived,
   noteStoreCommitted,
+  discardPendingBridgeEvent,
   setMountedTranscriptRows,
 } from './rendererPerf';
 import type { ServerEvent } from '../types/bridge';
@@ -111,4 +112,57 @@ test('mounted transcript rows track current and peak values', () => {
   const snapshot = getRendererPerfSnapshot();
   assert.equal(snapshot.mountedTranscriptRows, 80);
   assert.equal(snapshot.mountedTranscriptRowsMax, 120);
+});
+
+test('discarded events never contribute a commit or paint sample', () => {
+  resetRendererPerfForTest();
+  withFakeRaf(() => {
+    const discarded = appendedEvent(performance.timeOrigin + performance.now() - 5);
+    noteBridgeEventReceived({ type: 'sessions.list', sessions: [] });
+    noteBridgeEventReceived(discarded);
+    // adaptEvent returned null for the second event: its pending leg must go.
+    discardPendingBridgeEvent(discarded);
+    noteStoreCommitted();
+  });
+
+  const snapshot = getRendererPerfSnapshot();
+  assert.equal(snapshot.eventsReceived, 2);
+  assert.equal(
+    snapshot.receiveToCommitMs.count,
+    1,
+    'only the surviving event records a commit sample',
+  );
+});
+
+test('a stale awaiting-paint batch is dropped, not stamped late', () => {
+  resetRendererPerfForTest();
+  // Committed batches whose rAF callbacks never run (a backgrounded tab).
+  // Their pending entries stay in awaitingPaint across frames.
+  withFakeRaf(() => {
+    noteBridgeEventReceived(appendedEvent(performance.timeOrigin + performance.now()));
+    noteStoreCommitted();
+  });
+  const originalNow = performance.now.bind(performance);
+  try {
+    // Advance the perf clock past the staleness threshold, then commit a
+    // fresh batch: scheduling must clear the aged entries instead of
+    // recording paint samples against a frame that never ran.
+    (globalThis as { performance: Performance }).performance = Object.create(performance, {
+      now: { value: () => originalNow() + 60_000 },
+    }) as Performance;
+    withFakeRaf(() => {
+      noteBridgeEventReceived({ type: 'sessions.list', sessions: [] });
+      noteStoreCommitted();
+    });
+  } finally {
+    (globalThis as { performance: Performance }).performance = originalNow as Performance;
+  }
+
+  const snapshot = getRendererPerfSnapshot();
+  assert.equal(snapshot.receiveToCommitMs.count, 2);
+  assert.equal(
+    snapshot.receiveToPaintMs.count,
+    0,
+    'stale paint legs are dropped instead of recorded',
+  );
 });

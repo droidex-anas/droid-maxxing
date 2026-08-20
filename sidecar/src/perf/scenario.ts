@@ -137,12 +137,11 @@ export function buildReplayPlan(spec: PerfScenarioSpec): ReplayPlan {
       turns.push(buildTurn(spec, random, sessionIndex, turn));
     }
   }
-  // Interleaved sessions emit on the same global timeline, so order turns by
-  // their first step to keep the merged schedule faithful to `atMs`. Within a
-  // session, turn starts are a full turn-duration apart, so this never
-  // reorders turns; the runner additionally sorts each session's list by turn
-  // before the replay runtime consumes it.
-  turns.sort((a, b) => (a.steps.at(0)?.atMs ?? 0) - (b.steps.at(0)?.atMs ?? 0));
+  // Turn times are relative to each turn's own start, so cross-turn list
+  // order carries no schedule meaning; sessions interleave at runtime through
+  // concurrent pacing. The plan stays in deterministic generation order
+  // (session-major, turn-minor), and the runner sorts each session's list by
+  // turn before the replay runtime consumes it.
   return { spec, turns };
 }
 
@@ -154,9 +153,10 @@ function buildTurn(
 ): ReplayTurnPlan {
   const messageId = `s${String(sessionIndex)}-t${String(turn)}`;
   const steps: ReplayStep[] = [];
-  // eventsPerSecond paces the assistant deltas; tool markers ride in the gaps
+  // eventsPerSecond paces the assistant deltas. Tool markers ride in the gaps
   // between delta slots (interval thirds), so they add event count without
-  // extending the turn's wall-clock span or the expected duration.
+  // adding delta slots; expectedDurationMs counts them, and the final pair of
+  // a turn may land up to two-thirds of an interval past the last delta.
   const intervalMs = 1_000 / spec.eventsPerSecond;
   let toolCounter = 0;
   for (let delta = 0; delta < spec.deltasPerTurn; delta += 1) {
@@ -178,7 +178,7 @@ function buildTurn(
       },
       marker: null,
     });
-    if ((delta + 1) % spec.toolMarkerEvery === 0 && delta + 1 < spec.deltasPerTurn) {
+    if ((delta + 1) % spec.toolMarkerEvery === 0) {
       toolCounter += 1;
       const toolUseId = `${messageId}-tool-${String(toolCounter)}`;
       const toolName = toolCounter % 2 === 0 ? 'Read' : 'Bash';
@@ -248,7 +248,9 @@ function deltaText(random: () => number, chars: number): string {
 
 function markerPairs(deltas: number, every: number): number {
   if (every <= 0) return 0;
-  return Math.max(0, Math.floor(deltas / every) - (deltas % every === 0 ? 1 : 0));
+  // A marker pair for every completed `every` deltas, including the final
+  // boundary of a turn.
+  return Math.max(0, Math.floor(deltas / every));
 }
 
 export function mulberry32(seed: number): () => number {

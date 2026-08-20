@@ -39,9 +39,14 @@ export interface RendererPerfSnapshot {
 
 interface PendingEvent {
   receivedAt: number;
+  source: ServerEvent;
 }
 
 const CAPACITY = 4_096;
+// Backgrounded tabs throttle rAF indefinitely; never-stamped entries are
+// dropped rather than recorded against a meaningless far-future frame.
+const PAINT_STALE_MS = 10_000;
+const MAX_AWAITING_PAINT = 4_096;
 
 const receiveToCommit = new Float64Array(CAPACITY);
 const receiveToPaint = new Float64Array(CAPACITY);
@@ -91,7 +96,16 @@ export function noteBridgeEventReceived(event: ServerEvent): void {
     appendedReceived += 1;
     record(appendToReceive, 'append', now - clampEpoch(event.event.ts));
   }
-  pending.push({ receivedAt: now });
+  pending.push({ receivedAt: now, source: event });
+}
+
+/**
+ * Drop an event's pending leg when it produces no reducer action. Without
+ * this, the entry would be closed by the next unrelated commit and record a
+ * fabricated receive-to-commit/paint sample.
+ */
+export function discardPendingBridgeEvent(event: ServerEvent): void {
+  pending = pending.filter((item) => item.source !== event);
 }
 
 /**
@@ -149,7 +163,16 @@ export function resetRendererPerfForTest(): void {
 }
 
 function schedulePaintStamp(batch: PendingEvent[]): void {
+  const now = performance.now();
+  if (awaitingPaint.length > 0 && now - awaitingPaint[0].receivedAt > PAINT_STALE_MS) {
+    // The scheduled frame never ran (backgrounded tab); those samples can no
+    // longer describe a real paint, so drop them instead of inventing one.
+    awaitingPaint = [];
+  }
   awaitingPaint = awaitingPaint.concat(batch);
+  if (awaitingPaint.length > MAX_AWAITING_PAINT) {
+    awaitingPaint = awaitingPaint.slice(awaitingPaint.length - MAX_AWAITING_PAINT);
+  }
   if (paintScheduled) return;
   const raf = (globalThis as { requestAnimationFrame?: (cb: () => void) => number })
     .requestAnimationFrame;
@@ -162,8 +185,8 @@ function schedulePaintStamp(batch: PendingEvent[]): void {
   paintScheduled = true;
   raf(() => {
     paintScheduled = false;
-    const now = performance.now();
-    for (const item of awaitingPaint) record(receiveToPaint, 'paint', now - item.receivedAt);
+    const stampedAt = performance.now();
+    for (const item of awaitingPaint) record(receiveToPaint, 'paint', stampedAt - item.receivedAt);
     awaitingPaint = [];
   });
 }

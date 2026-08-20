@@ -72,11 +72,16 @@ test('perf metrics endpoint requires the bridge token', async () => {
   });
 });
 
-function closeSocket(socket: WebSocket): Promise<void> {
+function closeSocket(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
   // Await the close handshake so withServer's teardown never races a socket
-  // that is still winding down.
-  return new Promise((resolve) => {
-    socket.once('close', () => resolve());
+  // that is still winding down; a lost handshake must fail the test rather
+  // than hang the untimed suite.
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('socket close timed out')), timeoutMs);
+    socket.once('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
     socket.close();
   });
 }
