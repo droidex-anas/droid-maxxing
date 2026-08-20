@@ -54,3 +54,9 @@ test('unset diff still shows the loading skeleton until a patch arrives', () => 
   assert.match(html, /bg-droid-elevated\/40/);
   assert.doesNotMatch(html, /No file changes\./);
 });
+
+test('a refresh error replaces a stale cached diff with the failure', () => {
+  const html = renderCodePane('diff --git a/a.ts b/a.ts', 'Could not refresh diff');
+  assert.match(html, /Could not refresh diff/);
+  assert.doesNotMatch(html, /data-testid="pr-diff"/);
+});

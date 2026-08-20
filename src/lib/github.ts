@@ -268,6 +268,9 @@ export interface ChecksSummary {
   pass: number;
   fail: number;
   pending: number;
+  skipped: number;
+  neutral: number;
+  unknown: number;
   status: CheckStatus | 'none';
 }
 
@@ -277,13 +280,21 @@ export function checksSummary(checks: PrCheck[]): ChecksSummary {
     pass: 0,
     fail: 0,
     pending: 0,
+    skipped: 0,
+    neutral: 0,
+    unknown: 0,
     status: 'none',
   };
   for (const check of checks) {
-    const status = bucketToStatus(check.bucket);
+    const bucket = (check.bucket || '').toLowerCase();
+    const status = bucketToStatus(bucket);
     if (status === 'success') summary.pass += 1;
     else if (status === 'failure') summary.fail += 1;
     else if (status === 'pending') summary.pending += 1;
+    else if (bucket === 'skip' || bucket === 'skipped' || bucket === 'skipping')
+      summary.skipped += 1;
+    else if (bucket === 'neutral') summary.neutral += 1;
+    else summary.unknown += 1;
   }
   if (summary.total === 0) summary.status = 'none';
   else if (summary.fail > 0) summary.status = 'failure';

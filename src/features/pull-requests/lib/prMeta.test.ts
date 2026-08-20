@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { PullRequest } from '../../../types/vcs';
-import { checksBadge, mergeBlockReason } from './prMeta';
+import type { PrCheck, PullRequest } from '../../../types/vcs';
+import { checksSummary } from '../../../lib/github';
+import { checksBadge, mergeBlockReason, reviewerRows } from './prMeta';
 
 const pr = (overrides: Partial<PullRequest> = {}): PullRequest => ({
   number: 7,
@@ -25,6 +26,17 @@ const pr = (overrides: Partial<PullRequest> = {}): PullRequest => ({
   ...overrides,
 });
 
+const check = (bucket: string): PrCheck => ({
+  name: bucket,
+  workflow: null,
+  bucket,
+  state: '',
+  description: '',
+  link: null,
+  startedAt: null,
+  completedAt: null,
+});
+
 test('a mergeable pull request is not blocked', () => {
   assert.equal(mergeBlockReason(pr()), null);
 });
@@ -43,26 +55,53 @@ test('review state and unknown mergeability leave the merge to gh', () => {
 });
 
 test('checks that all skipped are neutral, not a green run', () => {
-  assert.deepEqual(checksBadge({ total: 3, pass: 0, fail: 0, pending: 0, status: 'neutral' }), {
+  assert.deepEqual(checksBadge(checksSummary(['skipping', 'skipping', 'skipping'].map(check))), {
     label: '3 skipped',
     tone: 'neutral',
   });
-  assert.deepEqual(checksBadge({ total: 3, pass: 3, fail: 0, pending: 0, status: 'success' }), {
+  assert.deepEqual(checksBadge(checksSummary(['pass', 'pass', 'pass'].map(check))), {
     label: '3/3 passed',
     tone: 'success',
   });
-  assert.equal(checksBadge({ total: 0, pass: 0, fail: 0, pending: 0, status: 'none' }), null);
+  assert.equal(checksBadge(checksSummary([])), null);
 });
 
 test('a run that passed some and skipped some is partial, not green', () => {
-  // The summary marks any run with a passing check 'success', so the badge has
-  // to account for the skipped checks itself.
-  assert.deepEqual(checksBadge({ total: 3, pass: 1, fail: 0, pending: 0, status: 'success' }), {
+  assert.deepEqual(checksBadge(checksSummary(['pass', 'skipping', 'skipping'].map(check))), {
     label: '1/3 passed',
     tone: 'neutral',
   });
-  assert.deepEqual(checksBadge({ total: 3, pass: 3, fail: 0, pending: 0, status: 'success' }), {
+  assert.deepEqual(checksBadge(checksSummary(['pass', 'pass', 'pass'].map(check))), {
     label: '3/3 passed',
     tone: 'success',
   });
+});
+
+test('neutral and unknown checks are labelled honestly', () => {
+  assert.deepEqual(checksBadge(checksSummary(['neutral', 'neutral'].map(check))), {
+    label: '2 neutral',
+    tone: 'neutral',
+  });
+  assert.deepEqual(checksBadge(checksSummary(['mystery'].map(check))), {
+    label: '1 unknown',
+    tone: 'neutral',
+  });
+});
+
+test('pending reviews stay pending and current requests override old reviews', () => {
+  assert.deepEqual(
+    reviewerRows(
+      pr({
+        reviews: [
+          { author: 'ana', state: 'pending' },
+          { author: 'rae', state: 'approved' },
+        ],
+        reviewRequests: ['rae'],
+      }),
+    ),
+    [
+      { login: 'ana', state: 'pending' },
+      { login: 'rae', state: 'pending' },
+    ],
+  );
 });

@@ -27,6 +27,11 @@ import {
 
 const POLL_MS = 12000;
 
+export function prActionError(message: string | undefined, fallback: string): string {
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+  return message || fallback;
+}
+
 function sectionError(
   failed: boolean,
   message: string | undefined,
@@ -164,7 +169,7 @@ export function usePullRequestDetail(
       dispatch({
         type: 'diff-failure',
         generation,
-        message: result.message ?? 'Could not load pull request diff',
+        message: prActionError(result.message, 'Could not load pull request diff'),
       });
     });
   }, [cwd, number]);
@@ -214,7 +219,7 @@ export function usePullRequestDetail(
       try {
         const result = await postPrComment(cwd, number, body);
         if (!result.ok) {
-          toast.error(result.message ?? 'Could not post comment');
+          toast.error(prActionError(result.message, 'Could not post comment'));
           return result;
         }
         toast.success(successMessage);
@@ -240,7 +245,7 @@ export function usePullRequestDetail(
       setMerging(true);
       const result = await mergePullRequest(cwd, number, method);
       if (result.ok) toast.success(`Pull request #${String(number)} merged`);
-      else toast.error(result.message ?? 'Could not merge pull request');
+      else toast.error(prActionError(result.message, 'Could not merge pull request'));
       if (generation === generationRef.current) {
         setMerging(false);
         if (result.ok) loadMeta(true);

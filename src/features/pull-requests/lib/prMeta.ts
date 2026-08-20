@@ -22,21 +22,23 @@ function reviewerState(state: string): ReviewerState {
       return 'changes_requested';
     case 'dismissed':
       return 'dismissed';
+    case 'pending':
+      return 'pending';
     default:
       return 'commented';
   }
 }
 
 // gh lists reviews chronologically, so the last entry for an author is their
-// current position; requested-but-silent reviewers stay pending.
+// current position; an active review request wins over a previous review.
 export function reviewerRows(pr: PullRequest | null): ReviewerRow[] {
   if (!pr) return [];
   const byLogin = new Map<string, ReviewerState>();
-  for (const login of pr.reviewRequests) {
-    if (login) byLogin.set(login, 'pending');
-  }
   for (const review of pr.reviews) {
     if (review.author) byLogin.set(review.author, reviewerState(review.state));
+  }
+  for (const login of pr.reviewRequests) {
+    if (login) byLogin.set(login, 'pending');
   }
   return [...byLogin].map(([login, state]) => ({ login, state }));
 }
@@ -103,16 +105,22 @@ export function checksBadge(summary: ChecksSummary): PrBadge | null {
   if (summary.pending > 0) {
     return { label: `${String(summary.pending)} running`, tone: 'neutral' };
   }
-  // Skipped or neutral checks never ran: a run that passed some and skipped
-  // some is partial, and only a run where every check passed is green.
-  const skipped = summary.total - summary.pass - summary.fail - summary.pending;
-  if (summary.pass === 0) {
-    return { label: `${String(skipped)} skipped`, tone: 'neutral' };
+  if (summary.pass === summary.total) {
+    return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'success' };
   }
-  if (skipped > 0) {
+  if (summary.pass > 0) {
     return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'neutral' };
   }
-  return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'success' };
+  if (summary.skipped === summary.total) {
+    return { label: `${String(summary.skipped)} skipped`, tone: 'neutral' };
+  }
+  if (summary.neutral === summary.total) {
+    return { label: `${String(summary.neutral)} neutral`, tone: 'neutral' };
+  }
+  if (summary.unknown === summary.total) {
+    return { label: `${String(summary.unknown)} unknown`, tone: 'neutral' };
+  }
+  return { label: `${String(summary.total)} checks completed`, tone: 'neutral' };
 }
 
 export const TONE_TEXT_CLASS: Record<PrTone, string> = {

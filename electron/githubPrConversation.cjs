@@ -189,6 +189,28 @@ function reviewThreadIssue(threads, { inlineSucceeded, inlineCount }) {
   return null;
 }
 
+function isCommentRow(row) {
+  return row !== null && typeof row === 'object' && !Array.isArray(row);
+}
+
+function malformedRowCount(rows) {
+  return Array.isArray(rows) ? rows.filter((row) => !isCommentRow(row)).length : 0;
+}
+
+function malformedRowsIssue({ commentCount, reviewCount, inlineCount }) {
+  const parts = [
+    commentCount === 0
+      ? null
+      : `${commentCount} malformed PR conversation comment${commentCount === 1 ? '' : 's'}`,
+    reviewCount === 0 ? null : `${reviewCount} malformed PR review${reviewCount === 1 ? '' : 's'}`,
+    inlineCount === 0
+      ? null
+      : `${inlineCount} malformed inline review comment${inlineCount === 1 ? '' : 's'}`,
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  return `Ignored ${parts.join(', ')}.`;
+}
+
 function normalizePrComments(data, inlineRows = [], threadStatus = new Map()) {
   const normalizeReactionGroups = (groups) => {
     if (!Array.isArray(groups)) return [];
@@ -215,17 +237,20 @@ function normalizePrComments(data, inlineRows = [], threadStatus = new Map()) {
       .map(([field, content]) => ({ content, count: Number(reactions[field] || 0) }))
       .filter((reaction) => reaction.count > 0);
   };
-  const comments = (Array.isArray(data?.comments) ? data.comments : []).map((c, i) => ({
-    id: `comment-${String(c.databaseId || c.id || `${i}-${c.createdAt || ''}`)}`,
-    kind: 'comment',
-    author: c.author?.login || 'unknown',
-    body: c.body || '',
-    createdAt: c.createdAt || null,
-    url: c.url || null,
-    state: null,
-    reactions: normalizeReactionGroups(c.reactionGroups),
-  }));
+  const comments = (Array.isArray(data?.comments) ? data.comments : [])
+    .filter(isCommentRow)
+    .map((c, i) => ({
+      id: `comment-${String(c.databaseId || c.id || `${i}-${c.createdAt || ''}`)}`,
+      kind: 'comment',
+      author: c.author?.login || 'unknown',
+      body: c.body || '',
+      createdAt: c.createdAt || null,
+      url: c.url || null,
+      state: null,
+      reactions: normalizeReactionGroups(c.reactionGroups),
+    }));
   const reviews = (Array.isArray(data?.reviews) ? data.reviews : [])
+    .filter(isCommentRow)
     .filter((r) => (r.body && r.body.trim()) || (r.state && r.state !== 'COMMENTED'))
     .map((r, i) => ({
       id: `review-${String(r.databaseId || r.id || `${i}-${r.submittedAt || ''}`)}`,
@@ -237,25 +262,27 @@ function normalizePrComments(data, inlineRows = [], threadStatus = new Map()) {
       state: r.state ? String(r.state).toLowerCase() : null,
       reactions: normalizeReactionGroups(r.reactionGroups),
     }));
-  const inline = (Array.isArray(inlineRows) ? inlineRows : []).map((comment, i) => {
-    const status = threadStatus.get(String(comment.id)) ?? null;
-    return {
-      id: `inline-${String(comment.id || `${i}-${comment.created_at || ''}`)}`,
-      kind: 'inline',
-      author: comment.user?.login || 'unknown',
-      body: comment.body || '',
-      createdAt: comment.created_at || null,
-      url: comment.html_url || null,
-      state: null,
-      path: comment.path || null,
-      line: comment.line ?? comment.original_line ?? null,
-      diffHunk: comment.diff_hunk || null,
-      resolved: status?.resolved === true,
-      outdated: status?.outdated === true,
-      resolvedBy: status?.resolvedBy ?? null,
-      reactions: normalizeRestReactions(comment.reactions),
-    };
-  });
+  const inline = (Array.isArray(inlineRows) ? inlineRows : [])
+    .filter(isCommentRow)
+    .map((comment, i) => {
+      const status = threadStatus.get(String(comment.id)) ?? null;
+      return {
+        id: `inline-${String(comment.id || `${i}-${comment.created_at || ''}`)}`,
+        kind: 'inline',
+        author: comment.user?.login || 'unknown',
+        body: comment.body || '',
+        createdAt: comment.created_at || null,
+        url: comment.html_url || null,
+        state: null,
+        path: comment.path || null,
+        line: comment.line ?? comment.original_line ?? null,
+        diffHunk: comment.diff_hunk || null,
+        resolved: status?.resolved === true,
+        outdated: status?.outdated === true,
+        resolvedBy: status?.resolvedBy ?? null,
+        reactions: normalizeRestReactions(comment.reactions),
+      };
+    });
   return [...comments, ...reviews, ...inline].sort(
     (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
   );
@@ -306,6 +333,11 @@ async function prComments(dir, { prNumber } = {}, runGh = gh) {
     inlineSucceeded: parsedInlineSucceeded,
     inlineCount: inlineRows.length,
   });
+  const rowIssue = malformedRowsIssue({
+    commentCount: parsedViewSucceeded ? malformedRowCount(data.comments) : 0,
+    reviewCount: parsedViewSucceeded ? malformedRowCount(data.reviews) : 0,
+    inlineCount: parsedInlineSucceeded ? malformedRowCount(inlineRows) : 0,
+  });
   const failures = [
     ...(parsedViewSucceeded
       ? []
@@ -316,6 +348,7 @@ async function prComments(dir, { prNumber } = {}, runGh = gh) {
           inlinePayload?.message || inline.stderr.trim() || 'Could not load inline review comments',
         ]),
     ...(threadIssue ? [threadIssue] : []),
+    ...(rowIssue ? [rowIssue] : []),
   ];
   return {
     ok: true,

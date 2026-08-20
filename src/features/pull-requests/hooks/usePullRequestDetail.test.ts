@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { PrCheck, PrComment } from '../../../types/vcs';
 import { initialPrDetailState } from '../lib/prDetailState';
-import { prevForSettledMeta, resolveMeta } from './usePullRequestDetail';
+import { prActionError, prevForSettledMeta, resolveMeta } from './usePullRequestDetail';
 
 const failedView = { ok: false as const, message: 'view down', pr: null };
 const failedChecks = { ok: false as const, message: 'checks down', checks: [] };
@@ -160,4 +160,13 @@ test('poll all-fail after success keeps last good rows and previous errors', () 
   assert.equal(resolved.event.metaError, null);
   assert.equal(resolved.event.checksError, null);
   assert.equal(resolved.event.commentsError, null);
+});
+
+test('empty action failures use visible fallbacks', () => {
+  assert.equal(
+    prActionError('', 'Could not load pull request diff'),
+    'Could not load pull request diff',
+  );
+  assert.equal(prActionError(undefined, 'Could not post comment'), 'Could not post comment');
+  assert.equal(prActionError('merge refused', 'Could not merge pull request'), 'merge refused');
 });

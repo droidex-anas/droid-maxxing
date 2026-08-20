@@ -24,6 +24,15 @@ export function resolvePrWorkspaceNumber(
   return currentNumber;
 }
 
+export function selectionForPrWorkspace(
+  boundCwd: string | null,
+  effectiveCwd: string | null,
+  number: number | null,
+): number | null {
+  if (!boundCwd || !effectiveCwd) return null;
+  return comparablePath(boundCwd) === comparablePath(effectiveCwd) ? number : null;
+}
+
 export function resolvePrWorkspaceCwd(input: {
   boundCwd: string | null;
   activeCwd: string | null | undefined;

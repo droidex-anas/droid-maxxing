@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolvePrWorkspaceCwd } from './prWorkspaceCwd';
+import { resolvePrWorkspaceCwd, selectionForPrWorkspace } from './prWorkspaceCwd';
 
 test('prefers an explicit bind, then a folder session, then the newest workspace', () => {
   assert.equal(
@@ -103,4 +103,11 @@ test('known folders compare with the app path equivalence rules', () => {
     }),
     'c:/work/repo',
   );
+});
+
+test('a selected PR is retained only for the effective bound repository', () => {
+  assert.equal(selectionForPrWorkspace('/repo', '/repo', 12), 12);
+  assert.equal(selectionForPrWorkspace('C:\\Work\\Repo', 'c:/work/repo', 12), 12);
+  assert.equal(selectionForPrWorkspace('/removed', '/fallback', 12), null);
+  assert.equal(selectionForPrWorkspace(null, '/fallback', 12), null);
 });

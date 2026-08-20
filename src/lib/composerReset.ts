@@ -1,3 +1,7 @@
+export function createComposerSeed(text: string, replace = false) {
+  return { text, id: Date.now(), replace };
+}
+
 /**
  * Post-submit composer reset. Image chips always clear: the submit path
  * waited out every in-flight encode, so each made the prompt. The
@@ -12,4 +16,9 @@ export function resetComposerAfterSubmit(opts: {
 }): void {
   opts.clearImages();
   if (opts.draftUntouched) opts.resetDraft();
+}
+
+export function composerTextAfterSeed(current: string, seed: string, replace: boolean): string {
+  if (replace || !current.trim()) return seed;
+  return `${current.trimEnd()}\n\n${seed}`;
 }

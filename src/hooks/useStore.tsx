@@ -85,6 +85,7 @@ import {
   type ChatMetadataMap,
 } from '../lib/chatMetadata';
 import { createSnapshotScheduler, loadSessionSnapshot } from '../lib/sessionSnapshot';
+import { createComposerSeed } from '../lib/composerReset';
 import { toast } from '../lib/toast';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
 import {
@@ -317,7 +318,7 @@ export interface AppState {
   pendingAutonomy: Record<string, Autonomy>;
   // One-shot text seeded into the composer (welcome-screen suggestion cards,
   // saved-note clicks). A fresh id per seed lets re-clicking re-arm the effect.
-  composerSeed: { text: string; id: number } | null;
+  composerSeed: { text: string; id: number; replace: boolean } | null;
   workspaceCwds: string[];
   // Derived (synced by the reducer): whether the browser pane is open for the
   // *currently active* session. Source of truth is `browserOpenKeys`.
@@ -561,7 +562,7 @@ type Action =
       executionMode: 'worktree' | 'local';
       branch?: string;
     }
-  | { type: 'SEED_COMPOSER'; text: string }
+  | { type: 'SEED_COMPOSER'; text: string; replace?: boolean }
   | { type: 'CLEAR_COMPOSER_SEED' }
   | { type: 'SESSION_NOTE_ADD'; appSessionId: string; text: string }
   | { type: 'SESSION_NOTE_MARK_USED'; appSessionId: string; noteId: string }
@@ -2624,8 +2625,7 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'SEED_COMPOSER':
-      return { ...state, composerSeed: { text: action.text, id: Date.now() } };
-
+      return { ...state, composerSeed: createComposerSeed(action.text, action.replace) };
     // The composer consumes the seed once; it must not linger, or remounting
     // the composer (e.g. toggling Mission Control) would re-apply stale text.
     case 'CLEAR_COMPOSER_SEED':

@@ -64,6 +64,7 @@ export function PrReviewButton({
       {open ? (
         <div
           role="menu"
+          aria-label="Review pull request"
           className="absolute right-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-droid-border bg-droid-surface py-1 shadow-xl"
         >
           <p className="flex items-center gap-2 px-3 pt-1 pb-1.5">

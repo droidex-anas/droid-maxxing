@@ -40,13 +40,14 @@ export function isLongComment(body: string): boolean {
 // A fence delimiter and its language line are not prose, whichever character
 // the fence is built from.
 const FENCE_DELIMITER = /^\s*(?:`{3,}|~{3,})/;
+const THEMATIC_BREAK = /^\s{0,3}(?:(?:-\s*){3,}|(?:_\s*){3,}|(?:\*\s*){3,})$/;
 
 // Folded cards need a headline. Markdown syntax is stripped rather than
 // rendered so the line stays one plain line at any width.
 export function commentPreview(body: string, limit = 120): string {
   const line = body
     .split('\n')
-    .filter((raw) => !FENCE_DELIMITER.test(raw))
+    .filter((raw) => !FENCE_DELIMITER.test(raw) && !THEMATIC_BREAK.test(raw))
     .map((raw) =>
       raw
         .replace(/^\s*(?:[>#]+|[-*+]|\d+\.)\s*/, '')

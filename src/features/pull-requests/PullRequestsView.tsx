@@ -8,7 +8,7 @@ import { PrWorkspaceEmpty } from './components/PrWorkspaceEmpty';
 import { usePullRequestList } from './hooks/usePullRequestList';
 import { prChatSeed } from './lib/prChatSeed';
 import { droidReviewSeed } from './lib/prReview';
-import { resolvePrWorkspaceCwd } from './lib/prWorkspaceCwd';
+import { resolvePrWorkspaceCwd, selectionForPrWorkspace } from './lib/prWorkspaceCwd';
 
 function WorkspaceDetail({
   cwd,
@@ -68,6 +68,11 @@ export function PullRequestsView() {
   const setup = useGithubSetup(Boolean(cwd), cwd ?? 'none');
   const canList = Boolean(cwd && git.env?.isGitHub && setup.isReady);
   const list = usePullRequestList(cwd, canList);
+  const selectedNumber = selectionForPrWorkspace(
+    state.prWorkspaceCwd,
+    cwd,
+    state.prWorkspaceNumber,
+  );
 
   if (!canList || !cwd) {
     return (
@@ -88,18 +93,18 @@ export function PullRequestsView() {
         <PrInbox
           prs={list.prs}
           viewerLogin={list.viewerLogin}
-          selectedNumber={state.prWorkspaceNumber}
+          selectedNumber={selectedNumber}
           loading={list.loading || !list.loaded}
           error={list.error}
           onSelect={(number) => {
-            dispatch({ type: 'OPEN_PULL_REQUESTS', number });
+            dispatch({ type: 'OPEN_PULL_REQUESTS', cwd, number });
           }}
           onRetry={list.refresh}
         />
       </div>
       <WorkspaceDetail
         cwd={cwd}
-        number={state.prWorkspaceNumber}
+        number={selectedNumber}
         prs={list.prs}
         viewerLogin={list.viewerLogin}
         onOpenChat={(pr) => {
@@ -107,14 +112,14 @@ export function PullRequestsView() {
           // prevents an active chat from another workspace from owning the PR
           // prompt; sending stays the user's decision.
           dispatch({ type: 'START_CHAT', cwd, executionMode: 'local' });
-          dispatch({ type: 'SEED_COMPOSER', text: prChatSeed(pr) });
+          dispatch({ type: 'SEED_COMPOSER', text: prChatSeed(pr), replace: true });
         }}
         onReviewWithDroid={(pr) => {
           // A local review starts as its own chat in this checkout, opened with
           // the review skill and the pull request already typed in.
           dispatch({ type: 'CLOSE_PULL_REQUESTS' });
           dispatch({ type: 'START_CHAT', cwd, executionMode: 'local' });
-          dispatch({ type: 'SEED_COMPOSER', text: droidReviewSeed(pr) });
+          dispatch({ type: 'SEED_COMPOSER', text: droidReviewSeed(pr), replace: true });
         }}
       />
     </div>

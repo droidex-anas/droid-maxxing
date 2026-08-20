@@ -29,15 +29,21 @@ export function mergeButtonTitle(
   return blocked ?? 'Merge this pull request';
 }
 
+export function mergePullRequestKey(pr: PullRequest, repositoryKey: string): string {
+  return pr.url || `${repositoryKey}#${String(pr.number)}`;
+}
+
 // Merging happens through `gh pr merge`, so the strategy is picked explicitly:
 // the button opens the list and the chosen entry performs the merge. There is no
 // separate confirmation because choosing a strategy already states the intent.
 export function PrMergeButton({
   pr,
+  repositoryKey,
   merging,
   onMerge,
 }: {
   pr: PullRequest | null;
+  repositoryKey: string;
   merging: boolean;
   onMerge: (method: PrMergeMethod) => Promise<boolean>;
 }) {
@@ -57,7 +63,7 @@ export function PrMergeButton({
   const kind = pr ? prKind(pr) : null;
   // A merged or closed pull request has nothing left to merge.
   const blocked = pr ? mergeBlockReason(pr) : null;
-  const prKey = pr ? pr.url || `#${String(pr.number)}` : null;
+  const prKey = pr ? mergePullRequestKey(pr, repositoryKey) : null;
   const merged = prKey !== null && mergedKey === prKey;
   const disabled = merging || merged || blocked !== null;
   useEffect(() => {

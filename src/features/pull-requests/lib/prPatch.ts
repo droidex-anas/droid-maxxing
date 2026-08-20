@@ -60,8 +60,27 @@ function stripAbPrefix(value: string): string {
   return path;
 }
 
-// The destination side of `diff --git`, quoted or not.
-const GIT_HEADER = /^diff --git (?:"a\/(?:\\.|[^"\\])*"|a\/.*?) ("b\/(?:\\.|[^"\\])*"|b\/.*)$/m;
+const QUOTED_GIT_HEADER = /^diff --git (?:"a\/(?:\\.|[^"\\])*") ("b\/(?:\\.|[^"\\])*")$/m;
+
+function gitHeaderDestination(chunk: string): string | null {
+  const quoted = QUOTED_GIT_HEADER.exec(chunk);
+  if (quoted) return stripAbPrefix(quoted[1]);
+  const line = /^diff --git (a\/.*)$/m.exec(chunk)?.[1];
+  if (!line) return null;
+  const candidates: { source: string; destination: string }[] = [];
+  let separator = line.indexOf(' b/');
+  while (separator >= 0) {
+    candidates.push({
+      source: line.slice(0, separator),
+      destination: line.slice(separator + 1),
+    });
+    separator = line.indexOf(' b/', separator + 1);
+  }
+  const samePath = candidates.find(
+    ({ source, destination }) => stripAbPrefix(source) === stripAbPrefix(destination),
+  );
+  return samePath ? stripAbPrefix(samePath.destination) : null;
+}
 
 // Git metadata that describes a change on its own: mode flips, empty new or
 // deleted files, rename or copy records, and binary blobs all arrive without
@@ -83,8 +102,11 @@ function filePathFromChunk(chunk: string): string | null {
   // b/x` does not invent a file. Anchored: a textual line inside a hunk
   // mentioning binary files is content, not git's own marker.
   if (GIT_METADATA.test(chunk)) {
-    const git = GIT_HEADER.exec(chunk);
-    if (git) return stripAbPrefix(git[1]);
+    const rename = /^rename to (.+)$/m.exec(chunk)?.[1];
+    if (rename) return unquoteGitPath(rename);
+    const copy = /^copy to (.+)$/m.exec(chunk)?.[1];
+    if (copy) return unquoteGitPath(copy);
+    return gitHeaderDestination(chunk);
   }
   return null;
 }

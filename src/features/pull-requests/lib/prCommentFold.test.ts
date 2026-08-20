@@ -69,3 +69,9 @@ test('the preview skips tilde fence delimiters too', () => {
   assert.equal(commentPreview('~~~ts\nconst a = 1;\n~~~\nafter the fence'), 'const a = 1;');
   assert.equal(commentPreview('~~~\ncode\n~~~'), 'code');
 });
+
+test('the preview skips Markdown thematic breaks', () => {
+  assert.equal(commentPreview('---\nActual summary'), 'Actual summary');
+  assert.equal(commentPreview(' * * * \nActual summary'), 'Actual summary');
+  assert.equal(commentPreview('___\nActual summary'), 'Actual summary');
+});

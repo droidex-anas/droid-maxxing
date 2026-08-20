@@ -42,7 +42,6 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 export function CodePane({ diff, diffError }: { diff: string | null; diffError: string | null }) {
-  if (diff !== null) return <PrDiff diff={diff} />;
   if (diffError) {
     return (
       <div className="flex h-full items-center justify-center px-8">
@@ -50,6 +49,7 @@ export function CodePane({ diff, diffError }: { diff: string | null; diffError: 
       </div>
     );
   }
+  if (diff !== null) return <PrDiff diff={diff} />;
   return (
     <div className="flex h-full items-center justify-center px-8">
       <div className="h-16 w-full max-w-2xl rounded-xl bg-droid-elevated/40" />
@@ -264,6 +264,7 @@ export function PrDetail({
           />
           <PrMergeButton
             pr={headerPr}
+            repositoryKey={cwd}
             merging={detail.merging}
             onMerge={(method) => detail.merge(method).then((result) => result.ok)}
           />

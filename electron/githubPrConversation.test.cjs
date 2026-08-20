@@ -94,6 +94,74 @@ test('PR comments include top-level, review, and inline review threads', () => {
   );
 });
 
+test('PR comment normalization excludes malformed rows', () => {
+  const comments = normalizePrComments(
+    {
+      comments: [
+        null,
+        { databaseId: 10, author: { login: 'author' }, body: 'top level' },
+        'not a comment',
+      ],
+      reviews: [
+        42,
+        { databaseId: 20, author: { login: 'reviewer' }, body: 'review', state: 'COMMENTED' },
+      ],
+    },
+    [
+      undefined,
+      { id: 30, user: { login: 'inline-reviewer' }, body: 'inline' },
+      ['not an inline comment'],
+    ],
+  );
+
+  assert.deepEqual(
+    comments.map(({ kind, author, body }) => ({ kind, author, body })),
+    [
+      { kind: 'comment', author: 'author', body: 'top level' },
+      { kind: 'review', author: 'reviewer', body: 'review' },
+      { kind: 'inline', author: 'inline-reviewer', body: 'inline' },
+    ],
+  );
+});
+
+test('PR comments report malformed rows as partial while keeping valid rows', async () => {
+  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
+    if (args[0] === 'pr') {
+      return ghResult({
+        stdout: JSON.stringify({
+          comments: [null, { databaseId: 10, author: { login: 'author' }, body: 'top level' }],
+          reviews: [{ databaseId: 20, author: { login: 'reviewer' }, body: 'review' }, 42],
+        }),
+      });
+    }
+    if (args[1] === 'graphql')
+      return ghResult({
+        stdout: JSON.stringify({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+        }),
+      });
+    return ghResult({
+      stdout: JSON.stringify([
+        [undefined, { id: 30, user: { login: 'inline-reviewer' }, body: 'inline' }],
+      ]),
+    });
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, true);
+  assert.match(result.message, /1 malformed PR conversation comment/);
+  assert.match(result.message, /1 malformed PR review/);
+  assert.match(result.message, /1 malformed inline review comment/);
+  assert.deepEqual(
+    result.comments.map(({ kind, body }) => ({ kind, body })),
+    [
+      { kind: 'comment', body: 'top level' },
+      { kind: 'review', body: 'review' },
+      { kind: 'inline', body: 'inline' },
+    ],
+  );
+});
+
 test('PR comments keep conversation comments when inline pagination fails', async () => {
   const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
     if (args[0] === 'pr') {

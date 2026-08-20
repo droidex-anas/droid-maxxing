@@ -26,6 +26,10 @@ export function prInboxEmptyCopy(tab: PrInboxTab, query: string): string {
   return query.trim() ? 'No pull requests match your search.' : EMPTY_COPY[tab];
 }
 
+export function shouldShowPrInboxEmpty(error: string | null, count: number): boolean {
+  return !error && count === 0;
+}
+
 function PrInboxRow({
   pr,
   selected,
@@ -101,21 +105,24 @@ function SkeletonRows() {
 
 function InboxList({
   loading,
+  error,
   emptyCopy,
   prs,
   selectedNumber,
   onSelect,
 }: {
   loading: boolean;
+  error: string | null;
   emptyCopy: string;
   prs: PullRequest[];
   selectedNumber: number | null;
   onSelect: (number: number) => void;
 }) {
   if (loading) return <SkeletonRows />;
-  if (prs.length === 0) {
+  if (shouldShowPrInboxEmpty(error, prs.length)) {
     return <p className="px-1 py-6 text-[13px] text-droid-text-muted">{emptyCopy}</p>;
   }
+  if (prs.length === 0) return null;
   return (
     <div className="space-y-0.5">
       {prs.map((pr) => (
@@ -222,6 +229,7 @@ export function PrInbox({
       <div className="pr-workspace-scroll mt-2 min-h-0 flex-1 overflow-y-auto">
         <InboxList
           loading={showSkeleton}
+          error={error}
           emptyCopy={prInboxEmptyCopy(tab, query)}
           prs={visible}
           selectedNumber={selectedNumber}

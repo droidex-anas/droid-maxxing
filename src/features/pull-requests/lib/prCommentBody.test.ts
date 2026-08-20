@@ -185,3 +185,35 @@ test('a details tag with nothing in it does not become a disclosure', () => {
     { kind: 'markdown', text: 'tail' },
   ]);
 });
+
+test('a longer backtick run cannot close a shorter inline code span', () => {
+  const body = '``code ``` <details><summary>still code</summary>payload</details> `` after';
+  assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);
+});
+
+test('summary markup inside disclosure code stays in the disclosure body', () => {
+  const fenced = [
+    '<details>',
+    '<summary>Real label</summary>',
+    '',
+    '```html',
+    '<summary>sample label</summary>',
+    '```',
+    '</details>',
+  ].join('\n');
+  const indented = [
+    '<details>',
+    '<summary>Real label</summary>',
+    '',
+    '    <summary>sample label</summary>',
+    '</details>',
+  ].join('\n');
+
+  for (const body of [fenced, indented]) {
+    const blocks = prCommentBlocks(body);
+    assert.equal(blocks.length, 1);
+    if (blocks[0].kind !== 'disclosure') throw new Error('expected a disclosure');
+    assert.equal(blocks[0].summary, 'Real label');
+    assert.match(blocks[0].body, /<summary>sample label<\/summary>/);
+  }
+});

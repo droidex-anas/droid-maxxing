@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { PullRequest } from '../../../types/vcs';
-import { PrMergeButton, mergeButtonTitle } from '../components/PrMergeButton';
+import { PrMergeButton, mergeButtonTitle, mergePullRequestKey } from '../components/PrMergeButton';
 import { PrReviewButton } from '../components/PrReviewButton';
 
 const pr: PullRequest = {
@@ -37,6 +37,7 @@ test('merge and review dropdown triggers expose menu state', () => {
   const mergeHtml = renderToStaticMarkup(
     createElement(PrMergeButton, {
       pr,
+      repositoryKey: '/repo',
       merging: false,
       onMerge: async () => true,
     }),
@@ -55,4 +56,10 @@ test('merge and review dropdown triggers expose menu state', () => {
   );
   assert.match(reviewHtml, /aria-haspopup="menu"/);
   assert.match(reviewHtml, /aria-expanded="false"/);
+});
+
+test('URL-less pull requests are keyed by repository and number', () => {
+  const withoutUrl = { ...pr, url: '' };
+  assert.equal(mergePullRequestKey(withoutUrl, '/repo-a'), '/repo-a#1');
+  assert.equal(mergePullRequestKey(withoutUrl, '/repo-b'), '/repo-b#1');
 });

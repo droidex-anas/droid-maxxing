@@ -100,9 +100,8 @@ function inlineCodeSpans(text: string, covered: readonly ProtectedSpan[]): Prote
     // A span must close before the next code context begins, so a stray
     // backtick in prose cannot reach into a later fence.
     const boundary = covered.find((span) => span.start > start)?.start ?? text.length;
-    const close = new RegExp('`{' + String(length) + '}(?!`)').exec(
-      text.slice(start + length, boundary),
-    );
+    const runs = text.slice(start + length, boundary).matchAll(/`+/g);
+    const close = [...runs].find((run) => run[0].length === length);
     if (!close) {
       cursor = start + length;
       continue;
@@ -178,8 +177,13 @@ function normalizeBlock(text: string): string {
 }
 
 function disclosure(inner: string): PrCommentBlock | null {
-  const summary = SUMMARY.exec(inner);
-  const body = normalizeBlock(inner.replace(SUMMARY, ''));
+  const spans = protectedSpans(inner);
+  const summary = [...inner.matchAll(new RegExp(SUMMARY.source, 'gi'))].find(
+    (match) => !spans.some((span) => match.index >= span.start && match.index < span.end),
+  );
+  const body = summary
+    ? normalizeBlock(inner.slice(0, summary.index) + inner.slice(summary.index + summary[0].length))
+    : normalizeBlock(inner);
   const label = summary ? inlineText(summary[1]) : '';
   // A tag pair with neither a summary label nor a body carried nothing, so it
   // must not invent a disclosure.

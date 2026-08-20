@@ -1,10 +1,8 @@
-import { useState } from 'react';
-
 import { GithubAuthPromptContent } from '../../../components/environment/GithubSetupCard';
+import { useGithubAuthCodeCopy } from '../../../hooks/useGithubAuthCodeCopy';
 import { useStoreDispatch } from '../../../hooks/useStore';
 import type { GithubSetupController } from '../../../hooks/useGithubSetup';
 import { pickDirectory } from '../../../lib/desktop';
-import { isGithubAuthCodeCopied } from '../../../lib/github';
 
 function setupActionLabel(setup: GithubSetupController): string {
   if (setup.action === 'installing') return 'Installing…';
@@ -29,27 +27,11 @@ function EmptyCopy({ children }: { children: string }) {
 }
 
 export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) {
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [copyFailedCode, setCopyFailedCode] = useState<string | null>(null);
+  const authCodeCopy = useGithubAuthCodeCopy(setup.authCode);
   const busy = setup.action !== 'idle' && !setup.authCode;
   const canCancel =
     setup.action === 'authenticating' ||
     (setup.action === 'installing' && setup.availability?.installMethod !== 'manual');
-  const copied = isGithubAuthCodeCopied(setup.authCode, copiedCode);
-  const copyFailed = isGithubAuthCodeCopied(setup.authCode, copyFailedCode);
-
-  const copyCode = async () => {
-    if (!setup.authCode) return;
-    setCopyFailedCode(null);
-    try {
-      await navigator.clipboard.writeText(setup.authCode);
-      setCopiedCode(setup.authCode);
-    } catch {
-      setCopiedCode(null);
-      setCopyFailedCode(setup.authCode);
-    }
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center px-8">
       <EmptyCopy>{setupEmptyCopy(setup)}</EmptyCopy>
@@ -65,9 +47,9 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
         <div className="mt-4 w-full max-w-sm">
           <GithubAuthPromptContent
             code={setup.authCode}
-            copied={copied}
-            copyFailed={copyFailed}
-            onCopy={() => void copyCode()}
+            copied={authCodeCopy.copied}
+            copyFailed={authCodeCopy.copyFailed}
+            onCopy={() => void authCodeCopy.copyCode()}
             onCancel={() => {
               setup.closeAuthPrompt();
               setup.cancelAuthentication();

@@ -138,3 +138,16 @@ test('literal astral characters in a quoted path decode as whole code points', (
   assert.equal(files.length, 1);
   assert.equal(files[0].file.path, 'emoji 🚀.png');
 });
+
+test('metadata paths containing the destination prefix are not truncated', () => {
+  const files = splitPrPatch(
+    [
+      'diff --git a/docs/a b/example.txt b/docs/a b/example.txt',
+      'old mode 100644',
+      'new mode 100755',
+    ].join('\n'),
+  );
+
+  assert.equal(files.length, 1);
+  assert.equal(files[0].file.path, 'docs/a b/example.txt');
+});
