@@ -329,9 +329,10 @@ async function prComments(dir, { prNumber } = {}, runGh = gh) {
   }
   const data = parsedViewSucceeded ? viewPayload.payload : { comments: [], reviews: [] };
   const inlineRows = parsedInlineSucceeded ? inlinePayload.pages.flat() : [];
+  const validInlineCount = inlineRows.filter(isCommentRow).length;
   const threadIssue = reviewThreadIssue(threads, {
     inlineSucceeded: parsedInlineSucceeded,
-    inlineCount: inlineRows.length,
+    inlineCount: validInlineCount,
   });
   const rowIssue = malformedRowsIssue({
     commentCount: parsedViewSucceeded ? malformedRowCount(data.comments) : 0,

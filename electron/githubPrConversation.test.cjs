@@ -322,6 +322,30 @@ test('a failed thread lookup stays quiet when there are no inline comments', asy
   assert.equal(result.message, undefined);
 });
 
+test('malformed inline rows do not make thread status failures relevant', async () => {
+  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
+    if (args[0] === 'pr') {
+      return ghResult({
+        stdout: JSON.stringify({
+          comments: [{ databaseId: 10, author: { login: 'author' }, body: 'top level' }],
+          reviews: [],
+        }),
+      });
+    }
+    if (args[1] === 'graphql') return ghResult({ code: 1, stderr: 'graphql rate limited' });
+    return ghResult({ stdout: JSON.stringify([[null, 42]]) });
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, true);
+  assert.match(result.message, /2 malformed inline review comments/);
+  assert.doesNotMatch(result.message, /graphql rate limited/);
+  assert.deepEqual(
+    result.comments.map((comment) => comment.body),
+    ['top level'],
+  );
+});
+
 test('review threads without comment ids are ignored instead of throwing', () => {
   const page = normalizeReviewThreadPage({
     data: {

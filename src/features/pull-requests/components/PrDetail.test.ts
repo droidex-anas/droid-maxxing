@@ -56,7 +56,12 @@ test('unset diff still shows the loading skeleton until a patch arrives', () => 
 });
 
 test('a refresh error replaces a stale cached diff with the failure', () => {
-  const html = renderCodePane('diff --git a/a.ts b/a.ts', 'Could not refresh diff');
+  const html = renderCodePane(
+    ['diff --git a/a.ts b/a.ts', '--- a/a.ts', '+++ b/a.ts', '@@ -1 +1 @@', '-old', '+new'].join(
+      '\n',
+    ),
+    'Could not refresh diff',
+  );
   assert.match(html, /Could not refresh diff/);
-  assert.doesNotMatch(html, /data-testid="pr-diff"/);
+  assert.doesNotMatch(html, /a\.ts/);
 });
