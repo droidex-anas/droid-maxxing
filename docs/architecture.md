@@ -66,6 +66,51 @@ flowchart LR
 - Live changes go provider-first through `session.updateSettings`, serialized per session. The renderer shows a pending state and settles only when the confirmed summary arrives; rejections surface as recoverable `session.autonomy_update_failed` errors, and a settlement that lands after close or provider replacement is discarded.
 - Child sessions report their confirmed effective autonomy only while their runtime is live. It is read from the provider init result, never persisted, and never inherited from the parent; historical or unopened children report none and the renderer labels them provider managed.
 
+## Performance instrumentation
+
+Perf phase 0 (#116) instruments the full event path — provider event →
+normalized → persisted → transport → renderer receive → store commit → next
+paint — and provides a deterministic replay harness for validating every later
+performance change.
+
+### Sidecar hot-path metrics
+
+- `sidecar/src/telemetry/hotPathMetrics.ts` records always-on stage
+  histograms (`normalize`, SQLite `persist`, `emit` dispatch, `transport`
+  fan-out, coalesced-delta batch sizes), transport byte rates, event-loop
+  delay, process CPU/memory, and resource gauges (live sessions, child
+  agents).
+- `sidecar/src/bridgeServer.ts` owns the authenticated WebSocket fan-out and
+  the token-gated HTTP routes. `GET /perf/metrics?token=<BRIDGE_TOKEN>`
+  returns the current snapshot as JSON for live diagnosis and for the harness.
+- The sidecar entry (`sidecar/src/index.ts`) enables the collector at
+  readiness and samples `SessionManager.resourceCounts()` for the gauges.
+
+### Renderer metrics
+
+- `src/lib/rendererPerf.ts` measures bridge receive → store commit → next
+  paint per event batch, the age of `event.appended` messages at socket read,
+  long tasks (`PerformanceObserver`), and the mounted transcript row count
+  (reported by the conversation scroll window).
+- The snapshot is available in the console via
+  `window.__droidexPerf.getSnapshot()`.
+
+### Electron main gauges
+
+- `electron/performanceMetrics.cjs` collects live WebContents, live PTYs, and
+  process memory/CPU; the renderer reads it through
+  `window.droidControl.getPerformanceMetrics()`.
+
+### Replay harness
+
+`npm run perf:replay -- --scenario <name>` boots the real sidecar pipeline
+(SessionManager, SessionEventFlow, SessionTimeline, SQLite history, bridge
+WebSocket) against a scripted provider and writes JSON + Markdown artifacts
+to `reports/perf/`. Scenarios (`smoke`, `streaming`, `multi-agent`,
+`long-history`) are deterministic for a given seed; `long-history` compares
+early vs late latency drift. Budgets are phase 0 calibration values from the
+#115 performance contract; pass `--enforce-budgets` to fail a run on a breach.
+
 ## Build path
 
 `npm run build` runs frontend typecheck and Vite build, builds the sidecar bundle, and syntax-checks Electron CommonJS entrypoints. The sidecar build emits `sidecar/dist/sidecar.mjs`, which Electron uses unless `SIDECAR_ENTRY` is set.
