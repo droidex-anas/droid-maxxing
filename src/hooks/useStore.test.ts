@@ -101,3 +101,27 @@ test('session creation records the exact request-to-session settlement', () => {
   });
   assert.equal(created.pendingCompose['client-1'], undefined);
 });
+
+test('session seeds preserve live file provenance without claiming background content', () => {
+  const live = reducer(
+    {
+      ...initialState,
+      pendingCompose: {
+        'client-1': { text: 'typed prompt', skills: [], files: [] },
+      },
+    },
+    {
+      type: 'SESSION_CREATED',
+      clientRef: 'client-1',
+      session: { ...session('live-session', 3_000), goal: 'persisted prompt' },
+    },
+  );
+  assert.deepEqual(live.transcripts['live-session']?.[0]?.files, []);
+
+  const background = reducer(initialState, {
+    type: 'SESSION_CREATED',
+    clientRef: 'another-window',
+    session: { ...session('background-session', 3_000), goal: 'persisted prompt' },
+  });
+  assert.equal(background.transcripts['background-session']?.[0]?.files, undefined);
+});

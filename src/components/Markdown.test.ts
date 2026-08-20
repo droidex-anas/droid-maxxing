@@ -110,6 +110,20 @@ test('a linked image renders one image control without a wrapping anchor', () =>
   assert.doesNotMatch(html, /<a[^>]*href="https:\/\/x\.test\/full"/);
 });
 
+test('a link containing image and text does not wrap the image control in an anchor', () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      Markdown,
+      null,
+      '[![Preview](https://x.test/a.png) full size](https://x.test/full)',
+    ),
+  );
+
+  assert.match(html, /<button[^>]*title="View Preview"/);
+  assert.match(html, /full size/);
+  assert.doesNotMatch(html, /<a[^>]*href="https:\/\/x\.test\/full"/);
+});
+
 test('each live App fence owns its own completion state', () => {
   const source = [
     '```app',

@@ -343,10 +343,9 @@ function MarkdownImpl({
             // interactive HTML (<a><button>), so the image viewer wins and the
             // redundant outer link is omitted. Inspect the parsed markdown node
             // rather than React element identity, which react-markdown wraps.
-            const linkedImage =
-              node?.children.length === 1 &&
-              node.children[0]?.type === 'element' &&
-              node.children[0].tagName === 'img';
+            const linkedImage = node?.children.some(
+              (child) => child.type === 'element' && child.tagName === 'img',
+            );
             if (linkedImage) return <>{children}</>;
             return (
               <a

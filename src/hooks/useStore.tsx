@@ -1393,9 +1393,9 @@ function baseReducer(state: AppState, action: Action): AppState {
           text: pending ? pending.text : action.session.goal,
           author: 'user',
           skills: pending?.skills.length ? pending.skills : undefined,
-          // Live optimistic events use a defined array, including empty, so the
-          // transcript renderer can distinguish them from restored history.
-          files: pending?.files ?? [],
+          // Only a compose owned by this renderer is live metadata. A seed from
+          // another window or a resumed session is restored-equivalent content.
+          files: pending?.files,
         };
         transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
         transcriptRetainedCost = {
