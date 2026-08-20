@@ -2,11 +2,17 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initialState, StoreProvider } from './hooks/useStore';
 import { initializeRendererDiagnostics } from './lib/rendererDiagnostics';
+import { getRendererPerfSnapshot, startRendererPerfObservers } from './lib/rendererPerf';
 import { applyTheme } from './lib/theme';
 import App from './App';
 import './index.css';
 
 if (window.droidControl) void initializeRendererDiagnostics();
+
+// Perf phase 0 instrumentation: long-task tracking plus a console-accessible
+// snapshot (`window.__droidexPerf.getSnapshot()`) for live diagnosis.
+startRendererPerfObservers();
+window.__droidexPerf = { getSnapshot: getRendererPerfSnapshot };
 
 // Apply the persisted theme BEFORE the first React paint. App also applies it
 // in an effect, but that runs after the first commit — with the hardcoded dark

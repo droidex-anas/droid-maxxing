@@ -61,6 +61,7 @@ import {
 } from '../lib/compactionSettings';
 import { sanitizeForLog } from '../lib/sensitiveLogRedaction';
 import { sessionIsLive } from '../lib/sessions';
+import { noteStoreCommitted } from '../lib/rendererPerf';
 import {
   addSessionNote,
   loadSessionNotes,
@@ -3262,6 +3263,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     stateRef.current = state;
+    // Closes the perf receive→commit leg for events reduced by this commit.
+    noteStoreCommitted();
     for (const listener of listenersRef.current) listener();
   }, [state]);
 

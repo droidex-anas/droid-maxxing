@@ -1,4 +1,5 @@
 import { getBridgeInfo } from './desktop';
+import { noteBridgeEventReceived } from './rendererPerf';
 import type { ClientCommand, ServerEvent } from '../types/bridge';
 
 type Listener = (ev: ServerEvent) => void;
@@ -72,6 +73,7 @@ export class Bridge {
       } catch {
         return;
       }
+      noteBridgeEventReceived(ev);
       if (ev.type === 'session.created' && ev.session.cwd) {
         const api = globalThis.window.droidControl;
         if (api && canAdoptTurnBaseline(api)) {

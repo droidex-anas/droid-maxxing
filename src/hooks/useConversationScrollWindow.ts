@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { loadChildHistory, loadSessionHistory } from '../lib/commands';
+import { setMountedTranscriptRows } from '../lib/rendererPerf';
 import {
   captureViewportAnchor,
   restoreViewportAnchor,
@@ -195,6 +196,12 @@ export function useConversationScrollWindow({
   }, []);
 
   useEffect(() => cancelSettledTopLoad, [cancelSettledTopLoad, visibleConversationKey]);
+
+  // Perf phase 0: the retained transcript window is what the feed mounts, so
+  // report its size whenever it changes.
+  useEffect(() => {
+    setMountedTranscriptRows(transcriptLength);
+  }, [transcriptLength]);
 
   useEffect(() => {
     if (isLoadingOlder) return;
