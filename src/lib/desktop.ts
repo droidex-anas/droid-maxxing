@@ -164,6 +164,7 @@ interface DroidControlApi {
   setApiKey: (key: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
   listFiles: (dir: string) => Promise<string[]>;
+  getPerformanceMetrics: () => Promise<DesktopPerformanceMetrics>;
   readFile: (path: string) => Promise<string>;
   repoStatus: (dir: string) => Promise<RepoStatus | null>;
   listEditors: () => Promise<EditorId[]>;
@@ -276,6 +277,15 @@ declare global {
   interface Window {
     droidControl?: DroidControlApi;
   }
+}
+
+/** Perf phase 0 gauge from the Electron main process. */
+export interface DesktopPerformanceMetrics {
+  timestamp: number;
+  webContentsTotal: number;
+  ptys: number;
+  memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
+  cpu: { userMs: number; systemMs: number };
 }
 
 function desktopApi(): DroidControlApi | undefined {

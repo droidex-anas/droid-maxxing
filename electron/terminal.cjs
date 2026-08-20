@@ -448,6 +448,16 @@ function createTerminalManager(opts) {
     };
   }
 
+  // Perf phase 0 gauge: live PTYs held by this host (exited-but-retained
+  // entries still hold replay buffers, so they count until reaped).
+  function count() {
+    let n = 0;
+    for (const e of terminals.values()) {
+      if (!e.exited) n += 1;
+    }
+    return n;
+  }
+
   return {
     create,
     write,
@@ -459,6 +469,7 @@ function createTerminalManager(opts) {
     list,
     closeAll,
     limits,
+    count,
   };
 }
 

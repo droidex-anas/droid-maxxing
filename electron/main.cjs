@@ -10,6 +10,7 @@ const {
   safeStorage,
   session,
   shell,
+  webContents,
 } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -20,6 +21,7 @@ const { pathToFileURL } = require('node:url');
 const gitVcs = require('./git.cjs');
 const githubVcs = require('./github.cjs');
 const { createTerminalManager, createTerminalSubscriptionRegistry } = require('./terminal.cjs');
+const { createPerformanceMetricsCollector } = require('./performanceMetrics.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
 const {
@@ -47,6 +49,10 @@ const terminalManager = createTerminalManager({
   },
 });
 const terminalSubscriptions = createTerminalSubscriptionRegistry(terminalManager);
+const performanceMetrics = createPerformanceMetricsCollector({
+  countPtys: () => terminalManager.count(),
+  listWebContents: () => webContents.getAllWebContents(),
+});
 const filesRootAccess = files.createRootAccessRegistry();
 const diagnostics = createDiagnostics({
   app,
@@ -277,6 +283,7 @@ function registerIpc() {
   ipcMain.handle('set-api-key', (_event, { key }) => setApiKey(key));
   ipcMain.handle('clear-api-key', clearApiKey);
   ipcMain.handle('list-files', (_event, { dir }) => listFiles(dir));
+  ipcMain.handle('get-performance-metrics', () => performanceMetrics.collect());
   ipcMain.handle('read-file', (_event, { path: filePath }) => readFile(filePath));
   ipcMain.handle('repo-status', (_event, { dir }) => repoStatus(dir));
   ipcMain.handle('list-editors', () => listEditors());
