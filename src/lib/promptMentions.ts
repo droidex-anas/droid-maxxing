@@ -31,7 +31,13 @@ export function splitTrailingMentions(text: string): { text: string; files: stri
  * Presentation view of a user message: attachments come from the event when it
  * was sent in this session, and from the composed text when it was replayed from
  * history. Guarded by a round-trip through composePrompt so the split only
- * applies to text this app actually composed.
+ * applies to text this app actually composes.
+ *
+ * The round trip proves format, not provenance: a live message whose final
+ * paragraph is nothing but @path mentions is indistinguishable from a composed
+ * one, so it renders as attachment chips too. That is accepted rather than
+ * plumbed around — the chips name exactly the paths the paragraph contained, and
+ * the prose above them is untouched.
  */
 export function userMessageAttachments(
   text: string | undefined,

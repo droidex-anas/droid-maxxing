@@ -53,6 +53,14 @@ test('imageSrc rewrites a local path to the desktop image scheme', () => {
   );
 });
 
+test('a repo-relative image is an image with no displayable source', () => {
+  // What the @ menu attaches: listFiles returns paths relative to the repo root.
+  // Both halves must hold, because the composer picks its chip on exactly this
+  // pair and used to drop the attachment when the src was null.
+  assert.equal(isImagePath('assets/hero.png'), true);
+  assert.equal(imageSrc('assets/hero.png'), null);
+});
+
 test('imageSrc refuses references it cannot resolve or display', () => {
   assert.equal(imageSrc('./relative/a.png'), null);
   assert.equal(imageSrc('/tmp/notes.txt'), null);

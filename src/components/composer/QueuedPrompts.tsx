@@ -15,9 +15,12 @@ import { queuedPromptPreview } from './queuedPromptPreview';
 // for the prompt's images and carries the total as a badge. Editing the prompt
 // brings every image back as a full composer chip.
 function QueuedImages({ paths }: { paths: string[] }) {
-  const [failed, setFailed] = useState(false);
   const first = paths[0];
   const src = imageSrc(first);
+  // Keyed by src: reordering the queue can hand this row a different image, and
+  // a stale failure would hide it.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc !== null && failedSrc === src;
   const label = paths.length === 1 ? pathBaseName(first) : `${String(paths.length)} images`;
 
   return (
@@ -39,7 +42,7 @@ function QueuedImages({ paths }: { paths: string[] }) {
             draggable={false}
             className="h-full w-full object-cover"
             onError={() => {
-              setFailed(true);
+              setFailedSrc(src);
             }}
           />
         )}

@@ -11,7 +11,10 @@ import { ImageLightbox } from './ImageLightbox';
  */
 export function ImageAttachmentChip({ path }: { path: string }) {
   const src = imageSrc(path);
-  const [failed, setFailed] = useState(false);
+  // Keyed by src, not a flag: a chip at the same position can be handed a
+  // different attachment, and a stale failure would hide a loadable one.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc !== null && failedSrc === src;
   const [open, setOpen] = useState(false);
   const label = pathBaseName(path) || path;
 
@@ -42,7 +45,7 @@ export function ImageAttachmentChip({ path }: { path: string }) {
           draggable={false}
           className="h-full w-full object-cover"
           onError={() => {
-            setFailed(true);
+            setFailedSrc(src);
           }}
         />
       </button>

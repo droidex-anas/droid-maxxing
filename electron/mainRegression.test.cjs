@@ -226,6 +226,10 @@ test('the local image scheme is privileged before ready and served to the main s
     /session\.defaultSession\.protocol\.handle\(localImages\.LOCAL_IMAGE_SCHEME/,
   );
   assert.match(mainSource, /registerLocalImageProtocol\(\);/);
+  // A served SVG must not be able to run anything if a body is navigated to or
+  // embedded rather than displayed in an <img>.
+  assert.match(mainSource, /'content-security-policy': "default-src 'none';/);
+  assert.match(mainSource, /'x-content-type-options': 'nosniff'/);
 });
 
 test('system app icon tracks the OS appearance and repaints on change', () => {

@@ -229,8 +229,17 @@ function registerLocalImageProtocol() {
       const { mime, data } = await localImages.readLocalImage(filePath);
       // no-store: an attachment path can be rewritten in place by a crop, and a
       // cached body would keep showing the superseded pixels.
+      // The scheme is fetchable and serves image/svg+xml, so the response denies
+      // every subresource and script: an SVG is inert in an <img>, but this keeps
+      // it inert if a body is ever navigated to or embedded directly. nosniff
+      // stops Chromium from re-typing a body as something executable.
       return new Response(data, {
-        headers: { 'content-type': mime, 'cache-control': 'no-store' },
+        headers: {
+          'content-type': mime,
+          'cache-control': 'no-store',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+          'x-content-type-options': 'nosniff',
+        },
       });
     } catch (error) {
       // The renderer degrades to an "image unavailable" chip; the reason is only
