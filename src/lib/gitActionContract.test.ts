@@ -235,3 +235,30 @@ test('mergePullRequest reports a bridge failure instead of rejecting', async () 
     message: 'Could not merge pull request',
   });
 });
+
+test('writes refuse an empty directory instead of acting on the host process cwd', async () => {
+  let merged = false;
+  let commented = false;
+  let created = false;
+  withBridge({
+    githubMergePr: () => {
+      merged = true;
+      return Promise.resolve({ ok: true });
+    },
+    githubPostComment: () => {
+      commented = true;
+      return Promise.resolve({ ok: true });
+    },
+    githubCreatePr: () => {
+      created = true;
+      return Promise.resolve({ ok: true });
+    },
+  });
+
+  assert.equal((await mergePullRequest('', 12, 'squash')).ok, false);
+  assert.equal((await postPrComment('', 12, 'hello')).ok, false);
+  assert.equal((await createPullRequest('', { title: 't' })).ok, false);
+  assert.equal(merged, false);
+  assert.equal(commented, false);
+  assert.equal(created, false);
+});

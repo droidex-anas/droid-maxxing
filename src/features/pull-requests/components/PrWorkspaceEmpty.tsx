@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import { GithubAuthPromptContent } from '../../../components/environment/GithubSetupCard';
 import { useStoreDispatch } from '../../../hooks/useStore';
-import { useGithubSetup, type GithubSetupController } from '../../../hooks/useGithubSetup';
+import type { GithubSetupController } from '../../../hooks/useGithubSetup';
 import { pickDirectory } from '../../../lib/desktop';
 import { isGithubAuthCodeCopied } from '../../../lib/github';
 
@@ -93,9 +93,19 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
   );
 }
 
-export function PrWorkspaceEmpty({ cwd, isGitHub }: { cwd: string | null; isGitHub?: boolean }) {
+// The view owns the GitHub setup controller, because the same readiness gates
+// the pull request list: a second controller here would sign in without ever
+// unblocking it.
+export function PrWorkspaceEmpty({
+  cwd,
+  isGitHub,
+  setup,
+}: {
+  cwd: string | null;
+  isGitHub?: boolean;
+  setup: GithubSetupController;
+}) {
   const dispatch = useStoreDispatch();
-  const setup = useGithubSetup(true, cwd ?? 'none');
 
   const openWorkspace = async () => {
     const nextCwd = await pickDirectory();

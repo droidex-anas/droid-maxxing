@@ -21,6 +21,14 @@ export function PrSection({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  // `defaultOpen` follows loaded state (a section opens itself once its checks
+  // fail), so a change to it re-applies; a toggle afterwards stays the user's.
+  const [appliedDefault, setAppliedDefault] = useState(defaultOpen);
+  if (defaultOpen !== appliedDefault) {
+    setAppliedDefault(defaultOpen);
+    setOpen(defaultOpen);
+  }
+
   return (
     <section className="mt-7 first:mt-0">
       <div className="flex items-center gap-2">

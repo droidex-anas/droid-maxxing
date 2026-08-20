@@ -145,7 +145,7 @@ export async function getPullRequestDiff(
 
 export async function getPrChecks(dir: string, prNumber: number): Promise<PrChecksResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop', checks: [] };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', checks: [] };
   try {
     return await api.githubPrChecks(dir, { prNumber });
   } catch {
@@ -155,7 +155,7 @@ export async function getPrChecks(dir: string, prNumber: number): Promise<PrChec
 
 export async function getPrComments(dir: string, prNumber: number): Promise<PrCommentsResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop', comments: [] };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', comments: [] };
   try {
     return await api.githubPrComments(dir, { prNumber });
   } catch {
@@ -168,7 +168,7 @@ export async function createPullRequest(
   options: CreatePrOptions,
 ): Promise<CreatePrResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop' };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop' };
   try {
     return await api.githubCreatePr(dir, options);
   } catch {
@@ -182,7 +182,7 @@ export async function postPrComment(
   body: string,
 ): Promise<PostCommentResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop' };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop' };
   try {
     return await api.githubPostComment(dir, { prNumber, body });
   } catch {
@@ -196,7 +196,9 @@ export async function mergePullRequest(
   method: PrMergeMethod,
 ): Promise<PrMergeResult> {
   const api = githubApi();
-  if (!api) {
+  // Without a repository directory gh would act on the Electron process's own
+  // working directory, so every wrapper refuses an empty `dir`.
+  if (!api || !dir) {
     return {
       ok: false,
       reason: 'not_desktop',

@@ -28,6 +28,9 @@ test('cubic is recognised as both a user and a bot account', () => {
   assert.equal(isCubicAuthor('Cubic-Dev-AI[bot]'), true);
   assert.equal(isCubicAuthor('cubicle'), false);
   assert.equal(isCubicAuthor('ana'), false);
+  // Only the documented account counts: a lookalike login is not Cubic.
+  assert.equal(isCubicAuthor('cubic-dev-ai-impostor'), false);
+  assert.equal(isCubicAuthor('cubic-developer'), false);
 });
 
 test('cubic activity is detected from any comment on the pull request', () => {

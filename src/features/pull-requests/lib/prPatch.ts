@@ -19,7 +19,9 @@ function filePathFromChunk(chunk: string): string | null {
   if (minus && minus[1] !== '/dev/null') return stripAbPrefix(minus[1]);
   // Binary and 100% rename chunks often omit ---/+++. Header-only sections
   // stay empty so `diff --git a/x b/x` does not invent a file.
-  if (chunk.includes('Binary files') || /^rename from /m.test(chunk)) {
+  // Anchored: a textual line inside a hunk mentioning binary files is content,
+  // not git's own marker.
+  if (/^Binary files /m.test(chunk) || /^rename from /m.test(chunk)) {
     const git = /^diff --git a\/(.+) b\/(.+)$/m.exec(chunk);
     if (git) return git[2];
   }
@@ -47,7 +49,7 @@ export function splitPrPatch(diff: string): PrPatchFile[] {
         status: statusFromChunk(chunk),
         additions: parsed.additions,
         deletions: parsed.deletions,
-        binary: chunk.includes('Binary files') || parsed.binary,
+        binary: parsed.binary,
       },
       diff: chunk,
     });

@@ -80,6 +80,13 @@ export function PrCommentCard({ comment }: { comment: PrComment }) {
   const prose = prCommentProse(blocks);
   const foldable = commentStartsFolded(comment, prose);
   const [open, setOpen] = useState(!foldable);
+  // Polling can edit or resolve a comment under the same id: a card that stops
+  // being foldable must not stay collapsed with no way to expand it.
+  const [appliedFoldable, setAppliedFoldable] = useState(foldable);
+  if (foldable !== appliedFoldable) {
+    setAppliedFoldable(foldable);
+    setOpen(!foldable);
+  }
   const location = inlineLocation(comment);
   const badge = reviewBadge(comment);
   const status = threadStatus(comment);

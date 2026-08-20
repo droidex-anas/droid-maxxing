@@ -8,16 +8,22 @@ const POLL_MS = 20000;
 export function usePullRequestList(cwd: string | null, enabled: boolean) {
   const [state, dispatch] = useReducer(reducePrList, initialPrListState);
   const generationRef = useRef(state.generation);
+  // A poll and a manual refresh can be in flight together on one repository, so
+  // only the newest request may settle: the generation alone cannot tell them
+  // apart.
+  const requestRef = useRef(0);
 
   const load = useCallback(
     (userInitiated: boolean) => {
       if (!cwd || !enabled) return;
       const generation = generationRef.current;
+      requestRef.current += 1;
+      const request = requestRef.current;
       if (userInitiated) {
         dispatch({ type: 'load-start', generation });
       }
       void listPullRequests(cwd).then((result) => {
-        if (generation !== generationRef.current) return;
+        if (generation !== generationRef.current || request !== requestRef.current) return;
         if (result.ok) {
           dispatch({
             type: 'load-success',

@@ -72,7 +72,7 @@ export function PullRequestsView() {
   if (!canList || !cwd) {
     return (
       <div data-testid="pull-requests-workspace" className="flex h-full min-h-0">
-        <PrWorkspaceEmpty cwd={cwd} isGitHub={git.env?.isGitHub} />
+        <PrWorkspaceEmpty cwd={cwd} isGitHub={git.env?.isGitHub} setup={setup} />
       </div>
     );
   }

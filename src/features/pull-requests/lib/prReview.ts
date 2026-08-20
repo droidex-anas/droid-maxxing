@@ -17,9 +17,11 @@ function normalizeLogin(login: string): string {
 }
 
 // Cubic posts conversation comments as `cubic-dev-ai` and reviews as
-// `cubic-dev-ai[bot]`.
+// `cubic-dev-ai[bot]`; no other login counts as Cubic activity.
+const CUBIC_LOGIN = 'cubic-dev-ai';
+
 export function isCubicAuthor(login: string): boolean {
-  return normalizeLogin(login).startsWith('cubic-dev');
+  return normalizeLogin(login) === CUBIC_LOGIN;
 }
 
 export function hasCubicActivity(comments: readonly PrComment[]): boolean {
