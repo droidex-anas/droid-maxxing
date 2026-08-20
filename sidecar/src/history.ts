@@ -42,6 +42,7 @@ import {
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
 import { searchSessionFiles } from './sessionSearch.js';
+import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 import { hasCompletedConversation } from './sessionHistoryAdmission.js';
 
 interface StoredMissionState {
@@ -616,6 +617,7 @@ export class HistoryIndex {
   }
 
   recordEvent(event: TranscriptEvent): void {
+    const persistStartedAt = performance.now();
     this.recordEventStatement ??= this.db.prepare(`
       INSERT OR IGNORE INTO events (id, source_session_id, app_session_id, kind, ts)
       VALUES (?, ?, ?, ?, ?)
@@ -627,6 +629,7 @@ export class HistoryIndex {
       event.kind,
       event.ts,
     );
+    hotPathMetrics.recordPersist(performance.now() - persistStartedAt);
   }
 
   upsertChildSession(child: PersistedChildSession): void {

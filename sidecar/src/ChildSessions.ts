@@ -96,6 +96,20 @@ export class ChildSessions {
       .map((record) => childSummary({ ...record, status: restoredChildStatus(record.status) }));
   }
 
+  // Resource gauge for hot-path metrics: how many child agents are held
+  // across attached parents, and how many are still able to do work.
+  counts(): { total: number; active: number } {
+    let total = 0;
+    let active = 0;
+    for (const parent of this.parents.values()) {
+      for (const child of parent.children.values()) {
+        total += 1;
+        if (child.status !== 'completed') active += 1;
+      }
+    }
+    return { total, active };
+  }
+
   admitChildObservation(observation: ChildSpawnObservation): ChildIdentity | undefined {
     const parent = this.parents.get(observation.parentAppSessionId);
     if (!parent || !this.isCurrentParent(parent)) return undefined;

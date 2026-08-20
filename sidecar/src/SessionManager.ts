@@ -78,6 +78,7 @@ import type { ChildSettings } from './ChildSessionState.js';
 import { MissionControlPolicy } from './MissionControlPolicy.js';
 import type { SessionListFilterOptions } from './sessionListFilter.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
+import type { HotPathResourceCounts } from './telemetry/hotPathMetrics.js';
 import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfiguration.js';
 import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
@@ -466,6 +467,17 @@ export class SessionManager {
     this.ready = true;
     this.emit({ type: 'connection', status: 'connected' });
     this.emit({ type: 'runtime.updated', status: this.runtime.status() });
+  }
+
+  // Resource gauge sampled by the hot-path metrics endpoint. Composed here so
+  // each count stays owned by its registry; the composition root wires it in.
+  resourceCounts(): HotPathResourceCounts {
+    const children = this.childSessions.counts();
+    return {
+      livePrimarySessions: this.registry.liveCount,
+      childAgentsTotal: children.total,
+      childAgentsActive: children.active,
+    };
   }
 
   // eslint-disable-next-line complexity -- Public command dispatch is intentionally unchanged in PR 3.

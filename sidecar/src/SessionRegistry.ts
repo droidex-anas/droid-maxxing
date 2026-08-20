@@ -59,6 +59,11 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     return appSessionId ? this.sessions.get(appSessionId) : undefined;
   }
 
+  // Gauge for hot-path metrics: live top-level sessions currently held.
+  get liveCount(): number {
+    return this.sessions.size;
+  }
+
   getCanonicalSummary(id: string): SessionSummary | undefined {
     const summary = this.resolveCanonicalSummary(id);
     return summary ? copySummary(summary) : undefined;

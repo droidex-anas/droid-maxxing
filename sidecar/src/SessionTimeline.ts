@@ -16,6 +16,7 @@ import type {
 } from './protocol.js';
 import type { CompactType } from './compaction.js';
 import { errMsg } from './sessionHelpers.js';
+import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 type TimelineHistory = Pick<HistoryIndex, 'recordEvent'>;
 type TimelineError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
@@ -126,6 +127,9 @@ export class SessionTimeline {
   private streamingBuffer: {
     event: TranscriptEvent;
     estimatedBytes: number;
+    // Deltas merged into this buffered run so far; reported at flush as the
+    // coalescing batch-size metric.
+    mergedCount: number;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
   private readonly streamingFlushFailures = new Map<string, StreamingTranscriptPersistenceError>();
@@ -323,6 +327,7 @@ export class SessionTimeline {
         }
         buffer.event = merged;
         buffer.estimatedBytes += incomingBytes;
+        buffer.mergedCount += 1;
         return;
       }
     }
@@ -358,6 +363,7 @@ export class SessionTimeline {
     if (!buffer) return;
     this.streamingBuffer = null;
     clearTimeout(buffer.timer);
+    hotPathMetrics.recordCoalesce(buffer.mergedCount);
     try {
       this.recordAndEmit(buffer.event);
     } catch (error) {
@@ -406,7 +412,7 @@ export class SessionTimeline {
       }
     }, this.streamingCoalesceMs);
     timer.unref();
-    this.streamingBuffer = { event, estimatedBytes, timer };
+    this.streamingBuffer = { event, estimatedBytes, mergedCount: 1, timer };
   }
 
   private rememberStreamingFailure(
@@ -446,7 +452,11 @@ export class SessionTimeline {
 
   private recordAndEmit(event: TranscriptEvent): void {
     this.dependencies.history.recordEvent(event);
+    // Emit is timed around the dispatch alone; recordEvent reports its own
+    // persist stage from inside HistoryIndex.
+    const emitStartedAt = performance.now();
     this.dependencies.emit({ type: 'event.appended', event });
+    hotPathMetrics.recordEmit(performance.now() - emitStartedAt);
   }
 
   appendStatus(
