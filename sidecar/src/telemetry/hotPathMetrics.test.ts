@@ -96,3 +96,20 @@ test('enable is idempotent and keeps a stable start baseline', async () => {
   assert.equal(metrics.snapshot().startedAt, firstStartedAt);
   assert.ok(metrics.snapshot().uptimeMs >= 5);
 });
+
+test('transport byte samples wrap the ring without losing totals', () => {
+  const metrics = freshMetrics();
+  metrics.enable();
+  // More sends than the ring holds, so the cursor wraps while the counters
+  // and byte totals keep accumulating unaffected.
+  const sends = 10_500;
+  for (let index = 0; index < sends; index += 1) metrics.recordTransport(0.1, 2, 1);
+
+  const snapshot = metrics.snapshot();
+  assert.equal(snapshot.counters.transportSends, sends);
+  assert.equal(snapshot.transport.bytesTotal, sends * 2);
+  assert.ok(
+    Number.isFinite(snapshot.transport.bytesPerSecondRecent) &&
+      snapshot.transport.bytesPerSecondRecent > 0,
+  );
+});

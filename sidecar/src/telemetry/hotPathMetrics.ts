@@ -4,7 +4,7 @@
 // Stage ownership (all cheap enough to stay always-on):
 //   normalize  SessionEventFlow around normalizeStreamEvent/normalizeNotification
 //   persist    HistoryIndex.recordEvent around the SQLite insert
-//   emit       SessionTimeline.recordAndEmit (persist + emit dispatch)
+//   emit       SessionTimeline.recordAndEmit around the emit dispatch alone
 //   transport  bridgeServer broadcast (serialize + fan-out)
 //   coalesce   SessionTimeline streaming flush (deltas merged per flush)
 // Plus process health: event-loop delay, CPU, memory, live session and child
@@ -70,7 +70,10 @@ export class HotPathMetrics {
   private readonly emit = new ReservoirHistogram();
   private readonly transport = new ReservoirHistogram();
   private readonly coalesce = new ReservoirHistogram();
-  private readonly byteLog: { at: number; bytes: number }[] = [];
+  private readonly byteSampleAt = new Float64Array(MAX_BYTE_SAMPLES);
+  private readonly byteSampleBytes = new Float64Array(MAX_BYTE_SAMPLES);
+  private byteSampleCursor = 0;
+  private byteSampleCount = 0;
   private readonly eventLoop = monitorEventLoopDelay({ resolution: 10 });
   private startedAt = 0;
   private cpuBaseline = { user: 0, system: 0 };
@@ -103,7 +106,8 @@ export class HotPathMetrics {
     this.emit.reset();
     this.transport.reset();
     this.coalesce.reset();
-    this.byteLog.length = 0;
+    this.byteSampleCursor = 0;
+    this.byteSampleCount = 0;
     this.counters = {
       normalized: 0,
       persisted: 0,
@@ -142,9 +146,14 @@ export class HotPathMetrics {
     this.counters.transportSends += 1;
     this.transport.add(durationMs);
     if (clients > 0 && bytes > 0) {
-      this.bytesTotal += bytes * clients;
-      this.byteLog.push({ at: performance.now(), bytes: bytes * clients });
-      if (this.byteLog.length > MAX_BYTE_SAMPLES) this.byteLog.shift();
+      // Ring buffer, not a shifted array: this fires on every broadcast, so
+      // recording must stay O(1) instead of adding its own transport jitter.
+      const sent = bytes * clients;
+      this.bytesTotal += sent;
+      this.byteSampleAt[this.byteSampleCursor] = performance.now();
+      this.byteSampleBytes[this.byteSampleCursor] = sent;
+      this.byteSampleCursor = (this.byteSampleCursor + 1) % MAX_BYTE_SAMPLES;
+      this.byteSampleCount = Math.min(this.byteSampleCount + 1, MAX_BYTE_SAMPLES);
     }
   }
 
@@ -191,10 +200,11 @@ export class HotPathMetrics {
     const cutoff = now - RECENT_WINDOW_MS;
     let bytes = 0;
     let oldest = now;
-    for (const sample of this.byteLog) {
-      if (sample.at < cutoff) continue;
-      bytes += sample.bytes;
-      oldest = Math.min(oldest, sample.at);
+    for (let index = 0; index < this.byteSampleCount; index += 1) {
+      const at = this.byteSampleAt[index];
+      if (at < cutoff) continue;
+      bytes += this.byteSampleBytes[index];
+      oldest = Math.min(oldest, at);
     }
     const windowMs = Math.max(1, now - oldest);
     return bytes / (windowMs / 1_000);
