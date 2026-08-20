@@ -32,6 +32,7 @@ import {
 import { useImageAttachments } from '../hooks/useImageAttachments';
 import { useImageFileDrop } from '../hooks/useImageFileDrop';
 import { ImageChip } from './composer/ImageChip';
+import { AttachedFileChip } from './composer/AttachedFileChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
 import { ImageLightbox } from './media/ImageLightbox';
 import { imageSrc, partitionImagePaths } from '../lib/localImage';
@@ -73,7 +74,6 @@ import {
 import {
   ArrowUp,
   ChevronDown,
-  FileText,
   LoaderCircle,
   Plus,
   SlidersHorizontal,
@@ -641,6 +641,9 @@ export default function PromptInput({
     setHistoryIndex(null);
     setActiveSkills([]);
     setAttachedFiles([]);
+    // Both viewers show a dropped attachment, so they cannot outlive it.
+    setViewerImageId(null);
+    setViewerPath(null);
     clearAndDiscardImages();
   }, [activeSession?.appSessionId, clearAndDiscardImages]);
 
@@ -1398,8 +1401,14 @@ export default function PromptInput({
               ))}
               {attachedImagePaths.map((path) => {
                 const src = imageSrc(path);
-                if (src === null) return null;
-                return (
+                // No discard on removal: the file was written for an
+                // already-composed prompt, and the attachments store sweeps it.
+                const remove = () => {
+                  setAttachedFiles((prev) => prev.filter((x) => x !== path));
+                };
+                return src === null ? (
+                  <AttachedFileChip key={path} path={path} onRemove={remove} />
+                ) : (
                   <ImageChip
                     key={path}
                     src={src}
@@ -1407,11 +1416,7 @@ export default function PromptInput({
                     onOpen={() => {
                       setViewerPath(path);
                     }}
-                    onRemove={() => {
-                      // No discard: the file was written for an already-composed
-                      // prompt, and the attachments store sweeps it on its own.
-                      setAttachedFiles((prev) => prev.filter((x) => x !== path));
-                    }}
+                    onRemove={remove}
                   />
                 );
               })}
@@ -1439,23 +1444,13 @@ export default function PromptInput({
                 </span>
               ))}
               {attachedDocumentPaths.map((f) => (
-                <span
+                <AttachedFileChip
                   key={f}
-                  className="group flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg text-[11px] bg-droid-bg/60 text-droid-text-secondary border border-droid-border"
-                  title={f}
-                >
-                  <FileText className="w-3 h-3 text-droid-text-muted" />
-                  {basename(f)}
-                  <button
-                    onClick={() => {
-                      setAttachedFiles((prev) => prev.filter((x) => x !== f));
-                    }}
-                    className="p-0.5 rounded hover:bg-black/20 transition-colors"
-                    title="Remove file"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </span>
+                  path={f}
+                  onRemove={() => {
+                    setAttachedFiles((prev) => prev.filter((x) => x !== f));
+                  }}
+                />
               ))}
             </div>
           )}

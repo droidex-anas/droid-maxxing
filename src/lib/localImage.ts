@@ -49,7 +49,11 @@ export function localImageFilePath(reference: string): string | null {
       return null;
     }
   }
-  if (reference.startsWith('/') || reference.startsWith('~/')) return reference;
+  if (reference.startsWith('/') || reference.startsWith('~/')) {
+    // Agent markdown sometimes cache-busts an image ("/tmp/a.png?v=2"); the
+    // suffix is not part of the file name and would turn the read into ENOENT.
+    return reference.split(/[?#]/)[0];
+  }
   return null;
 }
 

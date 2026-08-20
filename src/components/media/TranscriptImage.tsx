@@ -9,9 +9,21 @@ import { ImageLightbox } from './ImageLightbox';
  * A reference we cannot load (relative path, deleted attachment, unsupported
  * type) degrades to a compact row naming it instead of a broken-image glyph.
  */
-export function TranscriptImage({ reference, alt }: { reference: string; alt?: string }) {
+export function TranscriptImage({
+  reference,
+  alt,
+  title,
+}: {
+  reference: string;
+  alt?: string;
+  title?: string;
+}) {
   const src = imageSrc(reference);
-  const [failed, setFailed] = useState(false);
+  // Keyed by src rather than a plain flag: markdown reuses this node position for
+  // whatever image the next render puts there, and a stale failure would hide a
+  // perfectly loadable replacement.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc !== null && failedSrc === src;
   const [open, setOpen] = useState(false);
   // Markdown images frequently carry an empty alt, so fall back to the file name.
   const altLabel = alt?.trim() ?? '';
@@ -20,7 +32,7 @@ export function TranscriptImage({ reference, alt }: { reference: string; alt?: s
   if (src === null || failed) {
     return (
       <span
-        title={reference}
+        title={title ?? reference}
         className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-droid-border bg-droid-elevated/50 px-2 py-1 text-[11.5px] text-droid-text-muted"
       >
         <ImageOff className="h-3.5 w-3.5 shrink-0" />
@@ -35,7 +47,7 @@ export function TranscriptImage({ reference, alt }: { reference: string; alt?: s
         onClick={() => {
           setOpen(true);
         }}
-        title={`View ${label}`}
+        title={title ?? `View ${label}`}
         className="my-1.5 block max-w-full overflow-hidden rounded-xl border border-droid-border bg-droid-bg/40 transition-colors hover:border-droid-border-hover"
       >
         <img
@@ -44,7 +56,7 @@ export function TranscriptImage({ reference, alt }: { reference: string; alt?: s
           draggable={false}
           className="block max-h-64 max-w-full object-contain"
           onError={() => {
-            setFailed(true);
+            setFailedSrc(src);
           }}
         />
       </button>

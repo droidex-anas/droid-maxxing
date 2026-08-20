@@ -37,17 +37,49 @@ function ImageLightboxContent({
     };
   }, []);
 
+  // aria-modal contract: Tab cycles inside the dialog (same wrap logic as
+  // ThemeEditor) and the page behind it does not scroll while it is open.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      onClose();
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      const first = focusables.at(0);
+      const last = focusables.at(-1);
+      if (!first || !last) return;
+      const active = document.activeElement;
+      const inside = active instanceof HTMLElement && dialog.contains(active);
+      if (e.shiftKey && (active === first || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => {
       window.removeEventListener('keydown', onKeyDown, true);
     };
   }, [onClose]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
 
   return (
     <motion.div

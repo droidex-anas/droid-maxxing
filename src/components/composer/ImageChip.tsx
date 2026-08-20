@@ -28,8 +28,11 @@ export function ImageChip({
         title={failed ? `${label} is no longer available` : `View ${label}`}
       >
         {failed ? (
-          <span className="flex h-full w-full items-center justify-center text-droid-text-muted">
-            <ImageOff className="h-4 w-4" />
+          // Name the missing file in place: several restored chips can fail at
+          // once, and an anonymous icon says nothing about which one is gone.
+          <span className="flex h-full w-full flex-col items-center justify-center gap-0.5 px-1 text-droid-text-muted">
+            <ImageOff className="h-4 w-4 shrink-0" />
+            <span className="max-w-full truncate text-[9px] leading-none">{label}</span>
           </span>
         ) : (
           <img

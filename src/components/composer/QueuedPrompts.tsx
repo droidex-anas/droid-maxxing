@@ -23,23 +23,27 @@ function QueuedImages({ paths }: { paths: string[] }) {
   return (
     <span
       title={paths.map((p) => pathBaseName(p)).join('\n')}
-      className="relative mt-1 inline-block h-6 w-6 overflow-hidden rounded-md border border-droid-border bg-droid-bg/60 align-middle"
+      className="relative mt-1 inline-block h-6 w-6 align-middle"
     >
-      {src === null || failed ? (
-        <span className="flex h-full w-full items-center justify-center text-droid-text-muted">
-          <ImageOff className="h-3 w-3" />
-        </span>
-      ) : (
-        <img
-          src={src}
-          alt={label}
-          draggable={false}
-          className="h-full w-full object-cover"
-          onError={() => {
-            setFailed(true);
-          }}
-        />
-      )}
+      {/* The badge overhangs the thumbnail, so the clipping box is the inner
+          element: putting overflow-hidden on the positioned parent would cut it. */}
+      <span className="block h-full w-full overflow-hidden rounded-md border border-droid-border bg-droid-bg/60">
+        {src === null || failed ? (
+          <span className="flex h-full w-full items-center justify-center text-droid-text-muted">
+            <ImageOff className="h-3 w-3" />
+          </span>
+        ) : (
+          <img
+            src={src}
+            alt={label}
+            draggable={false}
+            className="h-full w-full object-cover"
+            onError={() => {
+              setFailed(true);
+            }}
+          />
+        )}
+      </span>
       {paths.length > 1 && (
         <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-droid-border bg-droid-elevated px-0.5 text-[8px] font-semibold leading-none text-droid-text">
           {paths.length}

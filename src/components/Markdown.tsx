@@ -359,8 +359,10 @@ function MarkdownImpl({
           // Without this, react-markdown emits a bare <img src="/abs/path">,
           // which the renderer origin cannot resolve; TranscriptImage routes
           // local paths through the desktop image source and bounds the preview.
-          img: ({ src, alt }) =>
-            typeof src === 'string' ? <TranscriptImage reference={src} alt={alt} /> : null,
+          img: ({ src, alt, title }) =>
+            typeof src === 'string' ? (
+              <TranscriptImage reference={src} alt={alt} title={title} />
+            ) : null,
           hr: () => (
             <hr className={`border-0 h-px bg-droid-border/25 ${specMode ? 'my-8' : 'my-4'}`} />
           ),

@@ -62,6 +62,28 @@ test('readLocalImage refuses an unsupported type, a directory, and an oversize f
   await assert.rejects(readLocalImage(big, { maxBytes: 2 }), /size limit/);
 });
 
+test('readLocalImage reads no more than the size it validated', async () => {
+  // The file grows after the descriptor is inspected: the read must stay bounded
+  // by the validated size instead of pulling in whatever the file became.
+  let requestedLength = null;
+  const fs = {
+    open: async () => ({
+      stat: async () => ({ isFile: () => true, size: 6 }),
+      read: async (buffer, offset, length) => {
+        requestedLength = length;
+        Buffer.from('pixels-and-then-some').copy(buffer, offset, 0, length);
+        return { bytesRead: length };
+      },
+      close: async () => {},
+    }),
+  };
+  assert.deepEqual(await readLocalImage('/tmp/grows.png', { fs }), {
+    mime: 'image/png',
+    data: Buffer.from('pixels'),
+  });
+  assert.equal(requestedLength, 6);
+});
+
 test('readLocalImage refuses a path that is not a regular file', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'local-images-test-'));
   const asDir = path.join(dir, 'weird.png');

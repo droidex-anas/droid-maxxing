@@ -62,18 +62,28 @@ function localImageRequestPath(requestUrl, homeDir = os.homedir()) {
 /**
  * Reads an image file for the protocol handler. Rejects anything that is not a
  * regular file of a supported type within the size cap; a symlink is followed
- * (stat, not lstat) because screenshot tools legitimately link into temp dirs,
+ * (open, not lstat) because screenshot tools legitimately link into temp dirs,
  * and the renderer could read the target through the existing read-file IPC
  * anyway.
+ *
+ * The file is inspected and read through one descriptor, and the read is bounded
+ * by the cap, so a file that is replaced or grown between the check and the read
+ * cannot pull more than the cap into memory.
  */
 async function readLocalImage(filePath, { maxBytes = MAX_IMAGE_BYTES, fs = fsp } = {}) {
   const mime = imageMimeForPath(filePath);
   if (!mime) throw new Error(`Unsupported image type: ${path.basename(filePath)}`);
-  const stats = await fs.stat(filePath);
-  if (!stats.isFile()) throw new Error('Not a regular file');
-  if (stats.size > maxBytes) throw new Error('Image exceeds the size limit');
-  const data = await fs.readFile(filePath);
-  return { mime, data };
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new Error('Not a regular file');
+    if (stats.size > maxBytes) throw new Error('Image exceeds the size limit');
+    const buffer = Buffer.alloc(Number(stats.size));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return { mime, data: bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead) };
+  } finally {
+    await handle.close();
+  }
 }
 
 module.exports = {

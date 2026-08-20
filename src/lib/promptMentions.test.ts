@@ -16,6 +16,17 @@ test('splitTrailingMentions keeps prose that merely contains an @word', () => {
   assert.deepEqual(splitTrailingMentions(text), { text, files: [] });
 });
 
+test('splitTrailingMentions recovers paths that contain spaces', () => {
+  const files = ['/tmp/Screen Shot 2026.png', '/tmp/b.png'];
+  const composed = composePrompt('compare these', [], files);
+  assert.deepEqual(splitTrailingMentions(composed), { text: 'compare these', files });
+});
+
+test('splitTrailingMentions leaves a trailing paragraph of @words that are not paths', () => {
+  const text = 'thanks\n\n@anas @cubic';
+  assert.deepEqual(splitTrailingMentions(text), { text, files: [] });
+});
+
 test('splitTrailingMentions handles a prompt that is only attachments', () => {
   const composed = composePrompt('', [], ['/tmp/a.png']);
   assert.deepEqual(splitTrailingMentions(composed), { text: '', files: ['/tmp/a.png'] });

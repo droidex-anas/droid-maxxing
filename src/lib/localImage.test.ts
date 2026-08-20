@@ -36,6 +36,7 @@ test('localImageFilePath resolves absolute, ~ and file:// references only', () =
   assert.equal(localImageFilePath('/tmp/a.png'), '/tmp/a.png');
   assert.equal(localImageFilePath('~/shots/a.png'), '~/shots/a.png');
   assert.equal(localImageFilePath('file:///tmp/a%20b.png'), '/tmp/a b.png');
+  assert.equal(localImageFilePath('/tmp/a.png?v=2'), '/tmp/a.png');
   assert.equal(localImageFilePath('./docs/a.png'), null);
   assert.equal(localImageFilePath('https://x.test/a.png'), null);
 });

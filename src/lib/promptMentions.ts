@@ -6,21 +6,25 @@ import { composePrompt } from './composePrompt';
  * just the composed string, so the trailing mention block would otherwise render
  * as a wall of raw paths in the bubble.
  *
- * Only a final paragraph made entirely of @mentions is claimed, which is exactly
- * what composePrompt produces; prose that merely contains an @word is left alone.
+ * Only a final paragraph made entirely of @path mentions is claimed, which is
+ * exactly what composePrompt produces; prose that merely contains an @word is
+ * left alone. Mentions are separated at the ` @` boundary rather than on any
+ * whitespace, so an attached path containing spaces survives the round trip. A
+ * path that itself contains ` @` is the one case this cannot resolve, and it
+ * splits into two mentions.
  */
 export function splitTrailingMentions(text: string): { text: string; files: string[] } {
   const paragraphs = text.split('\n\n');
-  const last = paragraphs[paragraphs.length - 1]?.trim() ?? '';
-  const tokens = last.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return { text, files: [] };
-  if (!tokens.every((token) => token.length > 1 && token.startsWith('@'))) {
+  const last = paragraphs[paragraphs.length - 1] ?? '';
+  if (!last.startsWith('@')) return { text, files: [] };
+  const files = last.split(/ (?=@)/).map((mention) => mention.slice(1));
+  // A path always carries a separator and never a line break; requiring both
+  // keeps a typed sign-off like "@anas" and hand-written mention lists from being
+  // mistaken for attachments the user never selected.
+  if (!files.every((file) => file.includes('/') && !file.includes('\n'))) {
     return { text, files: [] };
   }
-  return {
-    text: paragraphs.slice(0, -1).join('\n\n'),
-    files: tokens.map((token) => token.slice(1)),
-  };
+  return { text: paragraphs.slice(0, -1).join('\n\n'), files };
 }
 
 /**
