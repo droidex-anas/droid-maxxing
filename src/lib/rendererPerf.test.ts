@@ -134,35 +134,57 @@ test('discarded events never contribute a commit or paint sample', () => {
   );
 });
 
+function withFakedPerfClock(offsetMs: number, fn: () => void): void {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'performance');
+  const realNow = performance.now.bind(performance);
+  const fake = Object.create(performance, {
+    now: { value: () => realNow() + offsetMs },
+  }) as Performance;
+  Object.defineProperty(globalThis, 'performance', { value: fake, configurable: true });
+  try {
+    fn();
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'performance', descriptor);
+  }
+}
+
 test('a stale awaiting-paint batch is dropped, not stamped late', () => {
   resetRendererPerfForTest();
-  // Committed batches whose rAF callbacks never run (a backgrounded tab).
-  // Their pending entries stay in awaitingPaint across frames.
-  withFakeRaf(() => {
+  const frames = withFakeRaf(() => {
     noteBridgeEventReceived(appendedEvent(performance.timeOrigin + performance.now()));
     noteStoreCommitted();
   });
-  const originalNow = performance.now.bind(performance);
-  try {
-    // Advance the perf clock past the staleness threshold, then commit a
-    // fresh batch: scheduling must clear the aged entries instead of
-    // recording paint samples against a frame that never ran.
-    (globalThis as { performance: Performance }).performance = Object.create(performance, {
-      now: { value: () => originalNow() + 60_000 },
-    }) as Performance;
+  // Advance the clock past the staleness threshold, commit a fresh batch,
+  // then run the still-pending frame: the aged entry must be gone while the
+  // fresh one is stamped.
+  withFakedPerfClock(60_000, () => {
     withFakeRaf(() => {
       noteBridgeEventReceived({ type: 'sessions.list', sessions: [] });
       noteStoreCommitted();
     });
-  } finally {
-    (globalThis as { performance: Performance }).performance = originalNow as Performance;
-  }
+    frames[0]?.callback();
+  });
 
   const snapshot = getRendererPerfSnapshot();
   assert.equal(snapshot.receiveToCommitMs.count, 2);
+  assert.equal(snapshot.receiveToPaintMs.count, 1, 'only the fresh entry records a paint sample');
+});
+
+test('a paint frame that runs late records nothing stale', () => {
+  resetRendererPerfForTest();
+  const frames = withFakeRaf(() => {
+    noteBridgeEventReceived(appendedEvent(performance.timeOrigin + performance.now()));
+    noteStoreCommitted();
+  });
+  withFakedPerfClock(60_000, () => {
+    frames[0]?.callback();
+  });
+
+  const snapshot = getRendererPerfSnapshot();
+  assert.equal(snapshot.receiveToCommitMs.count, 1);
   assert.equal(
     snapshot.receiveToPaintMs.count,
     0,
-    'stale paint legs are dropped instead of recorded',
+    'a frame firing past the threshold stamps nothing',
   );
 });

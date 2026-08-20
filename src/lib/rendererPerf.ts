@@ -162,13 +162,15 @@ export function resetRendererPerfForTest(): void {
   observersStarted = false;
 }
 
+// Entries older than the staleness threshold can no longer describe a real
+// paint (backgrounded tab, throttled or never-run frame), so they are dropped
+// rather than recorded against whatever frame eventually fires.
+function dropStalePaintEntries(now: number): void {
+  awaitingPaint = awaitingPaint.filter((item) => now - item.receivedAt <= PAINT_STALE_MS);
+}
+
 function schedulePaintStamp(batch: PendingEvent[]): void {
-  const now = performance.now();
-  if (awaitingPaint.length > 0 && now - awaitingPaint[0].receivedAt > PAINT_STALE_MS) {
-    // The scheduled frame never ran (backgrounded tab); those samples can no
-    // longer describe a real paint, so drop them instead of inventing one.
-    awaitingPaint = [];
-  }
+  dropStalePaintEntries(performance.now());
   awaitingPaint = awaitingPaint.concat(batch);
   if (awaitingPaint.length > MAX_AWAITING_PAINT) {
     awaitingPaint = awaitingPaint.slice(awaitingPaint.length - MAX_AWAITING_PAINT);
@@ -186,6 +188,7 @@ function schedulePaintStamp(batch: PendingEvent[]): void {
   raf(() => {
     paintScheduled = false;
     const stampedAt = performance.now();
+    dropStalePaintEntries(stampedAt);
     for (const item of awaitingPaint) record(receiveToPaint, 'paint', stampedAt - item.receivedAt);
     awaitingPaint = [];
   });
