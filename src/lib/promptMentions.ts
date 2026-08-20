@@ -1,6 +1,17 @@
 import { composePrompt } from './composePrompt';
 
 /**
+ * Whether a recovered mention names a file rather than a person or a word. An
+ * attachment is either a path with a separator or a file name with an extension,
+ * and never spans lines; a typed sign-off like "@anas" is neither, so it stays
+ * prose in the bubble.
+ */
+function looksLikeAttachmentPath(mention: string): boolean {
+  if (mention.includes('\n')) return false;
+  return mention.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(mention);
+}
+
+/**
  * Inverse of the @file block composePrompt appends. Sent messages carry their
  * attachments as structured metadata, but a message replayed from history is
  * just the composed string, so the trailing mention block would otherwise render
@@ -18,12 +29,7 @@ export function splitTrailingMentions(text: string): { text: string; files: stri
   const last = paragraphs[paragraphs.length - 1] ?? '';
   if (!last.startsWith('@')) return { text, files: [] };
   const files = last.split(/ (?=@)/).map((mention) => mention.slice(1));
-  // A path always carries a separator and never a line break; requiring both
-  // keeps a typed sign-off like "@anas" and hand-written mention lists from being
-  // mistaken for attachments the user never selected.
-  if (!files.every((file) => file.includes('/') && !file.includes('\n'))) {
-    return { text, files: [] };
-  }
+  if (!files.every(looksLikeAttachmentPath)) return { text, files: [] };
   return { text: paragraphs.slice(0, -1).join('\n\n'), files };
 }
 

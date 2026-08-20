@@ -44,7 +44,11 @@ export function TranscriptImage({
   return (
     <>
       <button
-        onClick={() => {
+        onClick={(e) => {
+          // Markdown can wrap an image in a link, which puts this control inside
+          // an anchor; without this the click would also follow the link.
+          e.preventDefault();
+          e.stopPropagation();
           setOpen(true);
         }}
         title={title ?? `View ${label}`}

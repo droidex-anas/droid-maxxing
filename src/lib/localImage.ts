@@ -10,9 +10,22 @@ const LOCAL_IMAGE_SCHEME = 'droidex-img';
 // type would only ever come back 404.
 const LOCAL_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'];
 
+/** The file path carried by a droidex-img URL, or null for anything else. */
+function localSchemePath(reference: string): string | null {
+  if (!/^droidex-img:/i.test(reference.trim())) return null;
+  try {
+    return new URL(reference.trim()).searchParams.get('p');
+  } catch {
+    return null;
+  }
+}
+
 /** Last segment of a path or URL, used as the display label for an image. */
 export function pathBaseName(reference: string): string {
-  const withoutQuery = reference.split(/[?#]/)[0];
+  // A droidex-img URL keeps its path in ?p=, so the segment before the query is
+  // just "local" — read the real path back out instead of labelling it that.
+  const path = localSchemePath(reference) ?? reference;
+  const withoutQuery = path.split(/[?#]/)[0];
   const slash = withoutQuery.lastIndexOf('/');
   return slash >= 0 ? withoutQuery.slice(slash + 1) : withoutQuery;
 }
@@ -42,7 +55,8 @@ export function partitionImagePaths(paths: readonly string[]): {
 
 /** Absolute filesystem path behind a reference, or null when it is not local. */
 export function localImageFilePath(reference: string): string | null {
-  if (reference.startsWith('file://')) {
+  // Schemes are case-insensitive in URLs, so FILE:// is the same reference.
+  if (/^file:\/\//i.test(reference)) {
     try {
       return decodeURIComponent(new URL(reference).pathname) || null;
     } catch {
@@ -66,7 +80,7 @@ export function localImageFilePath(reference: string): string | null {
 export function imageSrc(reference: string): string | null {
   const trimmed = reference.trim();
   if (!trimmed) return null;
-  if (/^(https?:|data:|blob:|droidex-img:)/.test(trimmed)) return trimmed;
+  if (/^(https?:|data:|blob:|droidex-img:)/i.test(trimmed)) return trimmed;
   const filePath = localImageFilePath(trimmed);
   if (filePath === null || !isImagePath(filePath)) return null;
   return `${LOCAL_IMAGE_SCHEME}://local/?p=${encodeURIComponent(filePath)}`;

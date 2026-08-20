@@ -84,6 +84,22 @@ test('readLocalImage reads no more than the size it validated', async () => {
   assert.equal(requestedLength, 6);
 });
 
+test('readLocalImage refuses a body that ends before its reported size', async () => {
+  const fs = {
+    open: async () => ({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      read: async (buffer, offset, length) => {
+        // A short read followed by EOF: a truncated file, not a smaller image.
+        if (offset > 0) return { bytesRead: 0 };
+        Buffer.from('pix').copy(buffer, offset, 0, Math.min(3, length));
+        return { bytesRead: 3 };
+      },
+      close: async () => {},
+    }),
+  };
+  await assert.rejects(readLocalImage('/tmp/truncated.png', { fs }), /ended before the size/);
+});
+
 test('readLocalImage refuses a path that is not a regular file', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'local-images-test-'));
   const asDir = path.join(dir, 'weird.png');

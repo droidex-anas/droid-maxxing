@@ -823,6 +823,10 @@ export default function PromptInput({
         draftUntouched: composerRevisionRef.current === composerRevision,
         clearImages: () => {
           imageAttachments.clear();
+          // Image chips always clear on submit, so a viewer open over one of them
+          // would be showing an attachment the composer no longer holds.
+          setViewerImageId(null);
+          setViewerPath(null);
         },
         resetDraft: () => {
           setInput('');

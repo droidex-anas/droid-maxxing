@@ -21,6 +21,15 @@ test('pathBaseName drops directories and query strings', () => {
   assert.equal(pathBaseName('shot.png'), 'shot.png');
 });
 
+test('pathBaseName reads the file name back out of a droidex-img URL', () => {
+  assert.equal(pathBaseName('droidex-img://local/?p=%2Ftmp%2Fattach%2Fpaste-1.png'), 'paste-1.png');
+});
+
+test('scheme matching ignores case', () => {
+  assert.equal(imageSrc('HTTPS://x.test/a.png'), 'HTTPS://x.test/a.png');
+  assert.equal(localImageFilePath('FILE:///tmp/a.png'), '/tmp/a.png');
+});
+
 test('partitionImagePaths splits attachments and keeps each order', () => {
   const { images, files } = partitionImagePaths([
     '/tmp/b.png',

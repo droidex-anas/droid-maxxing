@@ -58,7 +58,9 @@ function ImageLightboxContent({
       const last = focusables.at(-1);
       if (!first || !last) return;
       const active = document.activeElement;
-      const inside = active instanceof HTMLElement && dialog.contains(active);
+      // The dialog itself holds focus right after opening, and it sits before
+      // every control, so it is the boundary in both directions.
+      const inside = active instanceof HTMLElement && dialog.contains(active) && active !== dialog;
       if (e.shiftKey && (active === first || !inside)) {
         e.preventDefault();
         last.focus();
@@ -108,7 +110,14 @@ function ImageLightboxContent({
           }}
         />
       </div>
-      <div className="flex items-center gap-3 border-t border-droid-border/60 bg-droid-bg/80 px-5 py-3">
+      {/* The bar is chrome, not backdrop: clicking the file name should not
+          dismiss the image the user is inspecting. */}
+      <div
+        className="flex items-center gap-3 border-t border-droid-border/60 bg-droid-bg/80 px-5 py-3"
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+      >
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-droid-text-muted">
           {label}
         </span>

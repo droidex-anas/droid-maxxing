@@ -60,6 +60,22 @@ function localImageRequestPath(requestUrl, homeDir = os.homedir()) {
 }
 
 /**
+ * Reads exactly `length` bytes from an open handle. A single read can come back
+ * short, and a truncated body would reach the renderer as a corrupt image with no
+ * explanation, so an early EOF fails loudly instead.
+ */
+async function readExactBytes(handle, length) {
+  const buffer = Buffer.alloc(length);
+  let offset = 0;
+  while (offset < length) {
+    const { bytesRead } = await handle.read(buffer, offset, length - offset, offset);
+    if (bytesRead === 0) throw new Error('Image ended before the size it reported');
+    offset += bytesRead;
+  }
+  return buffer;
+}
+
+/**
  * Reads an image file for the protocol handler. Rejects anything that is not a
  * regular file of a supported type within the size cap; a symlink is followed
  * (open, not lstat) because screenshot tools legitimately link into temp dirs,
@@ -78,9 +94,7 @@ async function readLocalImage(filePath, { maxBytes = MAX_IMAGE_BYTES, fs = fsp }
     const stats = await handle.stat();
     if (!stats.isFile()) throw new Error('Not a regular file');
     if (stats.size > maxBytes) throw new Error('Image exceeds the size limit');
-    const buffer = Buffer.alloc(Number(stats.size));
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return { mime, data: bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead) };
+    return { mime, data: await readExactBytes(handle, Number(stats.size)) };
   } finally {
     await handle.close();
   }

@@ -22,6 +22,14 @@ test('splitTrailingMentions recovers paths that contain spaces', () => {
   assert.deepEqual(splitTrailingMentions(composed), { text: 'compare these', files });
 });
 
+test('splitTrailingMentions recovers a repo-root file that has no directory', () => {
+  const composed = composePrompt('read this', [], ['README.md', 'logo.png']);
+  assert.deepEqual(splitTrailingMentions(composed), {
+    text: 'read this',
+    files: ['README.md', 'logo.png'],
+  });
+});
+
 test('splitTrailingMentions leaves a trailing paragraph of @words that are not paths', () => {
   const text = 'thanks\n\n@anas @cubic';
   assert.deepEqual(splitTrailingMentions(text), { text, files: [] });
