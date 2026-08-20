@@ -7,6 +7,7 @@ const {
   dialog,
   ipcMain,
   nativeTheme,
+  protocol,
   safeStorage,
   session,
   shell,
@@ -22,6 +23,7 @@ const githubVcs = require('./github.cjs');
 const { createTerminalManager, createTerminalSubscriptionRegistry } = require('./terminal.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
+const localImages = require('./localImages.cjs');
 const {
   normalizeBrowserConsoleMessage,
   redactBrowserDiagnosticUrl,
@@ -94,6 +96,15 @@ const BROWSER_PARTITION = 'persist:droidex-browser';
 let browserSessionConfigured = false;
 
 app.setName(APP_NAME);
+// Must run before the app is ready: the renderer loads transcript images through
+// this scheme, and Chromium only treats it as a normal, fetchable origin when it
+// is declared up front.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: localImages.LOCAL_IMAGE_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+]);
 // Overridable so a second dev instance (e.g. a feature worktree) can run beside
 // the main one without fighting over the Chromium profile lock.
 app.setPath(
@@ -113,6 +124,7 @@ app.whenReady().then(async () => {
     logError: (message) => console.error('[menu] %s', message),
   });
   registerIpc();
+  registerLocalImageProtocol();
   createMainWindow();
   // Pin the DROIDEX mark on the dock/taskbar up front so OS notifications
   // inherit it instead of the bare Electron atom in dev builds.
@@ -204,6 +216,37 @@ function createMainWindow() {
     terminalSubscriptions.clear();
     filesRootAccess.clear();
     mainWindow = null;
+  });
+}
+
+// Serves local image files to the renderer (see localImages.cjs). Registered on
+// the default session only: the Browser pane runs in its own partition, so web
+// pages there never gain a local-file reader.
+function registerLocalImageProtocol() {
+  session.defaultSession.protocol.handle(localImages.LOCAL_IMAGE_SCHEME, async (request) => {
+    try {
+      const filePath = localImages.localImageRequestPath(request.url);
+      const { mime, data } = await localImages.readLocalImage(filePath);
+      // no-store: an attachment path can be rewritten in place by a crop, and a
+      // cached body would keep showing the superseded pixels.
+      // The scheme is fetchable and serves image/svg+xml, so the response denies
+      // every subresource and script: an SVG is inert in an <img>, but this keeps
+      // it inert if a body is ever navigated to or embedded directly. nosniff
+      // stops Chromium from re-typing a body as something executable.
+      return new Response(data, {
+        headers: {
+          'content-type': mime,
+          'cache-control': 'no-store',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+          'x-content-type-options': 'nosniff',
+        },
+      });
+    } catch (error) {
+      // The renderer degrades to an "image unavailable" chip; the reason is only
+      // useful when debugging, so keep it out of the UI and in the log.
+      console.warn('Could not serve local image %s:', request.url, error);
+      return new Response('Image unavailable', { status: 404 });
+    }
   });
 }
 

@@ -213,6 +213,25 @@ test('app icon switching authorizes the renderer and accepts only committed icon
   assert.match(mainSource, /mainWindow\.setIcon\(iconPath\)/);
 });
 
+test('the local image scheme is privileged before ready and served to the main session only', () => {
+  // registerSchemesAsPrivileged is a no-op once the app is ready, so it must sit
+  // at module scope; handling it on defaultSession keeps the Browser pane's
+  // partition (untrusted web content) without a local-file reader.
+  const privilegedIndex = mainSource.indexOf('protocol.registerSchemesAsPrivileged');
+  assert.notEqual(privilegedIndex, -1);
+  assert.ok(privilegedIndex < mainSource.indexOf('app.whenReady()'));
+  assert.match(mainSource, /scheme: localImages\.LOCAL_IMAGE_SCHEME/);
+  assert.match(
+    mainSource,
+    /session\.defaultSession\.protocol\.handle\(localImages\.LOCAL_IMAGE_SCHEME/,
+  );
+  assert.match(mainSource, /registerLocalImageProtocol\(\);/);
+  // A served SVG must not be able to run anything if a body is navigated to or
+  // embedded rather than displayed in an <img>.
+  assert.match(mainSource, /'content-security-policy': "default-src 'none';/);
+  assert.match(mainSource, /'x-content-type-options': 'nosniff'/);
+});
+
 test('system app icon tracks the OS appearance and repaints on change', () => {
   assert.match(
     mainSource,

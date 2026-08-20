@@ -14,6 +14,7 @@ import type { Mermaid } from 'mermaid';
 import { AppBlock } from './AppBlock';
 import { appFencesInMarkdown } from '../lib/appBlocks';
 import { CodeCard } from './MarkdownCode';
+import { TranscriptImage } from './media/TranscriptImage';
 
 export { copyMarkdownCode } from './MarkdownCode';
 
@@ -337,17 +338,27 @@ function MarkdownImpl({
             <strong className="font-semibold text-droid-text">{children}</strong>
           ),
           em: ({ children }) => <em className="italic">{children}</em>,
-          a: ({ children, href }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="underline underline-offset-2 hover:opacity-80 transition-opacity"
-              style={{ color: 'var(--droid-accent)' }}
-            >
-              {children}
-            </a>
-          ),
+          a: ({ children, href, node }) => {
+            // A linked markdown image would otherwise produce invalid nested
+            // interactive HTML (<a><button>), so the image viewer wins and the
+            // redundant outer link is omitted. Inspect the parsed markdown node
+            // rather than React element identity, which react-markdown wraps.
+            const linkedImage = node?.children.some(
+              (child) => child.type === 'element' && child.tagName === 'img',
+            );
+            if (linkedImage) return <>{children}</>;
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2 hover:opacity-80 transition-opacity"
+                style={{ color: 'var(--droid-accent)' }}
+              >
+                {children}
+              </a>
+            );
+          },
           blockquote: ({ children }) => (
             <blockquote
               className={`italic text-droid-text-secondary ${specMode ? 'border-l border-droid-border pl-4 py-0.5 my-4' : 'border-l-2 border-droid-border-hover pl-3.5'}`}
@@ -355,6 +366,13 @@ function MarkdownImpl({
               {children}
             </blockquote>
           ),
+          // Without this, react-markdown emits a bare <img src="/abs/path">,
+          // which the renderer origin cannot resolve; TranscriptImage routes
+          // local paths through the desktop image source and bounds the preview.
+          img: ({ src, alt, title }) =>
+            typeof src === 'string' ? (
+              <TranscriptImage reference={src} alt={alt} title={title} />
+            ) : null,
           hr: () => (
             <hr className={`border-0 h-px bg-droid-border/25 ${specMode ? 'my-8' : 'my-4'}`} />
           ),

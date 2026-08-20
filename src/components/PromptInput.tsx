@@ -32,7 +32,10 @@ import {
 import { useImageAttachments } from '../hooks/useImageAttachments';
 import { useImageFileDrop } from '../hooks/useImageFileDrop';
 import { ImageChip } from './composer/ImageChip';
+import { AttachedFileChip } from './composer/AttachedFileChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
+import { ImageLightbox } from './media/ImageLightbox';
+import { imageSrc, partitionImagePaths } from '../lib/localImage';
 import { FeedbackModal } from './FeedbackModal';
 import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
@@ -71,7 +74,6 @@ import {
 import {
   ArrowUp,
   ChevronDown,
-  FileText,
   LoaderCircle,
   Plus,
   SlidersHorizontal,
@@ -264,6 +266,9 @@ export default function PromptInput({
   const imageAttachments = useImageAttachments(state.imagePasteQuality);
   const fileDrop = useImageFileDrop(imageAttachments.addBlob);
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
+  // A path-only attachment has no staged copy to crop, so it opens the
+  // read-only lightbox instead of the composer's image viewer.
+  const [viewerPath, setViewerPath] = useState<string | null>(null);
   const [feedbackReport, setFeedbackReport] = useState<FeedbackReportRequest | null>(null);
   const [activeSkills, setActiveSkillsState] = useState<SkillInfo[]>([]);
   const setActiveSkills = (value: SetStateAction<SkillInfo[]>) => {
@@ -636,6 +641,9 @@ export default function PromptInput({
     setHistoryIndex(null);
     setActiveSkills([]);
     setAttachedFiles([]);
+    // Both viewers show a dropped attachment, so they cannot outlive it.
+    setViewerImageId(null);
+    setViewerPath(null);
     clearAndDiscardImages();
   }, [activeSession?.appSessionId, clearAndDiscardImages]);
 
@@ -815,6 +823,10 @@ export default function PromptInput({
         draftUntouched: composerRevisionRef.current === composerRevision,
         clearImages: () => {
           imageAttachments.clear();
+          // Image chips always clear on submit, so a viewer open over one of them
+          // would be showing an attachment the composer no longer holds.
+          setViewerImageId(null);
+          setViewerPath(null);
         },
         resetDraft: () => {
           setInput('');
@@ -1189,6 +1201,8 @@ export default function PromptInput({
     // their temp files — no prompt ever referenced them.
     imageAttachments.clearAndDiscard();
     setInput(p.text);
+    // Its own attachments come back as chips: images among them render as
+    // thumbnails again, so the restored draft looks like the one that was queued.
     setAttachedFiles(p.files);
     setActiveSkills(invocableSkills.filter((s) => p.skills.includes(s.name)));
     dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id: p.id });
@@ -1289,6 +1303,12 @@ export default function PromptInput({
   const hasChips =
     activeSkills.length > 0 || attachedFiles.length > 0 || imageAttachments.images.length > 0;
   const viewerImage = imageAttachments.images.find((i) => i.id === viewerImageId) ?? null;
+  // Files attached as paths (the @ menu, the picker, or a queued prompt brought
+  // back for editing) show as thumbnails when they are displayable images, so a
+  // pasted image looks the same before queueing and after reopening it.
+  const { images: attachedImagePaths, files: attachedDocumentPaths } =
+    partitionImagePaths(attachedFiles);
+  const viewerSrc = viewerPath === null ? null : imageSrc(viewerPath);
   // The "Start in" repo/worktree/branch row only applies while drafting a brand
   // new chat; it renders as the top section of the composer card.
   const showStartIn = !activeSession && !missionPreview && !!cwd;
@@ -1373,7 +1393,8 @@ export default function PromptInput({
               {imageAttachments.images.map((img) => (
                 <ImageChip
                   key={img.id}
-                  image={img}
+                  src={img.preview}
+                  label={basename(img.path)}
                   onOpen={() => {
                     setViewerImageId(img.id);
                   }}
@@ -1382,6 +1403,27 @@ export default function PromptInput({
                   }}
                 />
               ))}
+              {attachedImagePaths.map((path) => {
+                const src = imageSrc(path);
+                // No discard on removal: the file was written for an
+                // already-composed prompt, and the attachments store sweeps it.
+                const remove = () => {
+                  setAttachedFiles((prev) => prev.filter((x) => x !== path));
+                };
+                return src === null ? (
+                  <AttachedFileChip key={path} path={path} onRemove={remove} />
+                ) : (
+                  <ImageChip
+                    key={path}
+                    src={src}
+                    label={basename(path)}
+                    onOpen={() => {
+                      setViewerPath(path);
+                    }}
+                    onRemove={remove}
+                  />
+                );
+              })}
               {activeSkills.map((skill) => (
                 <span
                   key={skill.filePath}
@@ -1405,24 +1447,14 @@ export default function PromptInput({
                   </button>
                 </span>
               ))}
-              {attachedFiles.map((f) => (
-                <span
+              {attachedDocumentPaths.map((f) => (
+                <AttachedFileChip
                   key={f}
-                  className="group flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg text-[11px] bg-droid-bg/60 text-droid-text-secondary border border-droid-border"
-                  title={f}
-                >
-                  <FileText className="w-3 h-3 text-droid-text-muted" />
-                  {basename(f)}
-                  <button
-                    onClick={() => {
-                      setAttachedFiles((prev) => prev.filter((x) => x !== f));
-                    }}
-                    className="p-0.5 rounded hover:bg-black/20 transition-colors"
-                    title="Remove file"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </span>
+                  path={f}
+                  onRemove={() => {
+                    setAttachedFiles((prev) => prev.filter((x) => x !== f));
+                  }}
+                />
               ))}
             </div>
           )}
@@ -1737,6 +1769,15 @@ export default function PromptInput({
             setViewerImageId(null);
           }}
           onCrop={imageAttachments.applyCrop}
+        />
+      )}
+      {viewerPath !== null && viewerSrc !== null && (
+        <ImageLightbox
+          src={viewerSrc}
+          label={viewerPath}
+          onClose={() => {
+            setViewerPath(null);
+          }}
         />
       )}
       {feedbackReport && (
