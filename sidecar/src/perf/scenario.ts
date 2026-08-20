@@ -138,7 +138,10 @@ export function buildReplayPlan(spec: PerfScenarioSpec): ReplayPlan {
     }
   }
   // Interleaved sessions emit on the same global timeline, so order turns by
-  // their first step to keep the merged schedule faithful to `atMs`.
+  // their first step to keep the merged schedule faithful to `atMs`. Within a
+  // session, turn starts are a full turn-duration apart, so this never
+  // reorders turns; the runner additionally sorts each session's list by turn
+  // before the replay runtime consumes it.
   turns.sort((a, b) => (a.steps.at(0)?.atMs ?? 0) - (b.steps.at(0)?.atMs ?? 0));
   return { spec, turns };
 }
@@ -151,6 +154,9 @@ function buildTurn(
 ): ReplayTurnPlan {
   const messageId = `s${String(sessionIndex)}-t${String(turn)}`;
   const steps: ReplayStep[] = [];
+  // eventsPerSecond paces the assistant deltas; tool markers ride in the gaps
+  // between delta slots (interval thirds), so they add event count without
+  // extending the turn's wall-clock span or the expected duration.
   const intervalMs = 1_000 / spec.eventsPerSecond;
   let toolCounter = 0;
   for (let delta = 0; delta < spec.deltasPerTurn; delta += 1) {

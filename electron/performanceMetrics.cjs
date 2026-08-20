@@ -18,6 +18,9 @@ function createPerformanceMetricsCollector({ countPtys, listWebContents } = {}) 
         heapUsedBytes: memory.heapUsed,
         heapTotalBytes: memory.heapTotal,
       },
+      // Cumulative since the collector was constructed (the baseline is
+      // captured once, above). Consumers polling on a timer must difference
+      // consecutive samples to derive a per-interval rate.
       cpu: {
         userMs: Math.round(cpu.user / 1000),
         systemMs: Math.round(cpu.system / 1000),

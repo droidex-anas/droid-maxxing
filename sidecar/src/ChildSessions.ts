@@ -97,14 +97,15 @@ export class ChildSessions {
   }
 
   // Resource gauge for hot-path metrics: how many child agents are held
-  // across attached parents, and how many are still able to do work.
+  // across attached parents, and how many can still be offered work (same
+  // predicate the runtime itself uses when admitting work).
   counts(): { total: number; active: number } {
     let total = 0;
     let active = 0;
     for (const parent of this.parents.values()) {
       for (const child of parent.children.values()) {
         total += 1;
-        if (child.status !== 'completed') active += 1;
+        if (childAcceptsWork(child)) active += 1;
       }
     }
     return { total, active };

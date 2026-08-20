@@ -285,6 +285,7 @@ export interface DesktopPerformanceMetrics {
   webContentsTotal: number;
   ptys: number;
   memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
+  /** Cumulative since app start, not per sample: difference polls for a rate. */
   cpu: { userMs: number; systemMs: number };
 }
 

@@ -47,9 +47,13 @@ async function shutdown(): Promise<void> {
   const forceExit = setTimeout(() => process.exit(1), 5_000);
   forceExit.unref();
   try {
-    await server.close();
+    // Manager cleanup emits final state while clients are still connected;
+    // transport closure (which terminates sockets) runs concurrently so a
+    // stalled renderer cannot block session cleanup.
+    const transportClosed = server.close();
     await manager.shutdown();
     hotPathMetrics.disable();
+    await transportClosed;
   } catch (error) {
     console.error(error);
     process.exitCode = 1;

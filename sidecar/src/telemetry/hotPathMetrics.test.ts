@@ -16,7 +16,7 @@ test('snapshot before enable reports no event-loop monitor and no resources', ()
   assert.equal(snapshot.uptimeMs, 0);
 });
 
-test('stage records feed counters, histograms, and snapshot gauges', () => {
+test('stage records feed counters, histograms, and snapshot gauges', async () => {
   const metrics = freshMetrics();
   metrics.enable();
   metrics.recordNormalize(0.5);
@@ -26,7 +26,15 @@ test('stage records feed counters, histograms, and snapshot gauges', () => {
   metrics.recordTransport(0.25, 1_000, 1);
   metrics.recordCoalesce(4);
 
-  const snapshot = metrics.snapshot();
+  // The event-loop monitor needs at least one timer tick before its first
+  // sample; until then the snapshot legitimately reports no event-loop stats.
+  let snapshot = metrics.snapshot();
+  const deadline = Date.now() + 500;
+  while (snapshot.eventLoop === null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    snapshot = metrics.snapshot();
+  }
+
   assert.equal(snapshot.counters.normalized, 2);
   assert.equal(snapshot.counters.persisted, 1);
   assert.equal(snapshot.counters.emitted, 1);
@@ -38,6 +46,7 @@ test('stage records feed counters, histograms, and snapshot gauges', () => {
   assert.equal(snapshot.transport.bytesTotal, 1_000);
   assert.ok(snapshot.transport.bytesPerSecondAvg > 0);
   assert.ok(snapshot.eventLoop !== null);
+  assert.ok(Number.isFinite(snapshot.eventLoop.meanMs));
   assert.ok(snapshot.process.rssBytes > 0);
   assert.ok(snapshot.process.cpuUserMs >= 0);
 });

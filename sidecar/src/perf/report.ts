@@ -52,7 +52,7 @@ export function renderReportMarkdown(report: ReplayReport): string {
     '| --- | --- | --- | --- | --- | --- |',
     stageRow('normalize', report.sidecar.histograms.normalizeMs),
     stageRow('sqlite persist', report.sidecar.histograms.persistMs),
-    stageRow('emit dispatch', report.sidecar.histograms.emitMs),
+    stageRow('emit dispatch (contains transport)', report.sidecar.histograms.emitMs),
     stageRow('transport fan-out', report.sidecar.histograms.transportMs),
     stageRow('coalesce merged', report.sidecar.histograms.coalesceMerged),
     '',

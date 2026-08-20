@@ -189,6 +189,10 @@ export function startBridgeServer(options: {
     browserAssetUrl,
     close: () =>
       new Promise<void>((resolve) => {
+        // A renderer that stalls on the close handshake must not hold
+        // shutdown hostage: destroy live sockets, then close the servers.
+        for (const ws of clients) ws.terminate();
+        clients.clear();
         let pending = 2;
         const settled = () => {
           if (--pending === 0) resolve();

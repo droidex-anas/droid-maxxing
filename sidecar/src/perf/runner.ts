@@ -58,6 +58,15 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
     existing.push(turn);
     turnsBySession.set(turn.sessionIndex, existing);
   }
+  // The global plan orders turns across sessions for schedule fidelity, but
+  // the replay runtime selects a session's plan by prompt count, so each
+  // session's list must be in strict turn order before consumption.
+  for (const [index, turns] of turnsBySession) {
+    turnsBySession.set(
+      index,
+      turns.toSorted((a, b) => a.turn - b.turn),
+    );
+  }
 
   let manager: SessionManager | null = null;
   const server = startBridgeServer({
@@ -173,14 +182,23 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   }
   const durationMs = Math.round(performance.now() - startedPerf);
 
-  const sidecar = await fetchSidecarMetrics(server.port, token);
-  await cleanup();
+  // Metrics capture must never strand the server, manager, pinned HOME, or
+  // temp dir: cleanup runs whether or not the snapshot succeeds.
+  let sidecar: HotPathMetricsSnapshot | null = null;
+  try {
+    sidecar = await fetchSidecarMetrics(server.port, token);
+  } catch (error) {
+    if (failure === null) failure = error;
+  } finally {
+    await cleanup();
+  }
 
   if (failure !== null) {
     throw failure instanceof Error ? failure : new Error(JSON.stringify(failure));
   }
+  if (sidecar === null) throw new Error('Sidecar metrics snapshot was not captured.');
 
-  return buildReport();
+  return buildReport(sidecar);
 
   async function createAndDriveSessions(): Promise<void> {
     for (let index = 0; index < spec.sessions; index += 1) {
@@ -226,7 +244,7 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
     await sleep(spec.coalesceMs + DRAIN_QUIET_MS);
   }
 
-  function buildReport(): ReplayReport {
+  function buildReport(sidecar: HotPathMetricsSnapshot): ReplayReport {
     const appendToReceive = new ReservoirHistogram();
     const providerToReceive = new ReservoirHistogram();
     let markerSamples = 0;
@@ -292,7 +310,9 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
       hotPathMetrics.disable();
       hotPathMetrics.reset();
       hotPathMetrics.clearGaugeProvider();
-      process.env.HOME = previousHome;
+      // Assigning undefined would store the literal string "undefined".
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
       rmSync(home, { recursive: true, force: true });
     }
   }

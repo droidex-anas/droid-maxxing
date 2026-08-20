@@ -45,7 +45,7 @@ test('broadcast reaches a connected authenticated client', async () => {
     harness.broadcast({ type: 'connection', status: 'connected' });
     await waitFor(() => received.length === 1);
     assert.match(received[0] ?? '', /"connection"/);
-    socket.close();
+    await closeSocket(socket);
   });
 });
 
@@ -71,6 +71,15 @@ test('perf metrics endpoint requires the bridge token', async () => {
     assert.ok(body.counters);
   });
 });
+
+function closeSocket(socket: WebSocket): Promise<void> {
+  // Await the close handshake so withServer's teardown never races a socket
+  // that is still winding down.
+  return new Promise((resolve) => {
+    socket.once('close', () => resolve());
+    socket.close();
+  });
+}
 
 function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
   return new Promise((resolve, reject) => {

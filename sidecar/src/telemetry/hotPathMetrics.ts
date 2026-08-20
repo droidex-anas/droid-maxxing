@@ -4,7 +4,9 @@
 // Stage ownership (all cheap enough to stay always-on):
 //   normalize  SessionEventFlow around normalizeStreamEvent/normalizeNotification
 //   persist    HistoryIndex.recordEvent around the SQLite insert
-//   emit       SessionTimeline.recordAndEmit around the emit dispatch alone
+//   emit       SessionTimeline.recordAndEmit around the emit dispatch; in the
+//              production composition the sink is the bridge broadcast, so
+//              emit contains transport rather than excluding it
 //   transport  bridgeServer broadcast (serialize + fan-out)
 //   coalesce   SessionTimeline streaming flush (deltas merged per flush)
 // Plus process health: event-loop delay, CPU, memory, live session and child
@@ -212,11 +214,15 @@ export class HotPathMetrics {
 
   private eventLoopStats(): HotPathMetricsSnapshot['eventLoop'] {
     if (this.startedAt === 0) return null;
+    const mean = this.eventLoop.mean;
+    // Until the first event-loop sample the monitor reports NaN, which JSON
+    // would silently render as null inside an otherwise populated block.
+    if (!Number.isFinite(mean)) return null;
     return {
       p50Ms: round(this.eventLoop.percentile(50) / 1e6),
       p95Ms: round(this.eventLoop.percentile(95) / 1e6),
       p99Ms: round(this.eventLoop.percentile(99) / 1e6),
-      meanMs: round(this.eventLoop.mean / 1e6),
+      meanMs: round(mean / 1e6),
       maxMs: round(this.eventLoop.max / 1e6),
     };
   }
