@@ -338,17 +338,28 @@ function MarkdownImpl({
             <strong className="font-semibold text-droid-text">{children}</strong>
           ),
           em: ({ children }) => <em className="italic">{children}</em>,
-          a: ({ children, href }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="underline underline-offset-2 hover:opacity-80 transition-opacity"
-              style={{ color: 'var(--droid-accent)' }}
-            >
-              {children}
-            </a>
-          ),
+          a: ({ children, href, node }) => {
+            // A linked markdown image would otherwise produce invalid nested
+            // interactive HTML (<a><button>), so the image viewer wins and the
+            // redundant outer link is omitted. Inspect the parsed markdown node
+            // rather than React element identity, which react-markdown wraps.
+            const linkedImage =
+              node?.children.length === 1 &&
+              node.children[0]?.type === 'element' &&
+              node.children[0].tagName === 'img';
+            if (linkedImage) return <>{children}</>;
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2 hover:opacity-80 transition-opacity"
+                style={{ color: 'var(--droid-accent)' }}
+              >
+                {children}
+              </a>
+            );
+          },
           blockquote: ({ children }) => (
             <blockquote
               className={`italic text-droid-text-secondary ${specMode ? 'border-l border-droid-border pl-4 py-0.5 my-4' : 'border-l-2 border-droid-border-hover pl-3.5'}`}

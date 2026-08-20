@@ -1393,7 +1393,9 @@ function baseReducer(state: AppState, action: Action): AppState {
           text: pending ? pending.text : action.session.goal,
           author: 'user',
           skills: pending?.skills.length ? pending.skills : undefined,
-          files: pending?.files.length ? pending.files : undefined,
+          // Live optimistic events use a defined array, including empty, so the
+          // transcript renderer can distinguish them from restored history.
+          files: pending?.files ?? [],
         };
         transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
         transcriptRetainedCost = {

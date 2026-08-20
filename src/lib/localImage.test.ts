@@ -23,6 +23,10 @@ test('pathBaseName drops directories and query strings', () => {
 
 test('pathBaseName reads the file name back out of a droidex-img URL', () => {
   assert.equal(pathBaseName('droidex-img://local/?p=%2Ftmp%2Fattach%2Fpaste-1.png'), 'paste-1.png');
+  assert.equal(
+    pathBaseName('droidex-img://local/?p=%2Ftmp%2Fattach%2Fpaste%23final%3F.png'),
+    'paste#final?.png',
+  );
 });
 
 test('scheme matching ignores case', () => {

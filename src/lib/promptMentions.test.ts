@@ -47,6 +47,11 @@ test('userMessageAttachments prefers event metadata over parsing', () => {
   });
 });
 
+test('userMessageAttachments keeps typed attachment-shaped text in live events', () => {
+  const text = 'nothing\n\n@/tmp/a.png';
+  assert.deepEqual(userMessageAttachments(text, []), { text, files: [] });
+});
+
 test('userMessageAttachments parses a replayed message that has no metadata', () => {
   const composed = composePrompt('what is wrong here', [], ['/tmp/paste-1.png']);
   assert.deepEqual(userMessageAttachments(composed, undefined), {
@@ -57,7 +62,7 @@ test('userMessageAttachments parses a replayed message that has no metadata', ()
 
 test('userMessageAttachments keeps the skill invocation with the message text', () => {
   const composed = composePrompt('fix the bug', ['debugger'], ['/tmp/paste-1.png']);
-  assert.deepEqual(userMessageAttachments(composed, []), {
+  assert.deepEqual(userMessageAttachments(composed, undefined), {
     text: '/debugger fix the bug',
     files: ['/tmp/paste-1.png'],
   });

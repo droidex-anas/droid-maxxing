@@ -27,7 +27,10 @@ export function TranscriptImage({
   const [open, setOpen] = useState(false);
   // Markdown images frequently carry an empty alt, so fall back to the file name.
   const altLabel = alt?.trim() ?? '';
-  const label = altLabel.length > 0 ? altLabel : pathBaseName(reference);
+  const baseName = pathBaseName(reference);
+  let label = reference;
+  if (baseName.length > 0) label = baseName;
+  if (altLabel.length > 0) label = altLabel;
 
   if (src === null || failed) {
     return (
@@ -44,11 +47,7 @@ export function TranscriptImage({
   return (
     <>
       <button
-        onClick={(e) => {
-          // Markdown can wrap an image in a link, which puts this control inside
-          // an anchor; without this the click would also follow the link.
-          e.preventDefault();
-          e.stopPropagation();
+        onClick={() => {
           setOpen(true);
         }}
         title={title ?? `View ${label}`}

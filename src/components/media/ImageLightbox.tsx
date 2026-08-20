@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { X } from 'lucide-react';
+import { ImageOff, X } from 'lucide-react';
 
 /**
  * Read-only full-view for a single image: click a transcript thumbnail to
@@ -28,6 +28,8 @@ function ImageLightboxContent({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc === src;
 
   useEffect(() => {
     const opener = document.activeElement;
@@ -97,18 +99,34 @@ function ImageLightboxContent({
       onClick={onClose}
     >
       <div className="flex flex-1 items-center justify-center overflow-hidden p-8">
-        <motion.img
-          src={src}
-          alt={label}
-          draggable={false}
-          initial={{ scale: 0.96, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-          className="block max-h-[80vh] max-w-[90vw] select-none rounded-lg border border-droid-border object-contain"
-          onClick={(e) => {
-            e.stopPropagation();
-          }}
-        />
+        {failed ? (
+          <div
+            className="flex max-w-[90vw] flex-col items-center gap-3 rounded-xl border border-droid-border bg-droid-bg/90 px-6 py-5 text-droid-text-muted"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            <ImageOff className="h-8 w-8" />
+            <span className="max-w-full truncate font-mono text-[11px]">{label}</span>
+            <span className="text-[12px]">Image is no longer available</span>
+          </div>
+        ) : (
+          <motion.img
+            src={src}
+            alt={label}
+            draggable={false}
+            initial={{ scale: 0.96, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            className="block max-h-[80vh] max-w-[90vw] select-none rounded-lg border border-droid-border object-contain"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+            onError={() => {
+              setFailedSrc(src);
+            }}
+          />
+        )}
       </div>
       {/* The bar is chrome, not backdrop: clicking the file name should not
           dismiss the image the user is inspecting. */}

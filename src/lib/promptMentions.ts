@@ -39,17 +39,15 @@ export function splitTrailingMentions(text: string): { text: string; files: stri
  * history. Guarded by a round-trip through composePrompt so the split only
  * applies to text this app actually composes.
  *
- * The round trip proves format, not provenance: a live message whose final
- * paragraph is nothing but @path mentions is indistinguishable from a composed
- * one, so it renders as attachment chips too. That is accepted rather than
- * plumbed around — the chips name exactly the paths the paragraph contained, and
- * the prose above them is untouched.
+ * A defined files array is authoritative even when empty: live optimistic
+ * events always carry it, while restored history omits it. That distinction
+ * prevents typed mention-shaped prose from being claimed as attachments.
  */
 export function userMessageAttachments(
   text: string | undefined,
   files: readonly string[] | undefined,
 ): { text: string; files: string[] } {
-  if (files && files.length > 0) return { text: text ?? '', files: [...files] };
+  if (files !== undefined) return { text: text ?? '', files: [...files] };
   const split = splitTrailingMentions(text ?? '');
   if (split.files.length === 0) return { text: text ?? '', files: [] };
   if (composePrompt(split.text, [], split.files) !== text) return { text: text ?? '', files: [] };

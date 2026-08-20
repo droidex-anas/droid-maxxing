@@ -24,8 +24,12 @@ function localSchemePath(reference: string): string | null {
 export function pathBaseName(reference: string): string {
   // A droidex-img URL keeps its path in ?p=, so the segment before the query is
   // just "local" — read the real path back out instead of labelling it that.
-  const path = localSchemePath(reference) ?? reference;
-  const withoutQuery = path.split(/[?#]/)[0];
+  const localPath = localSchemePath(reference);
+  const path = localPath ?? reference;
+  // Query and fragment delimiters belong to remote references. Once `p` has
+  // been decoded it is a filesystem path, where either character may be part of
+  // the actual file name.
+  const withoutQuery = localPath === null ? path.split(/[?#]/)[0] : path;
   const slash = withoutQuery.lastIndexOf('/');
   return slash >= 0 ? withoutQuery.slice(slash + 1) : withoutQuery;
 }
