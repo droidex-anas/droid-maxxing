@@ -1,13 +1,14 @@
 // File-size exception (AGENTS.md): this file is the sidebar's single
 // composition root — brand header, tool buttons, workspace/chat/pinned section
 // wiring, unread/search chrome, update prompt, and the row menu/rename glue
-// handlers. ~650 lines. The interactive row (SessionRow, marquee, inline
+// handlers. ~738 lines. The interactive row (SessionRow, marquee, inline
 // rename) already lives in SidebarSessionRow.tsx; further splitting was
 // rejected because the remaining handlers are composition glue that fail the
 // deletion test (extracting them would only forward store state), and the
 // Expand/WorkspaceFolderIcon primitives are too small to justify their own
-// modules. Reviewed ceiling: ~700 lines; extract the workspace section if it
-// grows past that.
+// modules. The Automations view remains feature-local; this file only owns its
+// navigation state and routing. Reviewed ceiling: ~750 lines; extract primary
+// navigation actions if another top-level surface is added.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
@@ -17,7 +18,16 @@ import { dismissSidebarCard, loadSidebarCardSeen } from '../lib/sidebarCards';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
-import { Folder, FolderOpen, Plus, Search, Settings, ChevronRight, SquarePen } from 'lucide-react';
+import {
+  CalendarClock,
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  Plus,
+  Search,
+  Settings,
+  SquarePen,
+} from 'lucide-react';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import {
   buildWorkspaceSections,
@@ -34,6 +44,8 @@ import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
 import { sessionAttention } from '../lib/sessionAttention';
 import type { SessionSummary } from '../types/bridge';
 import { SidebarAppUpdateButton } from './SidebarAppUpdateButton';
+import { AutomationsView } from '../features/automations/AutomationsView';
+import { AUTOMATION_SETUP_PROMPT } from '../features/automations/schedule';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -139,6 +151,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
   // (Codex-style bell toggle) belong to the sidebar, not the root store.
   const [searchOpen, setSearchOpen] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [automationsOpen, setAutomationsOpen] = useState(false);
   // Per-section count of rows to show; grows by SIDEBAR_VISIBLE_SESSION_LIMIT on
   // each "Show more" so long lists page in (5 + 5 + 5...) rather than loading all.
   const [shownCount, setShownCount] = useState<Map<string, number>>(new Map());
@@ -212,6 +225,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
   }, [dispatch]);
 
   const startChat = (cwd: string) => {
+    setAutomationsOpen(false);
     dispatch({ type: 'START_CHAT', cwd, executionMode: cwd ? 'worktree' : 'local' });
   };
 
@@ -292,6 +306,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
 
   const handleSelectSession = useCallback(
     (appSessionId: string) => {
+      setAutomationsOpen(false);
       dispatch({ type: 'SET_ACTIVE_SESSION', id: appSessionId });
       dispatch({ type: 'SELECT_CHILD', selection: null });
       // Opening a session from the unread-only view drops the filter: the
@@ -464,13 +479,29 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
         </div>
       </div>
 
-      <div className="px-2 pb-1.5">
+      <div className="px-2 pb-1.5 space-y-0.5">
         <button
           onClick={newChat}
           className="group w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-medium text-droid-text hover:bg-droid-elevated transition-colors"
         >
           <SquarePen className="w-[18px] h-[18px] shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text" />
           New chat
+        </button>
+        <button
+          onClick={() => {
+            setAutomationsOpen(true);
+            dispatch({ type: 'SET_RIGHT_PANEL', open: false });
+            dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: false });
+          }}
+          aria-current={automationsOpen ? 'page' : undefined}
+          className={`group w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-medium transition-colors ${
+            automationsOpen
+              ? 'bg-droid-elevated text-droid-text'
+              : 'text-droid-text-secondary hover:bg-droid-elevated hover:text-droid-text'
+          }`}
+        >
+          <CalendarClock className="w-[18px] h-[18px] shrink-0" />
+          Automations
         </button>
       </div>
 
@@ -665,6 +696,17 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
           />
         )}
       </AnimatePresence>
+
+      {automationsOpen && (
+        <AutomationsView
+          workspaceScopes={workspaceScopes}
+          currentWorkspaceCwd={resolveNewChatCwd(activeSession, state.draftChat) || null}
+          onChatWithDroidex={() => {
+            startChat(resolveNewChatCwd(activeSession, state.draftChat));
+            dispatch({ type: 'SEED_COMPOSER', text: AUTOMATION_SETUP_PROMPT });
+          }}
+        />
+      )}
 
       {rowMenu && (
         <SessionContextMenu
