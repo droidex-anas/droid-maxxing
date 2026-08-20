@@ -154,9 +154,17 @@ export default function App() {
   const activeUtilityTab =
     utilityPanel.tabs.find((tab) => tab.id === utilityPanel.activeTabId) ?? null;
   const showUtilityPane = !embedded && !!activeSession && utilityPanel.open && !showWizard;
+  // The pull request workspace owns the whole content area and the top-right
+  // corner of its own toolbar, so the session-scoped overlays (Context panel)
+  // and floating window buttons stay out of it instead of covering its header.
+  const prWorkspaceView = !embedded && state.mainView === 'pull-requests';
+  // An expanded browser covers the full content row, which would leave the pull
+  // request workspace hidden and non-interactive behind it. The expansion stays
+  // owned by the browser pane; this view simply does not take part in it.
   const browserExpanded =
     !!activeSession &&
     showUtilityPane &&
+    !prWorkspaceView &&
     activeUtilityTab?.tool === 'browser' &&
     expandedBrowserAppSessionId === activeSession.appSessionId;
   const focused = isMissionControlView;
@@ -166,10 +174,6 @@ export default function App() {
   // The context toggle is meaningful in Mission Control (always) and in a normal
   // chat only after it has content; otherwise there is nothing to open.
   const canToggleContext = isMissionControlView || hasSessionContent;
-  // The pull request workspace owns the whole content area and the top-right
-  // corner of its own toolbar, so the session-scoped overlays (Context panel)
-  // and floating window buttons stay out of it instead of covering its header.
-  const prWorkspaceView = !embedded && state.mainView === 'pull-requests';
   // The context panel floats *over* the chat as an overlay (it does not shrink
   // the main scroll area), so the page scrollbar stays pinned to the window's
   // right edge instead of sliding inward and looking like a divider.

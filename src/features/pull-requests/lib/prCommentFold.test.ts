@@ -31,6 +31,13 @@ test('the preview is the first prose line without its markdown markers', () => {
   assert.equal(commentPreview('1. first step'), 'first step');
 });
 
+test('the preview keeps identifiers that contain underscores', () => {
+  assert.equal(
+    commentPreview('- rename **snake_case** to camelCase'),
+    'rename snake_case to camelCase',
+  );
+});
+
 test('the preview skips fenced code and truncates with an ellipsis', () => {
   assert.equal(commentPreview('```ts\nconst a = 1;\n```\nafter the fence'), 'const a = 1;');
   assert.equal(commentPreview('word '.repeat(60), 20), 'word word word word…');

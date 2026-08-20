@@ -7,7 +7,13 @@ import {
   prepareChatWorkingDirectory,
   resolveMainCheckout,
 } from './chatWorkspace';
-import { createPullRequest, detectPullRequest, mergePullRequest, postPrComment } from './github';
+import {
+  createPullRequest,
+  detectPullRequest,
+  listPullRequests,
+  mergePullRequest,
+  postPrComment,
+} from './github';
 
 // These wrappers promise one error contract: IPC-level rejections surface as
 // structured failures, never as rejected promises. Simulate the desktop bridge
@@ -208,6 +214,35 @@ test('detectPullRequest passes the bridge answer through untouched', async () =>
   const answer = { ok: true, pr: { number: 12, title: 'x' } };
   withBridge({ githubDetectPr: () => Promise.resolve(answer) });
   assert.equal(await detectPullRequest('/repo', 'feature/foo'), answer);
+});
+
+test('listPullRequests never reports an empty list it could not load', async () => {
+  // An empty inbox and an unreachable bridge must stay distinguishable.
+  assert.deepEqual(await listPullRequests('/repo'), {
+    ok: false,
+    reason: 'not_desktop',
+    message: 'Pull requests are available in the desktop app.',
+    viewerLogin: null,
+    prs: [],
+  });
+  withBridge({ githubListPrs: () => Promise.resolve({ ok: true, viewerLogin: null, prs: [] }) });
+  assert.equal((await listPullRequests('')).ok, false);
+});
+
+test('listPullRequests reports an IPC rejection as a failure', async () => {
+  withBridge({ githubListPrs: () => Promise.reject(new Error('bridge down')) });
+  assert.deepEqual(await listPullRequests('/repo'), {
+    ok: false,
+    reason: 'error',
+    viewerLogin: null,
+    prs: [],
+  });
+});
+
+test('listPullRequests passes the bridge answer through untouched', async () => {
+  const answer = { ok: true, viewerLogin: 'octocat', prs: [] };
+  withBridge({ githubListPrs: () => Promise.resolve(answer) });
+  assert.equal(await listPullRequests('/repo'), answer);
 });
 
 test('createPullRequest and postPrComment convert IPC rejections into failed results', async () => {

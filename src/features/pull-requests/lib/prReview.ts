@@ -57,13 +57,13 @@ export function prReviewOptions(input: {
   kind: PrKind;
 }): PrReviewOption[] {
   const open = input.kind === 'open' || input.kind === 'draft';
+  if (!open) return [DROID_OPTION];
   if (!input.cubicInstalled) {
     return [
       { action: 'enable-cubic', title: 'Enable Cubic', hint: 'AI review requires Cubic' },
       DROID_OPTION,
     ];
   }
-  if (!open) return [DROID_OPTION];
   return [
     { action: 'run-cubic', title: 'Run AI review', hint: 'Asks Cubic to review this pull request' },
     DROID_OPTION,

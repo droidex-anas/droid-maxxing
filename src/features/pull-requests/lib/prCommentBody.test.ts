@@ -85,6 +85,51 @@ test('a details block without a summary still folds under a label', () => {
   assert.deepEqual(blocks, [{ kind: 'disclosure', summary: 'Details', body: 'hidden' }]);
 });
 
+test('markup shown inside a fence is a code sample, not markup', () => {
+  const body = [
+    'How the marker looks:',
+    '',
+    '~~~html',
+    '<!-- cubic:review-summary:start -->',
+    '<details>',
+    '<summary>Not a real disclosure</summary>',
+    '</details>',
+    '~~~',
+  ].join('\n');
+  assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);
+});
+
+test('a longer fence closes only on a run at least as long', () => {
+  const body = ['````md', '```ts', 'const a = 1;', '```', '````'].join('\n');
+  assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);
+});
+
+test('blank lines inside a fence survive normalization', () => {
+  const body = ['```ts', 'const a = 1;', '', '', 'const b = 2;', '```'].join('\n');
+  assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);
+});
+
+test('a nested disclosure stays inside its parent', () => {
+  const blocks = prCommentBlocks(
+    '<details><summary>Outer</summary>\n\nintro\n\n<details><summary>Inner</summary>\n\ndeep\n</details>\n</details>\n\nafter',
+  );
+  assert.deepEqual(
+    blocks.map((block) => block.kind),
+    ['disclosure', 'markdown'],
+  );
+  if (blocks[0].kind !== 'disclosure') throw new Error('expected a disclosure');
+  assert.equal(blocks[0].summary, 'Outer');
+  assert.match(blocks[0].body, /intro/);
+  assert.match(blocks[0].body, /deep/);
+  assert.doesNotMatch(blocks[0].body, /<details|<\/details|<summary/);
+  assert.equal(blocks[1].kind === 'markdown' ? blocks[1].text : '', 'after');
+});
+
+test('an unbalanced disclosure tag never reaches the prose', () => {
+  const blocks = prCommentBlocks('Notes\n\n<details>\n\nunclosed');
+  assert.deepEqual(blocks, [{ kind: 'markdown', text: 'Notes\n\nunclosed' }]);
+});
+
 test('ordinary markdown passes through untouched', () => {
   const body = 'Please preserve **this decision**.\n\n- First\n- Second';
   assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);

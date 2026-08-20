@@ -20,6 +20,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const gitVcs = require('./git.cjs');
 const githubVcs = require('./github.cjs');
+const githubPrConversation = require('./githubPrConversation.cjs');
 const { createTerminalManager, createTerminalSubscriptionRegistry } = require('./terminal.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
@@ -377,14 +378,23 @@ function registerIpc() {
   ipcMain.handle('github-detect-pr', (_event, { dir, options }) =>
     githubVcs.detectPr(dir, options),
   );
-  ipcMain.handle('github-list-prs', (_event, { dir, options }) => githubVcs.listPrs(dir, options));
-  ipcMain.handle('github-view-pr', (_event, { dir, options }) => githubVcs.viewPr(dir, options));
-  ipcMain.handle('github-pr-diff', (_event, { dir, options }) => githubVcs.prDiff(dir, options));
+  ipcMain.handle('github-list-prs', (event, { dir, options }) => {
+    assertMainRenderer(event);
+    return githubVcs.listPrs(dir, options);
+  });
+  ipcMain.handle('github-view-pr', (event, { dir, options }) => {
+    assertMainRenderer(event);
+    return githubVcs.viewPr(dir, options);
+  });
+  ipcMain.handle('github-pr-diff', (event, { dir, options }) => {
+    assertMainRenderer(event);
+    return githubVcs.prDiff(dir, options);
+  });
   ipcMain.handle('github-pr-checks', (_event, { dir, options }) =>
     githubVcs.prChecks(dir, options),
   );
   ipcMain.handle('github-pr-comments', (_event, { dir, options }) =>
-    githubVcs.prComments(dir, options),
+    githubPrConversation.prComments(dir, options),
   );
   ipcMain.handle('github-create-pr', (_event, { dir, options }) =>
     githubVcs.createPr(dir, options),
@@ -392,7 +402,10 @@ function registerIpc() {
   ipcMain.handle('github-post-comment', (_event, { dir, options }) =>
     githubVcs.postComment(dir, options),
   );
-  ipcMain.handle('github-merge-pr', (_event, { dir, options }) => githubVcs.mergePr(dir, options));
+  ipcMain.handle('github-merge-pr', (event, { dir, options }) => {
+    assertMainRenderer(event);
+    return githubVcs.mergePr(dir, options);
+  });
 
   ipcMain.handle('onboarding-get', getOnboarding);
   ipcMain.handle('onboarding-set', (_event, { patch }) => setOnboarding(patch));

@@ -13,6 +13,11 @@ const METHODS: { id: PrMergeMethod; label: string; hint: string }[] = [
   { id: 'rebase', label: 'Rebase and merge', hint: 'Replays the commits onto the base' },
 ];
 
+function mergeLabel(merging: boolean, merged: boolean): string {
+  if (merged) return 'Merged';
+  return merging ? 'Merging…' : 'Merge';
+}
+
 // Merging happens through `gh pr merge`, so the strategy is picked explicitly:
 // the button opens the list and the chosen entry performs the merge. There is no
 // separate confirmation because choosing a strategy already states the intent.
@@ -23,9 +28,14 @@ export function PrMergeButton({
 }: {
   pr: PullRequest | null;
   merging: boolean;
-  onMerge: (method: PrMergeMethod) => void;
+  onMerge: (method: PrMergeMethod) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
+  // A merge lands before the refreshed pull request does, so the button stays
+  // disabled on the merged pull request instead of offering a second merge
+  // while the still-open data is on screen. Keyed by URL because a number
+  // repeats across repositories.
+  const [mergedKey, setMergedKey] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const close = useCallback(() => {
@@ -38,7 +48,9 @@ export function PrMergeButton({
   // A merged or closed pull request has nothing left to merge.
   if (kind === 'merged' || kind === 'closed') return null;
   const blocked = mergeBlockReason(pr);
-  const disabled = merging || blocked !== null;
+  const prKey = pr.url || `#${String(pr.number)}`;
+  const merged = mergedKey === prKey;
+  const disabled = merging || merged || blocked !== null;
 
   return (
     <div ref={rootRef} className="relative">
@@ -53,7 +65,7 @@ export function PrMergeButton({
         className="flex items-center gap-1.5 rounded-lg bg-[#238636] px-2.5 py-1.5 text-[12.5px] font-semibold text-white transition-colors hover:bg-[#2ea043] disabled:cursor-not-allowed disabled:bg-droid-elevated disabled:text-droid-text-muted"
       >
         <Octicon name="git-merge" size={13} />
-        {merging ? 'Merging…' : 'Merge'}
+        {mergeLabel(merging, merged)}
         <ChevronDown className="h-3 w-3" />
       </button>
       {open ? (
@@ -64,7 +76,9 @@ export function PrMergeButton({
               type="button"
               onClick={() => {
                 setOpen(false);
-                onMerge(method.id);
+                void onMerge(method.id).then((ok) => {
+                  if (ok) setMergedKey(prKey);
+                });
               }}
               className="block w-full px-3 py-1.5 text-left transition-colors hover:bg-droid-active"
             >

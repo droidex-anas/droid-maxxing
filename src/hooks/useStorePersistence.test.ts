@@ -76,6 +76,7 @@ test('loadPersistedUiState sanitizes persisted shell fields', () => {
       settingsOpen: true,
       mainView: 'pull-requests',
       prWorkspaceCwd: '/repo',
+      prWorkspaceNumber: 42,
     }),
     () => {
       assert.deepEqual(loadPersistedUiState(), {
@@ -107,6 +108,7 @@ test('loadPersistedUiState sanitizes persisted shell fields', () => {
         selectedFeatureId: 'f1',
         mainView: 'pull-requests',
         prWorkspaceCwd: '/repo',
+        prWorkspaceNumber: 42,
       });
     },
   );
@@ -117,6 +119,23 @@ test('loadPersistedUiState accepts only the pull-requests main view and a string
     const loaded = loadPersistedUiState();
     assert.equal(loaded.mainView, undefined);
     assert.equal(loaded.prWorkspaceCwd, undefined);
+  });
+});
+
+test('loadPersistedUiState accepts only a positive integer pull request number', () => {
+  withLocalStorage(JSON.stringify({ prWorkspaceCwd: '/repo', prWorkspaceNumber: 0 }), () => {
+    assert.equal(loadPersistedUiState().prWorkspaceNumber, undefined);
+  });
+  withLocalStorage(JSON.stringify({ prWorkspaceCwd: '/repo', prWorkspaceNumber: 1.5 }), () => {
+    assert.equal(loadPersistedUiState().prWorkspaceNumber, undefined);
+  });
+  withLocalStorage(JSON.stringify({ prWorkspaceCwd: '/repo', prWorkspaceNumber: '3' }), () => {
+    assert.equal(loadPersistedUiState().prWorkspaceNumber, undefined);
+  });
+  // Without the repository it was selected in, a restored number would point at
+  // whichever pull request happens to share it in the fallback repository.
+  withLocalStorage(JSON.stringify({ prWorkspaceNumber: 3 }), () => {
+    assert.equal(loadPersistedUiState().prWorkspaceNumber, undefined);
   });
 });
 

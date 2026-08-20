@@ -46,7 +46,9 @@ export function commentPreview(body: string, limit = 120): string {
     .map((raw) =>
       raw
         .replace(/^\s*(?:[>#]+|[-*+]|\d+\.)\s*/, '')
-        .replace(/[*_`~]/g, '')
+        // `_` stays: it is part of identifiers like snake_case far more often
+        // than it is emphasis in a review comment.
+        .replace(/[*`~]/g, '')
         .trim(),
     )
     .find((candidate) => candidate.length > 0);

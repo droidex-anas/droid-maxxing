@@ -106,6 +106,7 @@ export function PrDetail({
   const cubicActive = hasCubicActivity(detail.comments);
 
   useEffect(() => {
+    setTab('summary');
     setDraft('');
     setPosting(false);
     setRequestingReview(false);
@@ -141,6 +142,7 @@ export function PrDetail({
     if (!body) return;
     const submittedCwd = cwd;
     const submittedNumber = number;
+    const submittedDraft = draft;
     setPosting(true);
     void detail.submitComment(body).then((result) => {
       const settlement = applyCommentPostSettlement(
@@ -149,7 +151,11 @@ export function PrDetail({
         result.ok,
       );
       if (!settlement) return;
-      if (settlement.clearDraft) setDraft('');
+      // Text typed while the post was in flight is the next comment, not the
+      // posted one, so only the submitted draft is cleared.
+      if (settlement.clearDraft) {
+        setDraft((current) => (current === submittedDraft ? '' : current));
+      }
       setPosting(settlement.posting);
     });
   };
@@ -186,11 +192,17 @@ export function PrDetail({
             <PrStateIcon kind={prKind(headerPr)} size={16} />
           </span>
         ) : null}
-        <div className="flex items-center gap-0.5 rounded-lg bg-droid-elevated/50 p-0.5">
+        <div
+          role="tablist"
+          aria-label="Pull request views"
+          className="flex items-center gap-0.5 rounded-lg bg-droid-elevated/50 p-0.5"
+        >
           {TABS.map((item) => (
             <button
               key={item.id}
               type="button"
+              role="tab"
+              aria-selected={tab === item.id}
               onClick={() => {
                 setTab(item.id);
               }}
@@ -243,15 +255,16 @@ export function PrDetail({
           <PrMergeButton
             pr={headerPr}
             merging={detail.merging}
-            onMerge={(method) => {
-              void detail.merge(method);
-            }}
+            onMerge={(method) => detail.merge(method).then((result) => result.ok)}
           />
         </div>
       </div>
       <div className="min-h-0 flex-1">
         {tab === 'summary' ? (
           <PrSummary
+            // Section folds are per pull request, so the sections are rebuilt
+            // rather than carried over to the next one.
+            key={`${cwd}#${String(number)}`}
             pr={headerPr}
             number={number}
             body={detail.body}

@@ -167,6 +167,24 @@ test('GitHub setup handlers require the trusted renderer and teardown their proc
   );
 });
 
+test('pull request workspace handlers require the trusted renderer', () => {
+  for (const channel of [
+    'github-list-prs',
+    'github-view-pr',
+    'github-pr-diff',
+    'github-merge-pr',
+  ]) {
+    const handlerStart = mainSource.indexOf(`ipcMain.handle('${channel}'`);
+    const handlerEnd = mainSource.indexOf('\n  ipcMain.handle(', handlerStart + 1);
+    assert.notEqual(handlerStart, -1, `missing ${channel} handler`);
+    assert.match(
+      mainSource.slice(handlerStart, handlerEnd),
+      /assertMainRenderer\(event\)/,
+      `${channel} must authorize its sender`,
+    );
+  }
+});
+
 test('diagnostics initialize before app readiness and preferences require the trusted renderer', () => {
   const initializeAt = mainSource.indexOf(
     'const diagnosticsInitialization = diagnostics.initialize();',

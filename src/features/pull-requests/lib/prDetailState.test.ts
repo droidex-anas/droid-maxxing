@@ -82,9 +82,15 @@ test('number change drops body, checks, comments, and cached diff', () => {
 test('failed section keeps prior rows; diff success is ignored until requested', () => {
   const bound = reducePrDetail(initialPrDetailState, { type: 'bind', cwd: '/repo', number: 1 });
   const failed = reducePrDetail(bound, {
-    type: 'meta-failure',
+    type: 'meta-success',
     generation: bound.generation,
-    message: 'down',
+    body: '',
+    commits: [],
+    checks: [],
+    comments: [],
+    checksError: null,
+    commentsError: null,
+    metaError: 'down',
   });
   assert.equal(failed.loaded, true);
   assert.equal(failed.metaError, 'down');
@@ -101,6 +107,59 @@ test('failed section keeps prior rows; diff success is ignored until requested',
     diff: 'x',
   });
   assert.equal(got.diff, 'x');
+});
+
+test('a stale generation settlement leaves the bound state untouched', () => {
+  const bound = reducePrDetail(initialPrDetailState, { type: 'bind', cwd: '/repo', number: 1 });
+  const rebound = reducePrDetail(bound, { type: 'bind', cwd: '/repo', number: 2 });
+  const asked = reducePrDetail(rebound, { type: 'diff-request', generation: rebound.generation });
+  const loaded = reducePrDetail(asked, {
+    type: 'meta-success',
+    generation: rebound.generation,
+    body: 'PR 2',
+    commits: [],
+    checks: [sampleCheck],
+    comments: [sampleComment],
+    checksError: null,
+    commentsError: null,
+    metaError: null,
+  });
+  const withDiff = reducePrDetail(loaded, {
+    type: 'diff-success',
+    generation: rebound.generation,
+    diff: 'diff 2',
+  });
+
+  assert.equal(
+    reducePrDetail(withDiff, {
+      type: 'meta-success',
+      generation: bound.generation,
+      body: 'PR 1',
+      commits: [],
+      checks: [],
+      comments: [],
+      checksError: 'stale checks failure',
+      commentsError: null,
+      metaError: null,
+    }),
+    withDiff,
+  );
+  assert.equal(
+    reducePrDetail(withDiff, {
+      type: 'diff-success',
+      generation: bound.generation,
+      diff: 'diff 1',
+    }),
+    withDiff,
+  );
+  assert.equal(
+    reducePrDetail(withDiff, {
+      type: 'diff-failure',
+      generation: bound.generation,
+      message: 'stale diff failure',
+    }),
+    withDiff,
+  );
 });
 
 test('all-fail first load via meta-success stores section errors on empty rows', () => {

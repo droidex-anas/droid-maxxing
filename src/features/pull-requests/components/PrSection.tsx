@@ -5,8 +5,8 @@ import { PrCollapse } from './PrCollapse';
 
 // Every long stretch of a pull request (description, checks, conflicts,
 // activity) folds from its own header, so a 200-line description never buries
-// the conversation. Fold state is local: it resets when the workspace rebuilds
-// the sections for another pull request.
+// the conversation. Fold state is local, and the summary is keyed by pull
+// request, so switching pull requests rebuilds the sections from their defaults.
 export function PrSection({
   title,
   count,

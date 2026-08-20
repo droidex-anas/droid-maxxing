@@ -108,6 +108,11 @@ export function usePullRequestDetail(
   const [pr, setPr] = useState<PullRequestDetail | null>(null);
   const [merging, setMerging] = useState(false);
   const generationRef = useRef(state.generation);
+  // The poll, a visibility tick, a manual refresh and the post-comment reload
+  // can be in flight together on one pull request, so only the newest response
+  // may settle: the generation alone cannot tell them apart.
+  const metaRequestRef = useRef(0);
+  const diffRequestRef = useRef(0);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -115,13 +120,15 @@ export function usePullRequestDetail(
     (userInitiated: boolean) => {
       if (!cwd || number == null || !active) return;
       const generation = generationRef.current;
+      metaRequestRef.current += 1;
+      const request = metaRequestRef.current;
       if (userInitiated) dispatch({ type: 'meta-start', generation });
       void Promise.all([
         viewPullRequest(cwd, number),
         getPrChecks(cwd, number),
         getPrComments(cwd, number),
       ]).then(([viewRes, checksRes, commentsRes]) => {
-        if (generation !== generationRef.current) return;
+        if (generation !== generationRef.current || request !== metaRequestRef.current) return;
         const live = stateRef.current;
         const prev = prevForSettledMeta(live, cwd, number);
         const showErrors = !prev.loaded || userInitiated;
@@ -141,9 +148,11 @@ export function usePullRequestDetail(
   const loadDiffNow = useCallback(() => {
     if (!cwd || number == null) return;
     const generation = generationRef.current;
+    diffRequestRef.current += 1;
+    const request = diffRequestRef.current;
     dispatch({ type: 'diff-request', generation });
     void getPullRequestDiff(cwd, number).then((result) => {
-      if (generation !== generationRef.current) return;
+      if (generation !== generationRef.current || request !== diffRequestRef.current) return;
       if (result.ok) {
         dispatch({ type: 'diff-success', generation, diff: result.diff });
         return;

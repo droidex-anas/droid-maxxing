@@ -64,6 +64,17 @@ test('an unknown repository is invited to Cubic and can still review locally', (
   );
 });
 
+test('a settled pull request never invites Cubic, installed or not', () => {
+  assert.deepEqual(
+    prReviewOptions({ cubicInstalled: false, kind: 'merged' }).map((option) => option.action),
+    ['droid'],
+  );
+  assert.deepEqual(
+    prReviewOptions({ cubicInstalled: false, kind: 'closed' }).map((option) => option.action),
+    ['droid'],
+  );
+});
+
 test('a connected repository can trigger Cubic while the pull request is open', () => {
   assert.deepEqual(
     prReviewOptions({ cubicInstalled: true, kind: 'draft' }).map((option) => option.action),

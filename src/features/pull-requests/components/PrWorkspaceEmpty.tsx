@@ -98,11 +98,13 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
 // unblocking it.
 export function PrWorkspaceEmpty({
   cwd,
+  gitLoaded,
   isGitHub,
   setup,
 }: {
   cwd: string | null;
-  isGitHub?: boolean;
+  gitLoaded: boolean;
+  isGitHub: boolean;
   setup: GithubSetupController;
 }) {
   const dispatch = useStoreDispatch();
@@ -111,7 +113,9 @@ export function PrWorkspaceEmpty({
     const nextCwd = await pickDirectory();
     if (!nextCwd) return;
     dispatch({ type: 'ADD_WORKSPACE', cwd: nextCwd });
-    dispatch({ type: 'OPEN_PULL_REQUESTS', cwd: nextCwd });
+    // The previously selected number belongs to the old repository, so the new
+    // workspace opens with nothing selected.
+    dispatch({ type: 'OPEN_PULL_REQUESTS', cwd: nextCwd, number: null });
   };
 
   if (!cwd) {
@@ -131,7 +135,10 @@ export function PrWorkspaceEmpty({
     );
   }
 
-  if (isGitHub === false) {
+  // Until the git environment has loaded, a folder that is not a repository is
+  // indistinguishable from one still being read, and GitHub setup would be
+  // offered for a folder that can never use it.
+  if (gitLoaded && !isGitHub) {
     return (
       <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center px-8">
         <EmptyCopy>This folder is not a GitHub repository.</EmptyCopy>
@@ -139,7 +146,7 @@ export function PrWorkspaceEmpty({
     );
   }
 
-  if (setup.availability && !setup.isReady) {
+  if (isGitHub && setup.availability && !setup.isReady) {
     return <PrGithubSetupEmpty setup={setup} />;
   }
 

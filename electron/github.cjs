@@ -325,165 +325,6 @@ async function prChecks(dir, { prNumber } = {}) {
   return { ok: true, checks };
 }
 
-// Resolution lives on the review thread, which `gh pr view --json` cannot
-// report, so it comes from GraphQL. gh expands {owner}/{repo} in field values,
-// which keeps this a single call with no repository lookup of our own.
-const REVIEW_THREADS_QUERY =
-  'query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)' +
-  '{pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated ' +
-  'resolvedBy{login} comments(first:100){nodes{databaseId}}}}}}}';
-
-// Thread status keyed by the REST comment id, so every comment in a resolved
-// thread carries the same verdict.
-function normalizeReviewThreads(payload) {
-  const nodes = payload?.data?.repository?.pullRequest?.reviewThreads?.nodes;
-  const byCommentId = new Map();
-  for (const node of Array.isArray(nodes) ? nodes : []) {
-    const status = {
-      resolved: node?.isResolved === true,
-      outdated: node?.isOutdated === true,
-      resolvedBy: node?.resolvedBy?.login || null,
-    };
-    for (const comment of Array.isArray(node?.comments?.nodes) ? node.comments.nodes : []) {
-      if (comment?.databaseId != null) byCommentId.set(String(comment.databaseId), status);
-    }
-  }
-  return byCommentId;
-}
-
-function normalizePrComments(data, inlineRows = [], threadStatus = new Map()) {
-  const normalizeReactionGroups = (groups) => {
-    if (!Array.isArray(groups)) return [];
-    return groups
-      .map((group) => ({
-        content: String(group?.content || '').toUpperCase(),
-        count: Number(group?.users?.totalCount || 0),
-      }))
-      .filter((reaction) => reaction.content && reaction.count > 0);
-  };
-  const normalizeRestReactions = (reactions) => {
-    const contentByField = {
-      '+1': 'THUMBS_UP',
-      '-1': 'THUMBS_DOWN',
-      laugh: 'LAUGH',
-      hooray: 'HOORAY',
-      confused: 'CONFUSED',
-      heart: 'HEART',
-      rocket: 'ROCKET',
-      eyes: 'EYES',
-    };
-    if (!reactions || typeof reactions !== 'object') return [];
-    return Object.entries(contentByField)
-      .map(([field, content]) => ({ content, count: Number(reactions[field] || 0) }))
-      .filter((reaction) => reaction.count > 0);
-  };
-  const comments = (Array.isArray(data?.comments) ? data.comments : []).map((c, i) => ({
-    id: `comment-${String(c.databaseId || c.id || `${i}-${c.createdAt || ''}`)}`,
-    kind: 'comment',
-    author: c.author?.login || 'unknown',
-    body: c.body || '',
-    createdAt: c.createdAt || null,
-    url: c.url || null,
-    state: null,
-    reactions: normalizeReactionGroups(c.reactionGroups),
-  }));
-  const reviews = (Array.isArray(data?.reviews) ? data.reviews : [])
-    .filter((r) => (r.body && r.body.trim()) || (r.state && r.state !== 'COMMENTED'))
-    .map((r, i) => ({
-      id: `review-${String(r.databaseId || r.id || `${i}-${r.submittedAt || ''}`)}`,
-      kind: 'review',
-      author: r.author?.login || 'unknown',
-      body: r.body || '',
-      createdAt: r.submittedAt || null,
-      url: r.url || null,
-      state: r.state ? String(r.state).toLowerCase() : null,
-      reactions: normalizeReactionGroups(r.reactionGroups),
-    }));
-  const inline = (Array.isArray(inlineRows) ? inlineRows : []).map((comment, i) => {
-    const status = threadStatus.get(String(comment.id)) ?? null;
-    return {
-      id: `inline-${String(comment.id || `${i}-${comment.created_at || ''}`)}`,
-      kind: 'inline',
-      author: comment.user?.login || 'unknown',
-      body: comment.body || '',
-      createdAt: comment.created_at || null,
-      url: comment.html_url || null,
-      state: null,
-      path: comment.path || null,
-      line: comment.line ?? comment.original_line ?? null,
-      diffHunk: comment.diff_hunk || null,
-      resolved: status?.resolved === true,
-      outdated: status?.outdated === true,
-      resolvedBy: status?.resolvedBy ?? null,
-      reactions: normalizeRestReactions(comment.reactions),
-    };
-  });
-  return [...comments, ...reviews, ...inline].sort(
-    (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
-  );
-}
-
-async function prComments(dir, { prNumber } = {}, runGh = gh) {
-  const selector = prSelector(prNumber);
-  if (selector == null) return { ok: false, reason: 'missing_pr', comments: [] };
-  const [view, inline, threads] = await Promise.all([
-    runGh(dir, ['pr', 'view', '--json', 'comments,reviews', '--', selector]),
-    runGh(dir, ['api', '--paginate', '--slurp', `repos/{owner}/{repo}/pulls/${selector}/comments`]),
-    runGh(dir, [
-      'api',
-      'graphql',
-      '-F',
-      'owner={owner}',
-      '-F',
-      'repo={repo}',
-      '-F',
-      `number=${selector}`,
-      '-f',
-      `query=${REVIEW_THREADS_QUERY}`,
-    ]),
-  ]);
-  const viewSucceeded = !view.spawnFailed && view.code === 0;
-  const inlineSucceeded = !inline.spawnFailed && inline.code === 0;
-  const threadsSucceeded = !threads.spawnFailed && threads.code === 0;
-  if (!viewSucceeded && !inlineSucceeded) {
-    const message = [view.stderr, inline.stderr]
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .join('\n');
-    return {
-      ok: false,
-      reason: view.spawnFailed || inline.spawnFailed ? 'gh_unavailable' : 'gh_error',
-      message,
-      comments: [],
-    };
-  }
-  const data = viewSucceeded
-    ? parseJson(view.stdout, { comments: [], reviews: [] })
-    : { comments: [], reviews: [] };
-  const pages = inlineSucceeded ? parseJson(inline.stdout, []) : [];
-  const inlineRows = Array.isArray(pages)
-    ? pages.flatMap((page) => (Array.isArray(page) ? page : []))
-    : [];
-  const failures = [
-    ...(viewSucceeded ? [] : [view.stderr.trim() || 'Could not load PR conversation comments']),
-    ...(inlineSucceeded ? [] : [inline.stderr.trim() || 'Could not load inline review comments']),
-    // Only worth reporting when there are inline comments whose status is now
-    // missing; without them the thread query has nothing to say.
-    ...(threadsSucceeded || !inlineSucceeded || inlineRows.length === 0
-      ? []
-      : [threads.stderr.trim() || 'Could not load review thread status']),
-  ];
-  return {
-    ok: true,
-    ...(failures.length === 0 ? {} : { partial: true, message: failures.join('\n') }),
-    comments: normalizePrComments(
-      data,
-      inlineRows,
-      threadsSucceeded ? normalizeReviewThreads(parseJson(threads.stdout, null)) : new Map(),
-    ),
-  };
-}
-
 async function createPr(dir, { title, body = '', base, draft = false, head } = {}) {
   if (!title || !title.trim()) return { ok: false, reason: 'empty_title' };
   const args = ['pr', 'create', '--title', title, '--body', body];
@@ -506,8 +347,11 @@ const MERGE_FLAGS = { merge: '--merge', squash: '--squash', rebase: '--rebase' }
 async function mergePr(dir, { prNumber, method } = {}, runGh = gh) {
   const selector = prSelector(prNumber);
   if (selector == null) return { ok: false, reason: 'missing_pr' };
-  const flag = MERGE_FLAGS[String(method)];
-  if (!flag) return { ok: false, reason: 'invalid_method' };
+  // Own-key only: an inherited name such as `toString` would otherwise resolve
+  // to a truthy function and reach execFile in place of a flag string.
+  const requested = String(method);
+  if (!Object.hasOwn(MERGE_FLAGS, requested)) return { ok: false, reason: 'invalid_method' };
+  const flag = MERGE_FLAGS[requested];
   const res = await runGh(dir, ['pr', 'merge', flag, '--', selector], { timeout: 60000 });
   if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable' };
   if (res.code !== 0) return { ok: false, reason: 'gh_error', message: res.stderr.trim() };
@@ -535,18 +379,18 @@ module.exports = {
   isGithubDeviceUrl: githubSetup.isGithubDeviceUrl,
   resolveBrewExecutable: githubSetup.resolveBrewExecutable,
   resolveGhExecutable,
+  // Shared with the conversation module, which runs its own gh queries.
+  gh,
+  parseJson,
   // Exported for unit tests: the validation boundary for PR selectors.
   prSelector,
   normalizePr,
   normalizePrCommits,
-  normalizePrComments,
-  normalizeReviewThreads,
   detectPr,
   listPrs,
   viewPr,
   prDiff,
   prChecks,
-  prComments,
   createPr,
   postComment,
   mergePr,

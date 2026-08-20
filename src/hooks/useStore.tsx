@@ -838,6 +838,7 @@ interface PersistedUiState {
   selectedFeatureId: string | null;
   mainView?: 'session' | 'pull-requests';
   prWorkspaceCwd?: string | null;
+  prWorkspaceNumber?: number | null;
 }
 
 function loadCompactionModel(): string {
@@ -962,12 +963,23 @@ function saveWorkspaceCwds(cwds: string[]): string[] {
   return cwds;
 }
 
+// A pull request number only means something together with the repository it was
+// selected in, so the pair is sanitized as one value.
+function sanitizePrWorkspace(parsed: Partial<PersistedUiState>): Partial<PersistedUiState> {
+  const cwd = typeof parsed.prWorkspaceCwd === 'string' ? parsed.prWorkspaceCwd : '';
+  const number = parsed.prWorkspaceNumber;
+  const valid = typeof number === 'number' && Number.isInteger(number) && number > 0;
+  if (!cwd) return {};
+  return { prWorkspaceCwd: cwd, prWorkspaceNumber: valid ? number : undefined };
+}
+
 export function loadPersistedUiState(): Partial<PersistedUiState> {
   try {
     const raw = getLocalStorage()?.getItem(UI_STATE_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Partial<PersistedUiState>;
     return {
+      ...sanitizePrWorkspace(parsed),
       activeAppSessionId:
         typeof parsed.activeAppSessionId === 'string' ? parsed.activeAppSessionId : null,
       rightPanelOpen:
@@ -985,10 +997,6 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
       mainView:
         parsed.mainView === 'session' || parsed.mainView === 'pull-requests'
           ? parsed.mainView
-          : undefined,
-      prWorkspaceCwd:
-        typeof parsed.prWorkspaceCwd === 'string' && parsed.prWorkspaceCwd
-          ? parsed.prWorkspaceCwd
           : undefined,
     };
   } catch {
@@ -1009,6 +1017,7 @@ function savePersistedUiState(state: AppState): void {
     selectedFeatureId: state.selectedFeatureId,
     mainView: state.mainView,
     prWorkspaceCwd: state.prWorkspaceCwd,
+    prWorkspaceNumber: state.prWorkspaceNumber,
   };
   try {
     getLocalStorage()?.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
@@ -1122,7 +1131,7 @@ export const initialState: AppState = {
   sidebarCollapsed: persistedUiState.sidebarCollapsed ?? false,
   mainView: persistedUiState.mainView ?? 'session',
   prWorkspaceCwd: persistedUiState.prWorkspaceCwd ?? null,
-  prWorkspaceNumber: null,
+  prWorkspaceNumber: persistedUiState.prWorkspaceNumber ?? null,
   specMode: persistedUiState.specMode ?? false,
   settingsOpen: false,
   commandPaletteOpen: false,
@@ -3319,6 +3328,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.sidebarCollapsed,
     state.mainView,
     state.prWorkspaceCwd,
+    state.prWorkspaceNumber,
     state.specMode,
   ]);
 

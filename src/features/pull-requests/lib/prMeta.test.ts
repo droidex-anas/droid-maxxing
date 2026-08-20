@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { PullRequest } from '../../../types/vcs';
-import { mergeBlockReason } from './prMeta';
+import { checksBadge, mergeBlockReason } from './prMeta';
 
 const pr = (overrides: Partial<PullRequest> = {}): PullRequest => ({
   number: 7,
@@ -40,4 +40,16 @@ test('drafts and conflicting branches block the merge with a reason', () => {
 test('review state and unknown mergeability leave the merge to gh', () => {
   assert.equal(mergeBlockReason(pr({ reviewDecision: 'changes_requested' })), null);
   assert.equal(mergeBlockReason(pr({ mergeable: null })), null);
+});
+
+test('checks that all skipped are neutral, not a green run', () => {
+  assert.deepEqual(checksBadge({ total: 3, pass: 0, fail: 0, pending: 0, status: 'neutral' }), {
+    label: '3 skipped',
+    tone: 'neutral',
+  });
+  assert.deepEqual(checksBadge({ total: 3, pass: 3, fail: 0, pending: 0, status: 'success' }), {
+    label: '3/3 passed',
+    tone: 'success',
+  });
+  assert.equal(checksBadge({ total: 0, pass: 0, fail: 0, pending: 0, status: 'none' }), null);
 });

@@ -34,6 +34,7 @@ function PrInboxRow({
   return (
     <button
       type="button"
+      aria-current={selected ? 'true' : undefined}
       onClick={() => {
         onSelect(pr.number);
       }}
@@ -65,7 +66,12 @@ function PrInboxRow({
           {pr.headRefName ? (
             <>
               <Octicon name="git-branch" size={11} className="shrink-0" />
-              <span className="truncate">{pr.headRefName}</span>
+              {/* Which branch this lands on matters as much as where it comes
+                  from, so the row reads target ← source. */}
+              <span className="truncate">
+                {pr.baseRefName ? `${pr.baseRefName} ← ` : ''}
+                {pr.headRefName}
+              </span>
             </>
           ) : null}
         </span>
@@ -147,22 +153,26 @@ export function PrInbox({
   return (
     <div className="flex h-full min-h-0 flex-col px-3 pt-3 pb-2">
       <div className="flex items-center gap-3 px-1">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => {
-              setTab(item.id);
-            }}
-            className={`text-[13px] font-medium transition-colors ${
-              tab === item.id
-                ? 'text-droid-text'
-                : 'text-droid-text-muted hover:text-droid-text-secondary'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
+        <div role="tablist" aria-label="Pull request filters" className="flex items-center gap-3">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              onClick={() => {
+                setTab(item.id);
+              }}
+              className={`text-[13px] font-medium transition-colors ${
+                tab === item.id
+                  ? 'text-droid-text'
+                  : 'text-droid-text-muted hover:text-droid-text-secondary'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={onRetry}
@@ -185,6 +195,7 @@ export function PrInbox({
           onChange={(event) => {
             setQuery(event.target.value);
           }}
+          aria-label="Search pull requests"
           placeholder="Search"
           className="w-full rounded-xl bg-droid-field py-2 pr-3 pl-9 text-[13px] text-droid-text outline-none placeholder:text-droid-text-muted"
         />

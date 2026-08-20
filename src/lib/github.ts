@@ -109,7 +109,15 @@ export async function listPullRequests(
   options: { state?: string; limit?: number } = {},
 ): Promise<PullRequestListResult> {
   const api = githubApi();
-  if (!api || !dir) return { ok: true, viewerLogin: null, prs: [] };
+  if (!api || !dir) {
+    return {
+      ok: false,
+      reason: 'not_desktop',
+      message: 'Pull requests are available in the desktop app.',
+      viewerLogin: null,
+      prs: [],
+    };
+  }
   try {
     return await api.githubListPrs(dir, options);
   } catch {

@@ -23,6 +23,7 @@ function FileRow({
   return (
     <button
       type="button"
+      aria-current={selected ? 'true' : undefined}
       onClick={() => {
         onSelect(file.path);
       }}

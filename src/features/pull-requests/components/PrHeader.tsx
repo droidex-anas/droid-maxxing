@@ -112,10 +112,16 @@ export function PrHeader({
   return (
     <header>
       <h1 className="text-[21px] leading-snug font-semibold text-droid-text">
-        {pr?.title ?? `Pull request #${String(number)}`}
-        <span className="ml-2 font-normal tabular-nums text-droid-text-muted">
-          #{String(number)}
-        </span>
+        {pr ? (
+          <>
+            {pr.title}
+            <span className="ml-2 font-normal tabular-nums text-droid-text-muted">
+              #{String(number)}
+            </span>
+          </>
+        ) : (
+          `Pull request #${String(number)}`
+        )}
       </h1>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {kind ? (
@@ -137,7 +143,9 @@ export function PrHeader({
                 title={prAbsoluteTime(pr.updatedAt ?? pr.createdAt)}
                 className="text-droid-text-muted"
               >
-                updated {updated} ago
+                {/* `prRelativeTime` returns either "now" or an age like "3d",
+                    and only an age reads as "ago". */}
+                updated {updated === 'now' ? 'now' : `${updated} ago`}
               </span>
             ) : null}
           </span>

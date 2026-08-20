@@ -51,7 +51,6 @@ export type PrDetailEvent =
   | { type: 'bind'; cwd: string | null; number: number | null }
   | { type: 'meta-start'; generation: number }
   | ({ type: 'meta-success' } & MetaSuccessFields)
-  | { type: 'meta-failure'; generation: number; message: string }
   | { type: 'diff-request'; generation: number }
   | { type: 'diff-success'; generation: number; diff: string }
   | { type: 'diff-failure'; generation: number; message: string };
@@ -85,9 +84,6 @@ export function reducePrDetail(state: PrDetailState, event: PrDetailEvent): PrDe
       checksError: event.checksError,
       commentsError: event.commentsError,
     };
-  }
-  if (event.type === 'meta-failure') {
-    return { ...state, loading: false, loaded: true, metaError: event.message };
   }
   if (!state.diffRequested) return state;
   if (event.type === 'diff-success') {

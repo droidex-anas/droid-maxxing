@@ -22,21 +22,22 @@ export function filterPullRequests(
   );
 }
 
+// `#` is how a pull request number is written, so a leading one narrows the
+// search to the number. On its own it carries no query and matches everything.
 export function searchPullRequests(prs: PullRequest[], query: string): PullRequest[] {
-  const needle = query.trim().toLowerCase();
+  const trimmed = query.trim().toLowerCase();
+  const numbered = trimmed.startsWith('#');
+  const needle = numbered ? trimmed.slice(1).trim() : trimmed;
   if (!needle) return prs;
-  const numberNeedle = needle.startsWith('#') ? needle.slice(1) : needle;
   return prs.filter((item) => {
+    if (String(item.number).includes(needle)) return true;
+    if (numbered) return false;
     const haystacks = [
       item.title,
-      String(item.number),
-      `#${String(item.number)}`,
       item.author ?? '',
       item.headRefName ?? '',
       item.baseRefName ?? '',
     ];
-    return haystacks.some(
-      (value) => value.toLowerCase().includes(needle) || value.toLowerCase().includes(numberNeedle),
-    );
+    return haystacks.some((value) => value.toLowerCase().includes(needle));
   });
 }

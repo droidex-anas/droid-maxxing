@@ -48,6 +48,61 @@ test('a real binary section is binary, prose about binary files is not', () => {
   assert.equal(files[1].file.additions, 1);
 });
 
+test('git-quoted paths are decoded before they reach the file list', () => {
+  const files = splitPrPatch(
+    [
+      'diff --git "a/src/\\303\\274ber.ts" "b/src/\\303\\274ber.ts"',
+      '--- "a/src/\\303\\274ber.ts"',
+      '+++ "b/src/\\303\\274ber.ts"',
+      '@@ -1,1 +1,2 @@',
+      ' keep',
+      '+added',
+      'diff --git "a/docs/read me.png" "b/docs/read me.png"',
+      'Binary files "a/docs/read me.png" and "b/docs/read me.png" differ',
+    ].join('\n'),
+  );
+  assert.equal(files.length, 2);
+  assert.equal(files[0].file.path, 'src/über.ts');
+  // The quoted header alone carries the path for a binary section.
+  assert.equal(files[1].file.path, 'docs/read me.png');
+  assert.equal(files[1].file.binary, true);
+});
+
+test('metadata-only sections are listed with the status their mode lines report', () => {
+  const files = splitPrPatch(
+    [
+      'diff --git a/run.sh b/run.sh',
+      'old mode 100644',
+      'new mode 100755',
+      'diff --git a/src/empty.ts b/src/empty.ts',
+      'new file mode 100644',
+      'index 0000000..e69de29',
+      'diff --git a/added.png b/added.png',
+      'new file mode 100644',
+      'index 0000000..1234567',
+      'Binary files /dev/null and b/added.png differ',
+      'diff --git a/gone.png b/gone.png',
+      'deleted file mode 100644',
+      'index 1234567..0000000',
+      'Binary files a/gone.png and /dev/null differ',
+      'diff --git a/old.ts b/new.ts',
+      'similarity index 100%',
+      'rename from old.ts',
+      'rename to new.ts',
+    ].join('\n'),
+  );
+  assert.deepEqual(
+    files.map((entry) => [entry.file.path, entry.file.status]),
+    [
+      ['run.sh', 'modified'],
+      ['src/empty.ts', 'added'],
+      ['added.png', 'added'],
+      ['gone.png', 'deleted'],
+      ['new.ts', 'renamed'],
+    ],
+  );
+});
+
 test('empty or header-only patches produce no files', () => {
   assert.deepEqual(splitPrPatch(''), []);
   assert.deepEqual(splitPrPatch('diff --git a/x b/x\n'), []);

@@ -69,3 +69,12 @@ test('search matches title, number, author, and branch', () => {
   assert.equal(searchPullRequests(rows, 'feat').length, 3);
   assert.deepEqual(searchPullRequests(rows, '   '), rows);
 });
+
+test('a hash with no number is not a filter', () => {
+  assert.deepEqual(searchPullRequests(rows, '#'), rows);
+  assert.deepEqual(searchPullRequests(rows, '#  '), rows);
+  assert.deepEqual(
+    searchPullRequests(rows, '# 3').map((item) => item.number),
+    [3],
+  );
+});

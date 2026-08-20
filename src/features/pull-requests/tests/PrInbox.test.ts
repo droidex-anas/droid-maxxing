@@ -58,3 +58,53 @@ test('empty All tab shows the repo empty sentence', () => {
   );
   assert.match(html, /No open pull requests in this repo\./);
 });
+
+test('the inbox row names both branches and marks the selected pull request', () => {
+  const html = renderToStaticMarkup(
+    createElement(PrInbox, {
+      prs: [sample],
+      viewerLogin: 'ana',
+      selectedNumber: 1,
+      loading: false,
+      error: null,
+      onSelect: noop,
+      onRetry: noop,
+    }),
+  );
+  assert.match(html, /main ← f/);
+  assert.match(html, /aria-current="true"/);
+});
+
+test('an unselected row carries no current state', () => {
+  const html = renderToStaticMarkup(
+    createElement(PrInbox, {
+      prs: [sample],
+      viewerLogin: 'ana',
+      selectedNumber: null,
+      loading: false,
+      error: null,
+      onSelect: noop,
+      onRetry: noop,
+    }),
+  );
+  assert.doesNotMatch(html, /aria-current/);
+});
+
+test('the filters are a labelled tab list and the search field names itself', () => {
+  const html = renderToStaticMarkup(
+    createElement(PrInbox, {
+      prs: [sample],
+      viewerLogin: 'ana',
+      selectedNumber: 1,
+      loading: false,
+      error: null,
+      onSelect: noop,
+      onRetry: noop,
+    }),
+  );
+  assert.match(html, /role="tablist"/);
+  assert.match(html, /aria-label="Pull request filters"/);
+  assert.match(html, /role="tab" aria-selected="true"[^>]*>All</);
+  assert.match(html, /role="tab" aria-selected="false"[^>]*>Reviewing</);
+  assert.match(html, /aria-label="Search pull requests"/);
+});

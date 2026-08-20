@@ -56,7 +56,12 @@ function ChecksBody({
       <div className="-ml-1">
         {error ? <p className="mb-1 text-[13px] text-droid-text-muted">{error}</p> : null}
         {checks.map((check) => (
-          <CheckRow key={`${check.name}-${check.workflow ?? ''}`} check={check} />
+          <CheckRow
+            // A matrix job or a re-run reports the same name and workflow
+            // twice; the run link is what tells the two runs apart.
+            key={`${check.name}-${check.workflow ?? ''}-${check.link ?? ''}`}
+            check={check}
+          />
         ))}
       </div>
     );
@@ -78,8 +83,17 @@ function Description({
   // Generated descriptions carry the same disclosures, footers, and badge links
   // as bot comments, so they go through the same renderer.
   const blocks = body ? prCommentBlocks(body) : [];
-  if (blocks.length > 0) return <PrBody blocks={blocks} />;
-  return <p className="text-[13px] text-droid-text-muted">{metaError ?? 'No description.'}</p>;
+  if (blocks.length === 0) {
+    return <p className="text-[13px] text-droid-text-muted">{metaError ?? 'No description.'}</p>;
+  }
+  return (
+    <>
+      {/* A refresh that fails after the description loaded still has to report
+          the failure; the cached body must not read as a successful load. */}
+      {metaError ? <p className="mb-2 text-[13px] text-droid-text-muted">{metaError}</p> : null}
+      <PrBody blocks={blocks} />
+    </>
+  );
 }
 
 // Conflicts are resolved in a checkout or on github.com, so this section states

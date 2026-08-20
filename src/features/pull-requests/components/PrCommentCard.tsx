@@ -56,6 +56,16 @@ function ThreadStatusChip({ status }: { status: PrThreadStatus }) {
   );
 }
 
+// `threadStatus` reports one settled state and prefers "Resolved", but a thread
+// can be resolved on lines that have since changed, and both facts matter. The
+// second lookup asks the same owner for the outdated state instead of restating
+// its label here.
+function threadStatuses(comment: PrComment): PrThreadStatus[] {
+  const resolved = comment.resolved === true ? threadStatus(comment) : null;
+  const outdated = threadStatus({ ...comment, resolved: false });
+  return [resolved, outdated].filter((status): status is PrThreadStatus => status !== null);
+}
+
 function CommentByline({ comment }: { comment: PrComment }) {
   const time = prRelativeTime(comment.createdAt);
   return (
@@ -65,7 +75,9 @@ function CommentByline({ comment }: { comment: PrComment }) {
       {time ? (
         <span title={prAbsoluteTime(comment.createdAt)} className="text-droid-text-muted">
           {' · '}
-          {time} ago
+          {/* `prRelativeTime` returns either "now" or an age like "3d", and
+              only an age reads as "ago". */}
+          {time === 'now' ? 'now' : `${time} ago`}
         </span>
       ) : null}
     </span>
@@ -89,7 +101,7 @@ export function PrCommentCard({ comment }: { comment: PrComment }) {
   }
   const location = inlineLocation(comment);
   const badge = reviewBadge(comment);
-  const status = threadStatus(comment);
+  const statuses = threadStatuses(comment);
   const preview = commentPreview(prose);
   const previewLine = location && preview ? `${location.label} · ${preview}` : preview;
 
@@ -124,7 +136,9 @@ export function PrCommentCard({ comment }: { comment: PrComment }) {
           </span>
         )}
         <span className="flex shrink-0 items-center gap-2 pt-0.5">
-          {status ? <ThreadStatusChip status={status} /> : null}
+          {statuses.map((status) => (
+            <ThreadStatusChip key={status.label} status={status} />
+          ))}
           {badge ? <ToneBadge badge={badge} /> : null}
           {comment.url ? (
             <button
@@ -148,7 +162,9 @@ export function PrCommentCard({ comment }: { comment: PrComment }) {
               className="mb-2 inline-flex items-center gap-1.5 rounded-lg bg-droid-elevated/60 px-2 py-0.5 text-[12px] text-droid-text-secondary"
             >
               <Octicon name="file-diff" size={12} />
-              {location.label}
+              {/* Open cards have room for the full path: two files with the
+                  same basename are otherwise indistinguishable. */}
+              {location.title}
             </p>
           ) : null}
           {comment.diffHunk ? <HunkPreview diffHunk={comment.diffHunk} /> : null}

@@ -101,7 +101,9 @@ const CHECK_STATES: Record<
   success: { glyph: 'check', label: 'Passed', color: 'var(--diff-add-fg)' },
   failure: { glyph: 'x', label: 'Failed', color: 'var(--diff-del-fg)' },
   pending: { glyph: null, label: 'Pending', color: '#d29922' },
-  neutral: { glyph: 'dash', label: 'Skipped', color: '#848d97' },
+  // Skipped, cancelled, stale, and action-required runs all land here, so the
+  // label states the bucket rather than one of its members.
+  neutral: { glyph: 'dash', label: 'Neutral', color: '#848d97' },
 };
 
 export function CheckStatusIcon({ status, size = 16 }: { status: CheckStatus; size?: number }) {

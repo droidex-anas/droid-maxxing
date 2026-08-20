@@ -43,10 +43,12 @@ export function usePullRequestList(cwd: string | null, enabled: boolean) {
     [cwd, enabled],
   );
 
+  // Losing the binding (the repository stops being listable) must invalidate any
+  // in-flight request too, or re-enabling the same repository renders its rows.
   useLayoutEffect(() => {
     dispatch({ type: 'bind', cwd });
     generationRef.current += 1;
-  }, [cwd]);
+  }, [cwd, enabled]);
 
   useLayoutEffect(() => {
     if (!enabled || !cwd) return;

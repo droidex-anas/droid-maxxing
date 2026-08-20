@@ -30,6 +30,7 @@ const noop = () => undefined;
 
 function renderSummary(
   overrides: {
+    pr?: PullRequest | null;
     body?: string;
     checks?: PrCheck[];
     comments?: PrComment[];
@@ -41,7 +42,7 @@ function renderSummary(
 ): string {
   return renderToStaticMarkup(
     createElement(PrSummary, {
-      pr: samplePr,
+      pr: overrides.pr === undefined ? samplePr : overrides.pr,
       number: 1,
       body: overrides.body ?? '',
       loaded: true,
@@ -367,4 +368,85 @@ test('a single commit is shown outright with its short sha', () => {
   assert.match(html, /1 commit/);
   assert.match(html, /Fix the merge gate/);
   assert.match(html, /ccccccc/);
+});
+
+test('a refresh failure is reported next to the description it could not update', () => {
+  const html = renderSummary({
+    body: 'Ships the inbox.',
+    metaError: 'Could not load pull request',
+  });
+  assert.match(html, /Ships the inbox\./);
+  assert.match(html, /Could not load pull request/);
+});
+
+test('a resolved comment on changed lines reports both states', () => {
+  const html = renderSummary({
+    comments: [
+      {
+        id: 'inline-1',
+        kind: 'inline',
+        author: 'dev',
+        body: 'This moved.',
+        createdAt: '2026-08-04T10:01:00Z',
+        url: null,
+        state: 'commented',
+        reactions: [],
+        path: 'src/a.ts',
+        line: 12,
+        resolved: true,
+        outdated: true,
+        resolvedBy: 'ana',
+      },
+    ],
+  });
+  assert.match(html, /Resolved/);
+  assert.match(html, /Outdated/);
+});
+
+test('an open inline comment names the full path it points at', () => {
+  const html = renderSummary({
+    comments: [
+      {
+        id: 'inline-1',
+        kind: 'inline',
+        author: 'dev',
+        body: 'Rename this.',
+        createdAt: '2026-08-04T10:01:00Z',
+        url: null,
+        state: 'commented',
+        reactions: [],
+        path: 'src/features/deep/a.ts',
+        line: 12,
+      },
+    ],
+  });
+  // The location chip carries the path, not just the ambiguous basename.
+  assert.match(html, /src\/features\/deep\/a\.ts:12<\/p>/);
+});
+
+test('a just-posted comment reads "now" without an "ago" suffix', () => {
+  const now = new Date().toISOString();
+  const html = renderSummary({
+    pr: { ...samplePr, updatedAt: now },
+    comments: [
+      {
+        id: 'comment-1',
+        kind: 'comment',
+        author: 'reviewer',
+        body: 'Ship it',
+        createdAt: now,
+        url: null,
+        state: null,
+        reactions: [],
+      },
+    ],
+  });
+  assert.match(html, /updated now/);
+  assert.doesNotMatch(html, /now ago/);
+});
+
+test('the loading header states the pull request number once', () => {
+  const html = renderSummary({ pr: null });
+  assert.match(html, /Pull request #1/);
+  assert.equal((html.match(/#1/g) ?? []).length, 1);
 });
