@@ -35,6 +35,26 @@ test('OPEN_PULL_REQUESTS binds the view and optional number', () => {
   assert.equal(state.prWorkspaceNumber, 12);
 });
 
+test('OPEN_PULL_REQUESTS preserves an omitted number only within the same repository', () => {
+  const selected = reducer(initialState, {
+    type: 'OPEN_PULL_REQUESTS',
+    cwd: '/repo-a',
+    number: 12,
+  });
+  const sameRepository = reducer(selected, {
+    type: 'OPEN_PULL_REQUESTS',
+    cwd: '/repo-a',
+  });
+  assert.equal(sameRepository.prWorkspaceNumber, 12);
+
+  const differentRepository = reducer(sameRepository, {
+    type: 'OPEN_PULL_REQUESTS',
+    cwd: '/repo-b',
+  });
+  assert.equal(differentRepository.prWorkspaceCwd, '/repo-b');
+  assert.equal(differentRepository.prWorkspaceNumber, null);
+});
+
 test('CLOSE_PULL_REQUESTS leaves the bind in place', () => {
   const open = reducer(initialState, {
     type: 'OPEN_PULL_REQUESTS',
@@ -61,4 +81,34 @@ test('selecting a session or starting a chat leaves the workspace', () => {
     executionMode: 'local',
   });
   assert.equal(started.mainView, 'session');
+});
+
+test('a pull request chat draft targets its repository before composer text is seeded', () => {
+  const open = reducer(
+    {
+      ...initialState,
+      sessions: { a: session('a') },
+      sessionOrder: ['a'],
+      activeAppSessionId: 'a',
+    },
+    { type: 'OPEN_PULL_REQUESTS', cwd: '/repo' },
+  );
+  const started = reducer(open, {
+    type: 'START_CHAT',
+    cwd: '/repo',
+    executionMode: 'local',
+  });
+  const seeded = reducer(started, {
+    type: 'SEED_COMPOSER',
+    text: 'Help me with PR #12',
+  });
+
+  assert.equal(seeded.activeAppSessionId, null);
+  assert.deepEqual(seeded.draftChat, {
+    cwd: '/repo',
+    executionMode: 'local',
+    branch: undefined,
+  });
+  assert.equal(seeded.composerSeed?.text, 'Help me with PR #12');
+  assert.equal(seeded.mainView, 'session');
 });

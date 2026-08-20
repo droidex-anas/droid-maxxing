@@ -107,3 +107,34 @@ test('empty or header-only patches produce no files', () => {
   assert.deepEqual(splitPrPatch(''), []);
   assert.deepEqual(splitPrPatch('diff --git a/x b/x\n'), []);
 });
+
+test('a GIT binary patch section is binary even though it has no hunks', () => {
+  const files = splitPrPatch(
+    [
+      'diff --git a/logo.png b/logo.png',
+      'index 0ff1ce..baddad 100644',
+      'GIT binary patch',
+      'literal 42',
+      'zcmV+vhJ6zXw$a?FC',
+      '',
+    ].join('\n'),
+  );
+  assert.equal(files.length, 1);
+  assert.equal(files[0].file.path, 'logo.png');
+  assert.equal(files[0].file.binary, true);
+});
+
+test('literal astral characters in a quoted path decode as whole code points', () => {
+  const files = splitPrPatch(
+    [
+      'diff --git "a/emoji 🚀.png" "b/emoji 🚀.png"',
+      '--- "a/emoji 🚀.png"',
+      '+++ "b/emoji 🚀.png"',
+      '@@ -1,1 +1,2 @@',
+      ' keep',
+      '+added',
+    ].join('\n'),
+  );
+  assert.equal(files.length, 1);
+  assert.equal(files[0].file.path, 'emoji 🚀.png');
+});

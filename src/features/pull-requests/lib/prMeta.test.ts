@@ -53,3 +53,16 @@ test('checks that all skipped are neutral, not a green run', () => {
   });
   assert.equal(checksBadge({ total: 0, pass: 0, fail: 0, pending: 0, status: 'none' }), null);
 });
+
+test('a run that passed some and skipped some is partial, not green', () => {
+  // The summary marks any run with a passing check 'success', so the badge has
+  // to account for the skipped checks itself.
+  assert.deepEqual(checksBadge({ total: 3, pass: 1, fail: 0, pending: 0, status: 'success' }), {
+    label: '1/3 passed',
+    tone: 'neutral',
+  });
+  assert.deepEqual(checksBadge({ total: 3, pass: 3, fail: 0, pending: 0, status: 'success' }), {
+    label: '3/3 passed',
+    tone: 'success',
+  });
+});

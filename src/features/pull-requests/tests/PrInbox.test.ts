@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { PullRequest } from '../../../types/vcs';
-import { PrInbox } from '../components/PrInbox';
+import { PrInbox, prInboxEmptyCopy } from '../components/PrInbox';
 
 const sample: PullRequest = {
   number: 1,
@@ -107,4 +107,10 @@ test('the filters are a labelled tab list and the search field names itself', ()
   assert.match(html, /role="tab" aria-selected="true"[^>]*>All</);
   assert.match(html, /role="tab" aria-selected="false"[^>]*>Reviewing</);
   assert.match(html, /aria-label="Search pull requests"/);
+  assert.match(html, /focus-visible:ring-2/);
+});
+
+test('a query with no matches uses search-specific empty copy', () => {
+  assert.equal(prInboxEmptyCopy('all', 'missing'), 'No pull requests match your search.');
+  assert.equal(prInboxEmptyCopy('authored', '   '), 'You have not opened any.');
 });

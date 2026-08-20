@@ -73,6 +73,10 @@ export function prReviewOptions(input: {
 // The prompt the new chat opens with: the review skill, then which pull request
 // to review. Sending stays the user's decision.
 export function droidReviewSeed(pr: PullRequest): string {
-  const reference = pr.url ? `\n${pr.url}` : '';
-  return `/review Pull request #${String(pr.number)}: ${pr.title}${reference}`;
+  const title = pr.title.trim();
+  const heading = title
+    ? `Pull request #${String(pr.number)}: ${title}`
+    : `Pull request #${String(pr.number)}`;
+  const url = pr.url.trim();
+  return `/review ${heading}${url ? `\n${url}` : ''}`;
 }

@@ -15,6 +15,10 @@ import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
 import {
+  resolvePrWorkspaceNumber,
+  sanitizePersistedPrWorkspace,
+} from '../features/pull-requests/lib/prWorkspaceCwd';
+import {
   DEFAULT_THEME_ID,
   detectPresetId,
   migrateLegacyLightPreset,
@@ -963,23 +967,13 @@ function saveWorkspaceCwds(cwds: string[]): string[] {
   return cwds;
 }
 
-// A pull request number only means something together with the repository it was
-// selected in, so the pair is sanitized as one value.
-function sanitizePrWorkspace(parsed: Partial<PersistedUiState>): Partial<PersistedUiState> {
-  const cwd = typeof parsed.prWorkspaceCwd === 'string' ? parsed.prWorkspaceCwd : '';
-  const number = parsed.prWorkspaceNumber;
-  const valid = typeof number === 'number' && Number.isInteger(number) && number > 0;
-  if (!cwd) return {};
-  return { prWorkspaceCwd: cwd, prWorkspaceNumber: valid ? number : undefined };
-}
-
 export function loadPersistedUiState(): Partial<PersistedUiState> {
   try {
     const raw = getLocalStorage()?.getItem(UI_STATE_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Partial<PersistedUiState>;
     return {
-      ...sanitizePrWorkspace(parsed),
+      ...sanitizePersistedPrWorkspace(parsed.prWorkspaceCwd, parsed.prWorkspaceNumber),
       activeAppSessionId:
         typeof parsed.activeAppSessionId === 'string' ? parsed.activeAppSessionId : null,
       rightPanelOpen:
@@ -2593,7 +2587,12 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         mainView: 'pull-requests',
         prWorkspaceCwd: action.cwd === undefined ? state.prWorkspaceCwd : action.cwd,
-        prWorkspaceNumber: action.number === undefined ? state.prWorkspaceNumber : action.number,
+        prWorkspaceNumber: resolvePrWorkspaceNumber(
+          state.prWorkspaceCwd,
+          state.prWorkspaceNumber,
+          action.cwd,
+          action.number,
+        ),
       };
     case 'CLOSE_PULL_REQUESTS':
       return state.mainView === 'session' ? state : { ...state, mainView: 'session' };

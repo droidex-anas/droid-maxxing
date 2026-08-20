@@ -47,6 +47,41 @@ test('all-fail first load writes per-section errors instead of a total meta-fail
   assert.equal(resolved.event.commentsError, 'comments down');
 });
 
+test('empty failure messages use the section fallbacks', () => {
+  const resolved = resolveMeta(
+    1,
+    {
+      view: { ...failedView, message: '' },
+      checks: { ...failedChecks, message: '' },
+      comments: { ...failedComments, message: '' },
+    },
+    initialPrDetailState,
+    true,
+  );
+  assert.equal(resolved.event.metaError, 'Could not load pull request');
+  assert.equal(resolved.event.checksError, 'Could not load PR checks');
+  assert.equal(resolved.event.commentsError, 'Could not load PR comments');
+});
+
+test('empty partial-comments message uses the partial-load fallback', () => {
+  const resolved = resolveMeta(
+    1,
+    {
+      view: failedView,
+      checks: failedChecks,
+      comments: {
+        ok: true,
+        partial: true,
+        message: '',
+        comments: [sampleComment],
+      },
+    },
+    initialPrDetailState,
+    true,
+  );
+  assert.equal(resolved.event.commentsError, 'Some PR comments could not be loaded');
+});
+
 test('all-fail refresh keeps last good rows and surfaces section errors', () => {
   const prev = {
     ...initialPrDetailState,

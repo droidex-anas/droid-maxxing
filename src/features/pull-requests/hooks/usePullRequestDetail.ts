@@ -35,7 +35,10 @@ function sectionError(
   previous: string | null,
 ): string | null {
   if (!failed) return null;
-  return showErrors ? (message ?? fallback) : previous;
+  // Empty bridge messages are not actionable; the product fallback must be
+  // shown for both undefined and empty strings.
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+  return showErrors ? message || fallback : previous;
 }
 
 function commentsSectionError(
@@ -44,7 +47,8 @@ function commentsSectionError(
   previous: string | null,
 ): string | null {
   if (result.ok) {
-    return result.partial ? (result.message ?? 'Some PR comments could not be loaded') : null;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+    return result.partial ? result.message || 'Some PR comments could not be loaded' : null;
   }
   return sectionError(true, result.message, 'Could not load PR comments', showErrors, previous);
 }

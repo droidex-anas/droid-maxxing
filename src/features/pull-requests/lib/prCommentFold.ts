@@ -37,12 +37,16 @@ export function isLongComment(body: string): boolean {
   return body.split('\n').length > FOLD_LINES || body.length > FOLD_CHARACTERS;
 }
 
+// A fence delimiter and its language line are not prose, whichever character
+// the fence is built from.
+const FENCE_DELIMITER = /^\s*(?:`{3,}|~{3,})/;
+
 // Folded cards need a headline. Markdown syntax is stripped rather than
 // rendered so the line stays one plain line at any width.
 export function commentPreview(body: string, limit = 120): string {
   const line = body
     .split('\n')
-    .filter((raw) => !raw.trimStart().startsWith('```'))
+    .filter((raw) => !FENCE_DELIMITER.test(raw))
     .map((raw) =>
       raw
         .replace(/^\s*(?:[>#]+|[-*+]|\d+\.)\s*/, '')

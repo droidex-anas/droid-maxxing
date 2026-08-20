@@ -82,3 +82,25 @@ test('drops a bound cwd that is no longer a known workspace', () => {
     null,
   );
 });
+
+test('known folders compare with the app path equivalence rules', () => {
+  // Windows separators and drive casing name the same folder.
+  assert.equal(
+    resolvePrWorkspaceCwd({
+      boundCwd: 'C:\\Work\\Repo',
+      activeCwd: null,
+      workspaceKind: 'folder',
+      workspaceCwds: ['c:/work/repo'],
+    }),
+    'C:\\Work\\Repo',
+  );
+  assert.equal(
+    resolvePrWorkspaceCwd({
+      boundCwd: 'c:/work/repo',
+      activeCwd: 'C:\\Work\\Repo',
+      workspaceKind: 'folder',
+      workspaceCwds: [],
+    }),
+    'c:/work/repo',
+  );
+});

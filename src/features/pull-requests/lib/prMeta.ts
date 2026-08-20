@@ -103,9 +103,14 @@ export function checksBadge(summary: ChecksSummary): PrBadge | null {
   if (summary.pending > 0) {
     return { label: `${String(summary.pending)} running`, tone: 'neutral' };
   }
-  // Every check skipped or neutral is not a green run: nothing passed.
-  if (summary.status === 'neutral') {
-    return { label: `${String(summary.total)} skipped`, tone: 'neutral' };
+  // Skipped or neutral checks never ran: a run that passed some and skipped
+  // some is partial, and only a run where every check passed is green.
+  const skipped = summary.total - summary.pass - summary.fail - summary.pending;
+  if (summary.pass === 0) {
+    return { label: `${String(skipped)} skipped`, tone: 'neutral' };
+  }
+  if (skipped > 0) {
+    return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'neutral' };
   }
   return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'success' };
 }

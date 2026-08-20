@@ -134,3 +134,54 @@ test('ordinary markdown passes through untouched', () => {
   const body = 'Please preserve **this decision**.\n\n- First\n- Second';
   assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);
 });
+
+test('a CRLF closing fence closes, so only markup after it is markup', () => {
+  const body = [
+    'Sample:',
+    '',
+    '```html',
+    '<details><summary>not real</summary></details>',
+    '```',
+    '',
+    '<details><summary>real</summary>',
+    'payload',
+    '</details>',
+    '',
+    'See <a href="https://example.test/a">the docs</a>',
+  ].join('\r\n');
+  const blocks = prCommentBlocks(body);
+  assert.deepEqual(
+    blocks.map((block) => block.kind),
+    ['markdown', 'disclosure', 'markdown'],
+  );
+  const sample = blocks[0].kind === 'markdown' ? blocks[0].text : '';
+  assert.match(sample, /<summary>not real<\/summary>/);
+  const after = blocks[2].kind === 'markdown' ? blocks[2].text : '';
+  assert.match(after, /\[the docs\]\(https:\/\/example\.test\/a\)/);
+});
+
+test('markup inside inline code spans is content, not markup', () => {
+  const body = 'Write `<details>` (or `` `<summary>` ``) to fold a section.';
+  assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);
+});
+
+test('indented code blocks are content, not markup', () => {
+  const body = [
+    'Example:',
+    '',
+    '    <details>',
+    '    <summary>sample</summary>',
+    '    </details>',
+    '',
+    'Done.',
+  ].join('\n');
+  assert.deepEqual(prCommentBlocks(body), [{ kind: 'markdown', text: body }]);
+});
+
+test('a details tag with nothing in it does not become a disclosure', () => {
+  assert.deepEqual(prCommentBlocks('<details></details>'), []);
+  assert.deepEqual(prCommentBlocks('<details> \n </details>'), []);
+  assert.deepEqual(prCommentBlocks('<details><summary>  </summary></details>tail'), [
+    { kind: 'markdown', text: 'tail' },
+  ]);
+});

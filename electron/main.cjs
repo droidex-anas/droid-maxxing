@@ -375,36 +375,68 @@ function registerIpc() {
     githubVcs.cancelSetup();
     return { ok: true };
   });
-  ipcMain.handle('github-detect-pr', (_event, { dir, options }) =>
-    githubVcs.detectPr(dir, options),
-  );
-  ipcMain.handle('github-list-prs', (event, { dir, options }) => {
+  ipcMain.handle('github-detect-pr', (event, payload = {}) => {
     assertMainRenderer(event);
-    return githubVcs.listPrs(dir, options);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, pr: null };
+    return githubVcs.detectPr(requestDir, options);
   });
-  ipcMain.handle('github-view-pr', (event, { dir, options }) => {
+  ipcMain.handle('github-list-prs', (event, payload = {}) => {
     assertMainRenderer(event);
-    return githubVcs.viewPr(dir, options);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', viewerLogin: null, prs: [] };
+    return githubVcs.listPrs(requestDir, options);
   });
-  ipcMain.handle('github-pr-diff', (event, { dir, options }) => {
+  ipcMain.handle('github-view-pr', (event, payload = {}) => {
     assertMainRenderer(event);
-    return githubVcs.prDiff(dir, options);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', pr: null };
+    return githubVcs.viewPr(requestDir, options);
   });
-  ipcMain.handle('github-pr-checks', (_event, { dir, options }) =>
-    githubVcs.prChecks(dir, options),
-  );
-  ipcMain.handle('github-pr-comments', (_event, { dir, options }) =>
-    githubPrConversation.prComments(dir, options),
-  );
-  ipcMain.handle('github-create-pr', (_event, { dir, options }) =>
-    githubVcs.createPr(dir, options),
-  );
-  ipcMain.handle('github-post-comment', (_event, { dir, options }) =>
-    githubVcs.postComment(dir, options),
-  );
-  ipcMain.handle('github-merge-pr', (event, { dir, options }) => {
+  ipcMain.handle('github-pr-diff', (event, payload = {}) => {
     assertMainRenderer(event);
-    return githubVcs.mergePr(dir, options);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', diff: '' };
+    return githubVcs.prDiff(requestDir, options);
+  });
+  ipcMain.handle('github-pr-checks', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', checks: [] };
+    return githubVcs.prChecks(requestDir, options);
+  });
+  ipcMain.handle('github-pr-comments', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', comments: [] };
+    return githubPrConversation.prComments(requestDir, options);
+  });
+  ipcMain.handle('github-create-pr', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid' };
+    return githubVcs.createPr(requestDir, options);
+  });
+  ipcMain.handle('github-post-comment', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid' };
+    return githubVcs.postComment(requestDir, options);
+  });
+  ipcMain.handle('github-merge-pr', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid' };
+    return githubVcs.mergePr(requestDir, options);
   });
 
   ipcMain.handle('onboarding-get', getOnboarding);
@@ -613,6 +645,11 @@ function assertMainRenderer(event) {
   ) {
     throw new Error('Desktop request rejected for unknown renderer.');
   }
+}
+
+function prWorkspaceRequestDir(value) {
+  if (typeof value !== 'string') return null;
+  return value.trim() ? value : null;
 }
 
 function resolveAppIconFile(mode) {

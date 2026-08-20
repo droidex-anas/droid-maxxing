@@ -66,3 +66,24 @@ test('idle signed-out setup still uses the primary sign-in action', () => {
   assert.doesNotMatch(html, /Enter this code on GitHub/);
   assert.doesNotMatch(html, /Cancel sign-in/);
 });
+
+test('manual installation does not offer a nonfunctional cancellation action', () => {
+  const html = renderSetup({
+    availability: {
+      installed: false,
+      authenticated: false,
+      installMethod: 'manual',
+    },
+    action: 'installing',
+  });
+
+  assert.match(html, /Installing…/);
+  assert.doesNotMatch(html, /Cancel installation/);
+});
+
+test('setup errors are announced when they change', () => {
+  const html = renderSetup({ error: 'GitHub CLI setup failed' });
+
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /GitHub CLI setup failed/);
+});

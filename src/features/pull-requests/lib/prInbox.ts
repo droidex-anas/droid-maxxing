@@ -2,9 +2,11 @@ import type { PullRequest } from '../../../types/vcs';
 
 export type PrInboxTab = 'all' | 'reviewing' | 'authored';
 
+// Logins are ASCII, so plain case folding is enough; a locale-sensitive
+// compare would fold them differently under, say, a Turkish locale.
 function sameLogin(left: string | null | undefined, right: string | null | undefined): boolean {
   if (!left || !right) return false;
-  return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 export function filterPullRequests(

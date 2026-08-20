@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 import { Octicon } from '../../../components/environment/GithubIcons';
@@ -16,6 +16,17 @@ const METHODS: { id: PrMergeMethod; label: string; hint: string }[] = [
 function mergeLabel(merging: boolean, merged: boolean): string {
   if (merged) return 'Merged';
   return merging ? 'Merging…' : 'Merge';
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function mergeButtonTitle(
+  blocked: string | null,
+  merging: boolean,
+  merged: boolean,
+): string {
+  if (merged) return 'Pull request merged';
+  if (merging) return 'Merging pull request';
+  return blocked ?? 'Merge this pull request';
 }
 
 // Merging happens through `gh pr merge`, so the strategy is picked explicitly:
@@ -43,22 +54,26 @@ export function PrMergeButton({
   }, []);
   useDismissOnOutside(open, rootRef, close);
 
-  if (!pr) return null;
-  const kind = prKind(pr);
+  const kind = pr ? prKind(pr) : null;
   // A merged or closed pull request has nothing left to merge.
-  if (kind === 'merged' || kind === 'closed') return null;
-  const blocked = mergeBlockReason(pr);
-  const prKey = pr.url || `#${String(pr.number)}`;
-  const merged = mergedKey === prKey;
+  const blocked = pr ? mergeBlockReason(pr) : null;
+  const prKey = pr ? pr.url || `#${String(pr.number)}` : null;
+  const merged = prKey !== null && mergedKey === prKey;
   const disabled = merging || merged || blocked !== null;
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  if (!pr || kind === 'merged' || kind === 'closed' || prKey === null) return null;
 
   return (
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-expanded={open && !disabled}
         disabled={disabled}
-        title={blocked ?? 'Merge this pull request'}
+        title={mergeButtonTitle(blocked, merging, merged)}
         onClick={() => {
           setOpen((value) => !value);
         }}
@@ -68,12 +83,16 @@ export function PrMergeButton({
         {mergeLabel(merging, merged)}
         <ChevronDown className="h-3 w-3" />
       </button>
-      {open ? (
-        <div className="absolute right-0 z-50 mt-1 w-64 overflow-hidden rounded-xl border border-droid-border bg-droid-surface py-1 shadow-xl">
+      {open && !disabled ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1 w-64 overflow-hidden rounded-xl border border-droid-border bg-droid-surface py-1 shadow-xl"
+        >
           {METHODS.map((method) => (
             <button
               key={method.id}
               type="button"
+              role="menuitem"
               onClick={() => {
                 setOpen(false);
                 void onMerge(method.id).then((ok) => {

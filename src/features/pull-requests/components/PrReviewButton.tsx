@@ -49,6 +49,7 @@ export function PrReviewButton({
     <div ref={rootRef} className="relative">
       <button
         type="button"
+        aria-haspopup="menu"
         aria-expanded={open}
         title="Review this pull request"
         onClick={() => {
@@ -61,7 +62,10 @@ export function PrReviewButton({
         <ChevronDown className="h-3 w-3" />
       </button>
       {open ? (
-        <div className="absolute right-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-droid-border bg-droid-surface py-1 shadow-xl">
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-droid-border bg-droid-surface py-1 shadow-xl"
+        >
           <p className="flex items-center gap-2 px-3 pt-1 pb-1.5">
             <span className="text-[11px] font-medium tracking-wide text-droid-text-muted uppercase">
               Review PR
@@ -108,6 +112,7 @@ function MenuRow({
   return (
     <button
       type="button"
+      role="menuitem"
       disabled={disabled}
       onClick={onClick}
       className="block w-full px-3 py-1.5 text-left transition-colors hover:bg-droid-active disabled:opacity-50"

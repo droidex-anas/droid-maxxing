@@ -37,6 +37,51 @@ function commentIdsOf(connection) {
     .map(String);
 }
 
+function parseObjectPayload(stdout, message) {
+  const payload = parseJson(stdout, null);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, message };
+  }
+  return { ok: true, payload };
+}
+
+function parsePrConversationPayload(stdout) {
+  const parsed = parseObjectPayload(stdout, 'Invalid PR conversation payload');
+  if (!parsed.ok) return parsed;
+  if (!Array.isArray(parsed.payload.comments) || !Array.isArray(parsed.payload.reviews)) {
+    return { ok: false, message: 'Invalid PR conversation payload' };
+  }
+  return parsed;
+}
+
+function parseInlineCommentPages(stdout) {
+  const payload = parseJson(stdout, null);
+  if (!Array.isArray(payload) || payload.some((page) => !Array.isArray(page))) {
+    return { ok: false, message: 'Invalid inline review comments payload' };
+  }
+  return { ok: true, pages: payload };
+}
+
+function parseReviewThreadPayload(stdout) {
+  const parsed = parseObjectPayload(stdout, 'Invalid review thread status payload');
+  if (!parsed.ok) return parsed;
+  const connection = parsed.payload.data?.repository?.pullRequest?.reviewThreads;
+  if (!connection || typeof connection !== 'object' || !Array.isArray(connection.nodes)) {
+    return { ok: false, message: 'Invalid review thread status payload' };
+  }
+  return parsed;
+}
+
+function parseThreadCommentPayload(stdout) {
+  const parsed = parseObjectPayload(stdout, 'Invalid review thread replies payload');
+  if (!parsed.ok) return parsed;
+  const connection = parsed.payload.data?.node?.comments;
+  if (!connection || typeof connection !== 'object' || !Array.isArray(connection.nodes)) {
+    return { ok: false, message: 'Invalid review thread replies payload' };
+  }
+  return parsed;
+}
+
 // Thread status keyed by the REST comment id, so every comment in a resolved
 // thread carries the same verdict. A thread whose replies are themselves paged
 // is reported back so the caller can fetch the rest.
@@ -78,7 +123,9 @@ async function fetchThreadReplies(dir, thread, statusByCommentId, runGh) {
       `query=${THREAD_COMMENTS_QUERY}`,
     ]);
     if (res.spawnFailed || res.code !== 0) return { ok: false, message: res.stderr.trim() };
-    const page = normalizeThreadCommentPage(parseJson(res.stdout, null));
+    const parsed = parseThreadCommentPayload(res.stdout);
+    if (!parsed.ok) return { ok: false, message: parsed.message };
+    const page = normalizeThreadCommentPage(parsed.payload);
     for (const id of page.ids) statusByCommentId.set(id, thread.status);
     cursor = page.nextCursor;
   }
@@ -110,7 +157,11 @@ async function fetchReviewThreadStatus(dir, selector, runGh) {
     if (res.spawnFailed || res.code !== 0) {
       return { ok: false, message: res.stderr.trim(), statusByCommentId, truncated: true };
     }
-    const page = normalizeReviewThreadPage(parseJson(res.stdout, null));
+    const parsed = parseReviewThreadPayload(res.stdout);
+    if (!parsed.ok) {
+      return { ok: false, message: parsed.message, statusByCommentId, truncated: true };
+    }
+    const page = normalizeReviewThreadPage(parsed.payload);
     for (const [id, status] of page.statusByCommentId) statusByCommentId.set(id, status);
     pagedThreads.push(...page.pagedThreads);
     cursor = page.nextCursor;
@@ -133,7 +184,7 @@ function reviewThreadIssue(threads, { inlineSucceeded, inlineCount }) {
   if (!inlineSucceeded || inlineCount === 0) return null;
   if (!threads.ok) return threads.message || 'Could not load review thread status';
   if (threads.truncated) {
-    return 'This pull request has more review threads than DROIDEX can load, so some resolved states are missing.';
+    return 'This pull request has more review thread data than DROIDEX can load, so some resolved states are missing.';
   }
   return null;
 }
@@ -232,20 +283,38 @@ async function prComments(dir, { prNumber } = {}, runGh = gh) {
       comments: [],
     };
   }
-  const data = viewSucceeded
-    ? parseJson(view.stdout, { comments: [], reviews: [] })
-    : { comments: [], reviews: [] };
-  const pages = inlineSucceeded ? parseJson(inline.stdout, []) : [];
-  const inlineRows = Array.isArray(pages)
-    ? pages.flatMap((page) => (Array.isArray(page) ? page : []))
-    : [];
+  const viewPayload = viewSucceeded ? parsePrConversationPayload(view.stdout) : null;
+  const inlinePayload = inlineSucceeded ? parseInlineCommentPages(inline.stdout) : null;
+  const parsedViewSucceeded = viewPayload?.ok === true;
+  const parsedInlineSucceeded = inlinePayload?.ok === true;
+  if (!parsedViewSucceeded && !parsedInlineSucceeded) {
+    return {
+      ok: false,
+      reason: view.spawnFailed || inline.spawnFailed ? 'gh_unavailable' : 'gh_error',
+      message: [
+        viewPayload?.message || view.stderr.trim(),
+        inlinePayload?.message || inline.stderr.trim(),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      comments: [],
+    };
+  }
+  const data = parsedViewSucceeded ? viewPayload.payload : { comments: [], reviews: [] };
+  const inlineRows = parsedInlineSucceeded ? inlinePayload.pages.flat() : [];
   const threadIssue = reviewThreadIssue(threads, {
-    inlineSucceeded,
+    inlineSucceeded: parsedInlineSucceeded,
     inlineCount: inlineRows.length,
   });
   const failures = [
-    ...(viewSucceeded ? [] : [view.stderr.trim() || 'Could not load PR conversation comments']),
-    ...(inlineSucceeded ? [] : [inline.stderr.trim() || 'Could not load inline review comments']),
+    ...(parsedViewSucceeded
+      ? []
+      : [viewPayload?.message || view.stderr.trim() || 'Could not load PR conversation comments']),
+    ...(parsedInlineSucceeded
+      ? []
+      : [
+          inlinePayload?.message || inline.stderr.trim() || 'Could not load inline review comments',
+        ]),
     ...(threadIssue ? [threadIssue] : []),
   ];
   return {

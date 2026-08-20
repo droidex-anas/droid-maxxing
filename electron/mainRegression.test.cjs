@@ -169,9 +169,14 @@ test('GitHub setup handlers require the trusted renderer and teardown their proc
 
 test('pull request workspace handlers require the trusted renderer', () => {
   for (const channel of [
+    'github-detect-pr',
     'github-list-prs',
     'github-view-pr',
     'github-pr-diff',
+    'github-pr-checks',
+    'github-pr-comments',
+    'github-create-pr',
+    'github-post-comment',
     'github-merge-pr',
   ]) {
     const handlerStart = mainSource.indexOf(`ipcMain.handle('${channel}'`);
@@ -182,6 +187,42 @@ test('pull request workspace handlers require the trusted renderer', () => {
       /assertMainRenderer\(event\)/,
       `${channel} must authorize its sender`,
     );
+  }
+});
+
+test('pull request workspace handlers validate IPC directories before PR operations', () => {
+  assert.match(
+    mainSource,
+    /function prWorkspaceRequestDir\(value\) \{\s*if \(typeof value !== 'string'\) return null;\s*return value\.trim\(\) \? value : null;\s*\}/,
+  );
+
+  const expectations = {
+    'github-detect-pr':
+      /if \(!requestDir\) return \{ ok: false, pr: null \};[\s\S]*?githubVcs\.detectPr\(requestDir, options\)/,
+    'github-list-prs':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', viewerLogin: null, prs: \[\] \};[\s\S]*?githubVcs\.listPrs\(requestDir, options\)/,
+    'github-view-pr':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', pr: null \};[\s\S]*?githubVcs\.viewPr\(requestDir, options\)/,
+    'github-pr-diff':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', diff: '' \};[\s\S]*?githubVcs\.prDiff\(requestDir, options\)/,
+    'github-pr-checks':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', checks: \[\] \};[\s\S]*?githubVcs\.prChecks\(requestDir, options\)/,
+    'github-pr-comments':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', comments: \[\] \};[\s\S]*?githubPrConversation\.prComments\(requestDir, options\)/,
+    'github-create-pr':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.createPr\(requestDir, options\)/,
+    'github-post-comment':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.postComment\(requestDir, options\)/,
+    'github-merge-pr':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.mergePr\(requestDir, options\)/,
+  };
+
+  for (const [channel, pattern] of Object.entries(expectations)) {
+    const handlerStart = mainSource.indexOf(`ipcMain.handle('${channel}'`);
+    const handlerEnd = mainSource.indexOf('\n  ipcMain.handle(', handlerStart + 1);
+    const handler = mainSource.slice(handlerStart, handlerEnd);
+    assert.match(handler, /const requestDir = prWorkspaceRequestDir\(dir\)/);
+    assert.match(handler, pattern, channel);
   }
 });
 

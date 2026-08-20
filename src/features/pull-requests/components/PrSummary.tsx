@@ -55,11 +55,11 @@ function ChecksBody({
     return (
       <div className="-ml-1">
         {error ? <p className="mb-1 text-[13px] text-droid-text-muted">{error}</p> : null}
-        {checks.map((check) => (
+        {checks.map((check, index) => (
           <CheckRow
             // A matrix job or a re-run reports the same name and workflow
             // twice; the run link is what tells the two runs apart.
-            key={`${check.name}-${check.workflow ?? ''}-${check.link ?? ''}`}
+            key={`${check.name}-${check.workflow ?? ''}-${check.link ?? ''}-${String(index)}`}
             check={check}
           />
         ))}

@@ -21,6 +21,11 @@ const EMPTY_COPY: Record<PrInboxTab, string> = {
   authored: 'You have not opened any.',
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
+export function prInboxEmptyCopy(tab: PrInboxTab, query: string): string {
+  return query.trim() ? 'No pull requests match your search.' : EMPTY_COPY[tab];
+}
+
 function PrInboxRow({
   pr,
   selected,
@@ -197,7 +202,7 @@ export function PrInbox({
           }}
           aria-label="Search pull requests"
           placeholder="Search"
-          className="w-full rounded-xl bg-droid-field py-2 pr-3 pl-9 text-[13px] text-droid-text outline-none placeholder:text-droid-text-muted"
+          className="w-full rounded-xl bg-droid-field py-2 pr-3 pl-9 text-[13px] text-droid-text outline-none placeholder:text-droid-text-muted focus-visible:ring-2 focus-visible:ring-droid-accent/60"
         />
       </div>
 
@@ -217,7 +222,7 @@ export function PrInbox({
       <div className="pr-workspace-scroll mt-2 min-h-0 flex-1 overflow-y-auto">
         <InboxList
           loading={showSkeleton}
-          emptyCopy={EMPTY_COPY[tab]}
+          emptyCopy={prInboxEmptyCopy(tab, query)}
           prs={visible}
           selectedNumber={selectedNumber}
           onSelect={onSelect}

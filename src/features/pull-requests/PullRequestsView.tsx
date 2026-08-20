@@ -103,10 +103,11 @@ export function PullRequestsView() {
         prs={list.prs}
         viewerLogin={list.viewerLogin}
         onOpenChat={(pr) => {
-          // The chat opens with the pull request already typed into the prompt
-          // bar; sending stays the user's decision.
+          // Start a fresh local draft in this checkout before seeding it. This
+          // prevents an active chat from another workspace from owning the PR
+          // prompt; sending stays the user's decision.
+          dispatch({ type: 'START_CHAT', cwd, executionMode: 'local' });
           dispatch({ type: 'SEED_COMPOSER', text: prChatSeed(pr) });
-          dispatch({ type: 'CLOSE_PULL_REQUESTS' });
         }}
         onReviewWithDroid={(pr) => {
           // A local review starts as its own chat in this checkout, opened with

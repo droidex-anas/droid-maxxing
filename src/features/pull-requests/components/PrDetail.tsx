@@ -28,6 +28,14 @@ const TABS: { id: PrDetailTab; label: string; key: string }[] = [
   { id: 'code', label: 'Code', key: '2' },
 ];
 
+function tabId(tab: PrDetailTab): string {
+  return `pull-request-${tab}-tab`;
+}
+
+function tabPanelId(tab: PrDetailTab): string {
+  return `pull-request-${tab}-tabpanel`;
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
@@ -202,6 +210,8 @@ export function PrDetail({
               key={item.id}
               type="button"
               role="tab"
+              id={tabId(item.id)}
+              aria-controls={tabPanelId(item.id)}
               aria-selected={tab === item.id}
               onClick={() => {
                 setTab(item.id);
@@ -260,26 +270,34 @@ export function PrDetail({
         </div>
       </div>
       <div className="min-h-0 flex-1">
-        {tab === 'summary' ? (
-          <PrSummary
-            // Section folds are per pull request, so the sections are rebuilt
-            // rather than carried over to the next one.
-            key={`${cwd}#${String(number)}`}
-            pr={headerPr}
-            number={number}
-            body={detail.body}
-            loaded={detail.loaded}
-            loading={detail.loading}
-            metaError={detail.metaError}
-            checks={detail.checks}
-            checksError={detail.checksError}
-            comments={detail.comments}
-            commentsError={detail.commentsError}
-            commits={detail.commits}
-            {...composer}
-          />
-        ) : null}
-        {tab === 'code' ? <CodePane diff={detail.diff} diffError={detail.diffError} /> : null}
+        <div
+          role="tabpanel"
+          id={tabPanelId(tab)}
+          aria-labelledby={tabId(tab)}
+          className="h-full min-h-0"
+        >
+          {tab === 'summary' ? (
+            <PrSummary
+              // Section folds are per pull request, so the sections are rebuilt
+              // rather than carried over to the next one.
+              key={`${cwd}#${String(number)}`}
+              pr={headerPr}
+              number={number}
+              body={detail.body}
+              loaded={detail.loaded}
+              loading={detail.loading}
+              metaError={detail.metaError}
+              checks={detail.checks}
+              checksError={detail.checksError}
+              comments={detail.comments}
+              commentsError={detail.commentsError}
+              commits={detail.commits}
+              {...composer}
+            />
+          ) : (
+            <CodePane diff={detail.diff} diffError={detail.diffError} />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -20,18 +20,20 @@ function inlineText(value: string): string {
     .trim();
 }
 
-interface FenceSpan {
+interface ProtectedSpan {
   start: number;
   end: number;
 }
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+// A closing fence may end with a carriage return, so a CRLF body closes its
+// fences exactly like an LF body does.
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/;
 
 // CommonMark fences: three or more backticks or tildes, closed by a run of the
 // same character at least as long. An unterminated fence runs to the end.
-function fenceSpans(text: string): FenceSpan[] {
-  const spans: FenceSpan[] = [];
+function fenceSpans(text: string): ProtectedSpan[] {
+  const spans: ProtectedSpan[] = [];
   let open: { fence: string; start: number } | null = null;
   let offset = 0;
   for (const line of text.split('\n')) {
@@ -53,12 +55,82 @@ function fenceSpans(text: string): FenceSpan[] {
   return spans;
 }
 
-// Fenced code is content, not markup: transformations skip it so a review
-// prompt full of angle brackets survives untouched.
-function mapOutsideFences(text: string, transform: (chunk: string) => string): string {
+// CommonMark indented code: four spaces or a tab. Blank lines separate runs of
+// one block; any line that is neither indented nor blank ends it.
+const INDENTED_CODE = /^(?: {4}|\t)/;
+
+function indentedCodeSpans(text: string, covered: readonly ProtectedSpan[]): ProtectedSpan[] {
+  const spans: ProtectedSpan[] = [];
+  let start: number | null = null;
+  let end = 0;
+  let offset = 0;
+  for (const line of text.split('\n')) {
+    const lineStart = offset;
+    const lineEnd = lineStart + line.length;
+    offset = lineEnd + 1;
+    const isCovered = covered.some((span) => lineStart < span.end && lineEnd >= span.start);
+    if (!isCovered && INDENTED_CODE.test(line)) {
+      start ??= lineStart;
+      end = lineEnd;
+      continue;
+    }
+    if (start !== null && (isCovered || line.trim() !== '')) {
+      spans.push({ start, end });
+      start = null;
+    }
+  }
+  if (start !== null) spans.push({ start, end });
+  return spans;
+}
+
+// CommonMark code spans: a backtick string of length N closes on the next run
+// of exactly N backticks, so `` `x` `` is one span and a stray backtick is none.
+function inlineCodeSpans(text: string, covered: readonly ProtectedSpan[]): ProtectedSpan[] {
+  const spans: ProtectedSpan[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const open = /`+/.exec(text.slice(cursor));
+    if (!open) break;
+    const start = cursor + open.index;
+    const length = open[0].length;
+    if (covered.some((span) => start >= span.start && start < span.end)) {
+      cursor = start + length;
+      continue;
+    }
+    // A span must close before the next code context begins, so a stray
+    // backtick in prose cannot reach into a later fence.
+    const boundary = covered.find((span) => span.start > start)?.start ?? text.length;
+    const close = new RegExp('`{' + String(length) + '}(?!`)').exec(
+      text.slice(start + length, boundary),
+    );
+    if (!close) {
+      cursor = start + length;
+      continue;
+    }
+    const end = start + length + close.index + length;
+    spans.push({ start, end });
+    cursor = end;
+  }
+  return spans;
+}
+
+// Everything that is code rather than markup: fenced blocks, indented blocks,
+// and inline spans.
+function protectedSpans(text: string): ProtectedSpan[] {
+  const fences = fenceSpans(text);
+  const spans = [...fences, ...indentedCodeSpans(text, fences)].sort(
+    (left, right) => left.start - right.start,
+  );
+  spans.push(...inlineCodeSpans(text, spans));
+  return spans.sort((left, right) => left.start - right.start);
+}
+
+// Code is content, not markup: transformations skip it so a review prompt full
+// of angle brackets survives untouched.
+function mapOutsideCode(text: string, transform: (chunk: string) => string): string {
   let out = '';
   let cursor = 0;
-  for (const span of fenceSpans(text)) {
+  for (const span of protectedSpans(text)) {
     out += transform(text.slice(cursor, span.start)) + text.slice(span.start, span.end);
     cursor = span.end;
   }
@@ -95,10 +167,10 @@ function markdownFromHtml(chunk: string): string {
   );
 }
 
-// Blank runs are collapsed outside fences only, so a code sample keeps the
+// Blank runs are collapsed outside code only, so a code sample keeps the
 // blank lines it was written with.
 function normalizeBlock(text: string): string {
-  return mapOutsideFences(text, (chunk) =>
+  return mapOutsideCode(text, (chunk) =>
     markdownFromHtml(chunk)
       .replace(/\n[ \t]+\n/g, '\n\n')
       .replace(/\n{3,}/g, '\n\n'),
@@ -108,7 +180,9 @@ function normalizeBlock(text: string): string {
 function disclosure(inner: string): PrCommentBlock | null {
   const summary = SUMMARY.exec(inner);
   const body = normalizeBlock(inner.replace(SUMMARY, ''));
-  const label = summary ? inlineText(summary[1]) : 'Details';
+  const label = summary ? inlineText(summary[1]) : '';
+  // A tag pair with neither a summary label nor a body carried nothing, so it
+  // must not invent a disclosure.
   if (!body && !label) return null;
   return { kind: 'disclosure', summary: label || 'Details', body };
 }
@@ -125,9 +199,9 @@ interface DetailsSection {
 }
 
 // Outermost `<details>` pairs, matched by depth so a nested disclosure stays
-// inside its parent instead of ending it early. Fenced markup is content.
+// inside its parent instead of ending it early. Code is content.
 function detailsSections(text: string): DetailsSection[] {
-  const spans = fenceSpans(text);
+  const spans = protectedSpans(text);
   const sections: DetailsSection[] = [];
   let depth = 0;
   let start = 0;
@@ -157,9 +231,9 @@ function detailsSections(text: string): DetailsSection[] {
 }
 
 export function prCommentBlocks(raw: string): PrCommentBlock[] {
-  // Both the comment strip and the disclosure scan stay outside fences: an
-  // `<!-- -->` or a `<details>` shown inside a code sample is documentation.
-  const body = mapOutsideFences(raw, (chunk) => chunk.replace(/<!--[\s\S]*?-->/g, ''));
+  // Both the comment strip and the disclosure scan stay outside code: an
+  // `<!-- -->` or a `<details>` shown in a code sample is documentation.
+  const body = mapOutsideCode(raw, (chunk) => chunk.replace(/<!--[\s\S]*?-->/g, ''));
   const blocks: PrCommentBlock[] = [];
   let cursor = 0;
   for (const section of detailsSections(body)) {

@@ -64,3 +64,8 @@ test('thread status names who resolved the conversation', () => {
   assert.equal(threadStatus(comment({ outdated: true }))?.label, 'Outdated');
   assert.equal(threadStatus(comment()), null);
 });
+
+test('the preview skips tilde fence delimiters too', () => {
+  assert.equal(commentPreview('~~~ts\nconst a = 1;\n~~~\nafter the fence'), 'const a = 1;');
+  assert.equal(commentPreview('~~~\ncode\n~~~'), 'code');
+});

@@ -32,6 +32,9 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [copyFailedCode, setCopyFailedCode] = useState<string | null>(null);
   const busy = setup.action !== 'idle' && !setup.authCode;
+  const canCancel =
+    setup.action === 'authenticating' ||
+    (setup.action === 'installing' && setup.availability?.installMethod !== 'manual');
   const copied = isGithubAuthCodeCopied(setup.authCode, copiedCode);
   const copyFailed = isGithubAuthCodeCopied(setup.authCode, copyFailedCode);
 
@@ -51,7 +54,10 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
     <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center px-8">
       <EmptyCopy>{setupEmptyCopy(setup)}</EmptyCopy>
       {setup.error && (
-        <p className="mt-2 max-w-sm text-center text-[12px] leading-4 text-droid-red">
+        <p
+          aria-live="polite"
+          className="mt-2 max-w-sm text-center text-[12px] leading-4 text-droid-red"
+        >
           {setup.error}
         </p>
       )}
@@ -78,7 +84,7 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
           >
             {setupActionLabel(setup)}
           </button>
-          {busy && (
+          {canCancel && (
             <button
               type="button"
               onClick={setup.cancelAuthentication}

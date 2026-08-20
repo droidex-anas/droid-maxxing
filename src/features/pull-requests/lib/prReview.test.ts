@@ -105,3 +105,19 @@ test('a local review opens with the review skill and the pull request', () => {
     '/review Pull request #128: Ship the review menu',
   );
 });
+
+test('the review seed trims the title and url and omits empty values', () => {
+  const pr = {
+    number: 9,
+    title: '  Polish the seed  ',
+    url: '  https://github.com/o/r/pull/9  ',
+  } as PullRequest;
+  assert.equal(
+    droidReviewSeed(pr),
+    '/review Pull request #9: Polish the seed\nhttps://github.com/o/r/pull/9',
+  );
+  assert.equal(
+    droidReviewSeed({ ...pr, title: '', url: '   ' } as PullRequest),
+    '/review Pull request #9',
+  );
+});

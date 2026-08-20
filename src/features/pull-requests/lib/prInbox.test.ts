@@ -78,3 +78,19 @@ test('a hash with no number is not a filter', () => {
     [3],
   );
 });
+
+// Logins are ASCII, so matching is plain case folding: collation rules that
+// treat a ligature as the letters it resembles are not login equality.
+test('login matching folds ASCII case only, not collation equivalences', () => {
+  const row = pr({ number: 4, title: 'Login', author: 'Droidex-Anas', reviewRequests: ['Ana'] });
+  assert.deepEqual(filterPullRequests([row], 'authored', 'DROIDEX-ANAS'), [row]);
+  assert.deepEqual(filterPullRequests([row], 'reviewing', 'aNa'), [row]);
+  assert.equal(
+    filterPullRequests(
+      [pr({ number: 5, title: 'Ligature', author: 'ﬀactory' })],
+      'authored',
+      'ffactory',
+    ).length,
+    0,
+  );
+});
