@@ -15,6 +15,10 @@ import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
 import {
+  resolvePrWorkspaceNumber,
+  sanitizePersistedPrWorkspace,
+} from '../features/pull-requests/lib/prWorkspaceCwd';
+import {
   DEFAULT_THEME_ID,
   detectPresetId,
   migrateLegacyLightPreset,
@@ -81,6 +85,7 @@ import {
   type ChatMetadataMap,
 } from '../lib/chatMetadata';
 import { createSnapshotScheduler, loadSessionSnapshot } from '../lib/sessionSnapshot';
+import { createComposerSeed } from '../lib/composerReset';
 import { toast } from '../lib/toast';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
 import {
@@ -286,6 +291,9 @@ export interface AppState {
   reviewFocusRequestId: number;
   diffView: DiffViewMode;
   sidebarCollapsed: boolean;
+  mainView: 'session' | 'pull-requests';
+  prWorkspaceCwd: string | null;
+  prWorkspaceNumber: number | null;
   specMode: boolean;
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
@@ -310,7 +318,7 @@ export interface AppState {
   pendingAutonomy: Record<string, Autonomy>;
   // One-shot text seeded into the composer (welcome-screen suggestion cards,
   // saved-note clicks). A fresh id per seed lets re-clicking re-arm the effect.
-  composerSeed: { text: string; id: number } | null;
+  composerSeed: { text: string; id: number; replace: boolean } | null;
   workspaceCwds: string[];
   // Derived (synced by the reducer): whether the browser pane is open for the
   // *currently active* session. Source of truth is `browserOpenKeys`.
@@ -546,13 +554,15 @@ type Action =
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
+  | { type: 'OPEN_PULL_REQUESTS'; cwd?: string | null; number?: number | null }
+  | { type: 'CLOSE_PULL_REQUESTS' }
   | {
       type: 'START_CHAT';
       cwd: string;
       executionMode: 'worktree' | 'local';
       branch?: string;
     }
-  | { type: 'SEED_COMPOSER'; text: string }
+  | { type: 'SEED_COMPOSER'; text: string; replace?: boolean }
   | { type: 'CLEAR_COMPOSER_SEED' }
   | { type: 'SESSION_NOTE_ADD'; appSessionId: string; text: string }
   | { type: 'SESSION_NOTE_MARK_USED'; appSessionId: string; noteId: string }
@@ -831,6 +841,9 @@ interface PersistedUiState {
   browsers: Record<string, BrowserState>;
   browserOpenKeys: Record<string, boolean>;
   selectedFeatureId: string | null;
+  mainView?: 'session' | 'pull-requests';
+  prWorkspaceCwd?: string | null;
+  prWorkspaceNumber?: number | null;
 }
 
 function loadCompactionModel(): string {
@@ -961,6 +974,7 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Partial<PersistedUiState>;
     return {
+      ...sanitizePersistedPrWorkspace(parsed.prWorkspaceCwd, parsed.prWorkspaceNumber),
       activeAppSessionId:
         typeof parsed.activeAppSessionId === 'string' ? parsed.activeAppSessionId : null,
       rightPanelOpen:
@@ -975,6 +989,10 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
       browserOpenKeys: loadPersistedBrowserOpenKeys(parsed.browserOpenKeys),
       selectedFeatureId:
         typeof parsed.selectedFeatureId === 'string' ? parsed.selectedFeatureId : null,
+      mainView:
+        parsed.mainView === 'session' || parsed.mainView === 'pull-requests'
+          ? parsed.mainView
+          : undefined,
     };
   } catch {
     return {};
@@ -992,6 +1010,9 @@ function savePersistedUiState(state: AppState): void {
     browsers: persistBrowsers(state.browsers),
     browserOpenKeys: state.browserOpenKeys,
     selectedFeatureId: state.selectedFeatureId,
+    mainView: state.mainView,
+    prWorkspaceCwd: state.prWorkspaceCwd,
+    prWorkspaceNumber: state.prWorkspaceNumber,
   };
   try {
     getLocalStorage()?.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
@@ -1103,6 +1124,9 @@ export const initialState: AppState = {
   rightPanelOpen: persistedUiState.rightPanelOpen ?? true,
   utilityPanels: persistedUiState.utilityPanels ?? {},
   sidebarCollapsed: persistedUiState.sidebarCollapsed ?? false,
+  mainView: persistedUiState.mainView ?? 'session',
+  prWorkspaceCwd: persistedUiState.prWorkspaceCwd ?? null,
+  prWorkspaceNumber: persistedUiState.prWorkspaceNumber ?? null,
   specMode: persistedUiState.specMode ?? false,
   settingsOpen: false,
   commandPaletteOpen: false,
@@ -2329,6 +2353,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         // A pending review-focus request belongs to the session that issued
         // it; never let it fire in another session's panel after a switch.
         reviewFocusPath: action.id === state.activeAppSessionId ? state.reviewFocusPath : null,
+        mainView: 'session',
       };
     }
 
@@ -2558,6 +2583,21 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'TOGGLE_MISSION_CONTROL':
       return { ...state, missionControlMode: !state.missionControlMode };
 
+    case 'OPEN_PULL_REQUESTS':
+      return {
+        ...state,
+        mainView: 'pull-requests',
+        prWorkspaceCwd: action.cwd === undefined ? state.prWorkspaceCwd : action.cwd,
+        prWorkspaceNumber: resolvePrWorkspaceNumber(
+          state.prWorkspaceCwd,
+          state.prWorkspaceNumber,
+          action.cwd,
+          action.number,
+        ),
+      };
+    case 'CLOSE_PULL_REQUESTS':
+      return state.mainView === 'session' ? state : { ...state, mainView: 'session' };
+
     case 'START_CHAT': {
       // Stamp the session being left so model output produced while it was
       // open doesn't surface as an unread badge after starting a new chat.
@@ -2580,12 +2620,12 @@ function baseReducer(state: AppState, action: Action): AppState {
         // Leaving for a fresh draft orphans any pending review-focus request.
         reviewFocusPath: null,
         sessionLastSeen,
+        mainView: 'session',
       };
     }
 
     case 'SEED_COMPOSER':
-      return { ...state, composerSeed: { text: action.text, id: Date.now() } };
-
+      return { ...state, composerSeed: createComposerSeed(action.text, action.replace) };
     // The composer consumes the seed once; it must not linger, or remounting
     // the composer (e.g. toggling Mission Control) would re-apply stale text.
     case 'CLEAR_COMPOSER_SEED':
@@ -3285,6 +3325,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.selectedChild,
     state.selectedFeatureId,
     state.sidebarCollapsed,
+    state.mainView,
+    state.prWorkspaceCwd,
+    state.prWorkspaceNumber,
     state.specMode,
   ]);
 

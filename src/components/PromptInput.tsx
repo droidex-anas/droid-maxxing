@@ -61,7 +61,7 @@ import {
 import { hasCompleteAppBlock } from './appBlockRuntime';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
-import { resetComposerAfterSubmit } from '../lib/composerReset';
+import { composerTextAfterSeed, resetComposerAfterSubmit } from '../lib/composerReset';
 import {
   childRuntimeSubmitTarget,
   childSessionLabel,
@@ -654,9 +654,9 @@ export default function PromptInput({
   useEffect(() => {
     if (!composerSeed) return;
     setHistoryIndex(null);
-    // Append to an in-progress draft instead of clobbering it (welcome cards
-    // only appear over an empty composer, so this is a plain set for them).
-    const text = input.trim() ? `${input.trimEnd()}\n\n${composerSeed.text}` : composerSeed.text;
+    // Notes and suggestion cards append to an in-progress draft. A surface
+    // that explicitly starts a fresh chat can replace stale mounted input.
+    const text = composerTextAfterSeed(input, composerSeed.text, composerSeed.replace);
     setInput(text);
     pendingCaret.current = text.length;
     // Consume the seed so a later remount (e.g. toggling Mission Control, which

@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resetComposerAfterSubmit } from './composerReset';
+import { composerTextAfterSeed, resetComposerAfterSubmit } from './composerReset';
+
+test('a fresh-chat composer seed replaces stale mounted input', () => {
+  assert.equal(
+    composerTextAfterSeed('old draft', '/review Pull request #129', true),
+    '/review Pull request #129',
+  );
+});
+
+test('an ordinary composer seed still appends to an active draft', () => {
+  assert.equal(
+    composerTextAfterSeed('keep this  ', 'add this note', false),
+    'keep this\n\nadd this note',
+  );
+  assert.equal(composerTextAfterSeed('   ', 'start here', false), 'start here');
+});
 
 test('resetComposerAfterSubmit clears images and the draft when untouched', () => {
   const calls: string[] = [];

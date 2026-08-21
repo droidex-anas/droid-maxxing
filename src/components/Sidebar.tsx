@@ -1,13 +1,13 @@
 // File-size exception (AGENTS.md): this file is the sidebar's single
 // composition root — brand header, tool buttons, workspace/chat/pinned section
 // wiring, unread/search chrome, update prompt, and the row menu/rename glue
-// handlers. ~650 lines. The interactive row (SessionRow, marquee, inline
-// rename) already lives in SidebarSessionRow.tsx; further splitting was
-// rejected because the remaining handlers are composition glue that fail the
-// deletion test (extracting them would only forward store state), and the
-// Expand/WorkspaceFolderIcon primitives are too small to justify their own
-// modules. Reviewed ceiling: ~700 lines; extract the workspace section if it
-// grows past that.
+// handlers. ~730 lines after the Pull requests nav row. The interactive row
+// (SessionRow, marquee, inline rename) already lives in SidebarSessionRow.tsx;
+// further splitting was rejected because the remaining handlers are composition
+// glue that fail the deletion test (extracting them would only forward store
+// state), and the Expand/WorkspaceFolderIcon primitives are too small to
+// justify their own modules. Reviewed ceiling: ~750 lines; extract the
+// workspace section if it grows past that.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
@@ -17,7 +17,18 @@ import { dismissSidebarCard, loadSidebarCardSeen } from '../lib/sidebarCards';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
-import { Folder, FolderOpen, Plus, Search, Settings, ChevronRight, SquarePen } from 'lucide-react';
+import {
+  CirclePlus,
+  Folder,
+  FolderOpen,
+  Plus,
+  Search,
+  Settings,
+  ChevronRight,
+  SquarePen,
+} from 'lucide-react';
+import { GitPullRequestIcon } from './environment/GithubIcons';
+import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import {
   buildWorkspaceSections,
@@ -125,11 +136,14 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
       activeAppSessionId: current.activeAppSessionId,
       chatMetadata: current.chatMetadata,
       draftChat: current.draftChat,
+      mainView: current.mainView,
       pendingPermissions: current.pendingPermissions,
       pendingQuestions: current.pendingQuestions,
+      prWorkspaceCwd: current.prWorkspaceCwd,
       sessionLastSeen: current.sessionLastSeen,
       sessionOrder: current.sessionOrder,
       sessions: current.sessions,
+      workspaceCwds: current.workspaceCwds,
     }),
     shallowEqual,
   );
@@ -464,13 +478,61 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
         </div>
       </div>
 
+      {/* Navigation rows sit at session-row scale so the sidebar reads as one
+          list instead of a banner above it. */}
       <div className="px-2 pb-1.5">
+        {/* The plus overlays the row's right edge, like a session row's menu,
+            so the whole row still highlights as one target. */}
+        <div className="group relative">
+          <button
+            onClick={newChat}
+            className="flex w-full items-center gap-2.5 rounded-xl py-1.5 pr-8 pl-2.5 text-left text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-elevated"
+          >
+            <SquarePen
+              className="h-4 w-4 shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text"
+              strokeWidth={1.75}
+            />
+            New chat
+          </button>
+          <button
+            data-testid="new-workspaceless-chat"
+            onClick={() => {
+              startChat('');
+            }}
+            title="New chat without a workspace"
+            aria-label="New chat without a workspace"
+            className="absolute top-1/2 right-1.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
+          >
+            <CirclePlus className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </div>
         <button
-          onClick={newChat}
-          className="group w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-medium text-droid-text hover:bg-droid-elevated transition-colors"
+          data-testid="pull-requests-nav"
+          onClick={() => {
+            const cwd = resolvePrWorkspaceCwd({
+              boundCwd: state.prWorkspaceCwd,
+              activeCwd: activeSession?.cwd,
+              workspaceKind: activeSession?.workspaceKind,
+              workspaceCwds: state.workspaceCwds,
+            });
+            dispatch({ type: 'OPEN_PULL_REQUESTS', cwd });
+          }}
+          className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            state.mainView === 'pull-requests'
+              ? 'bg-droid-active text-droid-text'
+              : 'text-droid-text hover:bg-droid-elevated'
+          }`}
         >
-          <SquarePen className="w-[18px] h-[18px] shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text" />
-          New chat
+          <span
+            className={`flex h-4 w-4 shrink-0 items-center justify-center transition-colors ${
+              state.mainView === 'pull-requests'
+                ? 'text-droid-text'
+                : 'text-droid-text-secondary group-hover:text-droid-text'
+            }`}
+          >
+            <GitPullRequestIcon size={15} />
+          </span>
+          Pull requests
         </button>
       </div>
 

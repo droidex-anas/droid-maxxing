@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import {
   Check,
   CircleUserRound,
@@ -11,7 +11,7 @@ import {
 
 import type { GithubAvailability } from '../../types/vcs';
 import type { GithubSetupAction } from '../../hooks/useGithubSetup';
-import { isGithubAuthCodeCopied } from '../../lib/github';
+import { useGithubAuthCodeCopy } from '../../hooks/useGithubAuthCodeCopy';
 import { Popover } from './Popover';
 
 export interface GithubSetupCardProps {
@@ -164,26 +164,11 @@ export function GithubSetupCard({
   onCancelAuthentication,
 }: GithubSetupCardProps) {
   const actionRef = useRef<HTMLButtonElement>(null);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [copyFailedCode, setCopyFailedCode] = useState<string | null>(null);
+  const authCodeCopy = useGithubAuthCodeCopy(authCode);
   if (!availability || (availability.installed && availability.authenticated)) return null;
 
   const isBusy = action !== 'idle' && !authCode;
-  const copied = isGithubAuthCodeCopied(authCode, copiedCode);
-  const copyFailed = isGithubAuthCodeCopied(authCode, copyFailedCode);
   const content = setupContent(availability, action, manualGuideOpened, authCode);
-
-  const copyCode = async () => {
-    if (!authCode) return;
-    setCopyFailedCode(null);
-    try {
-      await navigator.clipboard.writeText(authCode);
-      setCopiedCode(authCode);
-    } catch {
-      setCopiedCode(null);
-      setCopyFailedCode(authCode);
-    }
-  };
 
   return (
     <div className="mx-1.5 mt-1.5 rounded-xl border border-droid-border bg-droid-surface px-3 py-2.5">
@@ -229,9 +214,9 @@ export function GithubSetupCard({
             >
               <GithubAuthPromptContent
                 code={authCode}
-                copied={copied}
-                copyFailed={copyFailed}
-                onCopy={() => void copyCode()}
+                copied={authCodeCopy.copied}
+                copyFailed={authCodeCopy.copyFailed}
+                onCopy={() => void authCodeCopy.copyCode()}
                 onCancel={() => {
                   onCloseAuthPrompt();
                   onCancelAuthentication();

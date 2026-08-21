@@ -8,11 +8,13 @@ const {
   cancelSetup,
   install,
   isGithubDeviceUrl,
-  normalizePrComments,
-  prComments,
+  listPrs,
+  mergePr,
+  prDiff,
   prSelector,
   resolveBrewExecutable,
   resolveGhExecutable,
+  viewPr,
 } = require('./github.cjs');
 const { runSetupFile } = require('./githubSetup.cjs');
 
@@ -807,143 +809,201 @@ test('PR selectors accept only bare positive digit strings', () => {
   assert.equal(prSelector('https://github.com/example/repo/pull/78'), null);
 });
 
-test('PR comments include top-level, review, and inline review threads', () => {
-  const comments = normalizePrComments(
-    {
-      comments: [
-        {
-          databaseId: 10,
-          author: { login: 'author' },
-          body: 'Top-level **comment**',
-          createdAt: '2026-08-04T10:00:00Z',
-          url: 'https://example.test/comment/10',
-          reactionGroups: [{ content: 'EYES', users: { totalCount: 2 } }],
-        },
-      ],
-      reviews: [
-        {
-          id: 'review-20',
-          author: { login: 'reviewer' },
-          body: 'Changes requested',
-          submittedAt: '2026-08-04T10:01:00Z',
-          state: 'CHANGES_REQUESTED',
-          reactionGroups: [{ content: 'THUMBS_UP', users: { totalCount: 1 } }],
-        },
-      ],
-    },
-    [
-      {
-        id: 30,
-        user: { login: 'inline-reviewer' },
-        body: 'Fix `scope` here',
-        created_at: '2026-08-04T10:02:00Z',
-        html_url: 'https://example.test/review/30',
-        path: 'src/components/ReviewPanel.tsx',
-        line: 42,
-        diff_hunk: '@@ -40,2 +40,3 @@',
-        reactions: { '+1': 3, heart: 1, total_count: 4 },
-      },
-    ],
-  );
-
-  assert.deepEqual(
-    comments.map(({ kind, author, body, path, line, reactions }) => ({
-      kind,
-      author,
-      body,
-      path,
-      line,
-      reactions,
-    })),
-    [
-      {
-        kind: 'comment',
-        author: 'author',
-        body: 'Top-level **comment**',
-        path: undefined,
-        line: undefined,
-        reactions: [{ content: 'EYES', count: 2 }],
-      },
-      {
-        kind: 'review',
-        author: 'reviewer',
-        body: 'Changes requested',
-        path: undefined,
-        line: undefined,
-        reactions: [{ content: 'THUMBS_UP', count: 1 }],
-      },
-      {
-        kind: 'inline',
-        author: 'inline-reviewer',
-        body: 'Fix `scope` here',
-        path: 'src/components/ReviewPanel.tsx',
-        line: 42,
-        reactions: [
-          { content: 'THUMBS_UP', count: 3 },
-          { content: 'HEART', count: 1 },
-        ],
-      },
-    ],
-  );
-});
-
-test('PR comments keep conversation comments when inline pagination fails', async () => {
-  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
-    if (args[0] === 'pr') {
-      return ghResult({
-        stdout: JSON.stringify({
-          comments: [{ databaseId: 10, author: { login: 'author' }, body: 'available' }],
-          reviews: [],
-        }),
-      });
-    }
-    return ghResult({ code: 1, stderr: 'REST rate limited' });
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.partial, true);
-  assert.match(result.message, /REST rate limited/);
-  assert.deepEqual(
-    result.comments.map((comment) => comment.body),
-    ['available'],
-  );
-});
-
-test('PR comments keep inline comments when conversation lookup fails', async () => {
-  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) => {
-    if (args[0] === 'pr') return ghResult({ code: 1, stderr: 'GraphQL unavailable' });
+test('listPrs returns normalized rows and the viewer login', async () => {
+  const runGh = async (_cwd, args) => {
+    runGh.calls.push(args);
+    if (args[0] === 'api') return ghResult({ stdout: 'octocat\n' });
     return ghResult({
       stdout: JSON.stringify([
-        [
-          {
-            id: 30,
-            user: { login: 'reviewer' },
-            body: 'inline available',
-            path: 'src/file.ts',
-            line: 4,
-          },
-        ],
+        {
+          number: 12,
+          title: 'Add inbox',
+          state: 'OPEN',
+          url: 'https://example.test/pull/12',
+          isDraft: false,
+          headRefName: 'feat',
+          baseRefName: 'main',
+          mergeable: 'MERGEABLE',
+          reviewDecision: 'REVIEW_REQUIRED',
+          additions: 4,
+          deletions: 1,
+          changedFiles: 2,
+          createdAt: '2026-08-18T00:00:00Z',
+          updatedAt: '2026-08-18T01:00:00Z',
+          author: { login: 'ana' },
+          reviewRequests: [{ login: 'octocat' }],
+          reviews: [{ author: { login: 'dev' }, state: 'COMMENTED' }],
+        },
       ]),
     });
-  });
-
+  };
+  runGh.calls = [];
+  const result = await listPrs('/repo', { state: 'open', limit: 50 }, runGh);
   assert.equal(result.ok, true);
-  assert.equal(result.partial, true);
-  assert.match(result.message, /GraphQL unavailable/);
-  assert.deepEqual(
-    result.comments.map((comment) => comment.body),
-    ['inline available'],
-  );
+  assert.equal(result.viewerLogin, 'octocat');
+  assert.equal(result.prs[0].number, 12);
+  assert.deepEqual(result.prs[0].reviewRequests, ['octocat']);
+  assert.deepEqual(result.prs[0].reviews, [{ author: 'dev', state: 'commented' }]);
+  assert.ok(runGh.calls[0].includes('--json'));
 });
 
-test('PR comments fail only when neither source succeeds', async () => {
-  const result = await prComments('/repo', { prNumber: 79 }, async (_dir, args) =>
-    ghResult({ code: 1, stderr: `${args[0]} failed` }),
-  );
-
+test('listPrs failed gh keeps no invented rows', async () => {
+  const runGh = async (_cwd, args) => {
+    if (args[0] === 'api') return ghResult({ stdout: 'octocat\n' });
+    return ghResult({ code: 1, stderr: 'boom' });
+  };
+  const result = await listPrs('/repo', {}, runGh);
   assert.equal(result.ok, false);
-  assert.equal(result.reason, 'gh_error');
-  assert.deepEqual(result.comments, []);
-  assert.match(result.message, /pr failed/);
-  assert.match(result.message, /api failed/);
+  assert.deepEqual(result.prs, []);
+  assert.equal(result.viewerLogin, null);
+});
+
+test('viewPr rejects a non-integer selector before spawning gh', async () => {
+  let spawned = false;
+  const runGh = async () => {
+    spawned = true;
+    return ghResult();
+  };
+  const result = await viewPr('/repo', { prNumber: 'https://github.com/o/r/pull/1' }, runGh);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'missing_pr');
+  assert.equal(result.pr, null);
+  assert.equal(spawned, false);
+});
+
+test('viewPr returns body on the detail payload', async () => {
+  const runGh = async () =>
+    ghResult({
+      stdout: JSON.stringify({
+        number: 12,
+        title: 'Add inbox',
+        state: 'OPEN',
+        url: 'https://example.test/pull/12',
+        isDraft: false,
+        headRefName: 'feat',
+        baseRefName: 'main',
+        body: 'Hello',
+        author: { login: 'ana' },
+        reviewRequests: [],
+        reviews: [],
+      }),
+    });
+  const result = await viewPr('/repo', { prNumber: 12 }, runGh);
+  assert.equal(result.ok, true);
+  assert.equal(result.pr.body, 'Hello');
+  assert.deepEqual(result.pr.reviewRequests, []);
+});
+
+test('viewPr returns the head branch commits with their GitHub authors', async () => {
+  const runGh = async (_cwd, args) => {
+    assert.match(args[3], /,commits$/);
+    return ghResult({
+      stdout: JSON.stringify({
+        number: 12,
+        title: 'Add inbox',
+        state: 'OPEN',
+        body: '',
+        author: { login: 'ana' },
+        reviewRequests: [],
+        reviews: [],
+        commits: [
+          {
+            oid: '1111111111111111',
+            messageHeadline: ' Add the inbox ',
+            committedDate: '2026-08-04T09:00:00Z',
+            authors: [{ name: 'Ana', login: 'ana' }],
+          },
+          {
+            oid: '2222222222222222',
+            messageHeadline: 'Vendor bump',
+            committedDate: '2026-08-04T10:00:00Z',
+            authors: [{ name: 'Release Bot', login: '' }],
+          },
+          { messageHeadline: 'no oid, dropped' },
+        ],
+      }),
+    });
+  };
+  const result = await viewPr('/repo', { prNumber: 12 }, runGh);
+  assert.deepEqual(result.pr.commits, [
+    {
+      oid: '1111111111111111',
+      headline: 'Add the inbox',
+      committedDate: '2026-08-04T09:00:00Z',
+      author: 'ana',
+    },
+    {
+      oid: '2222222222222222',
+      headline: 'Vendor bump',
+      committedDate: '2026-08-04T10:00:00Z',
+      author: 'Release Bot',
+    },
+  ]);
+});
+
+test('mergePr requires a known strategy and a bare PR number before spawning gh', async () => {
+  let spawned = false;
+  const runGh = async () => {
+    spawned = true;
+    return ghResult();
+  };
+  const badSelector = await mergePr('/repo', { prNumber: '--repo=evil', method: 'squash' }, runGh);
+  assert.deepEqual(badSelector, { ok: false, reason: 'missing_pr' });
+  const badMethod = await mergePr('/repo', { prNumber: 12, method: 'fast-forward' }, runGh);
+  assert.deepEqual(badMethod, { ok: false, reason: 'invalid_method' });
+  const noMethod = await mergePr('/repo', { prNumber: 12 }, runGh);
+  assert.deepEqual(noMethod, { ok: false, reason: 'invalid_method' });
+  assert.equal(spawned, false);
+});
+
+test('mergePr rejects inherited Object.prototype names as merge strategies', async () => {
+  let spawned = false;
+  const runGh = async () => {
+    spawned = true;
+    return ghResult();
+  };
+  for (const method of ['toString', 'constructor', 'hasOwnProperty', '__proto__']) {
+    assert.deepEqual(
+      await mergePr('/repo', { prNumber: 12, method }, runGh),
+      { ok: false, reason: 'invalid_method' },
+      `${method} must not resolve to a merge flag`,
+    );
+  }
+  assert.equal(spawned, false);
+});
+
+test('mergePr passes the chosen strategy to gh and reports its refusal', async () => {
+  const calls = [];
+  const ok = await mergePr('/repo', { prNumber: 12, method: 'squash' }, async (_cwd, args) => {
+    calls.push(args);
+    return ghResult();
+  });
+  assert.deepEqual(ok, { ok: true });
+  assert.deepEqual(calls[0], ['pr', 'merge', '--squash', '--', '12']);
+
+  const refused = await mergePr('/repo', { prNumber: 12, method: 'rebase' }, async () =>
+    ghResult({ code: 1, stderr: 'Pull request is not mergeable\n' }),
+  );
+  assert.deepEqual(refused, {
+    ok: false,
+    reason: 'gh_error',
+    message: 'Pull request is not mergeable',
+  });
+
+  const missingGh = await mergePr('/repo', { prNumber: 12, method: 'merge' }, async () =>
+    ghResult({ code: 1, spawnFailed: true }),
+  );
+  assert.deepEqual(missingGh, { ok: false, reason: 'gh_unavailable' });
+});
+
+test('prDiff rejects a non-integer selector and returns patch text on success', async () => {
+  const bad = await prDiff('/repo', { prNumber: '--repo=evil' }, async () => ghResult());
+  assert.equal(bad.ok, false);
+  assert.equal(bad.diff, '');
+  const good = await prDiff('/repo', { prNumber: 12 }, async (_cwd, args) => {
+    assert.deepEqual(args.slice(-2), ['--', '12']);
+    return ghResult({ stdout: 'diff --git a/a.ts b/a.ts\n' });
+  });
+  assert.equal(good.ok, true);
+  assert.match(good.diff, /diff --git/);
 });
