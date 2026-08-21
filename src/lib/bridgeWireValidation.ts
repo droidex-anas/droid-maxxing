@@ -134,7 +134,11 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'browser.error':
       return typeof value.message === 'string';
     case 'mission.features':
-      return typeof value.appSessionId === 'string' && recordArray(value.features);
+      return (
+        typeof value.appSessionId === 'string' &&
+        Array.isArray(value.features) &&
+        value.features.every(isBridgeFeature)
+      );
     case 'mission.progress':
       return typeof value.appSessionId === 'string' && progressArray(value.entries);
     case 'session.child':
@@ -196,6 +200,7 @@ function isSessionSummary(value: unknown): boolean {
       'phase',
     ]) &&
     Array.isArray(value.features) &&
+    value.features.every(isBridgeFeature) &&
     hasNumbers(value, ['tokensIn', 'tokensOut', 'contextTokens', 'createdAt', 'updatedAt'])
   );
 }
@@ -220,7 +225,37 @@ function isPermissionRequest(value: unknown): boolean {
   return (
     isRecord(value) &&
     hasStrings(value, ['appSessionId', 'requestId', 'kind', 'title', 'detail']) &&
+    isPermissionKind(value.kind) &&
     'raw' in value
+  );
+}
+
+function isPermissionKind(value: unknown): boolean {
+  return (
+    value === 'edit' ||
+    value === 'exec' ||
+    value === 'create' ||
+    value === 'apply_patch' ||
+    value === 'mcp' ||
+    value === 'spec' ||
+    value === 'mission_plan' ||
+    value === 'other'
+  );
+}
+
+function isBridgeFeature(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasStrings(value, ['id', 'description', 'status', 'skillName']) &&
+    (value.status === 'pending' ||
+      value.status === 'in_progress' ||
+      value.status === 'completed' ||
+      value.status === 'cancelled') &&
+    stringArray(value.preconditions) &&
+    stringArray(value.expectedBehavior) &&
+    stringArray(value.verificationSteps) &&
+    (value.fulfills === undefined || stringArray(value.fulfills)) &&
+    (value.milestone === undefined || typeof value.milestone === 'string')
   );
 }
 
