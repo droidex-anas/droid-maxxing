@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const appUrl = process.env.DROIDEX_TEST_URL || '/';
 
-test('the plus button offers plugins and Visualize joins the prompt as a chip', async ({
+test('the plus button offers plugins and Visualize joins the prompt as a selection', async ({
   page,
 }) => {
   await page.goto(appUrl);
@@ -16,18 +16,30 @@ test('the plus button offers plugins and Visualize joins the prompt as a chip', 
   const removeChip = page.getByRole('button', { name: 'Remove Visualize' });
   await expect(removeChip).toBeVisible();
   await expect(menu).toHaveCount(0);
-  // The plugin rides along as a chip: the draft stays the user's own words.
+  // The plugin rides along as a selection: the draft stays the user's own words.
   await expect(composer).toHaveValue('');
-  // The chip is the command, so it can be sent on its own.
+  // The selection is the command, so it can be sent on its own.
   await expect(page.getByTitle(/Enter: send/)).toBeEnabled();
 
-  // The row that added it takes it back off.
+  // It sits on the draft's own first line, so that line starts after it and
+  // typing continues from there.
+  const indent = () =>
+    composer.evaluate((el) => Number.parseFloat(getComputedStyle(el).textIndent));
+  expect(await indent()).toBeGreaterThan(40);
+  await composer.pressSequentially('a chart of the last week');
+  await expect(composer).toHaveValue('a chart of the last week');
+  await expect(removeChip).toBeVisible();
+
+  // The row that added it takes it back off, and the line reclaims the space.
   await page.getByTitle('Add files or a plugin').click();
   await menu.getByRole('menuitemcheckbox', { name: /Visualize/ }).click();
   await expect(removeChip).toHaveCount(0);
+  expect(await indent()).toBe(0);
 
+  // One Backspace at the start of an empty draft takes the whole selection off.
   await page.getByTitle('Add files or a plugin').click();
   await menu.getByText('Visualize', { exact: true }).click();
+  await composer.fill('');
   await composer.click();
   await composer.press('Backspace');
   await expect(removeChip).toHaveCount(0);

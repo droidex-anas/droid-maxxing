@@ -85,7 +85,7 @@ import {
   Square,
 } from 'lucide-react';
 import AddMenu from './composer/AddMenu';
-import { SelectionChip } from './composer/SelectionChip';
+import { DraftSelections, type DraftSelection } from './composer/DraftSelections';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
 import ModelSelectorPopover from './ModelSelectorPopover';
 import AutonomySelector from './AutonomySelector';
@@ -291,11 +291,39 @@ export default function PromptInput({
   };
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const addMenuAnchorRef = useRef<HTMLDivElement>(null);
+  // Skills and plugins live on the draft's first line; attachments keep their own
+  // row above it. Backspace on an empty draft unwinds both.
   const hasChips =
     visualizeSelected ||
     activeSkills.length > 0 ||
     attachedFiles.length > 0 ||
     imageAttachments.images.length > 0;
+  const hasAttachmentChips = attachedFiles.length > 0 || imageAttachments.images.length > 0;
+  const [selectionsIndent, setSelectionsIndent] = useState(0);
+  const draftSelections: DraftSelection[] = [
+    ...(visualizeSelected
+      ? [
+          {
+            key: 'visualize',
+            icon: AppWindow,
+            label: 'Visualize',
+            removeLabel: 'Remove Visualize',
+            onRemove: () => {
+              setVisualizeSelected(false);
+            },
+          },
+        ]
+      : []),
+    ...activeSkills.map((skill) => ({
+      key: skill.filePath,
+      icon: Blocks,
+      label: skill.name,
+      removeLabel: `Remove the ${skill.name} skill`,
+      onRemove: () => {
+        setActiveSkills((prev) => prev.filter((s) => s.filePath !== skill.filePath));
+      },
+    })),
+  ];
 
   const removeLastChip = () => {
     const { images, files: documents } = partitionImagePaths(attachedFiles);
@@ -704,6 +732,7 @@ export default function PromptInput({
     const text = composerTextAfterSeed(input, composerSeed.text, composerSeed.replace);
     setInput(text);
     pendingCaret.current = text.length;
+    setVisualizeSelected(false);
     // Consume the seed so a later remount (e.g. toggling Mission Control, which
     // unmounts this input) does not re-apply stale text over the user's edits.
     dispatch({ type: 'CLEAR_COMPOSER_SEED' });
@@ -714,7 +743,8 @@ export default function PromptInput({
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${String(Math.min(textareaRef.current.scrollHeight, 200))}px`;
     }
-  }, [input]);
+    // The indent moves where the first line wraps, so it can change the height.
+  }, [input, selectionsIndent]);
 
   // Restore caret after programmatic token replacement.
   useEffect(() => {
@@ -1359,6 +1389,15 @@ export default function PromptInput({
   const idleSendTooltip = childActionsEnabled
     ? 'Enter: send\nShift+Enter: newline'
     : 'This child transcript is read-only';
+  const promptPlaceholder = missionPreview
+    ? activeSession
+      ? targetChildSessionId
+        ? 'Steer the selected child session…'
+        : 'Direct the orchestrator…'
+      : 'Describe the mission objective…'
+    : isSpecMode
+      ? 'Describe what to build in spec mode...'
+      : 'What would you like to work on?  (/ for skills, @ for files)';
   const hasContent =
     input.trim().length > 0 ||
     visualizeSelected ||
@@ -1432,21 +1471,8 @@ export default function PromptInput({
               : undefined
           }
         >
-          {hasChips && (
-            // px-4 lines a selection up with the draft text below it, so the
-            // chip reads as part of the prompt rather than a tray above it.
-            <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
-              {visualizeSelected && (
-                <SelectionChip
-                  icon={AppWindow}
-                  label="Visualize"
-                  title={VISUALIZE_COMMAND.desc}
-                  removeLabel="Remove Visualize"
-                  onRemove={() => {
-                    setVisualizeSelected(false);
-                  }}
-                />
-              )}
+          {hasAttachmentChips && (
+            <div className="flex flex-wrap items-center gap-1.5 px-3 pt-3">
               {imageAttachments.images.map((img) => (
                 <ImageChip
                   key={img.id}
@@ -1481,18 +1507,6 @@ export default function PromptInput({
                   />
                 );
               })}
-              {activeSkills.map((skill) => (
-                <SelectionChip
-                  key={skill.filePath}
-                  icon={Blocks}
-                  label={skill.name}
-                  title={skill.description ?? skill.filePath}
-                  removeLabel={`Remove the ${skill.name} skill`}
-                  onRemove={() => {
-                    setActiveSkills((prev) => prev.filter((s) => s.filePath !== skill.filePath));
-                  }}
-                />
-              ))}
               {attachedDocumentPaths.map((f) => (
                 <AttachedFileChip
                   key={f}
@@ -1533,49 +1547,49 @@ export default function PromptInput({
             </div>
           )}
 
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              syncCaret(e.target);
-              setHistoryIndex(null);
-            }}
-            onKeyUp={(e) => {
-              syncCaret(e.currentTarget);
-            }}
-            onClick={(e) => {
-              syncCaret(e.currentTarget);
-            }}
-            onSelect={(e) => {
-              syncCaret(e.currentTarget);
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={(e) => {
-              const items = Array.from(e.clipboardData.items).filter(
-                (it) => it.kind === 'file' && it.type.startsWith('image/'),
-              );
-              if (items.length === 0) return;
-              e.preventDefault();
-              for (const item of items) {
-                const blob = item.getAsFile();
-                if (blob) imageAttachments.addBlob(blob);
-              }
-            }}
-            placeholder={
-              missionPreview
-                ? activeSession
-                  ? targetChildSessionId
-                    ? 'Steer the selected child session…'
-                    : 'Direct the orchestrator…'
-                  : 'Describe the mission objective…'
-                : isSpecMode
-                  ? 'Describe what to build in spec mode...'
-                  : 'What would you like to work on?  (/ for skills, @ for files)'
-            }
-            rows={1}
-            className="w-full bg-transparent px-4 pt-3 pb-2 text-sm text-droid-text placeholder-droid-text-muted/50 resize-none focus:outline-none min-h-[44px] max-h-[200px]"
-          />
+          <div className="relative">
+            <DraftSelections items={draftSelections} onWidthChange={setSelectionsIndent} />
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                syncCaret(e.target);
+                setHistoryIndex(null);
+              }}
+              onKeyUp={(e) => {
+                syncCaret(e.currentTarget);
+              }}
+              onClick={(e) => {
+                syncCaret(e.currentTarget);
+              }}
+              onSelect={(e) => {
+                syncCaret(e.currentTarget);
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={(e) => {
+                const items = Array.from(e.clipboardData.items).filter(
+                  (it) => it.kind === 'file' && it.type.startsWith('image/'),
+                );
+                if (items.length === 0) return;
+                e.preventDefault();
+                for (const item of items) {
+                  const blob = item.getAsFile();
+                  if (blob) imageAttachments.addBlob(blob);
+                }
+              }}
+              // A staged skill or plugin already says what this prompt will do,
+              // and the hint would only crowd it off the line.
+              placeholder={draftSelections.length > 0 ? '' : promptPlaceholder}
+              rows={1}
+              // A selection occupies the start of the first line, so the draft
+              // starts after it and the placeholder stays out from under it.
+              style={{
+                textIndent: selectionsIndent === 0 ? undefined : `${String(selectionsIndent)}px`,
+              }}
+              className="w-full bg-transparent px-4 pt-3 pb-2 text-sm text-droid-text placeholder-droid-text-muted/50 resize-none focus:outline-none min-h-[44px] max-h-[200px]"
+            />
+          </div>
 
           {/* Toolbar — one seamless surface with the textarea, no divider line */}
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">

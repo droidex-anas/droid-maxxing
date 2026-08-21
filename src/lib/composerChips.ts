@@ -1,8 +1,9 @@
-// Which chip Backspace deletes when the draft is empty.
+// What Backspace deletes when the draft is empty.
 //
-// The chip row renders Visualize, pasted images, image attachments, skills, then
-// documents, so unwinding it in reverse means Backspace always removes the chip
-// nearest the caret, and a skill or plugin leaves in a single press.
+// Backspace works outward from the caret, the way it does in text. Skills and
+// plugins sit on the caret's own line, so they go first, most recent first; the
+// attachment row above goes after that, unwound from its right edge. Each press
+// removes one whole thing.
 
 export interface ComposerChips {
   visualizeSelected: boolean;
@@ -20,13 +21,14 @@ export type ChipRemoval =
   | null;
 
 export function chipRemovedByBackspace(chips: ComposerChips): ChipRemoval {
-  const document = chips.documentPaths.at(-1);
-  if (document !== undefined) return { chip: 'attachment', path: document };
   const skill = chips.skillFilePaths.at(-1);
   if (skill !== undefined) return { chip: 'skill', filePath: skill };
+  if (chips.visualizeSelected) return { chip: 'visualize' };
+  const document = chips.documentPaths.at(-1);
+  if (document !== undefined) return { chip: 'attachment', path: document };
   const image = chips.imagePaths.at(-1);
   if (image !== undefined) return { chip: 'attachment', path: image };
   const pasted = chips.pastedImageIds.at(-1);
   if (pasted !== undefined) return { chip: 'pastedImage', id: pasted };
-  return chips.visualizeSelected ? { chip: 'visualize' } : null;
+  return null;
 }
