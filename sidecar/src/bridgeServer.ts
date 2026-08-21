@@ -1,18 +1,34 @@
-// The sidecar's single outbound surface: the authenticated WebSocket fan-out
-// plus the token-gated HTTP routes (browser assets, hot-path metrics). Owned
-// here so the packaged entry (index.ts) and the perf replay harness run the
-// exact same transport code the renderer talks to.
+// The sidecar's single outbound surface: authenticated WebSocket fan-out,
+// ordered event batching/replay, and token-gated HTTP routes. The packaged
+// entry and perf harness both use this exact transport path.
 
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { ClientCommand, ServerEvent } from './protocol.js';
+
 import { assertValidResponseFormat } from './appPrompt.js';
+import { BridgeEventBatcher, type BridgeEventBatchMetadata } from './bridgeEventBatcher.js';
+import { BridgeReplayBuffer, type SerializedEventBatch } from './bridgeReplayBuffer.js';
 import { resolveBrowserAssetPath } from './browser/browserPaths.js';
+import {
+  BRIDGE_PROTOCOL_VERSION,
+  type BridgeResetMessage,
+  type ClientCommand,
+  type ServerEvent,
+  type ServerEventBatch,
+  type ServerWireMessage,
+} from './protocol.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 const HOST = '127.0.0.1';
+const SOFT_CLIENT_BUFFER_BYTES = 512 * 1024;
+const HARD_CLIENT_BUFFER_BYTES = 8 * 1024 * 1024;
+const CLIENT_CLOSE_DRAIN_MS = 250;
+
+interface BridgeClient {
+  supportsEventBatches: boolean;
+}
 
 export interface BridgeServer {
   readonly port: number;
@@ -28,8 +44,10 @@ export function startBridgeServer(options: {
   assetToken: string;
   onCommand: (command: ClientCommand) => Promise<void>;
 }): BridgeServer {
-  const clients = new Set<WebSocket>();
+  const clients = new Map<WebSocket, BridgeClient>();
+  const replay = new BridgeReplayBuffer();
   let boundPort = options.requestedPort;
+  let closePromise: Promise<void> | null = null;
 
   const server = createServer((req, res) => {
     if (serveBrowserAsset(req, res, options.assetToken)) return;
@@ -38,18 +56,66 @@ export function startBridgeServer(options: {
   });
 
   const wss = new WebSocketServer({ server });
+  const batcher = new BridgeEventBatcher({
+    isUnderPressure: () => maxBufferedAmount(clients.keys()) >= SOFT_CLIENT_BUFFER_BYTES,
+    sendBatch,
+    onQueueChanged: (snapshot) => {
+      hotPathMetrics.recordTransportQueue({
+        pendingEvents: snapshot.pendingLogicalEvents,
+        pendingEstimatedBytes: snapshot.pendingEstimatedBytes,
+        oldestPendingAgeMs: snapshot.oldestPendingAgeMs,
+      });
+    },
+  });
 
   function broadcast(event: ServerEvent): void {
+    batcher.enqueue(event);
+  }
+
+  function sendBatch(batch: ServerEventBatch, metadata: BridgeEventBatchMetadata): void {
     const startedAt = performance.now();
-    const data = JSON.stringify(event);
-    let sentTo = 0;
-    for (const ws of clients) {
-      if (ws.readyState === ws.OPEN) {
+    const batchData = JSON.stringify(batch);
+    const replayEntry = replay.push(batch, batchData);
+    let legacyPayloads: readonly string[] | null = null;
+    let bytesSent = 0;
+    let sendOperations = 0;
+    let maxBufferedBytes = 0;
+
+    for (const [ws, client] of clients) {
+      if (ws.readyState !== ws.OPEN) continue;
+      maxBufferedBytes = Math.max(maxBufferedBytes, ws.bufferedAmount);
+      if (disconnectIfBackpressured(ws)) continue;
+
+      if (client.supportsEventBatches) {
+        ws.send(batchData);
+        bytesSent += replayEntry.bytes;
+        sendOperations += 1;
+        continue;
+      }
+
+      // Update safety: an older renderer has no `events.batch` contract. Keep
+      // it functional by unpacking the already-ordered batch into the legacy
+      // one-event wire format until the whole installed app has relaunched.
+      legacyPayloads ??= batch.events.map((entry) => JSON.stringify(entry.event));
+      for (const data of legacyPayloads) {
+        if (disconnectIfBackpressured(ws)) break;
         ws.send(data);
-        sentTo += 1;
+        bytesSent += Buffer.byteLength(data);
+        sendOperations += 1;
       }
     }
-    hotPathMetrics.recordTransport(performance.now() - startedAt, Buffer.byteLength(data), sentTo);
+
+    hotPathMetrics.recordTransport(performance.now() - startedAt, bytesSent, sendOperations);
+    hotPathMetrics.recordTransportBatch({
+      logicalEvents: metadata.logicalEvents,
+      deliveredEvents: metadata.deliveredEvents,
+      bytes: replayEntry.bytes,
+      queueDelayMs: metadata.queueDelayMs,
+      immediate: metadata.immediate,
+    });
+    hotPathMetrics.recordClientBufferedAmount(maxBufferedBytes);
+    const replayState = replay.snapshot();
+    hotPathMetrics.recordReplayBuffer(replayState.batches, replayState.bytes);
   }
 
   const ready = new Promise<void>((resolve, reject) => {
@@ -71,25 +137,87 @@ export function startBridgeServer(options: {
       ws.close(1008, 'unauthorized');
       return;
     }
-    clients.add(ws);
+
+    const client: BridgeClient = {
+      supportsEventBatches:
+        url.searchParams.get('bridgeProtocol') === String(BRIDGE_PROTOCOL_VERSION),
+    };
+    if (client.supportsEventBatches && !resumeClient(ws, url)) return;
+    clients.set(ws, client);
 
     ws.on('message', (raw) => void handleMessage(ws, raw));
-
     ws.on('close', () => clients.delete(ws));
     ws.on('error', () => clients.delete(ws));
   });
+
+  function resumeClient(ws: WebSocket, url: URL): boolean {
+    const resumeGeneration = url.searchParams.get('resumeGeneration');
+    const resumeSeqValue = url.searchParams.get('resumeSeq');
+    if (resumeGeneration === null && resumeSeqValue === null) return true;
+
+    // A reset/replay cursor must never acknowledge logical events that are
+    // still sitting in the timer window. Flush before taking the cursor so
+    // every acknowledged sequence is either replayable or explicitly outside
+    // the retained window.
+    batcher.flush();
+    const current = batcher.snapshot();
+    const resumeSeq = nonNegativeInteger(resumeSeqValue);
+    if (resumeGeneration === null || resumeSeq === null) {
+      sendReset(ws, current.lastSeq, 'invalid_resume');
+      return true;
+    }
+
+    if (resumeGeneration !== batcher.generation) {
+      sendReset(ws, current.lastSeq, 'generation_changed');
+      return true;
+    }
+    if (resumeSeq > current.lastSeq) {
+      sendReset(ws, current.lastSeq, 'invalid_resume');
+      return true;
+    }
+
+    const missed = replay.replayAfter(resumeSeq);
+    if (missed === null) {
+      sendReset(ws, current.lastSeq, 'replay_unavailable');
+      return true;
+    }
+    return replayBatches(ws, missed);
+  }
+
+  function replayBatches(ws: WebSocket, missed: readonly SerializedEventBatch[]): boolean {
+    const startedAt = performance.now();
+    let replayedBytes = 0;
+    let replayedEvents = 0;
+    let sendOperations = 0;
+    for (const entry of missed) {
+      if (disconnectIfBackpressured(ws)) return false;
+      ws.send(entry.data);
+      replayedBytes += entry.bytes;
+      replayedEvents += entry.eventCount;
+      sendOperations += 1;
+    }
+    if (missed.length > 0) {
+      hotPathMetrics.recordTransport(performance.now() - startedAt, replayedBytes, sendOperations);
+      hotPathMetrics.recordReplay(missed.length, replayedEvents, replayedBytes);
+    }
+    return true;
+  }
+
+  function sendReset(ws: WebSocket, lastSeq: number, reason: BridgeResetMessage['reason']): void {
+    sendDirectWire(ws, {
+      type: 'bridge.reset',
+      generation: batcher.generation,
+      lastSeq,
+      reason,
+    });
+  }
 
   async function handleMessage(ws: WebSocket, raw: RawData): Promise<void> {
     let parsed: unknown;
     try {
       parsed = JSON.parse(messageText(raw));
     } catch {
-      ws.send(
-        JSON.stringify({
-          type: 'error',
-          message: 'Invalid JSON command',
-        } satisfies ServerEvent),
-      );
+      sendDirectWire(ws, { type: 'error', message: 'Invalid JSON command' });
       return;
     }
     try {
@@ -98,13 +226,28 @@ export function startBridgeServer(options: {
       }
       await options.onCommand(parsed as ClientCommand);
     } catch (err) {
-      ws.send(
-        JSON.stringify({
-          type: 'error',
-          message: err instanceof Error ? err.message : String(err),
-        } satisfies ServerEvent),
-      );
+      sendDirectWire(ws, {
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
+  }
+
+  function sendDirectWire(ws: WebSocket, message: ServerWireMessage): void {
+    if (ws.readyState !== ws.OPEN || disconnectIfBackpressured(ws)) return;
+    const startedAt = performance.now();
+    const data = JSON.stringify(message);
+    ws.send(data);
+    hotPathMetrics.recordTransport(performance.now() - startedAt, Buffer.byteLength(data), 1);
+  }
+
+  function disconnectIfBackpressured(ws: WebSocket): boolean {
+    hotPathMetrics.recordClientBufferedAmount(ws.bufferedAmount);
+    if (ws.bufferedAmount < HARD_CLIENT_BUFFER_BYTES) return false;
+    clients.delete(ws);
+    hotPathMetrics.recordBackpressureDisconnect(ws.bufferedAmount);
+    ws.terminate();
+    return true;
   }
 
   function messageText(raw: RawData): string {
@@ -180,6 +323,34 @@ export function startBridgeServer(options: {
     return 'application/octet-stream';
   }
 
+  function close(): Promise<void> {
+    if (closePromise) return closePromise;
+    batcher.close();
+    closePromise = new Promise<void>((resolve) => {
+      let pendingServers = 2;
+      const settled = () => {
+        pendingServers -= 1;
+        if (pendingServers === 0) resolve();
+      };
+      const forceClose = setTimeout(() => {
+        for (const ws of clients.keys()) ws.terminate();
+        clients.clear();
+      }, CLIENT_CLOSE_DRAIN_MS);
+      forceClose.unref();
+
+      for (const ws of clients.keys()) {
+        if (ws.readyState === ws.OPEN) ws.close(1001, 'sidecar shutting down');
+        else ws.terminate();
+      }
+      wss.close(() => {
+        clearTimeout(forceClose);
+        settled();
+      });
+      server.close(settled);
+    });
+    return closePromise;
+  }
+
   return {
     get port() {
       return boundPort;
@@ -187,18 +358,18 @@ export function startBridgeServer(options: {
     ready,
     broadcast,
     browserAssetUrl,
-    close: () =>
-      new Promise<void>((resolve) => {
-        // A renderer that stalls on the close handshake must not hold
-        // shutdown hostage: destroy live sockets, then close the servers.
-        for (const ws of clients) ws.terminate();
-        clients.clear();
-        let pending = 2;
-        const settled = () => {
-          if (--pending === 0) resolve();
-        };
-        wss.close(settled);
-        server.close(settled);
-      }),
+    close,
   };
+}
+
+function maxBufferedAmount(clients: Iterable<WebSocket>): number {
+  let max = 0;
+  for (const ws of clients) max = Math.max(max, ws.bufferedAmount);
+  return max;
+}
+
+function nonNegativeInteger(value: string | null): number | null {
+  if (value === null || value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }

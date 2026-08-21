@@ -23,7 +23,7 @@ import { buildReplayPlan, type PerfScenarioSpec, type ReplayTurnPlan } from './s
 import { ReplayFactoryRuntime, type ReplayYieldReport } from './replayRuntime.js';
 import { evaluateBudgets } from './budgets.js';
 import type { ReplayReport } from './report.js';
-import type { ServerEvent, TranscriptEvent } from '../protocol.js';
+import type { ServerEvent, ServerWireMessage, TranscriptEvent } from '../protocol.js';
 
 export interface ReplayRunOptions {
   spec: PerfScenarioSpec;
@@ -132,7 +132,9 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   hotPathMetrics.enable();
   hotPathMetrics.setGaugeProvider(() => liveManager.resourceCounts());
 
-  const client = new WebSocket(`ws://127.0.0.1:${String(server.port)}?token=${token}`);
+  const client = new WebSocket(
+    `ws://127.0.0.1:${String(server.port)}?token=${token}&bridgeProtocol=2`,
+  );
   const sessionIds: (string | undefined)[] = [];
   const clientOpened = new Promise<void>((resolve, reject) => {
     client.once('open', () => {
@@ -145,26 +147,28 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   client.on('message', (raw) => {
     const data = messageText(raw);
     bytesReceived += Buffer.byteLength(data);
-    let event: ServerEvent;
+    let wireMessage: ServerWireMessage;
     try {
-      event = JSON.parse(data) as ServerEvent;
+      wireMessage = JSON.parse(data) as ServerWireMessage;
     } catch {
       return;
     }
-    if (event.type === 'session.created') {
-      const index = numberFromClientRef(event.clientRef);
-      sessionIds[index] = event.session.appSessionId;
-      for (const waiter of createdWaiters.splice(0)) waiter(event.session.appSessionId);
-      return;
-    }
-    if (event.type === 'event.appended') {
-      const { event: transcript } = event;
-      appended.push({
-        at: performance.timeOrigin + performance.now(),
-        eventTs: transcript.ts,
-        kind: transcript.kind,
-        toolUseId: transcript.toolUseId,
-      });
+    for (const event of eventsFromWireMessage(wireMessage)) {
+      if (event.type === 'session.created') {
+        const index = numberFromClientRef(event.clientRef);
+        sessionIds[index] = event.session.appSessionId;
+        for (const waiter of createdWaiters.splice(0)) waiter(event.session.appSessionId);
+        continue;
+      }
+      if (event.type === 'event.appended') {
+        const { event: transcript } = event;
+        appended.push({
+          at: performance.timeOrigin + performance.now(),
+          eventTs: transcript.ts,
+          kind: transcript.kind,
+          toolUseId: transcript.toolUseId,
+        });
+      }
     }
   });
   await clientOpened;
@@ -303,17 +307,20 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
 
   async function cleanup(): Promise<void> {
     client.close();
-    await server.close();
     try {
       await manager?.shutdown();
     } finally {
-      hotPathMetrics.disable();
-      hotPathMetrics.reset();
-      hotPathMetrics.clearGaugeProvider();
-      // Assigning undefined would store the literal string "undefined".
-      if (previousHome === undefined) delete process.env.HOME;
-      else process.env.HOME = previousHome;
-      rmSync(home, { recursive: true, force: true });
+      try {
+        await server.close();
+      } finally {
+        hotPathMetrics.disable();
+        hotPathMetrics.reset();
+        hotPathMetrics.clearGaugeProvider();
+        // Assigning undefined would store the literal string "undefined".
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        rmSync(home, { recursive: true, force: true });
+      }
     }
   }
 }
@@ -322,6 +329,12 @@ function messageText(raw: unknown): string {
   if (typeof raw === 'string') return raw;
   if (Array.isArray(raw)) return Buffer.concat(raw as Buffer[]).toString('utf8');
   return Buffer.from(raw as Buffer).toString('utf8');
+}
+
+function eventsFromWireMessage(message: ServerWireMessage): ServerEvent[] {
+  if (message.type === 'events.batch') return message.events.map((entry) => entry.event);
+  if (message.type === 'bridge.reset') return [];
+  return [message];
 }
 
 function sendCommand(client: WebSocket, command: Parameters<SessionManager['handle']>[0]): void {

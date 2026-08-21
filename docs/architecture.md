@@ -86,6 +86,21 @@ performance change.
 - The sidecar entry (`sidecar/src/index.ts`) enables the collector at
   readiness and samples `SessionManager.resourceCounts()` for the gauges.
 
+### Ordered bridge transport
+
+The sidecar assigns process-generation sequence numbers at the single outbound
+bridge boundary and groups ordinary events into short bounded batches. Only
+replaceable session/context telemetry can collapse, and never across a
+non-replaceable event. Approvals, questions, errors, lifecycle boundaries,
+history responses, and turn settlement flush immediately.
+
+Batch-capable renderers advertise bridge protocol 2, apply one wire batch as one
+ordered store transition, and reconnect with the last fully applied generation
+and sequence. The sidecar retains a bounded same-process replay window and
+terminates clients whose socket buffers cross the hard ceiling. Older renderers
+that do not advertise batching continue receiving the legacy one-event format,
+which keeps application updates safe across temporary mixed-version states.
+
 ### Renderer metrics
 
 - `src/lib/rendererPerf.ts` measures bridge receive → store commit → next

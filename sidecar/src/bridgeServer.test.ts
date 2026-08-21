@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { WebSocket } from 'ws';
+
 import { startBridgeServer } from './bridgeServer.js';
-import type { ServerEvent } from './protocol.js';
-import WebSocket from 'ws';
+import { BRIDGE_PROTOCOL_VERSION, type ServerEvent, type ServerEventBatch } from './protocol.js';
 
 interface Harness {
   port: number;
@@ -34,7 +35,7 @@ async function withServer(
   }
 }
 
-test('broadcast reaches a connected authenticated client', async () => {
+test('legacy authenticated client receives the one-event update-safe wire format', async () => {
   await withServer(async (harness) => {
     const received: string[] = [];
     const socket = new WebSocket(`ws://127.0.0.1:${String(harness.port)}?token=${harness.token}`);
@@ -44,7 +45,101 @@ test('broadcast reaches a connected authenticated client', async () => {
 
     harness.broadcast({ type: 'connection', status: 'connected' });
     await waitFor(() => received.length === 1);
-    assert.match(received[0] ?? '', /"connection"/);
+    assert.deepEqual(JSON.parse(received[0] ?? ''), {
+      type: 'connection',
+      status: 'connected',
+    });
+    await closeSocket(socket);
+  });
+});
+
+test('batch-capable client receives one ordered event envelope', async () => {
+  await withServer(async (harness) => {
+    const received: string[] = [];
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}`,
+    );
+    const opened = new Promise<void>((resolve) => socket.once('open', resolve));
+    socket.on('message', (raw) => received.push(String(raw)));
+    await opened;
+
+    harness.broadcast({ type: 'mission.progress', appSessionId: 'app', entries: [] });
+    harness.broadcast({ type: 'mission.progress', appSessionId: 'app', entries: [] });
+    await waitFor(() => received.length === 1);
+
+    const batch = JSON.parse(received[0] ?? '') as ServerEventBatch;
+    assert.equal(batch.type, 'events.batch');
+    assert.equal(batch.firstSeq, 1);
+    assert.equal(batch.lastSeq, 2);
+    assert.deepEqual(
+      batch.events.map((entry) => entry.event.type),
+      ['mission.progress', 'mission.progress'],
+    );
+    await closeSocket(socket);
+  });
+});
+
+test('same-process reconnect replays batches after the acknowledged sequence', async () => {
+  await withServer(async (harness) => {
+    const firstReceived: string[] = [];
+    const first = new WebSocket(
+      `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}`,
+    );
+    const firstOpened = new Promise<void>((resolve) => first.once('open', resolve));
+    first.on('message', (raw) => firstReceived.push(String(raw)));
+    await firstOpened;
+
+    harness.broadcast({ type: 'connection', status: 'connected' });
+    await waitFor(() => firstReceived.length === 1);
+    const acknowledged = JSON.parse(firstReceived[0] ?? '') as ServerEventBatch;
+    await closeSocket(first);
+
+    harness.broadcast({
+      type: 'runtime.updated',
+      status: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
+    });
+
+    const replayed: string[] = [];
+    const second = new WebSocket(
+      `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}&resumeGeneration=${encodeURIComponent(acknowledged.generation)}&resumeSeq=${String(acknowledged.lastSeq)}`,
+    );
+    const secondOpened = new Promise<void>((resolve) => second.once('open', resolve));
+    second.on('message', (raw) => replayed.push(String(raw)));
+    await secondOpened;
+    await waitFor(() => replayed.length === 1);
+
+    const batch = JSON.parse(replayed[0] ?? '') as ServerEventBatch;
+    assert.equal(batch.firstSeq, acknowledged.lastSeq + 1);
+    assert.equal(batch.events[0]?.event.type, 'runtime.updated');
+    await closeSocket(second);
+  });
+});
+
+test('resume reset flushes pending sequences before admitting the client', async () => {
+  await withServer(async (harness) => {
+    harness.broadcast({ type: 'mission.progress', appSessionId: 'app', entries: [] });
+
+    const received: string[] = [];
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}&resumeSeq=999`,
+    );
+    const opened = new Promise<void>((resolve) => socket.once('open', resolve));
+    socket.on('message', (raw) => received.push(String(raw)));
+    await opened;
+    await waitFor(() => received.length === 1);
+    await sleep(40);
+
+    assert.equal(received.length, 1);
+    const reset = JSON.parse(received[0] ?? '') as {
+      type: string;
+      generation: string;
+      lastSeq: number;
+      reason: string;
+    };
+    assert.equal(reset.type, 'bridge.reset');
+    assert.equal(typeof reset.generation, 'string');
+    assert.equal(reset.lastSeq, 1);
+    assert.equal(reset.reason, 'invalid_resume');
     await closeSocket(socket);
   });
 });
@@ -73,9 +168,6 @@ test('perf metrics endpoint requires the bridge token', async () => {
 });
 
 function closeSocket(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
-  // Await the close handshake so withServer's teardown never races a socket
-  // that is still winding down; a lost handshake must fail the test rather
-  // than hang the untimed suite.
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('socket close timed out')), timeoutMs);
     socket.once('close', () => {
@@ -84,6 +176,10 @@ function closeSocket(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
     });
     socket.close();
   });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
