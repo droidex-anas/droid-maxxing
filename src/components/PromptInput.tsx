@@ -64,8 +64,9 @@ import { hasCompleteAppBlock } from './appBlockRuntime';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
 import { composerTextAfterSeed, resetComposerAfterSubmit } from '../lib/composerReset';
-import { rankMenuCandidates } from '../lib/composerMenuRanking';
 import { chipRemovedByBackspace } from '../lib/composerChips';
+import { composerTrigger, menuItemsForTrigger } from './composer/menuItems';
+import { useDraftSelections } from './composer/useDraftSelections';
 import {
   childRuntimeSubmitTarget,
   childSessionLabel,
@@ -75,18 +76,9 @@ import {
   visibleSessionTarget,
   type VisibleSessionTarget,
 } from '../lib/childSessions';
-import {
-  AppWindow,
-  ArrowUp,
-  Blocks,
-  ChevronDown,
-  LoaderCircle,
-  Plus,
-  SlidersHorizontal,
-  Square,
-} from 'lucide-react';
+import { ArrowUp, ChevronDown, LoaderCircle, SlidersHorizontal, Square } from 'lucide-react';
 import AddMenu from './composer/AddMenu';
-import { DraftSelections, type DraftSelection } from './composer/DraftSelections';
+import { DraftSelections } from './composer/DraftSelections';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
 import ModelSelectorPopover from './ModelSelectorPopover';
 import AutonomySelector from './AutonomySelector';
@@ -174,33 +166,10 @@ export function shouldStopTurnStarting({
   );
 }
 
-interface Trigger {
-  kind: 'slash' | 'file';
-  query: string;
-  start: number;
-  end: number;
-}
-
-function getTrigger(text: string, caret: number): Trigger | null {
-  const upto = text.slice(0, caret);
-  const m = /(^|\s)([/@][^\s]*)$/.exec(upto);
-  if (!m) return null;
-  const token = m[2];
-  const start = caret - token.length;
-  return {
-    kind: token.startsWith('/') ? 'slash' : 'file',
-    query: token.slice(1),
-    start,
-    end: caret,
-  };
-}
-
 function basename(p: string): string {
   const i = p.lastIndexOf('/');
   return i >= 0 ? p.slice(i + 1) : p;
 }
-
-// The menu offers one Compact row; these aliases stay accepted when typed.
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -277,54 +246,26 @@ export default function PromptInput({
   // read-only lightbox instead of the composer's image viewer.
   const [viewerPath, setViewerPath] = useState<string | null>(null);
   const [feedbackReport, setFeedbackReport] = useState<FeedbackReportRequest | null>(null);
-  const [activeSkills, setActiveSkillsState] = useState<SkillInfo[]>([]);
-  const setActiveSkills = (value: SetStateAction<SkillInfo[]>) => {
-    composerRevisionRef.current += 1;
-    setActiveSkillsState(value);
-  };
-  // Visualize is the /visualize command held as a chip, so the words in the
-  // draft stay the user's own. Submitting re-attaches the command.
-  const [visualizeSelected, setVisualizeSelectedState] = useState(false);
-  const setVisualizeSelected = (value: boolean) => {
-    composerRevisionRef.current += 1;
-    setVisualizeSelectedState(value);
-  };
+  const {
+    activeSkills,
+    setActiveSkills,
+    visualizeSelected,
+    setVisualizeSelected,
+    items: draftSelections,
+    hasSelection,
+    indentPx: selectionsIndent,
+    setIndentPx: setSelectionsIndent,
+    clear: clearDraftSelections,
+  } = useDraftSelections(
+    useCallback(() => {
+      composerRevisionRef.current += 1;
+    }, []),
+  );
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const addMenuAnchorRef = useRef<HTMLDivElement>(null);
-  const addMenuTriggerRef = useRef<HTMLButtonElement>(null);
   // Skills and plugins live on the draft's first line; attachments keep their own
   // row above it. Backspace on an empty draft unwinds both.
-  const hasChips =
-    visualizeSelected ||
-    activeSkills.length > 0 ||
-    attachedFiles.length > 0 ||
-    imageAttachments.images.length > 0;
   const hasAttachmentChips = attachedFiles.length > 0 || imageAttachments.images.length > 0;
-  const [selectionsIndent, setSelectionsIndent] = useState(0);
-  const draftSelections: DraftSelection[] = [
-    ...(visualizeSelected
-      ? [
-          {
-            key: 'visualize',
-            icon: AppWindow,
-            label: 'Visualize',
-            removeLabel: 'Remove Visualize',
-            onRemove: () => {
-              setVisualizeSelected(false);
-            },
-          },
-        ]
-      : []),
-    ...activeSkills.map((skill) => ({
-      key: skill.filePath,
-      icon: Blocks,
-      label: skill.name,
-      removeLabel: `Remove the ${skill.name} skill`,
-      onRemove: () => {
-        setActiveSkills((prev) => prev.filter((s) => s.filePath !== skill.filePath));
-      },
-    })),
-  ];
+  const hasChips = hasSelection || hasAttachmentChips;
 
   const removeLastChip = () => {
     const { images, files: documents } = partitionImagePaths(attachedFiles);
@@ -560,7 +501,7 @@ export default function PromptInput({
     },
   ];
 
-  const trigger = useMemo(() => getTrigger(input, caret), [input, caret]);
+  const trigger = useMemo(() => composerTrigger(input, caret), [input, caret]);
   const overlayOpen = [trigger, modelsOpen, addMenuOpen, feedbackReport, isLive && sendHover].some(
     Boolean,
   );
@@ -646,41 +587,17 @@ export default function PromptInput({
     trigger?.start,
   ]);
 
-  const menuItems = useMemo<MenuItem[]>(() => {
-    if (!trigger) return [];
-    const q = trigger.query.toLowerCase();
-    if (trigger.kind === 'slash') {
-      // Commands match on their name alone, as they always have; only skills,
-      // whose names are terse, are also reachable through their description.
-      const rankedCommands = rankMenuCandidates(q, slashCommands, (c) => ({
-        name: c.cmd.slice(1),
-      }));
-      const rankedSkills = rankMenuCandidates(q, invocableSkills, (s) => ({
-        name: s.name,
-        description: s.description,
-      }));
-      const cmds = rankedCommands.items.map<MenuItem>((command) => ({ type: 'command', command }));
-      const skills = rankedSkills.items
-        .slice(0, 40)
-        .map<MenuItem>((skill) => ({ type: 'skill', skill }));
-      // Whichever group holds the better match leads, so typing a skill's exact
-      // name puts it first instead of behind every command.
-      return rankedSkills.bestRank < rankedCommands.bestRank
-        ? [...skills, ...cmds]
-        : [...cmds, ...skills];
-    }
-    // file mode
-    const matches = files
-      .filter((f) => f.toLowerCase().includes(q))
-      .sort((a, b) => {
-        const aw = basename(a).toLowerCase().startsWith(q) ? 0 : 1;
-        const bw = basename(b).toLowerCase().startsWith(q) ? 0 : 1;
-        return aw - bw || a.length - b.length;
-      })
-      .slice(0, 50)
-      .map<MenuItem>((path) => ({ type: 'file', path }));
-    return matches;
-  }, [trigger, files, invocableSkills, slashCommands]);
+  const menuItems = useMemo<MenuItem[]>(
+    () =>
+      trigger
+        ? menuItemsForTrigger(trigger, {
+            commands: slashCommands,
+            skills: invocableSkills,
+            files,
+          })
+        : [],
+    [trigger, files, invocableSkills, slashCommands],
+  );
 
   const menuOpen = !!trigger && menuItems.length > 0;
 
@@ -712,14 +629,13 @@ export default function PromptInput({
   const clearAndDiscardImages = imageAttachments.clearAndDiscard;
   useEffect(() => {
     setHistoryIndex(null);
-    setActiveSkills([]);
+    clearDraftSelections();
     setAttachedFiles([]);
-    setVisualizeSelected(false);
     // Both viewers show a dropped attachment, so they cannot outlive it.
     setViewerImageId(null);
     setViewerPath(null);
     clearAndDiscardImages();
-  }, [activeSession?.appSessionId, clearAndDiscardImages]);
+  }, [activeSession?.appSessionId, clearAndDiscardImages, clearDraftSelections]);
 
   // Welcome-screen suggestion cards and saved notes seed the composer through
   // the store so those surfaces and this input stay decoupled. The pendingCaret
@@ -737,7 +653,7 @@ export default function PromptInput({
     // Consume the seed so a later remount (e.g. toggling Mission Control, which
     // unmounts this input) does not re-apply stale text over the user's edits.
     dispatch({ type: 'CLEAR_COMPOSER_SEED' });
-  }, [composerSeed, input, dispatch]);
+  }, [composerSeed, input, dispatch, setVisualizeSelected]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -906,9 +822,8 @@ export default function PromptInput({
         },
         resetDraft: () => {
           setInput('');
-          setActiveSkills([]);
+          clearDraftSelections();
           setAttachedFiles([]);
-          setVisualizeSelected(false);
         },
       });
     };
@@ -1598,43 +1513,21 @@ export default function PromptInput({
 
           {/* Toolbar — one seamless surface with the textarea, no divider line */}
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
-            <div className="relative shrink-0" ref={addMenuAnchorRef}>
-              <button
-                ref={addMenuTriggerRef}
-                onClick={() => {
-                  setAddMenuOpen((open) => !open);
-                }}
-                className={`p-1.5 rounded-lg transition-colors ${
-                  addMenuOpen
-                    ? 'bg-droid-bg/60 text-droid-text'
-                    : 'text-droid-text-muted hover:text-droid-text hover:bg-droid-bg/50'
-                }`}
-                title="Add files or a plugin"
-                aria-haspopup="menu"
-                aria-expanded={addMenuOpen}
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-              <AddMenu
-                open={addMenuOpen}
-                anchorRef={addMenuAnchorRef}
-                triggerRef={addMenuTriggerRef}
-                visualizeSelected={visualizeSelected}
-                // Both rows hand focus to the draft, which is where the prompt
-                // continues once the menu has added to it.
-                onAttachFiles={() => {
-                  textareaRef.current?.focus();
-                  void handleAttachFiles();
-                }}
-                onToggleVisualize={() => {
-                  setVisualizeSelected(!visualizeSelected);
-                  textareaRef.current?.focus();
-                }}
-                onClose={() => {
-                  setAddMenuOpen(false);
-                }}
-              />
-            </div>
+            <AddMenu
+              open={addMenuOpen}
+              onOpenChange={setAddMenuOpen}
+              visualizeSelected={visualizeSelected}
+              // Both rows hand focus to the draft, which is where the prompt
+              // continues once the menu has added to it.
+              onAttachFiles={() => {
+                textareaRef.current?.focus();
+                void handleAttachFiles();
+              }}
+              onToggleVisualize={() => {
+                setVisualizeSelected(!visualizeSelected);
+                textareaRef.current?.focus();
+              }}
+            />
 
             <div className="relative shrink-0">
               <button
