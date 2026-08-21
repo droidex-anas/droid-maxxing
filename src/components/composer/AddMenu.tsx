@@ -35,11 +35,9 @@ function MenuRow({
     >
       <Icon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
       <span className="shrink-0 text-[12.5px] font-medium text-droid-text">{label}</span>
-      <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/75">
-        {hint}
-      </span>
+      <span className="min-w-0 truncate text-[11.5px] text-droid-text-muted/75">{hint}</span>
       {checked && (
-        <span className="shrink-0 text-[10.5px] font-medium" style={{ color: ACCENT }}>
+        <span className="ml-auto shrink-0 text-[10.5px] font-medium" style={{ color: ACCENT }}>
           Added
         </span>
       )}

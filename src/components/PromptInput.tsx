@@ -80,7 +80,6 @@ import {
   ChevronDown,
   LoaderCircle,
   Plus,
-  Puzzle,
   SlidersHorizontal,
   Square,
 } from 'lucide-react';
@@ -1482,7 +1481,6 @@ export default function PromptInput({
               {activeSkills.map((skill) => (
                 <SelectionChip
                   key={skill.filePath}
-                  icon={Puzzle}
                   label={skill.name}
                   title={skill.description ?? skill.filePath}
                   removeLabel={`Remove the ${skill.name} skill`}

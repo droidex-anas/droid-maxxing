@@ -6,7 +6,9 @@ const accentMix = (pct: number) =>
 
 // The composer's accent chip for a selection the next prompt carries: a skill,
 // or an invoked plugin such as Visualize. Attachments use their own neutral
-// chips, so the accent reads as "this changes how the turn runs".
+// chips, so the accent reads as "this changes how the turn runs". A plugin
+// brings its own icon; a skill is its name alone, since one shared glyph on
+// every skill says nothing about which one is selected.
 export function SelectionChip({
   icon: Icon,
   label,
@@ -14,7 +16,7 @@ export function SelectionChip({
   removeLabel,
   onRemove,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   label: string;
   title?: string;
   removeLabel: string;
@@ -30,7 +32,7 @@ export function SelectionChip({
       }}
       title={title}
     >
-      <Icon className="h-3 w-3" />
+      {Icon && <Icon className="h-3 w-3" />}
       {label}
       <button
         onClick={onRemove}
