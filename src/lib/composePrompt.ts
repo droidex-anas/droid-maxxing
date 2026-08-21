@@ -15,6 +15,24 @@ export function promptTextWithVisualize(text: string, visualizeSelected: boolean
   return `${VISUALIZE_COMMAND.cmd} ${text}`.trim();
 }
 
+/** A draft that runs as an app command instead of reaching the agent. */
+export type SubmitCommand = 'mission' | 'compact';
+
+const COMPACT_COMMANDS = new Set(['/compact', '/compaction', '/compression']);
+
+// A command runs only when the draft holds nothing but the command. Staged
+// skills, plugins, and files make the same words a prompt, so `/compact` with a
+// file attached asks the agent about compaction rather than compacting the
+// session and dropping what was staged for it.
+export function submitCommandFor(
+  text: string,
+  staged: { visualizeSelected: boolean; skillCount: number; fileCount: number },
+): SubmitCommand | null {
+  if (staged.visualizeSelected || staged.skillCount > 0 || staged.fileCount > 0) return null;
+  if (text === '/mission') return 'mission';
+  return COMPACT_COMMANDS.has(text) ? 'compact' : null;
+}
+
 export function responseFormatForPrompt(
   text: string,
   hasAppContext: boolean,

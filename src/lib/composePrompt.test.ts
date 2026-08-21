@@ -6,6 +6,7 @@ import {
   isVisualizeCommand,
   parseSlashSkillInvocation,
   promptTextWithVisualize,
+  submitCommandFor,
 } from './composePrompt';
 
 test('one selected skill uses the provider-native slash invocation', () => {
@@ -79,4 +80,24 @@ test('an existing App keeps follow-up prompts App-capable without another slash 
   assert.equal(responseFormatForPrompt('make the points larger', true), 'app-followup');
   assert.equal(responseFormatForPrompt('ordinary question', false), undefined);
   assert.equal(responseFormatForPrompt('/visualize a histogram', false), 'app-create');
+});
+
+const nothingStaged = { visualizeSelected: false, skillCount: 0, fileCount: 0 };
+
+test('a bare command runs as a command, including the compact aliases', () => {
+  assert.equal(submitCommandFor('/mission', nothingStaged), 'mission');
+  for (const alias of ['/compact', '/compaction', '/compression']) {
+    assert.equal(submitCommandFor(alias, nothingStaged), 'compact');
+  }
+  assert.equal(submitCommandFor('/compact this thread please', nothingStaged), null);
+  assert.equal(submitCommandFor('what does /compact do?', nothingStaged), null);
+});
+
+// Skills and files already made the same words a prompt. Visualize did not, so
+// staging it and typing /compact compacted the session and dropped the plugin.
+test('anything staged makes the same words a prompt instead of a command', () => {
+  assert.equal(submitCommandFor('/compact', { ...nothingStaged, visualizeSelected: true }), null);
+  assert.equal(submitCommandFor('/mission', { ...nothingStaged, visualizeSelected: true }), null);
+  assert.equal(submitCommandFor('/compact', { ...nothingStaged, skillCount: 1 }), null);
+  assert.equal(submitCommandFor('/mission', { ...nothingStaged, fileCount: 1 }), null);
 });

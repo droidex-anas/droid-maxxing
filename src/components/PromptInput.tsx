@@ -57,6 +57,7 @@ import {
   parseSlashSkillInvocation,
   promptTextWithVisualize,
   responseFormatForPrompt,
+  submitCommandFor,
   VISUALIZE_COMMAND,
 } from '../lib/composePrompt';
 import { hasCompleteAppBlock } from './appBlockRuntime';
@@ -200,7 +201,6 @@ function basename(p: string): string {
 }
 
 // The menu offers one Compact row; these aliases stay accepted when typed.
-const COMPACT_COMMANDS = new Set(['/compact', '/compaction', '/compression']);
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -291,6 +291,7 @@ export default function PromptInput({
   };
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const addMenuAnchorRef = useRef<HTMLDivElement>(null);
+  const addMenuTriggerRef = useRef<HTMLButtonElement>(null);
   // Skills and plugins live on the draft's first line; attachments keep their own
   // row above it. Backspace on an empty draft unwinds both.
   const hasChips =
@@ -919,13 +920,17 @@ export default function PromptInput({
       return;
     }
 
-    if (text === '/mission' && activeSkills.length === 0 && allFiles.length === 0) {
+    const submitCommand = submitCommandFor(text, {
+      visualizeSelected,
+      skillCount: activeSkills.length,
+      fileCount: allFiles.length,
+    });
+    if (submitCommand === 'mission') {
       dispatch({ type: 'TOGGLE_MISSION_CONTROL' });
       clearAfterSubmit();
       return;
     }
-
-    if (COMPACT_COMMANDS.has(text) && activeSkills.length === 0 && allFiles.length === 0) {
+    if (submitCommand === 'compact') {
       if (!primaryActionsEnabled) return;
       if (activeSession) compactSession(activeSession.appSessionId);
       clearAfterSubmit();
@@ -1595,6 +1600,7 @@ export default function PromptInput({
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
             <div className="relative shrink-0" ref={addMenuAnchorRef}>
               <button
+                ref={addMenuTriggerRef}
                 onClick={() => {
                   setAddMenuOpen((open) => !open);
                 }}
@@ -1612,10 +1618,17 @@ export default function PromptInput({
               <AddMenu
                 open={addMenuOpen}
                 anchorRef={addMenuAnchorRef}
+                triggerRef={addMenuTriggerRef}
                 visualizeSelected={visualizeSelected}
-                onAttachFiles={() => void handleAttachFiles()}
+                // Both rows hand focus to the draft, which is where the prompt
+                // continues once the menu has added to it.
+                onAttachFiles={() => {
+                  textareaRef.current?.focus();
+                  void handleAttachFiles();
+                }}
                 onToggleVisualize={() => {
                   setVisualizeSelected(!visualizeSelected);
+                  textareaRef.current?.focus();
                 }}
                 onClose={() => {
                   setAddMenuOpen(false);

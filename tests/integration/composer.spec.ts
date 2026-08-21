@@ -23,9 +23,10 @@ test('the plus button offers plugins and Visualize joins the prompt as a selecti
 
   // It sits on the draft's own first line, so that line starts after it and
   // typing continues from there.
+  // The indent lands in a layout effect after the selection commits, so poll it.
   const indent = () =>
     composer.evaluate((el) => Number.parseFloat(getComputedStyle(el).textIndent));
-  expect(await indent()).toBeGreaterThan(40);
+  await expect.poll(indent).toBeGreaterThan(40);
   await composer.pressSequentially('a chart of the last week');
   await expect(composer).toHaveValue('a chart of the last week');
   await expect(removeChip).toBeVisible();
@@ -34,7 +35,7 @@ test('the plus button offers plugins and Visualize joins the prompt as a selecti
   await page.getByTitle('Add files or a plugin').click();
   await menu.getByRole('menuitemcheckbox', { name: /Visualize/ }).click();
   await expect(removeChip).toHaveCount(0);
-  expect(await indent()).toBe(0);
+  await expect.poll(indent).toBe(0);
 
   // One Backspace at the start of an empty draft takes the whole selection off.
   await page.getByTitle('Add files or a plugin').click();
@@ -70,4 +71,51 @@ test('the slash menu lists a single Compact row', async ({ page }) => {
     await composer.fill(alias);
     await expect(page.getByRole('button').filter({ hasText: 'compact' })).toHaveCount(0);
   }
+});
+
+// A selection wider than half the line would leave no room to type, so it stops
+// indenting and takes a row of its own instead of pushing the draft off-screen.
+test('a selection too wide for the first line moves above it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+  const indent = () =>
+    composer.evaluate((el) => Number.parseFloat(getComputedStyle(el).textIndent));
+
+  await page.getByTitle('Add files or a plugin').click();
+  await page.getByRole('menu').getByText('Visualize', { exact: true }).click();
+  await expect.poll(indent).toBeGreaterThan(40);
+
+  await page.setViewportSize({ width: 420, height: 900 });
+  await expect.poll(indent).toBe(0);
+  // Still staged, still visible, and still removable.
+  await expect(page.getByRole('button', { name: 'Remove Visualize' })).toBeVisible();
+  await expect(composer).toBeVisible();
+});
+
+test('the plus menu is reachable by keyboard and on a narrow window', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 900 });
+  await page.goto(appUrl);
+
+  const trigger = page.getByTitle('Add files or a plugin');
+  await trigger.click();
+  const menu = page.getByRole('menu');
+  const box = (await menu.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(420);
+
+  // Opening focuses the first row; the arrows walk between them.
+  const focusedRow = () => page.evaluate(() => document.activeElement?.textContent ?? '');
+  await expect.poll(focusedRow).toContain('Files');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(focusedRow).toContain('Visualize');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(focusedRow).toContain('Files');
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(focusedRow).toContain('Visualize');
+
+  // Escape closes it and hands focus back to the button that opened it.
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toBeFocused();
 });

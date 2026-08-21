@@ -1,8 +1,28 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AppWindow, FolderOpen, type LucideIcon } from 'lucide-react';
 
 const ACCENT = 'var(--droid-accent)';
+
+const WINDOW_MARGIN_PX = 12;
+const PREFERRED_WIDTH_PX = 340;
+const MIN_WIDTH_PX = 200;
+
+// The menu opens from the plus button's left edge. On a cramped window that edge
+// leaves too little room, so it narrows to what is left and then slides back from
+// the window edge, rather than putting a row out of reach.
+function fitToWindow(anchorLeft: number, windowWidth: number) {
+  const room = windowWidth - anchorLeft - WINDOW_MARGIN_PX;
+  const width = Math.min(PREFERRED_WIDTH_PX, Math.max(MIN_WIDTH_PX, room));
+  return { width, left: Math.min(0, room - width) };
+}
 
 // One row of the menu. A row with `checked` toggles what it names, so it
 // reports the state its Added marker shows; a row without it runs an action.
@@ -63,6 +83,7 @@ function SectionTitle({ children, first = false }: { children: string; first?: b
 export default function AddMenu({
   open,
   anchorRef,
+  triggerRef,
   visualizeSelected,
   onAttachFiles,
   onToggleVisualize,
@@ -72,15 +93,55 @@ export default function AddMenu({
   /** Wraps the plus button and this menu, so pressing the button closes it
    *  through its own toggle instead of an outside-click that reopens it. */
   anchorRef: RefObject<HTMLElement | null>;
+  /** The plus button itself, which takes focus back when Escape closes the menu
+   *  the keyboard opened. */
+  triggerRef: RefObject<HTMLButtonElement | null>;
   visualizeSelected: boolean;
   onAttachFiles: () => void;
   onToggleVisualize: () => void;
   onClose: () => void;
 }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<{ width: number; left: number }>();
+  useLayoutEffect(() => {
+    if (!open) return;
+    // Measured from the trigger, not the menu, so a menu already slid left does
+    // not feed its own offset back in.
+    const refit = () => {
+      const trigger = triggerRef.current;
+      if (trigger) setFit(fitToWindow(trigger.getBoundingClientRect().left, window.innerWidth));
+    };
+    refit();
+    window.addEventListener('resize', refit);
+    return () => {
+      window.removeEventListener('resize', refit);
+    };
+  }, [open, triggerRef]);
+
+  // Arrow keys walk the rows, as they do in a menu; the rows themselves send
+  // focus onward, into the file dialog or back to the draft.
+  const moveFocus = (e: KeyboardEvent<HTMLDivElement>) => {
+    const rows = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]') ?? [],
+    );
+    if (rows.length === 0) return;
+    const current = rows.findIndex((row) => row === document.activeElement);
+    let next: number;
+    if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = rows.length - 1;
+    else if (e.key === 'ArrowDown') next = (current + 1) % rows.length;
+    else if (e.key === 'ArrowUp') next = (current - 1 + rows.length) % rows.length;
+    else return;
+    e.preventDefault();
+    rows.at(next)?.focus();
+  };
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      triggerRef.current?.focus();
+      onClose();
     };
     const onDown = (e: MouseEvent) => {
       const anchor = anchorRef.current;
@@ -92,16 +153,19 @@ export default function AddMenu({
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('mousedown', onDown);
     };
-  }, [open, anchorRef, onClose]);
+  }, [open, anchorRef, triggerRef, onClose]);
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
+          ref={menuRef}
+          onKeyDown={moveFocus}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 6 }}
           transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+          style={fit}
           className="absolute bottom-full left-0 z-50 mb-2 w-[340px] rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
           role="menu"
           aria-label="Add to this prompt"
