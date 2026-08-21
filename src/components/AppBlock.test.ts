@@ -114,8 +114,9 @@ test('the running document is self-contained and blocks network and nested conte
   assert.match(document, /<main><h1>Responsive app<\/h1><\/main>/);
 });
 
-test('reported app heights grow with the chat instead of creating a short nested scroller', () => {
-  assert.equal(normalizeAppBlockHeight(40), 240);
+test('reported app heights follow the app instead of creating a nested scroller', () => {
+  assert.equal(normalizeAppBlockHeight(40), 96);
+  assert.equal(normalizeAppBlockHeight(141), 141);
   assert.equal(normalizeAppBlockHeight(412.2), 413);
   assert.equal(normalizeAppBlockHeight(4_000), 4_000);
   assert.equal(normalizeAppBlockHeight(20_000), 12_000);
