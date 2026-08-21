@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { composePrompt, isVisualizeCommand, parseSlashSkillInvocation } from './composePrompt';
+import {
+  composePrompt,
+  isVisualizeCommand,
+  parseSlashSkillInvocation,
+  promptTextWithVisualize,
+} from './composePrompt';
 
 test('one selected skill uses the provider-native slash invocation', () => {
   assert.equal(composePrompt('PR #100', ['review'], []), '/review PR #100');
@@ -41,6 +46,17 @@ test('/visualize without arguments remains the visible user command', () => {
   const composed = composePrompt('/visualize', [], []);
 
   assert.equal(composed, '/visualize');
+});
+
+test('the Visualize chip sends exactly what typing the command sends', () => {
+  assert.equal(
+    promptTextWithVisualize('compare renderer timings', true),
+    '/visualize compare renderer timings',
+  );
+  assert.equal(promptTextWithVisualize('', true), '/visualize');
+  // Already typed: the chip must not double the command.
+  assert.equal(promptTextWithVisualize('/visualize a histogram', true), '/visualize a histogram');
+  assert.equal(promptTextWithVisualize('leave this alone', false), 'leave this alone');
 });
 
 test('/visualize remains an app command even when a provider skill has the same name', () => {

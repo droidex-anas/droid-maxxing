@@ -7,6 +7,14 @@ export function isVisualizeCommand(text: string): boolean {
   return /^\/visualize(?:\s|$)/i.test(text.trim());
 }
 
+// The composer can hold Visualize as a chip instead of leaving the command in
+// the draft. Sending re-attaches it so one canonical text drives the response
+// format, the transcript echo, and prompt history.
+export function promptTextWithVisualize(text: string, visualizeSelected: boolean): string {
+  if (!visualizeSelected || isVisualizeCommand(text)) return text;
+  return `${VISUALIZE_COMMAND.cmd} ${text}`.trim();
+}
+
 export function responseFormatForPrompt(
   text: string,
   hasAppContext: boolean,

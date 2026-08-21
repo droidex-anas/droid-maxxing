@@ -55,6 +55,7 @@ import {
   composePrompt,
   isVisualizeCommand,
   parseSlashSkillInvocation,
+  promptTextWithVisualize,
   responseFormatForPrompt,
   VISUALIZE_COMMAND,
 } from '../lib/composePrompt';
@@ -62,6 +63,8 @@ import { hasCompleteAppBlock } from './appBlockRuntime';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
 import { composerTextAfterSeed, resetComposerAfterSubmit } from '../lib/composerReset';
+import { rankMenuCandidates } from '../lib/composerMenuRanking';
+import { chipRemovedByBackspace } from '../lib/composerChips';
 import {
   childRuntimeSubmitTarget,
   childSessionLabel,
@@ -72,14 +75,17 @@ import {
   type VisibleSessionTarget,
 } from '../lib/childSessions';
 import {
+  AppWindow,
   ArrowUp,
   ChevronDown,
   LoaderCircle,
   Plus,
+  Puzzle,
   SlidersHorizontal,
   Square,
-  X,
 } from 'lucide-react';
+import AddMenu from './composer/AddMenu';
+import { SelectionChip } from './composer/SelectionChip';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
 import ModelSelectorPopover from './ModelSelectorPopover';
 import AutonomySelector from './AutonomySelector';
@@ -193,6 +199,7 @@ function basename(p: string): string {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+// The menu offers one Compact row; these aliases stay accepted when typed.
 const COMPACT_COMMANDS = new Set(['/compact', '/compaction', '/compression']);
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -274,6 +281,46 @@ export default function PromptInput({
   const setActiveSkills = (value: SetStateAction<SkillInfo[]>) => {
     composerRevisionRef.current += 1;
     setActiveSkillsState(value);
+  };
+  // Visualize is the /visualize command held as a chip, so the words in the
+  // draft stay the user's own. Submitting re-attaches the command.
+  const [visualizeSelected, setVisualizeSelectedState] = useState(false);
+  const setVisualizeSelected = (value: boolean) => {
+    composerRevisionRef.current += 1;
+    setVisualizeSelectedState(value);
+  };
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuAnchorRef = useRef<HTMLDivElement>(null);
+  const hasChips =
+    visualizeSelected ||
+    activeSkills.length > 0 ||
+    attachedFiles.length > 0 ||
+    imageAttachments.images.length > 0;
+
+  const removeLastChip = () => {
+    const { images, files: documents } = partitionImagePaths(attachedFiles);
+    const removal = chipRemovedByBackspace({
+      visualizeSelected,
+      pastedImageIds: imageAttachments.images.map((image) => image.id),
+      imagePaths: images,
+      skillFilePaths: activeSkills.map((skill) => skill.filePath),
+      documentPaths: documents,
+    });
+    if (removal === null) return;
+    switch (removal.chip) {
+      case 'attachment':
+        setAttachedFiles((prev) => prev.filter((path) => path !== removal.path));
+        return;
+      case 'skill':
+        setActiveSkills((prev) => prev.filter((skill) => skill.filePath !== removal.filePath));
+        return;
+      case 'pastedImage':
+        imageAttachments.remove(removal.id);
+        return;
+      case 'visualize':
+        setVisualizeSelected(false);
+        return;
+    }
   };
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
@@ -429,7 +476,9 @@ export default function PromptInput({
   const slashCommands: SlashCommand[] = [
     {
       ...VISUALIZE_COMMAND,
-      replacement: `${VISUALIZE_COMMAND.cmd} `,
+      run: () => {
+        setVisualizeSelected(true);
+      },
     },
     {
       cmd: '/bug',
@@ -467,20 +516,6 @@ export default function PromptInput({
       },
     },
     {
-      cmd: '/compaction',
-      desc: 'Compact current session',
-      run: () => {
-        if (primaryActionsEnabled && activeSession) compactSession(activeSession.appSessionId);
-      },
-    },
-    {
-      cmd: '/compression',
-      desc: 'Compact current session',
-      run: () => {
-        if (primaryActionsEnabled && activeSession) compactSession(activeSession.appSessionId);
-      },
-    },
-    {
       cmd: '/spec',
       desc: 'Toggle spec mode',
       run: () => {
@@ -497,7 +532,9 @@ export default function PromptInput({
   ];
 
   const trigger = useMemo(() => getTrigger(input, caret), [input, caret]);
-  const overlayOpen = [trigger, modelsOpen, feedbackReport, isLive && sendHover].some(Boolean);
+  const overlayOpen = [trigger, modelsOpen, addMenuOpen, feedbackReport, isLive && sendHover].some(
+    Boolean,
+  );
 
   useEffect(() => {
     if (!isLive) setSendHover(false);
@@ -584,17 +621,24 @@ export default function PromptInput({
     if (!trigger) return [];
     const q = trigger.query.toLowerCase();
     if (trigger.kind === 'slash') {
-      const cmds: MenuItem[] = slashCommands
-        .filter((c) => c.cmd.slice(1).toLowerCase().includes(q))
-        .map((command) => ({ type: 'command', command }));
-      const skills: MenuItem[] = invocableSkills
-        .filter(
-          (s) =>
-            s.name.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q),
-        )
+      // Commands match on their name alone, as they always have; only skills,
+      // whose names are terse, are also reachable through their description.
+      const rankedCommands = rankMenuCandidates(q, slashCommands, (c) => ({
+        name: c.cmd.slice(1),
+      }));
+      const rankedSkills = rankMenuCandidates(q, invocableSkills, (s) => ({
+        name: s.name,
+        description: s.description,
+      }));
+      const cmds = rankedCommands.items.map<MenuItem>((command) => ({ type: 'command', command }));
+      const skills = rankedSkills.items
         .slice(0, 40)
-        .map((skill) => ({ type: 'skill', skill }));
-      return [...cmds, ...skills];
+        .map<MenuItem>((skill) => ({ type: 'skill', skill }));
+      // Whichever group holds the better match leads, so typing a skill's exact
+      // name puts it first instead of behind every command.
+      return rankedSkills.bestRank < rankedCommands.bestRank
+        ? [...skills, ...cmds]
+        : [...cmds, ...skills];
     }
     // file mode
     const matches = files
@@ -832,6 +876,7 @@ export default function PromptInput({
           setInput('');
           setActiveSkills([]);
           setAttachedFiles([]);
+          setVisualizeSelected(false);
         },
       });
     };
@@ -858,11 +903,12 @@ export default function PromptInput({
 
     if (!childActionsEnabled) return;
 
+    const promptText = promptTextWithVisualize(text, visualizeSelected);
     const slashSkill =
-      activeSkills.length === 0 && !isVisualizeCommand(text)
-        ? parseSlashSkillInvocation(text, invocableSkills)
+      activeSkills.length === 0 && !isVisualizeCommand(promptText)
+        ? parseSlashSkillInvocation(promptText, invocableSkills)
         : undefined;
-    const displayText = slashSkill?.prompt ?? text;
+    const displayText = slashSkill?.prompt ?? promptText;
     const responseFormat = responseFormatForPrompt(displayText, hasAppContext);
     const skillNames = slashSkill
       ? [slashSkill.skillName]
@@ -1246,14 +1292,9 @@ export default function PromptInput({
         return;
       }
     }
-    if (
-      e.key === 'Backspace' &&
-      input === '' &&
-      (attachedFiles.length > 0 || imageAttachments.images.length > 0)
-    ) {
+    if (e.key === 'Backspace' && input === '' && hasChips) {
       e.preventDefault();
-      if (attachedFiles.length > 0) setAttachedFiles((prev) => prev.slice(0, -1));
-      else imageAttachments.remove(imageAttachments.images[imageAttachments.images.length - 1].id);
+      removeLastChip();
       return;
     }
     // Shell-style history recall. ArrowUp starts only from the top of the field
@@ -1300,8 +1341,6 @@ export default function PromptInput({
     ? 'border-droid-orange/40 focus-within:border-droid-orange/60'
     : 'border-droid-border focus-within:border-droid-border-hover';
 
-  const hasChips =
-    activeSkills.length > 0 || attachedFiles.length > 0 || imageAttachments.images.length > 0;
   const viewerImage = imageAttachments.images.find((i) => i.id === viewerImageId) ?? null;
   // Files attached as paths (the @ menu, the picker, or a queued prompt brought
   // back for editing) show as thumbnails when they are displayable images, so a
@@ -1390,6 +1429,17 @@ export default function PromptInput({
         >
           {hasChips && (
             <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+              {visualizeSelected && (
+                <SelectionChip
+                  icon={AppWindow}
+                  label="Visualize"
+                  title={VISUALIZE_COMMAND.desc}
+                  removeLabel="Remove Visualize"
+                  onRemove={() => {
+                    setVisualizeSelected(false);
+                  }}
+                />
+              )}
               {imageAttachments.images.map((img) => (
                 <ImageChip
                   key={img.id}
@@ -1425,27 +1475,16 @@ export default function PromptInput({
                 );
               })}
               {activeSkills.map((skill) => (
-                <span
+                <SelectionChip
                   key={skill.filePath}
-                  className="group flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg text-[11px] font-medium"
-                  style={{
-                    background: accentMix(14),
-                    color: ACCENT,
-                    boxShadow: `inset 0 0 0 1px ${accentMix(35)}`,
-                  }}
+                  icon={Puzzle}
+                  label={skill.name}
                   title={skill.description ?? skill.filePath}
-                >
-                  {skill.name}
-                  <button
-                    onClick={() => {
-                      setActiveSkills((prev) => prev.filter((s) => s.filePath !== skill.filePath));
-                    }}
-                    className="p-0.5 rounded hover:bg-black/20 transition-colors"
-                    title="Remove skill"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </span>
+                  removeLabel={`Remove the ${skill.name} skill`}
+                  onRemove={() => {
+                    setActiveSkills((prev) => prev.filter((s) => s.filePath !== skill.filePath));
+                  }}
+                />
               ))}
               {attachedDocumentPaths.map((f) => (
                 <AttachedFileChip
@@ -1533,13 +1572,36 @@ export default function PromptInput({
 
           {/* Toolbar — one seamless surface with the textarea, no divider line */}
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
-            <button
-              onClick={() => void handleAttachFiles()}
-              className="p-1.5 rounded-lg text-droid-text-muted hover:text-droid-text hover:bg-droid-bg/50 transition-colors shrink-0"
-              title="Add files"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+            <div className="relative shrink-0" ref={addMenuAnchorRef}>
+              <button
+                onClick={() => {
+                  setAddMenuOpen((open) => !open);
+                }}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  addMenuOpen
+                    ? 'bg-droid-bg/60 text-droid-text'
+                    : 'text-droid-text-muted hover:text-droid-text hover:bg-droid-bg/50'
+                }`}
+                title="Add files or a plugin"
+                aria-haspopup="menu"
+                aria-expanded={addMenuOpen}
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+              {addMenuOpen && (
+                <AddMenu
+                  anchorRef={addMenuAnchorRef}
+                  visualizeSelected={visualizeSelected}
+                  onAttachFiles={() => void handleAttachFiles()}
+                  onSelectVisualize={() => {
+                    setVisualizeSelected(true);
+                  }}
+                  onClose={() => {
+                    setAddMenuOpen(false);
+                  }}
+                />
+              )}
+            </div>
 
             <div className="relative shrink-0">
               <button
