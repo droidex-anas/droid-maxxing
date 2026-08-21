@@ -667,6 +667,78 @@ test('the iframe reports its initial height only after built-in math settles', a
   );
 });
 
+test('the iframe measures its content so the frame can shrink with it', async () => {
+  const documentHtml = createAppDocument('<main>Compact</main>', 'app-shrink', undefined, 'token');
+  const script = /<script>([\s\S]*?)<\/script>/.exec(documentHtml)?.[1];
+  assert.ok(script);
+
+  // The root element always fills the frame viewport, so its scrollHeight never
+  // drops below the height the host already applied. Measuring it turns every
+  // report into a ratchet: compact content is padded out to the frame it was
+  // given, and an App that shrinks keeps its taller frame forever.
+  const body = {
+    tagName: 'BODY',
+    scrollHeight: 141,
+    children: [] as never[],
+    matches: () => false,
+  };
+  const documentElement = { scrollHeight: 360 };
+  const runtimeDocument = {
+    body,
+    documentElement,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  const listeners = new Map<string, () => void>();
+  const heights: number[] = [];
+  const pendingReports: (() => void)[] = [];
+  let observerCallback: (() => void) | undefined;
+
+  vm.runInNewContext(script, {
+    parent: {
+      postMessage(message: Record<string, unknown>) {
+        if (message.type === 'droidex:app-height') heights.push(message.height as number);
+      },
+    },
+    window: {},
+    Element: class {},
+    document: runtimeDocument,
+    setTimeout(callback: () => void) {
+      pendingReports.push(callback);
+      return pendingReports.length;
+    },
+    clearTimeout: () => undefined,
+    ResizeObserver: class {
+      constructor(callback: () => void) {
+        observerCallback = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+    addEventListener(type: string, listener: () => void) {
+      listeners.set(type, listener);
+    },
+    removeEventListener: () => undefined,
+  });
+
+  const flushReports = () => {
+    observerCallback?.();
+    while (pendingReports.length > 0) pendingReports.shift()?.();
+  };
+
+  listeners.get('DOMContentLoaded')?.();
+  // The first report waits for built-in math to settle, one microtask away.
+  await Promise.resolve();
+  await Promise.resolve();
+  flushReports();
+  assert.deepEqual(heights, [141]);
+
+  body.scrollHeight = 90;
+  documentElement.scrollHeight = 141;
+  flushReports();
+  assert.deepEqual(heights, [141, 90]);
+});
+
 test('short and functional CSS colors select the correct canvas scheme', async () => {
   const runtime = (await import('./appBlockRuntime')) as unknown as {
     appColorScheme?: (color: string) => 'light' | 'dark';
