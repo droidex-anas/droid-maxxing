@@ -25,6 +25,8 @@ import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import MissionControl from './components/MissionControl';
 import { PullRequestsView } from './features/pull-requests/PullRequestsView';
+import { PluginLibraryView } from './features/plugins/PluginLibraryView';
+import { usePluginWorkspace } from './features/plugins/hooks/usePluginWorkspace';
 import PromptInput from './components/PromptInput';
 import RightPanel from './components/RightPanel';
 import { ReviewPanel } from './components/environment/ReviewPanel';
@@ -126,6 +128,7 @@ export default function App() {
   const [expandedBrowserAppSessionId, setExpandedBrowserAppSessionId] = useState<string | null>(
     null,
   );
+  const pluginWorkspace = usePluginWorkspace();
   const cliLaunchHandled = useRef(false);
   const appUpdateLaunchCheckHandled = useRef(false);
   const showWizard =
@@ -153,18 +156,19 @@ export default function App() {
   const utilityPanel = utilityPanelForSession(state.utilityPanels, activeSession?.appSessionId);
   const activeUtilityTab =
     utilityPanel.tabs.find((tab) => tab.id === utilityPanel.activeTabId) ?? null;
-  const showUtilityPane = !embedded && !!activeSession && utilityPanel.open && !showWizard;
-  // The pull request workspace owns the whole content area and the top-right
-  // corner of its own toolbar, so the session-scoped overlays (Context panel)
-  // and floating window buttons stay out of it instead of covering its header.
+  const pluginWorkspaceView = !embedded && pluginWorkspace.isOpen;
+  const showUtilityPane =
+    !embedded && !pluginWorkspaceView && !!activeSession && utilityPanel.open && !showWizard;
+  // Full workspaces own the content area and their own toolbar, so session-scoped
+  // overlays and floating controls stay out of the way.
   const prWorkspaceView = !embedded && state.mainView === 'pull-requests';
-  // An expanded browser covers the full content row, which would leave the pull
-  // request workspace hidden and non-interactive behind it. The expansion stays
-  // owned by the browser pane; this view simply does not take part in it.
+  const fullWorkspaceView = prWorkspaceView || pluginWorkspaceView;
+  // An expanded browser covers the full content row, so full workspaces do not
+  // participate in browser expansion.
   const browserExpanded =
     !!activeSession &&
     showUtilityPane &&
-    !prWorkspaceView &&
+    !fullWorkspaceView &&
     activeUtilityTab?.tool === 'browser' &&
     expandedBrowserAppSessionId === activeSession.appSessionId;
   const focused = isMissionControlView;
@@ -178,7 +182,11 @@ export default function App() {
   // the main scroll area), so the page scrollbar stays pinned to the window's
   // right edge instead of sliding inward and looking like a divider.
   const rightPanelVisible =
-    !focused && !prWorkspaceView && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
+    !focused &&
+    !fullWorkspaceView &&
+    !showUtilityPane &&
+    state.rightPanelOpen &&
+    hasSessionContent;
   const requestedHistory = useRef(new Set<string>());
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
@@ -493,7 +501,12 @@ export default function App() {
               transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
               className="shrink-0 overflow-hidden h-full"
             >
-              <Sidebar workspaceScopes={workspaceScopes} />
+              <Sidebar
+                workspaceScopes={workspaceScopes}
+                pluginLibraryOpen={pluginWorkspaceView}
+                onOpenPluginLibrary={pluginWorkspace.open}
+                onLeavePluginLibrary={pluginWorkspace.close}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -507,7 +520,16 @@ export default function App() {
                 browserExpanded ? 'pointer-events-none' : ''
               }`}
             >
-              {!embedded && state.mainView === 'pull-requests' ? (
+              {pluginWorkspaceView ? (
+                <PluginLibraryView
+                  selectedSlug={pluginWorkspace.selectedSlug}
+                  onSelectPlugin={pluginWorkspace.select}
+                  onUsePlugin={pluginWorkspace.useInComposer}
+                  onOpenSettings={() => {
+                    dispatch({ type: 'TOGGLE_SETTINGS' });
+                  }}
+                />
+              ) : !embedded && state.mainView === 'pull-requests' ? (
                 <PullRequestsView />
               ) : isMissionControlView ? (
                 <motion.div
@@ -684,7 +706,7 @@ export default function App() {
         </button>
       </div>
 
-      {!showUtilityPane && !prWorkspaceView && (
+      {!showUtilityPane && !fullWorkspaceView && (
         <div
           data-electron-drag-region
           className="absolute top-0 right-0 h-9 z-40 flex items-center gap-1 pr-3"

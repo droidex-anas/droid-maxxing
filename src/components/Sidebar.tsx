@@ -18,6 +18,7 @@ import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCar
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import {
+  Blocks,
   CirclePlus,
   Folder,
   FolderOpen,
@@ -129,7 +130,17 @@ function WorkspaceFolderIcon({ open }: { open: boolean }) {
   );
 }
 
-export default function Sidebar({ workspaceScopes }: { workspaceScopes: WorkspaceScope[] }) {
+export default function Sidebar({
+  workspaceScopes,
+  pluginLibraryOpen,
+  onOpenPluginLibrary,
+  onLeavePluginLibrary,
+}: {
+  workspaceScopes: WorkspaceScope[];
+  pluginLibraryOpen: boolean;
+  onOpenPluginLibrary: () => void;
+  onLeavePluginLibrary: () => void;
+}) {
   const dispatch = useStoreDispatch();
   const state = useStoreSelector(
     (current) => ({
@@ -226,6 +237,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
   }, [dispatch]);
 
   const startChat = (cwd: string) => {
+    onLeavePluginLibrary();
     dispatch({ type: 'START_CHAT', cwd, executionMode: cwd ? 'worktree' : 'local' });
   };
 
@@ -306,6 +318,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
 
   const handleSelectSession = useCallback(
     (appSessionId: string) => {
+      onLeavePluginLibrary();
       dispatch({ type: 'SET_ACTIVE_SESSION', id: appSessionId });
       dispatch({ type: 'SELECT_CHILD', selection: null });
       // Opening a session from the unread-only view drops the filter: the
@@ -313,7 +326,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
       // vanish from under the user.
       if (unreadOnly) setUnreadOnly(false);
     },
-    [dispatch, unreadOnly],
+    [dispatch, onLeavePluginLibrary, unreadOnly],
   );
 
   const handleRowMenu = useCallback((appSessionId: string, position: { x: number; y: number }) => {
@@ -509,6 +522,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
         <button
           data-testid="pull-requests-nav"
           onClick={() => {
+            onLeavePluginLibrary();
             const cwd = resolvePrWorkspaceCwd({
               boundCwd: state.prWorkspaceCwd,
               activeCwd: activeSession?.cwd,
@@ -518,14 +532,14 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
             dispatch({ type: 'OPEN_PULL_REQUESTS', cwd });
           }}
           className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-            state.mainView === 'pull-requests'
+            state.mainView === 'pull-requests' && !pluginLibraryOpen
               ? 'bg-droid-active text-droid-text'
               : 'text-droid-text hover:bg-droid-elevated'
           }`}
         >
           <span
             className={`flex h-4 w-4 shrink-0 items-center justify-center transition-colors ${
-              state.mainView === 'pull-requests'
+              state.mainView === 'pull-requests' && !pluginLibraryOpen
                 ? 'text-droid-text'
                 : 'text-droid-text-secondary group-hover:text-droid-text'
             }`}
@@ -533,6 +547,25 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
             <GitPullRequestIcon size={15} />
           </span>
           Pull requests
+        </button>
+        <button
+          data-testid="plugins-nav"
+          onClick={onOpenPluginLibrary}
+          className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            pluginLibraryOpen
+              ? 'bg-droid-active text-droid-text'
+              : 'text-droid-text hover:bg-droid-elevated'
+          }`}
+        >
+          <Blocks
+            className={`h-4 w-4 shrink-0 transition-colors ${
+              pluginLibraryOpen
+                ? 'text-droid-text'
+                : 'text-droid-text-secondary group-hover:text-droid-text'
+            }`}
+            strokeWidth={1.75}
+          />
+          Plugins
         </button>
       </div>
 
