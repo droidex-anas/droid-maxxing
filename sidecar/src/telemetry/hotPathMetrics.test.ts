@@ -26,8 +26,6 @@ test('stage records feed counters, histograms, and snapshot gauges', async () =>
   metrics.recordTransport(0.25, 1_000, 1);
   metrics.recordCoalesce(4);
 
-  // The event-loop monitor needs at least one timer tick before its first
-  // sample; until then the snapshot legitimately reports no event-loop stats.
   let snapshot = metrics.snapshot();
   const deadline = Date.now() + 500;
   while (snapshot.eventLoop === null && Date.now() < deadline) {
@@ -51,12 +49,65 @@ test('stage records feed counters, histograms, and snapshot gauges', async () =>
   assert.ok(snapshot.process.cpuUserMs >= 0);
 });
 
-test('transport bytes multiply across connected clients', () => {
+test('transport records explicit aggregate bytes and send operations', () => {
   const metrics = freshMetrics();
   metrics.enable();
-  metrics.recordTransport(1, 100, 3);
+  metrics.recordTransport(1, 300, 3);
 
-  assert.equal(metrics.snapshot().transport.bytesTotal, 300);
+  const snapshot = metrics.snapshot();
+  assert.equal(snapshot.transport.bytesTotal, 300);
+  assert.equal(snapshot.counters.transportSends, 3);
+});
+
+test('phase 1 metrics expose reduction, queue peaks, replay and backpressure', () => {
+  const metrics = freshMetrics();
+  metrics.enable();
+  metrics.recordTransportBatch({
+    logicalEvents: 10,
+    deliveredEvents: 7,
+    bytes: 1_200,
+    queueDelayMs: 16,
+    immediate: false,
+  });
+  metrics.recordTransportBatch({
+    logicalEvents: 1,
+    deliveredEvents: 1,
+    bytes: 200,
+    queueDelayMs: 0,
+    immediate: true,
+  });
+  metrics.recordTransportQueue({
+    pendingEvents: 12,
+    pendingEstimatedBytes: 4_096,
+    oldestPendingAgeMs: 8,
+  });
+  metrics.recordTransportQueue({
+    pendingEvents: 0,
+    pendingEstimatedBytes: 0,
+    oldestPendingAgeMs: 0,
+  });
+  metrics.recordClientBufferedAmount(10_000);
+  metrics.recordBackpressureDisconnect(20_000);
+  metrics.recordReplay(2, 7, 1_400);
+  metrics.recordReplayBuffer(4, 2_048);
+
+  const snapshot = metrics.snapshot();
+  assert.equal(snapshot.counters.transportBatches, 2);
+  assert.equal(snapshot.counters.transportLogicalEvents, 11);
+  assert.equal(snapshot.counters.transportDeliveredEvents, 8);
+  assert.equal(snapshot.counters.transportImmediateBatches, 1);
+  assert.equal(snapshot.counters.transportReplayedBatches, 2);
+  assert.equal(snapshot.counters.transportReplayedEvents, 7);
+  assert.equal(snapshot.counters.transportBackpressureDisconnects, 1);
+  assert.equal(snapshot.transport.eventReductionRatio, 0.273);
+  assert.equal(snapshot.transport.queue.pendingEvents, 0);
+  assert.equal(snapshot.transport.queue.pendingEventsMax, 12);
+  assert.equal(snapshot.transport.queue.pendingEstimatedBytesMax, 4_096);
+  assert.equal(snapshot.transport.clientBufferedBytesMax, 20_000);
+  assert.equal(snapshot.transport.replayBytesTotal, 1_400);
+  assert.equal(snapshot.transport.replayBuffer.batches, 4);
+  assert.equal(snapshot.histograms.transportBatchEvents.p50Ms, 1);
+  assert.equal(snapshot.histograms.transportBatchEvents.maxMs, 7);
 });
 
 test('gauge provider supplies resource counts and failures degrade to null', () => {
@@ -80,6 +131,14 @@ test('reset clears samples so consecutive runs stay independent', () => {
   metrics.enable();
   metrics.recordNormalize(1);
   metrics.recordTransport(1, 10, 1);
+  metrics.recordTransportBatch({
+    logicalEvents: 2,
+    deliveredEvents: 1,
+    bytes: 100,
+    queueDelayMs: 4,
+    immediate: false,
+  });
+  metrics.recordReplayBuffer(1, 100);
   metrics.reset();
 
   const snapshot = metrics.snapshot();
@@ -89,8 +148,30 @@ test('reset clears samples so consecutive runs stay independent', () => {
     emitted: 0,
     transportSends: 0,
     coalesceFlushes: 0,
+    transportBatches: 0,
+    transportLogicalEvents: 0,
+    transportDeliveredEvents: 0,
+    transportImmediateBatches: 0,
+    transportReplayedBatches: 0,
+    transportReplayedEvents: 0,
+    transportBackpressureDisconnects: 0,
   });
   assert.equal(snapshot.transport.bytesTotal, 0);
+  assert.equal(snapshot.transport.eventReductionRatio, 0);
+  assert.deepEqual(snapshot.transport.queue, {
+    pendingEvents: 0,
+    pendingEstimatedBytes: 0,
+    oldestPendingAgeMs: 0,
+    pendingEventsMax: 0,
+    pendingEstimatedBytesMax: 0,
+    oldestPendingAgeMsMax: 0,
+  });
+  assert.deepEqual(snapshot.transport.replayBuffer, {
+    batches: 0,
+    bytes: 0,
+    batchesMax: 0,
+    bytesMax: 0,
+  });
   assert.equal(snapshot.eventLoop, null);
   assert.equal(snapshot.uptimeMs, 0);
 });
@@ -109,8 +190,6 @@ test('enable is idempotent and keeps a stable start baseline', async () => {
 test('transport byte samples wrap the ring without losing totals', () => {
   const metrics = freshMetrics();
   metrics.enable();
-  // More sends than the ring holds, so the cursor wraps while the counters
-  // and byte totals keep accumulating unaffected.
   const sends = 10_500;
   for (let index = 0; index < sends; index += 1) metrics.recordTransport(0.1, 2, 1);
 

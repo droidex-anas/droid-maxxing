@@ -23,7 +23,12 @@ import { buildReplayPlan, type PerfScenarioSpec, type ReplayTurnPlan } from './s
 import { ReplayFactoryRuntime, type ReplayYieldReport } from './replayRuntime.js';
 import { evaluateBudgets } from './budgets.js';
 import type { ReplayReport } from './report.js';
-import type { ServerEvent, TranscriptEvent } from '../protocol.js';
+import {
+  BRIDGE_PROTOCOL_VERSION,
+  type ServerEvent,
+  type ServerWireMessage,
+  type TranscriptEvent,
+} from '../protocol.js';
 
 export interface ReplayRunOptions {
   spec: PerfScenarioSpec;
@@ -132,7 +137,9 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   hotPathMetrics.enable();
   hotPathMetrics.setGaugeProvider(() => liveManager.resourceCounts());
 
-  const client = new WebSocket(`ws://127.0.0.1:${String(server.port)}?token=${token}`);
+  const client = new WebSocket(
+    `ws://127.0.0.1:${String(server.port)}?token=${token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}`,
+  );
   const sessionIds: (string | undefined)[] = [];
   const clientOpened = new Promise<void>((resolve, reject) => {
     client.once('open', () => {
@@ -141,30 +148,37 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
     client.once('error', reject);
   });
   let bytesReceived = 0;
+  let clientProtocolFailure: Error | null = null;
+  const wireCursor: ReplayWireCursor = { generation: null, lastSeq: 0 };
   const createdWaiters: ((appSessionId: string) => void)[] = [];
   client.on('message', (raw) => {
     const data = messageText(raw);
     bytesReceived += Buffer.byteLength(data);
-    let event: ServerEvent;
+    let wireMessage: ServerWireMessage;
     try {
-      event = JSON.parse(data) as ServerEvent;
-    } catch {
+      wireMessage = JSON.parse(data) as ServerWireMessage;
+      for (const event of acceptReplayWireMessage(wireMessage, wireCursor)) {
+        if (event.type === 'session.created') {
+          const index = numberFromClientRef(event.clientRef);
+          sessionIds[index] = event.session.appSessionId;
+          for (const waiter of createdWaiters.splice(0)) waiter(event.session.appSessionId);
+          continue;
+        }
+        if (event.type === 'event.appended') {
+          const { event: transcript } = event;
+          appended.push({
+            at: performance.timeOrigin + performance.now(),
+            eventTs: transcript.ts,
+            kind: transcript.kind,
+            toolUseId: transcript.toolUseId,
+          });
+        }
+      }
+    } catch (error) {
+      clientProtocolFailure =
+        error instanceof Error ? error : new Error(`Invalid bridge message: ${String(error)}`);
+      for (const waiter of createdWaiters.splice(0)) waiter('');
       return;
-    }
-    if (event.type === 'session.created') {
-      const index = numberFromClientRef(event.clientRef);
-      sessionIds[index] = event.session.appSessionId;
-      for (const waiter of createdWaiters.splice(0)) waiter(event.session.appSessionId);
-      return;
-    }
-    if (event.type === 'event.appended') {
-      const { event: transcript } = event;
-      appended.push({
-        at: performance.timeOrigin + performance.now(),
-        eventTs: transcript.ts,
-        kind: transcript.kind,
-        toolUseId: transcript.toolUseId,
-      });
     }
   });
   await clientOpened;
@@ -215,6 +229,7 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         autonomy: 'off',
       });
       await created;
+      throwIfClientProtocolFailed();
     }
     // Each session runs its turns sequentially; sessions run concurrently,
     // which is exactly the interleaved-source workload the harness measures.
@@ -232,7 +247,10 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         throw new Error(`Session ${String(index)} was never created.`);
       sendCommand(client, { type: 'session.send', appSessionId, text: turn.prompt });
       await waitFor(
-        () => settledTurns.has(`${String(index)}:${String(turn.turn)}`),
+        () => {
+          throwIfClientProtocolFailed();
+          return settledTurns.has(`${String(index)}:${String(turn.turn)}`);
+        },
         expectedWallClockMs(spec),
         `turn ${String(index)}:${String(turn.turn)} never settled`,
       );
@@ -242,6 +260,7 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   async function waitForDrain(): Promise<void> {
     // Let the final coalesce timers flush and the socket drain.
     await sleep(spec.coalesceMs + DRAIN_QUIET_MS);
+    throwIfClientProtocolFailed();
   }
 
   function buildReport(sidecar: HotPathMetricsSnapshot): ReplayReport {
@@ -303,18 +322,25 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
 
   async function cleanup(): Promise<void> {
     client.close();
-    await server.close();
     try {
       await manager?.shutdown();
     } finally {
-      hotPathMetrics.disable();
-      hotPathMetrics.reset();
-      hotPathMetrics.clearGaugeProvider();
-      // Assigning undefined would store the literal string "undefined".
-      if (previousHome === undefined) delete process.env.HOME;
-      else process.env.HOME = previousHome;
-      rmSync(home, { recursive: true, force: true });
+      try {
+        await server.close();
+      } finally {
+        hotPathMetrics.disable();
+        hotPathMetrics.reset();
+        hotPathMetrics.clearGaugeProvider();
+        // Assigning undefined would store the literal string "undefined".
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        rmSync(home, { recursive: true, force: true });
+      }
     }
+  }
+
+  function throwIfClientProtocolFailed(): void {
+    if (clientProtocolFailure !== null) throw clientProtocolFailure;
   }
 }
 
@@ -322,6 +348,53 @@ function messageText(raw: unknown): string {
   if (typeof raw === 'string') return raw;
   if (Array.isArray(raw)) return Buffer.concat(raw as Buffer[]).toString('utf8');
   return Buffer.from(raw as Buffer).toString('utf8');
+}
+
+export interface ReplayWireCursor {
+  generation: string | null;
+  lastSeq: number;
+}
+
+export function acceptReplayWireMessage(
+  message: ServerWireMessage,
+  cursor: ReplayWireCursor,
+): ServerEvent[] {
+  if (message.type === 'bridge.reset') {
+    throw new Error(`Replay bridge reset: ${message.reason}.`);
+  }
+  if (message.type !== 'events.batch') {
+    throw new Error(`Replay bridge expected an event batch, received ${message.type}.`);
+  }
+  if (cursor.generation !== null && message.generation !== cursor.generation) {
+    throw new Error('Replay bridge generation changed during the run.');
+  }
+  if (
+    (cursor.generation !== null && message.firstSeq !== cursor.lastSeq + 1) ||
+    message.lastSeq < message.firstSeq
+  ) {
+    throw new Error('Replay bridge sequence gap or overlap.');
+  }
+  if (message.events.length === 0) throw new Error('Replay bridge delivered an empty batch.');
+
+  let previousSeq = message.firstSeq - 1;
+  for (const entry of message.events) {
+    if (
+      !Number.isSafeInteger(entry.seq) ||
+      entry.seq <= previousSeq ||
+      entry.seq < message.firstSeq ||
+      entry.seq > message.lastSeq
+    ) {
+      throw new Error('Replay bridge entry order is invalid.');
+    }
+    previousSeq = entry.seq;
+  }
+  if (previousSeq !== message.lastSeq) {
+    throw new Error('Replay bridge batch does not represent its final sequence.');
+  }
+
+  cursor.generation = message.generation;
+  cursor.lastSeq = message.lastSeq;
+  return message.events.map((entry) => entry.event);
 }
 
 function sendCommand(client: WebSocket, command: Parameters<SessionManager['handle']>[0]): void {

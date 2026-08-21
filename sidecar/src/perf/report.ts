@@ -36,6 +36,8 @@ export interface ReplayReport {
 }
 
 export function renderReportMarkdown(report: ReplayReport): string {
+  const transport = report.sidecar.transport;
+  const counters = report.sidecar.counters;
   const lines: string[] = [
     `# Perf replay: ${report.scenario.name}`,
     '',
@@ -52,9 +54,17 @@ export function renderReportMarkdown(report: ReplayReport): string {
     '| --- | --- | --- | --- | --- | --- |',
     stageRow('normalize', report.sidecar.histograms.normalizeMs),
     stageRow('sqlite persist', report.sidecar.histograms.persistMs),
-    stageRow('emit dispatch (contains transport)', report.sidecar.histograms.emitMs),
+    stageRow('emit queue/flush dispatch', report.sidecar.histograms.emitMs),
     stageRow('transport fan-out', report.sidecar.histograms.transportMs),
+    stageRow('transport queue delay', report.sidecar.histograms.transportQueueDelayMs),
     stageRow('coalesce merged', report.sidecar.histograms.coalesceMerged),
+    '',
+    '## Transport batches',
+    '',
+    '| Distribution | p50 | p95 | p99 | max | count |',
+    '| --- | --- | --- | --- | --- | --- |',
+    valueRow('delivered events / batch', report.sidecar.histograms.transportBatchEvents),
+    valueRow('serialized bytes / batch', report.sidecar.histograms.transportBatchBytes),
     '',
     '## Client-observed latency',
     '',
@@ -65,7 +75,11 @@ export function renderReportMarkdown(report: ReplayReport): string {
     '',
     '## Throughput and health',
     '',
-    `- Transport: ${n(report.sidecar.transport.bytesTotal)} bytes total, ${n(report.sidecar.transport.bytesPerSecondAvg)} bytes/s avg, ${n(report.sidecar.transport.bytesPerSecondRecent)} bytes/s recent`,
+    `- Event transport: ${n(counters.transportLogicalEvents)} logical → ${n(counters.transportDeliveredEvents)} delivered (${percent(transport.eventReductionRatio)} reduction) in ${n(counters.transportBatches)} batches; ${n(counters.transportImmediateBatches)} immediate`,
+    `- Wire sends: ${n(counters.transportSends)} operations, ${n(transport.bytesTotal)} bytes total, ${n(transport.bytesPerSecondAvg)} bytes/s avg, ${n(transport.bytesPerSecondRecent)} bytes/s recent`,
+    `- Queue peaks: ${n(transport.queue.pendingEventsMax)} events, ${n(transport.queue.pendingEstimatedBytesMax)} estimated bytes, ${ms(transport.queue.oldestPendingAgeMsMax)}`,
+    `- Slow clients: ${n(counters.transportBackpressureDisconnects)} hard disconnects; ${n(transport.clientBufferedBytesMax)} buffered bytes high-water`,
+    `- Replay: ${n(counters.transportReplayedBatches)} batches / ${n(counters.transportReplayedEvents)} events / ${n(transport.replayBytesTotal)} bytes; retained ${n(transport.replayBuffer.batches)} batches / ${n(transport.replayBuffer.bytes)} bytes (peak ${n(transport.replayBuffer.batchesMax)} / ${n(transport.replayBuffer.bytesMax)})`,
     `- Event-loop delay p95: ${report.sidecar.eventLoop ? ms(report.sidecar.eventLoop.p95Ms) : 'n/a'}`,
     `- Memory rss: ${n(report.sidecar.process.rssBytes)} bytes; cpu: user ${ms(report.sidecar.process.cpuUserMs)} / system ${ms(report.sidecar.process.cpuSystemMs)}`,
     `- Resources: ${report.sidecar.resources ? `${n(report.sidecar.resources.livePrimarySessions)} live sessions, ${n(report.sidecar.resources.childAgentsTotal)} child agents (${n(report.sidecar.resources.childAgentsActive)} active)` : 'n/a'}`,
@@ -104,10 +118,22 @@ function stageRow(label: string, stats: HistogramStats): string {
   return `| ${label} | ${ms(stats.p50Ms)} | ${ms(stats.p95Ms)} | ${ms(stats.p99Ms)} | ${ms(stats.maxMs)} | ${n(stats.count)} |`;
 }
 
+function valueRow(label: string, stats: HistogramStats): string {
+  return `| ${label} | ${value(stats.p50Ms)} | ${value(stats.p95Ms)} | ${value(stats.p99Ms)} | ${value(stats.maxMs)} | ${n(stats.count)} |`;
+}
+
 function n(value: number): string {
   return String(value);
 }
 
+function value(value: number | undefined): string {
+  return value === undefined ? '—' : String(value);
+}
+
 function ms(value: number | undefined): string {
   return value === undefined ? '—' : `${value.toFixed(2)} ms`;
+}
+
+function percent(ratio: number): string {
+  return `${(ratio * 100).toFixed(1)}%`;
 }

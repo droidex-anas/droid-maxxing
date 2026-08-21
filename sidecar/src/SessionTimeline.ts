@@ -452,10 +452,10 @@ export class SessionTimeline {
 
   private recordAndEmit(event: TranscriptEvent): void {
     this.dependencies.history.recordEvent(event);
-    // Emit timing wraps the configured sink. In production that sink is the
-    // bridge broadcast, so emitMs contains transportMs by construction; the
-    // transport histogram isolates the bridge's serialize + fan-out slice.
-    // recordEvent reports its own persist stage from inside HistoryIndex.
+    // Emit timing covers handoff into the ordered bridge queue. Priority or
+    // size-boundary events can synchronously trigger a flush inside that call;
+    // transportMs isolates the serialization + fan-out slice. Persistence is
+    // measured independently by HistoryIndex.
     const emitStartedAt = performance.now();
     this.dependencies.emit({ type: 'event.appended', event });
     hotPathMetrics.recordEmit(performance.now() - emitStartedAt);

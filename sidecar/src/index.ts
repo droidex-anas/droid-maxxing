@@ -47,13 +47,11 @@ async function shutdown(): Promise<void> {
   const forceExit = setTimeout(() => process.exit(1), 5_000);
   forceExit.unref();
   try {
-    // Manager cleanup emits final state while clients are still connected;
-    // transport closure (which terminates sockets) runs concurrently so a
-    // stalled renderer cannot block session cleanup.
-    const transportClosed = server.close();
+    // Keep the bridge available while manager cleanup emits final state.
+    // Bridge close is bounded and flushes its ordered queue after shutdown.
     await manager.shutdown();
     hotPathMetrics.disable();
-    await transportClosed;
+    await server.close();
   } catch (error) {
     console.error(error);
     process.exitCode = 1;

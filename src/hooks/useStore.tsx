@@ -3076,7 +3076,12 @@ function finiteNumber(value: unknown): number | undefined {
 
 /* ── Bridge event adapter ── */
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
-  if (ev.type === 'error' && ev.code === 'bridge.unsupported_command') return ev.message;
+  if (
+    ev.type === 'error' &&
+    (ev.code === 'bridge.unsupported_command' || ev.code === 'bridge.resync_required')
+  ) {
+    return ev.message;
+  }
   if (
     ev.type === 'error' &&
     (ev.code === 'session.autonomy_update_failed' || ev.code === 'session.create_failed')
@@ -3144,6 +3149,9 @@ export function adaptEvent(ev: ServerEvent): Action | null {
     case 'question.requested':
       return { type: 'SESSION_QUESTION', question: ev.question };
     case 'error':
+      if (ev.code === 'bridge.resync_required' && !ev.recoverable) {
+        return { type: 'SET_CONNECTION', status: 'error', message: ev.message };
+      }
       // A failed autonomy change is recoverable: the session keeps its last
       // confirmed level, the pending state settles, and the toast carries the
       // message (see toastMessageForEvent).
@@ -3352,21 +3360,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       delayMs: 16,
     });
     bridgeActionBatcherRef.current = batcher;
-    const unsub = bridge.subscribe((ev) => {
-      // Verbose per-event logging runs on every streaming token and eagerly
-      // deep-clones + redacts the whole event, so keep it to dev builds only;
-      // production strips this branch entirely.
-      if (import.meta.env.DEV) console.log('[bridge]', ev.type, sanitizeForLog(ev));
-      const toastMessage = toastMessageForEvent(ev);
-      if (toastMessage !== undefined) toast.error(toastMessage);
-      const action = adaptEvent(ev);
-      if (!action) {
-        // No reducer work means no commit: drop the perf leg instead of
-        // closing it against the next unrelated commit.
-        discardPendingBridgeEvent(ev);
-        return;
+    const unsub = bridge.subscribeBatch((events) => {
+      const actions: Action[] = [];
+      for (const ev of events) {
+        // Verbose per-event logging runs on every streaming token and eagerly
+        // deep-clones + redacts the whole event, so keep it to dev builds only;
+        // production strips this branch entirely.
+        if (import.meta.env.DEV) console.log('[bridge]', ev.type, sanitizeForLog(ev));
+        const toastMessage = toastMessageForEvent(ev);
+        if (toastMessage !== undefined) toast.error(toastMessage);
+        const action = adaptEvent(ev);
+        if (!action) {
+          // No reducer work means no commit: drop the perf leg instead of
+          // closing it against the next unrelated commit.
+          discardPendingBridgeEvent(ev);
+          continue;
+        }
+        actions.push(action);
       }
-      batcher.pushBridge(action);
+      batcher.pushBridgeBatch(actions);
     });
     return () => {
       unsub();
