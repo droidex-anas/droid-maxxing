@@ -685,6 +685,7 @@ export default function PromptInput({
     setHistoryIndex(null);
     setActiveSkills([]);
     setAttachedFiles([]);
+    setVisualizeSelected(false);
     // Both viewers show a dropped attachment, so they cannot outlive it.
     setViewerImageId(null);
     setViewerPath(null);
@@ -858,7 +859,7 @@ export default function PromptInput({
     const readyImages = await imageAttachments.whenSettled();
     if (updateInterruptedSubmit()) return;
     const allFiles = [...attachedFiles, ...readyImages.map((i) => i.path)];
-    const hasPayload = text || activeSkills.length > 0 || allFiles.length > 0;
+    const hasPayload = text || visualizeSelected || activeSkills.length > 0 || allFiles.length > 0;
     if (!hasPayload) return;
     setHistoryIndex(null);
 
@@ -1251,6 +1252,9 @@ export default function PromptInput({
     // thumbnails again, so the restored draft looks like the one that was queued.
     setAttachedFiles(p.files);
     setActiveSkills(invocableSkills.filter((s) => p.skills.includes(s.name)));
+    // A queued App request already carries /visualize in its text, so the chip
+    // would add a second copy of the command.
+    setVisualizeSelected(false);
     dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id: p.id });
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -1357,6 +1361,7 @@ export default function PromptInput({
     : 'This child transcript is read-only';
   const hasContent =
     input.trim().length > 0 ||
+    visualizeSelected ||
     activeSkills.length > 0 ||
     attachedFiles.length > 0 ||
     imageAttachments.images.length > 0;
@@ -1588,19 +1593,18 @@ export default function PromptInput({
               >
                 <Plus className="w-4 h-4" />
               </button>
-              {addMenuOpen && (
-                <AddMenu
-                  anchorRef={addMenuAnchorRef}
-                  visualizeSelected={visualizeSelected}
-                  onAttachFiles={() => void handleAttachFiles()}
-                  onSelectVisualize={() => {
-                    setVisualizeSelected(true);
-                  }}
-                  onClose={() => {
-                    setAddMenuOpen(false);
-                  }}
-                />
-              )}
+              <AddMenu
+                open={addMenuOpen}
+                anchorRef={addMenuAnchorRef}
+                visualizeSelected={visualizeSelected}
+                onAttachFiles={() => void handleAttachFiles()}
+                onSelectVisualize={() => {
+                  setVisualizeSelected(true);
+                }}
+                onClose={() => {
+                  setAddMenuOpen(false);
+                }}
+              />
             </div>
 
             <div className="relative shrink-0">

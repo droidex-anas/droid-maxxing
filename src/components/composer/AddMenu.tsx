@@ -4,18 +4,20 @@ import { AppWindow, FolderOpen, type LucideIcon } from 'lucide-react';
 
 const ACCENT = 'var(--droid-accent)';
 
+// One row of the menu. `checked` marks a row that toggles something already on
+// the prompt, so assistive technology hears the state the Added marker shows.
 function MenuRow({
   icon: Icon,
   label,
   hint,
-  added = false,
+  checked,
   autoFocus = false,
   onRun,
 }: {
   icon: LucideIcon;
   label: string;
   hint: string;
-  added?: boolean;
+  checked?: boolean;
   autoFocus?: boolean;
   onRun: () => void;
 }) {
@@ -27,6 +29,8 @@ function MenuRow({
     <button
       ref={ref}
       onClick={onRun}
+      role={checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+      aria-checked={checked}
       className="flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-droid-surface/55 focus:bg-droid-surface focus:outline-none"
     >
       <Icon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
@@ -34,7 +38,7 @@ function MenuRow({
       <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/75">
         {hint}
       </span>
-      {added && (
+      {checked && (
         <span className="shrink-0 text-[10.5px] font-medium" style={{ color: ACCENT }}>
           Added
         </span>
@@ -59,12 +63,14 @@ function SectionTitle({ children, first = false }: { children: string; first?: b
 // Attachments and plugins live in one list so the button is a single entry
 // point instead of a shortcut to the file picker.
 export default function AddMenu({
+  open,
   anchorRef,
   visualizeSelected,
   onAttachFiles,
   onSelectVisualize,
   onClose,
 }: {
+  open: boolean;
   /** Wraps the plus button and this menu, so pressing the button closes it
    *  through its own toggle instead of an outside-click that reopens it. */
   anchorRef: RefObject<HTMLElement | null>;
@@ -74,6 +80,7 @@ export default function AddMenu({
   onClose: () => void;
 }) {
   useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -87,41 +94,44 @@ export default function AddMenu({
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('mousedown', onDown);
     };
-  }, [anchorRef, onClose]);
+  }, [open, anchorRef, onClose]);
 
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 6 }}
-        transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-        className="absolute bottom-full left-0 z-50 mb-2 w-[340px] rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
-        role="menu"
-      >
-        <SectionTitle first>Add</SectionTitle>
-        <MenuRow
-          icon={FolderOpen}
-          label="Files"
-          hint="Attach files to this prompt"
-          autoFocus
-          onRun={() => {
-            onAttachFiles();
-            onClose();
-          }}
-        />
-        <SectionTitle>Plugins</SectionTitle>
-        <MenuRow
-          icon={AppWindow}
-          label="Visualize"
-          hint="Create an interactive in-chat App"
-          added={visualizeSelected}
-          onRun={() => {
-            onSelectVisualize();
-            onClose();
-          }}
-        />
-      </motion.div>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 6 }}
+          transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute bottom-full left-0 z-50 mb-2 w-[340px] rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
+          role="menu"
+          aria-label="Add to this prompt"
+        >
+          <SectionTitle first>Add</SectionTitle>
+          <MenuRow
+            icon={FolderOpen}
+            label="Files"
+            hint="Attach files to this prompt"
+            autoFocus
+            onRun={() => {
+              onAttachFiles();
+              onClose();
+            }}
+          />
+          <SectionTitle>Plugins</SectionTitle>
+          <MenuRow
+            icon={AppWindow}
+            label="Visualize"
+            hint="Create an interactive in-chat App"
+            checked={visualizeSelected}
+            onRun={() => {
+              onSelectVisualize();
+              onClose();
+            }}
+          />
+        </motion.div>
+      )}
     </AnimatePresence>
   );
 }

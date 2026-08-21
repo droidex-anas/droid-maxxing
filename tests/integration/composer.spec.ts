@@ -18,6 +18,8 @@ test('the plus button offers plugins and Visualize joins the prompt as a chip', 
   await expect(menu).toHaveCount(0);
   // The plugin rides along as a chip: the draft stays the user's own words.
   await expect(composer).toHaveValue('');
+  // The chip is the command, so it can be sent on its own.
+  await expect(page.getByTitle(/Enter: send/)).toBeEnabled();
 
   await composer.click();
   await composer.press('Backspace');
@@ -35,10 +37,18 @@ test('the slash menu keeps /visualize out of the draft text', async ({ page }) =
   await expect(composer).toHaveValue('');
 });
 
-test('the slash menu lists one Compact row for its three typed aliases', async ({ page }) => {
+// /compaction and /compression stay accepted when typed in full, but neither
+// matches the command's name, so the menu never offered a row for them and
+// still doesn't. What it used to offer was three identical Compact rows.
+test('the slash menu lists a single Compact row', async ({ page }) => {
   await page.goto(appUrl);
   const composer = page.locator('textarea').first();
 
   await composer.fill('/compact');
   await expect(page.getByRole('button').filter({ hasText: 'compact' })).toHaveCount(1);
+
+  for (const alias of ['/compaction', '/compression']) {
+    await composer.fill(alias);
+    await expect(page.getByRole('button').filter({ hasText: 'compact' })).toHaveCount(0);
+  }
 });
