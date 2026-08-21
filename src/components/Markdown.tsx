@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AppBlock } from './AppBlock';
-import { appFencesInMarkdown, type MarkdownAppFence } from '../lib/appBlocks';
+import { appFencesInMarkdown } from '../lib/appBlocks';
 import { CodeCard } from './MarkdownCode';
 import { TranscriptImage } from './media/TranscriptImage';
 import { MermaidBlock, SvgCodeBlock } from './MarkdownDiagrams';
@@ -109,10 +109,11 @@ interface FenceRenderOptions {
   autoPlayAppBlocks: boolean;
   buildingAppBlocks: boolean;
   cutOffAppBlocks: boolean;
-  appFences: MarkdownAppFence[];
-  // App fences are consumed in document order: the nth rendered fence reads the
-  // nth parsed fence. MarkdownImpl hands out a fresh cursor per render.
-  fenceCursor: { index: number };
+  // Source line of the one app fence still being written, when the response is
+  // mid-stream. Only the trailing fence can be unterminated, and a fence
+  // recognises itself by position, so rendering one twice cannot shift the
+  // building state onto its neighbour.
+  incompleteAppFenceLine: number | null;
 }
 
 const FenceOptionsContext = createContext<FenceRenderOptions>({
@@ -120,17 +121,18 @@ const FenceOptionsContext = createContext<FenceRenderOptions>({
   autoPlayAppBlocks: false,
   buildingAppBlocks: false,
   cutOffAppBlocks: false,
-  appFences: [],
-  fenceCursor: { index: 0 },
+  incompleteAppFenceLine: null,
 });
 
 function MarkdownFence({
   className,
   specMode,
+  startLine,
   children,
 }: {
   className?: string;
   specMode: boolean;
+  startLine?: number;
   children?: ReactNode;
 }) {
   const {
@@ -138,8 +140,7 @@ function MarkdownFence({
     autoPlayAppBlocks,
     buildingAppBlocks,
     cutOffAppBlocks,
-    appFences,
-    fenceCursor,
+    incompleteAppFenceLine,
   } = useContext(FenceOptionsContext);
   const inline = !className;
   if (inline)
@@ -154,7 +155,8 @@ function MarkdownFence({
   const codeText = typeof children === 'string' ? children : '';
 
   if (allowGeneratedContent && isAppLang(className)) {
-    const isComplete = appFences.at(fenceCursor.index++)?.complete ?? !buildingAppBlocks;
+    const isComplete =
+      startLine === undefined ? !buildingAppBlocks : startLine !== incompleteAppFenceLine;
     return (
       <AppBlock
         source={codeText}
@@ -308,8 +310,12 @@ function createMarkdownComponents(specMode: boolean): Components {
         </pre>
       );
     },
-    code: ({ className, children }) => (
-      <MarkdownFence className={className} specMode={specMode}>
+    code: ({ className, children, node }) => (
+      <MarkdownFence
+        className={className}
+        specMode={specMode}
+        startLine={node?.position?.start.line}
+      >
         {children}
       </MarkdownFence>
     ),
@@ -364,8 +370,8 @@ function MarkdownImpl({
     autoPlayAppBlocks,
     buildingAppBlocks,
     cutOffAppBlocks,
-    appFences: appFencesInMarkdown(children),
-    fenceCursor: { index: 0 },
+    incompleteAppFenceLine:
+      appFencesInMarkdown(children).find((fence) => !fence.complete)?.startLine ?? null,
   };
   return (
     <div
