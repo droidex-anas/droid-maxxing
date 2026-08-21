@@ -35,21 +35,10 @@ async function withServer(
   }
 }
 
-test('legacy authenticated client receives the one-event update-safe wire format', async () => {
+test('clients without the current bridge protocol are rejected', async () => {
   await withServer(async (harness) => {
-    const received: string[] = [];
     const socket = new WebSocket(`ws://127.0.0.1:${String(harness.port)}?token=${harness.token}`);
-    const opened = new Promise<void>((resolve) => socket.once('open', resolve));
-    socket.on('message', (raw) => received.push(String(raw)));
-    await opened;
-
-    harness.broadcast({ type: 'connection', status: 'connected' });
-    await waitFor(() => received.length === 1);
-    assert.deepEqual(JSON.parse(received[0] ?? ''), {
-      type: 'connection',
-      status: 'connected',
-    });
-    await closeSocket(socket);
+    assert.equal(await socketCloseCode(socket), 1002);
   });
 });
 
@@ -148,22 +137,6 @@ test('resume reset flushes pending sequences before admitting the client', async
       ['bridge.reset', 'events.batch'],
     );
     await closeSocket(socket);
-  });
-});
-
-test('legacy client is disconnected before an oversized payload is queued', async () => {
-  await withServer(async (harness) => {
-    const received: string[] = [];
-    const socket = new WebSocket(`ws://127.0.0.1:${String(harness.port)}?token=${harness.token}`);
-    const opened = new Promise<void>((resolve) => socket.once('open', resolve));
-    const closed = socketCloseCode(socket);
-    socket.on('message', (raw) => received.push(String(raw)));
-    await opened;
-
-    harness.broadcast({ type: 'error', message: 'x'.repeat(8 * 1024 * 1024) });
-
-    assert.equal(await closed, 1006);
-    assert.deepEqual(received, []);
   });
 });
 

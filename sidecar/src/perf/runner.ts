@@ -368,7 +368,10 @@ export function acceptReplayWireMessage(
   if (cursor.generation !== null && message.generation !== cursor.generation) {
     throw new Error('Replay bridge generation changed during the run.');
   }
-  if (message.firstSeq !== cursor.lastSeq + 1 || message.lastSeq < message.firstSeq) {
+  if (
+    (cursor.generation !== null && message.firstSeq !== cursor.lastSeq + 1) ||
+    message.lastSeq < message.firstSeq
+  ) {
     throw new Error('Replay bridge sequence gap or overlap.');
   }
   if (message.events.length === 0) throw new Error('Replay bridge delivered an empty batch.');

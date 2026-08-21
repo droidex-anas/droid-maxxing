@@ -124,3 +124,21 @@ test('replay client rejects reordered entries inside a batch', () => {
     /entry order/,
   );
 });
+
+test('the first replay batch establishes the live sequence baseline', () => {
+  const cursor = { generation: null, lastSeq: 0 };
+
+  const events = acceptReplayWireMessage(
+    {
+      type: 'events.batch',
+      generation: 'generation-1',
+      firstSeq: 7,
+      lastSeq: 7,
+      events: [{ seq: 7, event: { type: 'connection', status: 'connected' } }],
+    },
+    cursor,
+  );
+
+  assert.equal(events.length, 1);
+  assert.deepEqual(cursor, { generation: 'generation-1', lastSeq: 7 });
+});

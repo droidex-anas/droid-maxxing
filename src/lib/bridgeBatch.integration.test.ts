@@ -121,13 +121,13 @@ test(
 );
 
 test(
-  'bridge accepts legacy direct events during a mixed-version update',
+  'bridge accepts direct command errors but ignores unbatched events',
   { concurrency: false },
   async () => {
     const runtime = installFakeRuntime();
     try {
       const bridge = new Bridge(
-        async () => ({ port: 43121, token: 'legacy-token' }),
+        async () => ({ port: 43121, token: 'direct-error-token' }),
         () => undefined,
       );
       const batches: string[][] = [];
@@ -136,7 +136,8 @@ test(
       const socket = required(FakeWebSocket.instances.at(-1));
       socket.open();
       socket.message({ type: 'connection', status: 'connected' });
-      assert.deepEqual(batches, [['connection']]);
+      socket.message({ type: 'error', message: 'Invalid JSON command' });
+      assert.deepEqual(batches, [['error']]);
     } finally {
       restoreFakeRuntime(runtime);
     }
@@ -215,7 +216,7 @@ test(
 );
 
 test(
-  'bridge reset advances the resume cursor and emits one recoverable diagnostic',
+  'bridge reset advances the resume cursor and emits one non-recoverable diagnostic',
   { concurrency: false },
   async () => {
     const runtime = installFakeRuntime();
@@ -243,7 +244,7 @@ test(
           code: 'bridge.resync_required',
           message:
             'The agent runtime restarted. Reopen the active session if its live state does not refresh.',
-          recoverable: true,
+          recoverable: false,
         },
       ]);
 
@@ -282,8 +283,8 @@ test('late messages from a replaced socket are ignored', { concurrency: false },
     const second = required(FakeWebSocket.instances.at(-1));
     second.open();
 
-    first.message({ type: 'connection', status: 'connected' });
-    second.message({ type: 'connection', status: 'connected' });
+    first.message(batch('generation-1', 1, 1, [{ type: 'connection', status: 'connected' }]));
+    second.message(batch('generation-1', 1, 1, [{ type: 'connection', status: 'connected' }]));
     assert.deepEqual(seen, ['connection']);
   } finally {
     restoreFakeRuntime(runtime);
@@ -360,6 +361,44 @@ test(
       const url = new URL(second.url);
       assert.equal(url.searchParams.get('resumeGeneration'), null);
       assert.equal(url.searchParams.get('resumeSeq'), null);
+    } finally {
+      restoreFakeRuntime(runtime);
+    }
+  },
+);
+
+test(
+  'known events with missing payloads are rejected as malformed batches',
+  { concurrency: false },
+  async () => {
+    const runtime = installFakeRuntime();
+    try {
+      const bridge = new Bridge(
+        async () => ({ port: 43130, token: 'event-validation-token' }),
+        () => undefined,
+      );
+      const seen: ServerEvent[] = [];
+      bridge.subscribe((event) => seen.push(event));
+      await bridge.start();
+      const socket = required(FakeWebSocket.instances.at(-1));
+      socket.open();
+      socket.message({
+        type: 'events.batch',
+        generation: 'generation-1',
+        firstSeq: 1,
+        lastSeq: 1,
+        events: [{ seq: 1, event: { type: 'session.updated' } }],
+      });
+
+      assert.deepEqual(socket.closeArgs, [1002, 'malformed bridge message']);
+      assert.deepEqual(
+        seen
+          .filter(
+            (event): event is Extract<ServerEvent, { type: 'error' }> => event.type === 'error',
+          )
+          .map((event) => event.code),
+        ['bridge.resync_required'],
+      );
     } finally {
       restoreFakeRuntime(runtime);
     }

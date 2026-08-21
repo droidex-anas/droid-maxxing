@@ -3076,7 +3076,12 @@ function finiteNumber(value: unknown): number | undefined {
 
 /* ── Bridge event adapter ── */
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
-  if (ev.type === 'error' && ev.code === 'bridge.unsupported_command') return ev.message;
+  if (
+    ev.type === 'error' &&
+    (ev.code === 'bridge.unsupported_command' || ev.code === 'bridge.resync_required')
+  ) {
+    return ev.message;
+  }
   if (
     ev.type === 'error' &&
     (ev.code === 'session.autonomy_update_failed' || ev.code === 'session.create_failed')
@@ -3144,6 +3149,9 @@ export function adaptEvent(ev: ServerEvent): Action | null {
     case 'question.requested':
       return { type: 'SESSION_QUESTION', question: ev.question };
     case 'error':
+      if (ev.code === 'bridge.resync_required') {
+        return { type: 'SET_CONNECTION', status: 'error', message: ev.message };
+      }
       // A failed autonomy change is recoverable: the session keeps its last
       // confirmed level, the pending state settles, and the toast carries the
       // message (see toastMessageForEvent).

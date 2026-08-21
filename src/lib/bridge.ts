@@ -6,8 +6,8 @@ import {
   type ClientCommand,
   type ServerEvent,
   type ServerEventBatch,
-  type ServerWireMessage,
 } from '../types/bridge';
+import { serverWireMessage } from './bridgeWireValidation';
 
 type Listener = (event: ServerEvent) => void;
 type BatchListener = (events: readonly ServerEvent[]) => void;
@@ -143,7 +143,7 @@ export class Bridge {
         type: 'error',
         code: 'bridge.resync_required',
         message: resetMessage(message.reason),
-        recoverable: true,
+        recoverable: false,
       },
     ]);
   }
@@ -221,69 +221,6 @@ export class Bridge {
   }
 }
 
-function serverWireMessage(value: unknown): ServerWireMessage | null {
-  if (!isRecord(value) || typeof value.type !== 'string') return null;
-  if (value.type === 'events.batch') return eventBatch(value);
-  if (value.type === 'bridge.reset') return bridgeReset(value);
-  return value as ServerEvent;
-}
-
-function eventBatch(value: Record<string, unknown>): ServerEventBatch | null {
-  const generation = value.generation;
-  const firstSeq = value.firstSeq;
-  const lastSeq = value.lastSeq;
-  const events = value.events;
-  if (typeof generation !== 'string' || generation.length === 0) return null;
-  if (!positiveSafeInteger(firstSeq) || !positiveSafeInteger(lastSeq)) return null;
-  if (lastSeq < firstSeq || !Array.isArray(events) || events.length === 0) return null;
-  if (!hasOrderedBatchEntries(events, firstSeq, lastSeq)) return null;
-  return value as unknown as ServerEventBatch;
-}
-
-function hasOrderedBatchEntries(events: unknown[], firstSeq: number, lastSeq: number): boolean {
-  let previousSeq = firstSeq - 1;
-  for (const entry of events) {
-    if (!isRecord(entry) || !positiveSafeInteger(entry.seq) || !isServerEvent(entry.event)) {
-      return false;
-    }
-    const seq = entry.seq;
-    if (seq <= previousSeq || seq < firstSeq || seq > lastSeq) return false;
-    previousSeq = seq;
-  }
-  return previousSeq === lastSeq;
-}
-
-function bridgeReset(value: Record<string, unknown>): BridgeResetMessage | null {
-  const reason = value.reason;
-  if (
-    typeof value.generation !== 'string' ||
-    value.generation.length === 0 ||
-    !nonNegativeSafeInteger(value.lastSeq) ||
-    (reason !== 'generation_changed' &&
-      reason !== 'replay_unavailable' &&
-      reason !== 'invalid_resume')
-  ) {
-    return null;
-  }
-  return value as unknown as BridgeResetMessage;
-}
-
-function isServerEvent(value: unknown): value is ServerEvent {
-  return isRecord(value) && typeof value.type === 'string';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function positiveSafeInteger(value: unknown): value is number {
-  return nonNegativeSafeInteger(value) && value > 0;
-}
-
-function nonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
 function resetMessage(reason: BridgeResetMessage['reason']): string {
   switch (reason) {
     case 'generation_changed':
@@ -293,6 +230,10 @@ function resetMessage(reason: BridgeResetMessage['reason']): string {
     case 'invalid_resume':
       return 'The renderer sent an invalid event resume cursor and started a fresh stream.';
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 export const bridge = new Bridge();

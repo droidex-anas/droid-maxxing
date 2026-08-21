@@ -26,10 +26,6 @@ const SOFT_CLIENT_BUFFER_BYTES = 512 * 1024;
 const HARD_CLIENT_BUFFER_BYTES = 8 * 1024 * 1024;
 const CLIENT_CLOSE_DRAIN_MS = 250;
 
-interface BridgeClient {
-  supportsEventBatches: boolean;
-}
-
 export interface BridgeServer {
   readonly port: number;
   readonly ready: Promise<void>;
@@ -44,7 +40,7 @@ export function startBridgeServer(options: {
   assetToken: string;
   onCommand: (command: ClientCommand) => Promise<void>;
 }): BridgeServer {
-  const clients = new Map<WebSocket, BridgeClient>();
+  const clients = new Set<WebSocket>();
   const replay = new BridgeReplayBuffer();
   let boundPort = options.requestedPort;
   let closePromise: Promise<void> | null = null;
@@ -57,7 +53,7 @@ export function startBridgeServer(options: {
 
   const wss = new WebSocketServer({ server });
   const batcher = new BridgeEventBatcher({
-    isUnderPressure: () => maxBufferedAmount(clients.keys()) >= SOFT_CLIENT_BUFFER_BYTES,
+    isUnderPressure: () => maxBufferedAmount(clients) >= SOFT_CLIENT_BUFFER_BYTES,
     sendBatch,
     onQueueChanged: (snapshot) => {
       hotPathMetrics.recordTransportQueue({
@@ -77,34 +73,17 @@ export function startBridgeServer(options: {
     const batchData = JSON.stringify(batch);
     const replayEntry = replay.push(batch, batchData);
     if (replayEntry.bytes >= HARD_CLIENT_BUFFER_BYTES) replay.markHistoryUnavailable();
-    let legacyPayloads: readonly string[] | null = null;
     let bytesSent = 0;
     let sendOperations = 0;
     let maxBufferedBytes = 0;
 
-    for (const [ws, client] of clients) {
+    for (const ws of clients) {
       if (ws.readyState !== ws.OPEN) continue;
       maxBufferedBytes = Math.max(maxBufferedBytes, ws.bufferedAmount);
-
-      if (client.supportsEventBatches) {
-        if (disconnectIfBackpressured(ws, replayEntry.bytes)) continue;
-        ws.send(batchData);
-        bytesSent += replayEntry.bytes;
-        sendOperations += 1;
-        continue;
-      }
-
-      // Update safety: an older renderer has no `events.batch` contract. Keep
-      // it functional by unpacking the already-ordered batch into the legacy
-      // one-event wire format until the whole installed app has relaunched.
-      legacyPayloads ??= batch.events.map((entry) => JSON.stringify(entry.event));
-      for (const data of legacyPayloads) {
-        const payloadBytes = Buffer.byteLength(data);
-        if (disconnectIfBackpressured(ws, payloadBytes)) break;
-        ws.send(data);
-        bytesSent += payloadBytes;
-        sendOperations += 1;
-      }
+      if (disconnectIfBackpressured(ws, replayEntry.bytes)) continue;
+      ws.send(batchData);
+      bytesSent += replayEntry.bytes;
+      sendOperations += 1;
     }
 
     hotPathMetrics.recordTransport(performance.now() - startedAt, bytesSent, sendOperations);
@@ -140,12 +119,12 @@ export function startBridgeServer(options: {
       return;
     }
 
-    const client: BridgeClient = {
-      supportsEventBatches:
-        url.searchParams.get('bridgeProtocol') === String(BRIDGE_PROTOCOL_VERSION),
-    };
-    if (client.supportsEventBatches && !resumeClient(ws, url)) return;
-    clients.set(ws, client);
+    if (url.searchParams.get('bridgeProtocol') !== String(BRIDGE_PROTOCOL_VERSION)) {
+      ws.close(1002, 'unsupported bridge protocol');
+      return;
+    }
+    if (!resumeClient(ws, url)) return;
+    clients.add(ws);
 
     ws.on('message', (raw) => void handleMessage(ws, raw));
     ws.on('close', () => clients.delete(ws));

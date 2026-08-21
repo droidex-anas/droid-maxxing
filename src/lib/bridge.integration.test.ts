@@ -13,6 +13,7 @@ class FakeWebSocket {
   onclose: (() => void) | null = null;
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
+  private sequence = 0;
 
   constructor(readonly url: string) {
     FakeWebSocket.instances.push(this);
@@ -28,7 +29,16 @@ class FakeWebSocket {
   }
 
   message(event: ServerEvent): void {
-    this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent<string>);
+    this.sequence += 1;
+    this.onmessage?.({
+      data: JSON.stringify({
+        type: 'events.batch',
+        generation: 'test-generation',
+        firstSeq: this.sequence,
+        lastSeq: this.sequence,
+        events: [{ seq: this.sequence, event }],
+      }),
+    } as MessageEvent<string>);
   }
 
   close(): void {

@@ -892,4 +892,7 @@ export interface BridgeResetMessage {
   reason: 'generation_changed' | 'replay_unavailable' | 'invalid_resume';
 }
 
-export type ServerWireMessage = ServerEvent | ServerEventBatch | BridgeResetMessage;
+export type ServerWireMessage =
+  | Extract<ServerEvent, { type: 'error' }>
+  | ServerEventBatch
+  | BridgeResetMessage;
