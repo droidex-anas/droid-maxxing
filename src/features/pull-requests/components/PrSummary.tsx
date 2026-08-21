@@ -176,11 +176,12 @@ export function PrSummary({
         checksError={checksError}
       />
 
-      <PrSection title="Description">
+      <PrSection key="description" title="Description">
         <Description loaded={loaded} body={body} metaError={metaError} />
       </PrSection>
 
       <PrSection
+        key="checks"
         title="Checks"
         count={checks.length > 0 ? checks.length : undefined}
         meta={
@@ -198,12 +199,13 @@ export function PrSummary({
       </PrSection>
 
       {pr && hasMergeConflicts(pr) ? (
-        <PrSection title="Merge conflicts">
+        <PrSection key="merge-conflicts" title="Merge conflicts">
           <MergeConflicts pr={pr} />
         </PrSection>
       ) : null}
 
       <PrSection
+        key="conversation"
         title="Conversation"
         count={comments.length}
         meta={
