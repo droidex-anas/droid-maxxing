@@ -1,0 +1,40 @@
+name: Apply global plugin workspace
+
+on:
+  push:
+    branches:
+      - feat/global-plugin-library
+    paths:
+      - tools/apply-global-plugin-ui.cjs
+      - .github/workflows/apply-global-plugin-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/global-plugin-library
+          fetch-depth: 0
+
+      - name: Apply plugin workspace integration
+        run: node tools/apply-global-plugin-ui.cjs
+
+      - name: Verify patch
+        run: git diff --check
+
+      - name: Commit integration
+        run: |
+          if git diff --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx src/components/Sidebar.tsx
+          git commit -m "feat(plugins): route global plugin workspace"
+          git push origin HEAD:feat/global-plugin-library
