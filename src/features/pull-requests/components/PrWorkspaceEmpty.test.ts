@@ -3,8 +3,9 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+import { initialState, StaticStoreProvider } from '../../../hooks/useStore';
 import type { GithubSetupController } from '../../../hooks/useGithubSetup';
-import { PrGithubSetupEmpty } from './PrWorkspaceEmpty';
+import { PrGithubSetupEmpty, PrWorkspaceEmpty } from './PrWorkspaceEmpty';
 
 const signedOut = {
   installed: true,
@@ -86,4 +87,22 @@ test('setup errors are announced when they change', () => {
 
   assert.match(html, /aria-live="polite"/);
   assert.match(html, /GitHub CLI setup failed/);
+});
+
+test('a non-GitHub binding offers a replacement workspace action', () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      StaticStoreProvider,
+      { state: initialState, dispatch: () => undefined },
+      createElement(PrWorkspaceEmpty, {
+        cwd: '/removed-repository',
+        gitLoaded: true,
+        isGitHub: false,
+        setup: setupController(),
+      }),
+    ),
+  );
+
+  assert.match(html, /This folder is not a GitHub repository\./);
+  assert.match(html, /Choose another workspace/);
 });

@@ -130,6 +130,15 @@ export function PrWorkspaceEmpty({
     return (
       <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center px-8">
         <EmptyCopy>This folder is not a GitHub repository.</EmptyCopy>
+        <button
+          type="button"
+          onClick={() => {
+            void openWorkspace();
+          }}
+          className="mt-4 rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
+        >
+          Choose another workspace
+        </button>
       </div>
     );
   }
