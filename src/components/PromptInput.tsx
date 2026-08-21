@@ -77,6 +77,7 @@ import {
 import {
   AppWindow,
   ArrowUp,
+  Blocks,
   ChevronDown,
   LoaderCircle,
   Plus,
@@ -1432,7 +1433,9 @@ export default function PromptInput({
           }
         >
           {hasChips && (
-            <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+            // px-4 lines a selection up with the draft text below it, so the
+            // chip reads as part of the prompt rather than a tray above it.
+            <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
               {visualizeSelected && (
                 <SelectionChip
                   icon={AppWindow}
@@ -1481,6 +1484,7 @@ export default function PromptInput({
               {activeSkills.map((skill) => (
                 <SelectionChip
                   key={skill.filePath}
+                  icon={Blocks}
                   label={skill.name}
                   title={skill.description ?? skill.filePath}
                   removeLabel={`Remove the ${skill.name} skill`}
