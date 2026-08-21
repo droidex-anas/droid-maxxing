@@ -4,8 +4,8 @@ import { AppWindow, FolderOpen, type LucideIcon } from 'lucide-react';
 
 const ACCENT = 'var(--droid-accent)';
 
-// One row of the menu. `checked` marks a row that toggles something already on
-// the prompt, so assistive technology hears the state the Added marker shows.
+// One row of the menu. A row with `checked` toggles what it names, so it
+// reports the state its Added marker shows; a row without it runs an action.
 function MenuRow({
   icon: Icon,
   label,
@@ -67,7 +67,7 @@ export default function AddMenu({
   anchorRef,
   visualizeSelected,
   onAttachFiles,
-  onSelectVisualize,
+  onToggleVisualize,
   onClose,
 }: {
   open: boolean;
@@ -76,7 +76,7 @@ export default function AddMenu({
   anchorRef: RefObject<HTMLElement | null>;
   visualizeSelected: boolean;
   onAttachFiles: () => void;
-  onSelectVisualize: () => void;
+  onToggleVisualize: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -126,7 +126,7 @@ export default function AddMenu({
             hint="Create an interactive in-chat App"
             checked={visualizeSelected}
             onRun={() => {
-              onSelectVisualize();
+              onToggleVisualize();
               onClose();
             }}
           />

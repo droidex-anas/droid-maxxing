@@ -1598,8 +1598,8 @@ export default function PromptInput({
                 anchorRef={addMenuAnchorRef}
                 visualizeSelected={visualizeSelected}
                 onAttachFiles={() => void handleAttachFiles()}
-                onSelectVisualize={() => {
-                  setVisualizeSelected(true);
+                onToggleVisualize={() => {
+                  setVisualizeSelected(!visualizeSelected);
                 }}
                 onClose={() => {
                   setAddMenuOpen(false);

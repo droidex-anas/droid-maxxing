@@ -21,6 +21,13 @@ test('the plus button offers plugins and Visualize joins the prompt as a chip', 
   // The chip is the command, so it can be sent on its own.
   await expect(page.getByTitle(/Enter: send/)).toBeEnabled();
 
+  // The row that added it takes it back off.
+  await page.getByTitle('Add files or a plugin').click();
+  await menu.getByRole('menuitemcheckbox', { name: /Visualize/ }).click();
+  await expect(removeChip).toHaveCount(0);
+
+  await page.getByTitle('Add files or a plugin').click();
+  await menu.getByText('Visualize', { exact: true }).click();
   await composer.click();
   await composer.press('Backspace');
   await expect(removeChip).toHaveCount(0);
