@@ -60,5 +60,6 @@ test('rejects overlapping, out-of-order, or gapped batches', () => {
   const first = batch(1);
   store(replay, first);
   assert.throws(() => store(replay, first), /sequence order/);
+  assert.throws(() => store(replay, batch(0)), /sequence order/);
   assert.throws(() => store(replay, batch(3)), /sequence order/);
 });

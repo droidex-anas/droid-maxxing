@@ -277,6 +277,21 @@ test('pending limits synchronously flush a bounded queue', () => {
   assert.equal(harness.batcher.snapshot().pendingLogicalEvents, 0);
 });
 
+test('pending byte limits include the complete serialized event payload', () => {
+  const harness = createHarness({ maxPendingEstimatedBytes: 1_500 });
+  harness.batcher.enqueue({
+    type: 'session.updated',
+    session: {
+      ...sessionSummary('app'),
+      title: 'x'.repeat(5_000),
+    },
+  });
+
+  assert.equal(harness.batches.length, 1);
+  assert.ok((harness.batches[0]?.metadata.estimatedBytes ?? 0) > 5_000);
+  assert.equal(harness.batcher.snapshot().pendingLogicalEvents, 0);
+});
+
 test('queue snapshots publish the full dwell age before flush reset', () => {
   const ages: number[] = [];
   const harness = createHarness({

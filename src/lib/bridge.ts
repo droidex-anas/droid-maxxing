@@ -78,10 +78,17 @@ export class Bridge {
     };
     ws.onmessage = (message) => {
       if (this.ws !== ws || typeof message.data !== 'string') return;
-      let wireMessage: ServerWireMessage;
+      let parsed: unknown;
       try {
-        wireMessage = JSON.parse(message.data) as ServerWireMessage;
+        parsed = JSON.parse(message.data);
       } catch {
+        return;
+      }
+      const wireMessage = serverWireMessage(parsed);
+      if (wireMessage === null) {
+        if (isRecord(parsed) && parsed.type === 'events.batch') {
+          this.handleMalformedBatch(ws);
+        }
         return;
       }
       if (wireMessage.type === 'events.batch') {
@@ -141,6 +148,21 @@ export class Bridge {
     ]);
   }
 
+  private handleMalformedBatch(ws: WebSocket): void {
+    this.lastGeneration = null;
+    this.lastSeq = 0;
+    this.publishEvents([
+      {
+        type: 'error',
+        code: 'bridge.resync_required',
+        message:
+          'The agent runtime sent a malformed event batch. Reconnecting with a fresh cursor.',
+        recoverable: true,
+      },
+    ]);
+    ws.close(1002, 'malformed bridge message');
+  }
+
   private publishEvents(events: readonly ServerEvent[]): void {
     for (const event of events) {
       noteBridgeEventReceived(event);
@@ -197,6 +219,68 @@ export class Bridge {
     this.batchListeners.add(listener);
     return () => this.batchListeners.delete(listener);
   }
+}
+
+function serverWireMessage(value: unknown): ServerWireMessage | null {
+  if (!isRecord(value) || typeof value.type !== 'string') return null;
+  if (value.type === 'events.batch') return eventBatch(value);
+  if (value.type === 'bridge.reset') return bridgeReset(value);
+  return value as ServerEvent;
+}
+
+function eventBatch(value: Record<string, unknown>): ServerEventBatch | null {
+  const generation = value.generation;
+  const firstSeq = value.firstSeq;
+  const lastSeq = value.lastSeq;
+  const events = value.events;
+  if (typeof generation !== 'string' || generation.length === 0) return null;
+  if (!positiveSafeInteger(firstSeq) || !positiveSafeInteger(lastSeq)) return null;
+  if (lastSeq < firstSeq || !Array.isArray(events) || events.length === 0) return null;
+  if (!hasOrderedBatchEntries(events, firstSeq, lastSeq)) return null;
+  return value as unknown as ServerEventBatch;
+}
+
+function hasOrderedBatchEntries(events: unknown[], firstSeq: number, lastSeq: number): boolean {
+  let previousSeq = firstSeq - 1;
+  for (const entry of events) {
+    if (!isRecord(entry) || !positiveSafeInteger(entry.seq) || !isServerEvent(entry.event)) {
+      return false;
+    }
+    const seq = entry.seq;
+    if (seq <= previousSeq || seq < firstSeq || seq > lastSeq) return false;
+    previousSeq = seq;
+  }
+  return previousSeq === lastSeq;
+}
+
+function bridgeReset(value: Record<string, unknown>): BridgeResetMessage | null {
+  const reason = value.reason;
+  if (
+    typeof value.generation !== 'string' ||
+    !nonNegativeSafeInteger(value.lastSeq) ||
+    (reason !== 'generation_changed' &&
+      reason !== 'replay_unavailable' &&
+      reason !== 'invalid_resume')
+  ) {
+    return null;
+  }
+  return value as unknown as BridgeResetMessage;
+}
+
+function isServerEvent(value: unknown): value is ServerEvent {
+  return isRecord(value) && typeof value.type === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return nonNegativeSafeInteger(value) && value > 0;
+}
+
+function nonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 function resetMessage(reason: BridgeResetMessage['reason']): string {

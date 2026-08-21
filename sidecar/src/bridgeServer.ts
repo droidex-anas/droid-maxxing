@@ -84,9 +84,9 @@ export function startBridgeServer(options: {
     for (const [ws, client] of clients) {
       if (ws.readyState !== ws.OPEN) continue;
       maxBufferedBytes = Math.max(maxBufferedBytes, ws.bufferedAmount);
-      if (disconnectIfBackpressured(ws)) continue;
 
       if (client.supportsEventBatches) {
+        if (disconnectIfBackpressured(ws, replayEntry.bytes)) continue;
         ws.send(batchData);
         bytesSent += replayEntry.bytes;
         sendOperations += 1;
@@ -98,9 +98,10 @@ export function startBridgeServer(options: {
       // one-event wire format until the whole installed app has relaunched.
       legacyPayloads ??= batch.events.map((entry) => JSON.stringify(entry.event));
       for (const data of legacyPayloads) {
-        if (disconnectIfBackpressured(ws)) break;
+        const payloadBytes = Buffer.byteLength(data);
+        if (disconnectIfBackpressured(ws, payloadBytes)) break;
         ws.send(data);
-        bytesSent += Buffer.byteLength(data);
+        bytesSent += payloadBytes;
         sendOperations += 1;
       }
     }
@@ -190,7 +191,7 @@ export function startBridgeServer(options: {
     let replayedEvents = 0;
     let sendOperations = 0;
     for (const entry of missed) {
-      if (disconnectIfBackpressured(ws)) return false;
+      if (disconnectIfBackpressured(ws, entry.bytes)) return false;
       ws.send(entry.data);
       replayedBytes += entry.bytes;
       replayedEvents += entry.eventCount;
@@ -234,18 +235,21 @@ export function startBridgeServer(options: {
   }
 
   function sendDirectWire(ws: WebSocket, message: ServerWireMessage): void {
-    if (ws.readyState !== ws.OPEN || disconnectIfBackpressured(ws)) return;
+    if (ws.readyState !== ws.OPEN) return;
     const startedAt = performance.now();
     const data = JSON.stringify(message);
+    const payloadBytes = Buffer.byteLength(data);
+    if (disconnectIfBackpressured(ws, payloadBytes)) return;
     ws.send(data);
-    hotPathMetrics.recordTransport(performance.now() - startedAt, Buffer.byteLength(data), 1);
+    hotPathMetrics.recordTransport(performance.now() - startedAt, payloadBytes, 1);
   }
 
-  function disconnectIfBackpressured(ws: WebSocket): boolean {
-    hotPathMetrics.recordClientBufferedAmount(ws.bufferedAmount);
-    if (ws.bufferedAmount < HARD_CLIENT_BUFFER_BYTES) return false;
+  function disconnectIfBackpressured(ws: WebSocket, payloadBytes: number): boolean {
+    const projectedBufferedBytes = ws.bufferedAmount + payloadBytes;
+    hotPathMetrics.recordClientBufferedAmount(projectedBufferedBytes);
+    if (projectedBufferedBytes < HARD_CLIENT_BUFFER_BYTES) return false;
     clients.delete(ws);
-    hotPathMetrics.recordBackpressureDisconnect(ws.bufferedAmount);
+    hotPathMetrics.recordBackpressureDisconnect(projectedBufferedBytes);
     ws.terminate();
     return true;
   }

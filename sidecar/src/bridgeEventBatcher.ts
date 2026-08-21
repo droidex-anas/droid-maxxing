@@ -310,26 +310,7 @@ function isImmediateEvent(event: ServerEvent): boolean {
 }
 
 function estimateEventBytes(event: ServerEvent): number {
-  let bytes = 192 + Buffer.byteLength(event.type, 'utf8');
-  switch (event.type) {
-    case 'event.appended':
-      bytes += Buffer.byteLength(event.event.text ?? '', 'utf8');
-      break;
-    case 'session.updated':
-    case 'session.created':
-      bytes += Buffer.byteLength(event.session.appSessionId, 'utf8') + 1_024;
-      break;
-    case 'context.updated':
-      bytes +=
-        Buffer.byteLength(event.appSessionId, 'utf8') +
-        Buffer.byteLength(event.sourceSessionId, 'utf8') +
-        384;
-      break;
-    case 'session.history':
-      bytes += event.transcripts.length * 256;
-      break;
-    default:
-      bytes += 256;
-  }
-  return bytes;
+  // Include the complete event rather than sampling known text fields. The
+  // small fixed allowance covers the sequenced entry wrapper and batch JSON.
+  return Buffer.byteLength(JSON.stringify(event), 'utf8') + 48;
 }

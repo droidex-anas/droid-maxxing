@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Bridge } from './bridge';
-import type { ServerEvent, ServerEventBatch, ServerWireMessage } from '../types/bridge';
+import type { ServerEvent, ServerEventBatch } from '../types/bridge';
 
 class FakeWebSocket {
   static readonly OPEN = 1;
@@ -29,7 +29,7 @@ class FakeWebSocket {
     this.onopen?.();
   }
 
-  message(message: ServerWireMessage): void {
+  message(message: unknown): void {
     this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent<string>);
   }
 
@@ -312,6 +312,54 @@ test(
 
       socket.message(batch('generation-1', 3, 3, [{ type: 'connection', status: 'connected' }]));
       assert.deepEqual(socket.closeArgs, [1012, 'bridge event sequence gap']);
+    } finally {
+      restoreFakeRuntime(runtime);
+    }
+  },
+);
+
+test(
+  'malformed batches reset the cursor and reconnect without publishing payloads',
+  { concurrency: false },
+  async () => {
+    const runtime = installFakeRuntime();
+    const reconnects: Array<() => void> = [];
+    try {
+      const bridge = new Bridge(
+        async () => ({ port: 43128, token: 'malformed-token' }),
+        (callback) => reconnects.push(callback),
+      );
+      const seen: ServerEvent[] = [];
+      bridge.subscribe((event) => seen.push(event));
+      await bridge.start();
+      const first = required(FakeWebSocket.instances.at(-1));
+      first.open();
+      first.message({
+        type: 'events.batch',
+        generation: 'generation-1',
+        firstSeq: 1,
+        lastSeq: 1,
+        events: null,
+      });
+
+      assert.deepEqual(first.closeArgs, [1002, 'malformed bridge message']);
+      assert.deepEqual(seen, [
+        {
+          type: 'error',
+          code: 'bridge.resync_required',
+          message:
+            'The agent runtime sent a malformed event batch. Reconnecting with a fresh cursor.',
+          recoverable: true,
+        },
+      ]);
+
+      reconnects.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      const second = required(FakeWebSocket.instances.at(-1));
+      const url = new URL(second.url);
+      assert.equal(url.searchParams.get('resumeGeneration'), null);
+      assert.equal(url.searchParams.get('resumeSeq'), null);
     } finally {
       restoreFakeRuntime(runtime);
     }

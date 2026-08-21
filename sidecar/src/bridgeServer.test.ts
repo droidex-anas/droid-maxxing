@@ -127,9 +127,6 @@ test('resume reset flushes pending sequences before admitting the client', async
     socket.on('message', (raw) => received.push(String(raw)));
     await opened;
     await waitFor(() => received.length === 1);
-    await sleep(40);
-
-    assert.equal(received.length, 1);
     const reset = JSON.parse(received[0] ?? '') as {
       type: string;
       generation: string;
@@ -140,9 +137,42 @@ test('resume reset flushes pending sequences before admitting the client', async
     assert.equal(typeof reset.generation, 'string');
     assert.equal(reset.lastSeq, 1);
     assert.equal(reset.reason, 'invalid_resume');
+
+    harness.broadcast({ type: 'connection', status: 'connected' });
+    await waitFor(() => received.length === 2);
+    const boundary = JSON.parse(received[1] ?? '') as ServerEventBatch;
+    assert.equal(boundary.firstSeq, 2);
+    assert.equal(boundary.lastSeq, 2);
+    assert.deepEqual(
+      received.map((message) => JSON.parse(message) as { type: string }).map(({ type }) => type),
+      ['bridge.reset', 'events.batch'],
+    );
     await closeSocket(socket);
   });
 });
+
+for (const client of [
+  { name: 'batch-capable', query: `&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}` },
+  { name: 'legacy', query: '' },
+]) {
+  test(`${client.name} client is disconnected before an oversized payload is queued`, async () => {
+    await withServer(async (harness) => {
+      const received: string[] = [];
+      const socket = new WebSocket(
+        `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}${client.query}`,
+      );
+      const opened = new Promise<void>((resolve) => socket.once('open', resolve));
+      const closed = socketCloseCode(socket);
+      socket.on('message', (raw) => received.push(String(raw)));
+      await opened;
+
+      harness.broadcast({ type: 'error', message: 'x'.repeat(8 * 1024 * 1024) });
+
+      assert.equal(await closed, 1006);
+      assert.deepEqual(received, []);
+    });
+  });
+}
 
 test('wrong token is rejected at the socket layer', async () => {
   await withServer(async (harness) => {
@@ -178,8 +208,14 @@ function closeSocket(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
   });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function socketCloseCode(socket: WebSocket, timeoutMs = 2_000): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('socket close timed out')), timeoutMs);
+    socket.once('close', (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
 }
 
 function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
