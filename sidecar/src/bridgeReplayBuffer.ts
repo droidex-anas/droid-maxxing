@@ -59,6 +59,12 @@ export class BridgeReplayBuffer {
     return replay;
   }
 
+  markHistoryUnavailable(): void {
+    this.entries = [];
+    this.head = 0;
+    this.totalBytes = 0;
+  }
+
   snapshot(): { batches: number; bytes: number; firstSeq: number; lastSeq: number } {
     return {
       batches: this.entries.length - this.head,

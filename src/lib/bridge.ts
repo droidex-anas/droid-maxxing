@@ -257,6 +257,7 @@ function bridgeReset(value: Record<string, unknown>): BridgeResetMessage | null 
   const reason = value.reason;
   if (
     typeof value.generation !== 'string' ||
+    value.generation.length === 0 ||
     !nonNegativeSafeInteger(value.lastSeq) ||
     (reason !== 'generation_changed' &&
       reason !== 'replay_unavailable' &&

@@ -366,6 +366,45 @@ test(
   },
 );
 
+test(
+  'empty reset generations cannot replace a valid resume cursor',
+  { concurrency: false },
+  async () => {
+    const runtime = installFakeRuntime();
+    const reconnects: Array<() => void> = [];
+    try {
+      const bridge = new Bridge(
+        async () => ({ port: 43129, token: 'reset-token' }),
+        (callback) => reconnects.push(callback),
+      );
+      const seen: string[] = [];
+      bridge.subscribe((event) => seen.push(event.type));
+      await bridge.start();
+      const first = required(FakeWebSocket.instances.at(-1));
+      first.open();
+      first.message(batch('generation-1', 1, 1, [{ type: 'connection', status: 'connected' }]));
+      first.message({
+        type: 'bridge.reset',
+        generation: '',
+        lastSeq: 1,
+        reason: 'replay_unavailable',
+      });
+
+      first.close();
+      reconnects.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      const second = required(FakeWebSocket.instances.at(-1));
+      const url = new URL(second.url);
+      assert.equal(url.searchParams.get('resumeGeneration'), 'generation-1');
+      assert.equal(url.searchParams.get('resumeSeq'), '1');
+      assert.deepEqual(seen, ['connection']);
+    } finally {
+      restoreFakeRuntime(runtime);
+    }
+  },
+);
+
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error('expected fake socket');
   return value;

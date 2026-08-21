@@ -76,6 +76,7 @@ export function startBridgeServer(options: {
     const startedAt = performance.now();
     const batchData = JSON.stringify(batch);
     const replayEntry = replay.push(batch, batchData);
+    if (replayEntry.bytes >= HARD_CLIENT_BUFFER_BYTES) replay.markHistoryUnavailable();
     let legacyPayloads: readonly string[] | null = null;
     let bytesSent = 0;
     let sendOperations = 0;

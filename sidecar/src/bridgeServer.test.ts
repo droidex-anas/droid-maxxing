@@ -151,28 +151,68 @@ test('resume reset flushes pending sequences before admitting the client', async
   });
 });
 
-for (const client of [
-  { name: 'batch-capable', query: `&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}` },
-  { name: 'legacy', query: '' },
-]) {
-  test(`${client.name} client is disconnected before an oversized payload is queued`, async () => {
-    await withServer(async (harness) => {
-      const received: string[] = [];
-      const socket = new WebSocket(
-        `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}${client.query}`,
-      );
-      const opened = new Promise<void>((resolve) => socket.once('open', resolve));
-      const closed = socketCloseCode(socket);
-      socket.on('message', (raw) => received.push(String(raw)));
-      await opened;
+test('legacy client is disconnected before an oversized payload is queued', async () => {
+  await withServer(async (harness) => {
+    const received: string[] = [];
+    const socket = new WebSocket(`ws://127.0.0.1:${String(harness.port)}?token=${harness.token}`);
+    const opened = new Promise<void>((resolve) => socket.once('open', resolve));
+    const closed = socketCloseCode(socket);
+    socket.on('message', (raw) => received.push(String(raw)));
+    await opened;
 
-      harness.broadcast({ type: 'error', message: 'x'.repeat(8 * 1024 * 1024) });
+    harness.broadcast({ type: 'error', message: 'x'.repeat(8 * 1024 * 1024) });
 
-      assert.equal(await closed, 1006);
-      assert.deepEqual(received, []);
-    });
+    assert.equal(await closed, 1006);
+    assert.deepEqual(received, []);
   });
-}
+});
+
+test('an oversized batch resets a reconnect cursor instead of replaying the payload', async () => {
+  await withServer(async (harness) => {
+    const firstReceived: string[] = [];
+    const first = new WebSocket(
+      `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}`,
+    );
+    const firstOpened = new Promise<void>((resolve) => first.once('open', resolve));
+    const firstClosed = socketCloseCode(first);
+    first.on('message', (raw) => firstReceived.push(String(raw)));
+    await firstOpened;
+
+    harness.broadcast({ type: 'connection', status: 'connected' });
+    await waitFor(() => firstReceived.length === 1);
+    const acknowledged = JSON.parse(firstReceived[0] ?? '') as ServerEventBatch;
+    harness.broadcast({ type: 'error', message: 'x'.repeat(8 * 1024 * 1024) });
+    assert.equal(await firstClosed, 1006);
+
+    const resumed: string[] = [];
+    const second = new WebSocket(
+      `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}&resumeGeneration=${encodeURIComponent(acknowledged.generation)}&resumeSeq=${String(acknowledged.lastSeq)}`,
+    );
+    const secondOpened = new Promise<void>((resolve) => second.once('open', resolve));
+    second.on('message', (raw) => resumed.push(String(raw)));
+    await secondOpened;
+    await waitFor(() => resumed.length === 1);
+
+    const reset = JSON.parse(resumed[0] ?? '') as {
+      type: string;
+      lastSeq: number;
+      reason: string;
+    };
+    assert.deepEqual(reset, {
+      type: 'bridge.reset',
+      generation: acknowledged.generation,
+      lastSeq: 2,
+      reason: 'replay_unavailable',
+    });
+
+    harness.broadcast({ type: 'connection', status: 'connected' });
+    await waitFor(() => resumed.length === 2);
+    const next = JSON.parse(resumed[1] ?? '') as ServerEventBatch;
+    assert.equal(next.firstSeq, 3);
+    assert.equal(next.lastSeq, 3);
+    await closeSocket(second);
+  });
+});
 
 test('wrong token is rejected at the socket layer', async () => {
   await withServer(async (harness) => {
