@@ -119,3 +119,47 @@ test('the plus menu is reachable by keyboard and on a narrow window', async ({ p
   await expect(menu).toHaveCount(0);
   await expect(trigger).toBeFocused();
 });
+
+// The composer grows with the draft, and the transcript above owns the space it
+// takes. Remeasuring by collapsing the box to one line hands that space back for
+// a layout pass, which clamps the transcript's scroll position off the bottom
+// and, during a live turn, makes it jump on every keystroke. Growth needs no
+// collapse, so typing forward must not produce one.
+test('typing forward never collapses the composer to remeasure it', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+  const height = () => composer.evaluate((el) => el.offsetHeight);
+
+  const watchHeights = () =>
+    composer.evaluate((el) => {
+      const seen: string[] = [];
+      new MutationObserver((records) => {
+        for (const record of records) seen.push(record.oldValue ?? '');
+      }).observe(el, { attributeFilter: ['style'], attributeOldValue: true });
+      (window as unknown as { __draftStyles: string[] }).__draftStyles = seen;
+    });
+  const collapses = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __draftStyles: string[] }).__draftStyles.filter((style) =>
+          style.includes('height: auto'),
+        ).length,
+    );
+
+  const oneLine = await height();
+  await composer.click();
+  await watchHeights();
+  await composer.pressSequentially(
+    'a draft long enough to wrap the composer onto a second line, and then onto a third line, and a fourth one after that as well',
+  );
+  await expect.poll(height).toBeGreaterThan(oneLine);
+  expect(await collapses()).toBe(0);
+
+  // Deleting can need fewer lines than the box has, so it does collapse, and
+  // the composer hands the transcript its space back.
+  await watchHeights();
+  await composer.fill('');
+  await expect.poll(height).toBe(oneLine);
+  expect(await collapses()).toBeGreaterThan(0);
+});
