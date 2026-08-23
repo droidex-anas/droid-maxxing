@@ -200,8 +200,8 @@ export class HotPathMetrics {
     this.normalize.add(durationMs);
   }
 
-  recordPersist(durationMs: number): void {
-    this.counters.persisted += 1;
+  recordPersist(durationMs: number, rows = 1): void {
+    this.counters.persisted += rows;
     this.persist.add(durationMs);
   }
 

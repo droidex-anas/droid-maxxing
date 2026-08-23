@@ -35,13 +35,14 @@ import {
 import { detectEnvironment } from './Environment.js';
 import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInstaller.js';
 import {
-  HistoryIndex,
+  type HistoryIndex,
   loadMissionControlSessions,
   loadSessionTranscriptWindow,
   readFactoryDefaults,
   resolveSessionChain,
   warmSessionIndex,
 } from './history.js';
+import { HistoryPersistence } from './HistoryPersistence.js';
 import { transcriptToMarkdown } from './sessionMarkdown.js';
 import {
   startSessionFileWatcher,
@@ -247,7 +248,7 @@ export class SessionManager {
       this.startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
     } else {
       this.runtime = new DroidRuntime();
-      this.history = new HistoryIndex();
+      this.history = new HistoryPersistence();
       const browsers = new BrowserSessionManager({
         assetUrlFor: options.assetUrlFor,
         emit: (event) => {

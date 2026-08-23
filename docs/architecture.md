@@ -1,6 +1,6 @@
 # Architecture
 
-DROIDEX is split into three runtime surfaces: the React renderer, the Electron host, and the Node sidecar.
+DROIDEX is split into three runtime surfaces: the React renderer, the Electron host, and the Node sidecar. A dedicated Node worker owns high-frequency history persistence and search indexing so SQLite work does not block agent orchestration.
 
 ## Runtime flow
 
@@ -12,6 +12,8 @@ flowchart LR
   Main --> Sidecar[Node sidecar WebSocket bridge]
   Sidecar --> DroidSDK[Factory Droid SDK]
   Sidecar --> DroidCLI[Droid CLI child processes]
+  Sidecar --> HistoryWorker[History persistence worker]
+  HistoryWorker --> SQLite[(SQLite history index)]
   Main --> Updater[Download and update endpoints]
 ```
 
@@ -24,12 +26,14 @@ flowchart LR
 | Electron preload | `electron/preload.cjs` | Narrow API boundary between renderer and Electron main process |
 | Native browser preload | `electron/nativeBrowserPreload.cjs` | Browser automation bridge for embedded native browser flows |
 | Sidecar | `sidecar/src/` | Local WebSocket bridge, Droid SDK session lifecycle, Mission Control integration, CLI discovery |
+| History worker | `sidecar/src/historyPersistenceWorker.ts` | Batched SQLite writes and bounded cached transcript search away from the sidecar event loop |
 
 ## Data and control boundaries
 
 - The renderer does not call the Droid SDK directly. It communicates through preload APIs and the sidecar bridge.
 - The Electron main process owns local process lifecycle and injects bridge configuration into the sidecar.
 - The sidecar owns Droid SDK calls and child process environment shaping. It removes `FACTORY_API_KEY` unless a key is explicitly configured.
+- Live canonical session state stays in the sidecar. A bounded write-behind queue sends lossless event rows and latest-wins summary/child snapshots to the history worker in ordered transactions.
 - Packaged builds require a bridge token. Development builds may allow local no-token access with `BRIDGE_ALLOW_LOCAL_NO_TOKEN=1`.
 
 ### Sidecar session core
@@ -49,6 +53,15 @@ flowchart LR
 - `SessionEventFlow` owns stream and notification normalization, per-app/per-source terminal gating, and transcript-before-side-effect ordering. It has one callback into Manager for the coupled policy that remains there.
 - `SessionLifecycle` owns primary-session create, resume, lazy resume, send queueing, steering, interruption, and ordered cleanup. Parent close calls one semantic `ChildSessions.closeParent()` operation rather than maintaining another child map.
 - Workspace sessions pass their selected folder to Factory unchanged. Folder-less sessions remain `workspaceKind: none` in navigation, while their Factory runtime uses the app-owned `chats/` directory under `DROIDEX_USER_DATA_DIR`; DROIDEX creates it before opening the session and never uses the user's home directory as an implicit workspace.
+
+### History persistence
+
+- `HistoryPersistence` is the sidecar-facing history seam. It keeps canonical live summary and child overlays immediately readable while persistence is pending.
+- `HistoryPersistenceQueue` retains transcript metadata losslessly, collapses pending summaries and child records by stable identity, and enforces explicit row and byte ceilings.
+- Ordinary writes flush on a short debounce or batch limit. Session creation, turn settlement, provider replacement, compaction, child settlement, unregister, and shutdown force a synchronous durability boundary before the corresponding completed state is published.
+- `historyPersistenceWorker.ts` owns the write connection and executes each batch inside one `BEGIN IMMEDIATE` transaction. Failed transactions roll back completely and the queue restores the batch for delayed retry; terminal worker failures latch visibly and reject further writes instead of retrying forever.
+- Search also runs in the worker. Candidate scans and decoded transcript extractions are freshness-cached and invalidated by session-file reconciliation, so repeated queries do not compete with model streaming.
+- The SQLite schema and user-data paths are unchanged. Existing installations continue using the version-2 index and the worker bundle ships beside `sidecar.mjs` in packaged updates.
 
 ### Renderer child navigation
 
@@ -128,7 +141,7 @@ early vs late latency drift. Budgets are phase 0 calibration values from the
 
 ## Build path
 
-`npm run build` runs frontend typecheck and Vite build, builds the sidecar bundle, and syntax-checks Electron CommonJS entrypoints. The sidecar build emits `sidecar/dist/sidecar.mjs`, which Electron uses unless `SIDECAR_ENTRY` is set.
+`npm run build` runs frontend typecheck and Vite build, builds the sidecar bundles, and syntax-checks Electron CommonJS entrypoints. The sidecar build emits `sidecar/dist/sidecar.mjs` plus `sidecar/dist/historyPersistenceWorker.mjs`; Electron uses the former unless `SIDECAR_ENTRY` is set and packages both from `sidecar/dist`.
 
 ## Update path
 

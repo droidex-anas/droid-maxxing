@@ -41,7 +41,7 @@ import {
   type StoredSessionStart,
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
-import { searchSessionFiles } from './sessionSearch.js';
+import { searchSessionFiles, type SessionSearchCandidate } from './sessionSearch.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 import { hasCompletedConversation } from './sessionHistoryAdmission.js';
 
@@ -335,22 +335,22 @@ export class HistoryIndex {
   // most recently active first. Title matching happens renderer-side over
   // the session list; this only reports chat-content hits with snippets.
   async searchSessions(query: string, isStale?: () => boolean): Promise<SessionSearchResult[]> {
+    return await searchSessionFiles(this.searchCandidates(), query, isStale);
+  }
+
+  searchCandidates(): SessionSearchCandidate[] {
     const patches = this.summaryPatches();
-    const entries = this.sessionFiles
+    return this.sessionFiles
       .searchableEntries()
       .map((entry) => ({ entry, summary: applyCachedSummary({ ...entry.summary }, patches) }))
-      .sort((a, b) => b.summary.updatedAt - a.summary.updatedAt);
-    return await searchSessionFiles(
-      entries.map(({ entry, summary }) => ({
+      .sort((a, b) => b.summary.updatedAt - a.summary.updatedAt)
+      .map(({ entry, summary }) => ({
         providerSessionId: entry.providerSessionId,
         appSessionId: summary.appSessionId,
         path: entry.path,
         mtimeMs: entry.mtimeMs,
         sizeBytes: entry.sizeBytes,
-      })),
-      query,
-      isStale,
-    );
+      }));
   }
 
   // Diff-cached session files against the files on disk, re-summarizing only
