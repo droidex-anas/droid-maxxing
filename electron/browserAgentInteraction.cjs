@@ -1,11 +1,18 @@
 async function executeBrowserAgentInteraction(contents, request, options) {
-  if (
-    request.action === 'scroll' &&
-    Number.isFinite(Number(request.x)) &&
-    Number.isFinite(Number(request.y))
-  ) {
-    const x = Math.round(Number(request.x));
-    const y = Math.round(Number(request.y));
+  if (request.action === 'scroll') {
+    const hasPoint = Number.isFinite(Number(request.x)) && Number.isFinite(Number(request.y));
+    const x = hasPoint
+      ? Math.round(Number(request.x))
+      : Math.min(
+          Number(options.viewportBounds?.width) - 1,
+          Math.round(Number(options.viewportBounds?.width) / 2),
+        );
+    const y = hasPoint
+      ? Math.round(Number(request.y))
+      : Math.min(
+          Number(options.viewportBounds?.height) - 1,
+          Math.round(Number(options.viewportBounds?.height) / 2),
+        );
     requirePointerInsideViewport({ x, y }, options.viewportBounds);
     const pixels = Math.max(1, Math.round(Number(request.pixels) || 500));
     const horizontal = request.direction === 'left' || request.direction === 'right';
@@ -69,7 +76,7 @@ async function resolveBrowserPointer(contents, request) {
 }
 
 async function requireTrustedCursor(options, point) {
-  if ((await options.showCursor?.(point)) === false) {
+  if (typeof options.showCursor !== 'function' || (await options.showCursor(point)) !== true) {
     throw new Error('DROIDEX could not place the trusted agent cursor for this browser action.');
   }
 }

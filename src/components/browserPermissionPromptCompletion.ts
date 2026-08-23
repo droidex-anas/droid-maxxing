@@ -13,7 +13,9 @@ export async function completeBrowserPermissionPrompt(
 ): Promise<boolean> {
   options.close();
   await (options.waitForClosePaint ?? waitForBrowserPromptClosePaint)();
-  return (options.resolve ?? resolveBrowserPermissionPrompt)(requestId, response);
+  const accepted = await (options.resolve ?? resolveBrowserPermissionPrompt)(requestId, response);
+  if (!accepted) throw new Error('DROIDEX could not apply that choice.');
+  return true;
 }
 
 export async function settleBrowserPermissionPrompt(

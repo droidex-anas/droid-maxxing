@@ -38,3 +38,15 @@ test('browser permission failure resolves to an actionable error instead of reje
 
   assert.equal(result, 'Bridge disconnected');
 });
+
+test('browser permission choice stays open when the main process did not accept it', async () => {
+  const module = await import('./browserPermissionPromptCompletion');
+  const settleBrowserPermissionPrompt = Reflect.get(module, 'settleBrowserPermissionPrompt');
+  const result = await settleBrowserPermissionPrompt('prompt-stale', 1, {
+    close: () => {},
+    waitForClosePaint: async () => {},
+    resolve: async () => false,
+  });
+
+  assert.equal(result, 'DROIDEX could not apply that choice.');
+});

@@ -104,5 +104,12 @@ export default tseslint.config(
     },
   },
 
+  {
+    files: ['electron/nativeBrowserPreload.cjs'],
+    languageOptions: {
+      globals: { ...globals.browser },
+    },
+  },
+
   prettierConfig,
 );

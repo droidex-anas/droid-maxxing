@@ -905,17 +905,30 @@ function pageSnapshot() {
 }
 
 function collectRefs() {
-  const refs = [];
+  const visible = [];
+  const offscreen = [];
   const root = document.body || document.documentElement;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   let node = root;
   let visitedNodes = 0;
-  while (node && refs.length < 80 && visitedNodes < MAX_SNAPSHOT_VISITED_NODES) {
+  while (node && visible.length < 80 && visitedNodes < MAX_SNAPSHOT_VISITED_NODES) {
     visitedNodes += 1;
-    if (isCandidate(node)) refs.push(refFor(node));
+    if (isCandidate(node)) {
+      const bucket = intersectsViewport(node.getBoundingClientRect()) ? visible : offscreen;
+      if (bucket.length < 80) bucket.push(refFor(node));
+    }
     node = walker.nextNode();
   }
-  return refs;
+  return [...visible, ...offscreen].slice(0, 80);
+}
+
+function intersectsViewport(rect) {
+  return (
+    rect.right > 0 &&
+    rect.bottom > 0 &&
+    rect.left < window.innerWidth &&
+    rect.top < window.innerHeight
+  );
 }
 
 function refFor(el) {

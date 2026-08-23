@@ -184,6 +184,17 @@ test('agent pointer resolution runs in the isolated preload and rejects viewport
   assert.match(resolver, /point\.y >= window\.innerHeight/);
 });
 
+test('browser snapshots prioritize live viewport refs before offscreen document refs', () => {
+  const start = source.indexOf('function collectRefs()');
+  const end = source.indexOf('\nfunction refFor', start);
+  const collector = source.slice(start, end);
+
+  assert.match(collector, /const visible = \[\]/);
+  assert.match(collector, /const offscreen = \[\]/);
+  assert.match(collector, /intersectsViewport\(node\.getBoundingClientRect\(\)\)/);
+  assert.match(collector, /return \[\.\.\.visible, \.\.\.offscreen\]\.slice\(0, 80\)/);
+});
+
 test('agent cursor is not exposed to remote page JavaScript', () => {
   assert.doesNotMatch(source, /function showAgentCursor\(/);
   assert.doesNotMatch(source, /__DROIDMAXX_SHOW_AGENT_CURSOR/);
@@ -283,7 +294,7 @@ test('browser snapshots stop scanning after a bounded number of DOM nodes', () =
   assert.equal(ceiling, 2_000);
 
   const collectStart = source.indexOf('function collectRefs()');
-  const collectEnd = source.indexOf('\nfunction refFor(', collectStart);
+  const collectEnd = source.indexOf('\nfunction intersectsViewport(', collectStart);
   assert.ok(collectStart >= 0 && collectEnd > collectStart);
   const collectSource = source.slice(collectStart, collectEnd);
   const nodes = Array.from({ length: ceiling * 2 }, () => ({}));

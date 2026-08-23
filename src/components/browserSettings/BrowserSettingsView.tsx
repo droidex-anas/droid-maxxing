@@ -359,7 +359,7 @@ export function BrowserSettingsView({
             <BrowserSettingRow
               border
               label="Show DROIDEX agent cursor"
-              description="Display a trusted static pointer at the agent’s live click and hover position."
+              description="Keep a separate pointer parked on the agent’s last action and glide it to each live click, hover, and scroll position."
             >
               <div className="flex flex-col items-end gap-2.5">
                 <div className="flex items-center gap-2.5">

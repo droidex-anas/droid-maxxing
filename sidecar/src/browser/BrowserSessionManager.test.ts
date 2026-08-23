@@ -34,6 +34,7 @@ class FakeRuntime implements BrowserRuntime {
   hovers: { x: number; y: number; selector?: string }[] = [];
   refs: BrowserElementRef[] = [buttonRef()];
   selections: { selector: string; value: string }[] = [];
+  scrolls: { direction: ScrollDirection; pixels?: number; x?: number; y?: number }[] = [];
   screenshots: BrowserScreenshotOptions[] = [];
   captures: (BrowserBox | undefined)[] = [];
   viewport: BrowserViewport;
@@ -126,7 +127,8 @@ class FakeRuntime implements BrowserRuntime {
   async keypress() {
     return this.stateSnapshot();
   }
-  async scroll(_direction: ScrollDirection) {
+  async scroll(direction: ScrollDirection, pixels?: number, x?: number, y?: number) {
+    this.scrolls.push({ direction, pixels, x, y });
     return this.stateSnapshot();
   }
   async inspect(selector: string) {
@@ -413,6 +415,25 @@ test('hover and select target current snapshot refs', async () => {
 
   assert.deepEqual(runtime.hovers, [{ x: 50, y: 35, selector: 'button' }]);
   assert.deepEqual(runtime.selections, [{ selector: 'button', value: 'active' }]);
+});
+
+test('untargeted scroll defers its point to the live native viewport', async () => {
+  let runtime!: FakeRuntime;
+  const manager = createManager({
+    runtimeFactory: (_id, viewport) => {
+      runtime = new FakeRuntime(viewport);
+      return runtime;
+    },
+  });
+  await manager.open({ appSessionId: 'm1', url: 'http://127.0.0.1:1420/' });
+
+  await manager.scroll('m1', 'down', 500);
+  await manager.scroll('m1', 'up', 200, 'agent', '@e1');
+
+  assert.deepEqual(runtime.scrolls, [
+    { direction: 'down', pixels: 500, x: undefined, y: undefined },
+    { direction: 'up', pixels: 200, x: 50, y: 35 },
+  ]);
 });
 
 test('user address-bar navigation keeps its provenance through the runtime boundary', async () => {

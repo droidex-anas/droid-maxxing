@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BrowserDesignReferences } from './BrowserDesignReferences.js';
 import { normalizeBrowserUrl } from './browserUrl.js';
-import { writeDesignPromptPack } from './designPromptPacks.js';
+import type { writeDesignPromptPack } from './designPromptPacks.js';
 import { waitForBrowserCondition } from './browserWait.js';
 import { DEFAULT_BROWSER_VIEWPORT } from './browserViewports.js';
 import { centerOfBrowserRef, requireBrowserPoint } from './browserTargets.js';
@@ -109,7 +109,7 @@ export class BrowserSessionManager {
       snapshot = await session.runtime.open(url, input.source);
     } catch (error) {
       if (input.viewport) {
-        await session.runtime.setViewport(previousViewport, input.source).catch(() => {});
+        await session.runtime.setViewport(previousViewport, input.source).catch(() => undefined);
       }
       throw error;
     }
@@ -275,13 +275,8 @@ export class BrowserSessionManager {
     ref?: string,
   ): Promise<BrowserState> {
     const session = this.requireSession(appSessionId);
-    const point = ref
-      ? centerOfBrowserRef(this.requireRef(session, ref))
-      : {
-          x: Math.round(session.state.viewport.width / 2),
-          y: Math.round(session.state.viewport.height / 2),
-        };
-    const snapshot = await session.runtime.scroll(direction, pixels, point.x, point.y);
+    const point = ref ? centerOfBrowserRef(this.requireRef(session, ref)) : undefined;
+    const snapshot = await session.runtime.scroll(direction, pixels, point?.x, point?.y);
     return this.updateFromSnapshot(session, snapshot);
   }
 
@@ -387,7 +382,7 @@ export class BrowserSessionManager {
   async closeAll(): Promise<void> {
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
-    await Promise.all(sessions.map((session) => session.runtime.close().catch(() => {})));
+    await Promise.all(sessions.map((session) => session.runtime.close().catch(() => undefined)));
   }
 
   private sessionFor(

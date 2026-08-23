@@ -35,6 +35,7 @@ function harness(options = {}) {
       this.options = windowOptions;
       this.webContents = new FakeWebContents();
       this.bounds = [];
+      this.events = [];
       this.destroyed = false;
       this.hidden = 0;
       this.shown = 0;
@@ -57,6 +58,7 @@ function harness(options = {}) {
     }
 
     setBounds(bounds, animate) {
+      this.events.push('bounds');
       this.bounds.push({ bounds, animate });
     }
 
@@ -66,6 +68,7 @@ function harness(options = {}) {
     }
 
     showInactive() {
+      this.events.push('show');
       this.shown += 1;
     }
 
@@ -83,6 +86,7 @@ function harness(options = {}) {
     clearTimeout: options.clearTimeout,
     logError: options.logError,
     setTimeout: options.setTimeout,
+    waitForFrame: options.waitForFrame ?? (() => Promise.resolve()),
     style: options.style,
     size: options.size,
   });
@@ -126,17 +130,17 @@ test('cursor overlay is sandboxed, click-through, static, and blocks navigation'
   assert.equal(prevented, true);
 });
 
-test('cursor documents use the curved DROIDEX pointer with one exact hotspot', () => {
+test('cursor documents use the WhiteSur default pointer with its official hotspot', () => {
   assert.deepEqual(BROWSER_AGENT_CURSOR_STYLES, ['dark', 'light', 'droidex']);
   assert.equal(BROWSER_AGENT_CURSOR_DEFAULT_SIZE, 36);
-  assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 3 });
+  assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 6 });
 
   const documents = BROWSER_AGENT_CURSOR_STYLES.map((style) =>
     decodeURIComponent(createBrowserAgentCursorDataUrl(style)),
   );
   for (const document of documents) {
     assert.match(document, /default-src 'none'/);
-    assert.match(document, /<path d="M6 3L27 23\.7/);
+    assert.match(document, /<path d="m 6\.9356,4 v 14 l 3\.1328,-3\.8203/);
     assert.doesNotMatch(document, /<script|javascript:/i);
   }
   assert.doesNotMatch(documents[0], /class="agent-trail/);
@@ -145,6 +149,7 @@ test('cursor documents use the curved DROIDEX pointer with one exact hotspot', (
   assert.match(documents[2], /stroke="#dce1eb"/i);
   assert.match(documents[2], /fill-opacity="\.82"/);
   assert.match(documents[2], /rgba\(80,139,255,\.75\)/);
+  assert.match(documents[2], /WhiteSur-cursors/);
   assert.equal(new Set(documents).size, 3);
   assert.throws(
     () => createBrowserAgentCursorDataUrl('url(https://page.example/cursor.svg)'),
@@ -152,8 +157,11 @@ test('cursor documents use the curved DROIDEX pointer with one exact hotspot', (
   );
 });
 
-test('a live cursor eases between consecutive agent positions', async () => {
-  const { controller, windows } = harness();
+test('a live cursor glides through intermediate positions before the next agent action', async () => {
+  const frameDelays = [];
+  const { controller, windows } = harness({
+    waitForFrame: async (delayMs) => frameDelays.push(delayMs),
+  });
   controller.attach({
     browserSessionId: 'browser-1',
     hostWindow: hostWindow(),
@@ -163,8 +171,17 @@ test('a live cursor eases between consecutive agent positions', async () => {
   await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
   await controller.show({ browserSessionId: 'browser-1', x: 80, y: 90 });
 
-  assert.equal(windows[0].bounds.at(-2).animate, false);
-  assert.equal(windows[0].bounds.at(-1).animate, true);
+  const movement = windows[0].bounds.slice(1);
+  assert.ok(movement.length > 2);
+  assert.ok(frameDelays.length > 2);
+  assert.equal(
+    movement.every(({ animate }) => animate === false),
+    true,
+  );
+  assert.ok(movement[0].bounds.x > windows[0].bounds[0].bounds.x);
+  assert.ok(movement[0].bounds.x < movement.at(-1).bounds.x);
+  assert.ok(movement[0].bounds.y > windows[0].bounds[0].bounds.y);
+  assert.ok(movement[0].bounds.y < movement.at(-1).bounds.y);
 });
 
 test('cursor size stays bounded and preserves the pointer hotspot', async () => {
@@ -175,21 +192,21 @@ test('cursor size stays bounded and preserves the pointer hotspot', async () => 
     bounds: browserBounds,
   });
 
-  assert.equal(windows[0].options.width, 36);
-  assert.equal(windows[0].options.height, 36);
+  assert.ok(windows[0].options.width > 36);
+  assert.equal(windows[0].options.width, windows[0].options.height);
   assert.equal(typeof controller.setSize, 'function');
   assert.equal(controller.setSize(52), true);
-  assert.deepEqual(windows[0].sizes.at(-1), { width: 52, height: 52, animate: false });
+  assert.ok(windows[0].sizes.at(-1).width > 52);
+  assert.equal(windows[0].sizes.at(-1).width, windows[0].sizes.at(-1).height);
   assert.equal(controller.setSize(52), false);
   assert.throws(() => controller.setSize(23), /size must be an integer from 24 to 64 pixels/);
 
   assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 30, y: 40 }), true);
-  assert.deepEqual(windows[0].bounds.at(-1).bounds, {
-    x: 130,
-    y: 255,
-    width: 52,
-    height: 52,
-  });
+  const positioned = windows[0].bounds.at(-1).bounds;
+  assert.ok(positioned.x < 130);
+  assert.ok(positioned.y < 255);
+  assert.ok(positioned.width > 52);
+  assert.equal(positioned.width, positioned.height);
 });
 
 test('controller accepts only trusted styles and can reload a live overlay', async () => {
@@ -226,23 +243,24 @@ test('main can position the cursor above the attached browser session', async ()
 
   assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 30, y: 40 }), true);
 
-  assert.deepEqual(windows[0].bounds.at(-1), {
-    bounds: { x: 133, y: 257, width: 36, height: 36 },
-    animate: false,
-  });
+  const positioned = windows[0].bounds.at(-1);
+  assert.equal(positioned.animate, false);
+  assert.ok(positioned.bounds.x < 133);
+  assert.ok(positioned.bounds.y < 257);
+  assert.ok(positioned.bounds.width > 36);
+  assert.equal(positioned.bounds.width, positioned.bounds.height);
   assert.equal(windows[0].shown, 1);
+  assert.deepEqual(windows[0].events.slice(-2), ['bounds', 'show']);
   assert.equal(await controller.show({ browserSessionId: 'other-browser', x: 30, y: 40 }), false);
   assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 301, y: 40 }), false);
   assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 300, y: 40 }), false);
 });
 
-test('visible cursor expires instead of lingering over stale page state', async () => {
-  let scheduled;
-  let delay;
+test('visible cursor stays parked until its browser surface is hidden', async () => {
+  let scheduled = 0;
   const { controller, windows } = harness({
-    setTimeout: (callback, timeoutMs) => {
-      scheduled = callback;
-      delay = timeoutMs;
+    setTimeout: () => {
+      scheduled += 1;
       return { unref: () => undefined };
     },
     clearTimeout: () => undefined,
@@ -254,12 +272,33 @@ test('visible cursor expires instead of lingering over stale page state', async 
   });
 
   await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
-  assert.equal(delay, 1_800);
   assert.equal(windows[0].shown, 1);
+  assert.equal(scheduled, 0);
+  assert.equal(windows[0].hidden, 0);
 
-  scheduled();
+  controller.hide('browser-1');
 
   assert.equal(windows[0].hidden > 0, true);
+});
+
+test('reattaching resized bounds for the same browser preserves its parked point', async () => {
+  const { controller, windows } = harness();
+  const host = hostWindow();
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  const hiddenBefore = windows[0].hidden;
+
+  assert.equal(
+    controller.attach({
+      browserSessionId: 'browser-1',
+      hostWindow: host,
+      bounds: { x: 40, y: 50, width: 320, height: 240 },
+    }),
+    true,
+  );
+
+  assert.equal(windows[0].hidden, hiddenBefore);
+  assert.equal(windows[0].shown, 1);
 });
 
 test('bounds updates reposition a visible cursor and reject stale coordinates', async () => {
@@ -273,10 +312,10 @@ test('bounds updates reposition a visible cursor and reject stale coordinates', 
 
   assert.equal(controller.setBounds('browser-1', { x: 50, y: 60, width: 400, height: 300 }), true);
   assert.deepEqual(windows[0].bounds.at(-1).bounds, {
-    x: 423,
-    y: 357,
-    width: 36,
-    height: 36,
+    x: 399,
+    y: 330,
+    width: 84,
+    height: 84,
   });
   assert.equal(controller.setBounds('browser-1', { x: 50, y: 60, width: 200, height: 80 }), false);
   assert.equal(windows[0].hidden > 0, true);

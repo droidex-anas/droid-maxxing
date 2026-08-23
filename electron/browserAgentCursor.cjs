@@ -4,11 +4,14 @@ const BROWSER_AGENT_CURSOR_DEFAULT_SIZE = 36;
 const BROWSER_AGENT_CURSOR_MIN_SIZE = 24;
 const BROWSER_AGENT_CURSOR_MAX_SIZE = 64;
 const CURSOR_VIEWBOX_SIZE = 32;
-const CURSOR_VIEWBOX_HOTSPOT = Object.freeze({ x: 6, y: 3 });
+const CURSOR_VIEWBOX_HOTSPOT = Object.freeze({ x: 6, y: 5 });
+const CURSOR_GLOW_PADDING = 24;
+const CURSOR_FRAME_MS = 16;
+const CURSOR_MIN_MOVE_MS = 90;
+const CURSOR_MAX_MOVE_MS = 240;
 const BROWSER_AGENT_CURSOR_HOTSPOT = Object.freeze(
   scaleCursorHotspot(BROWSER_AGENT_CURSOR_DEFAULT_SIZE),
 );
-const CURSOR_VISIBLE_MS = 1_800;
 const CURSOR_PRESENTATIONS = Object.freeze({
   dark: Object.freeze({
     fill: '#3b3b3b',
@@ -40,7 +43,7 @@ function createBrowserAgentCursorController(options) {
   let overlay = null;
   let overlayHost = null;
   let overlayReady = null;
-  let hideTimer = null;
+  let movementGeneration = 0;
   let style = validateBrowserAgentCursorStyle(options.style ?? BROWSER_AGENT_CURSOR_DEFAULT_STYLE);
   let size = validateBrowserAgentCursorSize(options.size ?? BROWSER_AGENT_CURSOR_DEFAULT_SIZE);
 
@@ -48,14 +51,17 @@ function createBrowserAgentCursorController(options) {
     const browserSessionId = normalizeBrowserSessionId(input?.browserSessionId);
     const hostWindow = requireUsableWindow(input?.hostWindow);
     const bounds = normalizeBrowserBounds(input?.bounds);
-    if (
-      attachment?.browserSessionId === browserSessionId &&
-      attachment.hostWindow === hostWindow &&
-      browserBoundsEqual(attachment.bounds, bounds)
-    ) {
-      return false;
+    if (attachment?.browserSessionId === browserSessionId && attachment.hostWindow === hostWindow) {
+      if (browserBoundsEqual(attachment.bounds, bounds)) return false;
+      attachment.bounds = bounds;
+      if (attachment.visible && attachment.point) {
+        if (!pointInsideBounds(attachment.point, bounds)) hide(browserSessionId);
+        else positionOverlay(overlay, attachment);
+      }
+      return true;
     }
     generation += 1;
+    movementGeneration += 1;
     hideOverlay();
     attachment = {
       browserSessionId,
@@ -99,18 +105,21 @@ function createBrowserAgentCursorController(options) {
       return false;
     }
 
-    const shouldAnimate = current.visible && Boolean(current.point);
-    current.point = point;
+    const startPoint = current.visible ? current.point : null;
     current.visible = true;
-    positionOverlay(window, current, shouldAnimate);
+    if (!startPoint) {
+      current.point = point;
+      positionOverlay(window, current);
+      window.showInactive();
+      return true;
+    }
     window.showInactive();
-    scheduleHide(current);
-    return true;
+    return moveOverlay(window, current, startPoint, point, expectedGeneration);
   }
 
   function hide(browserSessionId) {
     if (!attachment || attachment.browserSessionId !== browserSessionId) return false;
-    clearHideTimer();
+    movementGeneration += 1;
     attachment.visible = false;
     attachment.point = null;
     hideOverlay();
@@ -126,6 +135,7 @@ function createBrowserAgentCursorController(options) {
       return false;
     }
     generation += 1;
+    movementGeneration += 1;
     hideOverlay();
     attachment = null;
     return true;
@@ -133,6 +143,7 @@ function createBrowserAgentCursorController(options) {
 
   function destroy() {
     generation += 1;
+    movementGeneration += 1;
     attachment = null;
     destroyOverlay();
   }
@@ -142,6 +153,7 @@ function createBrowserAgentCursorController(options) {
     if (nextStyle === style) return false;
     style = nextStyle;
     generation += 1;
+    movementGeneration += 1;
     if (!isUsableWindow(overlay)) return true;
 
     const window = overlay;
@@ -154,7 +166,8 @@ function createBrowserAgentCursorController(options) {
     if (nextSize === size) return false;
     size = nextSize;
     if (!isUsableWindow(overlay)) return true;
-    overlay.setSize(size, size, false);
+    const dimension = cursorOverlayDimension(size);
+    overlay.setSize(dimension, dimension, false);
     if (attachment?.visible && attachment.point) positionOverlay(overlay, attachment);
     return true;
   }
@@ -164,8 +177,8 @@ function createBrowserAgentCursorController(options) {
     destroyOverlay();
 
     const window = new options.BrowserWindow({
-      width: size,
-      height: size,
+      width: cursorOverlayDimension(size),
+      height: cursorOverlayDimension(size),
       parent: hostWindow,
       show: false,
       frame: false,
@@ -210,35 +223,60 @@ function createBrowserAgentCursorController(options) {
     );
   }
 
-  function positionOverlay(window, current, animate = false) {
+  async function moveOverlay(window, current, from, to, expectedGeneration) {
+    if (from.x === to.x && from.y === to.y) {
+      current.point = to;
+      positionOverlay(window, current);
+      return true;
+    }
+    const moveGeneration = ++movementGeneration;
+    const distance = Math.hypot(to.x - from.x, to.y - from.y);
+    const durationMs = Math.min(
+      CURSOR_MAX_MOVE_MS,
+      Math.max(CURSOR_MIN_MOVE_MS, Math.round(distance * 0.38)),
+    );
+    const frameCount = Math.max(2, Math.ceil(durationMs / CURSOR_FRAME_MS));
+    const waitForFrame = options.waitForFrame ?? defaultWaitForFrame;
+    for (let frame = 1; frame <= frameCount; frame += 1) {
+      await waitForFrame(CURSOR_FRAME_MS);
+      if (
+        attachment !== current ||
+        generation !== expectedGeneration ||
+        movementGeneration !== moveGeneration ||
+        !isUsableWindow(window)
+      ) {
+        return false;
+      }
+      const progress = frame / frameCount;
+      const eased = 1 - Math.pow(1 - progress, 3);
+      current.point = {
+        x: Math.round(from.x + (to.x - from.x) * eased),
+        y: Math.round(from.y + (to.y - from.y) * eased),
+      };
+      positionOverlay(window, current);
+    }
+    current.point = to;
+    return true;
+  }
+
+  function positionOverlay(window, current) {
     if (!isUsableWindow(window) || !current.point) return;
     const contentBounds = current.hostWindow.getContentBounds();
     const hotspot = scaleCursorHotspot(size);
+    const dimension = cursorOverlayDimension(size);
     window.setBounds(
       {
-        x: Math.round(contentBounds.x + current.bounds.x + current.point.x - hotspot.x),
-        y: Math.round(contentBounds.y + current.bounds.y + current.point.y - hotspot.y),
-        width: size,
-        height: size,
+        x: Math.round(
+          contentBounds.x + current.bounds.x + current.point.x - hotspot.x - CURSOR_GLOW_PADDING,
+        ),
+        y: Math.round(
+          contentBounds.y + current.bounds.y + current.point.y - hotspot.y - CURSOR_GLOW_PADDING,
+        ),
+        width: dimension,
+        height: dimension,
       },
-      animate,
+      false,
     );
-  }
-
-  function scheduleHide(current) {
-    clearHideTimer();
-    const schedule = options.setTimeout ?? setTimeout;
-    hideTimer = schedule(() => {
-      hideTimer = null;
-      if (attachment === current) hide(current.browserSessionId);
-    }, CURSOR_VISIBLE_MS);
-    hideTimer?.unref?.();
-  }
-
-  function clearHideTimer() {
-    if (!hideTimer) return;
-    (options.clearTimeout ?? clearTimeout)(hideTimer);
-    hideTimer = null;
   }
 
   function hideOverlay() {
@@ -246,7 +284,6 @@ function createBrowserAgentCursorController(options) {
   }
 
   function destroyOverlay() {
-    clearHideTimer();
     const window = overlay;
     overlay = null;
     overlayHost = null;
@@ -282,6 +319,17 @@ function scaleCursorHotspot(size) {
     x: Math.round((CURSOR_VIEWBOX_HOTSPOT.x / CURSOR_VIEWBOX_SIZE) * size),
     y: Math.round((CURSOR_VIEWBOX_HOTSPOT.y / CURSOR_VIEWBOX_SIZE) * size),
   };
+}
+
+function cursorOverlayDimension(size) {
+  return size + CURSOR_GLOW_PADDING * 2;
+}
+
+function defaultWaitForFrame(delayMs) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, delayMs);
+    timer.unref?.();
+  });
 }
 
 function normalizeBrowserSessionId(value) {
@@ -362,10 +410,17 @@ function createBrowserAgentCursorDataUrl(value) {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
-.cursor{display:block;width:100%;height:100%;filter:${presentation.filter}}
+.cursor{position:absolute;inset:${CURSOR_GLOW_PADDING}px;width:calc(100% - ${CURSOR_GLOW_PADDING * 2}px);height:calc(100% - ${CURSOR_GLOW_PADDING * 2}px);filter:${presentation.filter}}
 </style>
 </head>
-<body><svg class="cursor" aria-hidden="true" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M6 3L27 23.7c.8.8.3 2.1-.9 2H19c-4 0-7.9 1.2-11.2 3.4l-2.3 1.5c-.9.6-2-.1-1.9-1.2L5 4.5C5.1 3.3 5.7 2.5 6 3Z" fill="${presentation.fill}" fill-opacity="${presentation.fillOpacity}" stroke="${presentation.stroke}" stroke-width="2" stroke-linejoin="round"/></svg></body>
+<body>
+<!-- WhiteSur-cursors default geometry, GPL-3.0; DROIDEX modifies color, translucency, glow, and motion. See THIRD_PARTY_NOTICES.md. -->
+<svg class="cursor" aria-hidden="true" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <g transform="matrix(0.99994875,0,0,1.0015274,-0.93555,0.99999984)">
+    <path d="m 6.9356,4 v 14 l 3.1328,-3.8203 2.0664,4.9863 a 1.0001,1.0001 0 1 0 1.8477,-0.76562 l -2.1113,-5.0957 4.3789,0.0098 z" fill="${presentation.fill}" fill-opacity="${presentation.fillOpacity}" stroke="${presentation.stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
+</body>
 </html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }

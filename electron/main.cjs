@@ -1143,7 +1143,6 @@ function ensureNativeBrowserView(browserSessionId) {
   });
   contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
     if (entry.view === view && isMainFrame && !isInPlace) {
-      browserAgentCursor.hide(entry.browserSessionId);
       entry.trustedUserNavigation = null;
       entry.documentGeneration += 1;
       entry.authenticationCapability = null;
@@ -1356,7 +1355,6 @@ async function runNativeBrowserAgentAction(request, bounds) {
     if (!contents) throw new Error(`${APP_NAME} browser is not open.`);
     actionContents = contents;
     setBrowserActionActive(entry, true);
-    browserAgentCursor.hide(entry.browserSessionId);
     if (request.action === 'open') {
       await openNativeBrowser(request.browserSessionId, request.url, bounds, request.viewport);
       await consumePendingAgentNavigation(entry);

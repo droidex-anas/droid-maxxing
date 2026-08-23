@@ -22,7 +22,10 @@ test('clicks resolve the live selector, show the DROIDEX cursor, and use native 
     contents,
     { requestId: 'request-1', action: 'click', selector: '#continue' },
     {
-      showCursor: async (event) => cursorEvents.push(event),
+      showCursor: async (event) => {
+        cursorEvents.push(event);
+        return true;
+      },
       viewportBounds: { width: 300, height: 200 },
     },
   );
@@ -71,7 +74,10 @@ test('scroll uses native wheel input and returns a fresh snapshot', async () => 
       pixels: 640,
     },
     {
-      showCursor: async (event) => cursorEvents.push(event),
+      showCursor: async (event) => {
+        cursorEvents.push(event);
+        return true;
+      },
       viewportBounds: { width: 300, height: 200 },
     },
   );
@@ -81,6 +87,32 @@ test('scroll uses native wheel input and returns a fresh snapshot', async () => 
     { type: 'mouseWheel', x: 12, y: 46, deltaX: 0, deltaY: 640, canScroll: true },
   ]);
   assert.match(scripts[0], /"action":"snapshot"/);
+});
+
+test('untargeted scroll uses the live native viewport center instead of emulated dimensions', async () => {
+  const inputEvents = [];
+  const cursorEvents = [];
+  const contents = {
+    executeJavaScript: async () => ({ ok: true }),
+    sendInputEvent: (event) => inputEvents.push(event),
+  };
+
+  await executeBrowserAgentInteraction(
+    contents,
+    { action: 'scroll', requestId: 'request-live-scroll', direction: 'down', pixels: 500 },
+    {
+      showCursor: async (event) => {
+        cursorEvents.push(event);
+        return true;
+      },
+      viewportBounds: { width: 523, height: 792 },
+    },
+  );
+
+  assert.deepEqual(cursorEvents, [{ x: 262, y: 396, pressed: false }]);
+  assert.deepEqual(inputEvents, [
+    { type: 'mouseWheel', x: 262, y: 396, deltaX: 0, deltaY: 500, canScroll: true },
+  ]);
 });
 
 test('native input is blocked when the exact point is outside the live viewport', async () => {
@@ -113,6 +145,24 @@ test('visible native input is blocked when the trusted cursor cannot be placed',
       contents,
       { requestId: 'request-4', action: 'click', selector: '#continue' },
       { showCursor: async () => false, viewportBounds: { width: 300, height: 200 } },
+    ),
+    /could not place the trusted agent cursor/,
+  );
+  assert.deepEqual(inputEvents, []);
+});
+
+test('visible native input is blocked without a trusted cursor controller', async () => {
+  const inputEvents = [];
+  const contents = {
+    executeJavaScript: async () => ({ x: 120, y: 84 }),
+    sendInputEvent: (event) => inputEvents.push(event),
+  };
+
+  await assert.rejects(
+    executeBrowserAgentInteraction(
+      contents,
+      { requestId: 'request-without-cursor', action: 'click', selector: '#continue' },
+      { viewportBounds: { width: 300, height: 200 } },
     ),
     /could not place the trusted agent cursor/,
   );

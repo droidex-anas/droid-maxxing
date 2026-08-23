@@ -372,6 +372,24 @@ test('visible agent actions attach their Browser surface before showing the page
     action,
     /} else \{\s*await restoreNativeBrowserForAction\(request\.browserSessionId\);/,
   );
+  assert.doesNotMatch(
+    action,
+    /setBrowserActionActive\(entry, true\);\s*browserAgentCursor\.hide\(entry\.browserSessionId\);/,
+    'consecutive actions must preserve the parked point so the cursor can glide from it',
+  );
+});
+
+test('same browser navigation preserves the parked agent cursor', () => {
+  const handlerStart = mainSource.indexOf(
+    "contents.on('did-start-navigation'",
+    mainSource.indexOf('function ensureNativeBrowserView'),
+  );
+  const handlerEnd = mainSource.indexOf("contents.on('did-fail-load'", handlerStart);
+  const handler = mainSource.slice(handlerStart, handlerEnd);
+
+  assert.doesNotMatch(handler, /browserAgentCursor\.hide/);
+  assert.match(handler, /entry\.documentGeneration \+= 1/);
+  assert.match(handler, /revokePermissionsForNavigation/);
 });
 
 test('visible open delegates its only attach to openNativeBrowser', () => {
