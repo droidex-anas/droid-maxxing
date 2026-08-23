@@ -38,6 +38,7 @@ class FakeRuntime implements BrowserRuntime {
   captures: (BrowserBox | undefined)[] = [];
   viewport: BrowserViewport;
   openedUrls: string[] = [];
+  openedSources: Array<'agent' | 'user' | undefined> = [];
   reloads = 0;
   history: ('back' | 'forward')[] = [];
   canGoBack = false;
@@ -45,14 +46,17 @@ class FakeRuntime implements BrowserRuntime {
   omitHistory = false;
   snapshotRequests = 0;
   clickError?: Error;
+  openError?: Error;
   viewportError?: Error;
 
   constructor(viewport: BrowserViewport) {
     this.viewport = viewport;
   }
 
-  async open(url: string) {
+  async open(url: string, source?: 'agent' | 'user') {
     this.openedUrls.push(url);
+    this.openedSources.push(source);
+    if (this.openError) throw this.openError;
     return this.stateSnapshot(url);
   }
 
@@ -171,6 +175,72 @@ test('runtime snapshots propagate navigation history state', async () => {
   assert.equal(reloaded.canGoForward, true);
 });
 
+test('a cold manager restores the persisted browser identity without navigating', async () => {
+  let runtime!: FakeRuntime;
+  const created: { browserSessionId: string; appSessionId: string }[] = [];
+  const manager = createManager({
+    runtimeFactory: (browserSessionId, viewport, appSessionId) => {
+      created.push({ browserSessionId, appSessionId });
+      runtime = new FakeRuntime(viewport);
+      return runtime;
+    },
+  });
+
+  const restored = manager.restore({
+    browserSessionId: 'browser-persisted',
+    appSessionId: 'app-persisted',
+    url: 'https://example.com/persisted',
+    title: 'Persisted page',
+    viewport: { width: 1280, height: 720, deviceScaleFactor: 2 },
+    viewportMode: 'custom',
+    scroll: { x: 4, y: 12 },
+    canGoBack: true,
+  });
+
+  assert.deepEqual(created, [
+    { browserSessionId: 'browser-persisted', appSessionId: 'app-persisted' },
+  ]);
+  assert.equal(restored.browserSessionId, 'browser-persisted');
+  assert.equal(restored.url, 'https://example.com/persisted');
+  assert.deepEqual(restored.refs, []);
+  assert.deepEqual(runtime.openedUrls, []);
+  assert.equal(runtime.snapshotRequests, 0);
+
+  await manager.reload('app-persisted');
+  assert.equal(runtime.reloads, 1);
+});
+
+test('restore keeps an existing session authoritative and never reopens its stale URL', async () => {
+  let runtime!: FakeRuntime;
+  let runtimeCount = 0;
+  const manager = createManager({
+    runtimeFactory: (_browserSessionId, viewport) => {
+      runtimeCount += 1;
+      runtime = new FakeRuntime(viewport);
+      return runtime;
+    },
+  });
+  const live = await manager.open({
+    appSessionId: 'app-live',
+    url: 'https://example.com/live',
+  });
+
+  const restored = manager.restore({
+    browserSessionId: 'browser-stale',
+    appSessionId: 'app-live',
+    url: 'https://example.com/stale',
+    viewport: { width: 390, height: 844, deviceScaleFactor: 2 },
+    viewportMode: 'mobile',
+    scroll: { x: 0, y: 0 },
+  });
+
+  assert.equal(restored.browserSessionId, live.browserSessionId);
+  assert.equal(restored.url, 'https://example.com/live');
+  assert.deepEqual(runtime.openedUrls, ['https://example.com/live']);
+  assert.equal(runtimeCount, 1);
+  assert.equal(runtime.snapshotRequests, 0);
+});
+
 test('opening a new page clears stale history when its snapshot omits navigation state', async () => {
   let runtime!: FakeRuntime;
   const manager = createManager({
@@ -280,16 +350,37 @@ test('failed resize preserves the previous viewport and emits no optimistic upda
   });
 });
 
-test('agent click updates the visible agent cursor', async () => {
-  const manager = createManager();
-  await manager.open({ appSessionId: 'm1', url: 'http://127.0.0.1:1420/' });
+test('failed open preserves the committed URL and viewport without emitting optimistic state', async () => {
+  const updates: BrowserState[] = [];
+  const runtime = new FakeRuntime({ width: 1200, height: 800, deviceScaleFactor: 2 });
+  const manager = createManager({
+    runtimeFactory: () => runtime,
+    emit: (event) => {
+      if (event.type === 'browser.updated') updates.push(event.state);
+    },
+  });
+  await manager.open({ appSessionId: 'm1', url: 'https://example.com/committed' });
+  const committed = manager.state('m1');
+  const updateCount = updates.length;
+  runtime.openError = new Error('load failed');
 
-  const state = await manager.click({ appSessionId: 'm1', ref: '@e1' });
+  await assert.rejects(
+    manager.open({
+      appSessionId: 'm1',
+      url: 'https://example.com/failed',
+      viewport: { width: 390, height: 844, deviceScaleFactor: 2 },
+      viewportMode: 'mobile',
+    }),
+    /load failed/,
+  );
 
-  assert.deepEqual(state.agentCursor, { x: 50, y: 35 });
+  assert.equal(updates.length, updateCount);
+  assert.equal(manager.state('m1')?.url, committed?.url);
+  assert.deepEqual(manager.state('m1')?.viewport, committed?.viewport);
+  assert.equal(manager.state('m1')?.viewportMode, committed?.viewportMode);
 });
 
-test('failed agent click still emits the attempted cursor position', async () => {
+test('failed agent click does not emit speculative browser state', async () => {
   const updates: BrowserState[] = [];
   const runtime = new FakeRuntime({ width: 1200, height: 800, deviceScaleFactor: 2 });
   const manager = createManager({
@@ -304,17 +395,7 @@ test('failed agent click still emits the attempted cursor position', async () =>
 
   await assert.rejects(manager.click({ appSessionId: 'm1', ref: '@e1' }), /click failed/);
 
-  assert.equal(updates.length, updateCount + 1);
-  assert.deepEqual(updates.at(-1)?.agentCursor, { x: 50, y: 35 });
-});
-
-test('user click does not move the visible agent cursor', async () => {
-  const manager = createManager();
-  await manager.open({ appSessionId: 'm1', url: 'http://127.0.0.1:1420/' });
-
-  const state = await manager.click({ appSessionId: 'm1', ref: '@e1', source: 'user' });
-
-  assert.equal(state.agentCursor, undefined);
+  assert.equal(updates.length, updateCount);
 });
 
 test('hover and select target current snapshot refs', async () => {
@@ -332,6 +413,24 @@ test('hover and select target current snapshot refs', async () => {
 
   assert.deepEqual(runtime.hovers, [{ x: 50, y: 35, selector: 'button' }]);
   assert.deepEqual(runtime.selections, [{ selector: 'button', value: 'active' }]);
+});
+
+test('user address-bar navigation keeps its provenance through the runtime boundary', async () => {
+  let runtime!: FakeRuntime;
+  const manager = createManager({
+    runtimeFactory: (_id, viewport) => {
+      runtime = new FakeRuntime(viewport);
+      return runtime;
+    },
+  });
+
+  await manager.open({
+    appSessionId: 'm1',
+    url: 'https://www.google.com/search?q=weather',
+    source: 'user',
+  });
+
+  assert.deepEqual(runtime.openedSources, ['user']);
 });
 
 test('addReference captures an anchor crop and current browser context', async () => {
@@ -539,6 +638,62 @@ test('open and refresh do not force screenshot capture', async () => {
   await manager.refresh('m1');
 
   assert.equal(runtime.screenshots.length, 0);
+});
+
+test('wait backs off and caps full-page snapshot attempts', async () => {
+  let runtime!: FakeRuntime;
+  const delays: number[] = [];
+  const manager = createManager({
+    runtimeFactory: (_id, viewport) => {
+      runtime = new FakeRuntime(viewport);
+      runtime.refs = [];
+      return runtime;
+    },
+    // Keep the synthetic clock below the deadline long enough to prove the
+    // snapshot ceiling. If the ceiling regresses, the clock advances so the
+    // test fails by call count instead of hanging forever.
+    waitNow: () => (delays.length >= 25 ? 10 : 0),
+    waitDelay: async (milliseconds) => {
+      delays.push(milliseconds);
+    },
+  });
+  await manager.open({ appSessionId: 'm1', url: 'https://example.com' });
+
+  await assert.rejects(
+    manager.wait('m1', { text: 'never appears', timeoutMs: 10 }),
+    /Timed out waiting for the browser condition/,
+  );
+
+  assert.equal(runtime.snapshotRequests, 20);
+  assert.deepEqual(delays.slice(0, 4), [10, 10, 10, 10]);
+  assert.equal(delays.length, 19);
+});
+
+test('wait increases the poll interval while respecting its deadline', async () => {
+  let runtime!: FakeRuntime;
+  let nowMs = 0;
+  const delays: number[] = [];
+  const manager = createManager({
+    runtimeFactory: (_id, viewport) => {
+      runtime = new FakeRuntime(viewport);
+      runtime.refs = [];
+      return runtime;
+    },
+    waitNow: () => nowMs,
+    waitDelay: async (milliseconds) => {
+      delays.push(milliseconds);
+      nowMs += milliseconds;
+    },
+  });
+  await manager.open({ appSessionId: 'm1', url: 'https://example.com' });
+
+  await assert.rejects(
+    manager.wait('m1', { ref: '@missing', timeoutMs: 1_000 }),
+    /Timed out waiting for the browser condition/,
+  );
+
+  assert.deepEqual(delays, [250, 500, 250]);
+  assert.equal(runtime.snapshotRequests, 4);
 });
 
 function buttonRef(): BrowserElementRef {

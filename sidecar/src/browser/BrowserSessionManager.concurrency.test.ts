@@ -1,0 +1,202 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { BrowserSessionManager, type BrowserRuntime } from './BrowserSessionManager.js';
+import type {
+  BrowserBox,
+  BrowserScreenshotOptions,
+  BrowserSnapshot,
+  BrowserViewport,
+  ScrollDirection,
+} from './types.js';
+
+test('browser actions execute in request order within one managed session', async () => {
+  const runtime = new ControlledRuntime();
+  const manager = new BrowserSessionManager({ runtimeFactory: () => runtime });
+  await manager.open({ appSessionId: 'chat-1', url: 'https://example.test' });
+
+  const typeResult = deferred<BrowserSnapshot>();
+  runtime.nextTypeResult = typeResult;
+  const first = manager.type('chat-1', 'first');
+  await runtime.typeStarted.promise;
+  const second = manager.keypress('chat-1', 'Enter');
+  await Promise.resolve();
+
+  assert.deepEqual(runtime.actions, ['open', 'type:first']);
+
+  typeResult.resolve(snapshot('https://example.test/typed'));
+  await first;
+  await second;
+
+  assert.deepEqual(runtime.actions, ['open', 'type:first', 'keypress:Enter']);
+  assert.equal(manager.state('chat-1')?.url, 'https://example.test/keypressed');
+});
+
+test('close invalidates active and queued actions before a replacement is created', async () => {
+  const runtimes: ControlledRuntime[] = [];
+  const updates: string[] = [];
+  const manager = new BrowserSessionManager({
+    emit: (event) => {
+      if (event.type === 'browser.updated') updates.push(event.state.url);
+    },
+    runtimeFactory: () => {
+      const runtime = new ControlledRuntime();
+      runtimes.push(runtime);
+      return runtime;
+    },
+  });
+  const firstState = await manager.open({
+    appSessionId: 'chat-1',
+    url: 'https://old.example.test',
+  });
+  const oldRuntime = runtimes[0];
+  assert.ok(oldRuntime);
+
+  const lateTypeResult = deferred<BrowserSnapshot>();
+  oldRuntime.nextTypeResult = lateTypeResult;
+  const active = manager.type('chat-1', 'late');
+  await oldRuntime.typeStarted.promise;
+  const queued = manager.keypress('chat-1', 'Enter');
+  const closing = manager.close('chat-1');
+
+  await Promise.all([
+    assert.rejects(active, /Browser session closed/),
+    assert.rejects(queued, /Browser session closed/),
+    closing,
+  ]);
+  assert.deepEqual(oldRuntime.actions, ['open', 'type:late', 'close']);
+
+  const replacementState = await manager.open({
+    appSessionId: 'chat-1',
+    url: 'https://new.example.test',
+  });
+  assert.notEqual(replacementState.browserSessionId, firstState.browserSessionId);
+  assert.equal(runtimes.length, 2);
+  const updateCount = updates.length;
+
+  lateTypeResult.resolve(snapshot('https://old.example.test/stale'));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(updates.length, updateCount);
+  assert.equal(manager.state('chat-1')?.url, 'https://new.example.test');
+});
+
+class ControlledRuntime implements BrowserRuntime {
+  readonly actions: string[] = [];
+  readonly typeStarted = deferred<void>();
+  nextTypeResult?: Deferred<BrowserSnapshot>;
+
+  async open(url: string): Promise<BrowserSnapshot> {
+    this.actions.push('open');
+    return snapshot(url);
+  }
+
+  async reload(): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test/reloaded');
+  }
+
+  async goBack(): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test/back');
+  }
+
+  async goForward(): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test/forward');
+  }
+
+  async setViewport(_viewport: BrowserViewport): Promise<void> {}
+
+  async screenshot(_options?: BrowserScreenshotOptions): Promise<string> {
+    return '';
+  }
+
+  async capture(_box?: BrowserBox, _options?: BrowserScreenshotOptions): Promise<string> {
+    return '';
+  }
+
+  async snapshot(): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test');
+  }
+
+  async click(_x: number, _y: number, _selector?: string): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test/clicked');
+  }
+
+  async hover(_x: number, _y: number, _selector?: string): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test/hovered');
+  }
+
+  async selectOption(_selector: string, _value: string): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test/selected');
+  }
+
+  async type(text: string): Promise<BrowserSnapshot> {
+    this.actions.push(`type:${text}`);
+    this.typeStarted.resolve();
+    return this.nextTypeResult?.promise ?? snapshot('https://example.test/typed');
+  }
+
+  async keypress(key: string): Promise<BrowserSnapshot> {
+    this.actions.push(`keypress:${key}`);
+    return snapshot('https://example.test/keypressed');
+  }
+
+  async scroll(
+    _direction: ScrollDirection,
+    _pixels?: number,
+    _x?: number,
+    _y?: number,
+  ): Promise<BrowserSnapshot> {
+    return snapshot('https://example.test/scrolled');
+  }
+
+  async inspect(selector: string) {
+    return {
+      selector,
+      tagName: 'button',
+      attributes: {},
+      box: { x: 0, y: 0, width: 1, height: 1 },
+      html: '<button></button>',
+    };
+  }
+
+  async network() {
+    return [];
+  }
+
+  async console() {
+    return [];
+  }
+
+  async close(): Promise<void> {
+    this.actions.push('close');
+  }
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let settle: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((resolve) => {
+    settle = resolve;
+  });
+  return {
+    promise,
+    resolve(value: T): void {
+      if (!settle) throw new Error('Deferred promise was not initialized.');
+      settle(value);
+    },
+  };
+}
+
+function snapshot(url: string): BrowserSnapshot {
+  return {
+    url,
+    scroll: { x: 0, y: 0 },
+    refs: [],
+    canGoBack: false,
+    canGoForward: false,
+  };
+}

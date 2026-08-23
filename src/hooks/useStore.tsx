@@ -13,6 +13,10 @@ import {
 } from 'react';
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
+import {
+  restorePersistedBrowserSessions,
+  sanitizePersistedBrowserUrl,
+} from '../lib/browserPersistence';
 import { updateCompactionSettings } from '../lib/commands';
 import {
   DEFAULT_THEME_ID,
@@ -2974,8 +2978,7 @@ function sanitizePersistedBrowser(key: string, value: unknown): BrowserState | u
   if (!viewport) return undefined;
   return {
     browserSessionId: browser.browserSessionId,
-    appSessionId:
-      typeof browser.appSessionId === 'string' && browser.appSessionId ? browser.appSessionId : key,
+    appSessionId: key,
     url: browser.url,
     title: typeof browser.title === 'string' ? browser.title : undefined,
     viewport,
@@ -3015,6 +3018,7 @@ function persistBrowsers(browsers: Record<string, BrowserState>): Record<string,
       key,
       {
         ...browser,
+        url: sanitizePersistedBrowserUrl(browser.url),
         refs: [],
         agentCursor: undefined,
         screenshotPath: undefined,
@@ -3219,7 +3223,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     dispatch,
   }));
-
   useLayoutEffect(() => {
     stateRef.current = state;
     for (const listener of listenersRef.current) listener();
@@ -3245,6 +3248,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.sidebarCollapsed,
     state.specMode,
   ]);
+
+  useEffect(
+    () =>
+      bridge.subscribeOpen(() => {
+        restorePersistedBrowserSessions(stateRef.current.browsers);
+      }),
+    [],
+  );
 
   // Keep the sidecar's compaction-limit snapshot in sync so live sessions,
   // resumes, and model changes all follow these limits. The bridge queues

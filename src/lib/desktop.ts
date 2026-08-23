@@ -2,8 +2,6 @@ import type {
   NativeBrowserAgentAction,
   NativeBrowserAgentResult,
   NativeBrowserBounds,
-  NativeBrowserBox,
-  NativeBrowserCaptureOptions,
   NativeBrowserDesignPrompt,
   NativeBrowserLoadFailed,
   NativeBrowserLoaded,
@@ -41,6 +39,16 @@ import type {
   PrCommentsResult,
   PushOptions,
 } from '../types/vcs';
+import type {
+  BrowserCookieImportResult,
+  BrowserCookieProfileDiscovery,
+  BrowserCookieProfileImportPrepareResult,
+  BrowserCookieProfileImportResult,
+  BrowserSettingsPatch,
+  BrowserSettingsSnapshot,
+  BrowserSiteGrantKind,
+} from './browserSettings';
+import type { BrowserPermissionPrompt } from './browserPrompt';
 
 interface BridgeInfo {
   port: number;
@@ -237,12 +245,23 @@ interface DroidControlApi {
   filesPreview: (accessToken: string, relative: string) => Promise<FilePreviewPayload>;
   filesOpen: (accessToken: string, relative: string) => Promise<void>;
   filesReveal: (accessToken: string, relative: string) => Promise<void>;
-  nativeBrowserOpen: (
-    browserSessionId: string,
-    url: string,
-    bounds?: NativeBrowserBounds,
-    viewport?: { width: number; height: number; deviceScaleFactor: number },
-  ) => Promise<void>;
+  browserSettingsGet: () => Promise<BrowserSettingsSnapshot>;
+  browserSettingsUpdate: (patch: BrowserSettingsPatch) => Promise<BrowserSettingsSnapshot>;
+  browserCookiesImport: () => Promise<BrowserCookieImportResult>;
+  browserCookieProfilesDiscover: () => Promise<BrowserCookieProfileDiscovery>;
+  browserCookieProfileImportPrepare: (
+    profileId: string,
+  ) => Promise<BrowserCookieProfileImportPrepareResult>;
+  browserCookieProfileImportCommit: (planId: string) => Promise<BrowserCookieProfileImportResult>;
+  browserCookieProfileImportDiscard: (planId: string) => Promise<boolean>;
+  browserDataClear: () => Promise<BrowserSettingsSnapshot>;
+  browserCredentialDelete: (origin: string) => Promise<BrowserSettingsSnapshot>;
+  browserSiteGrantRevoke: (
+    kind: BrowserSiteGrantKind,
+    origin: string,
+  ) => Promise<BrowserSettingsSnapshot>;
+  browserDownloadDirectoryChoose: () => Promise<BrowserSettingsSnapshot | null>;
+  browserPermissionPromptResolve: (requestId: string, response: number) => Promise<boolean>;
   nativeBrowserAttach: (
     browserSessionId: string,
     bounds: NativeBrowserBounds,
@@ -251,25 +270,20 @@ interface DroidControlApi {
   nativeBrowserDetach: (browserSessionId?: string) => Promise<void>;
   nativeBrowserSetBounds: (browserSessionId: string, bounds: NativeBrowserBounds) => Promise<void>;
   nativeBrowserSetVisible: (browserSessionId: string, visible: boolean) => Promise<void>;
-  nativeBrowserClose: (browserSessionId: string) => Promise<void>;
-  nativeBrowserReload: (browserSessionId: string) => Promise<void>;
   nativeBrowserGoBack: (browserSessionId: string) => Promise<boolean>;
   nativeBrowserGoForward: (browserSessionId: string) => Promise<boolean>;
   nativeBrowserSetDesignMode: (browserSessionId: string, active: boolean) => Promise<void>;
   nativeBrowserSetPencilMode: (browserSessionId: string, active: boolean) => Promise<void>;
   nativeBrowserAgentAction: (
     request: NativeBrowserAgentAction,
+    bounds?: NativeBrowserBounds,
   ) => Promise<NativeBrowserAgentResult | undefined>;
-  nativeBrowserCapture: (
-    browserSessionId: string,
-    box?: NativeBrowserBox,
-    options?: NativeBrowserCaptureOptions,
-  ) => Promise<string | undefined>;
   onNativeBrowserSelection: (handler: (selection: NativeBrowserSelection) => void) => () => void;
   onNativeBrowserDesignPrompt: (handler: (prompt: NativeBrowserDesignPrompt) => void) => () => void;
   onNativeBrowserLoaded: (handler: (event: NativeBrowserLoaded) => void) => () => void;
   onNativeBrowserLoadFailed: (handler: (event: NativeBrowserLoadFailed) => void) => () => void;
-  onNativeBrowserAgentResult: (handler: (result: NativeBrowserAgentResult) => void) => () => void;
+  onBrowserPermissionPrompt: (handler: (prompt: BrowserPermissionPrompt) => void) => () => void;
+  onBrowserPermissionPromptDismiss: (handler: (requestId: string) => void) => () => void;
 }
 
 declare global {

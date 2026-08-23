@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 
@@ -60,6 +60,8 @@ test('free mac builds use ad-hoc signing and never attempt notarization', () => 
 
   assert.equal(config.mac.identity, '-');
   assert.equal(config.mac.notarize, false);
+  assert.equal(config.extraMetadata.webAuthnKeychainAccessGroup, '');
+  assert.equal(config.mac.entitlements, 'assets/brand/entitlements.mac.plist');
   assert.equal(config.extraMetadata.updateInstallMode, 'sparkle');
   assert.equal(config.extraMetadata.sparkleFeedUrl, config.mac.extendInfo.SUFeedURL);
   assert.equal(config.mac.extendInfo.SUPublicEDKey, 'czgsBI/YO7amJbwhZidZSO0j7LU5A4NsU0No9fDemWU=');
@@ -125,6 +127,7 @@ test('release builds emit canonical update artifacts', () => {
   const config = loadConfig({
     DROIDEX_RELEASE_BUILD: '1',
     CSC_LINK: 'base64-certificate',
+    APPLE_TEAM_ID: 'A1B2C3D4E5',
     APPLE_API_KEY: '/tmp/AuthKey.p8',
     APPLE_API_KEY_ID: 'KEYID',
     APPLE_API_ISSUER: 'ISSUER',
@@ -133,6 +136,11 @@ test('release builds emit canonical update artifacts', () => {
 
   assert.equal(config.forceCodeSigning, true);
   assert.equal(config.extraMetadata.updateInstallMode, 'automatic');
+  assert.equal(config.extraMetadata.webAuthnKeychainAccessGroup, 'A1B2C3D4E5.app.droidex.webauthn');
+  assert.match(
+    readFileSync(config.mac.entitlements, 'utf8'),
+    /<string>A1B2C3D4E5\.app\.droidex\.webauthn<\/string>/,
+  );
   assert.deepEqual(
     config.mac.target.map((target) => target.target),
     ['dmg', 'zip'],
@@ -151,6 +159,7 @@ test('release builds require crash reporting configuration', () => {
       loadConfig({
         DROIDEX_RELEASE_BUILD: '1',
         CSC_LINK: 'base64-certificate',
+        APPLE_TEAM_ID: 'A1B2C3D4E5',
         APPLE_API_KEY: '/tmp/AuthKey.p8',
         APPLE_API_KEY_ID: 'KEYID',
         APPLE_API_ISSUER: 'ISSUER',
@@ -159,10 +168,26 @@ test('release builds require crash reporting configuration', () => {
   );
 });
 
+test('release builds require a concrete signing Team ID for Touch ID passkeys', () => {
+  assert.throws(
+    () =>
+      loadConfig({
+        DROIDEX_RELEASE_BUILD: '1',
+        CSC_LINK: 'base64-certificate',
+        APPLE_API_KEY: '/tmp/AuthKey.p8',
+        APPLE_API_KEY_ID: 'KEYID',
+        APPLE_API_ISSUER: 'ISSUER',
+        SENTRY_DSN: canonicalSentryDsn,
+      }),
+    /APPLE_TEAM_ID.*10-character Apple Developer Team ID/,
+  );
+});
+
 test('release builds reject a Sentry DSN for another host or project', () => {
   const releaseEnvironment = {
     DROIDEX_RELEASE_BUILD: '1',
     CSC_LINK: 'base64-certificate',
+    APPLE_TEAM_ID: 'A1B2C3D4E5',
     APPLE_API_KEY: '/tmp/AuthKey.p8',
     APPLE_API_KEY_ID: 'KEYID',
     APPLE_API_ISSUER: 'ISSUER',
@@ -215,6 +240,7 @@ test('notarization rejects API key data instead of an absolute key path', () => 
       loadConfig({
         DROIDEX_RELEASE_BUILD: '1',
         CSC_LINK: 'base64-certificate',
+        APPLE_TEAM_ID: 'A1B2C3D4E5',
         APPLE_API_KEY: 'base64-api-key',
         APPLE_API_KEY_ID: 'KEYID',
         APPLE_API_ISSUER: 'ISSUER',
@@ -224,14 +250,14 @@ test('notarization rejects API key data instead of an absolute key path', () => 
   );
 });
 
-test('macOS protected project folders have truthful permission descriptions', () => {
+test('macOS protected resources have truthful permission descriptions', () => {
   const config = loadConfig({});
 
   assert.match(config.mac.extendInfo.NSDesktopFolderUsageDescription, /choose them/);
   assert.match(config.mac.extendInfo.NSDocumentsFolderUsageDescription, /choose them/);
   assert.match(config.mac.extendInfo.NSDownloadsFolderUsageDescription, /choose them/);
-  assert.equal(config.mac.extendInfo.NSCameraUsageDescription, undefined);
-  assert.equal(config.mac.extendInfo.NSMicrophoneUsageDescription, undefined);
+  assert.match(config.mac.extendInfo.NSCameraUsageDescription, /only after you approve/);
+  assert.match(config.mac.extendInfo.NSMicrophoneUsageDescription, /only after you approve/);
 });
 
 test('website DMG includes a direct Privacy & Security shortcut', () => {

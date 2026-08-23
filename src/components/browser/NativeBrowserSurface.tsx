@@ -13,29 +13,21 @@ import {
 } from '../../lib/iframeDesignMode';
 import {
   attachNativeBrowser,
-  closeNativeBrowser,
   detachNativeBrowser,
-  goBackNativeBrowser,
-  goForwardNativeBrowser,
   onNativeBrowserDesignPrompt,
   onNativeBrowserLoadFailed,
   onNativeBrowserLoaded,
   onNativeBrowserSelection,
-  openNativeBrowser,
-  nativeBrowserAgentActionFromRequest,
-  nativeBrowserCapture,
   runNativeBrowserAgentAction,
   setNativeBrowserBounds,
   setNativeBrowserDesignMode,
   setNativeBrowserPencilMode,
   setNativeBrowserVisible,
-  waitForNextNativeBrowserLoad,
   type NativeBrowserBounds,
   type NativeBrowserDesignPrompt,
   type NativeBrowserLoadFailed,
   type NativeBrowserLoaded,
   type NativeBrowserSelection,
-  reloadNativeBrowser,
 } from '../../lib/nativeBrowser';
 import { registerNativeBrowserController } from '../../lib/nativeBrowserAgent';
 import { nativeBrowserRequestTargetsVisibleSurface } from '../../lib/browserSessionIdentity';
@@ -63,6 +55,45 @@ interface NativeBrowserSurfaceProps {
   onPrompt: (prompt: NativeBrowserDesignPrompt) => void;
   onLoadFailed?: (failure: NativeBrowserLoadFailed) => void;
   onViewportSizeChange: (size: Size) => void;
+}
+
+const NATIVE_ATTACH_RETRY_DELAYS_MS = [100, 300] as const;
+
+export function retryNativeBrowserAttach(options: {
+  attach: () => Promise<void>;
+  onAttached: () => void;
+  onFailed: (error: unknown) => void;
+  schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+  cancel?: (timer: ReturnType<typeof setTimeout>) => void;
+}): () => void {
+  const schedule = options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+  const cancel = options.cancel ?? clearTimeout;
+  let disposed = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const attempt = (attemptIndex: number) => {
+    if (disposed) return;
+    void options.attach().then(
+      () => {
+        if (!disposed) options.onAttached();
+      },
+      (error: unknown) => {
+        if (disposed) return;
+        const retryDelayMs = NATIVE_ATTACH_RETRY_DELAYS_MS[attemptIndex];
+        if (retryDelayMs === undefined) {
+          options.onFailed(error);
+          return;
+        }
+        timer = schedule(() => attempt(attemptIndex + 1), retryDelayMs);
+      },
+    );
+  };
+
+  attempt(0);
+  return () => {
+    disposed = true;
+    if (timer !== undefined) cancel(timer);
+  };
 }
 
 export function NativeBrowserSurface({
@@ -100,17 +131,13 @@ export function NativeBrowserSurface({
   const obscuredRef = useRef(obscured);
   const controllerStateRef = useRef({
     browserKey,
-    designMode,
     obscured,
-    pencilMode,
     url,
     visibleBrowserSessionId,
   });
   controllerStateRef.current = {
     browserKey,
-    designMode,
     obscured,
-    pencilMode,
     url,
     visibleBrowserSessionId,
   };
@@ -268,28 +295,33 @@ export function NativeBrowserSurface({
       return;
     }
     if (attachedSessionRef.current !== visibleBrowserSessionId) {
-      // Avoid duplicate attaches while one is in flight, and only mark the
-      // session attached once attachNativeBrowser actually resolves so a failed
-      // attach can be retried by a later effect run.
-      if (attachingSessionRef.current === visibleBrowserSessionId) return;
       const target = visibleBrowserSessionId;
       attachingSessionRef.current = target;
-      attachNativeBrowser(target, bounds, urlRef.current)
-        .then(() => {
-          // A newer session may have started attaching while this was in
-          // flight; only commit state if `target` is still the intended one.
+      const cancelAttach = retryNativeBrowserAttach({
+        attach: () => attachNativeBrowser(target, bounds, urlRef.current),
+        onAttached: () => {
           if (attachingSessionRef.current !== target) return;
           attachedSessionRef.current = target;
+          attachingSessionRef.current = undefined;
           lastBounds.current = bounds;
           if (obscuredRef.current) {
             setNativeBrowserVisible(target, false).catch(() => {});
           }
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (attachingSessionRef.current === target) attachingSessionRef.current = undefined;
-        });
-      return;
+        },
+        onFailed: (error) => {
+          if (attachingSessionRef.current !== target) return;
+          attachingSessionRef.current = undefined;
+          onLoadFailedRef.current?.({
+            browserSessionId: target,
+            url: urlRef.current,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      });
+      return () => {
+        cancelAttach();
+        if (attachingSessionRef.current === target) attachingSessionRef.current = undefined;
+      };
     }
     if (!lastBounds.current || !equalBounds(lastBounds.current, bounds)) {
       scheduleBoundsUpdate(visibleBrowserSessionId, bounds);
@@ -317,10 +349,8 @@ export function NativeBrowserSurface({
                 browserKey: current.browserKey,
                 visibleBrowserSessionId: current.visibleBrowserSessionId,
                 obscured: current.obscured,
-                designMode: current.designMode,
-                pencilMode: current.designMode && current.pencilMode,
                 bounds: () => boundsFor(slotRef),
-                markOpen: (bounds) => {
+                markAttached: (bounds) => {
                   lastBounds.current = bounds;
                   if (current.visibleBrowserSessionId) {
                     attachedSessionRef.current = current.visibleBrowserSessionId;
@@ -365,7 +395,7 @@ export function NativeBrowserSurface({
           <iframe
             ref={iframeRef}
             src={url}
-            title="Droid Control browser"
+            title="DROIDEX Browser"
             className="h-full w-full border-0 bg-white"
             sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
           />
@@ -390,22 +420,11 @@ async function performNativeRequest(
     browserKey: string;
     visibleBrowserSessionId?: string;
     obscured: boolean;
-    designMode: boolean;
-    pencilMode: boolean;
     bounds: () => NativeBrowserBounds | null;
-    markOpen: (bounds: NativeBrowserBounds) => void;
+    markAttached: (bounds: NativeBrowserBounds) => void;
   },
 ): Promise<BrowserNativeResult> {
   try {
-    if (request.action === 'close') {
-      await closeNativeBrowser(request.browserSessionId);
-      return {
-        requestId: request.requestId,
-        appSessionId: request.appSessionId,
-        browserSessionId: request.browserSessionId,
-        ok: true,
-      };
-    }
     const bounds = options.bounds();
     // While a full-screen overlay (settings or a spec/question modal)
     // obscures the pane, the BrowserView is detached; treat the surface as not
@@ -419,89 +438,9 @@ async function performNativeRequest(
         requestBrowserSessionId: request.browserSessionId,
       });
     const visibleBounds = visible ? requireNativeBrowserBounds(bounds) : undefined;
-    if (visibleBounds && request.action !== 'open') {
-      await setNativeBrowserBounds(request.browserSessionId, visibleBounds);
-    }
-    await syncNativeDesignState(
-      request.browserSessionId,
-      visible ? options.designMode : false,
-      visible ? options.pencilMode : false,
-    );
-    if (request.action === 'open') {
-      const targetUrl = request.url ?? options.currentUrl;
-      const loaded = waitForNextNativeBrowserLoad(request.browserSessionId).catch(() => undefined);
-      await openNativeBrowser(request.browserSessionId, targetUrl, visibleBounds, request.viewport);
-      if (visibleBounds) options.markOpen(visibleBounds);
-      const loadedEvent = await loaded;
-      return {
-        requestId: request.requestId,
-        appSessionId: request.appSessionId,
-        browserSessionId: request.browserSessionId,
-        ok: true,
-        snapshot: await snapshotAfterNavigation(request, loadedEvent?.url ?? targetUrl),
-      };
-    }
-    if (request.action === 'reload') {
-      const loaded = waitForNextNativeBrowserLoad(request.browserSessionId).catch(() => undefined);
-      await reloadNativeBrowser(request.browserSessionId);
-      const loadedEvent = await loaded;
-      return {
-        requestId: request.requestId,
-        appSessionId: request.appSessionId,
-        browserSessionId: request.browserSessionId,
-        ok: true,
-        snapshot: await snapshotAfterNavigation(request, loadedEvent?.url ?? options.currentUrl),
-      };
-    }
-    if (request.action === 'goBack' || request.action === 'goForward') {
-      const loaded = waitForNextNativeBrowserLoad(request.browserSessionId).catch(() => undefined);
-      const moved =
-        request.action === 'goBack'
-          ? await goBackNativeBrowser(request.browserSessionId)
-          : await goForwardNativeBrowser(request.browserSessionId);
-      if (!moved) {
-        return {
-          requestId: request.requestId,
-          appSessionId: request.appSessionId,
-          browserSessionId: request.browserSessionId,
-          ok: true,
-          snapshot: await snapshotAfterNavigation(request, options.currentUrl),
-        };
-      }
-      const loadedEvent = await loaded;
-      return {
-        requestId: request.requestId,
-        appSessionId: request.appSessionId,
-        browserSessionId: request.browserSessionId,
-        ok: true,
-        snapshot: await snapshotAfterNavigation(request, loadedEvent?.url ?? options.currentUrl),
-      };
-    }
-    if (request.action === 'capture') {
-      const image = await nativeBrowserCapture(request.browserSessionId, request.box, {
-        fullPage: request.fullPage,
-        deviceScaleFactor: request.deviceScaleFactor,
-      });
-      return {
-        requestId: request.requestId,
-        appSessionId: request.appSessionId,
-        browserSessionId: request.browserSessionId,
-        ok: true,
-        image,
-      };
-    }
-    const result = await runNativeBrowserAgentAction(nativeBrowserAgentActionFromRequest(request));
-    return {
-      requestId: request.requestId,
-      appSessionId: request.appSessionId,
-      browserSessionId: request.browserSessionId,
-      ok: result.ok,
-      snapshot: result.snapshot,
-      inspection: result.inspection,
-      networkEvents: result.networkEvents,
-      consoleEvents: result.consoleEvents,
-      error: result.error,
-    };
+    const result = await runNativeBrowserAgentAction(request, undefined, visibleBounds);
+    if (visibleBounds && result.ok) options.markAttached(visibleBounds);
+    return result;
   } catch (err) {
     return {
       requestId: request.requestId,
@@ -514,17 +453,8 @@ async function performNativeRequest(
 }
 
 function requireNativeBrowserBounds(bounds: NativeBrowserBounds | null): NativeBrowserBounds {
-  if (!bounds) throw new Error('Droid Control browser pane is not laid out yet.');
+  if (!bounds) throw new Error('DROIDEX Browser pane is not laid out yet.');
   return bounds;
-}
-
-async function syncNativeDesignState(
-  browserSessionId: string,
-  designMode: boolean,
-  pencilMode: boolean,
-): Promise<void> {
-  await setNativeBrowserDesignMode(browserSessionId, designMode);
-  await setNativeBrowserPencilMode(browserSessionId, designMode && pencilMode);
 }
 
 async function performIframeRequest(
@@ -537,7 +467,7 @@ async function performIframeRequest(
 ): Promise<BrowserNativeResult> {
   try {
     const iframe = options.iframe.current;
-    if (!iframe) throw new Error('Droid Control browser pane is not mounted yet.');
+    if (!iframe) throw new Error('DROIDEX Browser pane is not mounted yet.');
     if (request.action === 'close') {
       iframe.src = 'about:blank';
       options.onLoaded('about:blank');
@@ -652,19 +582,6 @@ function safeIframeSnapshot(iframe: HTMLIFrameElement, fallbackUrl: string) {
   } catch {
     return { url: readIframeUrl(iframe) ?? fallbackUrl, scroll: { x: 0, y: 0 }, refs: [] };
   }
-}
-
-function navigationSnapshot(url: string) {
-  return { url, scroll: { x: 0, y: 0 }, refs: [] };
-}
-
-async function snapshotAfterNavigation(request: BrowserNativeRequest, fallbackUrl: string) {
-  const result = await runNativeBrowserAgentAction({
-    requestId: `${request.requestId}:snapshot`,
-    browserSessionId: request.browserSessionId,
-    action: 'snapshot',
-  }).catch(() => undefined);
-  return result?.ok && result.snapshot ? result.snapshot : navigationSnapshot(fallbackUrl);
 }
 
 function settleFrame(): Promise<void> {

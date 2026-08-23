@@ -13,6 +13,12 @@ const SENSITIVE_KEY_PARTS = [
   'session',
   'csrf',
   'otp',
+  'state',
+  'nonce',
+  'relaystate',
+  'assertion',
+  'ticket',
+  'samlresponse',
 ];
 
 function isSensitiveBrowserKey(value) {

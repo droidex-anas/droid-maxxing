@@ -106,6 +106,32 @@ function permissionInput(toolUseId: string, command = 'pwd'): RequestPermissionR
   };
 }
 
+function droidexBrowserPermissionInput(
+  toolUseId: string,
+  toolName: string,
+): RequestPermissionRequestParams {
+  return {
+    toolUses: [
+      {
+        toolUse: {
+          type: 'tool_use',
+          id: toolUseId,
+          name: `droidex-browser___${toolName}`,
+          input: { ref: '@b-link' },
+        },
+        confirmationType: 'mcp_tool',
+        details: {
+          type: 'mcp_tool',
+          serverName: 'droidex-browser',
+          toolName,
+          impactLevel: 'high',
+        },
+      },
+    ],
+    options: [],
+  } as RequestPermissionRequestParams;
+}
+
 function specApprovalInput(toolUseId: string): RequestPermissionRequestParams {
   return {
     toolUses: [
@@ -167,6 +193,30 @@ test('permission requests keep stable identity, exact correlation, and one event
   const requestId = latestApprovalRequest(harness.emitted).requestId;
   await harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
   assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
+});
+
+test('first-party DROIDEX browser tools defer approval to the authoritative browser policy', async () => {
+  const harness = createHarness();
+  harness.addLiveSession('app-1', 'provider-1');
+  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
+
+  const outcome = await handler(droidexBrowserPermissionInput('tool-1', 'hover'));
+
+  assert.equal(outcome, ToolConfirmationOutcome.ProceedOnce);
+  assert.equal(approvalRequests(harness.emitted).length, 0);
+});
+
+test('unknown tools cannot gain first-party browser permission deferral by name prefix', async () => {
+  const harness = createHarness();
+  harness.addLiveSession('app-1', 'provider-1');
+  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
+
+  const pending = Promise.resolve(handler(droidexBrowserPermissionInput('tool-1', 'future_tool')));
+  const requestId = latestApprovalRequest(harness.emitted).requestId;
+  await harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
+
+  assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
+  assert.equal(approvalRequests(harness.emitted).length, 1);
 });
 
 test('ProceedAlways bypasses only an equivalent later permission signature', async () => {

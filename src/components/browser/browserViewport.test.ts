@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeUrl, viewportForMode, viewportFromFrame } from './browserViewport';
+import {
+  normalizeBrowserOmniboxInput,
+  normalizeUrl,
+  viewportForMode,
+  viewportFromFrame,
+} from './browserViewport';
 
 test('viewportFromFrame matches the fit browser surface inside the canvas frame', () => {
   assert.deepEqual(viewportFromFrame({ width: 1325, height: 857 }), {
@@ -45,5 +50,34 @@ test('normalizeUrl preserves local browser targets', () => {
   assert.equal(normalizeUrl('//example.com/path'), 'https://example.com/path');
   assert.equal(normalizeUrl('::1:8080/dev'), 'http://[::1]:8080/dev');
   assert.equal(normalizeUrl('example.com'), 'https://example.com');
-  assert.equal(normalizeUrl('about:blank'), 'about:blank');
+  assert.equal(normalizeUrl('example.com:8443/path'), 'https://example.com:8443/path');
+});
+
+test('normalizeUrl rejects internal, local-file, executable, and custom schemes', () => {
+  for (const value of [
+    '',
+    'about:blank',
+    'file:///Users/me/private.txt',
+    'data:text/html,hello',
+    'javascript:alert(1)',
+    'javascript:123',
+    'droidex://settings',
+    'https://user:password@example.com',
+  ]) {
+    assert.throws(() => normalizeUrl(value), /address|http:\/\/ and https:\/\//);
+  }
+});
+
+test('normalizeBrowserOmniboxInput searches ordinary text and opens website addresses', () => {
+  assert.equal(
+    normalizeBrowserOmniboxInput('weather in Delhi today'),
+    'https://www.google.com/search?q=weather+in+Delhi+today',
+  );
+  assert.equal(normalizeBrowserOmniboxInput('openai'), 'https://www.google.com/search?q=openai');
+  assert.equal(normalizeBrowserOmniboxInput('example.com/docs'), 'https://example.com/docs');
+  assert.equal(normalizeBrowserOmniboxInput('localhost:3000'), 'http://localhost:3000');
+  assert.throws(
+    () => normalizeBrowserOmniboxInput('javascript:alert(1)'),
+    /http:\/\/ and https:\/\//,
+  );
 });

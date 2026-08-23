@@ -47,6 +47,29 @@ export interface SessionInteractionsDependencies {
 let requestSequence = 0;
 const defaultNextRequestId = () =>
   `req-${Date.now().toString(36)}-${(requestSequence++).toString(36)}`;
+const DROIDEX_BROWSER_PERMISSION_PREFIX = 'mcp::droidex-browser::';
+const DROIDEX_BROWSER_POLICY_DEFERRED_TOOLS = new Set([
+  'back',
+  'click',
+  'console',
+  'design_context',
+  'design_reference',
+  'fill_login',
+  'forward',
+  'hover',
+  'inspect',
+  'keypress',
+  'network',
+  'open',
+  'reload',
+  'resize',
+  'screenshot',
+  'scroll',
+  'select',
+  'snapshot',
+  'type',
+  'wait',
+]);
 
 export class SessionInteractions {
   private readonly scopes = new Map<string, InteractionScope>();
@@ -61,6 +84,15 @@ export class SessionInteractions {
         const type = confirmationType(params);
         const request = classifyPermission(ref.id, requestId, params);
         const signature = permissionSignature(params);
+        if (isDroidexBrowserPolicyDeferredPermission(signature)) {
+          // The first-party browser is reserved by SessionManager. Electron main
+          // still enforces agent access, autonomy, exact-origin navigation,
+          // authentication, downloads, and site permissions for every action.
+          // A second SDK-wide MCP prompt would be broader and less safe than that
+          // resource-owner policy while also interrupting every hover and click.
+          resolve(normalizePermissionOutcome('proceed_once'));
+          return;
+        }
         const scope = liveSession ? this.scope(liveSession.summary.appSessionId) : undefined;
         if (scope && signature && scope.permissionGrants.has(signature)) {
           resolve(normalizePermissionOutcome('proceed_always'));
@@ -184,4 +216,10 @@ export class SessionInteractions {
       });
     }
   }
+}
+
+function isDroidexBrowserPolicyDeferredPermission(signature: string): boolean {
+  if (!signature.startsWith(DROIDEX_BROWSER_PERMISSION_PREFIX)) return false;
+  const toolName = signature.slice(DROIDEX_BROWSER_PERMISSION_PREFIX.length);
+  return DROIDEX_BROWSER_POLICY_DEFERRED_TOOLS.has(toolName);
 }

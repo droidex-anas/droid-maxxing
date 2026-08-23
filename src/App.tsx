@@ -54,6 +54,7 @@ import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
 import { useWorkspaceScopes } from './hooks/useWorkspaceScopes';
 import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
+import { BrowserPermissionPromptHost } from './components/BrowserPermissionPrompt';
 
 function ContextListIcon({ className }: { className?: string }) {
   return (
@@ -94,6 +95,7 @@ function childAccessForSelection(
 export default function App() {
   const dispatch = useStoreDispatch();
   const store = useStoreApi();
+  const [browserPromptOpen, setBrowserPromptOpen] = useState(false);
   const state = useStoreSelector((current) => {
     const activeSession = current.activeAppSessionId
       ? current.sessions[current.activeAppSessionId]
@@ -263,14 +265,22 @@ export default function App() {
 
   useEffect(() => {
     if (embedded) return;
-    void (async () => {
-      // Bridge info and the saved API key are independent IPCs; fetch them
-      // together so the connect command reaches the sidecar one round-trip
-      // sooner. Queued commands flush in order once the socket opens.
-      const [, key] = await Promise.all([bridge.start(), getApiKey()]);
-      connect(key ?? '');
-      listFactoryDefaults();
-    })();
+    let disposed = false;
+    let stopOpenListener = () => {};
+    void getApiKey()
+      .catch(() => null)
+      .then((key) => {
+        if (disposed) return;
+        stopOpenListener = bridge.subscribeOpen(() => {
+          connect(key ?? '');
+          listFactoryDefaults();
+        });
+        void bridge.start();
+      });
+    return () => {
+      disposed = true;
+      stopOpenListener();
+    };
   }, [embedded]);
 
   useEffect(() => {
@@ -339,7 +349,9 @@ export default function App() {
         dispatch({ type: 'SET_RIGHT_PANEL', open: false });
         dispatch({ type: 'OPEN_UTILITY_TOOL', tool: 'browser' });
       }
-      void performNativeBrowserRequest(event.request)
+      void performNativeBrowserRequest(event.request, {
+        surface: requestIsForActiveChat ? 'visible' : 'background',
+      })
         .then(sendNativeBrowserResult)
         .catch((err: unknown) => {
           sendNativeBrowserResult({
@@ -574,7 +586,7 @@ export default function App() {
                         return (
                           <BrowserFocusWorkspace
                             expanded={browserExpanded}
-                            externalObscured={overlayOpen}
+                            externalObscured={overlayOpen || browserPromptOpen}
                             onToggleExpanded={() => {
                               setExpandedBrowserAppSessionId(
                                 browserExpanded ? null : activeSession.appSessionId,
@@ -699,6 +711,7 @@ export default function App() {
 
       {state.commandPaletteOpen && <CommandPalette />}
       {state.settingsOpen && <SettingsPanel />}
+      <BrowserPermissionPromptHost onOpenChange={setBrowserPromptOpen} />
       <SpecWikiModal />
       <Toaster />
 

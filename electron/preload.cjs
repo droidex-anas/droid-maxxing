@@ -89,8 +89,6 @@ contextBridge.exposeInMainWorld('droidControl', {
   filesReveal: (accessToken, relative) =>
     ipcRenderer.invoke('files-reveal', { accessToken, relative }),
 
-  nativeBrowserOpen: (browserSessionId, url, bounds, viewport) =>
-    ipcRenderer.invoke('native-browser-open', { browserSessionId, url, bounds, viewport }),
   nativeBrowserAttach: (browserSessionId, bounds, url) =>
     ipcRenderer.invoke('native-browser-attach', { browserSessionId, bounds, url }),
   nativeBrowserDetach: (browserSessionId) =>
@@ -99,10 +97,6 @@ contextBridge.exposeInMainWorld('droidControl', {
     ipcRenderer.invoke('native-browser-set-bounds', { browserSessionId, bounds }),
   nativeBrowserSetVisible: (browserSessionId, visible) =>
     ipcRenderer.invoke('native-browser-visible', { browserSessionId, visible }),
-  nativeBrowserClose: (browserSessionId) =>
-    ipcRenderer.invoke('native-browser-close', { browserSessionId }),
-  nativeBrowserReload: (browserSessionId) =>
-    ipcRenderer.invoke('native-browser-reload', { browserSessionId }),
   nativeBrowserGoBack: (browserSessionId) =>
     ipcRenderer.invoke('native-browser-go-back', { browserSessionId }),
   nativeBrowserGoForward: (browserSessionId) =>
@@ -111,14 +105,30 @@ contextBridge.exposeInMainWorld('droidControl', {
     ipcRenderer.invoke('native-browser-set-design-mode', { browserSessionId, active }),
   nativeBrowserSetPencilMode: (browserSessionId, active) =>
     ipcRenderer.invoke('native-browser-set-pencil-mode', { browserSessionId, active }),
-  nativeBrowserAgentAction: (request) =>
-    ipcRenderer.invoke('native-browser-agent-action', { request }),
-  nativeBrowserCapture: (browserSessionId, box, options) =>
-    ipcRenderer.invoke('native-browser-capture', { browserSessionId, box, options }),
+  nativeBrowserAgentAction: (request, bounds) =>
+    ipcRenderer.invoke('native-browser-agent-action', { request, bounds }),
+  browserSettingsGet: () => ipcRenderer.invoke('browser-settings-get'),
+  browserSettingsUpdate: (patch) => ipcRenderer.invoke('browser-settings-update', { patch }),
+  browserCookiesImport: () => ipcRenderer.invoke('browser-cookies-import'),
+  browserCookieProfilesDiscover: () => ipcRenderer.invoke('browser-cookie-profiles-discover'),
+  browserCookieProfileImportPrepare: (profileId) =>
+    ipcRenderer.invoke('browser-cookie-profile-import-prepare', { profileId }),
+  browserCookieProfileImportCommit: (planId) =>
+    ipcRenderer.invoke('browser-cookie-profile-import-commit', { planId }),
+  browserCookieProfileImportDiscard: (planId) =>
+    ipcRenderer.invoke('browser-cookie-profile-import-discard', { planId }),
+  browserDataClear: () => ipcRenderer.invoke('browser-data-clear'),
+  browserCredentialDelete: (origin) => ipcRenderer.invoke('browser-credential-delete', { origin }),
+  browserSiteGrantRevoke: (kind, origin) =>
+    ipcRenderer.invoke('browser-site-grant-revoke', { kind, origin }),
+  browserDownloadDirectoryChoose: () => ipcRenderer.invoke('browser-download-directory-choose'),
+  browserPermissionPromptResolve: (requestId, response) =>
+    ipcRenderer.invoke('browser-permission-prompt-resolve', { requestId, response }),
 
   onNativeBrowserSelection: (handler) => on('native-browser-selection', handler),
   onNativeBrowserDesignPrompt: (handler) => on('native-browser-design-prompt', handler),
   onNativeBrowserLoaded: (handler) => on('native-browser-loaded', handler),
   onNativeBrowserLoadFailed: (handler) => on('native-browser-load-failed', handler),
-  onNativeBrowserAgentResult: (handler) => on('native-browser-agent-result', handler),
+  onBrowserPermissionPrompt: (handler) => on('browser-permission-prompt', handler),
+  onBrowserPermissionPromptDismiss: (handler) => on('browser-permission-prompt-dismiss', handler),
 });

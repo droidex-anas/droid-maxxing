@@ -6,50 +6,64 @@ import type { BrowserSessionManager } from './BrowserSessionManager.js';
 test('browser MCP server exposes agent-facing names and typed inputs', () => {
   const server = createBrowserMcpServer({} as BrowserSessionManager, () => 'm1');
 
-  assert.equal(server.name, 'droidmaxx-browser');
+  assert.equal(server.name, 'droidex-browser');
   assert.deepEqual(
     server.tools.map((tool) => tool.name),
     [
-      'browser_open',
-      'browser_snapshot',
-      'browser_reload',
-      'browser_back',
-      'browser_forward',
-      'browser_screenshot',
-      'browser_click',
-      'browser_hover',
-      'browser_select',
-      'browser_type',
-      'browser_keypress',
-      'browser_resize',
-      'browser_scroll',
-      'browser_wait',
-      'browser_inspect',
-      'browser_network',
-      'browser_console',
-      'browser_fill_login',
-      'design-mode',
+      'open',
+      'snapshot',
+      'reload',
+      'back',
+      'forward',
+      'screenshot',
+      'click',
+      'hover',
+      'select',
+      'type',
+      'keypress',
+      'resize',
+      'scroll',
+      'wait',
+      'inspect',
+      'network',
+      'console',
+      'fill_login',
+      'design_context',
       'design_reference',
     ],
   );
-  assert.ok(server.tools.find((tool) => tool.name === 'browser_open')?.inputSchema?.url);
+  assert.ok(server.tools.find((tool) => tool.name === 'open')?.inputSchema?.url);
   assert.ok(
-    server.tools.find((tool) => tool.name === 'browser_screenshot')?.inputSchema?.deviceScaleFactor,
+    server.tools.find((tool) => tool.name === 'screenshot')?.inputSchema?.deviceScaleFactor,
   );
   assert.match(
-    server.tools.find((tool) => tool.name === 'browser_open')?.description ?? '',
+    server.tools.find((tool) => tool.name === 'open')?.description ?? '',
     /Do not ask the user for a URL/,
   );
+  assert.match(
+    server.tools.find((tool) => tool.name === 'open')?.description ?? '',
+    /Never reopen a URL from conversation memory/,
+  );
+  assert.match(
+    server.tools.find((tool) => tool.name === 'snapshot')?.description ?? '',
+    /current or already-open browser/,
+  );
+  const reloadDescription = server.tools.find((tool) => tool.name === 'reload')?.description ?? '';
+  assert.match(reloadDescription, /already includes fresh page refs/);
+  assert.doesNotMatch(reloadDescription, /Use snapshot after reload/);
+  const scrollDescription = server.tools.find((tool) => tool.name === 'scroll')?.description ?? '';
+  assert.match(scrollDescription, /already includes fresh page refs/);
+  assert.doesNotMatch(scrollDescription, /call snapshot to refresh refs/);
 });
 
 test('browser MCP handlers return visible tool errors', async () => {
   const manager = {
-    designContext() {
+    async refresh() {
       throw new Error('Browser session is not open yet.');
     },
   } as unknown as BrowserSessionManager;
   const server = createBrowserMcpServer(manager, () => 'm1');
-  const designMode = server.tools.find((tool) => tool.name === 'design-mode');
+  const designMode = server.tools.find((tool) => tool.name === 'design_context');
 
   const result = await designMode?.handler({});
 
@@ -57,7 +71,38 @@ test('browser MCP handlers return visible tool errors', async () => {
   assert.match(JSON.stringify(result), /Browser session is not open yet/);
 });
 
-test('browser_open keeps high-detail viewport scale by default', async () => {
+test('cached Design Mode data is read only after main browser policy authorizes access', async () => {
+  const calls: string[] = [];
+  const state = {
+    url: 'https://example.com',
+    viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
+    viewportMode: 'fit' as const,
+    scroll: { x: 0, y: 0 },
+    refs: [],
+  };
+  const manager = {
+    async refresh(appSessionId: string) {
+      calls.push(`authorize:${appSessionId}`);
+      return state;
+    },
+    designContext(appSessionId: string) {
+      calls.push(`context:${appSessionId}`);
+      return { state, references: [] };
+    },
+    referenceDetail(appSessionId: string, id: string) {
+      calls.push(`reference:${appSessionId}:${id}`);
+      return undefined;
+    },
+  } as unknown as BrowserSessionManager;
+  const server = createBrowserMcpServer(manager, () => 'm1');
+
+  await server.tools.find((tool) => tool.name === 'design_context')?.handler({});
+  await server.tools.find((tool) => tool.name === 'design_reference')?.handler({ id: '@live-1' });
+
+  assert.deepEqual(calls, ['authorize:m1', 'context:m1', 'authorize:m1', 'reference:m1:@live-1']);
+});
+
+test('open keeps high-detail viewport scale by default', async () => {
   let openedViewport: { width: number; height: number; deviceScaleFactor?: number } | undefined;
   const manager = {
     async open(input: {
@@ -74,7 +119,7 @@ test('browser_open keeps high-detail viewport scale by default', async () => {
     },
   } as unknown as BrowserSessionManager;
   const server = createBrowserMcpServer(manager, () => 'm1');
-  const browserOpen = server.tools.find((tool) => tool.name === 'browser_open');
+  const browserOpen = server.tools.find((tool) => tool.name === 'open');
 
   const result = await browserOpen?.handler({
     url: 'https://example.com',
@@ -86,7 +131,7 @@ test('browser_open keeps high-detail viewport scale by default', async () => {
   assert.match(String(result), /Opened the live DROIDEX browser/);
 });
 
-test('browser_reload returns a fresh browser state', async () => {
+test('reload returns a fresh browser state', async () => {
   const manager = {
     async reload() {
       return {
@@ -99,7 +144,7 @@ test('browser_reload returns a fresh browser state', async () => {
     },
   } as unknown as BrowserSessionManager;
   const server = createBrowserMcpServer(manager, () => 'm1');
-  const browserReload = server.tools.find((tool) => tool.name === 'browser_reload');
+  const browserReload = server.tools.find((tool) => tool.name === 'reload');
 
   const result = await browserReload?.handler({});
 
@@ -127,8 +172,8 @@ test('browser history tools return the resulting page state', async () => {
   } as unknown as BrowserSessionManager;
   const server = createBrowserMcpServer(manager, () => 'm1');
 
-  await server.tools.find((tool) => tool.name === 'browser_back')?.handler({});
-  await server.tools.find((tool) => tool.name === 'browser_forward')?.handler({});
+  await server.tools.find((tool) => tool.name === 'back')?.handler({});
+  await server.tools.find((tool) => tool.name === 'forward')?.handler({});
 
   assert.deepEqual(calls, ['back', 'forward']);
 });

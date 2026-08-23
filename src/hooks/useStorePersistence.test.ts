@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPersistedUiState, normalizeDiffStyle } from './useStore';
+import type { BrowserRestoreState } from '../types/bridge';
 import { normalizeAppIconMode } from '../lib/appIcon';
+import {
+  restorePersistedBrowserSessions,
+  sanitizePersistedBrowserUrl,
+} from '../lib/browserPersistence';
 import {
   applyFactoryCompactionDefaults,
   compactionSettingsSnapshot,
@@ -60,7 +65,7 @@ test('loadPersistedUiState sanitizes persisted shell fields', () => {
       browsers: {
         'chat-1': {
           browserSessionId: 'browser-chat-1',
-          appSessionId: 'chat-1',
+          appSessionId: 'wrong-stale-owner',
           url: 'http://127.0.0.1:17777/',
           title: 'Local app',
           viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
@@ -106,6 +111,68 @@ test('loadPersistedUiState sanitizes persisted shell fields', () => {
       });
     },
   );
+});
+
+test('startup restoration preserves each persisted browser task identity', () => {
+  const restored: BrowserRestoreState[] = [];
+
+  restorePersistedBrowserSessions(
+    {
+      'app-background': {
+        browserSessionId: 'browser-background',
+        appSessionId: 'wrong-stale-owner',
+        url: 'https://background.example.test',
+        viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
+        viewportMode: 'fit',
+        scroll: { x: 0, y: 10 },
+        refs: [],
+      },
+      'app-visible': {
+        browserSessionId: 'browser-visible',
+        appSessionId: 'app-visible',
+        url: 'https://visible.example.test',
+        viewport: { width: 390, height: 844, deviceScaleFactor: 2 },
+        viewportMode: 'mobile',
+        scroll: { x: 0, y: 0 },
+        refs: [],
+      },
+    },
+    (state) => restored.push(state),
+  );
+
+  assert.deepEqual(
+    restored.map((state) => [state.appSessionId, state.browserSessionId, state.url]),
+    [
+      ['app-background', 'browser-background', 'https://background.example.test'],
+      ['app-visible', 'browser-visible', 'https://visible.example.test'],
+    ],
+  );
+});
+
+test('browser URL persistence removes OAuth secrets without corrupting routes', () => {
+  assert.equal(
+    sanitizePersistedBrowserUrl(
+      'https://app.example.test/callback?tab=activity&code=secret&state=nonce&access_token=bearer#/workspace?panel=review',
+    ),
+    'https://app.example.test/callback?tab=activity#/workspace?panel=review',
+  );
+  assert.equal(
+    sanitizePersistedBrowserUrl(
+      'https://app.example.test/#/callback?panel=review&code=secret&state=nonce',
+    ),
+    'https://app.example.test/#/callback?panel=review',
+  );
+  assert.equal(
+    sanitizePersistedBrowserUrl('https://app.example.test/#/workspace?code=view&state=expanded'),
+    'https://app.example.test/#/workspace?code=view&state=expanded',
+  );
+  assert.equal(
+    sanitizePersistedBrowserUrl(
+      'https://app.example.test/callback#access_token=bearer&id_token=identity&state=nonce&tab=activity',
+    ),
+    'https://app.example.test/callback#tab=activity',
+  );
+  assert.equal(sanitizePersistedBrowserUrl('not a browser URL'), '');
 });
 
 test('factory defaults do not restore a cleared per-model compaction override', () => {

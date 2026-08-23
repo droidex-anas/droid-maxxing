@@ -4,7 +4,13 @@ export const DEFAULT_BROWSER_URL = 'about:blank';
 
 export function safeBrowserUrl(value: string | undefined, appOrigin: string | undefined): string {
   if (isInternalBrowserUrl(value)) return DEFAULT_BROWSER_URL;
-  const normalized = value ? normalizeUrl(value) : DEFAULT_BROWSER_URL;
+  if (!value) return DEFAULT_BROWSER_URL;
+  let normalized: string;
+  try {
+    normalized = normalizeUrl(value);
+  } catch {
+    return DEFAULT_BROWSER_URL;
+  }
   return isSelfBrowserUrl(normalized, appOrigin) ? DEFAULT_BROWSER_URL : normalized;
 }
 
@@ -27,7 +33,7 @@ export function isSelfBrowserUrl(value: string, appOrigin: string | undefined): 
 }
 
 function isInternalBrowserUrl(value: string | undefined): boolean {
-  return Boolean(value && /^chrome-error:\/\//i.test(value.trim()));
+  return Boolean(value && /^(?:about:blank$|chrome-error:\/\/)/i.test(value.trim()));
 }
 
 function portFor(url: URL): string {

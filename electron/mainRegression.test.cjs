@@ -4,38 +4,44 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const mainSource = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
+const browserRendererIpcSource = fs.readFileSync(
+  path.join(__dirname, 'browserRendererIpc.cjs'),
+  'utf8',
+);
 
-test('native browser invoke handlers authorize the main renderer', () => {
+test('native browser and settings invoke handlers authorize the main renderer', () => {
   const channels = [
-    'native-browser-open',
     'native-browser-attach',
     'native-browser-detach',
     'native-browser-set-bounds',
     'native-browser-visible',
-    'native-browser-close',
-    'native-browser-reload',
     'native-browser-go-back',
     'native-browser-go-forward',
     'native-browser-set-design-mode',
     'native-browser-set-pencil-mode',
     'native-browser-agent-action',
-    'native-browser-capture',
+    'browser-settings-get',
+    'browser-settings-update',
+    'browser-cookies-import',
+    'browser-cookie-profiles-discover',
+    'browser-cookie-profile-import-prepare',
+    'browser-cookie-profile-import-commit',
+    'browser-cookie-profile-import-discard',
+    'browser-data-clear',
+    'browser-credential-delete',
+    'browser-site-grant-revoke',
+    'browser-download-directory-choose',
+    'browser-permission-prompt-resolve',
   ];
 
   for (const channel of channels) {
-    const start = mainSource.indexOf(`ipcMain.handle('${channel}'`);
-    assert.notEqual(start, -1, `missing ${channel} handler`);
-    const nextHandle = mainSource.indexOf('\n  ipcMain.handle(', start + 1);
-    const nextListener = mainSource.indexOf('\n  ipcMain.on(', start + 1);
-    const end = Math.min(
-      ...[nextHandle, nextListener, mainSource.length].filter((index) => index >= 0),
-    );
-    assert.match(
-      mainSource.slice(start, end),
-      /assertMainRenderer\(event\)/,
-      `${channel} must authorize its sender`,
-    );
+    assert.match(browserRendererIpcSource, new RegExp(`handle\\('${channel}'`));
   }
+  assert.match(
+    browserRendererIpcSource,
+    /ipcMain\.handle\(channel, \(event, payload\) => \{\s*assertMainRenderer\(event\);/,
+  );
+  assert.match(mainSource, /registerBrowserRendererIpc\(\{/);
 });
 
 test('native browser restore does not reopen a URL that already failed this run', () => {
@@ -58,7 +64,7 @@ test('native browser restore does not reopen a URL that already failed this run'
   );
   assert.match(
     mainSource,
-    /contents\.on\('will-navigate', \(_event, requestedUrl\) => \{[\s\S]*?entry\.failedRestoreUrl = null;[\s\S]*?entry\.targetUrl = requestedUrl;/,
+    /contents\.on\('will-navigate', \(event, requestedUrl\) => \{[\s\S]*?entry\.failedRestoreUrl = null;[\s\S]*?entry\.targetUrl = requestedUrl;/,
   );
   const nativeDidNavigateStart = mainSource.indexOf("contents.on('did-navigate'");
   const didFinishStart = mainSource.indexOf(
@@ -80,7 +86,7 @@ test('native browser restore does not reopen a URL that already failed this run'
   );
   assert.match(
     mainSource,
-    /if \(entry\.failedRestoreUrl\) \{\s*const retryUrl = entry\.failedRestoreUrl;\s*entry\.failedRestoreUrl = null;\s*return loadNativeBrowserUrl\(entry, retryUrl, \{ force: true \}\);/,
+    /const reload = chooseBrowserReload\(\{[\s\S]*?currentUrl: contents\.getURL\(\),[\s\S]*?failedRestoreUrl: entry\.failedRestoreUrl,[\s\S]*?targetUrl: entry\.targetUrl,[\s\S]*?homePage: browserSettings\.homePage\(\),[\s\S]*?if \(reload\.kind === 'load'\) \{\s*return loadNativeBrowserUrl\(entry, reload\.url, \{ force: true \}\);/,
   );
 });
 
@@ -173,7 +179,21 @@ test('diagnostics initialize before app readiness and preferences require the tr
   );
   const readyAt = mainSource.indexOf('app.whenReady().then(async () =>');
   assert.ok(initializeAt > 0 && initializeAt < readyAt);
-  assert.match(mainSource, /await diagnosticsInitialization;\s*installApplicationMenu/);
+  assert.match(
+    mainSource,
+    /await diagnosticsInitialization;\s*browserWebAuthn\.initialize\(\);\s*try \{\s*await browserSettings\.initialize\(\);\s*\} catch \(error\) \{\s*failBrowserSettingsStartup\(error\);\s*return;\s*\}\s*installApplicationMenu/,
+  );
+  const failHandlerStart = mainSource.indexOf('function failBrowserSettingsStartup(error) {');
+  const failHandlerEnd = mainSource.indexOf('app.whenReady()', failHandlerStart);
+  assert.ok(failHandlerStart > 0 && failHandlerStart < failHandlerEnd);
+  const failHandler = mainSource.slice(failHandlerStart, failHandlerEnd);
+  assert.match(failHandler, /console\.error\(\s*`\[startup\] \$\{detail\}`/);
+  assert.match(
+    failHandler,
+    /dialog\.showErrorBox\(\s*'DROIDEX Browser settings are invalid',\s*detail\)/,
+  );
+  assert.match(failHandler, /browserSettings\.settingsPath/);
+  assert.match(failHandler, /app\.exit\(1\);/);
 
   for (const channel of ['diagnostics-preference-get', 'diagnostics-preference-set']) {
     const handlerStart = mainSource.indexOf(`ipcMain.handle('${channel}'`);
@@ -191,13 +211,178 @@ test('diagnostics initialize before app readiness and preferences require the tr
   assert.doesNotMatch(preferenceHandler, /relaunchApp/);
 });
 
-test('embedded websites cannot request unused system permissions', () => {
+test('embedded websites use exact allow-once media grants and deny device access', () => {
   assert.match(mainSource, /ses\.setDevicePermissionHandler\(\(\) => false\)/);
-  assert.match(mainSource, /ses\.setPermissionCheckHandler\(\(\) => false\)/);
   assert.match(
     mainSource,
-    /ses\.setPermissionRequestHandler\(\(_webContents, _permission, callback\) => callback\(false\)\)/,
+    /ses\.setPermissionCheckHandler\([\s\S]*?browserSettings\.canAccessPermission/,
   );
+  assert.match(
+    mainSource,
+    /ses\.setPermissionRequestHandler\([\s\S]*?browserSettings\.handlePermissionRequest/,
+  );
+  assert.match(mainSource, /browserSettings\.revokePermissionsForNavigation\(contents\)/);
+  assert.match(mainSource, /browserSettings\.revokePermissionsForContents\(contents\)/);
+});
+
+test('agent browser actions are authorized and executed as one main-process transaction', () => {
+  const handlerStart = browserRendererIpcSource.indexOf("handle('native-browser-agent-action'");
+  const handlerEnd = browserRendererIpcSource.indexOf('\n\n  handle(', handlerStart + 1);
+  const handler = browserRendererIpcSource.slice(handlerStart, handlerEnd);
+  assert.match(handler, /await browserSettings\.authorizeAgentRequest\(request\)/);
+  assert.match(handler, /await nativeBrowser\.runAgentAction\(request, bounds\)/);
+  assert.doesNotMatch(mainSource + browserRendererIpcSource, /native-browser-agent-result/);
+});
+
+test('manual address-bar navigation is not mislabeled as an agent origin request', () => {
+  assert.match(browserRendererIpcSource, /request\.source === 'user'/);
+  assert.match(browserRendererIpcSource, /USER_BROWSER_ACTIONS\.has\(action\)/);
+  assert.match(mainSource, /entry\.userNavigationActive/);
+});
+
+test('native browser sessions stay bound to their owning DROIDEX chat', () => {
+  assert.match(mainSource, /appSessionId: null,/);
+  assert.match(
+    mainSource,
+    /function bindNativeBrowserAppSession\(entry, appSessionId\)[\s\S]*?entry\.appSessionId !== appSessionId[\s\S]*?belongs to a different DROIDEX chat/,
+  );
+  assert.match(
+    mainSource,
+    /const entry = ensureNativeBrowserView\(request\.browserSessionId\);\s*bindNativeBrowserAppSession\(entry, request\.appSessionId\);/,
+  );
+});
+
+test('manual navigation provenance cannot bless page navigations, popups, or later transitions', () => {
+  const popupStart = mainSource.indexOf('contents.setWindowOpenHandler');
+  const popupEnd = mainSource.indexOf("contents.on('did-create-window'", popupStart);
+  const popupHandler = mainSource.slice(popupStart, popupEnd);
+  const navigateStart = mainSource.indexOf("contents.on('will-navigate'");
+  const navigateEnd = mainSource.indexOf("contents.on('will-redirect'", navigateStart);
+  const navigateHandler = mainSource.slice(navigateStart, navigateEnd);
+
+  assert.match(popupHandler, /requiresAgentOriginApproval\('popup'/);
+  assert.match(navigateHandler, /requiresAgentOriginApproval\('navigate'/);
+  assert.match(mainSource, /requiresAgentOriginApproval\('redirect'/);
+  assert.match(mainSource, /agentNavigationAutonomy\(entry\.agentRequest\)/);
+  assert.doesNotMatch(mainSource, /lastAgentAutonomy/);
+  assert.match(
+    mainSource,
+    /\.finally\(\(\) => \{\s*if \(!entry\.agentRequest && entry\.pendingAgentNavigation === pending\) \{\s*entry\.pendingAgentNavigation = null;/,
+  );
+});
+
+test('trusted physical navigation is frame-bound and consumed for only its exact popup or navigation', () => {
+  const registrationStart = mainSource.indexOf("ipcMain.on('native-browser-user-navigation'");
+  const registrationEnd = mainSource.indexOf('\n  ipcMain.on(', registrationStart + 1);
+  const registration = mainSource.slice(registrationStart, registrationEnd);
+  const expirationStart = mainSource.indexOf("ipcMain.on('native-browser-user-navigation-expired'");
+  const expirationEnd = mainSource.indexOf('\n  ipcMain.on(', expirationStart + 1);
+  const expiration = mainSource.slice(expirationStart, expirationEnd);
+  const popupStart = mainSource.indexOf('contents.setWindowOpenHandler');
+  const popupEnd = mainSource.indexOf("contents.on('did-create-window'", popupStart);
+  const popup = mainSource.slice(popupStart, popupEnd);
+  const navigateStart = mainSource.indexOf("contents.on('will-navigate'");
+  const navigateEnd = mainSource.indexOf("contents.on('will-redirect'", navigateStart);
+  const navigate = mainSource.slice(navigateStart, navigateEnd);
+
+  assert.match(registration, /event\.senderFrame !== contents\.mainFrame/);
+  assert.match(
+    registration,
+    /if \(entry\.agentActionActive\) \{\s*entry\.trustedUserNavigation = null;\s*return;/,
+  );
+  assert.match(registration, /validateUrl\(payload\?\.destinationUrl\)/);
+  assert.match(registration, /createTrustedUserNavigation\(\{/);
+  assert.match(registration, /browserSessionId: entry\.browserSessionId/);
+  assert.match(registration, /view: entry\.view/);
+  assert.match(registration, /navigationGeneration: entry\.navigationGeneration/);
+  assert.match(registration, /documentGeneration: entry\.documentGeneration/);
+  assert.match(expiration, /activationId === payload\?\.activationId/);
+  assert.match(popup, /consumeTrustedPhysicalNavigation\(entry, view, nextUrl\)/);
+  assert.match(navigate, /consumeTrustedPhysicalNavigation\(entry, view, requestedUrl\)/);
+});
+
+test('visible agent actions attach their Browser surface before showing the page-proof cursor', () => {
+  const start = mainSource.indexOf('async function runNativeBrowserAgentAction(request, bounds)');
+  const end = mainSource.indexOf('\nasync function authorizeNativeBrowserAuthentication', start);
+  const action = mainSource.slice(start, end);
+  assert.match(
+    action,
+    /const entry = ensureNativeBrowserView\(request\.browserSessionId\);\s*bindNativeBrowserAppSession\(entry, request\.appSessionId\);\s*if \(bounds\) \{\s*entry\.visible = true;\s*if \(request\.action !== 'open'\) \{\s*await attachNativeBrowser\(request\.browserSessionId, bounds\);\s*\}\s*/,
+  );
+  assert.match(
+    action,
+    /} else \{\s*await restoreNativeBrowserForAction\(request\.browserSessionId\);/,
+  );
+});
+
+test('visible open delegates its only attach to openNativeBrowser', () => {
+  const actionStart = mainSource.indexOf(
+    'async function runNativeBrowserAgentAction(request, bounds)',
+  );
+  const actionEnd = mainSource.indexOf(
+    '\nasync function authorizeNativeBrowserAuthentication',
+    actionStart,
+  );
+  const action = mainSource.slice(actionStart, actionEnd);
+  const openStart = mainSource.indexOf('async function openNativeBrowser(');
+  const openEnd = mainSource.indexOf('\nasync function attachNativeBrowser(', openStart);
+  const open = mainSource.slice(openStart, openEnd);
+
+  assert.match(action, /if \(request\.action !== 'open'\) \{\s*await attachNativeBrowser/);
+  assert.match(open, /if \(bounds\) await attachNativeBrowser\(entry\.browserSessionId, bounds/);
+  assert.equal(open.match(/await attachNativeBrowser\(/g)?.length, 1);
+});
+
+test('failed browser loads and snapshots are never converted to successful actions', () => {
+  const snapshotStart = mainSource.indexOf('async function snapshotNativeBrowserAfterNavigation');
+  const snapshotEnd = mainSource.indexOf(
+    '\nfunction consumeTrustedPhysicalNavigation',
+    snapshotStart,
+  );
+  const snapshot = mainSource.slice(snapshotStart, snapshotEnd);
+  const loadStart = mainSource.indexOf('async function loadNativeBrowserUrl');
+  const loadEnd = mainSource.indexOf('\nasync function restoreNativeBrowserForAction', loadStart);
+  const load = mainSource.slice(loadStart, loadEnd);
+
+  assert.match(snapshot, /requireFreshBrowserSnapshot/);
+  assert.doesNotMatch(snapshot, /ok: true/);
+  assert.match(load, /isExpectedSupersededLoad/);
+  assert.match(load, /throw err/);
+});
+
+test('disabled browser diagnostics return before scanning browser entries', () => {
+  const start = mainSource.indexOf('function recordNativeBrowserNetworkEvent(details)');
+  const end = mainSource.indexOf('\nfunction clearAllNativeBrowserDiagnostics', start);
+  const record = mainSource.slice(start, end);
+  const guard = record.indexOf('if (!browserSettings.areDiagnosticsEnabled()) return;');
+  const scan = record.indexOf('nativeBrowserHost.findEntry(');
+
+  assert.ok(guard >= 0, 'missing diagnostics disabled guard');
+  assert.ok(scan > guard, 'browser entry scan must happen after the disabled guard');
+});
+
+test('remote DROIDEX browser pages are sandboxed and cross-origin transitions are gated', () => {
+  const viewStart = mainSource.indexOf('const view = new WebContentsView');
+  const viewEnd = mainSource.indexOf("contents.on('console-message'", viewStart);
+  const viewSetup = mainSource.slice(viewStart, viewEnd);
+  assert.match(viewSetup, /contextIsolation: true/);
+  assert.match(viewSetup, /nodeIntegration: false/);
+  assert.match(viewSetup, /sandbox: true/);
+  assert.match(viewSetup, /setWindowOpenHandler/);
+  assert.match(viewSetup, /consumeAuthenticationPopup/);
+  assert.match(viewSetup, /beginAgentNavigationApproval/);
+  assert.match(mainSource, /contents\.on\('did-create-window',[\s\S]*?hardenAuthenticationPopup/);
+  assert.match(mainSource, /contents\.on\('will-navigate',[\s\S]*?beginAgentNavigationApproval/);
+  assert.match(mainSource, /contents\.on\('will-redirect',[\s\S]*?beginAgentNavigationApproval/);
+});
+
+test('saved-login capture is bound to the owning main frame and delegated to the capture guard', () => {
+  const start = mainSource.indexOf("ipcMain.on('native-browser-credential-capture'");
+  const end = mainSource.indexOf('\n  });', start) + 5;
+  const handler = mainSource.slice(start, end);
+  assert.match(handler, /event\.senderFrame !== contents\.mainFrame/);
+  assert.match(handler, /createCredentialCaptureGuard\(entry, contents, url\)/);
+  assert.match(handler, /isStillValid,/);
 });
 
 test('app icon switching authorizes the renderer and accepts only committed icon modes', () => {

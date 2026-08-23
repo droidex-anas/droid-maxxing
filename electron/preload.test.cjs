@@ -53,15 +53,78 @@ test('notification IPC returns the main-process delivery result unchanged', asyn
   assert.equal(calls[0].payload.appSessionId, 'app-1');
 });
 
-test('native browser IPC carries browserSessionId', async () => {
+test('native browser exposes only the canonical agent-action command path', async () => {
+  const { api, calls } = loadApi();
+  const request = {
+    requestId: 'request-1',
+    appSessionId: 'app-1',
+    browserSessionId: 'browser-1',
+    action: 'open',
+    url: 'https://example.test',
+  };
+
+  await api.nativeBrowserAgentAction(request);
+
+  assert.equal(calls[0].channel, 'native-browser-agent-action');
+  assert.deepEqual(calls[0].payload.request, request);
+  assert.equal(api.nativeBrowserOpen, undefined);
+  assert.equal(api.nativeBrowserClose, undefined);
+  assert.equal(api.nativeBrowserReload, undefined);
+  assert.equal(api.nativeBrowserCapture, undefined);
+});
+
+test('browser permission prompts expose removable show and dismiss subscriptions', () => {
+  const shown = [];
+  const dismissed = [];
+  const { api, listeners, removedListeners } = loadApi();
+
+  const stopShow = api.onBrowserPermissionPrompt((payload) => shown.push(payload));
+  const stopDismiss = api.onBrowserPermissionPromptDismiss((requestId) =>
+    dismissed.push(requestId),
+  );
+
+  listeners[0].listener({}, { requestId: 'prompt-1', title: 'Permission' });
+  listeners[1].listener({}, 'prompt-1');
+  assert.deepEqual(shown, [{ requestId: 'prompt-1', title: 'Permission' }]);
+  assert.deepEqual(dismissed, ['prompt-1']);
+
+  stopShow();
+  stopDismiss();
+  assert.deepEqual(
+    removedListeners.map(({ channel }) => channel),
+    ['browser-permission-prompt', 'browser-permission-prompt-dismiss'],
+  );
+});
+
+test('guided Chrome profile import uses only opaque identifiers across the preload bridge', async () => {
   const { api, calls } = loadApi();
 
-  await api.nativeBrowserOpen('browser-1', 'https://example.test');
+  await api.browserCookieProfilesDiscover();
+  await api.browserCookieProfileImportPrepare('Profile 1');
+  await api.browserCookieProfileImportCommit('plan-1');
+  await api.browserCookieProfileImportDiscard('plan-1');
 
-  assert.equal(calls[0].channel, 'native-browser-open');
-  assert.equal(calls[0].payload.browserSessionId, 'browser-1');
-  assert.equal(calls[0].payload.url, 'https://example.test');
-  assert.equal('sessionId' in calls[0].payload, false);
+  assert.deepEqual(
+    calls.map(({ channel }) => channel),
+    [
+      'browser-cookie-profiles-discover',
+      'browser-cookie-profile-import-prepare',
+      'browser-cookie-profile-import-commit',
+      'browser-cookie-profile-import-discard',
+    ],
+  );
+  assert.equal(calls[0].payload, undefined);
+  assert.equal(calls[1].payload.profileId, 'Profile 1');
+  assert.equal(calls[2].payload.planId, 'plan-1');
+  assert.equal(calls[3].payload.planId, 'plan-1');
+});
+
+test('cookie file recovery has no renderer-controlled browser source', async () => {
+  const { api, calls } = loadApi();
+
+  await api.browserCookiesImport();
+
+  assert.deepEqual(calls[0], { channel: 'browser-cookies-import', payload: undefined });
 });
 
 test('git turn baseline IPC carries its provisional owner', async () => {

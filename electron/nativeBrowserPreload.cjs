@@ -1,5 +1,46 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { isSensitiveBrowserKey, redactBrowserDiagnosticUrl } = require('./browserDiagnostics.cjs');
+
+const SENSITIVE_URL_KEY_PARTS = [
+  'token',
+  'key',
+  'secret',
+  'password',
+  'passcode',
+  'auth',
+  'signature',
+  'credential',
+  'code',
+  'cookie',
+  'session',
+  'csrf',
+  'otp',
+  'state',
+  'nonce',
+  'relaystate',
+  'assertion',
+  'ticket',
+  'samlresponse',
+];
+
+function isSensitiveBrowserKey(value) {
+  const key = String(value || '').toLowerCase();
+  return SENSITIVE_URL_KEY_PARTS.some((part) => key.includes(part));
+}
+
+function redactBrowserDiagnosticUrl(value, baseUrl) {
+  try {
+    const url = baseUrl ? new URL(String(value), baseUrl) : new URL(String(value));
+    for (const key of [...url.searchParams.keys()]) {
+      if (isSensitiveBrowserKey(key)) url.searchParams.set(key, '[redacted]');
+    }
+    url.username = '';
+    url.password = '';
+    url.hash = '';
+    return url.href;
+  } catch {
+    return String(value || '').slice(0, 1_000);
+  }
+}
 
 let designMode = false;
 let pencilMode = false;
@@ -21,6 +62,7 @@ let activePath = null;
 let textDragStart = null;
 let textRange = null;
 let clearTimer = null;
+let trustedPhysicalFormActivation = null;
 // True between submitting a design prompt and the main process acking that it
 // has captured the annotated region. While set, all design interactions are
 // frozen so the user cannot move/redraw/scroll mid-capture and produce a
@@ -68,6 +110,7 @@ const textTags = new Set([
 ]);
 const mediaTags = new Set(['IMG', 'SVG', 'VIDEO', 'CANVAS', 'PICTURE', 'IFRAME']);
 const redactedTextTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT']);
+const MAX_SNAPSHOT_VISITED_NODES = 2_000;
 const urlAttributes = new Set([
   'action',
   'archive',
@@ -156,13 +199,16 @@ overlay.setAttribute(INTERNAL_ATTR, '1');
 label.setAttribute(INTERNAL_ATTR, '1');
 textHighlights.setAttribute(INTERNAL_ATTR, '1');
 penSvg.setAttribute(INTERNAL_ATTR, '1');
-
 contextBridge.exposeInMainWorld('__DROIDMAXX_APPLY_DESIGN_STATE', applyState);
 contextBridge.exposeInMainWorld('__DROIDMAXX_AGENT_ACTION', runAgentAction);
+contextBridge.exposeInMainWorld('__DROIDMAXX_RESOLVE_POINTER', resolveAgentPointer);
 // Credential autofill is driven entirely from the main process: the secret
 // arrives here only to be written into the page's inputs and is never returned
 // to any caller, so the agent can authorize a login without reading it.
 contextBridge.exposeInMainWorld('__DROIDMAXX_FILL_CREDENTIALS', fillCredentials);
+contextBridge.exposeInMainWorld('__DROIDMAXX_AUTH_INTENT', inspectAuthenticationIntent);
+contextBridge.exposeInMainWorld('__DROIDMAXX_SENSITIVE_FIELD', sensitiveFocusedField);
+contextBridge.exposeInMainWorld('__DROIDMAXX_MASK_SENSITIVE_FIELDS', maskSensitiveFields);
 
 ipcRenderer.on('native-browser-design-prompt-sent', (_event, payload) => {
   // Ignore acks that do not match the capture currently in flight: a stale ack
@@ -182,12 +228,16 @@ function finishCapture() {
 }
 
 document.addEventListener('submit', onFormSubmit, true);
+document.addEventListener('submit', reportTrustedUserNavigation, false);
 document.addEventListener('mousemove', onMouseMove, true);
+document.addEventListener('pointerdown', rememberTrustedPhysicalFormActivation, true);
 document.addEventListener('mousedown', onMouseDown, true);
 document.addEventListener('mouseup', onMouseUp, true);
 document.addEventListener('click', onClick, true);
+document.addEventListener('click', reportTrustedUserNavigation, false);
 document.addEventListener('contextmenu', onContextMenu, true);
 document.addEventListener('keydown', onKey, true);
+document.addEventListener('keydown', rememberTrustedPhysicalFormActivation, true);
 document.addEventListener('keyup', onKey, true);
 window.addEventListener('scroll', queueReposition, true);
 window.addEventListener('resize', queueReposition, true);
@@ -383,6 +433,71 @@ function onContextMenu(event) {
   swallow(event);
 }
 
+function rememberTrustedPhysicalFormActivation(event) {
+  if (!event.isTrusted) return;
+  if (event.type === 'pointerdown' && event.button !== 0) return;
+  if (event.type === 'keydown' && event.key !== 'Enter') return;
+  const form = event.target?.form || event.target?.closest?.('form');
+  trustedPhysicalFormActivation = form ? { form, expiresAt: Date.now() + 1_000 } : null;
+}
+
+function consumeTrustedPhysicalFormActivation(form) {
+  const activation = trustedPhysicalFormActivation;
+  trustedPhysicalFormActivation = null;
+  return Boolean(activation && activation.form === form && activation.expiresAt >= Date.now());
+}
+
+function reportTrustedUserNavigation(event) {
+  if (!event.isTrusted || designMode || capturePending) return;
+  if (event.type === 'submit' && !consumeTrustedPhysicalFormActivation(event.target)) return;
+  const destinationUrl = trustedUserNavigationDestination(event);
+  if (!destinationUrl) return;
+  const activationId = crypto.randomUUID();
+  ipcRenderer.send('native-browser-user-navigation', { activationId, destinationUrl });
+  // The browser's native default action runs before the next task. Retire the
+  // intent there so delayed page JavaScript cannot reuse a real click.
+  setTimeout(() => {
+    ipcRenderer.send('native-browser-user-navigation-expired', { activationId });
+  }, 0);
+}
+
+function trustedUserNavigationDestination(event) {
+  if (event.defaultPrevented) return null;
+  try {
+    let value;
+    if (event.type === 'click') {
+      if (event.button !== 0) return null;
+      const anchor = event.target?.closest?.('a[href],area[href]');
+      if (!anchor || anchor.hasAttribute('download')) return null;
+      value = anchor.href;
+    } else if (event.type === 'submit') {
+      const form = event.target;
+      if (!form || form.tagName !== 'FORM') return null;
+      const submitter = event.submitter;
+      const method = String(submitter?.formMethod || form.method || 'get').toLowerCase();
+      if (method === 'dialog') return null;
+      value = submitter?.formAction || form.action;
+      const url = new URL(value, location.href);
+      if (method === 'get') {
+        const data = submitter ? new FormData(form, submitter) : new FormData(form);
+        const params = new URLSearchParams();
+        for (const [name, fieldValue] of data) {
+          params.append(name, typeof fieldValue === 'string' ? fieldValue : fieldValue.name);
+        }
+        url.search = params.toString();
+      }
+      value = url.href;
+    } else {
+      return null;
+    }
+    const url = new URL(value, location.href);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 function onClick(event) {
   if (!designMode || pencilMode || event.shiftKey) return;
   if (isInternalEvent(event)) return;
@@ -416,24 +531,45 @@ function onFormSubmit(event) {
     const form = event.target;
     if (!form || form.getAttribute(INTERNAL_ATTR)) return;
     const fields = form.querySelectorAll ? form.querySelectorAll('input') : [];
-    let password = null;
     let username = null;
+    const currentPasswords = [];
+    const newPasswords = [];
+    const unspecifiedPasswords = [];
     for (const field of fields) {
       const type = (field.getAttribute('type') || '').toLowerCase();
-      if (!password && type === 'password' && field.value) password = field.value;
-      else if (
+      const autocomplete = (field.getAttribute('autocomplete') || '').toLowerCase();
+      if (type === 'password' && field.value) {
+        if (autocomplete.includes('current-password')) currentPasswords.push(field.value);
+        else if (autocomplete.includes('new-password')) newPasswords.push(field.value);
+        else unspecifiedPasswords.push(field.value);
+      } else if (
         !username &&
         (type === 'email' || type === 'text' || type === '' || type === 'tel') &&
         field.value
       )
         username = field.value;
     }
+    let password;
+    let kind;
+    if (currentPasswords.length === 1 && newPasswords.length === 0) {
+      password = currentPasswords[0];
+      kind = 'current_password';
+    } else if (currentPasswords.length === 0 && new Set(newPasswords).size === 1) {
+      password = newPasswords[0];
+      kind = 'new_password';
+    } else if (
+      currentPasswords.length === 0 &&
+      newPasswords.length === 0 &&
+      unspecifiedPasswords.length === 1
+    ) {
+      password = unspecifiedPasswords[0];
+      kind = 'current_password';
+    }
     if (!password) return;
     ipcRenderer.send('native-browser-credential-capture', {
-      origin: location.origin,
-      url: location.href,
       username: username || '',
       password,
+      kind,
     });
   } catch {
     /* never interfere with the page's own submit */
@@ -445,17 +581,169 @@ function fillCredentials(payload) {
     const username = payload && typeof payload.username === 'string' ? payload.username : '';
     const password = payload && typeof payload.password === 'string' ? payload.password : '';
     if (!password) return { ok: false, filled: false };
-    const passwordField = firstVisible(document.querySelectorAll('input[type="password"]'));
-    if (!passwordField) return { ok: false, filled: false };
+    const passwordFields = [...document.querySelectorAll('input[type="password"]')].filter(
+      (field) =>
+        isVisible(field) &&
+        !(field.getAttribute('autocomplete') || '').toLowerCase().includes('new-password'),
+    );
+    if (passwordFields.length !== 1) {
+      return { ok: false, filled: false, error: 'No unambiguous current-password form found.' };
+    }
+    const passwordField = passwordFields[0];
     if (username) {
       const userField = usernameFieldFor(passwordField);
-      if (userField) setFieldValue(userField, username);
+      if (userField) {
+        savedCredentialFields.add(userField);
+        setFieldValue(userField, username);
+      }
     }
+    savedCredentialFields.add(passwordField);
     setFieldValue(passwordField, password);
     return { ok: true, filled: true };
   } catch (err) {
     return { ok: false, filled: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+function resolveAgentPointer(request) {
+  try {
+    let point;
+    if (typeof request?.selector === 'string' && request.selector) {
+      const target = document.querySelector(request.selector);
+      if (!(target instanceof Element)) return null;
+      target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
+      const box = target.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) return null;
+      point = {
+        x: Math.round(box.left + box.width / 2),
+        y: Math.round(box.top + box.height / 2),
+      };
+    } else {
+      point = { x: Math.round(Number(request?.x)), y: Math.round(Number(request?.y)) };
+    }
+    if (
+      !Number.isFinite(point.x) ||
+      !Number.isFinite(point.y) ||
+      point.x < 0 ||
+      point.y < 0 ||
+      point.x >= window.innerWidth ||
+      point.y >= window.innerHeight
+    ) {
+      return null;
+    }
+    return point;
+  } catch {
+    return null;
+  }
+}
+
+function inspectAuthenticationIntent(request) {
+  try {
+    const isEnter = request?.action === 'keypress' && request?.key === 'Enter';
+    if (request?.action !== 'click' && !isEnter) return null;
+    let target = isEnter ? document.activeElement : null;
+    if (!target && typeof request?.selector === 'string') {
+      target = document.querySelector(request.selector);
+    }
+    if (!target) target = document.elementFromPoint(Number(request?.x), Number(request?.y));
+    if (!(target instanceof Element)) return null;
+    if (target instanceof HTMLIFrameElement) {
+      try {
+        const targetOrigin = new URL(target.src, location.href).origin;
+        if (targetOrigin !== location.origin) {
+          return { kind: 'cross_origin_frame', origin: location.origin, targetOrigin };
+        }
+      } catch {
+        return { kind: 'cross_origin_frame', origin: location.origin };
+      }
+    }
+    const control = target.closest('button,a,input[type="submit"],input[type="button"]') || target;
+    const form = control.form || control.closest?.('form') || target.closest?.('form');
+    const label = cleanText(
+      control.getAttribute?.('aria-label') ||
+        control.getAttribute?.('title') ||
+        control.value ||
+        control.textContent ||
+        form?.getAttribute?.('aria-label') ||
+        '',
+      100,
+    );
+    const context = cleanText(`${label} ${form?.textContent || ''}`, 500).toLowerCase();
+    const hasPassword = Boolean(form?.querySelector('input[type="password"]'));
+    let kind;
+    if (/passkey|security key|touch id|webauthn/.test(context)) kind = 'passkey';
+    else if (
+      /(continue|sign in|log in|sign up).{0,24}(google|apple|microsoft|github|facebook|oauth)/.test(
+        context,
+      )
+    )
+      kind = 'oauth';
+    else if (/sign up|register|create (?:an )?account|join now/.test(context)) kind = 'signup';
+    else if (hasPassword && (isEnter || control !== target || control.matches?.('button,input'))) {
+      kind = 'signin';
+    }
+    if (!kind) return null;
+    const targetUrl = kind === 'oauth' ? authoritativeAuthenticationTarget(control, form) : null;
+    return targetUrl
+      ? { kind, origin: location.origin, label, targetUrl }
+      : { kind, origin: location.origin, label };
+  } catch {
+    return null;
+  }
+}
+
+function authoritativeAuthenticationTarget(control, form) {
+  let value;
+  if (control instanceof HTMLAnchorElement) value = control.href;
+  else if (form) value = control.formAction || form.action;
+  if (!value) return null;
+  try {
+    const url = new URL(value, location.href);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function sensitiveFocusedField() {
+  const field = document.activeElement;
+  if (!(field instanceof HTMLInputElement)) return null;
+  const type = (field.getAttribute('type') || '').toLowerCase();
+  const autocomplete = (field.getAttribute('autocomplete') || '').toLowerCase();
+  if (type === 'password' || autocomplete.includes('password')) return { kind: 'password' };
+  if (
+    autocomplete.includes('one-time-code') ||
+    /otp|verification|passcode/i.test(field.name || field.id)
+  ) {
+    return { kind: 'one-time code' };
+  }
+  return null;
+}
+
+const savedCredentialFields = new WeakSet();
+let maskedSensitiveFields = [];
+function maskSensitiveFields(active) {
+  if (!active) {
+    for (const { field, style } of maskedSensitiveFields) {
+      if (field.isConnected) {
+        if (style === null) field.removeAttribute('style');
+        else field.setAttribute('style', style);
+      }
+    }
+    maskedSensitiveFields = [];
+    return true;
+  }
+  if (maskedSensitiveFields.length > 0) return true;
+  for (const field of document.querySelectorAll('input')) {
+    if (!isSensitiveField(field)) continue;
+    maskedSensitiveFields.push({ field, style: field.getAttribute('style') });
+    field.style.setProperty('color', 'transparent', 'important');
+    field.style.setProperty('text-shadow', 'none', 'important');
+    field.style.setProperty('caret-color', 'transparent', 'important');
+    field.style.setProperty('background-image', 'none', 'important');
+  }
+  return true;
 }
 
 function usernameFieldFor(passwordField) {
@@ -603,13 +891,13 @@ function safeSnapshot() {
   try {
     return pageSnapshot();
   } catch {
-    return { url: location.href, title: document.title, scroll: { x: 0, y: 0 }, refs: [] };
+    return { url: agentVisibleUrl(), title: document.title, scroll: { x: 0, y: 0 }, refs: [] };
   }
 }
 
 function pageSnapshot() {
   return {
-    url: location.href,
+    url: agentVisibleUrl(),
     title: document.title,
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
     refs: collectRefs(),
@@ -621,7 +909,9 @@ function collectRefs() {
   const root = document.body || document.documentElement;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   let node = root;
-  while (node && refs.length < 80) {
+  let visitedNodes = 0;
+  while (node && refs.length < 80 && visitedNodes < MAX_SNAPSHOT_VISITED_NODES) {
+    visitedNodes += 1;
     if (isCandidate(node)) refs.push(refFor(node));
     node = walker.nextNode();
   }
@@ -725,7 +1015,7 @@ function elementSelection(el) {
   return {
     anchor,
     detail,
-    url: location.href,
+    url: agentVisibleUrl(),
     title: document.title,
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
   };
@@ -744,7 +1034,7 @@ function sketchSelection() {
         stroke.map((pt) => ({ x: Math.round(pt.x), y: Math.round(pt.y) })),
       ),
     },
-    url: location.href,
+    url: agentVisibleUrl(),
     title: document.title,
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
   };
@@ -813,7 +1103,7 @@ function textSelection() {
           html: cleanText(sanitizedOuterHtml(el), 400) || undefined,
         }
       : undefined,
-    url: location.href,
+    url: agentVisibleUrl(),
     title: document.title,
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
   };
@@ -1014,6 +1304,10 @@ function sanitizeUrl(value) {
   return redactBrowserDiagnosticUrl(value, location.href);
 }
 
+function agentVisibleUrl() {
+  return redactBrowserDiagnosticUrl(location.href);
+}
+
 function isMetaRefreshContent(name, el) {
   return (
     name === 'content' &&
@@ -1026,10 +1320,15 @@ function isMetaRefreshContent(name, el) {
 // their live values are redacted from every snapshot/detail payload.
 function isSensitiveField(el) {
   if (!el || el.tagName !== 'INPUT') return false;
+  if (savedCredentialFields.has(el)) return true;
   const type = (el.getAttribute('type') || '').toLowerCase();
   if (type === 'password') return true;
   const auto = (el.getAttribute('autocomplete') || '').toLowerCase();
-  return auto.includes('password') || auto === 'one-time-code';
+  return (
+    auto.includes('password') ||
+    auto === 'one-time-code' ||
+    /otp|verification|passcode/i.test(el.name || el.id)
+  );
 }
 
 function stylesFor(el) {
@@ -1416,7 +1715,6 @@ function sendDesignPrompt(payload) {
 }
 
 function sendAgent(payload) {
-  ipcRenderer.send('native-browser-agent-result', payload);
   return payload;
 }
 

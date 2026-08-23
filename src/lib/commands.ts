@@ -2,6 +2,7 @@ import { bridge } from './bridge';
 import type {
   Autonomy,
   BrowserNativeResult,
+  BrowserRestoreState,
   BrowserScrollDirection,
   BrowserViewport,
   BrowserViewportMode,
@@ -327,7 +328,11 @@ export const openBrowser = (input: {
   viewport?: BrowserViewport;
   viewportMode?: BrowserViewportMode;
 }) => {
-  bridge.send({ type: 'browser.open', ...input });
+  bridge.send({ type: 'browser.open', ...input, source: 'user' });
+};
+
+export const restoreBrowser = (state: BrowserRestoreState) => {
+  bridge.send({ type: 'browser.restore', state });
 };
 
 export const closeBrowser = (appSessionId: string) => {
@@ -335,7 +340,7 @@ export const closeBrowser = (appSessionId: string) => {
 };
 
 export const reloadBrowser = (appSessionId: string) => {
-  bridge.send({ type: 'browser.reload', appSessionId });
+  bridge.send({ type: 'browser.reload', appSessionId, source: 'user' });
 };
 
 export const refreshBrowser = (appSessionId: string) => {
@@ -347,7 +352,7 @@ export const resizeBrowserViewport = (input: {
   viewport: BrowserViewport;
   viewportMode: BrowserViewportMode;
 }) => {
-  bridge.send({ type: 'browser.resizeViewport', ...input });
+  bridge.send({ type: 'browser.resizeViewport', ...input, source: 'user' });
 };
 
 export const clickBrowser = (input: {

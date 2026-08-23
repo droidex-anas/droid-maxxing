@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type { BrowserNativeRequest, BrowserNativeResult } from '../protocol.js';
-import type { BrowserRuntime } from './BrowserSessionManager.js';
+import type { BrowserInputSource, BrowserRuntime } from './BrowserSessionManager.js';
 import type {
   BrowserBox,
   BrowserElementInspection,
@@ -31,12 +32,12 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     this.viewport = options.viewport;
   }
 
-  async open(url: string): Promise<BrowserSnapshot> {
-    return this.snapshotFrom(await this.send({ action: 'open', url }), url);
+  async open(url: string, source?: BrowserInputSource): Promise<BrowserSnapshot> {
+    return this.snapshotFrom(await this.send({ action: 'open', url, source }));
   }
 
-  async reload(): Promise<BrowserSnapshot> {
-    return this.navigationSnapshotFrom(await this.send({ action: 'reload' }));
+  async reload(source?: BrowserInputSource): Promise<BrowserSnapshot> {
+    return this.navigationSnapshotFrom(await this.send({ action: 'reload', source }));
   }
 
   async goBack(): Promise<BrowserSnapshot> {
@@ -47,8 +48,8 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     return this.navigationSnapshotFrom(await this.send({ action: 'goForward' }));
   }
 
-  async setViewport(viewport: BrowserViewport): Promise<void> {
-    const result = await this.send({ action: 'resize', viewport });
+  async setViewport(viewport: BrowserViewport, source?: BrowserInputSource): Promise<void> {
+    const result = await this.send({ action: 'resize', viewport, source });
     if (!result.ok) throw new Error(result.error ?? 'Native browser resize failed.');
     this.viewport = viewport;
   }
@@ -143,9 +144,7 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     input: Omit<BrowserNativeRequest, 'requestId' | 'appSessionId' | 'browserSessionId'>,
   ): Promise<BrowserNativeResult> {
     return this.options.request({
-      requestId:
-        this.options.nextRequestId?.() ??
-        `native-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      requestId: this.options.nextRequestId?.() ?? `native-${randomUUID()}`,
       appSessionId: this.options.appSessionId,
       browserSessionId: this.options.browserSessionId,
       viewport: this.viewport,
@@ -153,23 +152,13 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     });
   }
 
-  private snapshotFrom(result: BrowserNativeResult, fallbackUrl?: string): BrowserSnapshot {
+  private snapshotFrom(result: BrowserNativeResult): BrowserSnapshot {
     if (!result.ok) throw new Error(result.error ?? 'Native browser action failed.');
-    if (result.snapshot) {
+    if (result.snapshot && isBrowserPageUrl(result.snapshot.url)) {
       this.lastSnapshot = result.snapshot;
       return this.lastSnapshot;
     }
-    if (!fallbackUrl) {
-      throw new Error('Native browser action completed without a fresh page snapshot.');
-    }
-    this.lastSnapshot = {
-      url: fallbackUrl,
-      scroll: { x: 0, y: 0 },
-      refs: [],
-      canGoBack: false,
-      canGoForward: false,
-    };
-    return this.lastSnapshot;
+    throw new Error('Native browser action completed without a fresh page snapshot.');
   }
 
   private navigationSnapshotFrom(result: BrowserNativeResult): BrowserSnapshot {
@@ -177,7 +166,21 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     if (!result.snapshot) {
       throw new Error('Native browser navigation completed without a fresh page snapshot.');
     }
+    if (!isBrowserPageUrl(result.snapshot.url)) {
+      throw new Error('Native browser navigation returned an invalid page snapshot.');
+    }
     this.lastSnapshot = result.snapshot;
     return this.lastSnapshot;
+  }
+}
+
+function isBrowserPageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password
+    );
+  } catch {
+    return false;
   }
 }

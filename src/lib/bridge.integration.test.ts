@@ -82,6 +82,60 @@ test('bridge refreshes sidecar identity before reconnecting', { concurrency: fal
   }
 });
 
+test(
+  'bridge replays connection bootstrap before commands queued during a sidecar restart',
+  { concurrency: false },
+  async () => {
+    const OldWebSocket = globalThis.WebSocket;
+    const reconnects: Array<() => void> = [];
+    try {
+      Object.assign(globalThis, { WebSocket: FakeWebSocket });
+      FakeWebSocket.instances = [];
+      const bridge = new Bridge(
+        async () => ({ port: 43003, token: 'restart-token' }),
+        (callback) => reconnects.push(callback),
+      );
+      const epochs: number[] = [];
+      bridge.subscribeOpen((epoch) => {
+        epochs.push(epoch);
+        bridge.send({ type: 'connect', apiKey: '' });
+        bridge.send({
+          type: 'browser.restore',
+          state: {
+            appSessionId: 'app-restore',
+            browserSessionId: 'browser-restore',
+            url: 'https://example.test/',
+            viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
+            viewportMode: 'fit',
+            scroll: { x: 0, y: 0 },
+          },
+        });
+      });
+
+      await bridge.start();
+      const first = FakeWebSocket.instances.at(-1)!;
+      first.open();
+      assert.deepEqual(epochs, [1]);
+
+      first.close();
+      bridge.send({ type: 'browser.reload', appSessionId: 'app-restore', source: 'user' });
+      reconnects.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      const second = FakeWebSocket.instances.at(-1)!;
+      second.open();
+
+      assert.deepEqual(epochs, [1, 2]);
+      assert.deepEqual(
+        second.sent.map((command) => JSON.parse(command).type),
+        ['connect', 'browser.restore', 'browser.reload'],
+      );
+    } finally {
+      Object.assign(globalThis, { WebSocket: OldWebSocket });
+    }
+  },
+);
+
 test('[R1] Renderer command round trip', { concurrency: false }, async () => {
   const oldWindow = globalThis.window;
   const OldWebSocket = globalThis.WebSocket;

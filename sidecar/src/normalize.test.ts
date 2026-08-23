@@ -252,7 +252,7 @@ test('classifyPermission reads the SDK toolUses shape for MCP tools', () => {
   assert.equal(req.title, 'droidmaxx-browser · design_reference');
   assert.match(req.detail, /url: https:\/\/skeina\.app/);
   assert.match(req.detail, /Impact: low/);
-  assert.equal(permissionSignature(params), 'mcp::::droidmaxx-browser___design_reference');
+  assert.equal(permissionSignature(params), 'mcp::droidmaxx-browser::design_reference');
 });
 
 test('classifyPermission reads the SDK toolUses shape for exec', () => {

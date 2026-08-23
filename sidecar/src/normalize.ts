@@ -548,8 +548,14 @@ export function permissionSignature(params: RequestPermissionRequestParams): str
   switch (type) {
     case 'exec':
       return `exec::${String(c.command ?? '')}`;
-    case 'mcp_tool':
-      return `mcp::${String(c.serverName ?? '')}::${String(c.toolName ?? '')}`;
+    case 'mcp_tool': {
+      const rawToolName = String(c.toolName ?? '');
+      const separatorIndex = rawToolName.indexOf('___');
+      const namespacedServer = separatorIndex >= 0 ? rawToolName.slice(0, separatorIndex) : '';
+      const toolName = separatorIndex >= 0 ? rawToolName.slice(separatorIndex + 3) : rawToolName;
+      const serverName = String(c.serverName ?? '') || namespacedServer;
+      return `mcp::${serverName}::${toolName}`;
+    }
     case 'edit':
     case 'create':
     case 'apply_patch': {

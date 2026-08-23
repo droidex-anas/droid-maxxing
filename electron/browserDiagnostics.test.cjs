@@ -44,6 +44,13 @@ test('browser network diagnostics remove URL credentials and sensitive parameter
     redactBrowserDiagnosticUrl('/callback?auth_code=secret&safe=yes', 'https://example.com/page'),
     'https://example.com/callback?auth_code=%5Bredacted%5D&safe=yes',
   );
+  assert.equal(
+    redactBrowserDiagnosticUrl(
+      '/callback?state=secret-state&nonce=secret-nonce&RelayState=saml-state&ticket=one-time&safe=yes',
+      'https://example.com/page',
+    ),
+    'https://example.com/callback?state=%5Bredacted%5D&nonce=%5Bredacted%5D&RelayState=%5Bredacted%5D&ticket=%5Bredacted%5D&safe=yes',
+  );
 });
 
 test('browser console redaction stays bounded on adversarial quoted input', () => {

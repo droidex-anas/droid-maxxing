@@ -3,8 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import type {
   Autonomy,
-  BrowserNativeRequest,
-  BrowserNativeResult,
   ClientCommand,
   ConfigurableSessionRole,
   FactoryDefaultSettings,
@@ -50,6 +48,7 @@ import {
 import { mergeModelCatalog } from './modelCatalog.js';
 import { readDroidCliModelCatalog, readDroidCliModelCatalogCache } from './DroidCliCatalog.js';
 import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
+import { BrowserCommandRouter, type BrowserCommands } from './browser/BrowserCommandRouter.js';
 import { createBrowserMcpServer } from './browser/browserMcpServer.js';
 import { isDesignPrompt } from './browser/designPromptPacks.js';
 import { NativeBrowserRuntime } from './browser/NativeBrowserRuntime.js';
@@ -100,23 +99,7 @@ type SessionHistory = Pick<
   | 'close'
 >;
 
-type SessionBrowsers = Pick<
-  BrowserSessionManager,
-  | 'open'
-  | 'close'
-  | 'closeAll'
-  | 'reload'
-  | 'refresh'
-  | 'resizeViewport'
-  | 'click'
-  | 'type'
-  | 'keypress'
-  | 'scroll'
-  | 'screenshot'
-  | 'inspectPoint'
-  | 'addReference'
-  | 'designPrompt'
->;
+type SessionBrowsers = BrowserCommands;
 
 export interface StartableLocalMcpResource {
   start(): Promise<McpServerConfig>;
@@ -159,24 +142,9 @@ const MAX_OPEN_CHILD_SESSIONS = boundedInt(
   1,
   24,
 );
-const BROWSER_NATIVE_TIMEOUT_MS = boundedInt(
-  process.env.DROID_CONTROL_BROWSER_NATIVE_TIMEOUT_MS,
-  12_000,
-  1_000,
-  60_000,
-);
 const ignoreError = (): undefined => undefined;
 
-let nativeBrowserSeq = 0;
-const nextNativeBrowserRequestId = () =>
-  `browser-native-${Date.now().toString(36)}-${(nativeBrowserSeq++).toString(36)}`;
 const nextChildSessionId = () => `child-${randomUUID()}`;
-
-interface PendingNativeBrowserRequest {
-  resolve: (result: BrowserNativeResult) => void;
-  reject: (err: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}
 
 export class SessionManager {
   private ready = false;
@@ -213,7 +181,7 @@ export class SessionManager {
   // Per-session autonomy mutation queue: rapid changes settle against the
   // provider in the order they were requested.
   private readonly autonomyMutationTails = new Map<string, Promise<void>>();
-  private readonly pendingNativeBrowserRequests = new Map<string, PendingNativeBrowserRequest>();
+  private readonly browserRouter: BrowserCommandRouter;
   private readonly browsers: SessionBrowsers;
   private readonly createLocalMcpResource: SessionManagerDependencies['createLocalMcpResource'];
   private readonly mcpConfiguration: McpConfiguration;
@@ -249,8 +217,8 @@ export class SessionManager {
             browserSessionId,
             appSessionId,
             viewport,
-            request: (request) => this.requestNativeBrowser(request),
-            nextRequestId: nextNativeBrowserRequestId,
+            request: (request) => this.browserRouter.requestNative(request),
+            nextRequestId: () => this.browserRouter.nextNativeRequestId(),
           }),
       });
       this.browsers = browsers;
@@ -262,6 +230,12 @@ export class SessionManager {
       this.nextChildSessionId = nextChildSessionId;
       this.startWatcher = startSessionFileWatcher;
     }
+    this.browserRouter = new BrowserCommandRouter({
+      browsers: this.browsers,
+      emit: (event) => this.emit(event),
+      getAutonomy: (appSessionId) => this.registry.getLive(appSessionId)?.summary.autonomy,
+      sendPrompt: (appSessionId, prompt) => this.lifecycle.send(appSessionId, prompt),
+    });
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
     this.mcpSettings = new McpSettings(
       (cwd) => {
@@ -463,6 +437,7 @@ export class SessionManager {
   // eslint-disable-next-line complexity -- Public command dispatch is intentionally unchanged in PR 3.
   async handle(cmd: ClientCommand): Promise<void> {
     if (this.shutdownPromise) throw new Error('Session manager is shutting down.');
+    if (await this.browserRouter.handle(cmd)) return;
     switch (cmd.type) {
       case 'connect':
         this.connect(cmd.apiKey);
@@ -640,109 +615,6 @@ export class SessionManager {
         return;
       case 'settings.compaction.update':
         await this.compaction.updateLimits(cmd, this.compactionRetuneTargets());
-        return;
-      case 'browser.open':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.open({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
-        return;
-      case 'browser.close':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-          await this.browsers.close(appSessionId);
-          this.emit({ type: 'browser.closed', appSessionId });
-        });
-        return;
-      case 'browser.reload':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.reload(this.requireBrowserAppSessionId(cmd.appSessionId)),
-        );
-        return;
-      case 'browser.refresh':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.refresh(this.requireBrowserAppSessionId(cmd.appSessionId)),
-        );
-        return;
-      case 'browser.resizeViewport':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.resizeViewport({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
-        return;
-      case 'browser.click':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.click({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
-        return;
-      case 'browser.type':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.type(this.requireBrowserAppSessionId(cmd.appSessionId), cmd.text),
-        );
-        return;
-      case 'browser.keypress':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.keypress(this.requireBrowserAppSessionId(cmd.appSessionId), cmd.key),
-        );
-        return;
-      case 'browser.scroll':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.scroll(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            cmd.direction,
-            cmd.pixels,
-            cmd.source,
-            cmd.ref,
-          ),
-        );
-        return;
-      case 'browser.screenshot':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          await this.browsers.screenshot(this.requireBrowserAppSessionId(cmd.appSessionId), {
-            fullPage: cmd.fullPage,
-            deviceScaleFactor: cmd.deviceScaleFactor,
-          });
-        });
-        return;
-      case 'browser.inspectPoint':
-        await this.handleBrowser(cmd.appSessionId, () => {
-          const element = this.browsers.inspectPoint(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            cmd.x,
-            cmd.y,
-          );
-          if (!element) throw new Error('No browser element found at that point.');
-        });
-        return;
-      case 'browser.design.addReference':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          await this.browsers.addReference(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            {
-              anchor: cmd.reference.anchor,
-              detail: cmd.reference.detail,
-              id: cmd.reference.id,
-            },
-            cmd.reference.screenshot,
-          );
-        });
-        return;
-      case 'browser.design.sendPrompt':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-          const { prompt } = await this.browsers.designPrompt({ ...cmd, appSessionId });
-          await this.lifecycle.send(appSessionId, prompt);
-        });
-        return;
-      case 'browser.native.result':
-        this.resolveNativeBrowserRequest(cmd.result);
         return;
       default: {
         // Wire commands are JSON-parsed without runtime validation, so a
@@ -1720,52 +1592,6 @@ export class SessionManager {
     this.emit({ type: 'error', ...error });
   }
 
-  private async handleBrowser(
-    appSessionId: string | undefined,
-    action: () => unknown,
-  ): Promise<void> {
-    try {
-      await action();
-    } catch (err) {
-      const message = errMsg(err);
-      this.emit({ type: 'browser.error', appSessionId, message });
-      this.emitError({ code: 'browser.error', appSessionId, message });
-    }
-  }
-
-  private requestNativeBrowser(request: BrowserNativeRequest): Promise<BrowserNativeResult> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingNativeBrowserRequests.delete(request.requestId);
-        reject(
-          new Error(
-            `DROIDEX browser did not respond to ${request.action} within ${String(BROWSER_NATIVE_TIMEOUT_MS)}ms.`,
-          ),
-        );
-      }, BROWSER_NATIVE_TIMEOUT_MS);
-      this.pendingNativeBrowserRequests.set(request.requestId, { resolve, reject, timeout });
-      this.emit({ type: 'browser.native.request', request });
-    });
-  }
-
-  private resolveNativeBrowserRequest(result: BrowserNativeResult): void {
-    const pending = this.pendingNativeBrowserRequests.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingNativeBrowserRequests.delete(result.requestId);
-    if (result.ok) pending.resolve(result);
-    else pending.reject(new Error(result.error ?? 'DROIDEX browser action failed.'));
-  }
-
-  private requireBrowserAppSessionId(appSessionId?: string): string {
-    if (!appSessionId) {
-      throw new Error(
-        'Browser sessions are scoped to a Droid chat. Select or create a chat before opening the browser.',
-      );
-    }
-    return appSessionId;
-  }
-
   shutdown(): Promise<void> {
     this.shutdownPromise ??= Promise.resolve().then(() => this.performShutdown());
     return this.shutdownPromise;
@@ -1793,6 +1619,7 @@ export class SessionManager {
     await run(() => {
       this.compaction.clearAll();
     });
+    await run(() => this.browserRouter.shutdown());
     await run(() => this.browsers.closeAll());
     await run(() => {
       this.timeline.flushStreaming();

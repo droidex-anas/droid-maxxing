@@ -13,7 +13,7 @@ import type { BrowserViewport, BrowserViewportMode, DesignReference } from '../.
 import type { Size } from '../canvas/canvasMath';
 import {
   CUSTOM_DEFAULT_VIEWPORT,
-  normalizeUrl,
+  normalizeBrowserOmniboxInput,
   sameViewport,
   viewportForMode,
   viewportFromFrame,
@@ -286,7 +286,18 @@ export default function BrowserWorkspace({
   ]);
 
   const openCurrentUrl = () => {
-    const normalizedUrl = normalizeUrl(urlInput);
+    let normalizedUrl: string;
+    try {
+      normalizedUrl = normalizeBrowserOmniboxInput(urlInput);
+    } catch (error) {
+      dispatch({
+        type: 'BROWSER_ERROR',
+        appSessionId: browserKey,
+        message:
+          error instanceof Error ? error.message : 'Enter a website address or search terms.',
+      });
+      return;
+    }
     if (browserKey && isSelfBrowserUrl(normalizedUrl, appOrigin)) {
       setUrlInput(normalizedUrl);
       dispatch({

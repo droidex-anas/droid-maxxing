@@ -2,6 +2,7 @@ import { getBridgeInfo } from './desktop';
 import type { ClientCommand, ServerEvent } from '../types/bridge';
 
 type Listener = (ev: ServerEvent) => void;
+type OpenListener = (connectionEpoch: number) => void;
 
 type ReconnectScheduler = (callback: () => void, delayMs: number) => void;
 
@@ -16,10 +17,12 @@ function canAdoptTurnBaseline(api: object): api is TurnBaselineAdopter {
 export class Bridge {
   private ws: WebSocket | null = null;
   private listeners = new Set<Listener>();
+  private openListeners = new Set<OpenListener>();
   private queue: ClientCommand[] = [];
   private backoff = 500;
   private url = '';
   private started = false;
+  private connectionEpoch = 0;
 
   constructor(
     private readonly loadBridgeInfo = getBridgeInfo,
@@ -58,6 +61,8 @@ export class Bridge {
     this.ws = ws;
     ws.onopen = () => {
       this.backoff = 500;
+      this.connectionEpoch += 1;
+      for (const listener of [...this.openListeners]) listener(this.connectionEpoch);
       const pending = this.queue;
       this.queue = [];
       pending.forEach((command) => {
@@ -114,6 +119,12 @@ export class Bridge {
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
     return () => this.listeners.delete(l);
+  }
+
+  subscribeOpen(listener: OpenListener): () => void {
+    this.openListeners.add(listener);
+    if (this.ws?.readyState === WebSocket.OPEN) listener(this.connectionEpoch);
+    return () => this.openListeners.delete(listener);
   }
 }
 
