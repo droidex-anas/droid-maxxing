@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 const {
+  BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
   BROWSER_AGENT_CURSOR_HOTSPOT,
   BROWSER_AGENT_CURSOR_STYLES,
   createBrowserAgentCursorController,
@@ -59,6 +60,11 @@ function harness(options = {}) {
       this.bounds.push({ bounds, animate });
     }
 
+    setSize(width, height, animate) {
+      this.sizes ??= [];
+      this.sizes.push({ width, height, animate });
+    }
+
     showInactive() {
       this.shown += 1;
     }
@@ -78,6 +84,7 @@ function harness(options = {}) {
     logError: options.logError,
     setTimeout: options.setTimeout,
     style: options.style,
+    size: options.size,
   });
   return { controller, windows };
 }
@@ -119,26 +126,70 @@ test('cursor overlay is sandboxed, click-through, static, and blocks navigation'
   assert.equal(prevented, true);
 });
 
-test('cursor documents are main-owned static arrows with one exact hotspot', () => {
+test('cursor documents use the curved DROIDEX pointer with one exact hotspot', () => {
   assert.deepEqual(BROWSER_AGENT_CURSOR_STYLES, ['dark', 'light', 'droidex']);
-  assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 10, y: 8 });
+  assert.equal(BROWSER_AGENT_CURSOR_DEFAULT_SIZE, 36);
+  assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 3 });
 
   const documents = BROWSER_AGENT_CURSOR_STYLES.map((style) =>
     decodeURIComponent(createBrowserAgentCursorDataUrl(style)),
   );
   for (const document of documents) {
     assert.match(document, /default-src 'none'/);
-    assert.match(document, /<path d="M10 8/);
+    assert.match(document, /<path d="M6 3L27 23\.7/);
     assert.doesNotMatch(document, /<script|javascript:/i);
   }
-  assert.equal(documents[2].match(/class="agent-trail/g)?.length, 2);
   assert.doesNotMatch(documents[0], /class="agent-trail/);
   assert.doesNotMatch(documents[1], /class="agent-trail/);
+  assert.doesNotMatch(documents[2], /class="agent-trail/);
+  assert.match(documents[2], /stroke="#dce1eb"/i);
+  assert.match(documents[2], /fill-opacity="\.82"/);
+  assert.match(documents[2], /rgba\(80,139,255,\.75\)/);
   assert.equal(new Set(documents).size, 3);
   assert.throws(
     () => createBrowserAgentCursorDataUrl('url(https://page.example/cursor.svg)'),
     /style must be dark, light, or droidex/,
   );
+});
+
+test('a live cursor eases between consecutive agent positions', async () => {
+  const { controller, windows } = harness();
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  await controller.show({ browserSessionId: 'browser-1', x: 80, y: 90 });
+
+  assert.equal(windows[0].bounds.at(-2).animate, false);
+  assert.equal(windows[0].bounds.at(-1).animate, true);
+});
+
+test('cursor size stays bounded and preserves the pointer hotspot', async () => {
+  const { controller, windows } = harness();
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+
+  assert.equal(windows[0].options.width, 36);
+  assert.equal(windows[0].options.height, 36);
+  assert.equal(typeof controller.setSize, 'function');
+  assert.equal(controller.setSize(52), true);
+  assert.deepEqual(windows[0].sizes.at(-1), { width: 52, height: 52, animate: false });
+  assert.equal(controller.setSize(52), false);
+  assert.throws(() => controller.setSize(23), /size must be an integer from 24 to 64 pixels/);
+
+  assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 30, y: 40 }), true);
+  assert.deepEqual(windows[0].bounds.at(-1).bounds, {
+    x: 130,
+    y: 255,
+    width: 52,
+    height: 52,
+  });
 });
 
 test('controller accepts only trusted styles and can reload a live overlay', async () => {
@@ -149,11 +200,10 @@ test('controller accepts only trusted styles and can reload a live overlay', asy
     bounds: browserBounds,
   });
 
-  assert.match(decodeURIComponent(windows[0].loadedUrl), /class="agent-trail/);
-  assert.match(decodeURIComponent(windows[0].loadedUrl), /fill="#34383f"/i);
+  assert.match(decodeURIComponent(windows[0].loadedUrl), /stroke="#dce1eb"/i);
   assert.equal(controller.setStyle('dark'), true);
   assert.equal(windows[0].loadedUrls.length, 2);
-  assert.match(decodeURIComponent(windows[0].loadedUrl), /fill="#141517"/);
+  assert.match(decodeURIComponent(windows[0].loadedUrl), /fill="#3b3b3b"/);
   assert.equal(controller.setStyle('dark'), false);
   assert.throws(() => controller.setStyle('<svg onload=alert(1)>'), /style must be/);
 
@@ -163,7 +213,7 @@ test('controller accepts only trusted styles and can reload a live overlay', asy
     hostWindow: hostWindow(),
     bounds: browserBounds,
   });
-  assert.match(decodeURIComponent(light.windows[0].loadedUrl), /fill="#f7f7f8"/i);
+  assert.match(decodeURIComponent(light.windows[0].loadedUrl), /fill="#ffffff"/i);
 });
 
 test('main can position the cursor above the attached browser session', async () => {
@@ -177,7 +227,7 @@ test('main can position the cursor above the attached browser session', async ()
   assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 30, y: 40 }), true);
 
   assert.deepEqual(windows[0].bounds.at(-1), {
-    bounds: { x: 130, y: 252, width: 44, height: 44 },
+    bounds: { x: 133, y: 257, width: 36, height: 36 },
     animate: false,
   });
   assert.equal(windows[0].shown, 1);
@@ -223,10 +273,10 @@ test('bounds updates reposition a visible cursor and reject stale coordinates', 
 
   assert.equal(controller.setBounds('browser-1', { x: 50, y: 60, width: 400, height: 300 }), true);
   assert.deepEqual(windows[0].bounds.at(-1).bounds, {
-    x: 420,
-    y: 352,
-    width: 44,
-    height: 44,
+    x: 423,
+    y: 357,
+    width: 36,
+    height: 36,
   });
   assert.equal(controller.setBounds('browser-1', { x: 50, y: 60, width: 200, height: 80 }), false);
   assert.equal(windows[0].hidden > 0, true);

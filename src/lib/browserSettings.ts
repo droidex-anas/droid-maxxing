@@ -107,6 +107,7 @@ export interface BrowserSettingsSnapshot {
   askDownloadLocation: boolean;
   showAgentCursor: boolean;
   agentCursorStyle: BrowserAgentCursorStyle;
+  agentCursorSize: number;
   homePage: string;
   downloadDirectoryLabel: string;
   cookieCount: number;
@@ -144,6 +145,7 @@ export type BrowserSettingsPatch = Partial<
     | 'askDownloadLocation'
     | 'showAgentCursor'
     | 'agentCursorStyle'
+    | 'agentCursorSize'
     | 'homePage'
   >
 >;

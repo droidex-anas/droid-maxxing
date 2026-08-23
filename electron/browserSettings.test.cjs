@@ -13,6 +13,7 @@ async function withController(run) {
   const cookies = [];
   const importLifecycle = [];
   const appliedCursorStyles = [];
+  const appliedCursorSizes = [];
   const appliedCursorVisibility = [];
   const browserSession = {
     cookies: {
@@ -50,6 +51,7 @@ async function withController(run) {
     closeBrowsers: () => importLifecycle.push('close'),
     suspendBrowsers: () => importLifecycle.push('suspend'),
     applyAgentCursorStyle: (style) => appliedCursorStyles.push(style),
+    applyAgentCursorSize: (size) => appliedCursorSizes.push(size),
     applyAgentCursorVisibility: (isVisible) => appliedCursorVisibility.push(isVisible),
     getWebAuthnCapability: () => ({
       accountSelectionAvailable: true,
@@ -64,6 +66,7 @@ async function withController(run) {
     await run({
       browserSession,
       appliedCursorStyles,
+      appliedCursorSizes,
       appliedCursorVisibility,
       controller,
       cookies,
@@ -87,25 +90,29 @@ function deferred() {
 }
 
 test('browser settings default to global autonomy policy, Google, and visible cursor', async () => {
-  await withController(async ({ appliedCursorStyles, appliedCursorVisibility, controller }) => {
-    const snapshot = await controller.snapshot();
-    assert.equal(snapshot.navigationApproval, 'follow_autonomy');
-    assert.equal(snapshot.homePage, 'https://www.google.com/');
-    assert.equal(snapshot.showAgentCursor, true);
-    assert.equal(snapshot.agentCursorStyle, 'droidex');
-    assert.equal(controller.agentCursorStyle(), 'droidex');
-    assert.equal(snapshot.loginFillApproval, 'always_ask');
-    assert.equal(snapshot.keychainAvailable, true);
-    assert.deepEqual(snapshot.webAuthn, {
-      accountSelectionAvailable: true,
-      touchIdPasskeysAvailable: true,
-      touchIdPasskeysReason: 'available',
-    });
-    assert.equal(snapshot.lastCookieImport, null);
-    assert.equal('approvedLoginOrigins' in snapshot, false);
-    assert.deepEqual(appliedCursorStyles, ['droidex']);
-    assert.deepEqual(appliedCursorVisibility, [true]);
-  });
+  await withController(
+    async ({ appliedCursorSizes, appliedCursorStyles, appliedCursorVisibility, controller }) => {
+      const snapshot = await controller.snapshot();
+      assert.equal(snapshot.navigationApproval, 'follow_autonomy');
+      assert.equal(snapshot.homePage, 'https://www.google.com/');
+      assert.equal(snapshot.showAgentCursor, true);
+      assert.equal(snapshot.agentCursorStyle, 'droidex');
+      assert.equal(snapshot.agentCursorSize, 36);
+      assert.equal(controller.agentCursorStyle(), 'droidex');
+      assert.equal(snapshot.loginFillApproval, 'always_ask');
+      assert.equal(snapshot.keychainAvailable, true);
+      assert.deepEqual(snapshot.webAuthn, {
+        accountSelectionAvailable: true,
+        touchIdPasskeysAvailable: true,
+        touchIdPasskeysReason: 'available',
+      });
+      assert.equal(snapshot.lastCookieImport, null);
+      assert.equal('approvedLoginOrigins' in snapshot, false);
+      assert.deepEqual(appliedCursorStyles, ['droidex']);
+      assert.deepEqual(appliedCursorSizes, [36]);
+      assert.deepEqual(appliedCursorVisibility, [true]);
+    },
+  );
 });
 
 test('disabling the agent cursor immediately applies visibility to the live overlay', async () => {
@@ -130,6 +137,23 @@ test('browser settings persist only trusted agent cursor styles', async () => {
     await assert.rejects(
       controller.update({ agentCursorStyle: 'url(https://page.example/cursor.svg)' }),
       /agentCursorStyle has an invalid value/,
+    );
+  });
+});
+
+test('browser settings persist only bounded agent cursor sizes', async () => {
+  await withController(async ({ appliedCursorSizes, controller, userDataPath }) => {
+    const snapshot = await controller.update({ agentCursorSize: 52 });
+    assert.equal(snapshot.agentCursorSize, 52);
+    assert.deepEqual(appliedCursorSizes, [36, 52]);
+
+    const persisted = JSON.parse(
+      await fs.readFile(path.join(userDataPath, 'browser-settings.json'), 'utf8'),
+    );
+    assert.equal(persisted.agentCursorSize, 52);
+    await assert.rejects(
+      controller.update({ agentCursorSize: 65 }),
+      /agentCursorSize must be an integer from 24 to 64 pixels/,
     );
   });
 });

@@ -223,6 +223,7 @@ const browserSettings = createBrowserSettingsController({
   closeBrowsers: () => closeAllNativeBrowsers(),
   suspendBrowsers: () => suspendAllNativeBrowsers(),
   applyAgentCursorStyle: (style) => browserAgentCursor.setStyle(style),
+  applyAgentCursorSize: (size) => browserAgentCursor.setSize(size),
   applyAgentCursorVisibility: (isVisible) => {
     if (!isVisible) browserAgentCursor.detach();
   },

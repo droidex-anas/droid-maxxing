@@ -1,12 +1,33 @@
 const BROWSER_AGENT_CURSOR_DEFAULT_STYLE = 'droidex';
 const BROWSER_AGENT_CURSOR_STYLES = Object.freeze(['dark', 'light', 'droidex']);
-const BROWSER_AGENT_CURSOR_HOTSPOT = Object.freeze({ x: 10, y: 8 });
-const CURSOR_WINDOW_SIZE = 44;
+const BROWSER_AGENT_CURSOR_DEFAULT_SIZE = 36;
+const BROWSER_AGENT_CURSOR_MIN_SIZE = 24;
+const BROWSER_AGENT_CURSOR_MAX_SIZE = 64;
+const CURSOR_VIEWBOX_SIZE = 32;
+const CURSOR_VIEWBOX_HOTSPOT = Object.freeze({ x: 6, y: 3 });
+const BROWSER_AGENT_CURSOR_HOTSPOT = Object.freeze(
+  scaleCursorHotspot(BROWSER_AGENT_CURSOR_DEFAULT_SIZE),
+);
 const CURSOR_VISIBLE_MS = 1_800;
 const CURSOR_PRESENTATIONS = Object.freeze({
-  dark: Object.freeze({ fill: '#141517', stroke: '#f7f7f8', trails: false }),
-  light: Object.freeze({ fill: '#f7f7f8', stroke: '#141517', trails: false }),
-  droidex: Object.freeze({ fill: '#34383f', stroke: '#aeb4bd', trails: true }),
+  dark: Object.freeze({
+    fill: '#3b3b3b',
+    fillOpacity: '1',
+    stroke: '#ffffff',
+    filter: 'drop-shadow(0 1px 1.5px rgba(0,0,0,.5))',
+  }),
+  light: Object.freeze({
+    fill: '#ffffff',
+    fillOpacity: '1',
+    stroke: '#3b3b3b',
+    filter: 'drop-shadow(0 1px 1.5px rgba(0,0,0,.5))',
+  }),
+  droidex: Object.freeze({
+    fill: '#303743',
+    fillOpacity: '.82',
+    stroke: '#dce1eb',
+    filter: 'drop-shadow(0 0 5px rgba(80,139,255,.75)) drop-shadow(0 0 12px rgba(80,139,255,.35))',
+  }),
 });
 
 function createBrowserAgentCursorController(options) {
@@ -21,6 +42,7 @@ function createBrowserAgentCursorController(options) {
   let overlayReady = null;
   let hideTimer = null;
   let style = validateBrowserAgentCursorStyle(options.style ?? BROWSER_AGENT_CURSOR_DEFAULT_STYLE);
+  let size = validateBrowserAgentCursorSize(options.size ?? BROWSER_AGENT_CURSOR_DEFAULT_SIZE);
 
   function attach(input) {
     const browserSessionId = normalizeBrowserSessionId(input?.browserSessionId);
@@ -77,9 +99,10 @@ function createBrowserAgentCursorController(options) {
       return false;
     }
 
+    const shouldAnimate = current.visible && Boolean(current.point);
     current.point = point;
     current.visible = true;
-    positionOverlay(window, current);
+    positionOverlay(window, current, shouldAnimate);
     window.showInactive();
     scheduleHide(current);
     return true;
@@ -126,13 +149,23 @@ function createBrowserAgentCursorController(options) {
     return true;
   }
 
+  function setSize(value) {
+    const nextSize = validateBrowserAgentCursorSize(value);
+    if (nextSize === size) return false;
+    size = nextSize;
+    if (!isUsableWindow(overlay)) return true;
+    overlay.setSize(size, size, false);
+    if (attachment?.visible && attachment.point) positionOverlay(overlay, attachment);
+    return true;
+  }
+
   function ensureOverlay(hostWindow) {
     if (isUsableWindow(overlay) && overlayHost === hostWindow) return overlay;
     destroyOverlay();
 
     const window = new options.BrowserWindow({
-      width: CURSOR_WINDOW_SIZE,
-      height: CURSOR_WINDOW_SIZE,
+      width: size,
+      height: size,
       parent: hostWindow,
       show: false,
       frame: false,
@@ -177,21 +210,18 @@ function createBrowserAgentCursorController(options) {
     );
   }
 
-  function positionOverlay(window, current) {
+  function positionOverlay(window, current, animate = false) {
     if (!isUsableWindow(window) || !current.point) return;
     const contentBounds = current.hostWindow.getContentBounds();
+    const hotspot = scaleCursorHotspot(size);
     window.setBounds(
       {
-        x: Math.round(
-          contentBounds.x + current.bounds.x + current.point.x - BROWSER_AGENT_CURSOR_HOTSPOT.x,
-        ),
-        y: Math.round(
-          contentBounds.y + current.bounds.y + current.point.y - BROWSER_AGENT_CURSOR_HOTSPOT.y,
-        ),
-        width: CURSOR_WINDOW_SIZE,
-        height: CURSOR_WINDOW_SIZE,
+        x: Math.round(contentBounds.x + current.bounds.x + current.point.x - hotspot.x),
+        y: Math.round(contentBounds.y + current.bounds.y + current.point.y - hotspot.y),
+        width: size,
+        height: size,
       },
-      false,
+      animate,
     );
   }
 
@@ -224,7 +254,7 @@ function createBrowserAgentCursorController(options) {
     if (isUsableWindow(window)) window.destroy();
   }
 
-  return { attach, destroy, detach, hide, setBounds, setStyle, show };
+  return { attach, destroy, detach, hide, setBounds, setSize, setStyle, show };
 }
 
 function validateBrowserAgentCursorStyle(value) {
@@ -232,6 +262,26 @@ function validateBrowserAgentCursorStyle(value) {
     throw new Error('Browser agent cursor style must be dark, light, or droidex.');
   }
   return value;
+}
+
+function validateBrowserAgentCursorSize(value) {
+  if (
+    !Number.isInteger(value) ||
+    value < BROWSER_AGENT_CURSOR_MIN_SIZE ||
+    value > BROWSER_AGENT_CURSOR_MAX_SIZE
+  ) {
+    throw new Error(
+      `Browser agent cursor size must be an integer from ${BROWSER_AGENT_CURSOR_MIN_SIZE} to ${BROWSER_AGENT_CURSOR_MAX_SIZE} pixels.`,
+    );
+  }
+  return value;
+}
+
+function scaleCursorHotspot(size) {
+  return {
+    x: Math.round((CURSOR_VIEWBOX_HOTSPOT.x / CURSOR_VIEWBOX_SIZE) * size),
+    y: Math.round((CURSOR_VIEWBOX_HOTSPOT.y / CURSOR_VIEWBOX_SIZE) * size),
+  };
 }
 
 function normalizeBrowserSessionId(value) {
@@ -305,33 +355,30 @@ function browserBoundsEqual(left, right) {
 function createBrowserAgentCursorDataUrl(value) {
   const style = validateBrowserAgentCursorStyle(value);
   const presentation = CURSOR_PRESENTATIONS[style];
-  const trails = presentation.trails
-    ? '<path class="agent-trail agent-trail-far" d="M10 8v25.6l6.8-6.4 4.8 10.2 5.7-2.7-4.8-9.9h9.6L10 8Z" transform="translate(6 2)" fill="none" stroke="#777d86" stroke-width="1.5" stroke-linejoin="round"/><path class="agent-trail agent-trail-near" d="M10 8v25.6l6.8-6.4 4.8 10.2 5.7-2.7-4.8-9.9h9.6L10 8Z" transform="translate(3 1)" fill="none" stroke="#9298a1" stroke-width="1.6" stroke-linejoin="round"/>'
-    : '';
   const html = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <style>
-html,body{margin:0;width:44px;height:44px;overflow:hidden;background:transparent}
-.cursor{width:44px;height:44px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
-.agent-trail{animation:agent-working 1.1s ease-in-out infinite}
-.agent-trail-far{opacity:.2}.agent-trail-near{opacity:.42;animation-delay:-.2s}
-@keyframes agent-working{0%,100%{opacity:.18}50%{opacity:.58}}
-@media (prefers-reduced-motion:reduce){.agent-trail{animation:none}}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
+.cursor{display:block;width:100%;height:100%;filter:${presentation.filter}}
 </style>
 </head>
-<body><svg class="cursor" aria-hidden="true" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">${trails}<path d="M10 8v25.6l6.8-6.4 4.8 10.2 5.7-2.7-4.8-9.9h9.6L10 8Z" fill="${presentation.fill}" stroke="${presentation.stroke}" stroke-width="2" stroke-linejoin="round"/></svg></body>
+<body><svg class="cursor" aria-hidden="true" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M6 3L27 23.7c.8.8.3 2.1-.9 2H19c-4 0-7.9 1.2-11.2 3.4l-2.3 1.5c-.9.6-2-.1-1.9-1.2L5 4.5C5.1 3.3 5.7 2.5 6 3Z" fill="${presentation.fill}" fill-opacity="${presentation.fillOpacity}" stroke="${presentation.stroke}" stroke-width="2" stroke-linejoin="round"/></svg></body>
 </html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 module.exports = {
+  BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
   BROWSER_AGENT_CURSOR_DEFAULT_STYLE,
   BROWSER_AGENT_CURSOR_HOTSPOT,
+  BROWSER_AGENT_CURSOR_MAX_SIZE,
+  BROWSER_AGENT_CURSOR_MIN_SIZE,
   BROWSER_AGENT_CURSOR_STYLES,
   createBrowserAgentCursorController,
   createBrowserAgentCursorDataUrl,
+  validateBrowserAgentCursorSize,
   validateBrowserAgentCursorStyle,
 };

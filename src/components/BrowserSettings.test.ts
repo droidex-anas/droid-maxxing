@@ -21,6 +21,7 @@ const SNAPSHOT: BrowserSettingsSnapshot = {
   askDownloadLocation: true,
   showAgentCursor: true,
   agentCursorStyle: 'droidex',
+  agentCursorSize: 36,
   homePage: 'https://www.google.com/',
   downloadDirectoryLabel: 'Downloads',
   cookieCount: 4,
@@ -94,8 +95,10 @@ test('BrowserSettingsView renders real safety controls without unexpected secret
   assert.match(html, /https:\/\/www\.google\.com\//);
   assert.match(html, /Show DROIDEX agent cursor/);
   assert.match(html, /aria-label="Agent cursor style"/);
+  assert.match(html, /aria-label="Agent cursor size"/);
+  assert.match(html, /36 px/);
   assert.match(html, />DROIDEX</);
-  assert.match(html, /translate\(6 2\)/);
+  assert.match(html, /M6 3L27 23\.7/);
   assert.match(html, /Signups, OAuth, and passkeys/);
   assert.match(html, /Touch ID passkeys are available in this signed DROIDEX build/);
   assert.match(html, /https:\/\/docs\.example\.com/);

@@ -65,6 +65,7 @@ class BrowserSettingsController {
   async initialize() {
     this.settings = await readSettings(this.settingsPath, this.defaultSettings());
     this.options.applyAgentCursorStyle(this.settings.agentCursorStyle);
+    this.options.applyAgentCursorSize(this.settings.agentCursorSize);
     this.options.applyAgentCursorVisibility(this.settings.showAgentCursor);
   }
 
@@ -84,6 +85,7 @@ class BrowserSettingsController {
       askDownloadLocation: settings.askDownloadLocation,
       showAgentCursor: settings.showAgentCursor,
       agentCursorStyle: settings.agentCursorStyle,
+      agentCursorSize: settings.agentCursorSize,
       homePage: settings.homePage,
       downloadDirectoryLabel:
         settings.downloadDirectory === this.options.downloadsPath
@@ -129,6 +131,9 @@ class BrowserSettingsController {
     }));
     if (validatedPatch.agentCursorStyle !== undefined) {
       this.options.applyAgentCursorStyle(validatedPatch.agentCursorStyle);
+    }
+    if (validatedPatch.agentCursorSize !== undefined) {
+      this.options.applyAgentCursorSize(validatedPatch.agentCursorSize);
     }
     if (validatedPatch.showAgentCursor !== undefined) {
       this.options.applyAgentCursorVisibility(validatedPatch.showAgentCursor);
@@ -396,6 +401,10 @@ class BrowserSettingsController {
 
   agentCursorStyle() {
     return this.requireSettings().agentCursorStyle;
+  }
+
+  agentCursorSize() {
+    return this.requireSettings().agentCursorSize;
   }
 
   areDiagnosticsEnabled() {

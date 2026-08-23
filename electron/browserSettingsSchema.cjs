@@ -1,8 +1,10 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const {
+  BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
   BROWSER_AGENT_CURSOR_DEFAULT_STYLE,
   BROWSER_AGENT_CURSOR_STYLES,
+  validateBrowserAgentCursorSize,
 } = require('./browserAgentCursor.cjs');
 
 const SETTINGS_VERSION = 3;
@@ -43,6 +45,7 @@ function createDefaultBrowserSettings(downloadDirectory) {
     askDownloadLocation: true,
     showAgentCursor: true,
     agentCursorStyle: BROWSER_AGENT_CURSOR_DEFAULT_STYLE,
+    agentCursorSize: BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
     homePage: 'https://www.google.com/',
     downloadDirectory,
     approvedAgentOrigins: [],
@@ -182,6 +185,7 @@ function validateSettingsPatch(patch, complete = false) {
     'askDownloadLocation',
     'showAgentCursor',
     'agentCursorStyle',
+    'agentCursorSize',
     'homePage',
   ]);
   if (!complete && Object.keys(patch).some((key) => !allowed.has(key))) {
@@ -213,6 +217,13 @@ function validateSettingsPatch(patch, complete = false) {
     }
   }
   if (complete || 'homePage' in patch) out.homePage = validateHomePage(patch.homePage);
+  if (complete || 'agentCursorSize' in patch) {
+    try {
+      out.agentCursorSize = validateBrowserAgentCursorSize(patch.agentCursorSize);
+    } catch {
+      throw new Error('Browser setting agentCursorSize must be an integer from 24 to 64 pixels.');
+    }
+  }
   return out;
 }
 

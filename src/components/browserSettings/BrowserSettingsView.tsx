@@ -39,36 +39,23 @@ const CURSOR_STYLE_OPTIONS = [
 ];
 
 function AgentCursorStyleIcon({ style }: { style: BrowserAgentCursorStyle }) {
-  const isDroidex = style === 'droidex';
-  const fill = style === 'dark' ? '#141517' : style === 'light' ? '#f7f7f8' : '#34383f';
-  const stroke = style === 'dark' ? '#f7f7f8' : style === 'light' ? '#141517' : '#aeb4bd';
+  const fill = style === 'dark' ? '#3b3b3b' : style === 'light' ? '#ffffff' : '#303743';
+  const stroke = style === 'dark' ? '#ffffff' : style === 'light' ? '#3b3b3b' : '#dce1eb';
   return (
-    <svg aria-hidden="true" viewBox="0 0 44 44" className="h-5 w-5 shrink-0">
-      {isDroidex && (
-        <>
-          <path
-            d="M10 8v25.6l6.8-6.4 4.8 10.2 5.7-2.7-4.8-9.9h9.6L10 8Z"
-            transform="translate(6 2)"
-            fill="none"
-            stroke="#777d86"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-            opacity=".2"
-          />
-          <path
-            d="M10 8v25.6l6.8-6.4 4.8 10.2 5.7-2.7-4.8-9.9h9.6L10 8Z"
-            transform="translate(3 1)"
-            fill="none"
-            stroke="#9298a1"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-            opacity=".42"
-          />
-        </>
-      )}
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 32 32"
+      className="h-5 w-5 shrink-0"
+      style={
+        style === 'droidex'
+          ? { filter: 'drop-shadow(0 0 3px rgba(80, 139, 255, 0.75))' }
+          : undefined
+      }
+    >
       <path
-        d="M10 8v25.6l6.8-6.4 4.8 10.2 5.7-2.7-4.8-9.9h9.6L10 8Z"
+        d="M6 3L27 23.7c.8.8.3 2.1-.9 2H19c-4 0-7.9 1.2-11.2 3.4l-2.3 1.5c-.9.6-2-.1-1.9-1.2L5 4.5C5.1 3.3 5.7 2.5 6 3Z"
         fill={fill}
+        fillOpacity={style === 'droidex' ? 0.82 : 1}
         stroke={stroke}
         strokeWidth="2"
         strokeLinejoin="round"
@@ -374,25 +361,45 @@ export function BrowserSettingsView({
               label="Show DROIDEX agent cursor"
               description="Display a trusted static pointer at the agent’s live click and hover position."
             >
-              <div className="flex items-center gap-2.5">
-                <Dropdown
-                  value={snapshot.agentCursorStyle}
-                  options={CURSOR_STYLE_OPTIONS}
-                  ariaLabel="Agent cursor style"
-                  width="w-28"
-                  disabled={disabled}
-                  onChange={(value) => {
-                    onPatch({ agentCursorStyle: parseAgentCursorStyle(value) });
-                  }}
-                />
-                <Switch
-                  label="Show DROIDEX agent cursor"
-                  checked={snapshot.showAgentCursor}
-                  disabled={disabled}
-                  onChange={(showAgentCursor) => {
-                    onPatch({ showAgentCursor });
-                  }}
-                />
+              <div className="flex flex-col items-end gap-2.5">
+                <div className="flex items-center gap-2.5">
+                  <Dropdown
+                    value={snapshot.agentCursorStyle}
+                    options={CURSOR_STYLE_OPTIONS}
+                    ariaLabel="Agent cursor style"
+                    width="w-28"
+                    disabled={disabled}
+                    onChange={(value) => {
+                      onPatch({ agentCursorStyle: parseAgentCursorStyle(value) });
+                    }}
+                  />
+                  <Switch
+                    label="Show DROIDEX agent cursor"
+                    checked={snapshot.showAgentCursor}
+                    disabled={disabled}
+                    onChange={(showAgentCursor) => {
+                      onPatch({ showAgentCursor });
+                    }}
+                  />
+                </div>
+                <label className="flex items-center gap-2.5 text-xs text-droid-muted">
+                  <span className="w-10 text-right tabular-nums">
+                    {String(snapshot.agentCursorSize)} px
+                  </span>
+                  <input
+                    type="range"
+                    min="24"
+                    max="64"
+                    step="2"
+                    value={snapshot.agentCursorSize}
+                    aria-label="Agent cursor size"
+                    disabled={disabled || !snapshot.showAgentCursor}
+                    className="h-1.5 w-28 cursor-pointer accent-droid-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    onChange={(event) => {
+                      onPatch({ agentCursorSize: Number(event.currentTarget.value) });
+                    }}
+                  />
+                </label>
               </div>
             </BrowserSettingRow>
             <BrowserSettingRow

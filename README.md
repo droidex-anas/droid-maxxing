@@ -50,8 +50,10 @@ The built-in DROIDEX Browser gives an agent a reliable native browser session
 with the user in control of sign-ins and sensitive capabilities. Every task
 keeps its own live browser session—even while the user views another chat—while
 the authenticated browser profile is shared so sites do not require a fresh
-sign-in per chat. The active pane can show a compact grey DROIDEX agent cursor
-with subtle motion trails at the agent's exact hover and click position; the
+sign-in per chat. The active pane can show a crisp curved DROIDEX agent cursor
+with a soft blue activity halo and native eased movement at the agent's exact
+hover and click position; its high-contrast style and
+24–64 px size are configurable in Browser settings, and the
 indicator is optional, expires instead of lingering over stale content, and
 never pulls a background task into the visible pane.
 
