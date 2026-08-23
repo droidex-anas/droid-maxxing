@@ -1,49 +1,54 @@
 async function executeBrowserAgentInteraction(contents, request, options) {
   if (request.action === 'scroll') {
-    const hasPoint = Number.isFinite(Number(request.x)) && Number.isFinite(Number(request.y));
-    const x = hasPoint
-      ? Math.round(Number(request.x))
-      : Math.min(
-          Number(options.viewportBounds?.width) - 1,
-          Math.round(Number(options.viewportBounds?.width) / 2),
-        );
-    const y = hasPoint
-      ? Math.round(Number(request.y))
-      : Math.min(
-          Number(options.viewportBounds?.height) - 1,
-          Math.round(Number(options.viewportBounds?.height) / 2),
-        );
+    const resolved = request.selector ? await resolveBrowserPointer(contents, request) : undefined;
+    assertCurrentBrowserAction(options);
+    const x = resolved?.x ?? viewportCenter(options.viewportBounds, 'width');
+    const y = resolved?.y ?? viewportCenter(options.viewportBounds, 'height');
     requirePointerInsideViewport({ x, y }, options.viewportBounds);
-    const pixels = Math.max(1, Math.round(Number(request.pixels) || 500));
-    const horizontal = request.direction === 'left' || request.direction === 'right';
     await requireTrustedCursor(options, { x, y, pressed: false });
-    contents.sendInputEvent({
-      type: 'mouseWheel',
-      x,
-      y,
-      deltaX: horizontal ? (request.direction === 'left' ? -pixels : pixels) : 0,
-      deltaY: horizontal ? 0 : request.direction === 'up' ? -pixels : pixels,
-      canScroll: true,
-    });
-    return snapshotAfterInteraction(contents, request);
+    assertCurrentBrowserAction(options);
+    return contents.executeJavaScript(
+      `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(
+        pageActionRequest(request, options, { x, y }),
+      )});`,
+      true,
+    );
   }
 
   if (request.action === 'click' || request.action === 'hover') {
     const { x, y } = await resolveBrowserPointer(contents, request);
+    assertCurrentBrowserAction(options);
     requirePointerInsideViewport({ x, y }, options.viewportBounds);
     await requireTrustedCursor(options, { x, y, pressed: request.action === 'click' });
-    contents.sendInputEvent({ type: 'mouseMove', x, y, movementX: 0, movementY: 0 });
-    if (request.action === 'click') {
-      contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-      contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
-    }
-    return snapshotAfterInteraction(contents, request);
+    assertCurrentBrowserAction(options);
+    return contents.executeJavaScript(
+      `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(
+        pageActionRequest(request, options, { x, y }),
+      )});`,
+      true,
+    );
   }
 
+  assertCurrentBrowserAction(options);
   return contents.executeJavaScript(
-    `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(request)});`,
+    `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(pageActionRequest(request, options))});`,
     true,
   );
+}
+
+function pageActionRequest(request, options, fields = {}) {
+  return { ...request, ...fields, __droidexContext: options.pageContext };
+}
+
+function viewportCenter(bounds, dimension) {
+  const value = Number(bounds?.[dimension]);
+  return Math.min(value - 1, Math.round(value / 2));
+}
+
+function assertCurrentBrowserAction(options) {
+  if (typeof options.isCurrent === 'function' && !options.isCurrent()) {
+    throw new Error('The page changed before the browser action completed. No input was sent.');
+  }
 }
 
 async function blockBrowserAgentSensitiveTyping(contents, request) {
@@ -96,16 +101,6 @@ function requirePointerInsideViewport(point, bounds) {
   ) {
     throw new Error('Browser pointer interaction is outside the live browser viewport.');
   }
-}
-
-function snapshotAfterInteraction(contents, request) {
-  return contents.executeJavaScript(
-    `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify({
-      ...request,
-      action: 'snapshot',
-    })});`,
-    true,
-  );
 }
 
 module.exports = {

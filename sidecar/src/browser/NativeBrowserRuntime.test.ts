@@ -31,14 +31,22 @@ test('NativeBrowserRuntime sends live requests with application and browser sess
   await runtime.reload('user');
   await runtime.goBack();
   await runtime.goForward();
-  await runtime.click(12, 34, '#submit');
-  await runtime.hover(56, 78, '#account');
-  await runtime.selectOption('#country', 'Canada');
+  await runtime.click(12, 34, '#submit', '@b-snapshot-submit');
+  await runtime.hover(56, 78, '#account', '@b-snapshot-account');
+  await runtime.selectOption('#country', 'Canada', '@b-snapshot-country');
+  await runtime.scroll({
+    direction: 'down',
+    pixels: 600,
+    x: 50,
+    y: 100,
+    selector: '#results',
+    ref: '@b-snapshot-results',
+  });
 
   assert.equal(snapshot.url, 'https://example.com/');
   assert.deepEqual(
     requests.map((request) => request.action),
-    ['open', 'reload', 'goBack', 'goForward', 'click', 'hover', 'selectOption'],
+    ['open', 'reload', 'goBack', 'goForward', 'click', 'hover', 'selectOption', 'scroll'],
   );
   assert.equal(requests[0].appSessionId, 'app-session-one');
   assert.equal(requests[0].browserSessionId, 'browser-one');
@@ -46,16 +54,20 @@ test('NativeBrowserRuntime sends live requests with application and browser sess
   assert.equal(requests[1].source, 'user');
   assert.deepEqual(requests[0].viewport, { width: 900, height: 700, deviceScaleFactor: 2 });
   assert.deepEqual(
-    { x: requests[4].x, y: requests[4].y, selector: requests[4].selector },
-    { x: 12, y: 34, selector: '#submit' },
+    { x: requests[4].x, y: requests[4].y, selector: requests[4].selector, ref: requests[4].ref },
+    { x: 12, y: 34, selector: '#submit', ref: '@b-snapshot-submit' },
   );
   assert.deepEqual(
-    { x: requests[5].x, y: requests[5].y, selector: requests[5].selector },
-    { x: 56, y: 78, selector: '#account' },
+    { x: requests[5].x, y: requests[5].y, selector: requests[5].selector, ref: requests[5].ref },
+    { x: 56, y: 78, selector: '#account', ref: '@b-snapshot-account' },
   );
   assert.deepEqual(
-    { selector: requests[6].selector, text: requests[6].text },
-    { selector: '#country', text: 'Canada' },
+    { selector: requests[6].selector, text: requests[6].text, ref: requests[6].ref },
+    { selector: '#country', text: 'Canada', ref: '@b-snapshot-country' },
+  );
+  assert.deepEqual(
+    { selector: requests[7].selector, ref: requests[7].ref },
+    { selector: '#results', ref: '@b-snapshot-results' },
   );
 });
 

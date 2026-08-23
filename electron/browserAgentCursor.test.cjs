@@ -93,10 +93,14 @@ function harness(options = {}) {
   return { controller, windows };
 }
 
-function hostWindow(contentBounds = { x: 100, y: 200, width: 900, height: 700 }) {
+function hostWindow(contentBounds = { x: 100, y: 200, width: 900, height: 700 }, state = {}) {
   const host = new EventEmitter();
   host.destroyed = false;
+  host.focused = state.focused ?? true;
+  host.visible = state.visible ?? true;
   host.isDestroyed = () => host.destroyed;
+  host.isFocused = () => host.focused;
+  host.isVisible = () => host.visible;
   host.getContentBounds = () => contentBounds;
   return host;
 }
@@ -130,17 +134,22 @@ test('cursor overlay is sandboxed, click-through, static, and blocks navigation'
   assert.equal(prevented, true);
 });
 
-test('cursor documents use the WhiteSur default pointer with its official hotspot', () => {
+test('cursor documents render the curved DROIDEX pointer with subtle accessible motion', () => {
   assert.deepEqual(BROWSER_AGENT_CURSOR_STYLES, ['dark', 'light', 'droidex']);
   assert.equal(BROWSER_AGENT_CURSOR_DEFAULT_SIZE, 36);
-  assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 6 });
+  assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 5 });
 
   const documents = BROWSER_AGENT_CURSOR_STYLES.map((style) =>
     decodeURIComponent(createBrowserAgentCursorDataUrl(style)),
   );
   for (const document of documents) {
     assert.match(document, /default-src 'none'/);
-    assert.match(document, /<path d="m 6\.9356,4 v 14 l 3\.1328,-3\.8203/);
+    assert.match(document, /<path d="M6 3\.5 L27 20\.5 C20\.3 19\.5 12\.7 20\.8 5 28 Z"/);
+    assert.match(document, /@keyframes cursor-rock/);
+    assert.match(document, /rotate\(-3deg\)/);
+    assert.match(document, /rotate\(3\.4deg\)/);
+    assert.match(document, /transform-origin:6px 4px/);
+    assert.match(document, /prefers-reduced-motion:reduce/);
     assert.doesNotMatch(document, /<script|javascript:/i);
   }
   assert.doesNotMatch(documents[0], /class="agent-trail/);
@@ -149,7 +158,6 @@ test('cursor documents use the WhiteSur default pointer with its official hotspo
   assert.match(documents[2], /stroke="#dce1eb"/i);
   assert.match(documents[2], /fill-opacity="\.82"/);
   assert.match(documents[2], /rgba\(80,139,255,\.75\)/);
-  assert.match(documents[2], /WhiteSur-cursors/);
   assert.equal(new Set(documents).size, 3);
   assert.throws(
     () => createBrowserAgentCursorDataUrl('url(https://page.example/cursor.svg)'),
@@ -172,16 +180,19 @@ test('a live cursor glides through intermediate positions before the next agent 
   await controller.show({ browserSessionId: 'browser-1', x: 80, y: 90 });
 
   const movement = windows[0].bounds.slice(1);
-  assert.ok(movement.length > 2);
-  assert.ok(frameDelays.length > 2);
+  assert.ok(movement.length >= 10);
+  assert.ok(frameDelays.length >= 10);
   assert.equal(
     movement.every(({ animate }) => animate === false),
     true,
   );
-  assert.ok(movement[0].bounds.x > windows[0].bounds[0].bounds.x);
-  assert.ok(movement[0].bounds.x < movement.at(-1).bounds.x);
-  assert.ok(movement[0].bounds.y > windows[0].bounds[0].bounds.y);
-  assert.ok(movement[0].bounds.y < movement.at(-1).bounds.y);
+  const start = windows[0].bounds[0].bounds;
+  const end = movement.at(-1).bounds;
+  const progressed = movement.find(
+    ({ bounds }) =>
+      bounds.x > start.x && bounds.x < end.x && bounds.y > start.y && bounds.y < end.y,
+  );
+  assert.ok(progressed);
 });
 
 test('cursor size stays bounded and preserves the pointer hotspot', async () => {
@@ -256,6 +267,39 @@ test('main can position the cursor above the attached browser session', async ()
   assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 300, y: 40 }), false);
 });
 
+test('moving a visible cursor does not raise its window again', async () => {
+  const { controller, windows } = harness();
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  await controller.show({ browserSessionId: 'browser-1', x: 80, y: 90 });
+
+  assert.equal(windows[0].shown, 1);
+});
+
+test('background browser actions stay parked without raising an inactive app', async () => {
+  const { controller, windows } = harness();
+  const host = hostWindow(undefined, { focused: false });
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+
+  assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 }), true);
+  assert.equal(windows[0].shown, 0);
+
+  host.focused = true;
+  host.emit('focus');
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(windows[0].shown, 1);
+
+  host.focused = false;
+  host.emit('blur');
+  assert.equal(windows[0].hidden > 0, true);
+});
+
 test('visible cursor stays parked until its browser surface is hidden', async () => {
   let scheduled = 0;
   const { controller, windows } = harness({
@@ -301,6 +345,85 @@ test('reattaching resized bounds for the same browser preserves its parked point
   assert.equal(windows[0].shown, 1);
 });
 
+test('detaching and reattaching a browser session restores its parked cursor', async () => {
+  const { controller, windows } = harness();
+  const host = hostWindow();
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  const firstPosition = windows[0].bounds.at(-1).bounds;
+
+  controller.detach('browser-1');
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(windows[0].shown, 2);
+  assert.deepEqual(windows[0].bounds.at(-1).bounds, firstPosition);
+});
+
+test('switching tasks restores each browser session at its own last agent position', async () => {
+  const { controller, windows } = harness();
+  const host = hostWindow();
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  const browserOnePosition = windows[0].bounds.at(-1).bounds;
+
+  controller.attach({ browserSessionId: 'browser-2', hostWindow: host, bounds: browserBounds });
+  await controller.show({ browserSessionId: 'browser-2', x: 90, y: 100 });
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(windows[0].bounds.at(-1).bounds, browserOnePosition);
+});
+
+test('background agent work updates the parked point without raising another task', async () => {
+  const { controller, windows } = harness();
+  const host = hostWindow();
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  controller.detach('browser-1');
+  const shownBefore = windows[0].shown;
+
+  assert.equal(typeof controller.park, 'function');
+  assert.equal(
+    controller.park({ browserSessionId: 'browser-1', bounds: browserBounds, x: 90, y: 100 }),
+    true,
+  );
+  assert.equal(windows[0].shown, shownBefore);
+
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(windows[0].bounds.at(-1).bounds, {
+    x: 169,
+    y: 291,
+    width: 84,
+    height: 84,
+  });
+});
+
+test('cursor visibility can be disabled and restored without losing the live point', async () => {
+  const { controller, windows } = harness();
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+
+  assert.equal(typeof controller.setEnabled, 'function');
+  assert.equal(controller.setEnabled(false), true);
+  assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 60, y: 70 }), true);
+  assert.equal(windows[0].shown, 1);
+  assert.equal(controller.setEnabled(true), true);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(windows[0].shown, 2);
+});
+
 test('bounds updates reposition a visible cursor and reject stale coordinates', async () => {
   const { controller, windows } = harness();
   controller.attach({
@@ -313,7 +436,7 @@ test('bounds updates reposition a visible cursor and reject stale coordinates', 
   assert.equal(controller.setBounds('browser-1', { x: 50, y: 60, width: 400, height: 300 }), true);
   assert.deepEqual(windows[0].bounds.at(-1).bounds, {
     x: 399,
-    y: 330,
+    y: 331,
     width: 84,
     height: 84,
   });
@@ -338,6 +461,82 @@ test('detach invalidates a pending show and hides background sessions', async ()
   assert.equal(windows[0].shown, 0);
   assert.equal(windows[0].hidden > 0, true);
   assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 }), false);
+});
+
+test('hide invalidates a pending show before the overlay can resurrect', async () => {
+  const load = deferred();
+  const { controller, windows } = harness({ load });
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+  const showing = controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+
+  assert.equal(controller.hide('browser-1'), true);
+  load.resolve();
+
+  assert.equal(await showing, false);
+  assert.equal(windows[0].shown, 0);
+});
+
+test('bounds invalidation refuses a pending point resolved against the old viewport', async () => {
+  const load = deferred();
+  const { controller, windows } = harness({ load });
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+  const showing = controller.show({ browserSessionId: 'browser-1', x: 280, y: 100 });
+
+  assert.equal(controller.setBounds('browser-1', { x: 10, y: 20, width: 100, height: 200 }), true);
+  load.resolve();
+
+  assert.equal(await showing, false);
+  assert.equal(windows[0].shown, 0);
+});
+
+test('resizing the viewport cancels a glide before stale native input can land', async () => {
+  const firstFrame = deferred();
+  let frameCount = 0;
+  const { controller } = harness({
+    waitForFrame: async () => {
+      frameCount += 1;
+      if (frameCount === 1) await firstFrame.promise;
+    },
+  });
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  const moving = controller.show({ browserSessionId: 'browser-1', x: 280, y: 100 });
+  await Promise.resolve();
+
+  assert.equal(frameCount, 1);
+  assert.equal(controller.setBounds('browser-1', { x: 10, y: 20, width: 100, height: 200 }), true);
+  firstFrame.resolve();
+
+  assert.equal(await moving, false);
+});
+
+test('forget removes a closed session point instead of restoring it later', async () => {
+  const { controller, windows } = harness();
+  const host = hostWindow();
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  controller.detach('browser-1');
+  const shownBefore = windows[0].shown;
+
+  assert.equal(typeof controller.forget, 'function');
+  assert.equal(controller.forget('browser-1'), true);
+  controller.attach({ browserSessionId: 'browser-1', hostWindow: host, bounds: browserBounds });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(windows[0].shown, shownBefore);
 });
 
 test('switching sessions hides the old cursor and destroy releases the overlay', async () => {

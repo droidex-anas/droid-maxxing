@@ -5,7 +5,13 @@ const {
   executeBrowserAgentInteraction,
 } = require('./browserAgentInteraction.cjs');
 
-test('clicks resolve the live selector, show the DROIDEX cursor, and use native input', async () => {
+const PAGE_CONTEXT = {
+  documentId: 'document-1',
+  snapshotId: 'document-1:4',
+  urlHash: 'url-1',
+};
+
+test('clicks resolve live refs and run in the isolated page without stealing app focus', async () => {
   const scripts = [];
   const inputEvents = [];
   const cursorEvents = [];
@@ -26,18 +32,17 @@ test('clicks resolve the live selector, show the DROIDEX cursor, and use native 
         cursorEvents.push(event);
         return true;
       },
+      pageContext: PAGE_CONTEXT,
       viewportBounds: { width: 300, height: 200 },
     },
   );
 
   assert.equal(result.ok, true);
   assert.deepEqual(cursorEvents, [{ x: 120, y: 84, pressed: true }]);
-  assert.deepEqual(inputEvents, [
-    { type: 'mouseMove', x: 120, y: 84, movementX: 0, movementY: 0 },
-    { type: 'mouseDown', x: 120, y: 84, button: 'left', clickCount: 1 },
-    { type: 'mouseUp', x: 120, y: 84, button: 'left', clickCount: 1 },
-  ]);
-  assert.match(scripts[1], /"action":"snapshot"/);
+  assert.deepEqual(inputEvents, []);
+  assert.match(scripts[1], /"action":"click"/);
+  assert.match(scripts[1], /"x":120/);
+  assert.match(scripts[1], /"__droidexContext":\{"documentId":"document-1"/);
 });
 
 test('agent-authored text cannot enter password or one-time-code fields', async () => {
@@ -51,13 +56,14 @@ test('agent-authored text cannot enter password or one-time-code fields', async 
   );
 });
 
-test('scroll uses native wheel input and returns a fresh snapshot', async () => {
+test('scroll uses the isolated live scroller and returns a fresh snapshot', async () => {
   const scripts = [];
   const inputEvents = [];
   const cursorEvents = [];
   const contents = {
     executeJavaScript: async (script) => {
       scripts.push(script);
+      if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 12, y: 46 };
       return { ok: true };
     },
     sendInputEvent: (event) => inputEvents.push(event),
@@ -68,6 +74,8 @@ test('scroll uses native wheel input and returns a fresh snapshot', async () => 
     {
       action: 'scroll',
       requestId: 'request-2',
+      ref: '@b-current-results',
+      selector: '#results',
       x: 12.3,
       y: 45.8,
       direction: 'down',
@@ -78,15 +86,15 @@ test('scroll uses native wheel input and returns a fresh snapshot', async () => 
         cursorEvents.push(event);
         return true;
       },
+      pageContext: PAGE_CONTEXT,
       viewportBounds: { width: 300, height: 200 },
     },
   );
 
   assert.deepEqual(cursorEvents, [{ x: 12, y: 46, pressed: false }]);
-  assert.deepEqual(inputEvents, [
-    { type: 'mouseWheel', x: 12, y: 46, deltaX: 0, deltaY: 640, canScroll: true },
-  ]);
-  assert.match(scripts[0], /"action":"snapshot"/);
+  assert.deepEqual(inputEvents, []);
+  assert.match(scripts[1], /"action":"scroll"/);
+  assert.match(scripts[1], /"selector":"#results"/);
 });
 
 test('untargeted scroll uses the live native viewport center instead of emulated dimensions', async () => {
@@ -110,9 +118,61 @@ test('untargeted scroll uses the live native viewport center instead of emulated
   );
 
   assert.deepEqual(cursorEvents, [{ x: 262, y: 396, pressed: false }]);
-  assert.deepEqual(inputEvents, [
-    { type: 'mouseWheel', x: 262, y: 396, deltaX: 0, deltaY: 500, canScroll: true },
-  ]);
+  assert.deepEqual(inputEvents, []);
+});
+
+test('navigation invalidates a click while cursor placement is pending', async () => {
+  const inputEvents = [];
+  let resolveCursor;
+  let current = true;
+  const cursorPlaced = new Promise((resolve) => {
+    resolveCursor = resolve;
+  });
+  const contents = {
+    executeJavaScript: async (script) =>
+      script.includes('__DROIDMAXX_RESOLVE_POINTER') ? { x: 120, y: 84 } : { ok: true },
+    sendInputEvent: (event) => inputEvents.push(event),
+  };
+
+  const action = executeBrowserAgentInteraction(
+    contents,
+    { requestId: 'request-navigation-race', action: 'click', selector: '#continue' },
+    {
+      isCurrent: () => current,
+      showCursor: () => cursorPlaced,
+      viewportBounds: { width: 300, height: 200 },
+    },
+  );
+  current = false;
+  resolveCursor(true);
+
+  await assert.rejects(action, /page changed before the browser action completed/);
+  assert.deepEqual(inputEvents, []);
+});
+
+test('navigation invalidates typing and keypresses before page code can receive them', async () => {
+  const scripts = [];
+  const contents = {
+    executeJavaScript: async (script) => {
+      scripts.push(script);
+      return { ok: true };
+    },
+  };
+
+  for (const request of [
+    { requestId: 'request-type-race', action: 'type', text: 'hello' },
+    { requestId: 'request-enter-race', action: 'keypress', key: 'Enter' },
+  ]) {
+    await assert.rejects(
+      executeBrowserAgentInteraction(contents, request, {
+        isCurrent: () => false,
+        viewportBounds: { width: 300, height: 200 },
+      }),
+      /page changed before the browser action completed/,
+    );
+  }
+
+  assert.deepEqual(scripts, []);
 });
 
 test('native input is blocked when the exact point is outside the live viewport', async () => {

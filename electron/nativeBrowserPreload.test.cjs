@@ -168,9 +168,86 @@ test('select option matching accepts the option label attribute', () => {
 test('remote pages cannot forge agent results and only expose bounded page operations', () => {
   assert.doesNotMatch(source, /native-browser-agent-result/);
   assert.match(source, /__DROIDMAXX_AGENT_ACTION/);
+  assert.match(source, /__DROIDMAXX_AGENT_CONTEXT/);
   assert.match(source, /__DROIDMAXX_RESOLVE_POINTER/);
   assert.match(source, /__DROIDMAXX_AUTH_INTENT/);
   assert.match(source, /__DROIDMAXX_SENSITIVE_FIELD/);
+});
+
+test('final page execution rejects a replaced document, snapshot, or in-page URL', () => {
+  const start = source.indexOf('function requireCurrentAgentActionContext(expected)');
+  const end = source.indexOf('\nfunction requireSafeAgentTextAction', start);
+  const current = { documentId: 'document-1', snapshotId: 'document-1:8', urlHash: 'url-1' };
+  const requireContext = vm.runInNewContext(
+    `(${source
+      .slice(start, end)
+      .replace('function requireCurrentAgentActionContext', 'function')})`,
+    { browserAgentActionContext: () => current },
+  );
+
+  assert.doesNotThrow(() => requireContext({ ...current }));
+  for (const expected of [
+    { ...current, documentId: 'document-old' },
+    { ...current, snapshotId: 'document-1:7' },
+    { ...current, urlHash: 'url-old' },
+  ]) {
+    assert.throws(
+      () => requireContext(expected),
+      /page changed before the browser action completed/,
+    );
+  }
+});
+
+test('snapshot recovery mints a new lease when in-page navigation cleared the old one', async () => {
+  const start = source.indexOf('async function runAgentAction(request)');
+  const end = source.indexOf('\nfunction clickAt', start);
+  let agentSnapshotId = '';
+  let contextChecks = 0;
+  const runAction = vm.runInNewContext(
+    `(${source.slice(start, end).replace('async function runAgentAction', 'async function')})`,
+    {
+      finishScrollAttempt: () => undefined,
+      pageSnapshot: () => {
+        agentSnapshotId = 'document-new:1';
+        return { refs: [], snapshotId: agentSnapshotId };
+      },
+      requireCurrentAgentActionContext: () => {
+        contextChecks += 1;
+      },
+      safeSnapshot: () => ({ refs: [] }),
+      sendAgent: (result) => result,
+      settle: async () => {},
+    },
+  );
+
+  const result = await runAction({ requestId: 'snapshot-recovery', action: 'snapshot' });
+
+  assert.equal(contextChecks, 0);
+  assert.equal(result.ok, true);
+  assert.equal(result.snapshot.snapshotId, 'document-new:1');
+  assert.equal(agentSnapshotId, 'document-new:1');
+});
+
+test('the isolated final action rechecks sensitive focus immediately before typing', () => {
+  const start = source.indexOf('function requireSafeAgentTextAction(request)');
+  const end = source.indexOf('\nfunction currentAgentSnapshotTarget', start);
+  let sensitive = null;
+  const requireSafeText = vm.runInNewContext(
+    `(${source.slice(start, end).replace('function requireSafeAgentTextAction', 'function')})`,
+    { sensitiveFocusedField: () => sensitive },
+  );
+
+  assert.doesNotThrow(() => requireSafeText({ action: 'type' }));
+  sensitive = { kind: 'password' };
+  assert.throws(() => requireSafeText({ action: 'type' }), /password field/);
+  assert.throws(() => requireSafeText({ action: 'keypress', key: 'a' }), /password field/);
+  assert.doesNotThrow(() => requireSafeText({ action: 'keypress', key: 'Enter' }));
+
+  const actionStart = source.indexOf('async function runAgentAction(request)');
+  const actionEnd = source.indexOf('\nfunction clickAt', actionStart);
+  const action = source.slice(actionStart, actionEnd);
+  assert.match(action, /requireSafeAgentTextAction\(request\);\s*typeIntoFocused/);
+  assert.match(action, /requireSafeAgentTextAction\(request\);\s*pressKey/);
 });
 
 test('agent pointer resolution runs in the isolated preload and rejects viewport edges', () => {
@@ -178,10 +255,67 @@ test('agent pointer resolution runs in the isolated preload and rejects viewport
   const end = source.indexOf('\nfunction inspectAuthenticationIntent', start);
   const resolver = source.slice(start, end);
 
-  assert.match(resolver, /document\.querySelector\(request\.selector\)/);
+  assert.match(resolver, /currentAgentSnapshotTarget\(request\.ref, request\.selector\)/);
   assert.match(resolver, /target\.getBoundingClientRect\(\)/);
   assert.match(resolver, /point\.x >= window\.innerWidth/);
   assert.match(resolver, /point\.y >= window\.innerHeight/);
+});
+
+test('browser refs are leased to the exact snapshotted element', () => {
+  assert.match(source, /const agentDocumentId = crypto\.randomUUID\(\)/);
+  assert.match(source, /let agentSnapshotId = ''/);
+  assert.match(source, /const agentSnapshotTargets = new Map\(\)/);
+  assert.match(
+    source,
+    /agentSnapshotId = `\$\{agentDocumentId\}:\$\{String\(\+\+agentSnapshotSequence\)\}`/,
+  );
+  assert.match(source, /agentSnapshotTargets\.set\(ref, \{ element: el, selector \}\)/);
+  assert.match(source, /function currentAgentSnapshotTarget\(ref, selector\)/);
+  assert.match(source, /!target\.element\.isConnected/);
+  assert.match(source, /target\.element\.ownerDocument !== document/);
+  assert.match(source, /agentSnapshotTargets\.clear\(\)/);
+  assert.match(source, /native-browser-agent-snapshot-invalidated[\s\S]*invalidateAgentSnapshot/);
+});
+
+test('replacing an element with the same selector expires the old browser ref', () => {
+  const start = source.indexOf('function currentAgentSnapshotTarget(ref, selector)');
+  const end = source.indexOf('\nfunction requireCurrentAgentSnapshotTarget', start);
+  const document = {};
+  class Element {}
+  const snapshottedElement = Object.assign(new Element(), {
+    isConnected: true,
+    ownerDocument: document,
+  });
+  const replacementElement = Object.assign(new Element(), {
+    isConnected: true,
+    ownerDocument: document,
+  });
+  document.querySelector = () => replacementElement;
+  const agentSnapshotTargets = new Map([
+    ['@b-current', { element: snapshottedElement, selector: '#continue' }],
+  ]);
+  const currentTarget = vm.runInNewContext(
+    `(${source.slice(start, end).replace('function currentAgentSnapshotTarget', 'function')})`,
+    { agentSnapshotId: 'document:1', agentSnapshotTargets, document, Element },
+  );
+
+  assert.equal(currentTarget('@b-current', '#continue'), snapshottedElement);
+  snapshottedElement.isConnected = false;
+  assert.equal(currentTarget('@b-current', '#continue'), null);
+  assert.notEqual(currentTarget('@b-current', '#continue'), document.querySelector('#continue'));
+});
+
+test('agent scroll resolves a live nested scroller and observes movement before snapshot', () => {
+  const start = source.indexOf('function scrollPage(request)');
+  const end = source.indexOf('\nfunction safeSnapshot', start);
+  const scroll = source.slice(start, end);
+
+  assert.match(scroll, /request\.selector/);
+  assert.match(scroll, /requireCurrentAgentSnapshotTarget\(request\.ref, request\.selector\)/);
+  assert.match(scroll, /scrollTargetFor/);
+  assert.match(scroll, /target\.scrollBy/);
+  assert.match(scroll, /before/);
+  assert.match(source, /snapshot\.scrollResult = finishScrollAttempt\(scrollAttempt\)/);
 });
 
 test('browser snapshots prioritize live viewport refs before offscreen document refs', () => {
@@ -265,6 +399,7 @@ test('OAuth authentication intent includes the exact authoritative anchor destin
     closest: (selector) => (selector.includes('button') ? anchor : null),
     getAttribute: () => '',
   });
+  realm.currentAgentSnapshotTarget = () => anchor;
   realm.document = { querySelector: () => anchor };
   realm.authoritativeAuthenticationTarget = vm.runInNewContext(
     `(${source
@@ -279,12 +414,15 @@ test('OAuth authentication intent includes the exact authoritative anchor destin
     realm,
   );
 
-  assert.deepEqual(JSON.parse(JSON.stringify(inspect({ action: 'click', selector: '#oauth' }))), {
-    kind: 'oauth',
-    origin: 'https://app.example',
-    label: 'Continue with Google',
-    targetUrl: 'https://accounts.example/authorize?client=droidex',
-  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(inspect({ action: 'click', ref: '@b-current', selector: '#oauth' }))),
+    {
+      kind: 'oauth',
+      origin: 'https://app.example',
+      label: 'Continue with Google',
+      targetUrl: 'https://accounts.example/authorize?client=droidex',
+    },
+  );
 });
 
 test('browser snapshots stop scanning after a bounded number of DOM nodes', () => {

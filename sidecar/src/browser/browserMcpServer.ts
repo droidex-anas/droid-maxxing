@@ -347,13 +347,17 @@ export function createBrowserMcpServer(
           await manager.refresh(id);
           const context = manager.designContext(id);
           const refs = context.references;
-          const images = refs
-            .filter((r) => r.screenshot)
-            .map((r) => ({
-              type: 'image' as const,
-              data: r.screenshot!.base64,
-              mimeType: 'image/png' as const,
-            }));
+          const images = refs.flatMap((ref) =>
+            ref.screenshot
+              ? [
+                  {
+                    type: 'image' as const,
+                    data: ref.screenshot.base64,
+                    mimeType: 'image/png' as const,
+                  },
+                ]
+              : [],
+          );
           const result = jsonResult({
             ok: true,
             instruction: input.instruction,
@@ -421,6 +425,7 @@ function stateForTool(
     viewportMode: state.viewportMode,
     screenshotPath: state.screenshotPath,
     scroll: state.scroll,
+    scrollResult: state.scrollResult,
     canGoBack: state.canGoBack ?? false,
     canGoForward: state.canGoForward ?? false,
     refs: state.refs.map((ref) => ({

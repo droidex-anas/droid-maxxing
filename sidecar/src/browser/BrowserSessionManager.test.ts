@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   BrowserSessionManager,
   type BrowserRuntime,
+  type BrowserScrollAction,
   type BrowserSessionManagerOptions,
 } from './BrowserSessionManager.js';
 import type {
@@ -34,7 +35,14 @@ class FakeRuntime implements BrowserRuntime {
   hovers: { x: number; y: number; selector?: string }[] = [];
   refs: BrowserElementRef[] = [buttonRef()];
   selections: { selector: string; value: string }[] = [];
-  scrolls: { direction: ScrollDirection; pixels?: number; x?: number; y?: number }[] = [];
+  scrolls: {
+    direction: ScrollDirection;
+    pixels?: number;
+    x?: number;
+    y?: number;
+    selector?: string;
+    ref?: string;
+  }[] = [];
   screenshots: BrowserScreenshotOptions[] = [];
   captures: (BrowserBox | undefined)[] = [];
   viewport: BrowserViewport;
@@ -127,9 +135,21 @@ class FakeRuntime implements BrowserRuntime {
   async keypress() {
     return this.stateSnapshot();
   }
-  async scroll(direction: ScrollDirection, pixels?: number, x?: number, y?: number) {
-    this.scrolls.push({ direction, pixels, x, y });
-    return this.stateSnapshot();
+  async scroll(input: BrowserScrollAction) {
+    this.scrolls.push(input);
+    return {
+      ...this.stateSnapshot(),
+      scrollResult: {
+        x: 0,
+        y: input.direction === 'down' ? (input.pixels ?? 500) : 0,
+        moved: true,
+        atBoundary: false,
+        requested: {
+          x: 0,
+          y: input.direction === 'down' ? (input.pixels ?? 500) : -(input.pixels ?? 500),
+        },
+      },
+    };
   }
   async inspect(selector: string) {
     const ref = this.refs.find((item) => item.selector === selector);
@@ -431,9 +451,48 @@ test('untargeted scroll defers its point to the live native viewport', async () 
   await manager.scroll('m1', 'up', 200, 'agent', '@e1');
 
   assert.deepEqual(runtime.scrolls, [
-    { direction: 'down', pixels: 500, x: undefined, y: undefined },
-    { direction: 'up', pixels: 200, x: 50, y: 35 },
+    {
+      direction: 'down',
+      pixels: 500,
+      x: undefined,
+      y: undefined,
+      selector: undefined,
+      ref: undefined,
+    },
+    { direction: 'up', pixels: 200, x: 50, y: 35, selector: 'button', ref: '@e1' },
   ]);
+});
+
+test('scroll movement is cleared by the next non-scroll browser snapshot', async () => {
+  const manager = createManager();
+  await manager.open({ appSessionId: 'm1', url: 'http://127.0.0.1:1420/' });
+
+  const scrolled = await manager.scroll('m1', 'down', 500);
+  assert.deepEqual(scrolled.scrollResult, {
+    x: 0,
+    y: 500,
+    moved: true,
+    atBoundary: false,
+    requested: { x: 0, y: 500 },
+  });
+
+  const clicked = await manager.click({ appSessionId: 'm1', ref: '@e1' });
+  assert.equal(clicked.scrollResult, undefined);
+
+  const refreshed = await manager.refresh('m1');
+  assert.equal(refreshed.scrollResult, undefined);
+
+  await manager.scroll('m1', 'down', 300);
+  const opened = await manager.open({ appSessionId: 'm1', url: 'https://example.org' });
+  assert.equal(opened.scrollResult, undefined);
+
+  await manager.scroll('m1', 'down', 200);
+  const resized = await manager.resizeViewport({
+    appSessionId: 'm1',
+    viewport: { width: 900, height: 700, deviceScaleFactor: 1 },
+    viewportMode: 'custom',
+  });
+  assert.equal(resized.scrollResult, undefined);
 });
 
 test('user address-bar navigation keeps its provenance through the runtime boundary', async () => {

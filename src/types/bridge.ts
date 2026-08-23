@@ -372,6 +372,7 @@ export interface BrowserState {
   refs: BrowserElementRef[];
   canGoBack?: boolean;
   canGoForward?: boolean;
+  scrollResult?: BrowserScrollResult;
   agentCursor?: { x: number; y: number };
   error?: string;
 }
@@ -395,6 +396,15 @@ export interface BrowserNativeSnapshot {
   refs: BrowserElementRef[];
   canGoBack?: boolean;
   canGoForward?: boolean;
+  scrollResult?: BrowserScrollResult;
+}
+
+export interface BrowserScrollResult {
+  x: number;
+  y: number;
+  moved: boolean;
+  atBoundary: boolean;
+  requested: { x: number; y: number };
 }
 
 export interface BrowserElementInspection {
@@ -462,6 +472,7 @@ export interface BrowserNativeRequest {
   x?: number;
   y?: number;
   selector?: string;
+  ref?: string;
   text?: string;
   key?: string;
   direction?: BrowserScrollDirection;

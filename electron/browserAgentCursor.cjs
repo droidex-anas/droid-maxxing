@@ -1,38 +1,33 @@
-const BROWSER_AGENT_CURSOR_DEFAULT_STYLE = 'droidex';
-const BROWSER_AGENT_CURSOR_STYLES = Object.freeze(['dark', 'light', 'droidex']);
-const BROWSER_AGENT_CURSOR_DEFAULT_SIZE = 36;
-const BROWSER_AGENT_CURSOR_MIN_SIZE = 24;
-const BROWSER_AGENT_CURSOR_MAX_SIZE = 64;
-const CURSOR_VIEWBOX_SIZE = 32;
-const CURSOR_VIEWBOX_HOTSPOT = Object.freeze({ x: 6, y: 5 });
-const CURSOR_GLOW_PADDING = 24;
+const {
+  BROWSER_AGENT_CURSOR_DEFAULT_STYLE,
+  BROWSER_AGENT_CURSOR_STYLES,
+  CURSOR_GLOW_PADDING,
+  createBrowserAgentCursorDataUrl,
+  validateBrowserAgentCursorStyle,
+} = require('./browserAgentCursorDocument.cjs');
+const {
+  BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
+  BROWSER_AGENT_CURSOR_MAX_SIZE,
+  BROWSER_AGENT_CURSOR_MIN_SIZE,
+  browserBoundsEqual,
+  normalizeBrowserBounds,
+  normalizePoint,
+  pointInsideBounds,
+  scaleCursorHotspot,
+  validateBrowserAgentCursorSize,
+} = require('./browserAgentCursorGeometry.cjs');
+const {
+  canPresentOverlay,
+  isUsableWindow,
+  requireUsableWindow,
+} = require('./browserAgentCursorWindow.cjs');
+
 const CURSOR_FRAME_MS = 16;
-const CURSOR_MIN_MOVE_MS = 90;
-const CURSOR_MAX_MOVE_MS = 240;
+const CURSOR_MIN_MOVE_MS = 160;
+const CURSOR_MAX_MOVE_MS = 420;
 const BROWSER_AGENT_CURSOR_HOTSPOT = Object.freeze(
   scaleCursorHotspot(BROWSER_AGENT_CURSOR_DEFAULT_SIZE),
 );
-const CURSOR_PRESENTATIONS = Object.freeze({
-  dark: Object.freeze({
-    fill: '#3b3b3b',
-    fillOpacity: '1',
-    stroke: '#ffffff',
-    filter: 'drop-shadow(0 1px 1.5px rgba(0,0,0,.5))',
-  }),
-  light: Object.freeze({
-    fill: '#ffffff',
-    fillOpacity: '1',
-    stroke: '#3b3b3b',
-    filter: 'drop-shadow(0 1px 1.5px rgba(0,0,0,.5))',
-  }),
-  droidex: Object.freeze({
-    fill: '#303743',
-    fillOpacity: '.82',
-    stroke: '#dce1eb',
-    filter: 'drop-shadow(0 0 5px rgba(80,139,255,.75)) drop-shadow(0 0 12px rgba(80,139,255,.35))',
-  }),
-});
-
 function createBrowserAgentCursorController(options) {
   if (typeof options?.BrowserWindow !== 'function') {
     throw new Error('Browser agent cursor requires Electron BrowserWindow.');
@@ -42,8 +37,11 @@ function createBrowserAgentCursorController(options) {
   let generation = 0;
   let overlay = null;
   let overlayHost = null;
+  let overlayHostListeners = null;
   let overlayReady = null;
   let movementGeneration = 0;
+  let enabled = true;
+  const parkedPoints = new Map();
   let style = validateBrowserAgentCursorStyle(options.style ?? BROWSER_AGENT_CURSOR_DEFAULT_STYLE);
   let size = validateBrowserAgentCursorSize(options.size ?? BROWSER_AGENT_CURSOR_DEFAULT_SIZE);
 
@@ -52,37 +50,51 @@ function createBrowserAgentCursorController(options) {
     const hostWindow = requireUsableWindow(input?.hostWindow);
     const bounds = normalizeBrowserBounds(input?.bounds);
     if (attachment?.browserSessionId === browserSessionId && attachment.hostWindow === hostWindow) {
-      if (browserBoundsEqual(attachment.bounds, bounds)) return false;
+      if (browserBoundsEqual(attachment.bounds, bounds)) {
+        void restoreOverlayForAttachment(attachment);
+        return false;
+      }
       attachment.bounds = bounds;
       if (attachment.visible && attachment.point) {
         if (!pointInsideBounds(attachment.point, bounds)) hide(browserSessionId);
-        else positionOverlay(overlay, attachment);
+        else if (attachment.overlayVisible) positionOverlay(overlay, attachment);
+        else void restoreOverlayForAttachment(attachment);
       }
       return true;
     }
     generation += 1;
     movementGeneration += 1;
     hideOverlay();
+    const parkedPoint = parkedPoints.get(browserSessionId);
+    const point = parkedPoint && pointInsideBounds(parkedPoint, bounds) ? parkedPoint : null;
+    if (parkedPoint && !point) parkedPoints.delete(browserSessionId);
     attachment = {
       browserSessionId,
       hostWindow,
       bounds,
-      point: null,
-      visible: false,
+      point,
+      visible: Boolean(point),
+      overlayVisible: false,
     };
     ensureOverlay(hostWindow);
+    void restoreOverlayForAttachment(attachment);
     return true;
   }
 
   function setBounds(browserSessionId, value) {
     if (!attachment || attachment.browserSessionId !== browserSessionId) return false;
-    attachment.bounds = normalizeBrowserBounds(value);
+    const bounds = normalizeBrowserBounds(value);
+    if (browserBoundsEqual(attachment.bounds, bounds)) return true;
+    generation += 1;
+    movementGeneration += 1;
+    attachment.bounds = bounds;
     if (!attachment.visible || !attachment.point) return true;
     if (!pointInsideBounds(attachment.point, attachment.bounds)) {
       hide(browserSessionId);
       return false;
     }
-    positionOverlay(overlay, attachment);
+    if (attachment.overlayVisible) positionOverlay(overlay, attachment);
+    else void restoreOverlayForAttachment(attachment);
     return true;
   }
 
@@ -91,6 +103,14 @@ function createBrowserAgentCursorController(options) {
     if (!current || current.browserSessionId !== input?.browserSessionId) return false;
     const point = normalizePoint(input, current.bounds);
     if (!point || !isUsableWindow(current.hostWindow)) return false;
+    if (!enabled || !canPresentOverlay(current.hostWindow)) {
+      movementGeneration += 1;
+      current.point = point;
+      current.visible = true;
+      rememberPoint(current.browserSessionId, point);
+      hideOverlay();
+      return true;
+    }
     const expectedGeneration = generation;
     const window = ensureOverlay(current.hostWindow);
     const ready = await overlayReady;
@@ -109,19 +129,21 @@ function createBrowserAgentCursorController(options) {
     current.visible = true;
     if (!startPoint) {
       current.point = point;
-      positionOverlay(window, current);
-      window.showInactive();
+      rememberPoint(current.browserSessionId, point);
+      presentOverlay(window, current);
       return true;
     }
-    window.showInactive();
+    presentOverlay(window, current);
     return moveOverlay(window, current, startPoint, point, expectedGeneration);
   }
 
   function hide(browserSessionId) {
     if (!attachment || attachment.browserSessionId !== browserSessionId) return false;
+    generation += 1;
     movementGeneration += 1;
     attachment.visible = false;
     attachment.point = null;
+    parkedPoints.delete(browserSessionId);
     hideOverlay();
     return true;
   }
@@ -141,10 +163,55 @@ function createBrowserAgentCursorController(options) {
     return true;
   }
 
+  function park(input) {
+    const browserSessionId = normalizeBrowserSessionId(input?.browserSessionId);
+    const bounds = normalizeBrowserBounds(input?.bounds);
+    const point = normalizePoint(input, bounds);
+    if (!point) return false;
+    rememberPoint(browserSessionId, point);
+    if (attachment?.browserSessionId === browserSessionId) {
+      if (!pointInsideBounds(point, attachment.bounds)) return true;
+      attachment.point = point;
+      attachment.visible = true;
+      if (attachment.overlayVisible) positionOverlay(overlay, attachment);
+    }
+    return true;
+  }
+
+  function forget(browserSessionId) {
+    if (browserSessionId === undefined) {
+      generation += 1;
+      movementGeneration += 1;
+      parkedPoints.clear();
+      hideOverlay();
+      attachment = null;
+      return true;
+    }
+    const id = normalizeBrowserSessionId(browserSessionId);
+    const forgotPoint = parkedPoints.delete(id);
+    if (attachment?.browserSessionId !== id) return forgotPoint;
+    generation += 1;
+    movementGeneration += 1;
+    hideOverlay();
+    attachment = null;
+    return true;
+  }
+
+  function setEnabled(value) {
+    const nextEnabled = Boolean(value);
+    if (nextEnabled === enabled) return false;
+    enabled = nextEnabled;
+    movementGeneration += 1;
+    if (!enabled) hideOverlay();
+    else if (attachment) void restoreOverlayForAttachment(attachment);
+    return true;
+  }
+
   function destroy() {
     generation += 1;
     movementGeneration += 1;
     attachment = null;
+    parkedPoints.clear();
     destroyOverlay();
   }
 
@@ -158,6 +225,7 @@ function createBrowserAgentCursorController(options) {
 
     const window = overlay;
     overlayReady = loadCursorDocument(window, style);
+    void restoreOverlayForAttachment(attachment);
     return true;
   }
 
@@ -168,7 +236,7 @@ function createBrowserAgentCursorController(options) {
     if (!isUsableWindow(overlay)) return true;
     const dimension = cursorOverlayDimension(size);
     overlay.setSize(dimension, dimension, false);
-    if (attachment?.visible && attachment.point) positionOverlay(overlay, attachment);
+    if (attachment?.overlayVisible && attachment.point) positionOverlay(overlay, attachment);
     return true;
   }
 
@@ -205,9 +273,25 @@ function createBrowserAgentCursorController(options) {
     overlay = window;
     overlayHost = hostWindow;
     overlayReady = loadCursorDocument(window, style);
-    hostWindow.once?.('closed', () => {
-      if (overlayHost === hostWindow) destroyOverlay();
-    });
+    const onFocus = () => {
+      if (overlayHost === hostWindow && attachment?.hostWindow === hostWindow) {
+        void restoreOverlayForAttachment(attachment);
+      }
+    };
+    const onBlur = () => {
+      if (overlayHost === hostWindow) hideOverlay();
+    };
+    const onClosed = () => {
+      if (overlayHost !== hostWindow) return;
+      generation += 1;
+      movementGeneration += 1;
+      if (attachment?.hostWindow === hostWindow) attachment = null;
+      destroyOverlay();
+    };
+    hostWindow.on?.('focus', onFocus);
+    hostWindow.on?.('blur', onBlur);
+    hostWindow.once?.('closed', onClosed);
+    overlayHostListeners = { hostWindow, onBlur, onClosed, onFocus };
     return window;
   }
 
@@ -233,7 +317,7 @@ function createBrowserAgentCursorController(options) {
     const distance = Math.hypot(to.x - from.x, to.y - from.y);
     const durationMs = Math.min(
       CURSOR_MAX_MOVE_MS,
-      Math.max(CURSOR_MIN_MOVE_MS, Math.round(distance * 0.38)),
+      Math.max(CURSOR_MIN_MOVE_MS, Math.round(distance * 0.8)),
     );
     const frameCount = Math.max(2, Math.ceil(durationMs / CURSOR_FRAME_MS));
     const waitForFrame = options.waitForFrame ?? defaultWaitForFrame;
@@ -248,15 +332,75 @@ function createBrowserAgentCursorController(options) {
         return false;
       }
       const progress = frame / frameCount;
-      const eased = 1 - Math.pow(1 - progress, 3);
+      const eased =
+        progress < 0.5 ? 4 * Math.pow(progress, 3) : 1 - Math.pow(-2 * progress + 2, 3) / 2;
       current.point = {
         x: Math.round(from.x + (to.x - from.x) * eased),
         y: Math.round(from.y + (to.y - from.y) * eased),
       };
+      rememberPoint(current.browserSessionId, current.point);
       positionOverlay(window, current);
     }
     current.point = to;
+    rememberPoint(current.browserSessionId, to);
     return true;
+  }
+
+  async function restoreOverlayForAttachment(current) {
+    if (
+      !current?.visible ||
+      !current.point ||
+      attachment !== current ||
+      !enabled ||
+      !canPresentOverlay(current.hostWindow)
+    ) {
+      return false;
+    }
+    const expectedGeneration = generation;
+    const window = ensureOverlay(current.hostWindow);
+    const ready = await overlayReady;
+    if (
+      !ready ||
+      attachment !== current ||
+      generation !== expectedGeneration ||
+      overlay !== window ||
+      !canPresentOverlay(current.hostWindow)
+    ) {
+      return false;
+    }
+    if (
+      !current.visible ||
+      !current.point ||
+      !enabled ||
+      !pointInsideBounds(current.point, current.bounds)
+    ) {
+      return false;
+    }
+    presentOverlay(window, current);
+    return true;
+  }
+
+  function presentOverlay(window, current) {
+    if (
+      attachment !== current ||
+      !current.visible ||
+      !current.point ||
+      !enabled ||
+      !pointInsideBounds(current.point, current.bounds) ||
+      !canPresentOverlay(current.hostWindow)
+    ) {
+      return false;
+    }
+    positionOverlay(window, current);
+    if (!current.overlayVisible) {
+      window.showInactive();
+      current.overlayVisible = true;
+    }
+    return true;
+  }
+
+  function rememberPoint(browserSessionId, point) {
+    parkedPoints.set(browserSessionId, { x: point.x, y: point.y });
   }
 
   function positionOverlay(window, current) {
@@ -280,44 +424,35 @@ function createBrowserAgentCursorController(options) {
   }
 
   function hideOverlay() {
+    if (attachment) attachment.overlayVisible = false;
     if (isUsableWindow(overlay)) overlay.hide();
   }
 
   function destroyOverlay() {
     const window = overlay;
+    const listeners = overlayHostListeners;
     overlay = null;
     overlayHost = null;
+    overlayHostListeners = null;
     overlayReady = null;
+    listeners?.hostWindow.removeListener?.('focus', listeners.onFocus);
+    listeners?.hostWindow.removeListener?.('blur', listeners.onBlur);
+    listeners?.hostWindow.removeListener?.('closed', listeners.onClosed);
     if (isUsableWindow(window)) window.destroy();
   }
 
-  return { attach, destroy, detach, hide, setBounds, setSize, setStyle, show };
-}
-
-function validateBrowserAgentCursorStyle(value) {
-  if (!BROWSER_AGENT_CURSOR_STYLES.includes(value)) {
-    throw new Error('Browser agent cursor style must be dark, light, or droidex.');
-  }
-  return value;
-}
-
-function validateBrowserAgentCursorSize(value) {
-  if (
-    !Number.isInteger(value) ||
-    value < BROWSER_AGENT_CURSOR_MIN_SIZE ||
-    value > BROWSER_AGENT_CURSOR_MAX_SIZE
-  ) {
-    throw new Error(
-      `Browser agent cursor size must be an integer from ${BROWSER_AGENT_CURSOR_MIN_SIZE} to ${BROWSER_AGENT_CURSOR_MAX_SIZE} pixels.`,
-    );
-  }
-  return value;
-}
-
-function scaleCursorHotspot(size) {
   return {
-    x: Math.round((CURSOR_VIEWBOX_HOTSPOT.x / CURSOR_VIEWBOX_SIZE) * size),
-    y: Math.round((CURSOR_VIEWBOX_HOTSPOT.y / CURSOR_VIEWBOX_SIZE) * size),
+    attach,
+    destroy,
+    detach,
+    forget,
+    hide,
+    park,
+    setBounds,
+    setEnabled,
+    setSize,
+    setStyle,
+    show,
   };
 }
 
@@ -337,92 +472,6 @@ function normalizeBrowserSessionId(value) {
     throw new Error('Browser agent cursor requires a browser session ID.');
   }
   return value;
-}
-
-function requireUsableWindow(window) {
-  if (!isUsableWindow(window) || typeof window.getContentBounds !== 'function') {
-    throw new Error('Browser agent cursor requires a live host window.');
-  }
-  return window;
-}
-
-function isUsableWindow(window) {
-  try {
-    return Boolean(window && !window.isDestroyed());
-  } catch {
-    return false;
-  }
-}
-
-function normalizeBrowserBounds(value) {
-  const bounds = {
-    x: Number(value?.x),
-    y: Number(value?.y),
-    width: Number(value?.width),
-    height: Number(value?.height),
-  };
-  if (
-    !Number.isFinite(bounds.x) ||
-    !Number.isFinite(bounds.y) ||
-    !Number.isFinite(bounds.width) ||
-    !Number.isFinite(bounds.height) ||
-    bounds.width < 1 ||
-    bounds.height < 1
-  ) {
-    throw new Error('Browser agent cursor requires finite, positive browser bounds.');
-  }
-  return {
-    x: Math.round(bounds.x),
-    y: Math.round(bounds.y),
-    width: Math.round(bounds.width),
-    height: Math.round(bounds.height),
-  };
-}
-
-function normalizePoint(value, bounds) {
-  const point = { x: Number(value?.x), y: Number(value?.y) };
-  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return undefined;
-  point.x = Math.round(point.x);
-  point.y = Math.round(point.y);
-  return pointInsideBounds(point, bounds) ? point : undefined;
-}
-
-function pointInsideBounds(point, bounds) {
-  return point.x >= 0 && point.y >= 0 && point.x < bounds.width && point.y < bounds.height;
-}
-
-function browserBoundsEqual(left, right) {
-  return (
-    left.x === right.x &&
-    left.y === right.y &&
-    left.width === right.width &&
-    left.height === right.height
-  );
-}
-
-function createBrowserAgentCursorDataUrl(value) {
-  const style = validateBrowserAgentCursorStyle(value);
-  const presentation = CURSOR_PRESENTATIONS[style];
-  const html = `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
-<style>
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
-.cursor{position:absolute;inset:${CURSOR_GLOW_PADDING}px;width:calc(100% - ${CURSOR_GLOW_PADDING * 2}px);height:calc(100% - ${CURSOR_GLOW_PADDING * 2}px);filter:${presentation.filter}}
-</style>
-</head>
-<body>
-<!-- WhiteSur-cursors default geometry, GPL-3.0; DROIDEX modifies color, translucency, glow, and motion. See THIRD_PARTY_NOTICES.md. -->
-<svg class="cursor" aria-hidden="true" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <g transform="matrix(0.99994875,0,0,1.0015274,-0.93555,0.99999984)">
-    <path d="m 6.9356,4 v 14 l 3.1328,-3.8203 2.0664,4.9863 a 1.0001,1.0001 0 1 0 1.8477,-0.76562 l -2.1113,-5.0957 4.3789,0.0098 z" fill="${presentation.fill}" fill-opacity="${presentation.fillOpacity}" stroke="${presentation.stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  </g>
-</svg>
-</body>
-</html>`;
-  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 module.exports = {

@@ -154,7 +154,7 @@ function createNativeBrowserHostController(options) {
     options.beforeDispose?.(entry);
     if (attachedBrowserSessionId === entry.browserSessionId) attachedBrowserSessionId = null;
     disposeBrowserEntryView(entry, {
-      detachCursor: options.detachCursor,
+      detachCursor: forget ? options.forgetCursor : options.detachCursor,
       revokePermissions: options.revokePermissions,
       removeView,
     });
@@ -226,7 +226,6 @@ function createNativeBrowserHostController(options) {
   }
 
   function closeAll(forget) {
-    options.detachCursor?.();
     for (const entry of [...registry.values()]) disposeEntry(entry, forget);
     if (forget) registry.clear();
     attachedBrowserSessionId = null;

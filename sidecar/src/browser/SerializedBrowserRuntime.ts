@@ -1,4 +1,8 @@
-import type { BrowserInputSource, BrowserRuntime } from './BrowserSessionManager.js';
+import type {
+  BrowserInputSource,
+  BrowserRuntime,
+  BrowserScrollAction,
+} from './BrowserSessionManager.js';
 import type {
   BrowserBox,
   BrowserConsoleEvent,
@@ -7,7 +11,6 @@ import type {
   BrowserScreenshotOptions,
   BrowserSnapshot,
   BrowserViewport,
-  ScrollDirection,
 } from './types.js';
 
 const CLOSED_MESSAGE = 'Browser session closed before the action completed.';
@@ -55,16 +58,16 @@ export class SerializedBrowserRuntime implements BrowserRuntime {
     return this.actions.run(() => this.runtime.snapshot());
   }
 
-  click(x: number, y: number, selector?: string): Promise<BrowserSnapshot> {
-    return this.actions.run(() => this.runtime.click(x, y, selector));
+  click(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot> {
+    return this.actions.run(() => this.runtime.click(x, y, selector, ref));
   }
 
-  hover(x: number, y: number, selector?: string): Promise<BrowserSnapshot> {
-    return this.actions.run(() => this.runtime.hover(x, y, selector));
+  hover(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot> {
+    return this.actions.run(() => this.runtime.hover(x, y, selector, ref));
   }
 
-  selectOption(selector: string, value: string): Promise<BrowserSnapshot> {
-    return this.actions.run(() => this.runtime.selectOption(selector, value));
+  selectOption(selector: string, value: string, ref?: string): Promise<BrowserSnapshot> {
+    return this.actions.run(() => this.runtime.selectOption(selector, value, ref));
   }
 
   type(text: string): Promise<BrowserSnapshot> {
@@ -75,17 +78,12 @@ export class SerializedBrowserRuntime implements BrowserRuntime {
     return this.actions.run(() => this.runtime.keypress(key));
   }
 
-  scroll(
-    direction: ScrollDirection,
-    pixels?: number,
-    x?: number,
-    y?: number,
-  ): Promise<BrowserSnapshot> {
-    return this.actions.run(() => this.runtime.scroll(direction, pixels, x, y));
+  scroll(input: BrowserScrollAction): Promise<BrowserSnapshot> {
+    return this.actions.run(() => this.runtime.scroll(input));
   }
 
-  inspect(selector: string): Promise<BrowserElementInspection> {
-    return this.actions.run(() => this.runtime.inspect(selector));
+  inspect(selector: string, ref?: string): Promise<BrowserElementInspection> {
+    return this.actions.run(() => this.runtime.inspect(selector, ref));
   }
 
   network(clear?: boolean): Promise<BrowserNetworkEvent[]> {

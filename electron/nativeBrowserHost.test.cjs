@@ -218,6 +218,7 @@ test('host controller owns attachment moves and preserves hidden session entries
 
 test('host controller suspend disposes views but retains entries and close forgets them', () => {
   const closed = [];
+  const cursorEvents = [];
   const hidden = createHost();
   hidden.setContentSize = () => {};
   hidden.close = () => {};
@@ -227,6 +228,8 @@ test('host controller suspend disposes views but retains entries and close forge
     getMainWindow: createHost,
     isViewUsable: Boolean,
     createHiddenWindow: () => hidden,
+    detachCursor: (browserSessionId) => cursorEvents.push(['detach', browserSessionId]),
+    forgetCursor: (browserSessionId) => cursorEvents.push(['forget', browserSessionId]),
     revokePermissions: () => closed.push('revoke'),
   });
   const makeEntry = (browserSessionId) => ({
@@ -247,7 +250,12 @@ test('host controller suspend disposes views but retains entries and close forge
   assert.equal(controller.hasEntry('browser-1'), true);
   assert.equal(controller.getEntry('browser-1').view, null);
   assert.deepEqual(closed, ['revoke', 'close']);
+  assert.deepEqual(cursorEvents, [['detach', 'browser-1']]);
 
   controller.closeAll();
   assert.equal(controller.hasEntry('browser-1'), false);
+  assert.deepEqual(cursorEvents, [
+    ['detach', 'browser-1'],
+    ['forget', 'browser-1'],
+  ]);
 });

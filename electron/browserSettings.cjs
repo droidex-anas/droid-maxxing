@@ -395,10 +395,6 @@ class BrowserSettingsController {
     this.permissions.revokeForContents(contents);
   }
 
-  shouldShowAgentCursor() {
-    return this.requireSettings().showAgentCursor;
-  }
-
   agentCursorStyle() {
     return this.requireSettings().agentCursorStyle;
   }

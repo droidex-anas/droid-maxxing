@@ -52,22 +52,26 @@ export interface BrowserRuntime {
   screenshot(options?: BrowserScreenshotOptions): Promise<string>;
   capture(box?: BrowserBox, options?: BrowserScreenshotOptions): Promise<string>;
   snapshot(): Promise<BrowserSnapshot>;
-  click(x: number, y: number, selector?: string): Promise<BrowserSnapshot>;
-  hover(x: number, y: number, selector?: string): Promise<BrowserSnapshot>;
-  selectOption(selector: string, value: string): Promise<BrowserSnapshot>;
+  click(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot>;
+  hover(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot>;
+  selectOption(selector: string, value: string, ref?: string): Promise<BrowserSnapshot>;
   type(text: string): Promise<BrowserSnapshot>;
   keypress(key: string): Promise<BrowserSnapshot>;
-  scroll(
-    direction: ScrollDirection,
-    pixels?: number,
-    x?: number,
-    y?: number,
-  ): Promise<BrowserSnapshot>;
-  inspect(selector: string): Promise<BrowserElementInspection>;
+  scroll(input: BrowserScrollAction): Promise<BrowserSnapshot>;
+  inspect(selector: string, ref?: string): Promise<BrowserElementInspection>;
   network(clear?: boolean): Promise<BrowserNetworkEvent[]>;
   console(clear?: boolean): Promise<BrowserConsoleEvent[]>;
   fillCredentials?(): Promise<BrowserSnapshot>;
   close(): Promise<void>;
+}
+
+export interface BrowserScrollAction {
+  direction: ScrollDirection;
+  pixels?: number;
+  x?: number;
+  y?: number;
+  selector?: string;
+  ref?: string;
 }
 
 interface ManagedBrowserSession {
@@ -120,6 +124,7 @@ export class BrowserSessionManager {
       ...snapshot,
       viewport: nextViewport,
       viewportMode: input.viewportMode ?? session.state.viewportMode,
+      scrollResult: snapshot.scrollResult,
     };
     this.emitUpdated(session.state);
     return session.state;
@@ -202,6 +207,7 @@ export class BrowserSessionManager {
       viewport: input.viewport,
       viewportMode: input.viewportMode,
       refs: [],
+      scrollResult: undefined,
     };
     await session.runtime.setViewport(input.viewport, input.source);
     session.state = nextState;
@@ -219,7 +225,7 @@ export class BrowserSessionManager {
     const session = this.requireSession(input.appSessionId);
     const target = input.ref ? this.requireRef(session, input.ref) : undefined;
     const point = target ? centerOfBrowserRef(target) : requireBrowserPoint(input);
-    const snapshot = await session.runtime.click(point.x, point.y, target?.selector);
+    const snapshot = await session.runtime.click(point.x, point.y, target?.selector, target?.ref);
     return this.updateFromSnapshot(session, snapshot);
   }
 
@@ -232,14 +238,14 @@ export class BrowserSessionManager {
     const session = this.requireSession(input.appSessionId);
     const target = input.ref ? this.requireRef(session, input.ref) : undefined;
     const point = target ? centerOfBrowserRef(target) : requireBrowserPoint(input);
-    const snapshot = await session.runtime.hover(point.x, point.y, target?.selector);
+    const snapshot = await session.runtime.hover(point.x, point.y, target?.selector, target?.ref);
     return this.updateFromSnapshot(session, snapshot);
   }
 
   async selectOption(appSessionId: string, ref: string, value: string): Promise<BrowserState> {
     const session = this.requireSession(appSessionId);
     const target = this.requireRef(session, ref);
-    const snapshot = await session.runtime.selectOption(target.selector, value);
+    const snapshot = await session.runtime.selectOption(target.selector, value, target.ref);
     return this.updateFromSnapshot(session, snapshot);
   }
 
@@ -275,8 +281,16 @@ export class BrowserSessionManager {
     ref?: string,
   ): Promise<BrowserState> {
     const session = this.requireSession(appSessionId);
-    const point = ref ? centerOfBrowserRef(this.requireRef(session, ref)) : undefined;
-    const snapshot = await session.runtime.scroll(direction, pixels, point?.x, point?.y);
+    const target = ref ? this.requireRef(session, ref) : undefined;
+    const point = target ? centerOfBrowserRef(target) : undefined;
+    const snapshot = await session.runtime.scroll({
+      direction,
+      pixels,
+      x: point?.x,
+      y: point?.y,
+      selector: target?.selector,
+      ref: target?.ref,
+    });
     return this.updateFromSnapshot(session, snapshot);
   }
 
@@ -289,7 +303,7 @@ export class BrowserSessionManager {
       ? this.requireRef(session, input.ref).selector
       : input.selector?.trim();
     if (!selector) throw new Error('Browser inspection requires a ref or selector.');
-    return session.runtime.inspect(selector);
+    return session.runtime.inspect(selector, input.ref);
   }
 
   async network(appSessionId: string, clear = false): Promise<BrowserNetworkEvent[]> {
@@ -375,7 +389,7 @@ export class BrowserSessionManager {
   async close(appSessionId: string): Promise<void> {
     const session = this.resolveSession(appSessionId);
     if (!session) return;
-    this.sessions.delete(keyFor(appSessionId));
+    this.sessions.delete(appSessionId);
     await session.runtime.close();
   }
 
@@ -390,8 +404,7 @@ export class BrowserSessionManager {
     viewport?: BrowserViewport,
     viewportMode?: BrowserViewportMode,
   ): ManagedBrowserSession {
-    const key = keyFor(appSessionId);
-    const existing = this.sessions.get(key);
+    const existing = this.sessions.get(appSessionId);
     if (existing) return existing;
     const initialViewport = viewport ?? DEFAULT_BROWSER_VIEWPORT;
     const initialViewportMode = viewportMode ?? 'fit';
@@ -431,7 +444,7 @@ export class BrowserSessionManager {
       }),
       state,
     };
-    this.sessions.set(keyFor(appSessionId), session);
+    this.sessions.set(appSessionId, session);
     return session;
   }
 
@@ -442,7 +455,7 @@ export class BrowserSessionManager {
   }
 
   private resolveSession(appSessionId: string): ManagedBrowserSession | undefined {
-    return this.sessions.get(keyFor(appSessionId));
+    return this.sessions.get(appSessionId);
   }
 
   private stateFromSnapshot(
@@ -452,6 +465,7 @@ export class BrowserSessionManager {
     return {
       ...session.state,
       ...snapshot,
+      scrollResult: snapshot.scrollResult,
     };
   }
 
@@ -460,6 +474,7 @@ export class BrowserSessionManager {
     return {
       ...session.state,
       ...snapshot,
+      scrollResult: snapshot.scrollResult,
     };
   }
 
@@ -484,8 +499,4 @@ export class BrowserSessionManager {
   private emitUpdated(state: BrowserState): void {
     this.options.emit?.({ type: 'browser.updated', state });
   }
-}
-
-function keyFor(appSessionId: string): string {
-  return appSessionId;
 }

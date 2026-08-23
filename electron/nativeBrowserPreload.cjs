@@ -63,6 +63,10 @@ let textDragStart = null;
 let textRange = null;
 let clearTimer = null;
 let trustedPhysicalFormActivation = null;
+const agentDocumentId = crypto.randomUUID();
+let agentSnapshotSequence = 0;
+let agentSnapshotId = '';
+const agentSnapshotTargets = new Map();
 // True between submitting a design prompt and the main process acking that it
 // has captured the annotated region. While set, all design interactions are
 // frozen so the user cannot move/redraw/scroll mid-capture and produce a
@@ -201,6 +205,7 @@ textHighlights.setAttribute(INTERNAL_ATTR, '1');
 penSvg.setAttribute(INTERNAL_ATTR, '1');
 contextBridge.exposeInMainWorld('__DROIDMAXX_APPLY_DESIGN_STATE', applyState);
 contextBridge.exposeInMainWorld('__DROIDMAXX_AGENT_ACTION', runAgentAction);
+contextBridge.exposeInMainWorld('__DROIDMAXX_AGENT_CONTEXT', browserAgentActionContext);
 contextBridge.exposeInMainWorld('__DROIDMAXX_RESOLVE_POINTER', resolveAgentPointer);
 // Credential autofill is driven entirely from the main process: the secret
 // arrives here only to be written into the page's inputs and is never returned
@@ -215,6 +220,9 @@ ipcRenderer.on('native-browser-design-prompt-sent', (_event, payload) => {
   // from a superseded prompt must not clear a newer pending capture.
   if (pendingCaptureId === null || !payload || payload.captureId !== pendingCaptureId) return;
   finishCapture();
+});
+ipcRenderer.on('native-browser-agent-snapshot-invalidated', () => {
+  invalidateAgentSnapshot();
 });
 
 function finishCapture() {
@@ -609,8 +617,8 @@ function resolveAgentPointer(request) {
   try {
     let point;
     if (typeof request?.selector === 'string' && request.selector) {
-      const target = document.querySelector(request.selector);
-      if (!(target instanceof Element)) return null;
+      const target = currentAgentSnapshotTarget(request.ref, request.selector);
+      if (!target) return null;
       target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
       const box = target.getBoundingClientRect();
       if (box.width <= 0 || box.height <= 0) return null;
@@ -643,7 +651,8 @@ function inspectAuthenticationIntent(request) {
     if (request?.action !== 'click' && !isEnter) return null;
     let target = isEnter ? document.activeElement : null;
     if (!target && typeof request?.selector === 'string') {
-      target = document.querySelector(request.selector);
+      target = currentAgentSnapshotTarget(request.ref, request.selector);
+      if (!target) return null;
     }
     if (!target) target = document.elementFromPoint(Number(request?.x), Number(request?.y));
     if (!(target instanceof Element)) return null;
@@ -790,22 +799,35 @@ function isVisible(el) {
 async function runAgentAction(request) {
   try {
     const action = request && request.action;
+    if (action !== 'snapshot') requireCurrentAgentActionContext(request.__droidexContext);
+    let scrollAttempt;
     if (action === 'inspect') {
       return sendAgent({
         requestId: request.requestId,
         ok: true,
-        inspection: inspectElement(request.selector),
+        inspection: inspectElement(request.selector, request.ref),
       });
     }
-    if (action === 'click') clickAt(Number(request.x), Number(request.y));
-    else if (action === 'selectOption') selectOption(request.selector, request.text || '');
-    else if (action === 'type') typeIntoFocused(request.text || '');
-    else if (action === 'keypress') pressKey(request.key || '');
-    else if (action === 'scroll')
-      scrollPage(request.direction || 'down', Number(request.pixels || 500));
+    if (action === 'click' || action === 'hover') {
+      const target = request.selector
+        ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
+        : undefined;
+      if (action === 'click') clickAt(Number(request.x), Number(request.y), target);
+      else hoverAt(Number(request.x), Number(request.y), target);
+    } else if (action === 'selectOption')
+      selectOption(request.selector, request.text || '', request.ref);
+    else if (action === 'type') {
+      requireSafeAgentTextAction(request);
+      typeIntoFocused(request.text || '');
+    } else if (action === 'keypress') {
+      requireSafeAgentTextAction(request);
+      pressKey(request.key || '');
+    } else if (action === 'scroll') scrollAttempt = scrollPage(request);
     else if (action !== 'snapshot') throw new Error(`Unsupported browser action: ${action}`);
     await settle();
-    return sendAgent({ requestId: request.requestId, ok: true, snapshot: pageSnapshot() });
+    const snapshot = pageSnapshot();
+    if (scrollAttempt) snapshot.scrollResult = finishScrollAttempt(scrollAttempt);
+    return sendAgent({ requestId: request.requestId, ok: true, snapshot });
   } catch (err) {
     return sendAgent({
       requestId: request && request.requestId,
@@ -816,15 +838,25 @@ async function runAgentAction(request) {
   }
 }
 
-function clickAt(x, y) {
+function clickAt(x, y, expectedTarget) {
   const target = document.elementFromPoint(x, y);
   if (!target) throw new Error(`No element at ${x},${y}`);
+  requirePointOnExpectedTarget(target, expectedTarget);
   target.focus && target.focus();
   for (const type of ['mousedown', 'mouseup', 'click']) {
     target.dispatchEvent(
       new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }),
     );
   }
+}
+
+function hoverAt(x, y, expectedTarget) {
+  const target = document.elementFromPoint(x, y);
+  if (!target) throw new Error(`No element at ${x},${y}`);
+  requirePointOnExpectedTarget(target, expectedTarget);
+  target.dispatchEvent(
+    new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+  );
 }
 
 function typeIntoFocused(text) {
@@ -851,9 +883,9 @@ function typeIntoFocused(text) {
   throw new Error('Focused element is not text-editable.');
 }
 
-function selectOption(selector, value) {
+function selectOption(selector, value, ref) {
   if (!selector) throw new Error('Select option requires a target selector.');
-  const target = document.querySelector(selector);
+  const target = requireCurrentAgentSnapshotTarget(ref, selector);
   if (!(target instanceof HTMLSelectElement)) {
     throw new Error('Target is not a select element.');
   }
@@ -881,10 +913,38 @@ function pressKey(key) {
   active.dispatchEvent(new KeyboardEvent('keyup', { key: value, bubbles: true, cancelable: true }));
 }
 
-function scrollPage(direction, pixels) {
+function scrollPage(request) {
+  const direction = request.direction || 'down';
+  const pixels = Math.max(1, Math.round(Number(request.pixels) || 500));
   const dx = direction === 'left' ? -pixels : direction === 'right' ? pixels : 0;
   const dy = direction === 'up' ? -pixels : direction === 'down' ? pixels : 0;
-  window.scrollBy({ left: dx, top: dy, behavior: 'auto' });
+  const target = scrollTargetFor(request, dx !== 0);
+  const before = { left: target.scrollLeft, top: target.scrollTop };
+  target.scrollBy({ left: dx, top: dy, behavior: 'auto' });
+  return { target, before, requested: { x: dx, y: dy } };
+}
+
+function finishScrollAttempt(attempt) {
+  const x = Math.round(attempt.target.scrollLeft);
+  const y = Math.round(attempt.target.scrollTop);
+  const moved = x !== attempt.before.left || y !== attempt.before.top;
+  return { x, y, moved, atBoundary: !moved, requested: attempt.requested };
+}
+
+function scrollTargetFor(request, horizontal) {
+  let target = request.selector
+    ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
+    : document.elementFromPoint(Number(request.x), Number(request.y));
+  while (target instanceof Element) {
+    const style = getComputedStyle(target);
+    const overflow = horizontal ? style.overflowX : style.overflowY;
+    const canMove = horizontal
+      ? target.scrollWidth > target.clientWidth
+      : target.scrollHeight > target.clientHeight;
+    if (canMove && /(auto|scroll|overlay)/.test(overflow)) return target;
+    target = target.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
 }
 
 function safeSnapshot() {
@@ -896,6 +956,8 @@ function safeSnapshot() {
 }
 
 function pageSnapshot() {
+  agentSnapshotId = `${agentDocumentId}:${String(++agentSnapshotSequence)}`;
+  agentSnapshotTargets.clear();
   return {
     url: agentVisibleUrl(),
     title: document.title,
@@ -942,8 +1004,10 @@ function refFor(el) {
       directText(el) ||
       text,
   );
+  const ref = browserRefForSelector(selector);
+  agentSnapshotTargets.set(ref, { element: el, selector });
   return {
-    ref: `@b-${stableHash(selector)}`,
+    ref,
     selector,
     tagName: el.tagName.toLowerCase(),
     role: roleFor(el) || undefined,
@@ -954,9 +1018,80 @@ function refFor(el) {
   };
 }
 
-function inspectElement(selector) {
+function browserRefForSelector(selector) {
+  return `@b-${agentSnapshotId}-${stableHash(selector)}`;
+}
+
+function browserAgentActionContext() {
+  return {
+    documentId: agentDocumentId,
+    snapshotId: agentSnapshotId,
+    urlHash: stableHash(location.href),
+  };
+}
+
+function requireCurrentAgentActionContext(expected) {
+  const current = browserAgentActionContext();
+  if (
+    !expected ||
+    expected.documentId !== current.documentId ||
+    expected.snapshotId !== current.snapshotId ||
+    expected.urlHash !== current.urlHash
+  ) {
+    throw new Error('The page changed before the browser action completed. No input was sent.');
+  }
+}
+
+function requireSafeAgentTextAction(request) {
+  const needsCheck =
+    request.action === 'type' ||
+    (request.action === 'keypress' && !['Enter', 'Tab', 'Escape'].includes(request.key));
+  if (!needsCheck) return;
+  const sensitive = sensitiveFocusedField();
+  if (sensitive?.kind) {
+    throw new Error(
+      `DROIDEX will not send agent-authored text into a ${sensitive.kind} field. Use a saved login, OAuth/passkey, or enter it yourself.`,
+    );
+  }
+}
+
+function currentAgentSnapshotTarget(ref, selector) {
+  if (!agentSnapshotId || !ref || !selector) return null;
+  const target = agentSnapshotTargets.get(ref);
+  if (
+    !target ||
+    target.selector !== selector ||
+    !(target.element instanceof Element) ||
+    !target.element.isConnected ||
+    target.element.ownerDocument !== document
+  ) {
+    return null;
+  }
+  return target.element;
+}
+
+function requireCurrentAgentSnapshotTarget(ref, selector) {
+  const target = currentAgentSnapshotTarget(ref, selector);
+  if (!target) throw new Error('Browser target belongs to an expired page snapshot.');
+  return target;
+}
+
+function requirePointOnExpectedTarget(actualTarget, expectedTarget) {
+  if (expectedTarget && actualTarget !== expectedTarget && !expectedTarget.contains(actualTarget)) {
+    throw new Error('Browser target moved before the action completed. Refresh the snapshot.');
+  }
+}
+
+function invalidateAgentSnapshot() {
+  agentSnapshotId = '';
+  agentSnapshotTargets.clear();
+}
+
+function inspectElement(selector, ref) {
   if (!selector) throw new Error('Element inspection requires a selector.');
-  const el = document.querySelector(selector);
+  const el = ref
+    ? requireCurrentAgentSnapshotTarget(ref, selector)
+    : document.querySelector(selector);
   if (!el) throw new Error('The inspected browser element is no longer available.');
   const rect = el.getBoundingClientRect();
   const text = safeElementText(el, 1000);

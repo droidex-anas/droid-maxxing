@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { BrowserNativeRequest, BrowserNativeResult } from '../protocol.js';
-import type { BrowserInputSource, BrowserRuntime } from './BrowserSessionManager.js';
+import type {
+  BrowserInputSource,
+  BrowserRuntime,
+  BrowserScrollAction,
+} from './BrowserSessionManager.js';
 import type {
   BrowserBox,
   BrowserElementInspection,
@@ -9,7 +13,6 @@ import type {
   BrowserScreenshotOptions,
   BrowserSnapshot,
   BrowserViewport,
-  ScrollDirection,
 } from './types.js';
 
 export interface NativeBrowserRuntimeOptions {
@@ -74,16 +77,16 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     return this.snapshotFrom(await this.send({ action: 'snapshot' }));
   }
 
-  async click(x: number, y: number, selector?: string): Promise<BrowserSnapshot> {
-    return this.action({ action: 'click', x, y, selector });
+  async click(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot> {
+    return this.action({ action: 'click', x, y, selector, ref });
   }
 
-  async hover(x: number, y: number, selector?: string): Promise<BrowserSnapshot> {
-    return this.action({ action: 'hover', x, y, selector });
+  async hover(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot> {
+    return this.action({ action: 'hover', x, y, selector, ref });
   }
 
-  async selectOption(selector: string, value: string): Promise<BrowserSnapshot> {
-    return this.action({ action: 'selectOption', selector, text: value });
+  async selectOption(selector: string, value: string, ref?: string): Promise<BrowserSnapshot> {
+    return this.action({ action: 'selectOption', selector, ref, text: value });
   }
 
   async type(text: string): Promise<BrowserSnapshot> {
@@ -94,17 +97,12 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     return this.action({ action: 'keypress', key });
   }
 
-  async scroll(
-    direction: ScrollDirection,
-    pixels?: number,
-    x?: number,
-    y?: number,
-  ): Promise<BrowserSnapshot> {
-    return this.action({ action: 'scroll', direction, pixels, x, y });
+  async scroll(input: BrowserScrollAction): Promise<BrowserSnapshot> {
+    return this.action({ action: 'scroll', ...input });
   }
 
-  async inspect(selector: string): Promise<BrowserElementInspection> {
-    const result = await this.send({ action: 'inspect', selector });
+  async inspect(selector: string, ref?: string): Promise<BrowserElementInspection> {
+    const result = await this.send({ action: 'inspect', selector, ref });
     if (!result.ok) throw new Error(result.error ?? 'Native browser inspection failed.');
     if (!result.inspection) throw new Error('Native browser returned no element inspection.');
     return result.inspection;
@@ -127,7 +125,7 @@ export class NativeBrowserRuntime implements BrowserRuntime {
   }
 
   async close(): Promise<void> {
-    await this.send({ action: 'close' }).catch(() => {});
+    await this.send({ action: 'close' }).catch(() => undefined);
   }
 
   private async action(

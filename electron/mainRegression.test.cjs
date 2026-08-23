@@ -388,8 +388,59 @@ test('same browser navigation preserves the parked agent cursor', () => {
   const handler = mainSource.slice(handlerStart, handlerEnd);
 
   assert.doesNotMatch(handler, /browserAgentCursor\.hide/);
-  assert.match(handler, /entry\.documentGeneration \+= 1/);
+  assert.match(
+    handler,
+    /if \(entry\.view !== view \|\| !isMainFrame\) return;\s*entry\.documentGeneration \+= 1;\s*if \(isInPlace\)/,
+  );
   assert.match(handler, /revokePermissionsForNavigation/);
+});
+
+test('agent interactions pin the page generation before any authentication policy awaits', () => {
+  const actionStart = mainSource.indexOf(
+    'async function runNativeBrowserAgentAction(request, bounds)',
+  );
+  const actionEnd = mainSource.indexOf(
+    '\nasync function authorizeNativeBrowserAuthentication',
+    actionStart,
+  );
+  const action = mainSource.slice(actionStart, actionEnd);
+  const captureIndex = action.indexOf('const actionDocumentGeneration = entry.documentGeneration;');
+  const authorizationIndex = action.indexOf(
+    'await authorizeNativeBrowserAuthentication(entry, contents, request);',
+  );
+  const contextIndex = action.indexOf("'window.__DROIDMAXX_AGENT_CONTEXT?.();'");
+  const sensitiveIndex = action.indexOf(
+    'await blockBrowserAgentSensitiveTyping(contents, request);',
+  );
+
+  assert.ok(captureIndex >= 0 && captureIndex < authorizationIndex);
+  assert.ok(captureIndex < contextIndex && contextIndex < authorizationIndex);
+  assert.ok(authorizationIndex < sensitiveIndex);
+  assert.match(action.slice(authorizationIndex, sensitiveIndex), /assertCurrentActionTarget\(\);/);
+  assert.match(
+    action.slice(sensitiveIndex),
+    /assertCurrentActionTarget\(\);\s*const execution = executeBrowserAgentInteraction/,
+  );
+  assert.match(action, /isCurrent: isCurrentActionTarget,\s*pageContext,/);
+});
+
+test('a snapshot can recreate an invalidated in-page navigation lease', () => {
+  const actionStart = mainSource.indexOf(
+    'async function runNativeBrowserAgentAction(request, bounds)',
+  );
+  const actionEnd = mainSource.indexOf(
+    '\nasync function authorizeNativeBrowserAuthentication',
+    actionStart,
+  );
+  const action = mainSource.slice(actionStart, actionEnd);
+  const snapshotIndex = action.indexOf("if (request.action === 'snapshot')");
+  const contextIndex = action.indexOf("'window.__DROIDMAXX_AGENT_CONTEXT?.();'");
+
+  assert.ok(snapshotIndex >= 0 && snapshotIndex < contextIndex);
+  assert.match(
+    action.slice(snapshotIndex, contextIndex),
+    /return await snapshotNativeBrowserAfterNavigation\(contents, request\)/,
+  );
 });
 
 test('visible open delegates its only attach to openNativeBrowser', () => {

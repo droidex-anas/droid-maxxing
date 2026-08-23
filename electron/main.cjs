@@ -157,6 +157,7 @@ const nativeBrowserHost = createNativeBrowserHostController({
   getMainWindow: () => mainWindow,
   isViewUsable: isBrowserViewUsable,
   detachCursor: (browserSessionId) => browserAgentCursor.detach(browserSessionId),
+  forgetCursor: (browserSessionId) => browserAgentCursor.forget(browserSessionId),
   revokePermissions: (contents) => browserSettings.revokePermissionsForContents(contents),
   beforeDispose: (entry) => {
     invalidatePendingAgentNavigation(entry);
@@ -224,9 +225,7 @@ const browserSettings = createBrowserSettingsController({
   suspendBrowsers: () => suspendAllNativeBrowsers(),
   applyAgentCursorStyle: (style) => browserAgentCursor.setStyle(style),
   applyAgentCursorSize: (size) => browserAgentCursor.setSize(size),
-  applyAgentCursorVisibility: (isVisible) => {
-    if (!isVisible) browserAgentCursor.detach();
-  },
+  applyAgentCursorVisibility: (isVisible) => browserAgentCursor.setEnabled(isVisible),
   getWebAuthnCapability: () => browserWebAuthn.capability(),
   clearBrowserDiagnostics: () => clearAllNativeBrowserDiagnostics(),
   isNativeBrowserContents: (contents) => Boolean(findNativeBrowserEntryForWebContents(contents)),
@@ -1142,9 +1141,11 @@ function ensureNativeBrowserView(browserSessionId) {
     if (entry.state.designMode) applyNativeBrowserDesignState(entry);
   });
   contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (entry.view === view && isMainFrame && !isInPlace) {
+    if (entry.view !== view || !isMainFrame) return;
+    entry.documentGeneration += 1;
+    if (isInPlace) contents.send('native-browser-agent-snapshot-invalidated');
+    else {
       entry.trustedUserNavigation = null;
-      entry.documentGeneration += 1;
       entry.authenticationCapability = null;
       entry.authenticationPopupCapability = null;
       browserSettings.revokePermissionsForNavigation(contents);
@@ -1353,6 +1354,18 @@ async function runNativeBrowserAgentAction(request, bounds) {
   try {
     const contents = safeWebContents(entry.view);
     if (!contents) throw new Error(`${APP_NAME} browser is not open.`);
+    const actionView = entry.view;
+    const actionDocumentGeneration = entry.documentGeneration;
+    const isCurrentActionTarget = () =>
+      entry.view === actionView &&
+      safeWebContents(actionView) === contents &&
+      !contents.isDestroyed() &&
+      entry.documentGeneration === actionDocumentGeneration;
+    const assertCurrentActionTarget = () => {
+      if (!isCurrentActionTarget()) {
+        throw new Error('The page changed before the browser action completed. No input was sent.');
+      }
+    };
     actionContents = contents;
     setBrowserActionActive(entry, true);
     if (request.action === 'open') {
@@ -1412,15 +1425,41 @@ async function runNativeBrowserAgentAction(request, bounds) {
           await fillCredentialsForAgent(entry, contents, request),
         );
       }
+      if (request.action === 'snapshot') {
+        return await snapshotNativeBrowserAfterNavigation(contents, request);
+      }
+      const pageContext = await contents.executeJavaScript(
+        'window.__DROIDMAXX_AGENT_CONTEXT?.();',
+        true,
+      );
+      assertCurrentActionTarget();
+      if (
+        !pageContext ||
+        typeof pageContext.documentId !== 'string' ||
+        typeof pageContext.snapshotId !== 'string' ||
+        typeof pageContext.urlHash !== 'string' ||
+        !pageContext.documentId ||
+        !pageContext.snapshotId ||
+        !pageContext.urlHash
+      ) {
+        throw new Error('The browser page has no current action snapshot. Refresh and try again.');
+      }
       await authorizeNativeBrowserAuthentication(entry, contents, request);
+      assertCurrentActionTarget();
       await blockBrowserAgentSensitiveTyping(contents, request);
+      assertCurrentActionTarget();
       const execution = executeBrowserAgentInteraction(contents, request, {
+        isCurrent: isCurrentActionTarget,
+        pageContext,
         showCursor: async ({ x, y, pressed }) => {
-          if (!browserSettings.shouldShowAgentCursor()) {
-            browserAgentCursor.hide(entry.browserSessionId);
-            return true;
+          if (!entry.attached || !entry.visible) {
+            return browserAgentCursor.park({
+              browserSessionId: entry.browserSessionId,
+              bounds: entry.view.getBounds(),
+              x,
+              y,
+            });
           }
-          if (!entry.attached || !entry.visible) return true;
           return browserAgentCursor.show({
             browserSessionId: entry.browserSessionId,
             x,

@@ -1,13 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BrowserSessionManager, type BrowserRuntime } from './BrowserSessionManager.js';
-import type {
-  BrowserBox,
-  BrowserScreenshotOptions,
-  BrowserSnapshot,
-  BrowserViewport,
-  ScrollDirection,
-} from './types.js';
+import type { BrowserSnapshot } from './types.js';
 
 test('browser actions execute in request order within one managed session', async () => {
   const runtime = new ControlledRuntime();
@@ -103,13 +97,13 @@ class ControlledRuntime implements BrowserRuntime {
     return snapshot('https://example.test/forward');
   }
 
-  async setViewport(_viewport: BrowserViewport): Promise<void> {}
+  async setViewport(): Promise<void> {}
 
-  async screenshot(_options?: BrowserScreenshotOptions): Promise<string> {
+  async screenshot(): Promise<string> {
     return '';
   }
 
-  async capture(_box?: BrowserBox, _options?: BrowserScreenshotOptions): Promise<string> {
+  async capture(): Promise<string> {
     return '';
   }
 
@@ -117,15 +111,15 @@ class ControlledRuntime implements BrowserRuntime {
     return snapshot('https://example.test');
   }
 
-  async click(_x: number, _y: number, _selector?: string): Promise<BrowserSnapshot> {
+  async click(): Promise<BrowserSnapshot> {
     return snapshot('https://example.test/clicked');
   }
 
-  async hover(_x: number, _y: number, _selector?: string): Promise<BrowserSnapshot> {
+  async hover(): Promise<BrowserSnapshot> {
     return snapshot('https://example.test/hovered');
   }
 
-  async selectOption(_selector: string, _value: string): Promise<BrowserSnapshot> {
+  async selectOption(): Promise<BrowserSnapshot> {
     return snapshot('https://example.test/selected');
   }
 
@@ -140,12 +134,7 @@ class ControlledRuntime implements BrowserRuntime {
     return snapshot('https://example.test/keypressed');
   }
 
-  async scroll(
-    _direction: ScrollDirection,
-    _pixels?: number,
-    _x?: number,
-    _y?: number,
-  ): Promise<BrowserSnapshot> {
+  async scroll(): Promise<BrowserSnapshot> {
     return snapshot('https://example.test/scrolled');
   }
 

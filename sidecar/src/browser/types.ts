@@ -70,6 +70,15 @@ export interface BrowserSnapshot {
   refs: BrowserElementRef[];
   canGoBack?: boolean;
   canGoForward?: boolean;
+  scrollResult?: BrowserScrollResult;
+}
+
+export interface BrowserScrollResult {
+  x: number;
+  y: number;
+  moved: boolean;
+  atBoundary: boolean;
+  requested: { x: number; y: number };
 }
 
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
