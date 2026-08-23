@@ -47,15 +47,6 @@ function toolResultBlock(event: TranscriptEvent): string | null {
   return `**${label}${name}**\n\n${fenced(truncate(event.text, MAX_TOOL_CHARS))}`;
 }
 
-// History surfaces two kinds of status events: transient UI chrome (spinners,
-// phase lines), which is not conversation content, and the oversized-file trim
-// notice, which documents that older messages were dropped from the export.
-// Only the former is dropped; silently eliding the trim notice would misstate
-// the export as complete.
-function isTrimNotice(event: TranscriptEvent): boolean {
-  return event.text?.includes('oversized session') ?? false;
-}
-
 function blockFor(event: TranscriptEvent): string | null {
   switch (event.kind) {
     case 'text':
@@ -73,8 +64,8 @@ function blockFor(event: TranscriptEvent): string | null {
     case 'compaction':
       return `---\n\n*${String(event.removedCount ?? 0)} earlier messages were summarized by compaction.*`;
     case 'status':
-      if (!isTrimNotice(event)) return null;
-      return `> **Note:** ${event.text ?? 'This session was trimmed for performance.'}`;
+      // Transient UI chrome (spinners, phase lines), not conversation content.
+      return null;
   }
 }
 

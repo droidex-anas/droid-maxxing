@@ -105,30 +105,34 @@ export function buildWorkspaceSections(
     seen.add(cwd);
     return true;
   });
-  const ownerFor = (sessionCwd: string) => {
-    const normalizedSessionCwd = comparablePath(sessionCwd);
-    return workspaces
-      .flatMap((cwd) =>
-        (options.executionCwds?.get(cwd) ?? [cwd]).map((executionCwd) => ({
-          cwd,
-          executionCwd: comparablePath(executionCwd),
-        })),
-      )
-      .filter(
-        ({ executionCwd }) =>
-          normalizedSessionCwd === executionCwd ||
-          normalizedSessionCwd.startsWith(`${executionCwd}/`),
-      )
-      .sort((a, b) => b.executionCwd.length - a.executionCwd.length)[0]?.cwd;
-  };
+  // Normalize every candidate owner once and pre-sort longest-first, so the
+  // longest matching execution cwd wins and each session costs one pass over
+  // the owners instead of re-normalizing the whole table per session. The
+  // sidebar regroups on every session update, so this runs hot.
+  const owners = workspaces
+    .flatMap((cwd) =>
+      (options.executionCwds?.get(cwd) ?? [cwd]).map((executionCwd) => ({
+        cwd,
+        executionCwd: comparablePath(executionCwd),
+      })),
+    )
+    .sort((a, b) => b.executionCwd.length - a.executionCwd.length);
+  const sessionsByOwner = new Map<string, SessionSummary[]>(workspaces.map((cwd) => [cwd, []]));
+  for (const session of sessions) {
+    const normalizedSessionCwd = comparablePath(session.cwd);
+    const owner = owners.find(
+      ({ executionCwd }) =>
+        normalizedSessionCwd === executionCwd ||
+        normalizedSessionCwd.startsWith(`${executionCwd}/`),
+    );
+    if (owner) sessionsByOwner.get(owner.cwd)?.push(session);
+  }
 
   return workspaces.map((cwd) => ({
     cwd,
     name: workspaceName(cwd),
     sessions: maybeLimit(
-      sessions
-        .filter((session) => ownerFor(session.cwd) === cwd)
-        .sort((a, b) => b.updatedAt - a.updatedAt),
+      (sessionsByOwner.get(cwd) ?? []).sort((a, b) => b.updatedAt - a.updatedAt),
       options.limit,
     ),
   }));

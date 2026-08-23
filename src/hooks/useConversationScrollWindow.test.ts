@@ -9,6 +9,7 @@ import {
 } from './conversationViewportAnchor';
 import {
   didCommitRequestedHistoryPrepend,
+  shouldLoadOlderHistoryAtTop,
   shouldReleaseConversationTranscript,
 } from './useConversationScrollWindow';
 
@@ -115,6 +116,15 @@ test('anchor geometry refresh keeps tracking the originally captured row', () =>
     scrollTop: 3_476,
     scrollHeight: 23_500,
   });
+});
+
+test('older history loads only near the top with a cursor and no page in flight', () => {
+  const nearTop = { scrollTop: 0, hasOlderCursor: true, isLoadingOlder: false };
+  assert.equal(shouldLoadOlderHistoryAtTop(nearTop), true);
+  assert.equal(shouldLoadOlderHistoryAtTop({ ...nearTop, scrollTop: 599 }), true);
+  assert.equal(shouldLoadOlderHistoryAtTop({ ...nearTop, scrollTop: 600 }), false);
+  assert.equal(shouldLoadOlderHistoryAtTop({ ...nearTop, hasOlderCursor: false }), false);
+  assert.equal(shouldLoadOlderHistoryAtTop({ ...nearTop, isLoadingOlder: true }), false);
 });
 
 test('ordinary live appends do not start prepend restoration', () => {

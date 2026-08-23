@@ -151,6 +151,11 @@ export interface PushOptions {
   force?: boolean;
 }
 
+export interface PullRequestReviewRef {
+  author: string;
+  state: string;
+}
+
 export interface PullRequest {
   number: number;
   title: string;
@@ -167,6 +172,52 @@ export interface PullRequest {
   createdAt: string | null;
   updatedAt: string | null;
   author: string | null;
+  reviewRequests: string[];
+  reviews: PullRequestReviewRef[];
+}
+
+export interface PullRequestListResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  viewerLogin: string | null;
+  prs: PullRequest[];
+}
+
+// One commit on the pull request's head branch. `author` is the GitHub login
+// when the commit author is a linked account, otherwise the git author name.
+export interface PrCommit {
+  oid: string;
+  headline: string;
+  committedDate: string | null;
+  author: string | null;
+}
+
+export interface PullRequestDetail extends PullRequest {
+  body: string;
+  commits: PrCommit[];
+}
+
+export type PrMergeMethod = 'merge' | 'squash' | 'rebase';
+
+export interface PrMergeResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+}
+
+export interface PullRequestViewResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  pr: PullRequestDetail | null;
+}
+
+export interface PullRequestDiffResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  diff: string;
 }
 
 // `ok: false` means the lookup itself failed (gh missing, network, auth), not
@@ -212,6 +263,10 @@ export interface PrComment {
   path?: string | null;
   line?: number | null;
   diffHunk?: string | null;
+  // Review-thread verdict; only inline comments belong to a thread.
+  resolved?: boolean;
+  outdated?: boolean;
+  resolvedBy?: string | null;
 }
 
 export interface PrReaction {

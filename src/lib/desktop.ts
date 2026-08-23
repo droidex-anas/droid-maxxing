@@ -37,6 +37,11 @@ import type {
   PostCommentResult,
   PrChecksResult,
   PrCommentsResult,
+  PrMergeMethod,
+  PrMergeResult,
+  PullRequestDiffResult,
+  PullRequestListResult,
+  PullRequestViewResult,
   PushOptions,
 } from '../types/vcs';
 import type {
@@ -211,6 +216,12 @@ interface DroidControlApi {
   githubCancelSetup: () => Promise<{ ok: true }>;
   onGithubAuthCode: (handler: (payload: unknown) => void) => () => void;
   githubDetectPr: (dir: string, options: { branch?: string }) => Promise<DetectPrResult>;
+  githubListPrs: (
+    dir: string,
+    options?: { state?: string; limit?: number },
+  ) => Promise<PullRequestListResult>;
+  githubViewPr: (dir: string, options: { prNumber: number }) => Promise<PullRequestViewResult>;
+  githubPrDiff: (dir: string, options: { prNumber: number }) => Promise<PullRequestDiffResult>;
   githubPrChecks: (dir: string, options: { prNumber: number }) => Promise<PrChecksResult>;
   githubPrComments: (dir: string, options: { prNumber: number }) => Promise<PrCommentsResult>;
   githubCreatePr: (dir: string, options: CreatePrOptions) => Promise<CreatePrResult>;
@@ -218,6 +229,10 @@ interface DroidControlApi {
     dir: string,
     options: { prNumber: number; body: string },
   ) => Promise<PostCommentResult>;
+  githubMergePr: (
+    dir: string,
+    options: { prNumber: number; method: PrMergeMethod },
+  ) => Promise<PrMergeResult>;
   getOnboarding: () => Promise<OnboardingState>;
   setOnboarding: (patch: Partial<OnboardingState>) => Promise<OnboardingState>;
   appVersion: () => Promise<string>;

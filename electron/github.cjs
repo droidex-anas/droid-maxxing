@@ -108,7 +108,71 @@ const PR_FIELDS = [
   'createdAt',
   'updatedAt',
   'author',
+  'reviewRequests',
+  'reviews',
 ].join(',');
+
+function loginOf(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  return value.login || value.name || null;
+}
+
+function normalizeReviewRequests(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(loginOf).filter(Boolean);
+}
+
+function normalizeReviews(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ({
+      author: loginOf(item?.author) || '',
+      state: String(item?.state || '').toLowerCase(),
+    }))
+    .filter((item) => item.author);
+}
+
+// `gh pr view --json commits` reports every commit on the head branch with its
+// GitHub author when one is linked; plain git authors only carry a name.
+function normalizePrCommits(value) {
+  if (!Array.isArray(value)) return [];
+  const commits = [];
+  for (const commit of value) {
+    const oid = typeof commit?.oid === 'string' ? commit.oid : '';
+    if (!oid) continue;
+    const authors = Array.isArray(commit.authors) ? commit.authors : [];
+    commits.push({
+      oid,
+      headline: String(commit.messageHeadline || '').trim(),
+      committedDate: commit.committedDate || null,
+      author: loginOf(authors[0]),
+    });
+  }
+  return commits;
+}
+
+function normalizePr(pr) {
+  return {
+    number: pr.number,
+    title: pr.title || '',
+    state: String(pr.state || '').toLowerCase(),
+    url: pr.url || '',
+    isDraft: !!pr.isDraft,
+    headRefName: pr.headRefName || null,
+    baseRefName: pr.baseRefName || null,
+    mergeable: pr.mergeable ? String(pr.mergeable).toLowerCase() : null,
+    reviewDecision: pr.reviewDecision ? String(pr.reviewDecision).toLowerCase() : null,
+    additions: pr.additions ?? 0,
+    deletions: pr.deletions ?? 0,
+    changedFiles: pr.changedFiles ?? 0,
+    createdAt: pr.createdAt || null,
+    updatedAt: pr.updatedAt || null,
+    author: loginOf(pr.author),
+    reviewRequests: normalizeReviewRequests(pr.reviewRequests),
+    reviews: normalizeReviews(pr.reviews),
+  };
+}
 
 // Distinguishes "queried successfully, no PR" ({ ok: true, pr: null }) from a
 // failed query ({ ok: false }), so a transient gh error never erases a PR the
@@ -146,24 +210,87 @@ async function detectPr(dir, { branch } = {}) {
     pr = parseJson(res.stdout, null);
   }
   if (!pr || typeof pr.number !== 'number') return { ok: true, pr: null };
-  const normalized = {
-    number: pr.number,
-    title: pr.title || '',
-    state: String(pr.state || '').toLowerCase(), // open | closed | merged
-    url: pr.url || '',
-    isDraft: !!pr.isDraft,
-    headRefName: pr.headRefName || null,
-    baseRefName: pr.baseRefName || null,
-    mergeable: pr.mergeable ? String(pr.mergeable).toLowerCase() : null,
-    reviewDecision: pr.reviewDecision ? String(pr.reviewDecision).toLowerCase() : null,
-    additions: pr.additions ?? 0,
-    deletions: pr.deletions ?? 0,
-    changedFiles: pr.changedFiles ?? 0,
-    createdAt: pr.createdAt || null,
-    updatedAt: pr.updatedAt || null,
-    author: pr.author?.login || null,
+  return { ok: true, pr: normalizePr(pr) };
+}
+
+async function listPrs(dir, { state = 'open', limit = 50 } = {}, runGh = gh) {
+  const list = await runGh(dir, [
+    'pr',
+    'list',
+    '--state',
+    state,
+    '--limit',
+    String(limit),
+    '--json',
+    PR_FIELDS,
+  ]);
+  if (list.spawnFailed) {
+    return { ok: false, reason: 'gh_unavailable', viewerLogin: null, prs: [] };
+  }
+  if (list.code !== 0) {
+    return {
+      ok: false,
+      reason: 'gh_error',
+      message: list.stderr.trim(),
+      viewerLogin: null,
+      prs: [],
+    };
+  }
+  const rows = parseJson(list.stdout, null);
+  if (!Array.isArray(rows)) {
+    return {
+      ok: false,
+      reason: 'gh_error',
+      message: 'invalid list payload',
+      viewerLogin: null,
+      prs: [],
+    };
+  }
+  const user = await runGh(dir, ['api', 'user', '--jq', '.login']);
+  const viewerLogin = user.code === 0 ? String(user.stdout || '').trim() || null : null;
+  return {
+    ok: true,
+    viewerLogin,
+    prs: rows.filter((row) => typeof row?.number === 'number').map(normalizePr),
   };
-  return { ok: true, pr: normalized };
+}
+
+async function viewPr(dir, { prNumber } = {}, runGh = gh) {
+  const selector = prSelector(prNumber);
+  if (selector == null) return { ok: false, reason: 'missing_pr', pr: null };
+  const res = await runGh(dir, [
+    'pr',
+    'view',
+    '--json',
+    `${PR_FIELDS},body,commits`,
+    '--',
+    selector,
+  ]);
+  if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable', pr: null };
+  if (res.code !== 0) {
+    return { ok: false, reason: 'gh_error', message: res.stderr.trim(), pr: null };
+  }
+  const raw = parseJson(res.stdout, null);
+  if (!raw || typeof raw.number !== 'number') return { ok: true, pr: null };
+  return {
+    ok: true,
+    pr: {
+      ...normalizePr(raw),
+      body: typeof raw.body === 'string' ? raw.body : '',
+      commits: normalizePrCommits(raw.commits),
+    },
+  };
+}
+
+async function prDiff(dir, { prNumber } = {}, runGh = gh) {
+  const selector = prSelector(prNumber);
+  if (selector == null) return { ok: false, reason: 'missing_pr', diff: '' };
+  const res = await runGh(dir, ['pr', 'diff', '--', selector], { timeout: 30000 });
+  if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable', diff: '' };
+  if (res.code !== 0) {
+    return { ok: false, reason: 'gh_error', message: res.stderr.trim(), diff: '' };
+  }
+  return { ok: true, diff: String(res.stdout || '') };
 }
 
 async function prChecks(dir, { prNumber } = {}) {
@@ -198,111 +325,6 @@ async function prChecks(dir, { prNumber } = {}) {
   return { ok: true, checks };
 }
 
-function normalizePrComments(data, inlineRows = []) {
-  const normalizeReactionGroups = (groups) => {
-    if (!Array.isArray(groups)) return [];
-    return groups
-      .map((group) => ({
-        content: String(group?.content || '').toUpperCase(),
-        count: Number(group?.users?.totalCount || 0),
-      }))
-      .filter((reaction) => reaction.content && reaction.count > 0);
-  };
-  const normalizeRestReactions = (reactions) => {
-    const contentByField = {
-      '+1': 'THUMBS_UP',
-      '-1': 'THUMBS_DOWN',
-      laugh: 'LAUGH',
-      hooray: 'HOORAY',
-      confused: 'CONFUSED',
-      heart: 'HEART',
-      rocket: 'ROCKET',
-      eyes: 'EYES',
-    };
-    if (!reactions || typeof reactions !== 'object') return [];
-    return Object.entries(contentByField)
-      .map(([field, content]) => ({ content, count: Number(reactions[field] || 0) }))
-      .filter((reaction) => reaction.count > 0);
-  };
-  const comments = (Array.isArray(data?.comments) ? data.comments : []).map((c, i) => ({
-    id: `comment-${String(c.databaseId || c.id || `${i}-${c.createdAt || ''}`)}`,
-    kind: 'comment',
-    author: c.author?.login || 'unknown',
-    body: c.body || '',
-    createdAt: c.createdAt || null,
-    url: c.url || null,
-    state: null,
-    reactions: normalizeReactionGroups(c.reactionGroups),
-  }));
-  const reviews = (Array.isArray(data?.reviews) ? data.reviews : [])
-    .filter((r) => (r.body && r.body.trim()) || (r.state && r.state !== 'COMMENTED'))
-    .map((r, i) => ({
-      id: `review-${String(r.databaseId || r.id || `${i}-${r.submittedAt || ''}`)}`,
-      kind: 'review',
-      author: r.author?.login || 'unknown',
-      body: r.body || '',
-      createdAt: r.submittedAt || null,
-      url: r.url || null,
-      state: r.state ? String(r.state).toLowerCase() : null,
-      reactions: normalizeReactionGroups(r.reactionGroups),
-    }));
-  const inline = (Array.isArray(inlineRows) ? inlineRows : []).map((comment, i) => ({
-    id: `inline-${String(comment.id || `${i}-${comment.created_at || ''}`)}`,
-    kind: 'inline',
-    author: comment.user?.login || 'unknown',
-    body: comment.body || '',
-    createdAt: comment.created_at || null,
-    url: comment.html_url || null,
-    state: null,
-    path: comment.path || null,
-    line: comment.line ?? comment.original_line ?? null,
-    diffHunk: comment.diff_hunk || null,
-    reactions: normalizeRestReactions(comment.reactions),
-  }));
-  return [...comments, ...reviews, ...inline].sort(
-    (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
-  );
-}
-
-async function prComments(dir, { prNumber } = {}, runGh = gh) {
-  const selector = prSelector(prNumber);
-  if (selector == null) return { ok: false, reason: 'missing_pr', comments: [] };
-  const [view, inline] = await Promise.all([
-    runGh(dir, ['pr', 'view', '--json', 'comments,reviews', '--', selector]),
-    runGh(dir, ['api', '--paginate', '--slurp', `repos/{owner}/{repo}/pulls/${selector}/comments`]),
-  ]);
-  const viewSucceeded = !view.spawnFailed && view.code === 0;
-  const inlineSucceeded = !inline.spawnFailed && inline.code === 0;
-  if (!viewSucceeded && !inlineSucceeded) {
-    const message = [view.stderr, inline.stderr]
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .join('\n');
-    return {
-      ok: false,
-      reason: view.spawnFailed || inline.spawnFailed ? 'gh_unavailable' : 'gh_error',
-      message,
-      comments: [],
-    };
-  }
-  const data = viewSucceeded
-    ? parseJson(view.stdout, { comments: [], reviews: [] })
-    : { comments: [], reviews: [] };
-  const pages = inlineSucceeded ? parseJson(inline.stdout, []) : [];
-  const inlineRows = Array.isArray(pages)
-    ? pages.flatMap((page) => (Array.isArray(page) ? page : []))
-    : [];
-  const failures = [
-    ...(viewSucceeded ? [] : [view.stderr.trim() || 'Could not load PR conversation comments']),
-    ...(inlineSucceeded ? [] : [inline.stderr.trim() || 'Could not load inline review comments']),
-  ];
-  return {
-    ok: true,
-    ...(failures.length === 0 ? {} : { partial: true, message: failures.join('\n') }),
-    comments: normalizePrComments(data, inlineRows),
-  };
-}
-
 async function createPr(dir, { title, body = '', base, draft = false, head } = {}) {
   if (!title || !title.trim()) return { ok: false, reason: 'empty_title' };
   const args = ['pr', 'create', '--title', title, '--body', body];
@@ -315,6 +337,25 @@ async function createPr(dir, { title, body = '', base, draft = false, head } = {
   const url = (res.stdout.match(/https?:\/\/\S+/) || [])[0] || null;
   const detected = await detectPr(dir, head ? { branch: head } : {});
   return { ok: true, url, number: detected.pr?.number ?? null, pr: detected.pr };
+}
+
+const MERGE_FLAGS = { merge: '--merge', squash: '--squash', rebase: '--rebase' };
+
+// Merging is irreversible from the app's side, so the strategy must be one gh
+// understands; passing an unknown method through would let gh fall back to its
+// interactive prompt and hang the invisible child process.
+async function mergePr(dir, { prNumber, method } = {}, runGh = gh) {
+  const selector = prSelector(prNumber);
+  if (selector == null) return { ok: false, reason: 'missing_pr' };
+  // Own-key only: an inherited name such as `toString` would otherwise resolve
+  // to a truthy function and reach execFile in place of a flag string.
+  const requested = String(method);
+  if (!Object.hasOwn(MERGE_FLAGS, requested)) return { ok: false, reason: 'invalid_method' };
+  const flag = MERGE_FLAGS[requested];
+  const res = await runGh(dir, ['pr', 'merge', flag, '--', selector], { timeout: 60000 });
+  if (res.spawnFailed) return { ok: false, reason: 'gh_unavailable' };
+  if (res.code !== 0) return { ok: false, reason: 'gh_error', message: res.stderr.trim() };
+  return { ok: true };
 }
 
 async function postComment(dir, { prNumber, body } = {}) {
@@ -338,12 +379,19 @@ module.exports = {
   isGithubDeviceUrl: githubSetup.isGithubDeviceUrl,
   resolveBrewExecutable: githubSetup.resolveBrewExecutable,
   resolveGhExecutable,
+  // Shared with the conversation module, which runs its own gh queries.
+  gh,
+  parseJson,
   // Exported for unit tests: the validation boundary for PR selectors.
   prSelector,
-  normalizePrComments,
+  normalizePr,
+  normalizePrCommits,
   detectPr,
+  listPrs,
+  viewPr,
+  prDiff,
   prChecks,
-  prComments,
   createPr,
   postComment,
+  mergePr,
 };

@@ -15,7 +15,7 @@ test('slash feedback returns a durable copyable report receipt', async ({ page, 
 
   const composer = page.locator('textarea').first();
   await composer.fill('/');
-  await page.getByText('/bug', { exact: true }).click();
+  await page.getByText('bug', { exact: true }).click();
 
   const dialog = page.getByRole('dialog');
   const details = page.getByRole('textbox', { name: 'Details' });

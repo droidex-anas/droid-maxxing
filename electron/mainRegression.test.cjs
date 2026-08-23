@@ -173,6 +173,65 @@ test('GitHub setup handlers require the trusted renderer and teardown their proc
   );
 });
 
+test('pull request workspace handlers require the trusted renderer', () => {
+  for (const channel of [
+    'github-detect-pr',
+    'github-list-prs',
+    'github-view-pr',
+    'github-pr-diff',
+    'github-pr-checks',
+    'github-pr-comments',
+    'github-create-pr',
+    'github-post-comment',
+    'github-merge-pr',
+  ]) {
+    const handlerStart = mainSource.indexOf(`ipcMain.handle('${channel}'`);
+    const handlerEnd = mainSource.indexOf('\n  ipcMain.handle(', handlerStart + 1);
+    assert.notEqual(handlerStart, -1, `missing ${channel} handler`);
+    assert.match(
+      mainSource.slice(handlerStart, handlerEnd),
+      /assertMainRenderer\(event\)/,
+      `${channel} must authorize its sender`,
+    );
+  }
+});
+
+test('pull request workspace handlers validate IPC directories before PR operations', () => {
+  assert.match(
+    mainSource,
+    /function prWorkspaceRequestDir\(value\) \{\s*if \(typeof value !== 'string'\) return null;\s*return value\.trim\(\) \? value : null;\s*\}/,
+  );
+
+  const expectations = {
+    'github-detect-pr':
+      /if \(!requestDir\) return \{ ok: false, pr: null \};[\s\S]*?githubVcs\.detectPr\(requestDir, options\)/,
+    'github-list-prs':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', viewerLogin: null, prs: \[\] \};[\s\S]*?githubVcs\.listPrs\(requestDir, options\)/,
+    'github-view-pr':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', pr: null \};[\s\S]*?githubVcs\.viewPr\(requestDir, options\)/,
+    'github-pr-diff':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', diff: '' \};[\s\S]*?githubVcs\.prDiff\(requestDir, options\)/,
+    'github-pr-checks':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', checks: \[\] \};[\s\S]*?githubVcs\.prChecks\(requestDir, options\)/,
+    'github-pr-comments':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', comments: \[\] \};[\s\S]*?githubPrConversation\.prComments\(requestDir, options\)/,
+    'github-create-pr':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.createPr\(requestDir, options\)/,
+    'github-post-comment':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.postComment\(requestDir, options\)/,
+    'github-merge-pr':
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.mergePr\(requestDir, options\)/,
+  };
+
+  for (const [channel, pattern] of Object.entries(expectations)) {
+    const handlerStart = mainSource.indexOf(`ipcMain.handle('${channel}'`);
+    const handlerEnd = mainSource.indexOf('\n  ipcMain.handle(', handlerStart + 1);
+    const handler = mainSource.slice(handlerStart, handlerEnd);
+    assert.match(handler, /const requestDir = prWorkspaceRequestDir\(dir\)/);
+    assert.match(handler, pattern, channel);
+  }
+});
+
 test('diagnostics initialize before app readiness and preferences require the trusted renderer', () => {
   const initializeAt = mainSource.indexOf(
     'const diagnosticsInitialization = diagnostics.initialize();',
@@ -396,6 +455,25 @@ test('app icon switching authorizes the renderer and accepts only committed icon
   assert.match(mainSource, /mode !== 'light' && mode !== 'dark' && mode !== 'system'/);
   assert.match(mainSource, /app\.dock\.setIcon\(iconPath\)/);
   assert.match(mainSource, /mainWindow\.setIcon\(iconPath\)/);
+});
+
+test('the local image scheme is privileged before ready and served to the main session only', () => {
+  // registerSchemesAsPrivileged is a no-op once the app is ready, so it must sit
+  // at module scope; handling it on defaultSession keeps the Browser pane's
+  // partition (untrusted web content) without a local-file reader.
+  const privilegedIndex = mainSource.indexOf('protocol.registerSchemesAsPrivileged');
+  assert.notEqual(privilegedIndex, -1);
+  assert.ok(privilegedIndex < mainSource.indexOf('app.whenReady()'));
+  assert.match(mainSource, /scheme: localImages\.LOCAL_IMAGE_SCHEME/);
+  assert.match(
+    mainSource,
+    /session\.defaultSession\.protocol\.handle\(localImages\.LOCAL_IMAGE_SCHEME/,
+  );
+  assert.match(mainSource, /registerLocalImageProtocol\(\);/);
+  // A served SVG must not be able to run anything if a body is navigated to or
+  // embedded rather than displayed in an <img>.
+  assert.match(mainSource, /'content-security-policy': "default-src 'none';/);
+  assert.match(mainSource, /'x-content-type-options': 'nosniff'/);
 });
 
 test('system app icon tracks the OS appearance and repaints on change', () => {

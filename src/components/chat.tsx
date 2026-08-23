@@ -12,10 +12,10 @@ import {
   PenLine,
   Globe,
   AlertTriangle,
-  Hexagon,
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
+import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
@@ -27,8 +27,12 @@ import {
   revealNextDiffCards,
   type FileChange,
 } from '../lib/diff';
+import { ImageAttachmentChip } from './media/ImageAttachmentChip';
+import { isImagePath } from '../lib/localImage';
+import { userMessageAttachments } from '../lib/promptMentions';
 import { DiffCard } from './DiffView';
 import { SubagentsDock, type SubagentsDockData } from './SubagentsDock';
+import TurnChangesPanel, { type TurnChangesItem, type TurnFile } from './TurnChangesPanel';
 import {
   CAT_ICON,
   CAT_LABEL,
@@ -871,7 +875,7 @@ function FetchBodyContent({ body }: { body: string }) {
     <div className="max-h-96 overflow-auto rounded-lg bg-droid-elevated/30 px-3.5 py-2.5">
       {/* Fetched pages are untrusted: diagrams must stay off so an ```svg fence
           in the body can never reach SvgCodeBlock's dangerouslySetInnerHTML. */}
-      <Markdown allowDiagrams={false}>{body}</Markdown>
+      <Markdown allowGeneratedContent={false}>{body}</Markdown>
     </div>
   );
 }
@@ -1183,23 +1187,11 @@ export type FeedItem =
   | { type: 'child_sessions'; key: string; events: TranscriptEvent[] }
   | { type: 'tools'; key: string; events: TranscriptEvent[] }
   | { type: 'worked'; key: string; items: FeedItem[]; durationMs: number }
-  | {
-      type: 'turnChanges';
-      key: string;
-      tailEventId: string;
-      files: TurnFile[];
-      added: number;
-      removed: number;
-    };
+  | TurnChangesItem;
 
 // One file touched during a completed turn, aggregated across every edit the
 // agent made to it that turn.
-export interface TurnFile {
-  path: string;
-  added: number;
-  removed: number;
-  verb: FileChange['verb'];
-}
+export type { TurnFile } from './TurnChangesPanel';
 
 // Collect the files a turn's run edited, folding repeated edits to the same
 // path into a single entry (summed line counts). Order follows first touch.
@@ -1899,9 +1891,13 @@ export function UserBubble({
   event: Pick<TranscriptEvent, 'text' | 'skills' | 'files' | 'browserRefs' | 'steered'>;
 }) {
   const skills = event.skills ?? [];
-  const files = event.files ?? [];
   const browserRefs = event.browserRefs ?? [];
-  const hasAttachments = files.length > 0 || browserRefs.length > 0;
+  // A replayed message has no files metadata, only the composed text it was sent
+  // as, so attachments are recovered from its trailing @mention block.
+  const message = userMessageAttachments(event.text, event.files);
+  const images = message.files.filter((f) => isImagePath(f));
+  const files = message.files.filter((f) => !isImagePath(f));
+  const hasAttachments = message.files.length > 0 || browserRefs.length > 0;
   return (
     <div className="flex flex-col items-end gap-1.5 py-1">
       {event.steered && (
@@ -1925,6 +1921,9 @@ export function UserBubble({
           {browserRefs.map((reference) => (
             <BrowserReferenceChip key={`${reference.kind}:${reference.id}`} reference={reference} />
           ))}
+          {images.map((f) => (
+            <ImageAttachmentChip key={f} path={f} />
+          ))}
           {files.map((f) => (
             <span
               key={f}
@@ -1937,21 +1936,14 @@ export function UserBubble({
           ))}
         </div>
       )}
-      {(event.text || skills.length > 0) && (
+      {(message.text || skills.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-relaxed text-droid-text">
           {skills.map((skill) => (
-            <span
-              key={skill}
-              title={`Skill: ${skill}`}
-              className="inline-flex items-center gap-1.5 font-medium text-droid-skill"
-            >
-              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-droid-text">
-                <Hexagon className="h-2.5 w-2.5 fill-droid-accent text-droid-accent" />
-              </span>
+            <span key={skill} title={`Skill: ${skill}`} className="font-medium text-droid-skill">
               {skill}
             </span>
           ))}
-          {event.text && <span className="whitespace-pre-wrap break-words">{event.text}</span>}
+          {message.text && <span className="whitespace-pre-wrap break-words">{message.text}</span>}
         </div>
       )}
     </div>
@@ -2022,11 +2014,36 @@ const InlineSpecCard = memo(function InlineSpecCard({
 });
 
 /* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({ text }: { text: string }) {
+const MessageBody = memo(function MessageBody({
+  text,
+  live,
+  autoPlayAppBlocks,
+}: {
+  text: string;
+  live: boolean;
+  autoPlayAppBlocks: boolean;
+}) {
   // Strip the history "[truncated N chars]" sentinel so the raw marker never
   // shows; the cut itself is intentionally not surfaced.
-  const { body } = parseTruncatedTail(text);
-  if (!hasJsonRender(body)) return <Markdown>{body}</Markdown>;
+  const { body, truncatedChars } = parseTruncatedTail(text);
+  const hasCompleteApp = hasCompleteAppBlock(body);
+  const buildingAppBlocks = live && hasAppBlock(body);
+  // History caps message text. When that cut landed inside an App fence the
+  // source can never run, so the block says so instead of offering a Play
+  // control that would start an empty App. Only replayed text can be cut: a
+  // live answer whose tail merely looks like the sentinel is still streaming.
+  const cutOffAppBlocks = !live && truncatedChars !== null && hasIncompleteAppBlock(body);
+  const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
+  if (!hasJsonRender(body))
+    return (
+      <Markdown
+        autoPlayAppBlocks={shouldAutoPlayAppBlocks}
+        buildingAppBlocks={buildingAppBlocks}
+        cutOffAppBlocks={cutOffAppBlocks}
+      >
+        {body}
+      </Markdown>
+    );
   const segments = splitJsonRender(body);
   return (
     <>
@@ -2034,7 +2051,14 @@ const MessageBody = memo(function MessageBody({ text }: { text: string }) {
         seg.type === 'json-render' ? (
           <JsonRender key={i} source={seg.value} />
         ) : seg.value.trim() ? (
-          <Markdown key={i}>{seg.value}</Markdown>
+          <Markdown
+            key={i}
+            autoPlayAppBlocks={shouldAutoPlayAppBlocks}
+            buildingAppBlocks={buildingAppBlocks}
+            cutOffAppBlocks={cutOffAppBlocks}
+          >
+            {seg.value}
+          </Markdown>
         ) : null,
       )}
     </>
@@ -2044,6 +2068,7 @@ const MessageBody = memo(function MessageBody({ text }: { text: string }) {
 interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
+  autoPlayAppBlocks?: boolean;
   // True while the whole turn is still streaming, regardless of where this item
   // sits. Subagent waves need this rather than `live`: work continues after the
   // wave stops being the last item (a plan update or assistant text follows it),
@@ -2106,6 +2131,7 @@ function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): b
     return false;
   return (
     prev.live === next.live &&
+    prev.autoPlayAppBlocks === next.autoPlayAppBlocks &&
     prev.sessionLive === next.sessionLive &&
     prev.compacting === next.compacting &&
     prev.liveTiming === next.liveTiming &&
@@ -2166,6 +2192,7 @@ const ChildSessionsWave = memo(
 const FeedItemView = memo(function FeedItemView({
   item,
   live,
+  autoPlayAppBlocks = false,
   sessionLive,
   compacting,
   cwd,
@@ -2187,12 +2214,14 @@ const FeedItemView = memo(function FeedItemView({
       // only when it is exactly that spec text (avoid double-rendering the same
       // plan); never hide other prose just because spec mode is active (#14).
       if (specContent && text.trim() && text.trim() === specContent.trim()) return null;
+      const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
-          <MessageBody text={text} />
-          {live ? (
+          <MessageBody text={text} live={live} autoPlayAppBlocks={autoPlayAppBlocks} />
+          {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
+            !live &&
             isFinalResponse &&
             text.trim() && (
               <div className="mt-1.5 -ml-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -2441,92 +2470,6 @@ function DiffGroup({
   );
 }
 
-/* ── Per-turn changes summary: files the completed turn edited, click a file to
-   open the Review pane scoped to that turn and jump to it ── */
-function displayEditPath(path: string, cwd?: string): string {
-  const normalizedPath = path.replace(/\\/g, '/');
-  if (!cwd) return normalizedPath;
-  const root = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (normalizedPath === root) return normalizedPath;
-  if (normalizedPath.startsWith(`${root}/`)) return normalizedPath.slice(root.length + 1);
-  return normalizedPath;
-}
-
-function ChangeCount({ added, removed }: { added: number; removed: number }) {
-  if (added === 0 && removed === 0) return null;
-  return (
-    <span className="shrink-0 font-mono text-[11px]">
-      {added > 0 && <span style={{ color: 'var(--diff-add-fg)' }}>+{added}</span>}
-      {added > 0 && removed > 0 && ' '}
-      {removed > 0 && <span style={{ color: 'var(--diff-del-fg)' }}>−{removed}</span>}
-    </span>
-  );
-}
-
-function TurnChangesPanel({
-  item,
-  cwd,
-  onOpenFile,
-}: {
-  item: Extract<FeedItem, { type: 'turnChanges' }>;
-  cwd?: string;
-  onOpenFile?: (path: string) => void;
-}) {
-  const [open, setOpen] = useState(true);
-  const { files, added, removed } = item;
-  return (
-    <div className="overflow-hidden rounded-xl border border-droid-border bg-droid-surface">
-      <button
-        onClick={() => {
-          setOpen((o) => !o);
-        }}
-        className="group flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-droid-elevated/40"
-        aria-expanded={open}
-      >
-        <ChevronRight
-          className={`h-3.5 w-3.5 shrink-0 text-droid-text-muted transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-        <span className="text-[12.5px] font-medium text-droid-text-secondary">Changes</span>
-        <span className="ml-auto flex shrink-0 items-center gap-2.5">
-          <span className="text-[11px] text-droid-text-muted">
-            {files.length} {files.length === 1 ? 'file' : 'files'}
-          </span>
-          <ChangeCount added={added} removed={removed} />
-        </span>
-      </button>
-      <Expand open={open}>
-        {open ? (
-          <div className="border-t border-droid-border">
-            {files.map((f) => {
-              const display = displayEditPath(f.path, cwd);
-              const slash = display.lastIndexOf('/');
-              const dir = slash >= 0 ? display.slice(0, slash) : '';
-              const name = slash >= 0 ? display.slice(slash + 1) : display;
-              return (
-                <button
-                  key={f.path}
-                  onClick={() => onOpenFile?.(f.path)}
-                  disabled={!onOpenFile}
-                  title={f.path}
-                  className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/40 disabled:cursor-default"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[12.5px]">
-                    <span className="text-droid-text-secondary">{name}</span>
-                    {dir && (
-                      <span className="ml-2 text-[11px] text-droid-text-muted/60">{dir}</span>
-                    )}
-                  </span>
-                  <ChangeCount added={f.added} removed={f.removed} />
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </Expand>
-    </div>
-  );
-}
-
 /* ── Per-agent name color: deterministic pick so each droid keeps one hue ── */
 const CHILD_SESSION_COLORS = [
   '#e0a458',
@@ -2661,6 +2604,50 @@ export function appendedFeedItemKeys(
   return appended;
 }
 
+export interface FreshAppResponseState {
+  identity: string;
+  wasPending: boolean;
+  texts: Set<string>;
+}
+
+export function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
+  let latestPromptIndex = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type === 'message' && item.event.author === 'user') {
+      latestPromptIndex = i;
+      break;
+    }
+  }
+  if (latestPromptIndex < 0) return [];
+
+  const responses: string[] = [];
+  for (let i = latestPromptIndex + 1; i < items.length; i++) {
+    const item = items[i];
+    if (item.type !== 'message' || item.event.author === 'user') continue;
+    const text = item.event.text ?? '';
+    if (hasCompleteAppBlock(text)) responses.push(text);
+  }
+  return responses;
+}
+
+export function rememberFreshAppResponses(
+  previous: FreshAppResponseState | null,
+  identity: string,
+  items: FeedItem[],
+  pending: boolean,
+): FreshAppResponseState {
+  const sameSession = previous?.identity === identity;
+  const texts = new Set(sameSession ? previous.texts : []);
+  const justSettled = sameSession && previous.wasPending && !pending;
+
+  if (pending || justSettled) {
+    for (const text of completeAppResponsesInLatestTurn(items)) texts.add(text);
+  }
+
+  return { identity, wasPending: pending, texts };
+}
+
 // Offscreen feed rows skip layout and paint entirely (content-visibility) so
 // long transcripts scroll and chat switches render at the cost of the visible
 // screen only. The browser keeps DOM, component state, and animation timelines
@@ -2759,6 +2746,15 @@ export function MessageFeed({
     [providedItems, events, pending, rich, changes, specContent, dockEnabled],
   );
   const feedIdentity = `${events[0]?.appSessionId ?? ''}:${events[0]?.sourceSessionId ?? ''}`;
+  const freshAppResponsesRef = useRef<FreshAppResponseState | null>(null);
+  const freshAppResponseState = useMemo(
+    () => rememberFreshAppResponses(freshAppResponsesRef.current, feedIdentity, items, pending),
+    [feedIdentity, items, pending],
+  );
+  useEffect(() => {
+    freshAppResponsesRef.current = freshAppResponseState;
+  }, [freshAppResponseState]);
+  const freshAppResponseTexts = freshAppResponseState.texts;
   const renderedFeedRef = useRef<{ identity: string; keys: Set<string> } | null>(null);
   const previousFeed = renderedFeedRef.current;
   useEffect(() => {
@@ -2844,7 +2840,11 @@ export function MessageFeed({
 
   return (
     <div className="space-y-4">
-      {showSpecCard && <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />}
+      {showSpecCard && (
+        <div className="mx-auto min-w-0 max-w-2xl">
+          <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
+        </div>
+      )}
 
       {items.map((item, idx) => {
         const isNewItem = animateKeys.has(item.key);
@@ -2854,6 +2854,13 @@ export function MessageFeed({
               data-feed-row-id={feedRowId(item)}
               {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
               style={FEED_ROW_RENDER_STYLE}
+              className={`mx-auto min-w-0 ${
+                item.type === 'message' &&
+                item.event.author !== 'user' &&
+                hasAppBlock(item.event.text ?? '')
+                  ? 'max-w-4xl'
+                  : 'max-w-2xl'
+              }`}
               initial={isNewItem ? { opacity: 0, y: 4 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, ease: EASE }}
@@ -2861,6 +2868,11 @@ export function MessageFeed({
               <FeedItemView
                 item={item}
                 live={pending && idx === lastIdx && !subagentPoll}
+                autoPlayAppBlocks={
+                  item.type === 'message' &&
+                  item.event.author !== 'user' &&
+                  freshAppResponseTexts.has(item.event.text ?? '')
+                }
                 sessionLive={pending}
                 compacting={compacting && idx === lastIdx}
                 cwd={cwd}
@@ -2875,13 +2887,19 @@ export function MessageFeed({
               />
             </motion.div>
             {idx === worktreeInsertAfter && createdWorktreePath && (
-              <WorktreeCreatedCard path={createdWorktreePath} />
+              <div className="mx-auto min-w-0 max-w-2xl">
+                <WorktreeCreatedCard path={createdWorktreePath} />
+              </div>
             )}
           </Fragment>
         );
       })}
 
-      {showWorking && <WorkingIndicator label={workingLabel} startTs={workingStart} />}
+      {showWorking && (
+        <div className="mx-auto min-w-0 max-w-2xl">
+          <WorkingIndicator label={workingLabel} startTs={workingStart} />
+        </div>
+      )}
     </div>
   );
 }

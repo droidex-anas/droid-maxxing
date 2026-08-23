@@ -331,14 +331,8 @@ export function pruneRemovedSessionState(
     browserErrors: pruneSessionRecord(state.browserErrors, retainedSessionIds),
     designModes: pruneSessionRecord(state.designModes, retainedSessionIds),
     sessionSettingOverrides: pruneSessionRecord(state.sessionSettingOverrides, retainedSessionIds),
-    pendingPermission:
-      state.pendingPermission && retainedSessionIds.has(state.pendingPermission.appSessionId)
-        ? state.pendingPermission
-        : null,
-    pendingQuestion:
-      state.pendingQuestion && retainedSessionIds.has(state.pendingQuestion.appSessionId)
-        ? state.pendingQuestion
-        : null,
+    pendingPermissions: pruneSessionRecord(state.pendingPermissions, retainedSessionIds),
+    pendingQuestions: pruneSessionRecord(state.pendingQuestions, retainedSessionIds),
   };
 }
 

@@ -38,14 +38,39 @@ test('bucketToStatus normalizes gh buckets and check states', () => {
 });
 
 test('checksSummary is failure when any check fails, pending otherwise', () => {
-  assert.deepEqual(checksSummary([]), { total: 0, pass: 0, fail: 0, pending: 0, status: 'none' });
+  assert.deepEqual(checksSummary([]), {
+    total: 0,
+    pass: 0,
+    fail: 0,
+    pending: 0,
+    skipped: 0,
+    neutral: 0,
+    unknown: 0,
+    status: 'none',
+  });
   assert.deepEqual(checksSummary([check('pass'), check('pass')]), {
     total: 2,
     pass: 2,
     fail: 0,
     pending: 0,
+    skipped: 0,
+    neutral: 0,
+    unknown: 0,
     status: 'success',
   });
   assert.equal(checksSummary([check('pass'), check('pending')]).status, 'pending');
   assert.equal(checksSummary([check('pass'), check('fail'), check('pending')]).status, 'failure');
+});
+
+test('checksSummary preserves skipped, neutral, and unknown buckets', () => {
+  assert.deepEqual(checksSummary([check('skipping'), check('neutral'), check('mystery')]), {
+    total: 3,
+    pass: 0,
+    fail: 0,
+    pending: 0,
+    skipped: 1,
+    neutral: 1,
+    unknown: 1,
+    status: 'neutral',
+  });
 });

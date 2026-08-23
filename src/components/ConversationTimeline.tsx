@@ -20,6 +20,7 @@ export function ConversationTimeline({
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hover, setHover] = useState<{ label: string; top: number; left: number } | null>(null);
+  const railRef = useRef<HTMLDivElement | null>(null);
   // Currently-intersecting anchors keyed by id -> their viewport-relative top.
   // The observer only reports anchors whose intersection *changed*, so we keep
   // the full visible set here and recompute the topmost one on every callback;
@@ -73,6 +74,28 @@ export function ConversationTimeline({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollRef, anchorKey]);
 
+  // Long threads outgrow the rail's gutter, so keep the "you are here" dot
+  // inside the rail's own scroller. Scroll only the rail element directly:
+  // scrollIntoView could also move ancestor scrollers, including the feed.
+  // Re-run when the dot set changes too: an older-history page prepends dots
+  // above the active one, sliding it down without any activeId change.
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail || !activeId) return;
+    const dot = rail.querySelector<HTMLElement>(`[data-dot-id="${CSS.escape(activeId)}"]`);
+    if (!dot) return;
+    const railRect = rail.getBoundingClientRect();
+    const dotRect = dot.getBoundingClientRect();
+    if (dotRect.top < railRect.top) {
+      rail.scrollTo({ top: rail.scrollTop + (dotRect.top - railRect.top) - 8, behavior: 'smooth' });
+    } else if (dotRect.bottom > railRect.bottom) {
+      rail.scrollTo({
+        top: rail.scrollTop + (dotRect.bottom - railRect.bottom) + 8,
+        behavior: 'smooth',
+      });
+    }
+  }, [activeId, anchorKey]);
+
   if (anchors.length < 2) return null;
 
   const jump = (id: string) => {
@@ -84,12 +107,16 @@ export function ConversationTimeline({
 
   return (
     <div className="pointer-events-none absolute left-1 top-1/2 z-10 hidden -translate-y-1/2 lg:block">
-      <div className="no-scrollbar pointer-events-auto flex max-h-[68vh] flex-col items-start gap-2.5 overflow-y-auto py-1 pl-2 pr-3">
+      <div
+        ref={railRef}
+        className="no-scrollbar pointer-events-auto flex max-h-[68vh] flex-col items-start gap-2.5 overflow-y-auto py-1 pl-2 pr-3"
+      >
         {anchors.map((a) => {
           const active = a.id === activeId;
           return (
             <button
               key={a.id}
+              data-dot-id={a.id}
               type="button"
               onClick={() => {
                 jump(a.id);

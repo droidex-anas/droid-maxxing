@@ -8,7 +8,12 @@ import type {
   PrCheck,
   PrChecksResult,
   PrCommentsResult,
+  PrMergeMethod,
+  PrMergeResult,
   PullRequest,
+  PullRequestDiffResult,
+  PullRequestListResult,
+  PullRequestViewResult,
 } from '../types/vcs';
 
 export function isGithubAuthCodeCopied(
@@ -99,9 +104,56 @@ export async function detectPullRequest(dir: string, branch?: string): Promise<D
   }
 }
 
+export async function listPullRequests(
+  dir: string,
+  options: { state?: string; limit?: number } = {},
+): Promise<PullRequestListResult> {
+  const api = githubApi();
+  if (!api || !dir) {
+    return {
+      ok: false,
+      reason: 'not_desktop',
+      message: 'Pull requests are available in the desktop app.',
+      viewerLogin: null,
+      prs: [],
+    };
+  }
+  try {
+    return await api.githubListPrs(dir, options);
+  } catch {
+    return { ok: false, reason: 'error', viewerLogin: null, prs: [] };
+  }
+}
+
+export async function viewPullRequest(
+  dir: string,
+  prNumber: number,
+): Promise<PullRequestViewResult> {
+  const api = githubApi();
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', pr: null };
+  try {
+    return await api.githubViewPr(dir, { prNumber });
+  } catch {
+    return { ok: false, reason: 'error', pr: null };
+  }
+}
+
+export async function getPullRequestDiff(
+  dir: string,
+  prNumber: number,
+): Promise<PullRequestDiffResult> {
+  const api = githubApi();
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', diff: '' };
+  try {
+    return await api.githubPrDiff(dir, { prNumber });
+  } catch {
+    return { ok: false, reason: 'error', diff: '' };
+  }
+}
+
 export async function getPrChecks(dir: string, prNumber: number): Promise<PrChecksResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop', checks: [] };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', checks: [] };
   try {
     return await api.githubPrChecks(dir, { prNumber });
   } catch {
@@ -111,7 +163,7 @@ export async function getPrChecks(dir: string, prNumber: number): Promise<PrChec
 
 export async function getPrComments(dir: string, prNumber: number): Promise<PrCommentsResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop', comments: [] };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop', comments: [] };
   try {
     return await api.githubPrComments(dir, { prNumber });
   } catch {
@@ -124,7 +176,7 @@ export async function createPullRequest(
   options: CreatePrOptions,
 ): Promise<CreatePrResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop' };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop' };
   try {
     return await api.githubCreatePr(dir, options);
   } catch {
@@ -138,11 +190,33 @@ export async function postPrComment(
   body: string,
 ): Promise<PostCommentResult> {
   const api = githubApi();
-  if (!api) return { ok: false, reason: 'not_desktop' };
+  if (!api || !dir) return { ok: false, reason: 'not_desktop' };
   try {
     return await api.githubPostComment(dir, { prNumber, body });
   } catch {
     return { ok: false, reason: 'error' };
+  }
+}
+
+export async function mergePullRequest(
+  dir: string,
+  prNumber: number,
+  method: PrMergeMethod,
+): Promise<PrMergeResult> {
+  const api = githubApi();
+  // Without a repository directory gh would act on the Electron process's own
+  // working directory, so every wrapper refuses an empty `dir`.
+  if (!api || !dir) {
+    return {
+      ok: false,
+      reason: 'not_desktop',
+      message: 'Merging a pull request is available in the desktop app.',
+    };
+  }
+  try {
+    return await api.githubMergePr(dir, { prNumber, method });
+  } catch {
+    return { ok: false, reason: 'error', message: 'Could not merge pull request' };
   }
 }
 
@@ -194,6 +268,9 @@ export interface ChecksSummary {
   pass: number;
   fail: number;
   pending: number;
+  skipped: number;
+  neutral: number;
+  unknown: number;
   status: CheckStatus | 'none';
 }
 
@@ -203,13 +280,21 @@ export function checksSummary(checks: PrCheck[]): ChecksSummary {
     pass: 0,
     fail: 0,
     pending: 0,
+    skipped: 0,
+    neutral: 0,
+    unknown: 0,
     status: 'none',
   };
   for (const check of checks) {
-    const status = bucketToStatus(check.bucket);
+    const bucket = (check.bucket || '').toLowerCase();
+    const status = bucketToStatus(bucket);
     if (status === 'success') summary.pass += 1;
     else if (status === 'failure') summary.fail += 1;
     else if (status === 'pending') summary.pending += 1;
+    else if (bucket === 'skip' || bucket === 'skipped' || bucket === 'skipping')
+      summary.skipped += 1;
+    else if (bucket === 'neutral') summary.neutral += 1;
+    else summary.unknown += 1;
   }
   if (summary.total === 0) summary.status = 'none';
   else if (summary.fail > 0) summary.status = 'failure';

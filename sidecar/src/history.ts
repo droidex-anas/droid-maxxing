@@ -34,7 +34,6 @@ import {
   type SessionFileStat,
 } from './sessionFileCache.js';
 import {
-  SESSION_START_BYTES,
   parseFullSessionTranscript,
   readSessionRawWindow,
   SessionTranscriptReader,
@@ -151,10 +150,10 @@ const STATE_TO_PHASE: Record<string, SessionPhase> = {
 // each lazy older-page fetch). Bounds work for very long, multi-compaction chats.
 const DEFAULT_HISTORY_WINDOW = 400;
 // Per-segment span used to derive a global monotonic `seq` from a chain index +
-// in-segment position. Must exceed any single segment's seq band: a segment is
-// tail-windowed at MAX_SESSION_BYTES, and the reader assigns each line a
-// LINE_EVENT_STRIDE band, so the ceiling is (1<<27)/256 = 524,288 lines — far
-// above the ~50K lines a 5MB window of real message lines can hold.
+// in-segment position. Must exceed any single segment's seq band: the reader
+// assigns each line a LINE_EVENT_STRIDE band, so the ceiling is
+// (1<<27)/256 = 524,288 lines per segment — multi-GB at the multi-KB lines
+// real sessions store, far beyond any observed file.
 const SEQ_SEGMENT_STRIDE = 1 << 27;
 const HISTORY_SCHEMA_VERSION = 2;
 export const SESSION_INDEX_FILENAME = 'session-index.sqlite';
@@ -1258,7 +1257,7 @@ function parseTranscriptCursor(
     const line = Number(parts[2]);
     const skip = Number(parts[3]);
     if (parts.length !== 4 || !Number.isInteger(line) || !Number.isInteger(skip)) return null;
-    if (line < -1 || skip < 0) return null;
+    if (line < 0 || skip < 0) return null;
     return { ci, from: { line, skip } };
   }
   const ci = Number(parts[0]);
@@ -1769,6 +1768,10 @@ function readJson<T>(path: string): T {
 function readJsonLines<T>(path: string): T[] {
   return parseJsonLines(readFileSync(path, 'utf8'));
 }
+
+// The session_start record lives at the head of the file; cap that head read
+// instead of scanning the whole file.
+const SESSION_START_BYTES = 256_000;
 
 function readSessionStart(path: string): StoredSessionStart {
   const size = statSync(path).size;

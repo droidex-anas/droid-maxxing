@@ -14,10 +14,16 @@ import {
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import {
+  loadPersistedBrowserOpenKeys,
+  loadPersistedBrowsers,
+  persistBrowsers,
   restorePersistedBrowserSessions,
-  sanitizePersistedBrowserUrl,
 } from '../lib/browserPersistence';
 import { updateCompactionSettings } from '../lib/commands';
+import {
+  resolvePrWorkspaceNumber,
+  sanitizePersistedPrWorkspace,
+} from '../features/pull-requests/lib/prWorkspaceCwd';
 import {
   DEFAULT_THEME_ID,
   detectPresetId,
@@ -48,7 +54,6 @@ import type {
   ReasoningEffort,
   ContextStatsSnapshot,
   BrowserState,
-  BrowserViewportMode,
   DesignReference,
 } from '../types/bridge';
 import { addWorkspaceCwd } from '../lib/workspaces';
@@ -85,6 +90,7 @@ import {
   type ChatMetadataMap,
 } from '../lib/chatMetadata';
 import { createSnapshotScheduler, loadSessionSnapshot } from '../lib/sessionSnapshot';
+import { createComposerSeed } from '../lib/composerReset';
 import { toast } from '../lib/toast';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
 import {
@@ -252,8 +258,11 @@ export interface AppState {
   childHistory: Record<string, Record<string, ChildHistoryState>>;
   childAccess: Record<string, Record<string, ChildAccess>>;
   childRuntime: Record<string, Record<string, ChildRuntimeState>>;
-  pendingPermission: PermissionRequest | null;
-  pendingQuestion: SessionQuestion | null;
+  // Pending permission requests are scoped to the session that asked, so a
+  // request from one chat never appears (or gets answered) in another.
+  pendingPermissions: Record<string, PermissionRequest>;
+  // Same scoping for AskUser questions: keyed by the asking session.
+  pendingQuestions: Record<string, SessionQuestion>;
   contextStats: {
     primary: Record<string, ContextStatsSnapshot>;
     child: Record<string, Record<string, ContextStatsSnapshot>>;
@@ -287,6 +296,9 @@ export interface AppState {
   reviewFocusRequestId: number;
   diffView: DiffViewMode;
   sidebarCollapsed: boolean;
+  mainView: 'session' | 'pull-requests';
+  prWorkspaceCwd: string | null;
+  prWorkspaceNumber: number | null;
   specMode: boolean;
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
@@ -311,7 +323,7 @@ export interface AppState {
   pendingAutonomy: Record<string, Autonomy>;
   // One-shot text seeded into the composer (welcome-screen suggestion cards,
   // saved-note clicks). A fresh id per seed lets re-clicking re-arm the effect.
-  composerSeed: { text: string; id: number } | null;
+  composerSeed: { text: string; id: number; replace: boolean } | null;
   workspaceCwds: string[];
   // Derived (synced by the reducer): whether the browser pane is open for the
   // *currently active* session. Source of truth is `browserOpenKeys`.
@@ -504,8 +516,8 @@ type Action =
       parentAppSessionId: string;
       childSessionId: string;
     }
-  | { type: 'CLEAR_PERMISSION' }
-  | { type: 'CLEAR_QUESTION' }
+  | { type: 'CLEAR_PERMISSION'; appSessionId: string }
+  | { type: 'CLEAR_QUESTION'; appSessionId: string }
 
   // UI
   | { type: 'SET_ACTIVE_SESSION'; id: string | null }
@@ -547,13 +559,15 @@ type Action =
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
+  | { type: 'OPEN_PULL_REQUESTS'; cwd?: string | null; number?: number | null }
+  | { type: 'CLOSE_PULL_REQUESTS' }
   | {
       type: 'START_CHAT';
       cwd: string;
       executionMode: 'worktree' | 'local';
       branch?: string;
     }
-  | { type: 'SEED_COMPOSER'; text: string }
+  | { type: 'SEED_COMPOSER'; text: string; replace?: boolean }
   | { type: 'CLEAR_COMPOSER_SEED' }
   | { type: 'SESSION_NOTE_ADD'; appSessionId: string; text: string }
   | { type: 'SESSION_NOTE_MARK_USED'; appSessionId: string; noteId: string }
@@ -583,7 +597,11 @@ type Action =
 
   // Models / per-agent config
   | { type: 'MODELS_LIST'; models: ModelInfo[] }
-  | { type: 'SKILLS_LIST'; skills: SkillInfo[]; providerSessionId: string | null }
+  | {
+      type: 'SKILLS_LIST';
+      skills: SkillInfo[];
+      providerSessionId: string | null;
+    }
   | { type: 'FACTORY_DEFAULTS'; defaults: FactoryDefaultSettings }
   | { type: 'SET_AGENT_MODEL'; agent: AgentKind; modelId?: string }
   | { type: 'SET_AGENT_REASONING'; agent: AgentKind; reasoning: ReasoningEffort }
@@ -809,14 +827,6 @@ const REVIEW_SCOPE_STORAGE_KEY = 'droid-review-scope';
 const WORKSPACES_STORAGE_KEY = 'droid-workspaces';
 const SESSION_LAST_SEEN_STORAGE_KEY = 'droid-session-last-seen-v1';
 const UI_STATE_STORAGE_KEY = 'droid-ui-state-v2';
-const BROWSER_VIEWPORT_MODES = new Set<BrowserViewportMode>([
-  'fit',
-  'desktop',
-  'laptop',
-  'tablet',
-  'mobile',
-  'custom',
-]);
 
 interface PersistedUiState {
   activeAppSessionId: string | null;
@@ -828,6 +838,9 @@ interface PersistedUiState {
   browsers: Record<string, BrowserState>;
   browserOpenKeys: Record<string, boolean>;
   selectedFeatureId: string | null;
+  mainView?: 'session' | 'pull-requests';
+  prWorkspaceCwd?: string | null;
+  prWorkspaceNumber?: number | null;
 }
 
 function loadCompactionModel(): string {
@@ -958,6 +971,7 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Partial<PersistedUiState>;
     return {
+      ...sanitizePersistedPrWorkspace(parsed.prWorkspaceCwd, parsed.prWorkspaceNumber),
       activeAppSessionId:
         typeof parsed.activeAppSessionId === 'string' ? parsed.activeAppSessionId : null,
       rightPanelOpen:
@@ -972,6 +986,10 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
       browserOpenKeys: loadPersistedBrowserOpenKeys(parsed.browserOpenKeys),
       selectedFeatureId:
         typeof parsed.selectedFeatureId === 'string' ? parsed.selectedFeatureId : null,
+      mainView:
+        parsed.mainView === 'session' || parsed.mainView === 'pull-requests'
+          ? parsed.mainView
+          : undefined,
     };
   } catch {
     return {};
@@ -989,6 +1007,9 @@ function savePersistedUiState(state: AppState): void {
     browsers: persistBrowsers(state.browsers),
     browserOpenKeys: state.browserOpenKeys,
     selectedFeatureId: state.selectedFeatureId,
+    mainView: state.mainView,
+    prWorkspaceCwd: state.prWorkspaceCwd,
+    prWorkspaceNumber: state.prWorkspaceNumber,
   };
   try {
     getLocalStorage()?.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
@@ -1089,8 +1110,8 @@ export const initialState: AppState = {
   childHistory: {},
   childAccess: {},
   childRuntime: {},
-  pendingPermission: null,
-  pendingQuestion: null,
+  pendingPermissions: {},
+  pendingQuestions: {},
   contextStats: { primary: {}, child: {} },
   specPlans: {},
   sessionSpecs: {},
@@ -1100,6 +1121,9 @@ export const initialState: AppState = {
   rightPanelOpen: persistedUiState.rightPanelOpen ?? true,
   utilityPanels: persistedUiState.utilityPanels ?? {},
   sidebarCollapsed: persistedUiState.sidebarCollapsed ?? false,
+  mainView: persistedUiState.mainView ?? 'session',
+  prWorkspaceCwd: persistedUiState.prWorkspaceCwd ?? null,
+  prWorkspaceNumber: persistedUiState.prWorkspaceNumber ?? null,
   specMode: persistedUiState.specMode ?? false,
   settingsOpen: false,
   commandPaletteOpen: false,
@@ -1390,7 +1414,9 @@ function baseReducer(state: AppState, action: Action): AppState {
           text: pending ? pending.text : action.session.goal,
           author: 'user',
           skills: pending?.skills.length ? pending.skills : undefined,
-          files: pending?.files.length ? pending.files : undefined,
+          // Only a compose owned by this renderer is live metadata. A seed from
+          // another window or a resumed session is restored-equivalent content.
+          files: pending?.files,
         };
         transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
         transcriptRetainedCost = {
@@ -1530,6 +1556,12 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         childAccess,
         childRuntime,
+        pendingPermissions: Object.fromEntries(
+          Object.entries(state.pendingPermissions).filter(([id]) => id !== action.appSessionId),
+        ),
+        pendingQuestions: Object.fromEntries(
+          Object.entries(state.pendingQuestions).filter(([id]) => id !== action.appSessionId),
+        ),
         contextStats: { ...state.contextStats, child: childContext },
         pendingAutonomy: Object.fromEntries(
           Object.entries(state.pendingAutonomy).filter(([id]) => id !== action.appSessionId),
@@ -1957,11 +1989,22 @@ function baseReducer(state: AppState, action: Action): AppState {
               [r.appSessionId]: { path: existingSpec?.path, title: r.title, content: r.plan },
             }
           : state.sessionSpecs;
-      return { ...state, pendingPermission: r, specPlans, sessionSpecs };
+      return {
+        ...state,
+        pendingPermissions: { ...state.pendingPermissions, [r.appSessionId]: r },
+        specPlans,
+        sessionSpecs,
+      };
     }
 
     case 'SESSION_QUESTION':
-      return { ...state, pendingQuestion: action.question };
+      return {
+        ...state,
+        pendingQuestions: {
+          ...state.pendingQuestions,
+          [action.question.appSessionId]: action.question,
+        },
+      };
 
     case 'SESSION_CREATE_FAILED':
       return {
@@ -2251,11 +2294,23 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
     /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
-    case 'CLEAR_PERMISSION':
-      return { ...state, pendingPermission: null };
+    case 'CLEAR_PERMISSION': {
+      return {
+        ...state,
+        pendingPermissions: Object.fromEntries(
+          Object.entries(state.pendingPermissions).filter(([id]) => id !== action.appSessionId),
+        ),
+      };
+    }
 
-    case 'CLEAR_QUESTION':
-      return { ...state, pendingQuestion: null };
+    case 'CLEAR_QUESTION': {
+      return {
+        ...state,
+        pendingQuestions: Object.fromEntries(
+          Object.entries(state.pendingQuestions).filter(([id]) => id !== action.appSessionId),
+        ),
+      };
+    }
 
     case 'SET_ACTIVE_SESSION': {
       // Stamp "seen now" on both the session being left (so responses received
@@ -2295,6 +2350,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         // A pending review-focus request belongs to the session that issued
         // it; never let it fire in another session's panel after a switch.
         reviewFocusPath: action.id === state.activeAppSessionId ? state.reviewFocusPath : null,
+        mainView: 'session',
       };
     }
 
@@ -2524,6 +2580,21 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'TOGGLE_MISSION_CONTROL':
       return { ...state, missionControlMode: !state.missionControlMode };
 
+    case 'OPEN_PULL_REQUESTS':
+      return {
+        ...state,
+        mainView: 'pull-requests',
+        prWorkspaceCwd: action.cwd === undefined ? state.prWorkspaceCwd : action.cwd,
+        prWorkspaceNumber: resolvePrWorkspaceNumber(
+          state.prWorkspaceCwd,
+          state.prWorkspaceNumber,
+          action.cwd,
+          action.number,
+        ),
+      };
+    case 'CLOSE_PULL_REQUESTS':
+      return state.mainView === 'session' ? state : { ...state, mainView: 'session' };
+
     case 'START_CHAT': {
       // Stamp the session being left so model output produced while it was
       // open doesn't surface as an unread badge after starting a new chat.
@@ -2546,12 +2617,12 @@ function baseReducer(state: AppState, action: Action): AppState {
         // Leaving for a fresh draft orphans any pending review-focus request.
         reviewFocusPath: null,
         sessionLastSeen,
+        mainView: 'session',
       };
     }
 
     case 'SEED_COMPOSER':
-      return { ...state, composerSeed: { text: action.text, id: Date.now() } };
-
+      return { ...state, composerSeed: createComposerSeed(action.text, action.replace) };
     // The composer consumes the seed once; it must not linger, or remounting
     // the composer (e.g. toggling Mission Control) would re-apply stale text.
     case 'CLEAR_COMPOSER_SEED':
@@ -2793,7 +2864,11 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
 
     case 'SKILLS_LIST':
-      return { ...state, skills: action.skills, skillsProviderSessionId: action.providerSessionId };
+      return {
+        ...state,
+        skills: action.skills,
+        skillsProviderSessionId: action.providerSessionId,
+      };
 
     case 'FACTORY_DEFAULTS': {
       const next = sanitizeAgentConfig(
@@ -2947,94 +3022,6 @@ function baseReducer(state: AppState, action: Action): AppState {
     default:
       return state;
   }
-}
-
-function loadPersistedBrowsers(value: unknown): Record<string, BrowserState> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const entries = Object.entries(value as Record<string, unknown>)
-    .map(([key, browser]) => [key, sanitizePersistedBrowser(key, browser)] as const)
-    .filter((entry): entry is readonly [string, BrowserState] => Boolean(entry[1]));
-  return Object.fromEntries(entries);
-}
-
-function loadPersistedBrowserOpenKeys(value: unknown): Record<string, boolean> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  // Preserve both true (open) and false (explicitly hidden) so the "hidden"
-  // decision survives a restart; a dropped `false` would let later updates
-  // re-open a pane the user deliberately hid.
-  const entries = Object.entries(value as Record<string, unknown>).filter(
-    (entry): entry is [string, boolean] =>
-      typeof entry[0] === 'string' && entry[0].length > 0 && typeof entry[1] === 'boolean',
-  );
-  return Object.fromEntries(entries);
-}
-
-function sanitizePersistedBrowser(key: string, value: unknown): BrowserState | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const browser = value as Partial<BrowserState>;
-  if (typeof browser.browserSessionId !== 'string' || !browser.browserSessionId) return undefined;
-  if (typeof browser.url !== 'string' || !browser.url) return undefined;
-  const viewport = sanitizeBrowserViewport(browser.viewport);
-  if (!viewport) return undefined;
-  return {
-    browserSessionId: browser.browserSessionId,
-    appSessionId: key,
-    url: browser.url,
-    title: typeof browser.title === 'string' ? browser.title : undefined,
-    viewport,
-    viewportMode: sanitizeBrowserViewportMode(browser.viewportMode),
-    scroll: sanitizeBrowserScroll(browser.scroll),
-    refs: [],
-    ...(browser.canGoBack === true ? { canGoBack: true } : {}),
-    ...(browser.canGoForward === true ? { canGoForward: true } : {}),
-  };
-}
-
-function sanitizeBrowserViewport(value: unknown): BrowserState['viewport'] | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const viewport = value as Partial<BrowserState['viewport']>;
-  const width = finitePositiveNumber(viewport.width);
-  const height = finitePositiveNumber(viewport.height);
-  const deviceScaleFactor = finitePositiveNumber(viewport.deviceScaleFactor);
-  if (!width || !height || !deviceScaleFactor) return undefined;
-  return { width, height, deviceScaleFactor };
-}
-
-function sanitizeBrowserViewportMode(value: unknown): BrowserViewportMode {
-  return BROWSER_VIEWPORT_MODES.has(value as BrowserViewportMode)
-    ? (value as BrowserViewportMode)
-    : 'fit';
-}
-
-function sanitizeBrowserScroll(value: unknown): BrowserState['scroll'] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { x: 0, y: 0 };
-  const scroll = value as Partial<BrowserState['scroll']>;
-  return { x: finiteNumber(scroll.x) ?? 0, y: finiteNumber(scroll.y) ?? 0 };
-}
-
-function persistBrowsers(browsers: Record<string, BrowserState>): Record<string, BrowserState> {
-  return Object.fromEntries(
-    Object.entries(browsers).map(([key, browser]) => [
-      key,
-      {
-        ...browser,
-        url: sanitizePersistedBrowserUrl(browser.url),
-        refs: [],
-        agentCursor: undefined,
-        screenshotPath: undefined,
-        screenshotUrl: undefined,
-      },
-    ]),
-  );
-}
-
-function finitePositiveNumber(value: unknown): number | undefined {
-  const number = finiteNumber(value);
-  return number && number > 0 ? number : undefined;
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 /* ── Bridge event adapter ── */
@@ -3246,6 +3233,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.selectedChild,
     state.selectedFeatureId,
     state.sidebarCollapsed,
+    state.mainView,
+    state.prWorkspaceCwd,
+    state.prWorkspaceNumber,
     state.specMode,
   ]);
 

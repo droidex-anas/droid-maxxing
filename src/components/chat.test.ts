@@ -21,7 +21,7 @@ import {
   appendedFeedItemKeys,
   type FeedItem,
 } from './chat';
-import { EarlierHistoryStatus } from './ChatView';
+import { EarlierHistoryControl, isConversationOpeningSettling } from './ChatView';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
   createDiffDisclosure,
@@ -83,6 +83,7 @@ test('a skill prompt renders the skill inline in blue before the user text', () 
   );
   assert.match(html, /text-droid-skill[^>]*>.*review/);
   assert.ok(html.indexOf('review') < html.indexOf('PR #100'));
+  assert.ok(!html.includes('<svg'));
   assert.ok(!html.includes('violet'));
 });
 
@@ -792,6 +793,96 @@ test('restored feed rows render immediately instead of replaying entrance motion
   assert.doesNotMatch(html, /translateY\(4px\)/);
 });
 
+test('App responses receive a wider chat canvas while ordinary rows stay readable', () => {
+  const app = 'Here is the result.\n\n```app\n<main>Wide App</main>\n```';
+  const appHtml = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst(app)], pending: false }),
+  );
+  const textHtml = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst('Ordinary answer')], pending: false }),
+  );
+
+  assert.match(appHtml, /max-w-4xl/);
+  assert.match(textHtml, /max-w-2xl/);
+});
+
+test('an incomplete live App owns its building state without exposing Play or a trailing caret', () => {
+  const incompleteApp = [
+    'Preparing the visualization.',
+    '',
+    '```app',
+    '<main><script>const points = [',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst(incompleteApp)], pending: true }),
+  );
+
+  assert.match(html, /max-w-4xl/);
+  assert.match(html, /Building interactive app/);
+  assert.match(html, /role="status"/);
+  assert.doesNotMatch(html, /aria-label="Play app"/);
+  assert.doesNotMatch(html, /caret-blink/);
+  assert.doesNotMatch(html, /<iframe/i);
+});
+
+test('ordinary live prose keeps the trailing streaming caret', () => {
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: [asst('Still writing')], pending: true }),
+  );
+
+  assert.match(html, /caret-blink/);
+});
+
+test('a freshly generated App stays eligible for autoplay when history replaces its event id', async () => {
+  type FreshAppState = {
+    identity: string;
+    wasPending: boolean;
+    texts: Set<string>;
+  };
+  type RememberFreshApps = (
+    previous: FreshAppState | null,
+    identity: string,
+    items: FeedItem[],
+    pending: boolean,
+  ) => FreshAppState;
+  const chatModule = (await import('./chat')) as unknown as {
+    rememberFreshAppResponses?: RememberFreshApps;
+  };
+  const remember = chatModule.rememberFreshAppResponses;
+  assert.equal(typeof remember, 'function');
+  if (!remember) return;
+
+  const prompt = userMsg('Visualize this');
+  const incomplete = asst('```app\n<main><script>const points = [');
+  const liveItems = groupTurns(buildFeed([prompt, incomplete]), true);
+  const liveState = remember(null, 'session-1', liveItems, true);
+  assert.deepEqual([...liveState.texts], []);
+
+  const completeText = '```app\n<main>Complete App</main>\n```';
+  const authoritative = {
+    ...asst(completeText),
+    id: 'authoritative-history-id',
+  };
+  const settledItems = groupTurns(buildFeed([prompt, authoritative]), false);
+  const settledState = remember(liveState, 'session-1', settledItems, false);
+  assert.deepEqual([...settledState.texts], [completeText]);
+
+  const reopenedState = remember(null, 'session-1', settledItems, false);
+  assert.deepEqual([...reopenedState.texts], []);
+});
+
+test('assistant Apps without a user prompt are never treated as fresh autoplay responses', async () => {
+  const chatModule = (await import('./chat')) as unknown as {
+    completeAppResponsesInLatestTurn?: (items: FeedItem[]) => string[];
+  };
+  const completeApps = chatModule.completeAppResponsesInLatestTurn;
+  assert.equal(typeof completeApps, 'function');
+  if (!completeApps) return;
+
+  const historical = groupTurns(buildFeed([asst('```app\n<main>Historical</main>\n```')]), false);
+  assert.deepEqual(completeApps(historical), []);
+});
+
 test('live thinking stays collapsed until the user opens it', () => {
   const events = [
     userMsg('inspect this'),
@@ -906,16 +997,51 @@ test('diff disclosure preserves reveal progress while remounting in bounded comm
   }
 });
 
-test('history paging uses a persistent live region whose text changes in place', () => {
-  const idle = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: false }));
-  const loading = renderToStaticMarkup(createElement(EarlierHistoryStatus, { loading: true }));
+test('opening an old chat keeps the skeleton up until timeline priming settles', () => {
+  const settling = {
+    isConversationLive: false,
+    isViewingChildSession: false,
+    isTimelinePriming: true,
+    hasOlderHistory: true,
+    isLoadingOlder: false,
+  };
+  assert.equal(isConversationOpeningSettling(settling), true);
+  // The last priming page is still in flight after the cursor was consumed.
+  assert.equal(
+    isConversationOpeningSettling({ ...settling, hasOlderHistory: false, isLoadingOlder: true }),
+    true,
+  );
+  // Enough anchors: the rail is ready, the feed takes over.
+  assert.equal(isConversationOpeningSettling({ ...settling, isTimelinePriming: false }), false);
+  // History exhausted with nothing in flight: a short thread never re-covers.
+  assert.equal(isConversationOpeningSettling({ ...settling, hasOlderHistory: false }), false);
+  // Streaming output outranks a quiet open.
+  assert.equal(isConversationOpeningSettling({ ...settling, isConversationLive: true }), false);
+  assert.equal(isConversationOpeningSettling({ ...settling, isViewingChildSession: true }), false);
+});
 
-  for (const markup of [idle, loading]) {
+test('history paging uses a persistent live region whose text changes in place', () => {
+  const idle = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: true, loading: false }),
+  );
+  const loading = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: true, loading: true }),
+  );
+  const exhausted = renderToStaticMarkup(
+    createElement(EarlierHistoryControl, { hasMore: false, loading: false }),
+  );
+
+  for (const markup of [idle, loading, exhausted]) {
     assert.match(markup, /aria-atomic="true"/);
     assert.match(markup, /aria-live="polite"/);
+    assert.doesNotMatch(markup, /<button/);
   }
+  // While more history exists the row holds its height so an arriving page
+  // never nudges the reading position; only the in-flight state speaks.
+  assert.match(idle, /h-9/);
   assert.doesNotMatch(idle, /Loading earlier messages/);
   assert.match(loading, /Loading earlier messages…/);
+  assert.doesNotMatch(exhausted, /Loading earlier messages/);
 });
 
 test('a singleton diff keeps its viewport identity when an older edit joins the group', () => {

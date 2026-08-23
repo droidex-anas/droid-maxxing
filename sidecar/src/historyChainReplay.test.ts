@@ -172,9 +172,9 @@ test('equal-timestamp events keep chain order via seq, not wall-clock', () => {
   assert.ok(texts[0].seq! < texts[1].seq! && texts[1].seq! < texts[2].seq!);
 });
 
-test('an oversized compacted segment still surfaces its divider (read from the head)', () => {
-  // > MAX_SESSION_BYTES so the transcript reader tail-windows the file; the
-  // leading compaction_state must still be found by reading the head.
+test('an oversized compacted segment still surfaces its divider', () => {
+  // > MAX_SESSION_BYTES: the reader indexes the whole file, so the leading
+  // compaction_state parses in position like any other line.
   const huge = 'x'.repeat(6_000_000);
   writeSession('orig', [assistant('first')]);
   writeSession('big', [compactionState(42), assistant('after-1'), assistant(huge)]);
@@ -276,19 +276,27 @@ test('export path replays the whole compaction chain in a single window', () => 
   assert.equal(events.filter((e) => e.kind === 'compaction').length, 2);
 });
 
-test('an oversized segment surfaces its trim notice instead of being silently head-trimmed', () => {
-  // Regression: the oversized-file head-trim marker is a `status` event, which
-  // the Markdown conversion used to drop — exporting a >5MB chat looked
-  // complete while its oldest messages were missing. The event must survive
-  // so the exporter can surface it.
+test('an oversized segment replays completely, with no trim notice', () => {
+  // Regression: >5MB files used to be tail-windowed, so exports and history
+  // paging silently lost the oldest messages behind a "Loaded latest 5 MB"
+  // status. The whole file must now be served and the notice must not exist.
   const huge = 'x'.repeat(6_000_000);
-  writeSession('bigexport', [assistant(huge), assistant('tail-message')]);
+  writeSession('bigexport', [
+    assistant('oldest-message'),
+    assistant(huge),
+    assistant('tail-message'),
+  ]);
 
   const chain = resolveSessionChain('bigexport', 'bigexport');
   const { events } = loadSessionTranscriptWindow('bigexport', chain, { limit: 100_000 });
-  const notice = events.find((e) => e.kind === 'status' && e.text?.includes('oversized session'));
-  assert.ok(notice, 'expected the oversized-trim status event to reach the exporter');
-  assert.ok(events.some((e) => e.text === 'tail-message'));
+  assert.equal(
+    events.some((e) => e.kind === 'status'),
+    false,
+  );
+  const texts = events.filter((e) => e.kind === 'text');
+  assert.equal(texts[0]?.text, 'oldest-message');
+  assert.equal(texts.at(-1)?.text, 'tail-message');
+  assert.equal(texts.length, 3);
 });
 
 function historicalSummary(
@@ -333,26 +341,23 @@ test(
   { skip: !canBlockReads },
   () => {
     writeSession('memo1', [assistant('m1'), assistant('m2'), assistant('m3')]);
-    const first = loadSessionTranscriptWindow('app', ['memo1'], { limit: 1 });
+    const first = loadSessionTranscriptWindow('app', ['memo1'], { limit: 5 });
     assert.deepEqual(
       first.events.map((e) => e.text),
-      ['m3'],
+      ['m1', 'm2', 'm3'],
     );
-    assert.ok(first.olderCursor);
-    // Make the file unreadable: a re-read would throw, so a successful page
-    // proves the memoized reader (validated by unchanged mtime + size)
-    // served it from memory.
+    // Make the file unreadable: a re-read would throw, so a successful repeat
+    // page proves the memoized reader (validated by unchanged mtime + size)
+    // served it from memory. Only previously parsed lines are memoized; the
+    // reader preads unvisited lines on demand instead of holding the file.
     chmodSync(sessionFilePath('memo1'), 0);
     try {
-      const second = loadSessionTranscriptWindow('app', ['memo1'], {
-        cursor: first.olderCursor,
-        limit: 5,
-      });
+      const repeat = loadSessionTranscriptWindow('app', ['memo1'], { limit: 5 });
       assert.deepEqual(
-        second.events.map((e) => e.text),
-        ['m1', 'm2'],
+        repeat.events.map((e) => e.text),
+        ['m1', 'm2', 'm3'],
       );
-      assert.equal(second.olderCursor, undefined);
+      assert.equal(repeat.olderCursor, undefined);
     } finally {
       chmodSync(sessionFilePath('memo1'), 0o644);
     }

@@ -328,6 +328,10 @@
 }
 
 @layer components {
+  .pr-workspace-scroll {
+    scrollbar-gutter: stable;
+  }
+
   .review-pane,
   .files-workspace {
     container-type: inline-size;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { composePrompt, parseSlashSkillInvocation } from './composePrompt';
+import { composePrompt, isVisualizeCommand, parseSlashSkillInvocation } from './composePrompt';
 
 test('one selected skill uses the provider-native slash invocation', () => {
   assert.equal(composePrompt('PR #100', ['review'], []), '/review PR #100');
@@ -27,4 +27,40 @@ test('multiple selected skills keep the explicit multi-skill instruction', () =>
     composePrompt('inspect this', ['review', 'semgrep'], []),
     'Use these skills: "review", "semgrep".\n\ninspect this',
   );
+});
+
+test('/visualize remains concise when the renderer composes the visible prompt', () => {
+  const composed = composePrompt('/visualize compare renderer timings', [], []);
+
+  assert.equal(composed, '/visualize compare renderer timings');
+  assert.doesNotMatch(composed, /fenced `app` block/);
+  assert.doesNotMatch(composed, /--app-background/);
+});
+
+test('/visualize without arguments remains the visible user command', () => {
+  const composed = composePrompt('/visualize', [], []);
+
+  assert.equal(composed, '/visualize');
+});
+
+test('/visualize remains an app command even when a provider skill has the same name', () => {
+  assert.equal(isVisualizeCommand('/visualize chart these results'), true);
+  assert.equal(isVisualizeCommand('/visualizer is a different prompt'), false);
+});
+
+test('an existing App keeps follow-up prompts App-capable without another slash command', async () => {
+  type ResponseFormatForPrompt = (
+    text: string,
+    hasAppContext: boolean,
+  ) => 'app-create' | 'app-followup' | undefined;
+  const promptModule = (await import('./composePrompt')) as unknown as {
+    responseFormatForPrompt?: ResponseFormatForPrompt;
+  };
+  const responseFormatForPrompt = promptModule.responseFormatForPrompt;
+  assert.equal(typeof responseFormatForPrompt, 'function');
+  if (!responseFormatForPrompt) return;
+
+  assert.equal(responseFormatForPrompt('make the points larger', true), 'app-followup');
+  assert.equal(responseFormatForPrompt('ordinary question', false), undefined);
+  assert.equal(responseFormatForPrompt('/visualize a histogram', false), 'app-create');
 });

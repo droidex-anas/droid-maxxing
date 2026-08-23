@@ -1,4 +1,5 @@
 import { bridge } from './bridge';
+import { isAppUpdateInstalling } from './appUpdate';
 import type {
   Autonomy,
   BrowserNativeResult,
@@ -12,11 +13,18 @@ import type {
   McpServerInput,
   PermissionOutcome,
   ReasoningEffort,
+  ResponseFormat,
   SessionInteractionMode,
   SessionPurpose,
 } from '../types/bridge';
 
 let refCounter = 0;
+
+function requireAgentWorkAvailable(): void {
+  if (isAppUpdateInstalling()) {
+    throw new Error('DROIDEX is installing an update; new agent work is paused until restart.');
+  }
+}
 
 export const newClientRef = () => `c-${Date.now().toString(36)}-${String(refCounter++)}`;
 
@@ -41,7 +49,9 @@ export const createSession = (input: {
   workerReasoning?: ReasoningEffort;
   validatorModel?: string;
   validatorReasoning?: ReasoningEffort;
+  responseFormat?: ResponseFormat;
 }) => {
+  requireAgentWorkAvailable();
   bridge.send({ type: 'session.create', ...input });
 };
 
@@ -98,20 +108,47 @@ export const listFactoryDefaults = () => {
   bridge.send({ type: 'settings.defaults' });
 };
 
-export const sendToSession = (appSessionId: string, text: string) => {
-  bridge.send({ type: 'session.send', appSessionId, text });
+export const sendToSession = (
+  appSessionId: string,
+  text: string,
+  responseFormat?: ResponseFormat,
+) => {
+  requireAgentWorkAvailable();
+  bridge.send({
+    type: 'session.send',
+    appSessionId,
+    text,
+    ...(responseFormat ? { responseFormat } : {}),
+  });
 };
 
-export const sendToSessionNow = (appSessionId: string, text: string) => {
-  bridge.send({ type: 'session.sendNow', appSessionId, text });
+export const sendToSessionNow = (
+  appSessionId: string,
+  text: string,
+  responseFormat?: ResponseFormat,
+) => {
+  requireAgentWorkAvailable();
+  bridge.send({
+    type: 'session.sendNow',
+    appSessionId,
+    text,
+    ...(responseFormat ? { responseFormat } : {}),
+  });
 };
 
-export const sendToChild = (parentAppSessionId: string, childSessionId: string, text: string) => {
+export const sendToChild = (
+  parentAppSessionId: string,
+  childSessionId: string,
+  text: string,
+  responseFormat?: ResponseFormat,
+) => {
+  requireAgentWorkAvailable();
   bridge.send({
     type: 'child.send',
     parentAppSessionId,
     childSessionId,
     text,
+    ...(responseFormat ? { responseFormat } : {}),
   });
 };
 
@@ -119,12 +156,15 @@ export const sendToChildNow = (
   parentAppSessionId: string,
   childSessionId: string,
   text: string,
+  responseFormat?: ResponseFormat,
 ) => {
+  requireAgentWorkAvailable();
   bridge.send({
     type: 'child.sendNow',
     parentAppSessionId,
     childSessionId,
     text,
+    ...(responseFormat ? { responseFormat } : {}),
   });
 };
 

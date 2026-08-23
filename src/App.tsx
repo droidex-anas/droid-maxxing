@@ -24,6 +24,7 @@ import type { ChildAccess } from './hooks/useStore';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import MissionControl from './components/MissionControl';
+import { PullRequestsView } from './features/pull-requests/PullRequestsView';
 import PromptInput from './components/PromptInput';
 import RightPanel from './components/RightPanel';
 import { ReviewPanel } from './components/environment/ReviewPanel';
@@ -34,14 +35,13 @@ import { useDocumentVisible } from './hooks/useDocumentVisible';
 import CommandPalette from './components/CommandPalette';
 import SettingsPanel from './components/SettingsPanel';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
-import AskUserModal from './components/AskUserModal';
 import SpecWikiModal from './components/SpecWikiModal';
 import { BrowserFocusWorkspace } from './components/browser/BrowserFocusWorkspace';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
 import OnboardingWizard from './components/onboarding/OnboardingWizard';
 import SetupBanner from './components/onboarding/SetupBanner';
 import { updateCli } from './lib/commands';
-import { refreshAppUpdate } from './lib/appUpdate';
+import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
 import { TerminalWorkspace } from './components/terminal/TerminalWorkspace';
@@ -105,11 +105,11 @@ export default function App() {
       childAccess: current.childAccess,
       commandPaletteOpen: current.commandPaletteOpen,
       customThemes: current.customThemes,
-      hasPendingQuestion: Boolean(current.pendingQuestion),
       hasSessionContent: Boolean(
         activeSession && (current.transcripts[activeSession.appSessionId] ?? []).length > 0,
       ),
       historyLoaded: current.historyLoaded,
+      mainView: current.mainView,
       rightPanelOpen: current.rightPanelOpen,
       selectedChild: current.selectedChild,
       sessionRestore: current.sessionRestore,
@@ -128,7 +128,8 @@ export default function App() {
   const [expandedBrowserAppSessionId, setExpandedBrowserAppSessionId] = useState<string | null>(
     null,
   );
-  const launchHandled = useRef(false);
+  const cliLaunchHandled = useRef(false);
+  const appUpdateLaunchCheckHandled = useRef(false);
   const showWizard =
     !embedded && onboard.ready && (forceWizard || shouldShowOnboarding(onboard.onboarding));
   // Desktop-only: toast when a model turn finishes (snippet + optional sound).
@@ -155,9 +156,17 @@ export default function App() {
   const activeUtilityTab =
     utilityPanel.tabs.find((tab) => tab.id === utilityPanel.activeTabId) ?? null;
   const showUtilityPane = !embedded && !!activeSession && utilityPanel.open && !showWizard;
+  // The pull request workspace owns the whole content area and the top-right
+  // corner of its own toolbar, so the session-scoped overlays (Context panel)
+  // and floating window buttons stay out of it instead of covering its header.
+  const prWorkspaceView = !embedded && state.mainView === 'pull-requests';
+  // An expanded browser covers the full content row, which would leave the pull
+  // request workspace hidden and non-interactive behind it. The expansion stays
+  // owned by the browser pane; this view simply does not take part in it.
   const browserExpanded =
     !!activeSession &&
     showUtilityPane &&
+    !prWorkspaceView &&
     activeUtilityTab?.tool === 'browser' &&
     expandedBrowserAppSessionId === activeSession.appSessionId;
   const focused = isMissionControlView;
@@ -171,7 +180,7 @@ export default function App() {
   // the main scroll area), so the page scrollbar stays pinned to the window's
   // right edge instead of sliding inward and looking like a divider.
   const rightPanelVisible =
-    !focused && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
+    !focused && !prWorkspaceView && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
   const requestedHistory = useRef(new Set<string>());
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
@@ -291,21 +300,31 @@ export default function App() {
     listSessions({ workspaceCwds, includePlainChats: true });
   }, [embedded, workspaceScopes, workspaceScopesReady]);
 
-  // Post-onboarding launch tasks: optional CLI maintenance plus a non-blocking
-  // app update check. App installation always requires an explicit user action.
+  // App update discovery must never wait on CLI/env probing: that work can be
+  // slow or unavailable, while the verified appcast is independent.
   useEffect(() => {
-    if (embedded || launchHandled.current) return;
+    if (embedded) return;
+    if (!onboard.ready || !onboard.onboarding?.completed) return;
+    if (onboard.onboarding.appAutoUpdate === false) return;
+    return startAutomaticAppUpdateChecks(() => {
+      const resumeDeferred = !appUpdateLaunchCheckHandled.current;
+      appUpdateLaunchCheckHandled.current = true;
+      void checkForAppUpdateAutomatically(resumeDeferred);
+    });
+  }, [embedded, onboard.ready, onboard.onboarding?.completed, onboard.onboarding?.appAutoUpdate]);
+
+  // Optional CLI maintenance still waits for environment detection, but it no
+  // longer gates app update discovery or the sidebar update button.
+  useEffect(() => {
+    if (embedded || cliLaunchHandled.current) return;
     if (!onboard.ready || !onboard.onboarding?.completed) return;
     // Defer until env detection lands so the CLI auto-update isn't skipped by a
     // race where this runs before `env` arrives.
     const wantsCliAutoUpdate = onboard.onboarding.cliAutoUpdate !== false;
     if (wantsCliAutoUpdate && !onboard.env) return;
-    launchHandled.current = true;
+    cliLaunchHandled.current = true;
     if (wantsCliAutoUpdate && onboard.env?.cli.present) {
       updateCli(onboard.onboarding.installChannel);
-    }
-    if (onboard.onboarding.appAutoUpdate !== false) {
-      void refreshAppUpdate({ interactive: false, automaticChecks: true });
     }
   }, [embedded, onboard.ready, onboard.onboarding, onboard.env]);
 
@@ -500,7 +519,9 @@ export default function App() {
                 browserExpanded ? 'pointer-events-none' : ''
               }`}
             >
-              {isMissionControlView ? (
+              {!embedded && state.mainView === 'pull-requests' ? (
+                <PullRequestsView />
+              ) : isMissionControlView ? (
                 <motion.div
                   key="mission-control"
                   className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"
@@ -633,7 +654,6 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
-            {state.hasPendingQuestion && <AskUserModal />}
           </div>
         </main>
 
@@ -676,7 +696,7 @@ export default function App() {
         </button>
       </div>
 
-      {!showUtilityPane && (
+      {!showUtilityPane && !prWorkspaceView && (
         <div
           data-electron-drag-region
           className="absolute top-0 right-0 h-9 z-40 flex items-center gap-1 pr-3"

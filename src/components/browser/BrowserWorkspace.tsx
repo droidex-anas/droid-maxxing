@@ -59,8 +59,8 @@ export default function BrowserWorkspace({
       browsers: current.browsers,
       commandPaletteOpen: current.commandPaletteOpen,
       designModes: current.designModes,
-      hasPendingQuestion: Boolean(current.pendingQuestion),
-      hasSpecPermission: current.pendingPermission?.kind === 'spec',
+      pendingQuestions: current.pendingQuestions,
+      pendingPermissions: current.pendingPermissions,
       settingsOpen: current.settingsOpen,
     }),
     shallowEqual,
@@ -76,12 +76,14 @@ export default function BrowserWorkspace({
   // The native BrowserView is an OS-level layer painted above the React tree,
   // so any full-screen overlay would otherwise be punched through by it. Detach
   // it while such an overlay is visible and re-attach once it closes.
+  const pendingQuestion = requestedChatId ? state.pendingQuestions[requestedChatId] : undefined;
+  const pendingPermission = requestedChatId ? state.pendingPermissions[requestedChatId] : undefined;
   const obscured =
     externalObscured ||
     state.settingsOpen ||
     state.commandPaletteOpen ||
-    state.hasPendingQuestion ||
-    state.hasSpecPermission;
+    !!pendingQuestion ||
+    pendingPermission?.kind === 'spec';
   const frameRef = useRef<HTMLDivElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const appOrigin = typeof window === 'undefined' ? undefined : window.location.origin;

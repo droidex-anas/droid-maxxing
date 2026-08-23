@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, type SetStateAction 
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   shallowEqual,
+  useStoreApi,
   useStoreDispatch,
   useStoreSelector,
   type QueuedPrompt,
@@ -31,21 +32,36 @@ import {
 import { useImageAttachments } from '../hooks/useImageAttachments';
 import { useImageFileDrop } from '../hooks/useImageFileDrop';
 import { ImageChip } from './composer/ImageChip';
+import { AttachedFileChip } from './composer/AttachedFileChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
+import { ImageLightbox } from './media/ImageLightbox';
+import { imageSrc, partitionImagePaths } from '../lib/localImage';
 import { FeedbackModal } from './FeedbackModal';
 import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
 import { markGitTurnStart } from '../lib/git';
+import { isAppUpdateInstalling, useAppUpdate } from '../lib/appUpdate';
 import {
   chatWorktreeName,
   prepareChatWorkingDirectory,
   type ChatWorkingDirectoryResult,
 } from '../lib/chatWorkspace';
-import { createLocalDesignTranscriptEvent, newQueueId } from '../lib/promptQueue';
-import { composePrompt, parseSlashSkillInvocation } from '../lib/composePrompt';
+import {
+  createLocalDesignTranscriptEvent,
+  createPromptQueueDeliveryGuard,
+  newQueueId,
+} from '../lib/promptQueue';
+import {
+  composePrompt,
+  isVisualizeCommand,
+  parseSlashSkillInvocation,
+  responseFormatForPrompt,
+  VISUALIZE_COMMAND,
+} from '../lib/composePrompt';
+import { hasCompleteAppBlock } from './appBlockRuntime';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
-import { resetComposerAfterSubmit } from '../lib/composerReset';
+import { composerTextAfterSeed, resetComposerAfterSubmit } from '../lib/composerReset';
 import {
   childRuntimeSubmitTarget,
   childSessionLabel,
@@ -58,7 +74,6 @@ import {
 import {
   ArrowUp,
   ChevronDown,
-  FileText,
   LoaderCircle,
   Plus,
   SlidersHorizontal,
@@ -73,11 +88,12 @@ import {
   buildVisibleChildSettingsTarget,
   childSettingsReadinessLabel,
 } from '../lib/exactChildSettings';
+import AskUserInline from './AskUserInline';
 import PermissionInline from './PermissionInline';
 import PlanApprovalInline from './PlanApprovalInline';
 import { ModelIcon, providerOf } from './ModelIcon';
 import { StartInBar } from './environment/StartInBar';
-import type { Autonomy, SkillInfo } from '../types/bridge';
+import type { Autonomy, SkillInfo, TranscriptEvent } from '../types/bridge';
 import { feedbackDraftFromCommand } from '../lib/feedbackReport';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
 import { toast } from '../lib/toast';
@@ -90,6 +106,31 @@ const oppositeSubmitMode = (mode: SubmitMode): SubmitMode => (mode === 'queue' ?
 
 export function shouldShowTurnStarting(isLive: boolean): boolean {
   return !isLive;
+}
+
+export function shouldResumeQueuedPromptAfterUpdate(
+  wasInstalling: boolean,
+  isInstalling: boolean,
+  isLive: boolean,
+  hasQueuedPrompt: boolean,
+  installResult: 'downloaded' | 'presented' | null,
+): boolean {
+  return (
+    wasInstalling && !isInstalling && !isLive && hasQueuedPrompt && installResult === 'presented'
+  );
+}
+
+export function hasAppContextForTranscript(
+  events: TranscriptEvent[],
+  childSessionId: string | null,
+): boolean {
+  return events.some((event) => {
+    if (event.kind !== 'text' || event.author === 'user') return false;
+    const belongsToTarget = childSessionId
+      ? event.sourceSessionId === childSessionId
+      : event.role === 'primary';
+    return belongsToTarget && hasCompleteAppBlock(event.text ?? '');
+  });
 }
 
 export function shouldStopTurnStarting({
@@ -168,6 +209,8 @@ export default function PromptInput({
   onOverlayChange?: (open: boolean) => void;
 }) {
   const dispatch = useStoreDispatch();
+  const { downloading: appUpdateInstalling, installResult: appUpdateInstallResult } =
+    useAppUpdate();
   const state = useStoreSelector(
     (current) => ({
       activeAppSessionId: current.activeAppSessionId,
@@ -199,6 +242,7 @@ export default function PromptInput({
     }),
     shallowEqual,
   );
+  const store = useStoreApi();
   const composerRevisionRef = useRef(0);
   const [input, setInputState] = useState('');
   const setInput = (value: SetStateAction<string>) => {
@@ -222,6 +266,9 @@ export default function PromptInput({
   const imageAttachments = useImageAttachments(state.imagePasteQuality);
   const fileDrop = useImageFileDrop(imageAttachments.addBlob);
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
+  // A path-only attachment has no staged copy to crop, so it opens the
+  // read-only lightbox instead of the composer's image viewer.
+  const [viewerPath, setViewerPath] = useState<string | null>(null);
   const [feedbackReport, setFeedbackReport] = useState<FeedbackReportRequest | null>(null);
   const [activeSkills, setActiveSkillsState] = useState<SkillInfo[]>([]);
   const setActiveSkills = (value: SetStateAction<SkillInfo[]>) => {
@@ -276,6 +323,11 @@ export default function PromptInput({
   visibleTargetRef.current = visibleTarget;
   const targetChild = visibleTarget.kind === 'child' ? visibleTarget.child : undefined;
   const targetChildSessionId = targetChild?.childSessionId ?? null;
+  const hasAppContext = useStoreSelector((current) => {
+    if (!activeSession) return false;
+    const events = current.transcripts[activeSession.appSessionId] ?? [];
+    return hasAppContextForTranscript(events, targetChildSessionId);
+  });
   const primaryWorkingDirectory = useSessionWorkingDirectory(activeSession);
   const childWorkingDirectory = useSessionWorkingDirectory(
     targetChild ? activeSession : null,
@@ -375,6 +427,10 @@ export default function PromptInput({
   };
 
   const slashCommands: SlashCommand[] = [
+    {
+      ...VISUALIZE_COMMAND,
+      replacement: `${VISUALIZE_COMMAND.cmd} `,
+    },
     {
       cmd: '/bug',
       desc: 'Send a private bug report',
@@ -585,6 +641,9 @@ export default function PromptInput({
     setHistoryIndex(null);
     setActiveSkills([]);
     setAttachedFiles([]);
+    // Both viewers show a dropped attachment, so they cannot outlive it.
+    setViewerImageId(null);
+    setViewerPath(null);
     clearAndDiscardImages();
   }, [activeSession?.appSessionId, clearAndDiscardImages]);
 
@@ -595,9 +654,9 @@ export default function PromptInput({
   useEffect(() => {
     if (!composerSeed) return;
     setHistoryIndex(null);
-    // Append to an in-progress draft instead of clobbering it (welcome cards
-    // only appear over an empty composer, so this is a plain set for them).
-    const text = input.trim() ? `${input.trimEnd()}\n\n${composerSeed.text}` : composerSeed.text;
+    // Notes and suggestion cards append to an in-progress draft. A surface
+    // that explicitly starts a fresh chat can replace stale mounted input.
+    const text = composerTextAfterSeed(input, composerSeed.text, composerSeed.replace);
     setInput(text);
     pendingCaret.current = text.length;
     // Consume the seed so a later remount (e.g. toggling Mission Control, which
@@ -691,6 +750,10 @@ export default function PromptInput({
   };
 
   const runCommand = (s: SlashCommand) => {
+    if (s.replacement !== undefined) {
+      replaceTrigger(s.replacement);
+      return;
+    }
     replaceTrigger('');
     s.run();
   };
@@ -734,6 +797,12 @@ export default function PromptInput({
   };
 
   const runSubmit = async (mode: SubmitMode = 'queue', autonomyOverride?: Autonomy) => {
+    const updateInterruptedSubmit = () => {
+      if (!isAppUpdateInstalling()) return false;
+      toast.info('DROIDEX is installing an update. New turns will resume after restart.');
+      return true;
+    };
+    if (updateInterruptedSubmit()) return;
     const text = input.trim();
     // Snapshot the composer revision before the settle wait: text, files, and
     // skills are render-closure snapshots, so anything typed or staged while
@@ -743,6 +812,7 @@ export default function PromptInput({
     // Pasted/dropped images encode asynchronously; wait out any in-flight adds
     // so they make this prompt instead of surfacing on the next one via clear().
     const readyImages = await imageAttachments.whenSettled();
+    if (updateInterruptedSubmit()) return;
     const allFiles = [...attachedFiles, ...readyImages.map((i) => i.path)];
     const hasPayload = text || activeSkills.length > 0 || allFiles.length > 0;
     if (!hasPayload) return;
@@ -753,6 +823,10 @@ export default function PromptInput({
         draftUntouched: composerRevisionRef.current === composerRevision,
         clearImages: () => {
           imageAttachments.clear();
+          // Image chips always clear on submit, so a viewer open over one of them
+          // would be showing an attachment the composer no longer holds.
+          setViewerImageId(null);
+          setViewerPath(null);
         },
         resetDraft: () => {
           setInput('');
@@ -785,8 +859,11 @@ export default function PromptInput({
     if (!childActionsEnabled) return;
 
     const slashSkill =
-      activeSkills.length === 0 ? parseSlashSkillInvocation(text, invocableSkills) : undefined;
+      activeSkills.length === 0 && !isVisualizeCommand(text)
+        ? parseSlashSkillInvocation(text, invocableSkills)
+        : undefined;
     const displayText = slashSkill?.prompt ?? text;
+    const responseFormat = responseFormatForPrompt(displayText, hasAppContext);
     const skillNames = slashSkill
       ? [slashSkill.skillName]
       : activeSkills.map((skill) => skill.name);
@@ -815,6 +892,7 @@ export default function PromptInput({
       }
       const selectedDir = state.draftChat?.cwd ?? (await pickDirectory());
       if (!selectedDir) return;
+      if (updateInterruptedSubmit()) return;
       const { primary, worker, validator } = state.agentConfig;
       const clientRef = newClientRef();
       const title = (displayText || skillNames[0] || 'Mission').slice(0, 48);
@@ -825,13 +903,15 @@ export default function PromptInput({
         return;
       }
       const dir = preparation.path;
-      registerPending(clientRef);
-      // Clear the composer before the git-baseline await below so a prompt the
-      // user starts typing during that delay is never wiped by a late clear.
-      clearAfterSubmit();
       // Snapshot the tree before the agent's first turn so the Review "Last
       // turn" scope only attributes changes this session actually makes.
       await markGitTurnStart(dir, clientRef);
+      if (updateInterruptedSubmit()) {
+        stopTurnStarting();
+        return;
+      }
+      registerPending(clientRef);
+      clearAfterSubmit();
       try {
         createSession({
           clientRef,
@@ -851,6 +931,7 @@ export default function PromptInput({
           workerReasoning: worker.reasoning,
           validatorModel: validator.modelId,
           validatorReasoning: validator.reasoning,
+          ...(responseFormat ? { responseFormat } : {}),
         });
         armTurnStartingTimeout();
       } catch (error) {
@@ -873,10 +954,13 @@ export default function PromptInput({
         return;
       }
       const dir = preparation.path;
-      registerPending(clientRef);
-      // Clear before the baseline await (see above) so fast typing isn't lost.
-      clearAfterSubmit();
       if (dir) await markGitTurnStart(dir, clientRef);
+      if (updateInterruptedSubmit()) {
+        stopTurnStarting();
+        return;
+      }
+      registerPending(clientRef);
+      clearAfterSubmit();
       try {
         createSession({
           clientRef,
@@ -891,6 +975,7 @@ export default function PromptInput({
           compactionModel:
             state.compactionModel === 'current-model' ? undefined : state.compactionModel,
           ...compactionSettingsSnapshot(compactionSettingsInput),
+          ...(responseFormat ? { responseFormat } : {}),
         });
         armTurnStartingTimeout();
       } catch (error) {
@@ -934,10 +1019,17 @@ export default function PromptInput({
       try {
         if (targetChildSessionId) {
           if (mode === 'now')
-            sendToChildNow(activeSession.appSessionId, targetChildSessionId, composed);
-          else sendToChild(activeSession.appSessionId, targetChildSessionId, composed);
-        } else if (mode === 'now') sendToSessionNow(activeSession.appSessionId, composed);
-        else sendToSession(activeSession.appSessionId, composed);
+            sendToChildNow(
+              activeSession.appSessionId,
+              targetChildSessionId,
+              composed,
+              responseFormat,
+            );
+          else
+            sendToChild(activeSession.appSessionId, targetChildSessionId, composed, responseFormat);
+        } else if (mode === 'now')
+          sendToSessionNow(activeSession.appSessionId, composed, responseFormat);
+        else sendToSession(activeSession.appSessionId, composed, responseFormat);
         armTurnStartingTimeout();
       } catch (err) {
         stopTurnStarting();
@@ -955,6 +1047,7 @@ export default function PromptInput({
         waitForBaseline: () => markGitTurnStart(workingDirectory, activeSession.appSessionId),
         currentTarget: () => visibleTargetRef.current,
         currentComposerRevision: () => composerRevisionRef.current,
+        canCommit: () => !isAppUpdateInstalling(),
         appendTranscript,
         resetComposer: clearAfterSubmit,
         sendCommand,
@@ -963,14 +1056,19 @@ export default function PromptInput({
       return;
     }
 
-    if (shouldShowTurnStarting(isLive)) startTurnStarting();
-    appendTranscript();
-    clearAfterSubmit();
+    const showTurnStarting = shouldShowTurnStarting(isLive);
+    if (showTurnStarting) startTurnStarting();
 
     // Capture the last-turn baseline before the agent can touch the tree;
     // a fire-and-forget call here races the first edit and corrupts the diff.
     if (!childRuntimeTarget && workingDirectory)
       await markGitTurnStart(workingDirectory, activeSession.appSessionId);
+    if (updateInterruptedSubmit()) {
+      if (showTurnStarting) stopTurnStarting();
+      return;
+    }
+    appendTranscript();
+    clearAfterSubmit();
     sendCommand();
   };
 
@@ -982,67 +1080,86 @@ export default function PromptInput({
   // await, even though deliverPrompt closes over a stale render snapshot.
   const promptQueueRef = useRef(state.promptQueue);
   promptQueueRef.current = state.promptQueue;
+  const promptQueueDelivery = useMemo(createPromptQueueDeliveryGuard, []);
 
   const deliverPrompt = async () => {
-    if (!activeSession) return;
-    // Capture the Last-turn git baseline before sending ANY prompt (design
-    // included) so the Review tab diffs the turn from the right starting point.
-    if (primaryWorkingDirectory)
-      await markGitTurnStart(primaryWorkingDirectory, activeSession.appSessionId);
-    // The queue stays editable while that runs, so deliver whatever is now at
-    // the head: this honors deletes and edits (both remove the item) as well as
-    // reorders, and never sends a stale prompt out of the visible order.
-    const head = (promptQueueRef.current[activeSession.appSessionId] ?? []).at(0);
-    if (!head) return;
-
-    if (head.design) {
-      try {
-        sendDesignPrompt(head.design.browserKey, head.text, head.design.referenceIds);
-      } catch (err) {
-        console.error('[PromptInput] queued design send failed:', err);
-        return;
-      }
-      const browserRefs = browserTranscriptReferencesFromDesignReferences(head.design.references);
-      dispatch({
-        type: 'SESSION_TRANSCRIPT',
-        event: createLocalDesignTranscriptEvent(activeSession.appSessionId, head.text, browserRefs),
-      });
-      dispatch({
-        type: 'REMOVE_QUEUED_PROMPT',
-        appSessionId: activeSession.appSessionId,
-        id: head.id,
-      });
-      return;
-    }
-
+    if (!activeSession || isAppUpdateInstalling()) return;
     try {
-      sendToSession(activeSession.appSessionId, composeFrom(head.text, head.skills, head.files));
-    } catch (err) {
-      // Keep the prompt staged and skip the transcript echo so a send failure
-      // neither loses queued input nor leaves a duplicate user message behind.
-      console.error('[PromptInput] queued send failed:', err);
-      return;
+      await promptQueueDelivery.run(async () => {
+        // Capture the Last-turn git baseline before sending ANY prompt (design
+        // included) so the Review tab diffs the turn from the right starting point.
+        if (primaryWorkingDirectory)
+          await markGitTurnStart(primaryWorkingDirectory, activeSession.appSessionId);
+        if (isAppUpdateInstalling()) return;
+        // The queue stays editable while that runs, so deliver whatever is now at
+        // the head: this honors deletes and edits (both remove the item) as well as
+        // reorders, and never sends a stale prompt out of the visible order.
+        const head = (promptQueueRef.current[activeSession.appSessionId] ?? []).at(0);
+        if (!head) return;
+
+        if (head.design) {
+          try {
+            sendDesignPrompt(head.design.browserKey, head.text, head.design.referenceIds);
+          } catch (err) {
+            console.error('[PromptInput] queued design send failed:', err);
+            return;
+          }
+          const browserRefs = browserTranscriptReferencesFromDesignReferences(
+            head.design.references,
+          );
+          dispatch({
+            type: 'SESSION_TRANSCRIPT',
+            event: createLocalDesignTranscriptEvent(
+              activeSession.appSessionId,
+              head.text,
+              browserRefs,
+            ),
+          });
+          dispatch({
+            type: 'REMOVE_QUEUED_PROMPT',
+            appSessionId: activeSession.appSessionId,
+            id: head.id,
+          });
+          return;
+        }
+
+        try {
+          const primaryTranscript = store.getState().transcripts[activeSession.appSessionId] ?? [];
+          sendToSession(
+            activeSession.appSessionId,
+            composeFrom(head.text, head.skills, head.files),
+            responseFormatForPrompt(head.text, hasAppContextForTranscript(primaryTranscript, null)),
+          );
+        } catch (err) {
+          // Keep the prompt staged and skip the transcript echo so a send failure
+          // neither loses queued input nor leaves a duplicate user message behind.
+          console.error('[PromptInput] queued send failed:', err);
+          return;
+        }
+        dispatch({
+          type: 'SESSION_TRANSCRIPT',
+          event: {
+            id: `local-${String(Date.now())}`,
+            appSessionId: activeSession.appSessionId,
+            sourceSessionId: 'user',
+            role: 'primary',
+            ts: Date.now(),
+            kind: 'text',
+            text: head.text,
+            author: 'user',
+            skills: head.skills,
+            files: head.files,
+          },
+        });
+        dispatch({
+          type: 'REMOVE_QUEUED_PROMPT',
+          appSessionId: activeSession.appSessionId,
+          id: head.id,
+        });
+      });
+    } catch (error) {
+      console.error('[PromptInput] queued delivery preparation failed:', error);
     }
-    dispatch({
-      type: 'SESSION_TRANSCRIPT',
-      event: {
-        id: `local-${String(Date.now())}`,
-        appSessionId: activeSession.appSessionId,
-        sourceSessionId: 'user',
-        role: 'primary',
-        ts: Date.now(),
-        kind: 'text',
-        text: head.text,
-        author: 'user',
-        skills: head.skills,
-        files: head.files,
-      },
-    });
-    dispatch({
-      type: 'REMOVE_QUEUED_PROMPT',
-      appSessionId: activeSession.appSessionId,
-      id: head.id,
-    });
   };
 
   // When the current turn finishes, deliver the next staged prompt. Delivering
@@ -1062,6 +1179,21 @@ export default function PromptInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primaryIsLive, activeSession?.appSessionId]);
 
+  const previousAppUpdateInstalling = useRef(appUpdateInstalling);
+  useEffect(() => {
+    const shouldResume = shouldResumeQueuedPromptAfterUpdate(
+      previousAppUpdateInstalling.current,
+      appUpdateInstalling,
+      primaryIsLive,
+      queue.length > 0,
+      appUpdateInstallResult,
+    );
+    previousAppUpdateInstalling.current = appUpdateInstalling;
+    if (shouldResume) void deliverPrompt();
+    // deliverPrompt intentionally reads the latest queue through promptQueueRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appUpdateInstalling]);
+
   const editQueuedInComposer = (p: QueuedPrompt) => {
     if (!activeSession) return;
     // The queued prompt carries its own files; drop any images pasted after it
@@ -1069,6 +1201,8 @@ export default function PromptInput({
     // their temp files — no prompt ever referenced them.
     imageAttachments.clearAndDiscard();
     setInput(p.text);
+    // Its own attachments come back as chips: images among them render as
+    // thumbnails again, so the restored draft looks like the one that was queued.
     setAttachedFiles(p.files);
     setActiveSkills(invocableSkills.filter((s) => p.skills.includes(s.name)));
     dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id: p.id });
@@ -1169,6 +1303,12 @@ export default function PromptInput({
   const hasChips =
     activeSkills.length > 0 || attachedFiles.length > 0 || imageAttachments.images.length > 0;
   const viewerImage = imageAttachments.images.find((i) => i.id === viewerImageId) ?? null;
+  // Files attached as paths (the @ menu, the picker, or a queued prompt brought
+  // back for editing) show as thumbnails when they are displayable images, so a
+  // pasted image looks the same before queueing and after reopening it.
+  const { images: attachedImagePaths, files: attachedDocumentPaths } =
+    partitionImagePaths(attachedFiles);
+  const viewerSrc = viewerPath === null ? null : imageSrc(viewerPath);
   // The "Start in" repo/worktree/branch row only applies while drafting a brand
   // new chat; it renders as the top section of the composer card.
   const showStartIn = !activeSession && !missionPreview && !!cwd;
@@ -1206,6 +1346,7 @@ export default function PromptInput({
 
         <PlanApprovalInline />
         <PermissionInline />
+        <AskUserInline />
 
         {missionPreview ? (
           <div
@@ -1252,7 +1393,8 @@ export default function PromptInput({
               {imageAttachments.images.map((img) => (
                 <ImageChip
                   key={img.id}
-                  image={img}
+                  src={img.preview}
+                  label={basename(img.path)}
                   onOpen={() => {
                     setViewerImageId(img.id);
                   }}
@@ -1261,6 +1403,27 @@ export default function PromptInput({
                   }}
                 />
               ))}
+              {attachedImagePaths.map((path) => {
+                const src = imageSrc(path);
+                // No discard on removal: the file was written for an
+                // already-composed prompt, and the attachments store sweeps it.
+                const remove = () => {
+                  setAttachedFiles((prev) => prev.filter((x) => x !== path));
+                };
+                return src === null ? (
+                  <AttachedFileChip key={path} path={path} onRemove={remove} />
+                ) : (
+                  <ImageChip
+                    key={path}
+                    src={src}
+                    label={basename(path)}
+                    onOpen={() => {
+                      setViewerPath(path);
+                    }}
+                    onRemove={remove}
+                  />
+                );
+              })}
               {activeSkills.map((skill) => (
                 <span
                   key={skill.filePath}
@@ -1284,24 +1447,14 @@ export default function PromptInput({
                   </button>
                 </span>
               ))}
-              {attachedFiles.map((f) => (
-                <span
+              {attachedDocumentPaths.map((f) => (
+                <AttachedFileChip
                   key={f}
-                  className="group flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg text-[11px] bg-droid-bg/60 text-droid-text-secondary border border-droid-border"
-                  title={f}
-                >
-                  <FileText className="w-3 h-3 text-droid-text-muted" />
-                  {basename(f)}
-                  <button
-                    onClick={() => {
-                      setAttachedFiles((prev) => prev.filter((x) => x !== f));
-                    }}
-                    className="p-0.5 rounded hover:bg-black/20 transition-colors"
-                    title="Remove file"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </span>
+                  path={f}
+                  onRemove={() => {
+                    setAttachedFiles((prev) => prev.filter((x) => x !== f));
+                  }}
+                />
               ))}
             </div>
           )}
@@ -1586,7 +1739,9 @@ export default function PromptInput({
                 </AnimatePresence>
                 <button
                   onClick={() => void handleSubmit(enterSteers ? 'now' : 'queue')}
-                  className="p-2 rounded-full text-droid-bg transition-opacity hover:opacity-90"
+                  disabled={appUpdateInstalling}
+                  title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
+                  className="p-2 rounded-full text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   style={{ background: ACCENT }}
                 >
                   <ArrowUp className="w-3.5 h-3.5" />
@@ -1595,8 +1750,8 @@ export default function PromptInput({
             ) : (
               <button
                 onClick={() => void handleSubmit()}
-                disabled={!hasContent || !childActionsEnabled}
-                title={idleSendTooltip}
+                disabled={!hasContent || !childActionsEnabled || appUpdateInstalling}
+                title={appUpdateInstalling ? 'Installing DROIDEX update' : idleSendTooltip}
                 className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-25 disabled:cursor-not-allowed shrink-0"
                 style={{ background: ACCENT }}
               >
@@ -1614,6 +1769,15 @@ export default function PromptInput({
             setViewerImageId(null);
           }}
           onCrop={imageAttachments.applyCrop}
+        />
+      )}
+      {viewerPath !== null && viewerSrc !== null && (
+        <ImageLightbox
+          src={viewerSrc}
+          label={viewerPath}
+          onClose={() => {
+            setViewerPath(null);
+          }}
         />
       )}
       {feedbackReport && (

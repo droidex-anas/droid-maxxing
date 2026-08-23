@@ -16,7 +16,19 @@ import { ModelIcon, providerOf } from './ModelIcon';
 
 /* One grouping card for a turn's subagent spawns, anchored where the first
    per-spawn feed line used to render. MessageFeed only renders it when the
-   caller passes `subagentsDock`, so Mission Control keeps the inline lines. */
+   caller passes `subagentsDock`, so Mission Control keeps the inline lines.
+   Expanding a large wave reveals the first rows behind a "Show N more
+   subagents" fold, so paging older history into a long-running session never
+   dumps dozens of rows (and their entrance stagger) at once. */
+
+// Rows shown before the expanded card folds the rest behind "Show N more".
+export const DOCK_VISIBLE_ROW_LIMIT = 8;
+
+// Pure fold used by the expanded body: spawn order is preserved, so the fold
+// hides the latest spawns while the header pills keep summarizing all of them.
+export function foldedDockRows<T>(rows: readonly T[], showAll: boolean): T[] {
+  return showAll ? [...rows] : rows.slice(0, DOCK_VISIBLE_ROW_LIMIT);
+}
 
 export interface SubagentsDockData {
   sessions: ChildSessionSummary[];
@@ -205,6 +217,7 @@ export function SubagentsDock({
   activity,
 }: SubagentsDockProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showAllRows, setShowAllRows] = useState(false);
   const reduceMotion = useReducedMotion();
   const bodyId = useId();
 
@@ -214,6 +227,9 @@ export function SubagentsDock({
   const hasConfirmedRunning = counts.running > 0;
   const now = useNow(live && hasConfirmedRunning);
   const durationMs = useRowDurationMs(rows, now, live);
+  // A head slice, so visible indices line up with `rows` (names, durations).
+  const visibleRows = foldedDockRows(rows, showAllRows);
+  const foldedRowCount = rows.length - visibleRows.length;
 
   if (rows.length === 0) return null;
 
@@ -329,7 +345,7 @@ export function SubagentsDock({
               variants={{ show: { transition: { staggerChildren: 0.045 } } }}
               className="px-2 pb-1.5"
             >
-              {rows.map((row, i) => {
+              {visibleRows.map((row, i) => {
                 const name = childSessionLabel(row.child, i);
                 const model = models.find((m) => m.id === row.child.modelId);
                 // Placeholder rows carry no model yet, so there is nothing honest
@@ -421,6 +437,17 @@ export function SubagentsDock({
                 );
               })}
             </motion.ul>
+            {foldedRowCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAllRows(true);
+                }}
+                className="w-full px-4 pb-3 pt-1 text-left text-[12px] text-droid-text-muted transition-colors hover:text-droid-text-secondary"
+              >
+                Show {foldedRowCount} more {foldedRowCount === 1 ? 'subagent' : 'subagents'}
+              </button>
+            )}
           </motion.div>
         ) : null}
       </AnimatePresence>

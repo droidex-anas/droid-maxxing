@@ -1,13 +1,14 @@
 // Lazy session transcript reader.
 //
 // Opening a session must not parse a multi-MB JSONL file upfront: the reader
-// holds the (tail-windowed) raw lines and JSON.parses them backward, newest
-// first, only as far as each requested window needs. Paging older history
-// parses a few hundred more lines per page instead of re-reading the whole
-// file, and the per-line parse memo makes repeat pages and reopens free.
+// indexes line byte-offsets across the whole file, then preads and JSON.parses
+// lines backward, newest first, only as far as each requested window needs.
+// Paging older history parses a few hundred more lines per page instead of
+// re-reading the whole file, and the bounded per-line parse memo makes repeat
+// pages and reopens cheap. Because offsets are absolute, every message of an
+// arbitrarily large session stays reachable by cursor.
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { open as openAsync, readFile as readFileAsync } from 'node:fs/promises';
-import { dateMs, numberValue, objectValue, stringValue } from './values.js';
 import {
   event,
   parseSessionLineEvents,
@@ -20,37 +21,40 @@ import type { SessionRole, TranscriptEvent } from './protocol.js';
 // the history path's import stays stable.
 export type { StoredMessageLine, StoredSessionStart } from './sessionTranscriptParser.js';
 
-// Oversized session files are tail-windowed to the newest bytes; the dropped
-// head is surfaced as a status event when paging reaches the top.
+// Byte cap for the EAGER readers only (transcript search and the legacy
+// history.page full parse): they materialize file text, so oversized files
+// are tail-windowed. The lazy SessionTranscriptReader has no such cap.
 export const MAX_SESSION_BYTES = 5_000_000;
-// The session_start / leading compaction_state records live at the head of the
-// file; readers cap that head read instead of scanning the whole file.
-export const SESSION_START_BYTES = 256_000;
 // seq band per line: a line yields one event per content block, so (line,
 // event-in-line) maps to a unique, stable, monotonically increasing seq
 // within a segment. 256 far exceeds any real message's block count; a freak
 // line with more blocks clamps onto the last band slot (order within that
 // line is then kept by array order, not seq).
 const LINE_EVENT_STRIDE = 256;
-
-interface CompactionState {
-  removedCount?: number;
-  ts: number;
-}
+// Chunk size for the constructor's newline scan.
+const LINE_SCAN_CHUNK_BYTES = 4 * 1024 * 1024;
+// Bound on memoized parsed lines: paging deep into a huge session must not
+// accumulate its entire parsed transcript in sidecar memory. Eviction is
+// insertion-ordered and only costs a re-parse on revisit; 4,096 lines
+// comfortably covers the largest history page plus scroll locality.
+const MAX_MEMOIZED_LINES = 4_096;
 
 // A position inside one segment's event stream: the next line to parse
 // walking backward, plus how many of that line's tail events were already
 // served (a page boundary can split one line's events across pages).
-// line -1 addresses the synthesized head events (oversized-trim status and
-// the head compaction divider), which sort before every parsed line.
 export interface TranscriptWindowCursor {
   line: number;
   skip: number;
 }
 
-// Read the bytes a transcript parse can see: the whole file, or the newest
-// MAX_SESSION_BYTES tail for oversized files (the partial first line of the
-// window is dropped).
+// One shared, lazily-opened file descriptor per backward walk.
+interface LazyFile {
+  fd: number | null;
+}
+
+// Read the bytes an EAGER transcript parse can see: the whole file, or the
+// newest MAX_SESSION_BYTES tail for oversized files (the partial first line
+// of the window is dropped).
 export function readSessionRawWindow(
   path: string,
   size: number,
@@ -95,52 +99,6 @@ export async function readSessionRawWindowAsync(
   }
 }
 
-// Reads from the HEAD of the file (compaction_state is a leading record); the
-// transcript reader tail-windows oversized files and would miss it.
-function readCompactionState(path: string): CompactionState | null {
-  const size = statSync(path).size;
-  const bytes = Math.min(size, SESSION_START_BYTES);
-  const fd = openSync(path, 'r');
-  let rows: unknown[];
-  try {
-    const buffer = Buffer.alloc(bytes);
-    readSync(fd, buffer, 0, bytes, 0);
-    rows = parseJsonLines(buffer.toString('utf8'));
-  } finally {
-    closeSync(fd);
-  }
-  for (const row of rows) {
-    // Tolerate syntactically valid non-object JSONL rows (null, numbers,
-    // booleans, arrays): they are noise, not a leading record, so a stray
-    // literal must not crash the head read by dereferencing null.
-    const obj = objectValue(row);
-    if (!obj) continue;
-    if (obj.type === 'session_start') continue;
-    if (obj.type === 'compaction_state') {
-      return {
-        removedCount: numberValue(obj.removedCount),
-        ts: dateMs(stringValue(obj.timestamp)) || 0,
-      };
-    }
-    return null;
-  }
-  return null;
-}
-
-function parseJsonLines<T>(raw: string): T[] {
-  const rows: T[] = [];
-  raw.split(/\r?\n/).forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    try {
-      rows.push(JSON.parse(trimmed) as T);
-    } catch {
-      /* skip partial/corrupt JSONL rows */
-    }
-  });
-  return rows;
-}
-
 // Full eager parse of one session file, including the oversized-trim status
 // head. Used by the provider-scoped history.page path, which slices a
 // materialized event array by item index and so cannot window lazily.
@@ -175,33 +133,59 @@ export function parseFullSessionTranscript(
   return events;
 }
 
-// One chain segment's transcript, parsed lazily from the tail. Lines are
-// JSON.parsed at most once each (memoized per line index); windows walk
-// backward from a cursor, so the first page of a huge session parses a few
-// hundred lines instead of the whole file.
+// Byte offset of every line start in the file, bounded to `size` so bytes
+// appended after the stat are ignored (the reader cache re-keys on stat).
+// The scan is synchronous and O(file size), and the cache re-keys on every
+// append, so a live session pays it again on the next window request. That is
+// milliseconds for the tens-of-MB sessions this app produces; if sessions ever
+// reach GB scale this must move off the event loop or cap the indexed range.
+function scanLineStarts(path: string, size: number): number[] {
+  if (size <= 0) return [];
+  const starts = [0];
+  const fd = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(Math.min(size, LINE_SCAN_CHUNK_BYTES));
+    let position = 0;
+    while (position < size) {
+      const bytes = readSync(fd, buffer, 0, Math.min(buffer.length, size - position), position);
+      if (bytes <= 0) break;
+      const chunk = buffer.subarray(0, bytes);
+      let newline = chunk.indexOf(10 /* \n */);
+      while (newline !== -1) {
+        const next = position + newline + 1;
+        if (next < size) starts.push(next);
+        newline = chunk.indexOf(10, newline + 1);
+      }
+      position += bytes;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return starts;
+}
+
+// One chain segment's transcript, parsed lazily from the tail. Construction
+// scans the file once for line offsets; each window preads and parses only
+// the lines it needs, walking backward from a cursor, so the first page of a
+// huge session parses a few hundred lines instead of the whole file. Line
+// indices are absolute file positions, which keeps cursors stable while the
+// session is appended to.
 export class SessionTranscriptReader {
   readonly mtimeMs: number;
   readonly sizeBytes: number;
-  private readonly lines: string[];
-  private readonly trimmed: boolean;
-  private readonly headCompaction: CompactionState | null;
+  private readonly lineStarts: number[];
   private readonly parsedLines = new Map<number, TranscriptEvent[]>();
-  private readonly compactionTimestamps = new Set<number>();
-  private headEvents: TranscriptEvent[] | null = null;
 
   constructor(
     private readonly appSessionId: string,
     private readonly providerSessionId: string,
-    path: string,
+    private readonly path: string,
     private readonly role: SessionRole,
   ) {
     const stat = statSync(path);
     this.mtimeMs = stat.mtimeMs;
     this.sizeBytes = stat.size;
-    const window = readSessionRawWindow(path, stat.size);
-    this.lines = window.text.split(/\r?\n/).filter((line) => line.trim());
-    this.trimmed = window.trimmed;
-    this.headCompaction = readCompactionState(path);
+    this.lineStarts = scanLineStarts(path, stat.size);
   }
 
   // Serve up to `limit` events ending at `from` (or the segment tail),
@@ -213,52 +197,41 @@ export class SessionTranscriptReader {
     seqBase: number,
     from?: TranscriptWindowCursor,
   ): { events: TranscriptEvent[]; older?: TranscriptWindowCursor } {
-    if (from && from.line < 0) {
-      const head = this.headEventsAtExhaustion().map((e) => ({
-        ...e,
-        seq: seqBase + (e.seq ?? 0),
-      }));
-      return { events: head };
-    }
-    const { collected, older, exhausted } = this.collectBackward(limit, from);
-    let finalOlder = older;
-    if (!finalOlder && exhausted) {
-      // Every line is parsed at this point, so the head events are final.
-      // Serve them atomically: a page may overshoot the limit by one event,
-      // which the renderer tolerates, rather than splitting a two-event head.
-      const head = this.headEventsAtExhaustion();
-      if (head.length > 0 && limit - collected.length < head.length) {
-        finalOlder = { line: -1, skip: 0 };
-      } else {
-        // `collected` is newest-first and reversed before returning, so the
-        // forward-ordered head events go on in reverse to land at the top.
-        collected.push(...head.slice().reverse());
-      }
+    if (this.lineStarts.length === 0) return { events: [] };
+    // The fd opens lazily on the first memo miss and is shared across the
+    // walk, so a fully-memoized repeat page never touches the file.
+    const file: LazyFile = { fd: null };
+    let collected: TranscriptEvent[];
+    let older: TranscriptWindowCursor | undefined;
+    try {
+      ({ collected, older } = this.collectBackward(file, limit, from));
+    } finally {
+      if (file.fd !== null) closeSync(file.fd);
     }
     collected.reverse();
     return {
       events: collected.map((e) => ({ ...e, seq: seqBase + (e.seq ?? 0) })),
-      ...(finalOlder ? { older: finalOlder } : {}),
+      ...(older ? { older } : {}),
     };
   }
 
   // Walk lines backward from `from` (or the tail), collecting up to `limit`
-  // events newest-first. `older` addresses the first unserved event;
-  // `exhausted` means every line was consumed (head events may remain).
+  // events newest-first. `older` addresses the first unserved event.
   private collectBackward(
+    file: LazyFile,
     limit: number,
     from?: TranscriptWindowCursor,
-  ): { collected: TranscriptEvent[]; older?: TranscriptWindowCursor; exhausted: boolean } {
+  ): { collected: TranscriptEvent[]; older?: TranscriptWindowCursor } {
     const collected: TranscriptEvent[] = []; // newest first
-    let line = from ? from.line : this.lines.length - 1;
+    let line = from ? from.line : this.lineStarts.length - 1;
     let skip = from?.skip ?? 0;
     while (line >= 0 && collected.length < limit) {
-      const events = this.parseLine(line); // forward order within the line
+      const events = this.parseLine(file, line); // forward order within the line
       const available = events.length - skip;
       const take = Math.min(available, limit - collected.length);
       for (let i = available - 1; i >= available - take; i--) collected.push(events[i]);
       if (take < available) {
-        return { collected, older: { line, skip: skip + take }, exhausted: false };
+        return { collected, older: { line, skip: skip + take } };
       }
       line -= 1;
       skip = 0;
@@ -268,82 +241,47 @@ export class SessionTranscriptReader {
       // When the limit landed exactly on a line boundary, unserved events
       // remain below `line`.
       ...(line >= 0 ? { older: { line, skip: 0 } } : {}),
-      exhausted: line < 0,
     };
   }
 
-  private parseLine(index: number): TranscriptEvent[] {
+  private parseLine(file: LazyFile, index: number): TranscriptEvent[] {
     const hit = this.parsedLines.get(index);
     if (hit) return hit;
+    // A cursor minted against a since-rewritten (compacted) file can address
+    // lines past the end; serve nothing for them instead of a wrong page.
+    if (index >= this.lineStarts.length) return [];
+    const start = this.lineStarts[index];
+    const end = index + 1 < this.lineStarts.length ? this.lineStarts[index + 1] : this.sizeBytes;
     let events: TranscriptEvent[] = [];
-    try {
-      events = parseSessionLineEvents(
-        this.appSessionId,
-        this.providerSessionId,
-        this.role,
-        JSON.parse(this.lines[index]) as StoredMessageLine | StoredSessionStart,
-      );
-    } catch {
-      /* skip partial/corrupt JSONL rows */
-    }
-    for (const e of events) {
-      // Record even ts=0 (missing/invalid timestamp): the old eager parser
-      // deduped the head divider by `e.ts === comp.ts`, where 0 === 0 holds.
-      if (e.kind === 'compaction') this.compactionTimestamps.add(e.ts);
+    if (end > start) {
+      file.fd ??= openSync(this.path, 'r');
+      const buffer = Buffer.alloc(end - start);
+      readSync(file.fd, buffer, 0, end - start, start);
+      const raw = buffer.toString('utf8').trim();
+      if (raw) {
+        try {
+          events = parseSessionLineEvents(
+            this.appSessionId,
+            this.providerSessionId,
+            this.role,
+            JSON.parse(raw) as StoredMessageLine | StoredSessionStart,
+          );
+        } catch {
+          /* skip partial/corrupt JSONL rows */
+        }
+      }
     }
     const base = (index + 1) * LINE_EVENT_STRIDE;
     events.forEach((e, i) => {
       e.seq = base + Math.min(i, LINE_EVENT_STRIDE - 1);
     });
     this.parsedLines.set(index, events);
+    if (this.parsedLines.size > MAX_MEMOIZED_LINES) {
+      const oldest = this.parsedLines.keys().next().value;
+      if (oldest !== undefined) this.parsedLines.delete(oldest);
+    }
     return events;
   }
-
-  // The synthesized oldest entries of the segment: the head-read compaction
-  // divider (unless the parse already replayed that same record) and the
-  // oversized-trim status. Computed only once every line has been parsed, so
-  // the divider dedupe sees the complete compaction set. Seqs are
-  // segment-local (before every parsed line); callers add the chain base.
-  private headEventsAtExhaustion(): TranscriptEvent[] {
-    if (!this.headEvents) {
-      const events: TranscriptEvent[] = [];
-      // The head read backstops oversized files whose leading
-      // compaction_state was tail-windowed away; when the parse already
-      // replayed that same record as a divider, adding the head copy would
-      // duplicate it.
-      if (this.headCompaction && !this.compactionTimestamps.has(this.headCompaction.ts)) {
-        events.push(
-          compactionDividerEvent(this.appSessionId, this.providerSessionId, this.headCompaction),
-        );
-      }
-      if (this.trimmed) {
-        events.push(
-          oversizedStatusEvent(this.appSessionId, this.providerSessionId, this.role, this.mtimeMs),
-        );
-      }
-      events.forEach((e, i) => {
-        e.seq = i;
-      });
-      this.headEvents = events;
-    }
-    return this.headEvents;
-  }
-}
-
-function compactionDividerEvent(
-  appSessionId: string,
-  providerSessionId: string,
-  comp: CompactionState,
-): TranscriptEvent {
-  return {
-    id: `${providerSessionId}:compaction`,
-    appSessionId,
-    sourceSessionId: 'primary',
-    role: 'primary',
-    ts: comp.ts,
-    kind: 'compaction',
-    removedCount: comp.removedCount,
-  };
 }
 
 function oversizedStatusEvent(

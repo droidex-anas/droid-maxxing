@@ -7,7 +7,13 @@ import {
   prepareChatWorkingDirectory,
   resolveMainCheckout,
 } from './chatWorkspace';
-import { createPullRequest, detectPullRequest, postPrComment } from './github';
+import {
+  createPullRequest,
+  detectPullRequest,
+  listPullRequests,
+  mergePullRequest,
+  postPrComment,
+} from './github';
 
 // These wrappers promise one error contract: IPC-level rejections surface as
 // structured failures, never as rejected promises. Simulate the desktop bridge
@@ -210,6 +216,35 @@ test('detectPullRequest passes the bridge answer through untouched', async () =>
   assert.equal(await detectPullRequest('/repo', 'feature/foo'), answer);
 });
 
+test('listPullRequests never reports an empty list it could not load', async () => {
+  // An empty inbox and an unreachable bridge must stay distinguishable.
+  assert.deepEqual(await listPullRequests('/repo'), {
+    ok: false,
+    reason: 'not_desktop',
+    message: 'Pull requests are available in the desktop app.',
+    viewerLogin: null,
+    prs: [],
+  });
+  withBridge({ githubListPrs: () => Promise.resolve({ ok: true, viewerLogin: null, prs: [] }) });
+  assert.equal((await listPullRequests('')).ok, false);
+});
+
+test('listPullRequests reports an IPC rejection as a failure', async () => {
+  withBridge({ githubListPrs: () => Promise.reject(new Error('bridge down')) });
+  assert.deepEqual(await listPullRequests('/repo'), {
+    ok: false,
+    reason: 'error',
+    viewerLogin: null,
+    prs: [],
+  });
+});
+
+test('listPullRequests passes the bridge answer through untouched', async () => {
+  const answer = { ok: true, viewerLogin: 'octocat', prs: [] };
+  withBridge({ githubListPrs: () => Promise.resolve(answer) });
+  assert.equal(await listPullRequests('/repo'), answer);
+});
+
 test('createPullRequest and postPrComment convert IPC rejections into failed results', async () => {
   withBridge({
     githubCreatePr: () => Promise.reject(new Error('bridge down')),
@@ -220,4 +255,45 @@ test('createPullRequest and postPrComment convert IPC rejections into failed res
     reason: 'error',
   });
   assert.deepEqual(await postPrComment('/repo', 12, 'hello'), { ok: false, reason: 'error' });
+});
+
+test('mergePullRequest reports a bridge failure instead of rejecting', async () => {
+  assert.deepEqual(await mergePullRequest('/repo', 12, 'squash'), {
+    ok: false,
+    reason: 'not_desktop',
+    message: 'Merging a pull request is available in the desktop app.',
+  });
+  withBridge({ githubMergePr: () => Promise.reject(new Error('bridge down')) });
+  assert.deepEqual(await mergePullRequest('/repo', 12, 'squash'), {
+    ok: false,
+    reason: 'error',
+    message: 'Could not merge pull request',
+  });
+});
+
+test('writes refuse an empty directory instead of acting on the host process cwd', async () => {
+  let merged = false;
+  let commented = false;
+  let created = false;
+  withBridge({
+    githubMergePr: () => {
+      merged = true;
+      return Promise.resolve({ ok: true });
+    },
+    githubPostComment: () => {
+      commented = true;
+      return Promise.resolve({ ok: true });
+    },
+    githubCreatePr: () => {
+      created = true;
+      return Promise.resolve({ ok: true });
+    },
+  });
+
+  assert.equal((await mergePullRequest('', 12, 'squash')).ok, false);
+  assert.equal((await postPrComment('', 12, 'hello')).ok, false);
+  assert.equal((await createPullRequest('', { title: 't' })).ok, false);
+  assert.equal(merged, false);
+  assert.equal(commented, false);
+  assert.equal(created, false);
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Check, Crop, X } from 'lucide-react';
 import type { AttachedImage } from '../../hooks/useImageAttachments';
@@ -15,7 +16,17 @@ const FOCUSABLE_SELECTOR =
  * optionally drag a crop, or just close. Crop rects are drawn in displayed
  * pixels and handed to the parent as natural pixels via onCrop.
  */
-export function ImageViewerModal({
+export function ImageViewerModal(props: {
+  image: AttachedImage;
+  onCrop: (id: string, rect: CropRect) => Promise<void>;
+  onClose: () => void;
+}) {
+  // Portalled for the same reason as ImageLightbox: an animated ancestor's
+  // transform would otherwise become the containing block for `fixed`.
+  return createPortal(<ImageViewerModalContent {...props} />, document.body);
+}
+
+function ImageViewerModalContent({
   image,
   onCrop,
   onClose,

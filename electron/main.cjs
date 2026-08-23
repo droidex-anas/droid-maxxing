@@ -7,6 +7,7 @@ const {
   dialog,
   ipcMain,
   nativeTheme,
+  protocol,
   safeStorage,
   session,
   shell,
@@ -20,9 +21,11 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const gitVcs = require('./git.cjs');
 const githubVcs = require('./github.cjs');
+const githubPrConversation = require('./githubPrConversation.cjs');
 const { createTerminalManager, createTerminalSubscriptionRegistry } = require('./terminal.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
+const localImages = require('./localImages.cjs');
 const {
   normalizeBrowserConsoleMessage,
   redactBrowserDiagnosticUrl,
@@ -192,6 +195,15 @@ const nativeBrowserHost = createNativeBrowserHostController({
 });
 
 app.setName(APP_NAME);
+// Must run before the app is ready: the renderer loads transcript images through
+// this scheme, and Chromium only treats it as a normal, fetchable origin when it
+// is declared up front.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: localImages.LOCAL_IMAGE_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+]);
 // Overridable so a second dev instance (e.g. a feature worktree) can run beside
 // the main one without fighting over the Chromium profile lock.
 app.setPath(
@@ -248,6 +260,7 @@ app.whenReady().then(async () => {
     logError: (message) => console.error('[menu] %s', message),
   });
   registerIpc();
+  registerLocalImageProtocol();
   createMainWindow();
   // Pin the DROIDEX mark on the dock/taskbar up front so OS notifications
   // inherit it instead of the bare Electron atom in dev builds.
@@ -342,6 +355,37 @@ function createMainWindow() {
     terminalSubscriptions.clear();
     filesRootAccess.clear();
     mainWindow = null;
+  });
+}
+
+// Serves local image files to the renderer (see localImages.cjs). Registered on
+// the default session only: the Browser pane runs in its own partition, so web
+// pages there never gain a local-file reader.
+function registerLocalImageProtocol() {
+  session.defaultSession.protocol.handle(localImages.LOCAL_IMAGE_SCHEME, async (request) => {
+    try {
+      const filePath = localImages.localImageRequestPath(request.url);
+      const { mime, data } = await localImages.readLocalImage(filePath);
+      // no-store: an attachment path can be rewritten in place by a crop, and a
+      // cached body would keep showing the superseded pixels.
+      // The scheme is fetchable and serves image/svg+xml, so the response denies
+      // every subresource and script: an SVG is inert in an <img>, but this keeps
+      // it inert if a body is ever navigated to or embedded directly. nosniff
+      // stops Chromium from re-typing a body as something executable.
+      return new Response(data, {
+        headers: {
+          'content-type': mime,
+          'cache-control': 'no-store',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+          'x-content-type-options': 'nosniff',
+        },
+      });
+    } catch (error) {
+      // The renderer degrades to an "image unavailable" chip; the reason is only
+      // useful when debugging, so keep it out of the UI and in the log.
+      console.warn('Could not serve local image %s:', request.url, error);
+      return new Response('Image unavailable', { status: 404 });
+    }
   });
 }
 
@@ -469,21 +513,69 @@ function registerIpc() {
     githubVcs.cancelSetup();
     return { ok: true };
   });
-  ipcMain.handle('github-detect-pr', (_event, { dir, options }) =>
-    githubVcs.detectPr(dir, options),
-  );
-  ipcMain.handle('github-pr-checks', (_event, { dir, options }) =>
-    githubVcs.prChecks(dir, options),
-  );
-  ipcMain.handle('github-pr-comments', (_event, { dir, options }) =>
-    githubVcs.prComments(dir, options),
-  );
-  ipcMain.handle('github-create-pr', (_event, { dir, options }) =>
-    githubVcs.createPr(dir, options),
-  );
-  ipcMain.handle('github-post-comment', (_event, { dir, options }) =>
-    githubVcs.postComment(dir, options),
-  );
+  ipcMain.handle('github-detect-pr', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, pr: null };
+    return githubVcs.detectPr(requestDir, options);
+  });
+  ipcMain.handle('github-list-prs', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', viewerLogin: null, prs: [] };
+    return githubVcs.listPrs(requestDir, options);
+  });
+  ipcMain.handle('github-view-pr', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', pr: null };
+    return githubVcs.viewPr(requestDir, options);
+  });
+  ipcMain.handle('github-pr-diff', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', diff: '' };
+    return githubVcs.prDiff(requestDir, options);
+  });
+  ipcMain.handle('github-pr-checks', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', checks: [] };
+    return githubVcs.prChecks(requestDir, options);
+  });
+  ipcMain.handle('github-pr-comments', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid', comments: [] };
+    return githubPrConversation.prComments(requestDir, options);
+  });
+  ipcMain.handle('github-create-pr', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid' };
+    return githubVcs.createPr(requestDir, options);
+  });
+  ipcMain.handle('github-post-comment', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid' };
+    return githubVcs.postComment(requestDir, options);
+  });
+  ipcMain.handle('github-merge-pr', (event, payload = {}) => {
+    assertMainRenderer(event);
+    const { dir, options } = payload || {};
+    const requestDir = prWorkspaceRequestDir(dir);
+    if (!requestDir) return { ok: false, reason: 'invalid' };
+    return githubVcs.mergePr(requestDir, options);
+  });
 
   ipcMain.handle('onboarding-get', getOnboarding);
   ipcMain.handle('onboarding-set', (_event, { patch }) => setOnboarding(patch));
@@ -696,6 +788,11 @@ function assertMainRenderer(event) {
   ) {
     throw new Error('Desktop request rejected for unknown renderer.');
   }
+}
+
+function prWorkspaceRequestDir(value) {
+  if (typeof value !== 'string') return null;
+  return value.trim() ? value : null;
 }
 
 function resolveAppIconFile(mode) {
