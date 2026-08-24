@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AppBlock } from './AppBlock';
-import { appFencesInMarkdown } from '../lib/appBlocks';
+import { appFencesInMarkdown, type MarkdownAppFence } from '../lib/appBlocks';
 import { CodeCard } from './MarkdownCode';
 import { TranscriptImage } from './media/TranscriptImage';
 import { MermaidBlock, SvgCodeBlock } from './MarkdownDiagrams';
@@ -109,11 +109,13 @@ interface FenceRenderOptions {
   autoPlayAppBlocks: boolean;
   buildingAppBlocks: boolean;
   cutOffAppBlocks: boolean;
-  // Source line of the one app fence still being written, when the response is
-  // mid-stream. Only the trailing fence can be unterminated, and a fence
-  // recognises itself by position, so rendering one twice cannot shift the
-  // building state onto its neighbour.
-  incompleteAppFenceLine: number | null;
+  // The app fences found in the source, each carrying the line it opens on, so
+  // a fence recognises itself by position rather than by counting renders.
+  // Rendering one twice therefore cannot shift the building state onto its
+  // neighbour. The scan is deliberately simpler than a full CommonMark parse,
+  // so a fence nested deeper than it follows is absent from this list and falls
+  // back to whether the response is still streaming.
+  appFences: readonly MarkdownAppFence[];
 }
 
 const FenceOptionsContext = createContext<FenceRenderOptions>({
@@ -121,8 +123,19 @@ const FenceOptionsContext = createContext<FenceRenderOptions>({
   autoPlayAppBlocks: false,
   buildingAppBlocks: false,
   cutOffAppBlocks: false,
-  incompleteAppFenceLine: null,
+  appFences: [],
 });
+
+// A fence the scan did not report cannot be judged by position, so it counts as
+// unfinished for as long as the response is streaming: better a building card
+// for one token than auto-playing half an app.
+function appFenceIsFinished(
+  fences: readonly MarkdownAppFence[],
+  startLine: number | undefined,
+  streaming: boolean,
+): boolean {
+  return fences.find((fence) => fence.startLine === startLine)?.complete ?? !streaming;
+}
 
 function MarkdownFence({
   className,
@@ -140,7 +153,7 @@ function MarkdownFence({
     autoPlayAppBlocks,
     buildingAppBlocks,
     cutOffAppBlocks,
-    incompleteAppFenceLine,
+    appFences,
   } = useContext(FenceOptionsContext);
   const inline = !className;
   if (inline)
@@ -155,8 +168,7 @@ function MarkdownFence({
   const codeText = typeof children === 'string' ? children : '';
 
   if (allowGeneratedContent && isAppLang(className)) {
-    const isComplete =
-      startLine === undefined ? !buildingAppBlocks : startLine !== incompleteAppFenceLine;
+    const isComplete = appFenceIsFinished(appFences, startLine, buildingAppBlocks);
     return (
       <AppBlock
         source={codeText}
@@ -370,8 +382,7 @@ function MarkdownImpl({
     autoPlayAppBlocks,
     buildingAppBlocks,
     cutOffAppBlocks,
-    incompleteAppFenceLine:
-      appFencesInMarkdown(children).find((fence) => !fence.complete)?.startLine ?? null,
+    appFences: appFencesInMarkdown(children),
   };
   return (
     <div

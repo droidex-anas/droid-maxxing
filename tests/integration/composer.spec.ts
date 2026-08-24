@@ -120,46 +120,66 @@ test('the plus menu is reachable by keyboard and on a narrow window', async ({ p
   await expect(trigger).toBeFocused();
 });
 
-// The composer grows with the draft, and the transcript above owns the space it
-// takes. Remeasuring by collapsing the box to one line hands that space back for
-// a layout pass, which clamps the transcript's scroll position off the bottom
-// and, during a live turn, makes it jump on every keystroke. Growth needs no
-// collapse, so typing forward must not produce one.
-test('typing forward never collapses the composer to remeasure it', async ({ page }) => {
+// Measuring the draft collapses it to one line, and the transcript above owns
+// the space the composer gives up: in that layout pass the browser clamps the
+// transcript's scroll off the bottom and never restores it, so during a live
+// turn it jumps on every keystroke. The measurement therefore has to happen
+// with the draft's box held at the height it already has, and the box has to be
+// sizing itself again by the time anything paints.
+test('measuring the draft never lets its box give up height', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+  const draft = 'a draft long enough to wrap the composer onto a second line and a third';
+
+  await composer.click();
+  await composer.evaluate((el) => {
+    const box = el.parentElement;
+    if (!box) throw new Error('the draft has no box to hold still');
+    const seen: string[] = [];
+    new MutationObserver((records) => {
+      for (const record of records) seen.push(record.oldValue ?? '');
+    }).observe(box, { attributeFilter: ['style'], attributeOldValue: true });
+    (window as unknown as { __boxStyles: string[] }).__boxStyles = seen;
+  });
+  await composer.pressSequentially(draft);
+
+  // Every keystroke remeasures, and every remeasure has to release the height
+  // it pinned, which is what leaves a pinned height behind as a previous value.
+  const heldStill = await page.evaluate(
+    () =>
+      (window as unknown as { __boxStyles: string[] }).__boxStyles.filter((style) =>
+        /height: \d/.test(style),
+      ).length,
+  );
+  expect(heldStill).toBeGreaterThanOrEqual(draft.length);
+
+  // Nothing is left pinned, so the box tracks the draft again.
+  const leftover = await composer.evaluate((el) => el.parentElement?.style.height ?? 'no box');
+  expect(leftover).toBe('');
+});
+
+// Replacing a multi-line draft with a longer single-line one (what recalling a
+// prompt with ArrowUp does) adds characters while removing line breaks, so the
+// box has to shrink even though the draft grew.
+test('the composer shrinks when a longer draft needs fewer lines', async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 900 });
   await page.goto(appUrl);
   const composer = page.locator('textarea').first();
   const height = () => composer.evaluate((el) => el.offsetHeight);
 
-  const watchHeights = () =>
-    composer.evaluate((el) => {
-      const seen: string[] = [];
-      new MutationObserver((records) => {
-        for (const record of records) seen.push(record.oldValue ?? '');
-      }).observe(el, { attributeFilter: ['style'], attributeOldValue: true });
-      (window as unknown as { __draftStyles: string[] }).__draftStyles = seen;
-    });
-  const collapses = () =>
-    page.evaluate(
-      () =>
-        (window as unknown as { __draftStyles: string[] }).__draftStyles.filter((style) =>
-          style.includes('height: auto'),
-        ).length,
-    );
-
-  const oneLine = await height();
   await composer.click();
-  await watchHeights();
-  await composer.pressSequentially(
-    'a draft long enough to wrap the composer onto a second line, and then onto a third line, and a fourth one after that as well',
-  );
+  await composer.pressSequentially('first');
+  const oneLine = await height();
+  for (const line of ['second', 'third']) {
+    await composer.press('Shift+Enter');
+    await composer.pressSequentially(line);
+  }
   await expect.poll(height).toBeGreaterThan(oneLine);
-  expect(await collapses()).toBe(0);
 
-  // Deleting can need fewer lines than the box has, so it does collapse, and
-  // the composer hands the transcript its space back.
-  await watchHeights();
-  await composer.fill('');
+  // Longer than the three lines it replaces, but only one line tall.
+  await composer.press('ControlOrMeta+a');
+  await composer.pressSequentially('one line again');
+  await expect(composer).toHaveValue('one line again');
   await expect.poll(height).toBe(oneLine);
-  expect(await collapses()).toBeGreaterThan(0);
 });

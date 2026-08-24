@@ -191,6 +191,29 @@ test('completed App fences inside quotes and lists keep their completed streamin
   }
 });
 
+// The fence scan is deliberately simpler than a full CommonMark parser, so a
+// fence nested deeper than it follows is missing from its list. An unfinished
+// one must still not be mistaken for a finished app and auto-played.
+test('a streaming App fence nested past the fence scan keeps building', () => {
+  const source = [
+    '```app',
+    '<main>Complete</main>',
+    '```',
+    '',
+    '- item',
+    '  - nested',
+    '',
+    '      ```app',
+    '      <main>Still streaming',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(Markdown, { autoPlayAppBlocks: true, buildingAppBlocks: true }, source),
+  );
+
+  assert.equal(html.match(/<iframe/g)?.length, 1);
+  assert.equal(html.match(/>Building interactive app</g)?.length, 1);
+});
+
 test('a streaming response keeps the same element types across renders', () => {
   // react-markdown uses each `components` entry as the JSX element type, so a
   // map rebuilt per render makes React remount the whole response on every

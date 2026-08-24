@@ -295,6 +295,9 @@ export default function PromptInput({
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // The draft and the selections that share its first line. Autosize holds this
+  // box still while it measures the draft.
+  const draftBoxRef = useRef<HTMLDivElement>(null);
   const submittingRef = useRef(false);
   const turnStartingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnStartingTargetKeyRef = useRef<string | null>(null);
@@ -655,27 +658,23 @@ export default function PromptInput({
     dispatch({ type: 'CLEAR_COMPOSER_SEED' });
   }, [composerSeed, input, dispatch, setVisualizeSelected]);
 
-  // What the draft measured last, so autosize knows whether it can only grow.
-  const measuredDraft = useRef({ length: 0, indentPx: 0 });
-
   useEffect(() => {
     const draft = textareaRef.current;
-    if (!draft) return;
-    const previous = measuredDraft.current;
+    const box = draftBoxRef.current;
+    if (!draft || !box) return;
     // A textarea reports its content height in scrollHeight only while the
-    // content overflows the box, so shrinking has to collapse to `auto` and
-    // measure again. That collapse shortens the composer for one layout pass,
-    // and the transcript above (which owns the space the composer gives up) has
-    // its scroll position clamped away from the bottom in that pass and never
-    // gets it back. During a live turn the pin-to-bottom effect then
-    // yanks it down on the next token, so a collapse per keystroke reads as
-    // flicker. More text can never need fewer lines, so only remeasure from
-    // scratch when the draft could genuinely want less room than it has.
-    const mayNeedLessRoom =
-      input.length < previous.length || selectionsIndent !== previous.indentPx;
-    measuredDraft.current = { length: input.length, indentPx: selectionsIndent };
-    if (mayNeedLessRoom) draft.style.height = 'auto';
+    // content overflows the box, so measuring the draft means collapsing it to
+    // `auto` first. Left alone, that collapse hands the composer's space back to
+    // the transcript above for one layout pass: the browser clamps the
+    // transcript's scroll position away from the bottom and never restores it,
+    // so during a live turn the pin-to-bottom effect yanks it down again on the
+    // next token, once per keystroke. Holding this box at the height it already
+    // has keeps the collapse from reaching anything outside the composer, and
+    // the box goes back to sizing itself before the browser paints.
+    box.style.height = `${String(box.offsetHeight)}px`;
+    draft.style.height = 'auto';
     draft.style.height = `${String(Math.min(draft.scrollHeight, 200))}px`;
+    box.style.height = '';
     // The indent moves where the first line wraps, so it can change the height.
   }, [input, selectionsIndent]);
 
@@ -1483,7 +1482,7 @@ export default function PromptInput({
             </div>
           )}
 
-          <div className="relative">
+          <div className="relative" ref={draftBoxRef}>
             <DraftSelections items={draftSelections} onWidthChange={setSelectionsIndent} />
             <textarea
               ref={textareaRef}
