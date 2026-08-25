@@ -60,6 +60,10 @@ function childHistoryProviderSessionIds(
 
 export class ChildSessions {
   private readonly parents = new Map<string, ParentChildSessions>();
+  private readonly childrenAwaitingDurability = new Map<
+    string,
+    { child: ChildSessionState; closeAfterPublish: boolean }
+  >();
   private nextParentGeneration = 0;
   private shuttingDown = false;
 
@@ -240,6 +244,19 @@ export class ChildSessions {
             reasoningEffort: settings.reasoningEffort,
           });
       }
+    }
+  }
+
+  retryPendingDurability(): void {
+    for (const [key, pending] of this.childrenAwaitingDurability) {
+      const parent = this.parents.get(pending.child.identity.parentAppSessionId);
+      if (!parent || !this.isCurrentChild(parent, pending.child)) {
+        this.childrenAwaitingDurability.delete(key);
+        continue;
+      }
+      this.childrenAwaitingDurability.delete(key);
+      this.publish(pending.child);
+      if (pending.closeAfterPublish) void this.closeWhenIdle(pending.child.identity);
     }
   }
 
@@ -474,6 +491,10 @@ export class ChildSessions {
     for (const child of parent.children.values()) await this.closeRuntime(parent, child, false);
     parent.pendingSpawns.clear();
     parent.reservedOpenSlots.clear();
+    const durabilityPrefix = `${parentAppSessionId}\u0000`;
+    for (const key of this.childrenAwaitingDurability.keys()) {
+      if (key.startsWith(durabilityPrefix)) this.childrenAwaitingDurability.delete(key);
+    }
     if (this.parents.get(parentAppSessionId) === parent) this.parents.delete(parentAppSessionId);
   }
 
@@ -885,8 +906,11 @@ export class ChildSessions {
     // Activity describes a moment that has passed; keeping the last poll's line
     // would leave a finished subagent reading as still working.
     child.activity = undefined;
-    this.commit(child);
-    void this.closeWhenIdle(child.identity);
+    if (this.commit(child)) void this.closeWhenIdle(child.identity);
+    else {
+      const pending = this.childrenAwaitingDurability.get(childDurabilityKey(child.identity));
+      if (pending) pending.closeAfterPublish = true;
+    }
   }
 
   private createChild(
@@ -1007,7 +1031,12 @@ export class ChildSessions {
     child.mutationTail = cleanup;
     await cleanup;
     this.clearMutation(child, cleanup);
-    if (publish && this.isCurrentParent(parent) && child.runtimeGeneration === closedGeneration)
+    if (
+      publish &&
+      this.isCurrentParent(parent) &&
+      child.runtimeGeneration === closedGeneration &&
+      !this.childrenAwaitingDurability.has(childDurabilityKey(child.identity))
+    )
       this.publish(child);
   }
 
@@ -1240,16 +1269,29 @@ export class ChildSessions {
     });
   }
 
-  private persist(child: ChildSessionState): void {
-    this.d.history.upsertChildSession({
+  private persist(child: ChildSessionState): boolean | undefined {
+    return this.d.history.upsertChildSession({
       ...persistedChild(child),
       updatedAt: this.d.now(),
     });
   }
 
-  private commit(child: ChildSessionState): void {
-    this.persist(child);
+  private commit(child: ChildSessionState): boolean {
+    const key = childDurabilityKey(child.identity);
+    const durable = this.persist(child);
+    if (durable === false) {
+      const previous = this.childrenAwaitingDurability.get(key);
+      this.childrenAwaitingDurability.set(key, {
+        child,
+        closeAfterPublish: previous?.closeAfterPublish ?? false,
+      });
+      return false;
+    }
+    const pending = this.childrenAwaitingDurability.get(key);
+    this.childrenAwaitingDurability.delete(key);
     this.publish(child);
+    if (pending?.closeAfterPublish) void this.closeWhenIdle(child.identity);
+    return true;
   }
 
   private clearMutation(child: ChildSessionState, mutation: Promise<void>): boolean {
@@ -1265,4 +1307,8 @@ export class ChildSessions {
       runtimeGeneration: child.runtime?.generation ?? child.runtimeGeneration,
     });
   }
+}
+
+function childDurabilityKey(identity: ChildIdentity): string {
+  return `${identity.parentAppSessionId}\u0000${identity.childSessionId}`;
 }

@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 import { HistoryPersistenceDatabase } from './historyPersistenceDatabase.js';
-import type { HistoryPersistenceBatch } from './historyPersistenceProtocol.js';
+import type { HistoryPersistenceBatch, HistoryWriterLease } from './historyPersistenceProtocol.js';
 import type { SessionSummary } from './protocol.js';
 
 function createSchema(path: string): void {
@@ -64,6 +64,11 @@ function createSchema(path: string): void {
       kind TEXT NOT NULL,
       ts INTEGER NOT NULL
     );
+    CREATE TABLE settings (
+      scope TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
   db.close();
 }
@@ -108,16 +113,23 @@ function batch(value = summary(9)): HistoryPersistenceBatch {
   };
 }
 
+const writerLease: HistoryWriterLease = { owner: 'test-writer', generation: 1 };
+
 test('applies events, latest summaries, and child state in one transaction', () => {
   const dir = mkdtempSync(join(tmpdir(), 'droidex-history-db-'));
   const path = join(dir, 'history.sqlite');
   try {
     createSchema(path);
     const persistence = new HistoryPersistenceDatabase(path);
-    const result = persistence.persist(batch());
+    const result = persistence.persist(batch(), writerLease);
     assert.equal(result.eventsWritten, 1);
     assert.equal(result.summariesWritten, 1);
     assert.equal(result.childrenWritten, 1);
+    assert.equal(persistence.persist(batch(summary(10)), writerLease).eventsWritten, 0);
+    const activityUpdate = summary(11);
+    activityUpdate.updatedAt = 3;
+    persistence.persist(batch(activityUpdate), writerLease);
+    assert.doesNotThrow(() => persistence.durabilityBarrier(writerLease));
     persistence.close();
 
     const db = new DatabaseSync(path, { readOnly: true });
@@ -131,7 +143,7 @@ test('applies events, latest summaries, and child state in one transaction', () 
           tokens_out: number;
         }
       ).tokens_out,
-      9,
+      11,
     );
     assert.equal(
       (
@@ -140,6 +152,13 @@ test('applies events, latest summaries, and child state in one transaction', () 
         }
       ).status,
       'paused',
+    );
+    assert.equal(
+      db
+        .prepare("SELECT value_json FROM settings WHERE scope = 'history.search_identity_revision'")
+        .get()?.['value_json'],
+      '2',
+      'passive token updates do not invalidate the search identity cache',
     );
     db.close();
   } finally {
@@ -155,7 +174,7 @@ test('rolls back the complete batch when one row is invalid', () => {
     const persistence = new HistoryPersistenceDatabase(path);
     const invalid = summary(2);
     Reflect.set(invalid, 'title', null);
-    assert.throws(() => persistence.persist(batch(invalid)));
+    assert.throws(() => persistence.persist(batch(invalid), writerLease));
     persistence.close();
 
     const db = new DatabaseSync(path, { readOnly: true });
@@ -166,6 +185,50 @@ test('rolls back the complete batch when one row is invalid', () => {
     assert.equal(
       (db.prepare('SELECT COUNT(*) AS count FROM child_sessions').get() as { count: number }).count,
       0,
+    );
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rejects a replaced writer before it can commit stale state', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-history-db-lease-'));
+  const path = join(dir, 'history.sqlite');
+  const firstGeneration: HistoryWriterLease = { owner: 'worker', generation: 1 };
+  const secondGeneration: HistoryWriterLease = { owner: 'worker', generation: 2 };
+  try {
+    createSchema(path);
+    const staleWriter = new HistoryPersistenceDatabase(path);
+    const currentWriter = new HistoryPersistenceDatabase(path);
+    staleWriter.persist(batch(), firstGeneration);
+
+    const current = summary(20);
+    current.updatedAt = 20;
+    currentWriter.persist(batch(current), secondGeneration);
+
+    const stale = summary(99);
+    stale.updatedAt = 99;
+    assert.throws(
+      () => staleWriter.persist(batch(stale), firstGeneration),
+      /generation 1 was replaced by generation 2/,
+    );
+    assert.throws(
+      () => staleWriter.durabilityBarrier(firstGeneration),
+      /generation 1 was replaced by generation 2/,
+    );
+    currentWriter.durabilityBarrier(secondGeneration);
+    staleWriter.close();
+    currentWriter.close();
+
+    const db = new DatabaseSync(path, { readOnly: true });
+    assert.equal(
+      (
+        db.prepare('SELECT tokens_out FROM app_sessions WHERE app_session_id = ?').get('app') as {
+          tokens_out: number;
+        }
+      ).tokens_out,
+      20,
     );
     db.close();
   } finally {

@@ -100,9 +100,14 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
       server.broadcast(event);
     },
   });
+  // Worker startup is a sidecar-start concern, not a steady-state settlement
+  // sample. Establish the writer and its durability checkpoint before metrics
+  // begin so the boundary histogram measures live orchestration behavior.
+  const history = new HistoryPersistence();
+  history.flushSync();
   const dependencies: SessionManagerDependencies = {
     runtime,
-    history: new HistoryPersistence(),
+    history,
     browsers,
     createLocalMcpResource: () => stubMcpResource(),
     mcpConfiguration: {

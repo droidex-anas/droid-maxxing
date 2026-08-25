@@ -336,6 +336,10 @@ export const searchSessions = (requestId: string, query: string) => {
   bridge.send({ type: 'sessions.search', requestId, query });
 };
 
+export const setHistoryIndexingIdle = (isIdle: boolean) => {
+  return bridge.sendIfConnected({ type: 'history.indexingIdle', isIdle });
+};
+
 export const updateAgentSettings = (input: {
   appSessionId?: string;
   agent: ConfigurableSessionRole;

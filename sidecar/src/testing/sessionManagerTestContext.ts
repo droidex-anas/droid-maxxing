@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,7 +9,9 @@ import {
   type SessionManagerDependencies,
   type StartableLocalMcpResource,
 } from '../SessionManager.js';
+import { HistoryIndex } from '../history.js';
 import type * as Protocol from '../protocol.js';
+import type { SessionFileChange } from '../sessionFileCache.js';
 import { FakeBrowserSessionManager } from './browserCharacterizationSupport.js';
 import {
   FakeFactoryRuntime,
@@ -59,6 +61,7 @@ export interface SessionManagerTestContext {
   readonly fixture: {
     seedHistorySummaries(summaries: Protocol.SessionSummary[]): void;
     seedChildSessions(children: Protocol.ChildSessionSummary[]): void;
+    publishSessionFiles(changes: SessionFileChange[]): void;
   };
   readonly browsers: FakeBrowserSessionManager;
   readonly home: string;
@@ -129,10 +132,20 @@ export function createSessionManagerTestContext(
     rmSync(home, { recursive: true, force: true });
     throw error;
   }
+  let sessionFileMirror: HistoryIndex;
+  try {
+    sessionFileMirror = new HistoryIndex();
+  } catch (error) {
+    unpinTestHome();
+    rmSync(home, { recursive: true, force: true });
+    throw error;
+  }
+  let sessionFileRevision = 0;
   let manager: SessionManager;
   try {
     manager = new SessionManager(recordEvent, { dependencies, initialModels: INITIAL_MODELS });
   } catch (error) {
+    sessionFileMirror.close();
     unpinTestHome();
     rmSync(home, { recursive: true, force: true });
     throw error;
@@ -179,6 +192,30 @@ export function createSessionManagerTestContext(
           })),
         );
       },
+      publishSessionFiles: (changes) => {
+        const upserts = changes.map(({ providerSessionId, path: sessionPath }) => {
+          const stat = statSync(sessionPath);
+          return {
+            providerSessionId,
+            path: sessionPath,
+            birthtimeMs: stat.birthtimeMs,
+            mtimeMs: stat.mtimeMs,
+            sizeBytes: stat.size,
+            settingsMtimeMs: null,
+            summary: null,
+          };
+        });
+        const previousRevision = sessionFileRevision;
+        sessionFileRevision += 1;
+        const applied = sessionFileMirror.applySessionFileReconciliation({
+          previousRevision,
+          revision: sessionFileRevision,
+          changed: upserts.length,
+          upserts,
+          removedProviderSessionIds: [],
+        });
+        if (!applied) throw new Error('Test session-file mirror revision diverged.');
+      },
     },
     browsers,
     home,
@@ -196,6 +233,7 @@ export function createSessionManagerTestContext(
       try {
         await manager.shutdown();
       } finally {
+        sessionFileMirror.close();
         unpinTestHome();
         rmSync(home, { recursive: true, force: true });
       }

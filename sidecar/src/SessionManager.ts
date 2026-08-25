@@ -9,12 +9,14 @@ import type {
   ConfigurableSessionRole,
   FactoryDefaultSettings,
   InstallChannel,
+  SessionSearchResult,
   SessionSummary,
   ModelInfo,
   ReasoningEffort,
   ResponseFormat,
   ServerEvent,
   SessionInteractionMode,
+  TranscriptEvent,
 } from './protocol.js';
 import {
   defaultsModeForSummary,
@@ -36,19 +38,21 @@ import { detectEnvironment } from './Environment.js';
 import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInstaller.js';
 import {
   type HistoryIndex,
+  type PersistedChildSession,
   loadMissionControlSessions,
   loadSessionTranscriptWindow,
   readFactoryDefaults,
   resolveSessionChain,
-  warmSessionIndex,
 } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
+import type { SessionFileChange } from './sessionFileCache.js';
 import { transcriptToMarkdown } from './sessionMarkdown.js';
 import {
   startSessionFileWatcher,
   type SessionFileWatcher,
   type SessionFileWatcherOptions,
 } from './sessionFileWatcher.js';
+import { SessionFileServing } from './SessionFileServing.js';
 import { mergeModelCatalog } from './modelCatalog.js';
 import { readDroidCliModelCatalog, readDroidCliModelCatalogCache } from './DroidCliCatalog.js';
 import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
@@ -77,7 +81,6 @@ import {
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSettings } from './ChildSessionState.js';
 import { MissionControlPolicy } from './MissionControlPolicy.js';
-import type { SessionListFilterOptions } from './sessionListFilter.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
 import type { HotPathResourceCounts } from './telemetry/hotPathMetrics.js';
 import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfiguration.js';
@@ -93,22 +96,27 @@ function formatResponsePrompt(text: string, responseFormat?: ResponseFormat): st
   return formatAppPrompt(text, responseFormat === 'app-create' ? 'create' : 'followup');
 }
 
-type SessionHistory = Pick<
+type SessionHistoryBase = Pick<
   HistoryIndex,
-  | 'syncSummaries'
   | 'summaryPatchesAndHidden'
   | 'listHistoricalSessions'
-  | 'searchSessions'
-  | 'reconcileSessionFiles'
-  | 'reconcileSessionFilePaths'
   | 'sessionFileCacheSize'
   | 'sessionLaunchSettings'
   | 'childSessions'
   | 'childSession'
-  | 'upsertChildSession'
-  | 'recordEvent'
   | 'close'
->;
+> & {
+  syncSummaries(summaries: SessionSummary[]): boolean | undefined;
+  upsertChildSession(child: PersistedChildSession): boolean | undefined;
+  recordEvent(event: TranscriptEvent): void;
+};
+
+type SessionHistory = SessionHistoryBase & {
+  searchSessions(query: string, isStale?: () => boolean): Promise<SessionSearchResult[]>;
+  setIndexingIdle(isIdle: boolean): Promise<void>;
+  reconcileSessionFiles(): Promise<number>;
+  reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number>;
+};
 
 type SessionBrowsers = Pick<
   BrowserSessionManager,
@@ -208,18 +216,12 @@ export class SessionManager {
   private readonly childSessions: ChildSessions;
   private readonly missionControlPolicy: MissionControlPolicy;
   private readonly lifecycle: SessionLifecycle;
+  private readonly sessionFiles: SessionFileServing;
   private readonly pendingAgentSettings = new Map<
     string,
     Partial<Record<ConfigurableSessionRole, AgentSettingPatch>>
   >();
   private shutdownPromise?: Promise<void>;
-  private sessionsBootstrapDone = false;
-  // Non-null while the one-time warm-cache boot reconcile is pending;
-  // sessions.list responses wait for it (see bootstrapSessionListServing).
-  private sessionsBootReconcile: Promise<void> | null = null;
-  private sessionFileWatcher: SessionFileWatcher | null = null;
-  private readonly startWatcher: (options: SessionFileWatcherOptions) => SessionFileWatcher | null;
-  private lastSessionListOptions?: SessionListFilterOptions;
   // Per-session autonomy mutation queue: rapid changes settle against the
   // provider in the order they were requested.
   private readonly autonomyMutationTails = new Map<string, Promise<void>>();
@@ -236,6 +238,9 @@ export class SessionManager {
     private readonly emit: Emit,
     options: SessionManagerOptions = {},
   ) {
+    let startWatcher: (
+      options: SessionFileWatcherOptions,
+    ) => ReturnType<typeof startSessionFileWatcher>;
     if (options.dependencies) {
       this.runtime = options.dependencies.runtime;
       this.history = options.dependencies.history;
@@ -245,10 +250,27 @@ export class SessionManager {
       this.loadConfiguredMcpServers = options.dependencies.loadConfiguredMcpServers;
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
       this.nextChildSessionId = options.dependencies.nextChildSessionId ?? nextChildSessionId;
-      this.startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
+      startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
     } else {
       this.runtime = new DroidRuntime();
-      this.history = new HistoryPersistence();
+      this.history = new HistoryPersistence({
+        onStatusChanged: (status) => {
+          if (status.state === 'healthy') return;
+          this.emit({
+            type: 'error',
+            code: 'history.persistence_degraded',
+            message:
+              `History durability is temporarily degraded: ${status.message} ` +
+              'Live work will continue while buffered capacity remains; settlement will retry.',
+            recoverable: true,
+          });
+        },
+        onDurabilityRecovered: () => {
+          if (this.shutdownPromise) return;
+          this.registry.retryPendingDurability();
+          this.childSessions.retryPendingDurability();
+        },
+      });
       const browsers = new BrowserSessionManager({
         assetUrlFor: options.assetUrlFor,
         emit: (event) => {
@@ -270,7 +292,7 @@ export class SessionManager {
       this.loadConfiguredMcpServers = loadFactoryMcpServers;
       this.factoryDefaultsOverride = undefined;
       this.nextChildSessionId = nextChildSessionId;
-      this.startWatcher = startSessionFileWatcher;
+      startWatcher = startSessionFileWatcher;
     }
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
     this.mcpSettings = new McpSettings(
@@ -295,6 +317,9 @@ export class SessionManager {
       projectSummary: (summary) => this.applyPendingSettingsToSummary({ ...summary }),
       onSummaryUpdated: (summary) => {
         this.emit({ type: 'session.updated', session: summary });
+      },
+      onLiveProviderReplaced: (providerSessionId) => {
+        this.sessionFiles.finalizeReplacedProvider(providerSessionId);
       },
       now: Date.now,
     });
@@ -395,6 +420,19 @@ export class SessionManager {
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
       now: Date.now,
     });
+    this.sessionFiles = new SessionFileServing({
+      history: this.history,
+      startWatcher,
+      isLiveSession: (providerSessionId) => this.registry.isCurrentLiveProvider(providerSessionId),
+      isShutdownStarted: () => this.shutdownPromise !== undefined,
+      retryPendingLaunchSettings: (providerSessionIds) => {
+        this.childSessions.retryPendingLaunchSettings(providerSessionIds);
+      },
+      listSummaries: (listOptions) => this.registry.listSummaries(listOptions),
+      emitList: (sessions) => {
+        this.emit({ type: 'sessions.list', sessions });
+      },
+    });
     this.missionControlPolicy = new MissionControlPolicy({
       registry: this.registry,
       childSessions: this.childSessions,
@@ -443,22 +481,8 @@ export class SessionManager {
       emitStatus: (appSessionId, text) => {
         this.timeline.appendStatus(appSessionId, text);
       },
-      emitSessionList: (closedProviderSessionId) => {
-        if (this.shutdownPromise) return;
-        // Live writes are excluded from historical reconciliation, but the
-        // watcher retains their paths. Reconcile exactly the finalized file
-        // after unregister; if a very short session closed before its first
-        // watch event, fall back to the authoritative tree diff.
-        const sessionFile =
-          this.sessionFileWatcher?.consumeLiveSessionFile(closedProviderSessionId);
-        if (sessionFile) {
-          this.history.reconcileSessionFilePaths([
-            { providerSessionId: closedProviderSessionId, path: sessionFile },
-          ]);
-        } else {
-          this.history.reconcileSessionFiles();
-        }
-        this.emitSessionList(this.lastSessionListOptions);
+      emitSessionList: async (closedProviderSessionId) => {
+        await this.sessionFiles.finalizeClosedProvider(closedProviderSessionId);
       },
     });
   }
@@ -630,20 +654,7 @@ export class SessionManager {
         await this.lifecycle.close(cmd.appSessionId);
         return;
       case 'sessions.list':
-        this.lastSessionListOptions = cmd;
-        this.bootstrapSessionListServing();
-        if (this.sessionsBootReconcile) {
-          // Hold list responses until the one-time boot reconcile settles so
-          // the first list the renderer sees is already authoritative; only
-          // the latest queued request emits.
-          const boot = this.sessionsBootReconcile;
-          void boot.then(() => {
-            if (this.shutdownPromise || this.lastSessionListOptions !== cmd) return;
-            this.emitSessionList(cmd);
-          });
-          return;
-        }
-        this.emitSessionList(cmd);
+        await this.sessionFiles.list(cmd);
         return;
       case 'history.list':
         this.timeline.list();
@@ -655,8 +666,8 @@ export class SessionManager {
         this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
       case 'sessions.search': {
-        // Track the newest query so a superseded scan stops spending its file
-        // budget on results the renderer would discard by requestId anyway.
+        // Track the newest query so a superseded FTS query stops before
+        // publishing results the renderer would discard by requestId anyway.
         this.latestSearchRequestId = cmd.requestId;
         const isStale = (): boolean => this.latestSearchRequestId !== cmd.requestId;
         const results = await this.history.searchSessions(cmd.query, isStale);
@@ -665,6 +676,9 @@ export class SessionManager {
         }
         return;
       }
+      case 'history.indexingIdle':
+        await this.history.setIndexingIdle(cmd.isIdle);
+        return;
       case 'settings.agent.update':
         await this.updateAgentSettings(cmd);
         return;
@@ -1107,87 +1121,6 @@ export class SessionManager {
       });
       return false;
     }
-  }
-
-  private emitSessionList(options?: SessionListFilterOptions): void {
-    this.emit({ type: 'sessions.list', sessions: this.registry.listSummaries(options) });
-  }
-
-  // Runs once per boot, on the first sessions.list. An empty session file
-  // cache (first run after install or a rebuilt index) is populated
-  // synchronously so the first list returns the same rows an uncached scan
-  // would. A warm cache is refreshed from disk in the background, and the
-  // first list is held until that reconcile settles: the sidebar paints
-  // instantly from its local snapshot, and the authoritative list lands
-  // moments later without ever pruning rows a stale list happened to omit.
-  // Also warms the memoized session id -> file index so the first session
-  // restore does not pay the sessions walk, and starts the sessions-dir
-  // watcher so sessions created, updated, or deleted outside this app
-  // instance are reconciled into the cache and republished live.
-  private bootstrapSessionListServing(): void {
-    if (this.sessionsBootstrapDone) return;
-    this.sessionsBootstrapDone = true;
-    setImmediate(() => {
-      if (this.shutdownPromise) return;
-      // warmSessionIndex walks ~/.factory/sessions, whose entries can vanish
-      // mid-walk (a parallel Droid CLI run). The walk is best-effort
-      // prefetch, so a failure must degrade to a lazy rebuild on first use
-      // instead of becoming an uncaught exception in this detached callback.
-      try {
-        warmSessionIndex();
-      } catch (error) {
-        console.error(`Session index warm-up failed: ${errMsg(error)}`);
-      }
-    });
-    this.sessionFileWatcher = this.startWatcher({
-      isLiveSession: (id) => this.registry.getLive(id) !== undefined,
-      onExternalChange: (changes) => {
-        // The watcher starts before the one-time warm-cache boot reconcile
-        // runs. An event in that window must not emit a list served from a
-        // partially-reconciled cache: the boot full reconcile scans the whole
-        // tree and its own emit is authoritative, so a change seen here is
-        // already covered by it. After boot, the cache is fresh and events
-        // reconcile and republish normally.
-        if (this.shutdownPromise || this.sessionsBootReconcile) return;
-        try {
-          // A targeted change list reconciles exactly the reported files;
-          // null means the watcher saw unexplained events and only a full
-          // diff of the sessions tree can restore freshness.
-          if (changes) this.history.reconcileSessionFilePaths(changes);
-          else this.history.reconcileSessionFiles();
-        } catch (error) {
-          console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
-          return;
-        }
-        this.childSessions.retryPendingLaunchSettings(
-          changes?.map(({ providerSessionId }) => providerSessionId),
-        );
-        if (this.lastSessionListOptions) this.emitSessionList(this.lastSessionListOptions);
-      },
-    });
-    if (this.history.sessionFileCacheSize === 0) {
-      try {
-        this.history.reconcileSessionFiles();
-        this.childSessions.retryPendingLaunchSettings();
-      } catch (error) {
-        console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
-      }
-      return;
-    }
-    this.sessionsBootReconcile = new Promise((resolve) => {
-      setImmediate(() => {
-        if (!this.shutdownPromise) {
-          try {
-            this.history.reconcileSessionFiles();
-            this.childSessions.retryPendingLaunchSettings();
-          } catch (error) {
-            console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
-          }
-        }
-        this.sessionsBootReconcile = null;
-        resolve();
-      });
-    });
   }
 
   private async runPrimaryTurn(liveSession: LiveSession, prompt: string): Promise<void> {
@@ -1802,6 +1735,7 @@ export class SessionManager {
   }
 
   private async performShutdown(): Promise<void> {
+    this.latestSearchRequestId = null;
     let firstError: unknown;
     const run = async (action: () => void | Promise<void>): Promise<void> => {
       try {
@@ -1811,7 +1745,7 @@ export class SessionManager {
       }
     };
 
-    await run(() => this.sessionFileWatcher?.close());
+    await run(() => this.sessionFiles.close());
     await run(() => this.lifecycle.closeAll());
     await run(() => this.childSessions.shutdown());
     await run(() => {

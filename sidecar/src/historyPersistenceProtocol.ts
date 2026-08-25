@@ -1,8 +1,12 @@
 import type { MessagePort } from 'node:worker_threads';
 
 import type { PersistedChildSession } from './history.js';
+import type {
+  SessionFileChange,
+  SessionFileReconciliation,
+  SessionFileSnapshot,
+} from './sessionFileCache.js';
 import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './protocol.js';
-import type { SessionSearchCandidate } from './sessionSearch.js';
 
 export interface PersistedEventMetadata {
   id: string;
@@ -21,9 +25,15 @@ export interface HistoryPersistenceBatch {
 
 export interface HistoryPersistenceResult {
   durationMs: number;
+  initializationMs?: number;
   eventsWritten: number;
   summariesWritten: number;
   childrenWritten: number;
+}
+
+export interface HistoryWriterLease {
+  owner: string;
+  generation: number;
 }
 
 export interface HistoryPersistenceQueueSnapshot {
@@ -41,14 +51,24 @@ export interface HistoryPersistenceQueueSnapshot {
 
 export type HistoryWorkerRequest =
   | { type: 'persist'; batch: HistoryPersistenceBatch }
-  | { type: 'search'; generation: number; query: string; candidates: SessionSearchCandidate[] }
-  | { type: 'invalidate-search'; generation: number }
+  | { type: 'durability-barrier' }
+  | { type: 'reconcile-files' }
+  | { type: 'session-file-snapshot' }
+  | {
+      type: 'reconcile-file-paths';
+      changes: SessionFileChange[];
+    }
+  | { type: 'indexing-idle'; isIdle: boolean }
+  | { type: 'search'; query: string }
   | { type: 'close' };
 
 export type HistoryWorkerValue =
   | HistoryPersistenceResult
+  | SessionFileReconciliation
+  | SessionFileSnapshot
   | SessionSearchResult[]
-  | { invalidated: true }
+  | { durable: true }
+  | { accepted: true }
   | { closed: true };
 
 export type HistoryWorkerResponse =
@@ -64,6 +84,7 @@ export interface SerializedHistoryWorkerError {
 export interface HistoryWorkerEnvelope {
   request: HistoryWorkerRequest;
   replyPort: MessagePort;
+  writerLease?: HistoryWriterLease;
 }
 
 export function emptyPersistenceBatch(): HistoryPersistenceBatch {

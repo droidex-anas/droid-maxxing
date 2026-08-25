@@ -81,12 +81,137 @@ test('historical summaries and provider aliases reload only when the history rev
   assert.equal(loads, 2);
 });
 
+test('reanchored historical cwd survives a read at a stable history revision', () => {
+  const source = summary('app', 'provider', { cwd: '/repo/.worktrees/feature' });
+  const history = {
+    revision: 1,
+    syncSummaries: () => undefined,
+    summaryPatchesAndHidden: () => ({
+      patches: new Map<string, Partial<SessionSummary>>(),
+      hiddenProviderSessionIds: new Set<string>(),
+    }),
+  };
+  const registry = new SessionRegistry<LiveSession>({
+    history,
+    loadOrdinarySessions: () => [historical(source)],
+    loadMissionControlSessions: () => [],
+    projectSummary: (value) => ({ ...value, features: [...value.features] }),
+    onSummaryUpdated: () => undefined,
+    now: () => 2,
+  });
+
+  assert.deepEqual(
+    registry.reanchorHistoricalCwd('/repo/.worktrees/feature', '/repo').map((item) => item.cwd),
+    ['/repo'],
+  );
+
+  assert.equal(registry.resolveSummary('app')?.cwd, '/repo');
+});
+
+test('historical provider replacement preserves aliases at a stable history revision', () => {
+  const source = summary('app', 'provider-current', {
+    compactedFromProviderSessionIds: ['provider-old'],
+  });
+  const history = {
+    revision: 1,
+    syncSummaries: () => undefined,
+    summaryPatchesAndHidden: () => ({
+      patches: new Map<string, Partial<SessionSummary>>(),
+      hiddenProviderSessionIds: new Set<string>(),
+    }),
+  };
+  const registry = new SessionRegistry<LiveSession>({
+    history,
+    loadOrdinarySessions: () => [historical(source)],
+    loadMissionControlSessions: () => [],
+    projectSummary: (value) => ({ ...value, features: [...value.features] }),
+    onSummaryUpdated: () => undefined,
+    now: () => 2,
+  });
+
+  registry.replaceProvider('provider-old', 'provider-next');
+
+  assert.equal(registry.resolveSummary('provider-next')?.providerSessionId, 'provider-next');
+  assert.equal(registry.resolveSummary('provider-current')?.providerSessionId, 'provider-next');
+  assert.equal(registry.resolveSummary('provider-old')?.providerSessionId, 'provider-next');
+});
+
+test('Mission Control history refreshes independently of ordinary history revision', () => {
+  let mission = summary('mission-one', 'mission-provider-one', {
+    sessionPurpose: 'mission-control',
+  });
+  let missionLoads = 0;
+  const registry = new SessionRegistry<LiveSession>({
+    history: {
+      revision: 1,
+      syncSummaries: () => undefined,
+      summaryPatchesAndHidden: () => ({
+        patches: new Map<string, Partial<SessionSummary>>(),
+        hiddenProviderSessionIds: new Set<string>(),
+      }),
+    },
+    loadOrdinarySessions: () => [],
+    loadMissionControlSessions: () => {
+      missionLoads += 1;
+      return [historical(mission)];
+    },
+    projectSummary: (value) => ({ ...value, features: [...value.features] }),
+    onSummaryUpdated: () => undefined,
+    now: () => 2,
+  });
+
+  assert.equal(registry.listSummaries()[0]?.appSessionId, 'mission-one');
+  mission = summary('mission-two', 'mission-provider-two', {
+    sessionPurpose: 'mission-control',
+  });
+
+  assert.equal(registry.listSummaries()[0]?.appSessionId, 'mission-two');
+  assert.equal(missionLoads, 2);
+});
+
+test('a removed Mission row is not retained by a direct historical mutation', () => {
+  let missions = [
+    summary('mission-one', 'mission-provider-current', {
+      sessionPurpose: 'mission-control',
+      compactedFromProviderSessionIds: ['mission-provider-old'],
+    }),
+  ];
+  const registry = new SessionRegistry<LiveSession>({
+    history: {
+      revision: 1,
+      syncSummaries: () => undefined,
+      summaryPatchesAndHidden: () => ({
+        patches: new Map<string, Partial<SessionSummary>>(),
+        hiddenProviderSessionIds: new Set<string>(),
+      }),
+    },
+    loadOrdinarySessions: () => [],
+    loadMissionControlSessions: () => missions.map(historical),
+    projectSummary: (value) => ({ ...value, features: [...value.features] }),
+    onSummaryUpdated: () => undefined,
+    now: () => 2,
+  });
+
+  registry.replaceProvider('mission-provider-old', 'mission-provider-next');
+  missions = [];
+
+  assert.deepEqual(registry.listSummaries(), []);
+});
+
 test('unregister flushes persistence before exposing the session as closed', () => {
   const trace: string[] = [];
   const history = {
     revision: 0,
-    syncSummaries: () => trace.push('enqueue'),
-    flushSync: () => trace.push('flush'),
+    syncSummaries: () => {
+      trace.push('enqueue');
+      return undefined;
+    },
+    flushSync: () => {
+      trace.push('flush');
+    },
+    forgetSession: () => {
+      trace.push('forget');
+    },
     summaryPatchesAndHidden: () => ({
       patches: new Map<string, Partial<SessionSummary>>(),
       hiddenProviderSessionIds: new Set<string>(),
@@ -104,6 +229,6 @@ test('unregister flushes persistence before exposing the session as closed', () 
   registry.register(live);
 
   assert.equal(registry.unregister('provider'), live);
-  assert.deepEqual(trace, ['enqueue', 'flush']);
+  assert.deepEqual(trace, ['enqueue', 'flush', 'forget']);
   assert.equal(registry.getLive('app'), undefined);
 });

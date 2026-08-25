@@ -16,8 +16,10 @@ type IdentityField =
 
 export type SessionSummaryPatch = Omit<Partial<SessionSummary>, IdentityField>;
 
-type RegistryHistory = Pick<HistoryIndex, 'syncSummaries' | 'summaryPatchesAndHidden'> & {
+type RegistryHistory = Pick<HistoryIndex, 'summaryPatchesAndHidden'> & {
+  syncSummaries(summaries: SessionSummary[]): boolean | undefined;
   flushSync?: () => void;
+  forgetSession?: (appSessionId: string) => void;
   readonly revision?: number;
 };
 
@@ -29,14 +31,23 @@ export interface SessionRegistryDependencies {
   loadMissionControlSessions: SummaryLoader;
   projectSummary: (summary: Readonly<SessionSummary>) => SessionSummary;
   onSummaryUpdated: (summary: SessionSummary) => void;
+  onLiveProviderReplaced?: (providerSessionId: string) => void;
   now: () => number;
 }
 
 export class SessionRegistry<TLive extends RegisteredSession> {
   private readonly sessions = new Map<string, TLive>();
+  private readonly publishedLiveSummaries = new Map<string, SessionSummary>();
+  private readonly summariesAwaitingDurability = new Map<
+    string,
+    { liveSession: TLive; summary: SessionSummary }
+  >();
   private readonly providerAliases = new Map<string, string>();
   private readonly historicalAliases = new Map<string, string>();
   private historicalSummaries = new Map<string, SessionSummary>();
+  private ordinaryHistoricalSummaries = new Map<string, SessionSummary>();
+  private historicalPatches = new Map<string, Partial<SessionSummary>>();
+  private hiddenHistoricalProviderSessionIds = new Set<string>();
   private historicalRevision: number | undefined;
   private historicalLoaded = false;
 
@@ -49,12 +60,14 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     if (liveSession.summary.role !== 'primary' && liveSession.summary.role !== 'user') {
       throw new Error('SessionRegistry accepts top-level sessions only.');
     }
-    this.persist(liveSession.summary);
+    this.persistStrict(liveSession.summary);
 
     const previous = this.sessions.get(liveSession.summary.appSessionId);
     if (previous) this.removeAliases(previous.summary);
 
     this.sessions.set(liveSession.summary.appSessionId, liveSession);
+    this.publishedLiveSummaries.set(liveSession.summary.appSessionId, liveSession.summary);
+    this.summariesAwaitingDurability.delete(liveSession.summary.appSessionId);
     this.indexAliases(liveSession.summary);
   }
 
@@ -69,6 +82,10 @@ export class SessionRegistry<TLive extends RegisteredSession> {
   // Gauge for hot-path metrics: live top-level sessions currently held.
   get liveCount(): number {
     return this.sessions.size;
+  }
+
+  isCurrentLiveProvider(providerSessionId: string): boolean {
+    return this.getLive(providerSessionId)?.summary.providerSessionId === providerSessionId;
   }
 
   getCanonicalSummary(id: string): SessionSummary | undefined {
@@ -98,8 +115,14 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     if (!liveSession) return undefined;
 
     const updated = this.withPatch(liveSession.summary, patch, options.touchActivity !== false);
-    this.persist(updated);
+    const durable = this.persist(updated);
     liveSession.summary = updated;
+    if (durable === false) {
+      this.summariesAwaitingDurability.set(updated.appSessionId, { liveSession, summary: updated });
+      return copySummary(updated);
+    }
+    this.summariesAwaitingDurability.delete(updated.appSessionId);
+    this.publishedLiveSummaries.set(updated.appSessionId, updated);
     this.publish(updated);
     return updated;
   }
@@ -134,7 +157,7 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     this.dependencies.history.syncSummaries(updated);
     this.dependencies.history.flushSync?.();
     for (const summary of updated) {
-      this.historicalSummaries.set(summary.appSessionId, copySummary(summary));
+      this.cacheHistoricalSummary(summary);
       this.publish(summary);
     }
     this.rebuildHistoricalAliases(this.historicalSummaries.values());
@@ -162,17 +185,22 @@ export class SessionRegistry<TLive extends RegisteredSession> {
       ]),
     };
 
-    this.persist(updated);
+    this.persistStrict(updated);
     if (liveSession) {
       this.removeAliases(current);
       liveSession.summary = updated;
+      this.summariesAwaitingDurability.delete(updated.appSessionId);
+      this.publishedLiveSummaries.set(updated.appSessionId, updated);
       this.indexAliases(updated);
     } else {
-      this.historicalSummaries.set(updated.appSessionId, copySummary(updated));
+      this.cacheHistoricalSummary(updated);
       this.rebuildHistoricalAliases(this.historicalSummaries.values());
     }
 
     this.publish(updated);
+    if (liveSession && current.providerSessionId) {
+      this.dependencies.onLiveProviderReplaced?.(current.providerSessionId);
+    }
     return updated;
   }
 
@@ -185,10 +213,26 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     // boundary rather than claiming a closed session whose final rows are only
     // in memory.
     this.dependencies.history.flushSync?.();
+    this.dependencies.history.forgetSession?.(liveSession.summary.appSessionId);
     this.historicalLoaded = false;
     this.sessions.delete(liveSession.summary.appSessionId);
+    this.publishedLiveSummaries.delete(liveSession.summary.appSessionId);
+    this.summariesAwaitingDurability.delete(liveSession.summary.appSessionId);
     this.removeAliases(liveSession.summary);
     return liveSession;
+  }
+
+  retryPendingDurability(): void {
+    for (const [appSessionId, pending] of this.summariesAwaitingDurability) {
+      if (this.sessions.get(appSessionId) !== pending.liveSession) {
+        this.summariesAwaitingDurability.delete(appSessionId);
+        continue;
+      }
+      if (pending.liveSession.summary !== pending.summary) continue;
+      this.summariesAwaitingDurability.delete(appSessionId);
+      this.publishedLiveSummaries.set(appSessionId, pending.summary);
+      this.publish(pending.summary);
+    }
   }
 
   liveSessionsSnapshot(): readonly TLive[] {
@@ -210,35 +254,43 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     this.ensureHistoricalSummaries();
     const summaries = new Map(this.historicalSummaries);
     for (const liveSession of this.sessions.values()) {
-      summaries.set(liveSession.summary.appSessionId, liveSession.summary);
+      const appSessionId = liveSession.summary.appSessionId;
+      summaries.set(
+        appSessionId,
+        this.publishedLiveSummaries.get(appSessionId) ?? liveSession.summary,
+      );
     }
     return summaries;
   }
 
   private ensureHistoricalSummaries(): void {
     const revision = this.dependencies.history.revision;
-    if (this.historicalLoaded && revision !== undefined && revision === this.historicalRevision) {
-      return;
+    const ordinaryHistoryChanged =
+      !this.historicalLoaded || revision === undefined || revision !== this.historicalRevision;
+    if (ordinaryHistoryChanged) {
+      const { patches, hiddenProviderSessionIds } =
+        this.dependencies.history.summaryPatchesAndHidden();
+      this.historicalPatches = patches;
+      this.hiddenHistoricalProviderSessionIds = hiddenProviderSessionIds;
+      this.ordinaryHistoricalSummaries = new Map<string, SessionSummary>();
+      this.mergeHistoricalSummaries(
+        this.ordinaryHistoricalSummaries,
+        this.dependencies.loadOrdinarySessions(),
+        patches,
+        hiddenProviderSessionIds,
+      );
+      this.historicalRevision = revision;
+      this.historicalLoaded = true;
     }
 
-    const summaries = new Map<string, SessionSummary>();
-    const { patches, hiddenProviderSessionIds } =
-      this.dependencies.history.summaryPatchesAndHidden();
-    this.mergeHistoricalSummaries(
-      summaries,
-      this.dependencies.loadOrdinarySessions(),
-      patches,
-      hiddenProviderSessionIds,
-    );
+    const summaries = new Map(this.ordinaryHistoricalSummaries);
     this.mergeHistoricalSummaries(
       summaries,
       this.dependencies.loadMissionControlSessions(),
-      patches,
-      hiddenProviderSessionIds,
+      this.historicalPatches,
+      this.hiddenHistoricalProviderSessionIds,
     );
     this.historicalSummaries = summaries;
-    this.historicalRevision = revision;
-    this.historicalLoaded = true;
     this.rebuildHistoricalAliases(summaries.values());
   }
 
@@ -278,8 +330,16 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     return copySummary({ ...canonical, ...withoutIdentityFields(projected) });
   }
 
-  private persist(summary: SessionSummary): void {
-    this.dependencies.history.syncSummaries([summary]);
+  private persist(summary: SessionSummary): boolean | undefined {
+    return this.dependencies.history.syncSummaries([summary]);
+  }
+
+  private persistStrict(summary: SessionSummary): void {
+    if (this.persist(summary) !== false) return;
+    if (!this.dependencies.history.flushSync) {
+      throw new Error('History durability is pending and no strict flush is available.');
+    }
+    this.dependencies.history.flushSync();
   }
 
   private publish(summary: SessionSummary): void {
@@ -307,6 +367,18 @@ export class SessionRegistry<TLive extends RegisteredSession> {
       for (const providerSessionId of providerIds(summary)) {
         this.historicalAliases.set(providerSessionId, summary.appSessionId);
       }
+    }
+  }
+
+  private cacheHistoricalSummary(summary: SessionSummary): void {
+    const cached = copySummary(summary);
+    this.historicalSummaries.set(cached.appSessionId, cached);
+    if (cached.sessionPurpose !== 'mission-control') {
+      this.ordinaryHistoricalSummaries.set(cached.appSessionId, cached);
+    }
+    this.historicalPatches.set(cached.appSessionId, cached);
+    for (const providerSessionId of providerIds(cached)) {
+      this.historicalPatches.set(providerSessionId, cached);
     }
   }
 }

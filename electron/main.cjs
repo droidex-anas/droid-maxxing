@@ -7,6 +7,7 @@ const {
   dialog,
   ipcMain,
   nativeTheme,
+  powerMonitor,
   safeStorage,
   session,
   shell,
@@ -284,6 +285,10 @@ function registerIpc() {
   ipcMain.handle('clear-api-key', clearApiKey);
   ipcMain.handle('list-files', (_event, { dir }) => listFiles(dir));
   ipcMain.handle('get-performance-metrics', () => performanceMetrics.collect());
+  ipcMain.handle('system-idle-time', (event) => {
+    assertMainRenderer(event);
+    return powerMonitor.getSystemIdleTime();
+  });
   ipcMain.handle('read-file', (_event, { path: filePath }) => readFile(filePath));
   ipcMain.handle('repo-status', (_event, { dir }) => repoStatus(dir));
   ipcMain.handle('list-editors', () => listEditors());

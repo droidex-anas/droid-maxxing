@@ -10,51 +10,74 @@ import {
   type HistoricalSummaryFilter,
   type PersistedChildSession,
 } from './history.js';
+import { HistoryDurabilityPolicy } from './HistoryDurabilityPolicy.js';
 import { HistoryPersistenceQueue } from './HistoryPersistenceQueue.js';
+import {
+  HistoryWorkerClient,
+  type HistoryPersistenceClient,
+  type HistorySearchClient,
+} from './HistoryWorkerClient.js';
 import type { HistoryPersistenceBatch } from './historyPersistenceProtocol.js';
+import {
+  copyPersistenceChild,
+  copyPersistenceSummary,
+  persistenceChildKey,
+  persistenceChildKeyPrefix,
+} from './historyPersistenceQueueValues.js';
 import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './protocol.js';
+import type { SessionFileChange } from './sessionFileCache.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
-interface SummaryDurabilityState {
-  phase: SessionSummary['phase'];
-  streaming: boolean;
-  providerSessionId?: string;
-  compactedProviderSessionIds: string;
+export interface HistoryPersistenceOptions {
+  persistenceClient?: HistoryPersistenceClient;
+  searchClient?: HistorySearchClient;
+  createSearchClient?: () => HistorySearchClient;
+  onStatusChanged?: (status: HistoryPersistenceStatus) => void;
+  onDurabilityRecovered?: () => void;
 }
 
-interface ChildDurabilityState {
-  status: PersistedChildSession['status'];
-  providerSessionId?: string;
-  previousProviderSessionIds: string;
-}
+export type HistoryPersistenceStatus =
+  | { state: 'healthy' }
+  | { state: 'degraded'; message: string };
 
 /**
  * Worker-backed write seam around the existing read/index implementation.
  *
  * HistoryIndex remains the schema and read owner. This class owns live
- * canonical overlays plus the bounded write-behind queue, so renderer-visible
- * state updates immediately while SQLite work runs away from the orchestration
- * event loop.
+ * canonical overlays plus the bounded write-behind queue. Ordinary transcript
+ * output remains live while SQLite work runs away from the orchestration event
+ * loop; settlement and identity publication waits for confirmed durability.
  */
 export class HistoryPersistence {
   private readonly core: HistoryIndex;
   private readonly queue: HistoryPersistenceQueue;
+  private searchClient: HistorySearchClient | null;
+  private readonly createSearchClient: () => HistorySearchClient;
   private readonly runtimeSummaries = new Map<string, SessionSummary>();
   private readonly runtimeChildren = new Map<string, PersistedChildSession>();
-  private readonly summaryDurability = new Map<string, SummaryDurabilityState>();
-  private readonly childDurability = new Map<string, ChildDurabilityState>();
-  private readonly summariesAwaitingDurability = new Set<string>();
-  private readonly childrenAwaitingDurability = new Set<string>();
+  private readonly durability = new HistoryDurabilityPolicy();
   private historyRevision = 0;
   private lastFailureLogAt = 0;
+  private indexingIdle = false;
 
-  constructor() {
+  constructor(options: HistoryPersistenceOptions = {}) {
+    if (options.searchClient && options.createSearchClient) {
+      throw new Error('Provide either a history search client or a search client factory.');
+    }
     this.core = new HistoryIndex();
     const dbPath = join(homedir(), '.factory', 'droidex', SESSION_INDEX_FILENAME);
+    this.searchClient = options.searchClient ?? null;
+    this.createSearchClient =
+      options.createSearchClient ??
+      (() => new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } }));
     this.queue = new HistoryPersistenceQueue({
       dbPath,
+      ...(options.persistenceClient ? { client: options.persistenceClient } : {}),
       onCommitted: (batch, result) => {
         try {
+          if (result.initializationMs !== undefined) {
+            hotPathMetrics.recordPersistenceStartup(result.initializationMs);
+          }
           hotPathMetrics.recordPersist(
             result.durationMs,
             result.eventsWritten + result.summariesWritten + result.childrenWritten,
@@ -65,10 +88,29 @@ export class HistoryPersistence {
         this.noteCommitted(batch);
       },
       onFailure: (error) => {
+        hotPathMetrics.recordPersistenceFailure();
+        options.onStatusChanged?.({ state: 'degraded', message: error.message });
         const now = Date.now();
         if (now - this.lastFailureLogAt < 5_000) return;
         this.lastFailureLogAt = now;
         console.error(`History persistence worker failed: ${error.message}`);
+      },
+      onRecovered: () => {
+        if (this.durability.isBlocked) {
+          try {
+            // New writes can arrive after the retrying checkpoint was posted.
+            // Drain and checkpoint once more before releasing held owner state.
+            this.measurePersistenceBoundary(() => {
+              this.queue.flushSync();
+            });
+            this.durability.noteDurable();
+          } catch {
+            return;
+          }
+        }
+        hotPathMetrics.recordPersistenceRecovery();
+        options.onStatusChanged?.({ state: 'healthy' });
+        queueMicrotask(() => options.onDurabilityRecovered?.());
       },
     });
   }
@@ -105,45 +147,61 @@ export class HistoryPersistence {
   }
 
   async searchSessions(query: string, isStale?: () => boolean): Promise<SessionSearchResult[]> {
+    this.pauseBackgroundIndexing();
     if (isStale?.()) return [];
-    const results = await this.queue.search(query, this.core.searchCandidates());
-    this.clearDurabilityRequirements();
-    return isStale?.() ? [] : results;
+    const runtimeAliases = searchAliases(this.runtimeSummaries.values());
+    const results = await this.getSearchClient().search(query);
+    if (isStale?.()) return [];
+    for (const [providerSessionId, appSessionId] of searchAliases(this.runtimeSummaries.values())) {
+      runtimeAliases.set(providerSessionId, appSessionId);
+    }
+    return applySearchAliases(results, runtimeAliases);
   }
 
-  reconcileSessionFiles(): number {
-    this.flushPendingSync();
-    const changed = this.core.reconcileSessionFiles();
+  async setIndexingIdle(isIdle: boolean): Promise<void> {
+    this.indexingIdle = isIdle && !this.hasActiveIndexingWork();
+    if (this.searchClient) await this.searchClient.setIndexingIdle(this.indexingIdle);
+  }
+
+  async reconcileSessionFiles(): Promise<number> {
+    await this.queue.drain();
+    const client = this.getSearchClient();
+    const result = await client.reconcileSessionFiles();
+    let changed = result.changed;
+    if (!this.core.applySessionFileReconciliation(result)) {
+      const snapshot = await client.sessionFileSnapshot();
+      if (this.core.replaceSessionFileSnapshot(snapshot)) changed = Math.max(1, changed);
+    }
     if (changed > 0) {
       this.historyRevision += 1;
-      this.queue.invalidateSearch();
     }
     return changed;
   }
 
-  reconcileSessionFilePaths(changes: { providerSessionId: string; path: string }[]): number {
-    this.flushPendingSync();
-    const changed = this.core.reconcileSessionFilePaths(changes);
+  async reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number> {
+    await this.queue.drain();
+    const client = this.getSearchClient();
+    const result = await client.reconcileSessionFilePaths(changes);
+    let changed = result.changed;
+    if (!this.core.applySessionFileReconciliation(result)) {
+      const snapshot = await client.sessionFileSnapshot();
+      if (this.core.replaceSessionFileSnapshot(snapshot)) changed = Math.max(1, changed);
+    }
     if (changed > 0) {
       this.historyRevision += 1;
-      this.queue.invalidateSearch();
     }
     return changed;
   }
 
-  syncSummaries(summaries: SessionSummary[]): void {
+  syncSummaries(summaries: SessionSummary[]): boolean {
+    if (summaries.some((summary) => summary.streaming)) this.pauseBackgroundIndexing();
     const copies = this.queue.enqueueSummaries(summaries);
-    let durable = false;
     for (const summary of copies) {
-      const needsDurability =
-        this.summariesAwaitingDurability.has(summary.appSessionId) ||
-        summaryNeedsDurability(this.summaryDurability.get(summary.appSessionId), summary);
-      if (needsDurability) this.summariesAwaitingDurability.add(summary.appSessionId);
-      durable ||= needsDurability;
-      this.summaryDurability.set(summary.appSessionId, summaryDurabilityState(summary));
       this.runtimeSummaries.set(summary.appSessionId, summary);
     }
-    if (durable) this.flushPendingSync();
+    const decision = this.durability.acceptSummaries(copies);
+    if (this.durability.isBlocked) return !decision.holdWhileBlocked;
+    return decision.needsDurability ? this.requestDurability() : true;
   }
 
   summaryPatchesAndHidden(): {
@@ -156,31 +214,28 @@ export class HistoryPersistence {
   }
 
   recordEvent(event: TranscriptEvent): void {
+    this.pauseBackgroundIndexing();
     this.queue.enqueueEvent(event);
-    if (event.kind === 'compaction') this.flushPendingSync();
+    if (event.kind === 'compaction' && !this.durability.isBlocked) this.requestDurability();
   }
 
-  upsertChildSession(child: PersistedChildSession): void {
-    const key = childIdentityKey(child.parentAppSessionId, child.childSessionId);
+  upsertChildSession(child: PersistedChildSession): boolean {
+    if (child.status === 'pending' || child.status === 'running') this.pauseBackgroundIndexing();
+    const key = persistenceChildKey(child.parentAppSessionId, child.childSessionId);
     const copy = this.queue.enqueueChild(child);
-    const durable =
-      this.childrenAwaitingDurability.has(key) ||
-      childNeedsDurability(this.childDurability.get(key), copy);
-    if (durable) this.childrenAwaitingDurability.add(key);
-    this.childDurability.set(key, childDurabilityState(copy));
+    const decision = this.durability.acceptChild(copy);
     this.runtimeChildren.set(key, copy);
-    if (durable) this.flushPendingSync();
+    if (this.durability.isBlocked) return !decision.holdWhileBlocked;
+    return decision.needsDurability ? this.requestDurability() : true;
   }
 
   childSessions(parentAppSessionId: string): PersistedChildSession[] {
-    const merged = new Map(
-      this.core
-        .childSessions(parentAppSessionId)
-        .map((child) => [child.childSessionId, child] as const),
-    );
+    const persisted = this.core.childSessions(parentAppSessionId);
+    this.durability.observeChildren(persisted);
+    const merged = new Map(persisted.map((child) => [child.childSessionId, child] as const));
     for (const child of this.runtimeChildren.values()) {
       if (child.parentAppSessionId === parentAppSessionId) {
-        merged.set(child.childSessionId, copyChild(child));
+        merged.set(child.childSessionId, copyPersistenceChild(child));
       }
     }
     return [...merged.values()].sort(
@@ -193,12 +248,24 @@ export class HistoryPersistence {
     parentAppSessionId: string,
     childSessionId: string,
   ): PersistedChildSession | undefined {
-    const live = this.runtimeChildren.get(childIdentityKey(parentAppSessionId, childSessionId));
-    return live ? copyChild(live) : this.core.childSession(parentAppSessionId, childSessionId);
+    const live = this.runtimeChildren.get(persistenceChildKey(parentAppSessionId, childSessionId));
+    if (live) return copyPersistenceChild(live);
+    const persisted = this.core.childSession(parentAppSessionId, childSessionId);
+    if (persisted) this.durability.observeChildren([persisted]);
+    return persisted;
   }
 
   flushSync(): void {
     this.flushPendingSync();
+  }
+
+  forgetSession(appSessionId: string): void {
+    this.runtimeSummaries.delete(appSessionId);
+    this.durability.forgetSession(appSessionId);
+    const childPrefix = persistenceChildKeyPrefix(appSessionId);
+    for (const key of this.runtimeChildren.keys()) {
+      if (key.startsWith(childPrefix)) this.runtimeChildren.delete(key);
+    }
   }
 
   close(): void {
@@ -208,7 +275,13 @@ export class HistoryPersistence {
     } catch (error) {
       persistenceError = asError(error);
     } finally {
-      this.core.close();
+      try {
+        this.searchClient?.closeSync();
+      } catch (error) {
+        persistenceError ??= asError(error);
+      } finally {
+        this.core.close();
+      }
     }
     if (persistenceError) throw persistenceError;
   }
@@ -220,66 +293,96 @@ export class HistoryPersistence {
       }
     }
     for (const child of batch.children) {
-      const key = childIdentityKey(child.parentAppSessionId, child.childSessionId);
+      const key = persistenceChildKey(child.parentAppSessionId, child.childSessionId);
       if (this.runtimeChildren.get(key) === child) this.runtimeChildren.delete(key);
     }
   }
 
+  private getSearchClient(): HistorySearchClient {
+    if (!this.searchClient) {
+      this.searchClient = this.createSearchClient();
+      if (this.indexingIdle) {
+        void this.searchClient.setIndexingIdle(true).catch((error: unknown) => {
+          console.error(`Could not start idle history search indexing: ${asError(error).message}`);
+        });
+      }
+    }
+    return this.searchClient;
+  }
+
+  private pauseBackgroundIndexing(): void {
+    if (!this.indexingIdle) return;
+    this.indexingIdle = false;
+    if (this.searchClient) {
+      void this.searchClient.setIndexingIdle(false).catch((error: unknown) => {
+        console.error(`Could not pause history search indexing: ${asError(error).message}`);
+      });
+    }
+  }
+
+  private hasActiveIndexingWork(): boolean {
+    return this.durability.hasActiveWork();
+  }
+
   private flushPendingSync(): void {
-    this.queue.flushSync();
-    this.clearDurabilityRequirements();
+    this.measurePersistenceBoundary(() => {
+      this.queue.flushSync();
+    });
+    this.durability.noteDurable();
   }
 
-  private clearDurabilityRequirements(): void {
-    this.summariesAwaitingDurability.clear();
-    this.childrenAwaitingDurability.clear();
+  private requestDurability(): boolean {
+    try {
+      this.flushPendingSync();
+      return true;
+    } catch {
+      // The bounded queue retained the accepted state and owns backoff. Its
+      // owner holds renderer publication until the confirmed recovery callback.
+      this.durability.noteFailure();
+      return false;
+    }
+  }
+
+  private measurePersistenceBoundary(operation: () => void): void {
+    const startedAt = performance.now();
+    try {
+      operation();
+    } finally {
+      hotPathMetrics.recordPersistenceBoundary(performance.now() - startedAt);
+    }
   }
 }
 
-function summaryNeedsDurability(
-  previous: SummaryDurabilityState | undefined,
-  summary: SessionSummary,
-): boolean {
-  const next = summaryDurabilityState(summary);
-  if (previous === undefined) return true;
-  if (next.streaming) return false;
-  const terminal = next.phase === 'paused' || next.phase === 'completed' || next.phase === 'failed';
-  const turnSettled = previous.streaming;
-  const durableIdentityChanged =
-    previous.providerSessionId !== next.providerSessionId ||
-    previous.compactedProviderSessionIds !== next.compactedProviderSessionIds;
-  return turnSettled || durableIdentityChanged || (terminal && previous.phase !== next.phase);
+function searchAliases(summaries: Iterable<SessionSummary>): Map<string, string> {
+  const aliases = new Map<string, string>();
+  for (const summary of summaries) {
+    aliases.set(summary.appSessionId, summary.appSessionId);
+    if (summary.providerSessionId) {
+      aliases.set(summary.providerSessionId, summary.appSessionId);
+    }
+    for (const providerSessionId of summary.compactedFromProviderSessionIds ?? []) {
+      aliases.set(providerSessionId, summary.appSessionId);
+    }
+  }
+  return aliases;
 }
 
-function summaryDurabilityState(summary: SessionSummary): SummaryDurabilityState {
-  return {
-    phase: summary.phase,
-    streaming: summary.streaming === true,
-    ...(summary.providerSessionId ? { providerSessionId: summary.providerSessionId } : {}),
-    compactedProviderSessionIds: JSON.stringify(summary.compactedFromProviderSessionIds ?? []),
-  };
-}
-
-function childNeedsDurability(
-  previous: ChildDurabilityState | undefined,
-  child: PersistedChildSession,
-): boolean {
-  const next = childDurabilityState(child);
-  const identityChanged =
-    previous !== undefined &&
-    (previous.providerSessionId !== next.providerSessionId ||
-      previous.previousProviderSessionIds !== next.previousProviderSessionIds);
-  if (identityChanged) return true;
-  if (next.status !== 'paused' && next.status !== 'completed') return false;
-  return previous?.status !== next.status;
-}
-
-function childDurabilityState(child: PersistedChildSession): ChildDurabilityState {
-  return {
-    status: child.status,
-    ...(child.providerSessionId ? { providerSessionId: child.providerSessionId } : {}),
-    previousProviderSessionIds: JSON.stringify(child.previousProviderSessionIds ?? []),
-  };
+function applySearchAliases(
+  results: SessionSearchResult[],
+  aliases: ReadonlyMap<string, string>,
+): SessionSearchResult[] {
+  if (aliases.size === 0) return results;
+  const merged = new Map<string, SessionSearchResult['matches']>();
+  for (const result of results) {
+    const appSessionId = aliases.get(result.appSessionId) ?? result.appSessionId;
+    const matches = merged.get(appSessionId) ?? [];
+    matches.push(...result.matches);
+    merged.set(appSessionId, matches);
+  }
+  return [...merged].map(([appSessionId, matches]) => ({
+    appSessionId,
+    matches: matches.sort((left, right) => right.ts - left.ts).slice(0, 3),
+  }));
 }
 
 function overlayRuntimeSummaries(
@@ -288,7 +391,7 @@ function overlayRuntimeSummaries(
   hiddenProviderSessionIds: Set<string>,
 ): void {
   for (const summary of summaries) {
-    const copy = copySummary(summary);
+    const copy = copyPersistenceSummary(summary);
     patches.set(copy.appSessionId, copy);
     patches.set(copy.providerSessionId ?? copy.appSessionId, copy);
     for (const providerSessionId of copy.compactedFromProviderSessionIds ?? []) {
@@ -296,36 +399,6 @@ function overlayRuntimeSummaries(
       if (providerSessionId !== copy.appSessionId) hiddenProviderSessionIds.add(providerSessionId);
     }
   }
-}
-
-function childIdentityKey(parentAppSessionId: string, childSessionId: string): string {
-  return JSON.stringify([parentAppSessionId, childSessionId]);
-}
-
-function copySummary(summary: SessionSummary): SessionSummary {
-  return {
-    ...summary,
-    ...(summary.compactedFromProviderSessionIds
-      ? { compactedFromProviderSessionIds: [...summary.compactedFromProviderSessionIds] }
-      : {}),
-    features: summary.features.map((feature) => ({
-      ...feature,
-      preconditions: [...feature.preconditions],
-      expectedBehavior: [...feature.expectedBehavior],
-      verificationSteps: [...feature.verificationSteps],
-      ...(feature.fulfills ? { fulfills: [...feature.fulfills] } : {}),
-    })),
-  };
-}
-
-function copyChild(child: PersistedChildSession): PersistedChildSession {
-  return {
-    ...child,
-    ...(child.previousProviderSessionIds
-      ? { previousProviderSessionIds: [...child.previousProviderSessionIds] }
-      : {}),
-    ...(child.spawnLink ? { spawnLink: { ...child.spawnLink } } : {}),
-  };
 }
 
 function asError(error: unknown): Error {

@@ -15,7 +15,9 @@ import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './pro
 
 class FakeClient implements HistoryPersistenceClient {
   readonly batches: HistoryPersistenceBatch[] = [];
+  durabilityBarriers = 0;
   failNext: Error | null = null;
+  failNextBarrier: Error | null = null;
 
   startPersist(batch: HistoryPersistenceBatch): HistoryPersistenceCall<HistoryPersistenceResult> {
     this.batches.push(batch);
@@ -36,11 +38,26 @@ class FakeClient implements HistoryPersistenceClient {
     };
   }
 
+  startDurabilityBarrier(): HistoryPersistenceCall<{ durable: true }> {
+    this.durabilityBarriers += 1;
+    const failure = this.failNextBarrier;
+    this.failNextBarrier = null;
+    const result = { durable: true } as const;
+    const promise = failure ? Promise.reject(failure) : Promise.resolve(result);
+    void promise.catch(() => undefined);
+    return {
+      promise,
+      waitSync: () => {
+        if (failure) throw failure;
+        return result;
+      },
+    };
+  }
+
   search(): Promise<SessionSearchResult[]> {
     return Promise.resolve([]);
   }
 
-  invalidateSearch(): void {}
   closeSync(): void {}
 }
 
@@ -124,6 +141,7 @@ test('keeps transcript events lossless while summaries and children collapse lat
     client.batches.flatMap((batch) => batch.children.map((item) => item.status)),
     ['paused'],
   );
+  assert.equal(client.durabilityBarriers, 1);
 });
 
 test('restores a failed batch and preserves newer latest-wins state', () => {
@@ -151,6 +169,171 @@ test('restores a failed batch and preserves newer latest-wins state', () => {
     [2],
   );
   assert.equal(queue.snapshot().failures, 1);
+});
+
+test('an asynchronous persistence failure restores events ahead of newer events', async () => {
+  const callbacks: Array<() => void> = [];
+  const persistedIds: string[][] = [];
+  let attempts = 0;
+  let rejectFirst: ((error: Error) => void) | undefined;
+  const client: HistoryPersistenceClient = {
+    startPersist: (batch) => {
+      attempts += 1;
+      persistedIds.push(batch.events.map((item) => item.id));
+      const result: HistoryPersistenceResult = {
+        durationMs: 1,
+        eventsWritten: batch.events.length,
+        summariesWritten: batch.summaries.length,
+        childrenWritten: batch.children.length,
+      };
+      if (attempts > 1) return { promise: Promise.resolve(result), waitSync: () => result };
+      const promise = new Promise<HistoryPersistenceResult>((_resolve, reject) => {
+        rejectFirst = reject;
+      });
+      return {
+        promise,
+        waitSync: () => {
+          throw new Error('not used');
+        },
+      };
+    },
+    startDurabilityBarrier: () => {
+      const result = { durable: true } as const;
+      return { promise: Promise.resolve(result), waitSync: () => result };
+    },
+    closeSync: () => undefined,
+  };
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: (callback) => {
+      callbacks.push(callback);
+      return dormantTimer();
+    },
+  });
+
+  queue.enqueueEvent(event('one'));
+  callbacks.shift()?.();
+  queue.enqueueEvent(event('two'));
+  rejectFirst?.(new Error('worker exited'));
+  await Promise.resolve();
+  callbacks.shift()?.();
+  await Promise.resolve();
+
+  assert.deepEqual(persistedIds, [['one'], ['one', 'two']]);
+  assert.equal(queue.snapshot().pendingEntries, 0);
+});
+
+test('an asynchronous drain never enters the synchronous worker wait', async () => {
+  let resolvePersist: ((result: HistoryPersistenceResult) => void) | undefined;
+  let synchronousWaits = 0;
+  const client: HistoryPersistenceClient = {
+    startPersist: () => {
+      const promise = new Promise<HistoryPersistenceResult>((resolve) => {
+        resolvePersist = resolve;
+      });
+      return {
+        promise,
+        waitSync: () => {
+          synchronousWaits += 1;
+          throw new Error('synchronous wait must not run');
+        },
+      };
+    },
+    startDurabilityBarrier: () => {
+      const result = { durable: true } as const;
+      return { promise: Promise.resolve(result), waitSync: () => result };
+    },
+    closeSync: () => undefined,
+  };
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: dormantTimer,
+  });
+  queue.enqueueEvent(event('one'));
+
+  const draining = queue.drain();
+  await Promise.resolve();
+  assert.equal(synchronousWaits, 0);
+  assert.equal(queue.snapshot().inFlightEntries, 1);
+
+  resolvePersist?.({
+    durationMs: 1,
+    eventsWritten: 1,
+    summariesWritten: 0,
+    childrenWritten: 0,
+  });
+  await draining;
+  assert.equal(queue.snapshot().pendingEntries, 0);
+  assert.equal(queue.snapshot().inFlightEntries, 0);
+});
+
+test('an asynchronous drain waits only for entries captured when it starts', async () => {
+  let resolveFirst: ((result: HistoryPersistenceResult) => void) | undefined;
+  let resolveSecond: ((result: HistoryPersistenceResult) => void) | undefined;
+  let markSecondStarted: (() => void) | undefined;
+  const secondStarted = new Promise<void>((resolve) => {
+    markSecondStarted = resolve;
+  });
+  let calls = 0;
+  const client: HistoryPersistenceClient = {
+    startPersist: (batch) => {
+      calls += 1;
+      const promise = new Promise<HistoryPersistenceResult>((resolve) => {
+        if (calls === 1) resolveFirst = resolve;
+        else {
+          resolveSecond = resolve;
+          markSecondStarted?.();
+        }
+      });
+      return {
+        promise,
+        waitSync: () => ({
+          durationMs: 1,
+          eventsWritten: batch.events.length,
+          summariesWritten: batch.summaries.length,
+          childrenWritten: batch.children.length,
+        }),
+      };
+    },
+    startDurabilityBarrier: () => {
+      const result = { durable: true } as const;
+      return { promise: Promise.resolve(result), waitSync: () => result };
+    },
+    closeSync: () => undefined,
+  };
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: dormantTimer,
+  });
+  queue.enqueueEvent(event('captured'));
+  let drainFinished = false;
+  const draining = queue.drain().then(() => {
+    drainFinished = true;
+  });
+  queue.enqueueEvent(event('newer'));
+  resolveFirst?.({
+    durationMs: 1,
+    eventsWritten: 1,
+    summariesWritten: 0,
+    childrenWritten: 0,
+  });
+  await secondStarted;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  try {
+    assert.equal(drainFinished, true, 'new writes do not extend the captured drain barrier');
+  } finally {
+    resolveSecond?.({
+      durationMs: 1,
+      eventsWritten: 1,
+      summariesWritten: 0,
+      childrenWritten: 0,
+    });
+    await draining;
+    queue.close();
+  }
 });
 
 test('large event runs preserve exact order across bounded batches', () => {
@@ -206,8 +389,9 @@ test('hard capacity rejects unbounded event growth', () => {
         throw new Error('not used');
       },
     }),
-    search: async () => [],
-    invalidateSearch: () => undefined,
+    startDurabilityBarrier: () => {
+      throw new Error('not used');
+    },
     closeSync: () => undefined,
   };
   const queue = new HistoryPersistenceQueue({
@@ -224,32 +408,187 @@ test('hard capacity rejects unbounded event growth', () => {
   }, HistoryPersistenceBackpressureError);
 });
 
-test('a synchronous client failure becomes terminal instead of retrying forever', () => {
+test('a synchronous worker failure retains queued events and accepts live output until recovery', () => {
   const scheduledDelays: number[] = [];
+  const scheduledCallbacks: Array<() => void> = [];
+  const persistedIds: string[][] = [];
   let attempts = 0;
-  const terminalClient: HistoryPersistenceClient = {
-    startPersist: () => {
+  const recoveringClient: HistoryPersistenceClient = {
+    startPersist: (batch) => {
       attempts += 1;
-      throw new Error('worker exited');
+      if (attempts === 1) throw new Error('worker exited');
+      persistedIds.push(batch.events.map((item) => item.id));
+      const result: HistoryPersistenceResult = {
+        durationMs: 1,
+        eventsWritten: batch.events.length,
+        summariesWritten: batch.summaries.length,
+        childrenWritten: batch.children.length,
+      };
+      return { promise: Promise.resolve(result), waitSync: () => result };
     },
-    search: () => Promise.resolve([]),
-    invalidateSearch: () => undefined,
+    startDurabilityBarrier: () => {
+      const result = { durable: true } as const;
+      return { promise: Promise.resolve(result), waitSync: () => result };
+    },
     closeSync: () => undefined,
   };
   const queue = new HistoryPersistenceQueue({
     dbPath: '/unused',
-    client: terminalClient,
-    schedule: (_callback, delayMs) => {
+    client: recoveringClient,
+    schedule: (callback, delayMs) => {
       scheduledDelays.push(delayMs);
+      scheduledCallbacks.push(callback);
       return dormantTimer();
     },
   });
 
   queue.enqueueEvent(event('one'));
-  assert.throws(() => queue.flushSync(), /worker exited/);
+  scheduledCallbacks.shift()?.();
+  assert.doesNotThrow(() => queue.enqueueEvent(event('two')));
+  queue.flushSync();
 
-  assert.equal(attempts, 1);
-  assert.deepEqual(scheduledDelays, [25]);
-  assert.throws(() => queue.enqueueEvent(event('two')), /worker exited/);
-  assert.equal(queue.snapshot().pendingEntries, 1);
+  assert.equal(attempts, 2);
+  assert.deepEqual(scheduledDelays, [25, 250]);
+  assert.deepEqual(persistedIds, [['one', 'two']]);
+  assert.equal(queue.snapshot().pendingEntries, 0);
+});
+
+test('repeated worker failures retry with bounded exponential backoff', () => {
+  const delays: number[] = [];
+  const callbacks: Array<() => void> = [];
+  let attempts = 0;
+  const client: HistoryPersistenceClient = {
+    startPersist: (batch) => {
+      attempts += 1;
+      if (attempts <= 8) throw new Error('worker unavailable');
+      const result: HistoryPersistenceResult = {
+        durationMs: 1,
+        eventsWritten: batch.events.length,
+        summariesWritten: batch.summaries.length,
+        childrenWritten: batch.children.length,
+      };
+      return { promise: Promise.resolve(result), waitSync: () => result };
+    },
+    startDurabilityBarrier: () => {
+      const result = { durable: true } as const;
+      return { promise: Promise.resolve(result), waitSync: () => result };
+    },
+    closeSync: () => undefined,
+  };
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: (callback, delayMs) => {
+      callbacks.push(callback);
+      delays.push(delayMs);
+      return dormantTimer();
+    },
+  });
+
+  queue.enqueueEvent(event('one'));
+  for (let index = 0; index < 8; index += 1) callbacks.shift()?.();
+
+  assert.deepEqual(delays, [25, 250, 500, 1_000, 2_000, 4_000, 5_000, 5_000, 5_000]);
+});
+
+test('a failed durability barrier retries without waiting for another write', async () => {
+  const callbacks: Array<() => void> = [];
+  const statuses: string[] = [];
+  const client = new FakeClient();
+  client.failNextBarrier = new Error('checkpoint failed');
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: (callback) => {
+      callbacks.push(callback);
+      return dormantTimer();
+    },
+    onFailure: () => statuses.push('degraded'),
+    onRecovered: () => statuses.push('healthy'),
+  });
+
+  queue.enqueueEvent(event('one'));
+  assert.throws(() => queue.flushSync(), /checkpoint failed/);
+  callbacks.at(-1)?.();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(statuses, ['degraded', 'healthy']);
+  assert.equal(client.durabilityBarriers, 2);
+});
+
+test('a consistency drain preserves a pending durability retry', async () => {
+  const callbacks: Array<() => void> = [];
+  const statuses: string[] = [];
+  const client = new FakeClient();
+  client.failNextBarrier = new Error('checkpoint failed');
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: (callback) => {
+      callbacks.push(callback);
+      return dormantTimer();
+    },
+    onFailure: () => statuses.push('degraded'),
+    onRecovered: () => statuses.push('healthy'),
+  });
+
+  queue.enqueueEvent(event('one'));
+  assert.throws(() => queue.flushSync(), /checkpoint failed/);
+  await queue.drain();
+  callbacks.at(-1)?.();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(statuses, ['degraded', 'healthy']);
+});
+
+test('a failed boundary drain stays degraded until a later barrier succeeds', async () => {
+  const callbacks: Array<() => void> = [];
+  const statuses: string[] = [];
+  const client = new FakeClient();
+  client.failNext = new Error('worker failed during boundary');
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: (callback) => {
+      callbacks.push(callback);
+      return dormantTimer();
+    },
+    onFailure: () => statuses.push('degraded'),
+    onRecovered: () => statuses.push('healthy'),
+  });
+
+  queue.enqueueEvent(event('one'));
+  assert.throws(() => queue.flushSync(), /worker failed during boundary/);
+  callbacks.at(-1)?.();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(statuses, ['degraded', 'healthy']);
+});
+
+test('a failed close cancels the retry it scheduled before closing the client', () => {
+  const callbacks: Array<() => void> = [];
+  const cancelled = new Set<ReturnType<typeof setTimeout>>();
+  const client = new FakeClient();
+  client.failNextBarrier = new Error('checkpoint failed during close');
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: (callback) => {
+      callbacks.push(callback);
+      return dormantTimer();
+    },
+    cancel: (timer) => {
+      cancelled.add(timer);
+      clearTimeout(timer);
+    },
+  });
+
+  queue.enqueueEvent(event('one'));
+  assert.throws(() => queue.close(), /checkpoint failed during close/);
+  assert.equal(callbacks.length, 2, 'the initial flush and failed-barrier retry were scheduled');
+  assert.equal(cancelled.size, 2, 'both timers were cancelled before close returned');
+  const barriersBeforeStaleCallback = client.durabilityBarriers;
+  callbacks.at(-1)?.();
+  assert.equal(client.durabilityBarriers, barriersBeforeStaleCallback);
 });

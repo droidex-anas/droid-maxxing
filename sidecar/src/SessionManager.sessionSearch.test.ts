@@ -4,7 +4,7 @@ import test from 'node:test';
 import type * as Protocol from './protocol.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 
-test('sessions.search answers the requester with the history scan results', async () => {
+test('sessions.search answers the requester with indexed history results', async () => {
   const ctx = createSessionManagerTestContext();
   try {
     ctx.history.nextSearchResults = [

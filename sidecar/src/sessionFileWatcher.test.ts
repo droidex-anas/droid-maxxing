@@ -14,6 +14,32 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function controlledSessionWatch(): {
+  watchDirectory: (
+    root: string,
+    onChange: (filename: string | null) => void,
+  ) => { onError: (listener: (error: unknown) => void) => void; close: () => void };
+  emit: (filename: string | null) => void;
+} {
+  let onChange: ((filename: string | null) => void) | undefined;
+  let isClosed = false;
+  return {
+    watchDirectory: (_root, listener) => {
+      onChange = listener;
+      return {
+        onError: () => {},
+        close: () => {
+          isClosed = true;
+        },
+      };
+    },
+    emit: (filename) => {
+      if (!onChange) throw new Error('Controlled session watch has not started');
+      if (!isClosed) onChange(filename);
+    },
+  };
+}
+
 async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -36,24 +62,23 @@ test('external session file changes fire once with the changed files after write
   const dir = join(root, 'encoded-cwd');
   mkdirSync(dir);
   const payloads: (SessionFileChange[] | null)[] = [];
-  const debounceMs = 50;
-  const watcher = startSessionFileWatcher({
-    root,
-    debounceMs,
-    onExternalChange: (changes) => {
-      payloads.push(changes);
+  const controlledWatch = controlledSessionWatch();
+  const watcher = startSessionFileWatcher(
+    {
+      root,
+      debounceMs: 0,
+      onExternalChange: (changes) => {
+        payloads.push(changes);
+      },
     },
-  });
+    controlledWatch.watchDirectory,
+  );
   assert.ok(watcher);
   try {
-    writeFileSync(join(dir, 'a.jsonl'), '{}\n');
-    writeFileSync(join(dir, 'b.jsonl'), '{}\n');
-    writeFileSync(join(dir, 'c.jsonl'), '{}\n');
+    controlledWatch.emit('encoded-cwd/a.jsonl');
+    controlledWatch.emit('encoded-cwd/b.jsonl');
+    controlledWatch.emit('encoded-cwd/c.jsonl');
     await waitFor(() => payloads.length === 1);
-    // Wait past the debounce window to confirm no straggler callback splits
-    // the burst; the margin is tied to the configured window, not a magic
-    // number.
-    await delay(debounceMs * 4);
     assert.equal(payloads.length, 1, 'a burst of changes coalesces into one callback');
     const changes = payloads[0];
     assert.ok(changes, 'file events explained by the batch reconcile exactly those files');
@@ -74,18 +99,21 @@ test('a settings sidecar change reports its session file', async () => {
   const root = mkdtempSync(join(tmpdir(), 'session-watcher-'));
   const dir = join(root, 'encoded-cwd');
   mkdirSync(dir);
-  writeFileSync(join(dir, 'a.jsonl'), '{}\n');
   const payloads: (SessionFileChange[] | null)[] = [];
-  const watcher = startSessionFileWatcher({
-    root,
-    debounceMs: 50,
-    onExternalChange: (changes) => {
-      payloads.push(changes);
+  const controlledWatch = controlledSessionWatch();
+  const watcher = startSessionFileWatcher(
+    {
+      root,
+      debounceMs: 0,
+      onExternalChange: (changes) => {
+        payloads.push(changes);
+      },
     },
-  });
+    controlledWatch.watchDirectory,
+  );
   assert.ok(watcher);
   try {
-    writeFileSync(join(dir, 'a.settings.json'), '{}\n');
+    controlledWatch.emit('encoded-cwd/a.settings.json');
     await waitFor(() => payloads.length === 1);
     const changes = payloads[0];
     assert.ok(changes, 'a settings event next to its session file stays targeted');
@@ -101,20 +129,21 @@ test('writes from live in-app sessions do not fire', async () => {
   const dir = join(root, 'encoded-cwd');
   mkdirSync(dir);
   let calls = 0;
-  const debounceMs = 50;
-  const watcher = startSessionFileWatcher({
-    root,
-    debounceMs,
-    isLiveSession: (id) => id === 'live-1',
-    onExternalChange: () => {
-      calls += 1;
+  const controlledWatch = controlledSessionWatch();
+  const watcher = startSessionFileWatcher(
+    {
+      root,
+      debounceMs: 0,
+      isLiveSession: (id) => id === 'live-1',
+      onExternalChange: () => {
+        calls += 1;
+      },
     },
-  });
+    controlledWatch.watchDirectory,
+  );
   assert.ok(watcher);
   try {
-    writeFileSync(join(dir, 'live-1.jsonl'), '{}\n');
-    await delay(debounceMs * 8);
-    assert.equal(calls, 0, 'live session writes are pushed by the registry instead');
+    controlledWatch.emit('encoded-cwd/live-1.jsonl');
     assert.equal(
       watcher.consumeLiveSessionFile('live-1'),
       join(dir, 'live-1.jsonl'),
@@ -125,8 +154,9 @@ test('writes from live in-app sessions do not fire', async () => {
       undefined,
       'consuming a live file path forgets it',
     );
-    writeFileSync(join(dir, 'external-1.jsonl'), '{}\n');
+    controlledWatch.emit('encoded-cwd/external-1.jsonl');
     await waitFor(() => calls === 1);
+    assert.equal(calls, 1, 'the live write does not add another external callback');
   } finally {
     watcher.close();
     rmSync(root, { recursive: true, force: true });
@@ -138,21 +168,23 @@ test('close stops further callbacks', async () => {
   const dir = join(root, 'encoded-cwd');
   mkdirSync(dir);
   let calls = 0;
-  const debounceMs = 50;
-  const watcher = startSessionFileWatcher({
-    root,
-    debounceMs,
-    onExternalChange: () => {
-      calls += 1;
+  const controlledWatch = controlledSessionWatch();
+  const watcher = startSessionFileWatcher(
+    {
+      root,
+      debounceMs: 0,
+      onExternalChange: () => {
+        calls += 1;
+      },
     },
-  });
+    controlledWatch.watchDirectory,
+  );
   assert.ok(watcher);
   try {
-    writeFileSync(join(dir, 'a.jsonl'), '{}\n');
+    controlledWatch.emit('encoded-cwd/a.jsonl');
     await waitFor(() => calls === 1);
     watcher.close();
-    writeFileSync(join(dir, 'b.jsonl'), '{}\n');
-    await delay(debounceMs * 6);
+    controlledWatch.emit('encoded-cwd/b.jsonl');
     assert.equal(calls, 1);
   } finally {
     watcher.close();

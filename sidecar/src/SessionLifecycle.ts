@@ -104,7 +104,7 @@ export interface SessionLifecycleDependencies {
   emit: (event: ServerEvent) => void;
   emitError: (error: LifecycleError) => void;
   emitStatus: (appSessionId: string, text: string) => void;
-  emitSessionList: (closedProviderSessionId: string) => void;
+  emitSessionList: (closedProviderSessionId: string) => void | Promise<void>;
 }
 export class SessionLifecycle {
   private readonly deferredCloses = new WeakMap<LiveSession, DeferredClose>();
@@ -514,9 +514,7 @@ export class SessionLifecycle {
         d.forgetEventFlow(liveSession.summary.appSessionId);
       });
     }
-    await run(() => {
-      d.emitSessionList(closedProviderSessionId);
-    });
+    await run(() => d.emitSessionList(closedProviderSessionId));
     if (firstError !== undefined) throw errorFromUnknown(firstError);
   }
 

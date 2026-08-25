@@ -19,10 +19,9 @@ export type ChildSettingsTarget = ChildRuntimeTarget & {
 export interface ChildSessionsDependencies {
   runtime: Pick<FactoryRuntime, 'loadSession'>;
   registry: Pick<SessionRegistry<ChildParentLease>, 'getLive'>;
-  history: Pick<
-    HistoryIndex,
-    'childSessions' | 'childSession' | 'sessionLaunchSettings' | 'upsertChildSession'
-  >;
+  history: Pick<HistoryIndex, 'childSessions' | 'childSession' | 'sessionLaunchSettings'> & {
+    upsertChildSession(child: PersistedChildSession): boolean | undefined;
+  };
   timeline: Pick<
     SessionTimeline,
     'append' | 'appendStatus' | 'loadChildHistory' | 'flushStreamingFor' | 'settleStreaming'

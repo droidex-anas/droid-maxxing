@@ -8,7 +8,7 @@ import {
   readdirSync,
   statSync,
 } from 'node:fs';
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { dateMs, numberValue, objectValue, stringValue } from './values.js';
@@ -20,7 +20,6 @@ import type {
   FactoryDefaultSettings,
   SessionHistoryEntry,
   SessionPhase,
-  SessionSearchResult,
   SessionSummary,
   ProgressEntry,
   ReasoningEffort,
@@ -30,9 +29,13 @@ import { mapFeature } from './normalize.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
 import {
   SessionFileCache,
+  type SessionFileLaunchSettings,
+  type SessionFileReconciliation,
   type SessionFileScan,
+  type SessionFileSnapshot,
   type SessionFileStat,
 } from './sessionFileCache.js';
+import { SessionFileMirror } from './sessionFileMirror.js';
 import {
   parseFullSessionTranscript,
   readSessionRawWindow,
@@ -41,8 +44,7 @@ import {
   type StoredSessionStart,
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
-import { searchSessionFiles, type SessionSearchCandidate } from './sessionSearch.js';
-import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
+import { decodeProviderSessionIdList } from './historyProviderIds.js';
 import { hasCompletedConversation } from './sessionHistoryAdmission.js';
 
 interface StoredMissionState {
@@ -158,6 +160,7 @@ const DEFAULT_HISTORY_WINDOW = 400;
 const SEQ_SEGMENT_STRIDE = 1 << 27;
 const HISTORY_SCHEMA_VERSION = 2;
 export const SESSION_INDEX_FILENAME = 'session-index.sqlite';
+export const SESSION_SEARCH_INDEX_FILENAME = 'session-search.sqlite';
 const HISTORY_SCHEMA_RECOVERY =
   'DROIDEX local history index uses an incompatible schema. Quit DROIDEX, remove ' +
   `~/.factory/droidex/${SESSION_INDEX_FILENAME}, ` +
@@ -244,7 +247,7 @@ export function loadSessionPage(
   cursor?: string,
   limit = 200,
 ): HistoryPage {
-  const path = sessionIndexFor(providerSessionId).get(providerSessionId);
+  const path = sessionIndex().get(providerSessionId);
   if (!path) throw new Error(`Session history not found for ${providerSessionId}`);
   const role = roleFromSessionStart(readSessionStart(path));
   const all = parseFullSessionTranscript(appSessionId, providerSessionId, path, role);
@@ -259,10 +262,7 @@ export function loadSessionPage(
 
 export class HistoryIndex {
   private db: DatabaseSync;
-  private readonly sessionFiles: SessionFileCache;
-  // Statements on the live streaming path, prepared once instead of per call.
-  private recordEventStatement: StatementSync | undefined;
-  private syncSummaryStatement: StatementSync | undefined;
+  private readonly sessionFiles = new SessionFileMirror();
 
   constructor() {
     const dir = join(homedir(), '.factory', 'droidex');
@@ -272,12 +272,7 @@ export class HistoryIndex {
       HistoryIndex.initializeOrValidateHistorySchema(db);
       db.exec('PRAGMA journal_mode = WAL');
       this.db = db;
-      this.sessionFiles = new SessionFileCache(
-        db,
-        scanSessionFileTree,
-        summarizeSessionFile,
-        statSessionFile,
-      );
+      sessionIndexMemo = this.sessionFiles.pathIndex();
     } catch (error) {
       db.close();
       throw error;
@@ -291,21 +286,13 @@ export class HistoryIndex {
   sessionLaunchSettings(
     providerSessionId: string,
   ): Pick<FactoryDefaults, 'modelId' | 'reasoningEffort'> | undefined {
-    const path = sessionIndexFor(providerSessionId).get(providerSessionId);
-    if (!path) return undefined;
-    const settings = readSessionModelSettings(readSessionStart(path), path);
-    if (!settings.modelId) return undefined;
-    return {
-      modelId: settings.modelId,
-      ...(settings.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
-    };
+    return this.sessionFiles.sessionLaunchSettings(providerSessionId);
   }
 
-  // Serves the historical session list from the session file cache instead of
-  // walking and re-reading every session file on each request. Rows are as of
-  // the last reconcileSessionFiles() run, which happens once per boot and on
-  // every sessions-dir watcher event; the app_sessions patch overlay is
-  // always fresh.
+  // Serves the historical session list from the worker-maintained file cache
+  // instead of walking and re-reading every session file on each request. The
+  // app_sessions patch overlay remains fresh while file snapshots arrive as
+  // revisioned worker results.
   listHistoricalSessions(options: HistoricalSummaryFilter = {}): HistoricalSession[] {
     const workspaceCwds = options.workspaceCwds
       ? new Set(options.workspaceCwds.filter(Boolean))
@@ -331,46 +318,15 @@ export class HistoryIndex {
     );
   }
 
-  // Transcript content search across every cached top-level session file,
-  // most recently active first. Title matching happens renderer-side over
-  // the session list; this only reports chat-content hits with snippets.
-  async searchSessions(query: string, isStale?: () => boolean): Promise<SessionSearchResult[]> {
-    return await searchSessionFiles(this.searchCandidates(), query, isStale);
+  applySessionFileReconciliation(result: SessionFileReconciliation): boolean {
+    if (!this.sessionFiles.applyReconciliation(result)) return false;
+    updateSessionIndex(result, this.sessionFiles);
+    return true;
   }
 
-  searchCandidates(): SessionSearchCandidate[] {
-    const patches = this.summaryPatches();
-    return this.sessionFiles
-      .searchableEntries()
-      .map((entry) => ({ entry, summary: applyCachedSummary({ ...entry.summary }, patches) }))
-      .sort((a, b) => b.summary.updatedAt - a.summary.updatedAt)
-      .map(({ entry, summary }) => ({
-        providerSessionId: entry.providerSessionId,
-        appSessionId: summary.appSessionId,
-        path: entry.path,
-        mtimeMs: entry.mtimeMs,
-        sizeBytes: entry.sizeBytes,
-      }));
-  }
-
-  // Diff-cached session files against the files on disk, re-summarizing only
-  // new or changed files and dropping deleted ones. Returns the number of
-  // cache entries written or removed.
-  reconcileSessionFiles(): number {
-    const changed = this.sessionFiles.reconcile();
-    // The lifetime session id -> file memo must follow cache reconciliation:
-    // otherwise history.list can miss new files, and transcript lookup can
-    // follow stale paths after deletion.
-    if (changed > 0) invalidateSessionIndex();
-    return changed;
-  }
-
-  // Reconcile exactly the session files a watcher event reported, so a live
-  // external change costs a stat (and at most one re-parse) per changed file
-  // instead of a walk of the whole sessions tree.
-  reconcileSessionFilePaths(changes: { providerSessionId: string; path: string }[]): number {
-    const changed = this.sessionFiles.reconcilePaths(changes);
-    if (changed > 0) invalidateSessionIndex();
+  replaceSessionFileSnapshot(snapshot: SessionFileSnapshot): boolean {
+    const changed = this.sessionFiles.replaceSnapshot(snapshot);
+    sessionIndexMemo = this.sessionFiles.pathIndex();
     return changed;
   }
 
@@ -515,93 +471,6 @@ export class HistoryIndex {
     `);
   }
 
-  syncSummaries(summaries: SessionSummary[]): void {
-    this.syncSummaryStatement ??= this.db.prepare(`
-      INSERT INTO app_sessions (
-        app_session_id,
-        provider_session_id,
-        compacted_from_provider_session_ids,
-        session_purpose,
-        interaction_mode,
-        title,
-        cwd,
-        workspace_kind,
-        updated_at,
-        model_id,
-        reasoning_effort,
-        compaction_model,
-        worker_model_id,
-        worker_reasoning_effort,
-        validator_model_id,
-        validator_reasoning_effort,
-        autonomy,
-        tokens_in,
-        tokens_out,
-        context_tokens,
-        context_remaining_tokens,
-        context_accuracy,
-        context_updated_at,
-        max_context_tokens,
-        auto_compactions
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(app_session_id) DO UPDATE SET
-        provider_session_id = excluded.provider_session_id,
-        compacted_from_provider_session_ids = excluded.compacted_from_provider_session_ids,
-        session_purpose = excluded.session_purpose,
-        interaction_mode = excluded.interaction_mode,
-        title = excluded.title,
-        cwd = excluded.cwd,
-        workspace_kind = excluded.workspace_kind,
-        updated_at = excluded.updated_at,
-        model_id = excluded.model_id,
-        reasoning_effort = excluded.reasoning_effort,
-        compaction_model = excluded.compaction_model,
-        worker_model_id = excluded.worker_model_id,
-        worker_reasoning_effort = excluded.worker_reasoning_effort,
-        validator_model_id = excluded.validator_model_id,
-        validator_reasoning_effort = excluded.validator_reasoning_effort,
-        autonomy = excluded.autonomy,
-        tokens_in = excluded.tokens_in,
-        tokens_out = excluded.tokens_out,
-        context_tokens = excluded.context_tokens,
-        context_remaining_tokens = excluded.context_remaining_tokens,
-        context_accuracy = excluded.context_accuracy,
-        context_updated_at = excluded.context_updated_at,
-        max_context_tokens = excluded.max_context_tokens,
-        auto_compactions = excluded.auto_compactions
-    `);
-    for (const summary of summaries) {
-      this.syncSummaryStatement.run(
-        summary.appSessionId,
-        summary.providerSessionId ?? summary.appSessionId,
-        JSON.stringify(summary.compactedFromProviderSessionIds ?? []),
-        summary.sessionPurpose,
-        summary.interactionMode,
-        summary.title,
-        sqlValue(summary.cwd),
-        sqlValue(summary.workspaceKind),
-        summary.updatedAt,
-        sqlValue(summary.modelId),
-        sqlValue(summary.reasoningEffort),
-        sqlValue(summary.compactionModel),
-        sqlValue(summary.workerModelId),
-        sqlValue(summary.workerReasoningEffort),
-        sqlValue(summary.validatorModelId),
-        sqlValue(summary.validatorReasoningEffort),
-        sqlValue(summary.autonomy),
-        summary.tokensIn,
-        summary.tokensOut,
-        summary.contextTokens,
-        sqlValue(summary.contextRemainingTokens),
-        sqlValue(summary.contextAccuracy),
-        sqlValue(summary.contextUpdatedAt),
-        sqlValue(summary.maxContextTokens),
-        sqlValue(summary.autoCompactions),
-      );
-    }
-  }
-
   summaryPatchesAndHidden(): SummaryPatchesAndHidden {
     const rows = this.db.prepare('SELECT * FROM app_sessions').all() as Record<string, unknown>[];
     const patches = summaryPatchesFromRows(rows);
@@ -614,79 +483,6 @@ export class HistoryIndex {
     const patches = summaryPatchesFromRows(rows);
     applyStoredCompactionGenerations(this.db, patches);
     return patches;
-  }
-
-  recordEvent(event: TranscriptEvent): void {
-    const persistStartedAt = performance.now();
-    this.recordEventStatement ??= this.db.prepare(`
-      INSERT OR IGNORE INTO events (id, source_session_id, app_session_id, kind, ts)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    this.recordEventStatement.run(
-      event.id,
-      event.sourceSessionId,
-      event.appSessionId,
-      event.kind,
-      event.ts,
-    );
-    hotPathMetrics.recordPersist(performance.now() - persistStartedAt);
-  }
-
-  upsertChildSession(child: PersistedChildSession): void {
-    this.db
-      .prepare(
-        `
-      INSERT INTO child_sessions (
-        parent_app_session_id,
-        child_session_id,
-        provider_session_id,
-        previous_provider_session_ids,
-        role,
-        label,
-        prompt,
-        status,
-        model_id,
-        reasoning_effort,
-        spawn_link_kind,
-        spawn_link_id,
-        transcript_available,
-        started_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(parent_app_session_id, child_session_id) DO UPDATE SET
-        provider_session_id = excluded.provider_session_id,
-        previous_provider_session_ids = excluded.previous_provider_session_ids,
-        role = excluded.role,
-        label = excluded.label,
-        prompt = excluded.prompt,
-        status = excluded.status,
-        model_id = excluded.model_id,
-        reasoning_effort = excluded.reasoning_effort,
-        spawn_link_kind = excluded.spawn_link_kind,
-        spawn_link_id = excluded.spawn_link_id,
-        transcript_available = excluded.transcript_available,
-        started_at = excluded.started_at,
-        updated_at = excluded.updated_at
-    `,
-      )
-      .run(
-        child.parentAppSessionId,
-        child.childSessionId,
-        sqlValue(child.providerSessionId),
-        JSON.stringify(child.previousProviderSessionIds ?? []),
-        child.role,
-        sqlValue(child.label),
-        sqlValue(child.prompt),
-        child.status,
-        child.modelId,
-        sqlValue(child.reasoningEffort),
-        sqlValue(child.spawnLink?.kind),
-        sqlValue(child.spawnLink?.id),
-        child.transcriptAvailable ? 1 : 0,
-        sqlValue(child.startedAt),
-        child.updatedAt,
-      );
   }
 
   childSessions(parentAppSessionId: string): PersistedChildSession[] {
@@ -713,6 +509,16 @@ export class HistoryIndex {
   close(): void {
     this.db.close();
   }
+}
+
+export function createHistorySessionFileCache(db: DatabaseSync): SessionFileCache {
+  return new SessionFileCache(
+    db,
+    scanSessionFileTree,
+    summarizeSessionFile,
+    statSessionFile,
+    (_providerSessionId, file) => sessionLaunchSettingsFromFile(file.path),
+  );
 }
 
 const CANONICAL_TABLE_COLUMNS = {
@@ -914,7 +720,10 @@ function persistedChildSessionFromRow(row: Record<string, unknown>): PersistedCh
   if (!parentAppSessionId || !childSessionId || !modelId || updatedAt === undefined)
     throw new Error(HISTORY_SCHEMA_RECOVERY);
   const spawnLink = persistedChildSpawnLink(row);
-  const previousProviderSessionIds = jsonStringArray(row.previous_provider_session_ids);
+  const previousProviderSessionIds = decodeProviderSessionIdList(
+    row.previous_provider_session_ids,
+    HISTORY_SCHEMA_RECOVERY,
+  );
   return {
     parentAppSessionId,
     childSessionId,
@@ -1048,7 +857,10 @@ function summaryPatchesFromRows(
     const patch: Partial<SessionSummary> = {
       appSessionId,
       providerSessionId,
-      compactedFromProviderSessionIds: jsonStringArray(row.compacted_from_provider_session_ids),
+      compactedFromProviderSessionIds: decodeProviderSessionIdList(
+        row.compacted_from_provider_session_ids,
+        HISTORY_SCHEMA_RECOVERY,
+      ),
       sessionPurpose: sessionPurpose(stringValue(row.session_purpose)),
       interactionMode: sessionInteractionModeValue(stringValue(row.interaction_mode)),
       title: stringValue(row.title),
@@ -1082,7 +894,10 @@ function hiddenProviderSessionIdsFromRows(rows: Record<string, unknown>[]): Set<
   const hidden = new Set<string>();
   for (const row of rows) {
     const appSessionId = stringValue(row.app_session_id);
-    for (const providerSessionId of jsonStringArray(row.compacted_from_provider_session_ids)) {
+    for (const providerSessionId of decodeProviderSessionIdList(
+      row.compacted_from_provider_session_ids,
+      HISTORY_SCHEMA_RECOVERY,
+    )) {
       if (providerSessionId && providerSessionId !== appSessionId) hidden.add(providerSessionId);
     }
   }
@@ -1154,11 +969,11 @@ function orchestratorChain(summary: SessionSummary): string[] {
     patches.get(summary.providerSessionId ?? summary.appSessionId);
   const currentSession =
     patch?.providerSessionId ?? summary.providerSessionId ?? summary.appSessionId;
-  const sessionIndex = sessionIndexFor(currentSession);
+  const sessionFiles = sessionIndex();
   const compactedFrom =
     patch?.compactedFromProviderSessionIds ?? summary.compactedFromProviderSessionIds ?? [];
   return dedupeStrings([summary.appSessionId, ...compactedFrom, currentSession]).filter((id) =>
-    sessionIndex.has(id),
+    sessionFiles.has(id),
   );
 }
 
@@ -1172,10 +987,10 @@ export function resolveSessionChain(appSessionId: string, providerSessionId: str
   const patches = readStoredSummaryPatches();
   const patch = patches.get(appSessionId) ?? patches.get(providerSessionId);
   const currentSession = patch?.providerSessionId ?? providerSessionId;
-  const sessionIndex = sessionIndexFor(currentSession);
+  const sessionFiles = sessionIndex();
   const compactedFrom = patch?.compactedFromProviderSessionIds ?? [];
   return dedupeStrings([appSessionId, ...compactedFrom, currentSession]).filter((id) =>
-    sessionIndex.has(id),
+    sessionFiles.has(id),
   );
 }
 
@@ -1684,40 +1499,33 @@ function statSessionFile(path: string): SessionFileStat | null {
   }
 }
 
-// The session id -> file index backs every history page and transcript window
-// load, and several of those run per session restore. Walking ~/.factory/
-// sessions on each call made every restore and page pay the full directory
-// scan (~50ms warm, much more cold, with thousands of session files), so the
-// index is memoized for the sidecar's lifetime. The sidecar never moves or
-// deletes session files, and sessionIndexFor rebuilds the memo once when a
-// lookup misses, so a file created by a session started or compacted after
-// the memo was built still resolves on first access.
+// The worker-maintained file cache is the only owner that populates this path
+// mirror. History loads never fall back to a synchronous sessions-tree walk on
+// the orchestration thread; a missing path remains unavailable until the boot
+// or watcher reconciliation publishes its revisioned delta.
 let sessionIndexMemo: Map<string, string> | null = null;
+
+function updateSessionIndex(result: SessionFileReconciliation, files: SessionFileMirror): void {
+  if (result.changed === 0) return;
+  sessionIndexMemo ??= files.pathIndex();
+  for (const providerSessionId of result.removedProviderSessionIds) {
+    sessionIndexMemo.delete(providerSessionId);
+  }
+  for (const entry of result.upserts) {
+    sessionIndexMemo.set(entry.providerSessionId, entry.path);
+  }
+}
 
 export function invalidateSessionIndex(): void {
   sessionIndexMemo = null;
 }
 
-// Builds the memoized session index ahead of the first history lookup, so the
-// first session restore after boot does not pay the ~/.factory/sessions walk.
-export function warmSessionIndex(): void {
-  buildSessionIndex();
-}
-
 function buildSessionIndex(): Map<string, string> {
-  if (sessionIndexMemo) return sessionIndexMemo;
-  const index = new Map<string, string>();
-  for (const [providerSessionId, file] of scanSessionFiles()) {
-    index.set(providerSessionId, file.path);
-  }
-  sessionIndexMemo = index;
-  return index;
+  sessionIndexMemo ??= new Map();
+  return sessionIndexMemo;
 }
 
-function sessionIndexFor(requiredId: string): Map<string, string> {
-  const index = buildSessionIndex();
-  if (index.has(requiredId)) return index;
-  invalidateSessionIndex();
+function sessionIndex(): Map<string, string> {
   return buildSessionIndex();
 }
 
@@ -1761,6 +1569,15 @@ function summarizeSessionFile(
     contextTokens: 0,
     createdAt: file.birthtimeMs,
     updatedAt: file.mtimeMs,
+  };
+}
+
+function sessionLaunchSettingsFromFile(path: string): SessionFileLaunchSettings | undefined {
+  const settings = readSessionModelSettings(readSessionStart(path), path);
+  if (!settings.modelId) return undefined;
+  return {
+    modelId: settings.modelId,
+    ...(settings.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
   };
 }
 
@@ -1967,10 +1784,6 @@ function workspaceKind(value?: string): SessionSummary['workspaceKind'] | undefi
   return undefined;
 }
 
-function sqlValue(value: string | number | undefined): string | number | null {
-  return value ?? null;
-}
-
 function roleFromSessionStart(start: StoredSessionStart): SessionRole {
   if (start.decompSessionType === 'validator') return 'validator';
   if (start.decompSessionType === 'worker') return 'worker';
@@ -1986,23 +1799,6 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
-}
-
-function jsonStringArray(value: unknown): string[] {
-  const raw = stringValue(value);
-  if (!raw) throw new Error(HISTORY_SCHEMA_RECOVERY);
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) throw new Error(HISTORY_SCHEMA_RECOVERY);
-    const strings: string[] = [];
-    for (const item of parsed) {
-      if (typeof item !== 'string') throw new Error(HISTORY_SCHEMA_RECOVERY);
-      strings.push(item);
-    }
-    return strings;
-  } catch {
-    throw new Error(HISTORY_SCHEMA_RECOVERY);
-  }
 }
 
 function lastPathSegment(path: string): string {
