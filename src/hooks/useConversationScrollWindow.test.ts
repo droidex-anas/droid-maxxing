@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  firstRowNotAboveViewport,
   rowIntersectsViewport,
   scrollTopForPreservedAnchor,
   shouldCancelViewportRestore,
@@ -8,6 +9,7 @@ import {
   updateViewportAnchorGeometry,
 } from './conversationViewportAnchor';
 import {
+  applyConversationContentResize,
   didCommitRequestedHistoryPrepend,
   shouldLoadOlderHistoryAtTop,
   shouldReleaseConversationTranscript,
@@ -167,4 +169,52 @@ test('anchor fallback ignores feed rows entirely below non-feed viewport content
     }),
     true,
   );
+});
+
+test('anchor fallback locates a deep viewport row logarithmically', () => {
+  let geometryReads = 0;
+  const index = firstRowNotAboveViewport(
+    10_000,
+    (rowIndex) => {
+      geometryReads += 1;
+      return (rowIndex + 1) * 100;
+    },
+    543_210,
+  );
+
+  assert.equal(index, 5_432);
+  assert.ok(geometryReads <= 14, `expected logarithmic reads, observed ${geometryReads}`);
+});
+
+test('content resize follows a pinned tail and preserves an unpinned row anchor', () => {
+  const pinnedElement = { scrollTop: 100, scrollHeight: 2_400 } as HTMLDivElement;
+  const pinned = applyConversationContentResize(pinnedElement, null, true, false);
+  assert.equal(pinned.mode, 'follow-tail');
+  assert.equal(pinnedElement.scrollTop, 2_400);
+
+  const row = {
+    dataset: { feedRowId: 'message-42' },
+    getBoundingClientRect: () => ({ top: 300 }),
+  } as HTMLElement;
+  const unpinnedElement = {
+    scrollTop: 1_000,
+    scrollHeight: 2_500,
+    getBoundingClientRect: () => ({ top: 100 }),
+    querySelectorAll: () => [row],
+  } as unknown as HTMLDivElement;
+  const unpinned = applyConversationContentResize(
+    unpinnedElement,
+    {
+      rowId: 'message-42',
+      rowOffsetTop: 50,
+      scrollTop: 1_000,
+      scrollHeight: 2_000,
+    },
+    false,
+    true,
+  );
+
+  assert.equal(unpinned.mode, 'preserve-anchor');
+  assert.equal(unpinned.didFindRow, true);
+  assert.equal(unpinnedElement.scrollTop, 1_150);
 });

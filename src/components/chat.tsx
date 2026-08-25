@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, memo, useEffect, useRef } from 'react';
+import { useMemo, useState, memo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
@@ -62,9 +62,17 @@ import {
   type ChildSessionTarget,
 } from '../lib/childSessions';
 import { openExternal } from '../lib/onboarding';
-import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
-import { feedItemTailId, feedRowId } from '../hooks/conversationViewportAnchor';
+import { feedItemTailId } from '../hooks/conversationViewportAnchor';
+import { asChunkedSequence, chunkedSequenceChunks } from '../lib/chunkedSequence';
+import { FeedRowsChunk, type FeedRowsSharedProps } from './messageFeedRows';
+import {
+  appendedFeedItemKeysFromProjection,
+  projectFinalResponseKeys,
+  rememberFreshAppResponses,
+  type FinalResponseKeyState,
+  type FreshAppResponseState,
+} from './messageFeedState';
 
 // Open a link in the OS default browser rather than inside the Electron window.
 function openLink(e: React.MouseEvent, url: string) {
@@ -2055,7 +2063,7 @@ const MessageBody = memo(function MessageBody({
   );
 });
 
-interface FeedItemViewProps {
+export interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
   autoPlayAppBlocks?: boolean;
@@ -2573,83 +2581,6 @@ export function childSessionLineIsRunning(activity?: ChildSessionActivity): bool
   return activity?.status === 'running';
 }
 
-// Only genuinely appended items (new keys appearing at the tail) animate in.
-// Paging older history prepends already-past messages at the top; those and
-// every previously-rendered item must stay still rather than re-animating as if
-// they were fresh activity. Walking from the tail collects the contiguous run of
-// new keys and stops at the first previously-seen item, so a prepend (new keys
-// ahead of the old ones) animates nothing.
-export function appendedFeedItemKeys(
-  items: readonly { key: string }[],
-  previous: { identity: string; keys: Set<string> } | null,
-  identity: string,
-): Set<string> {
-  const appended = new Set<string>();
-  if (previous?.identity !== identity) return appended;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const key = items[i].key;
-    if (previous.keys.has(key)) break;
-    appended.add(key);
-  }
-  return appended;
-}
-
-export interface FreshAppResponseState {
-  identity: string;
-  wasPending: boolean;
-  texts: Set<string>;
-}
-
-export function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
-  let latestPromptIndex = -1;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.type === 'message' && item.event.author === 'user') {
-      latestPromptIndex = i;
-      break;
-    }
-  }
-  if (latestPromptIndex < 0) return [];
-
-  const responses: string[] = [];
-  for (let i = latestPromptIndex + 1; i < items.length; i++) {
-    const item = items[i];
-    if (item.type !== 'message' || item.event.author === 'user') continue;
-    const text = item.event.text ?? '';
-    if (hasCompleteAppBlock(text)) responses.push(text);
-  }
-  return responses;
-}
-
-export function rememberFreshAppResponses(
-  previous: FreshAppResponseState | null,
-  identity: string,
-  items: FeedItem[],
-  pending: boolean,
-): FreshAppResponseState {
-  const sameSession = previous?.identity === identity;
-  const texts = new Set(sameSession ? previous.texts : []);
-  const justSettled = sameSession && previous.wasPending && !pending;
-
-  if (pending || justSettled) {
-    for (const text of completeAppResponsesInLatestTurn(items)) texts.add(text);
-  }
-
-  return { identity, wasPending: pending, texts };
-}
-
-// Offscreen feed rows skip layout and paint entirely (content-visibility) so
-// long transcripts scroll and chat switches render at the cost of the visible
-// screen only. The browser keeps DOM, component state, and animation timelines
-// alive: a row scrolling back in repaints the same frame with its shimmer or
-// caret exactly where the shared timeline puts it, so nothing ever looks
-// paused. The intrinsic-size hint sizes never-rendered rows for the scrollbar;
-// 'auto' remembers each row's real height once it has been rendered.
-const FEED_ROW_RENDER_STYLE = {
-  contentVisibility: 'auto',
-  containIntrinsicSize: 'auto 96px',
-} as const;
-
 /* ── The activity feed (list only; parent owns the scroll container) ── */
 export function MessageFeed({
   events,
@@ -2664,6 +2595,9 @@ export function MessageFeed({
   specContent,
   onOpenSpecWiki,
   createdWorktreePath,
+  onMountedRowsChange,
+  updateKind = 'full',
+  rebuiltFromItemIndex = 0,
 }: {
   events: TranscriptEvent[];
   items?: FeedItem[];
@@ -2679,6 +2613,9 @@ export function MessageFeed({
   specContent?: string;
   onOpenSpecWiki?: () => void;
   createdWorktreePath?: string;
+  onMountedRowsChange?: (count: number) => void;
+  updateKind?: 'full' | 'append' | 'prepend';
+  rebuiltFromItemIndex?: number;
 }) {
   // Child session cards, waiting label, and live timers are enabled only for the
   // chat/spec feed (which supplies onOpenChildSession). Per-turn change summaries
@@ -2726,12 +2663,14 @@ export function MessageFeed({
   const dockEnabled = !!subagentsDock;
   const items = useMemo(
     () =>
-      providedItems ??
-      groupTurns(
-        buildFeed(events, { childSessionCards: rich, groupChildSessions: dockEnabled }),
-        pending,
-        specContent,
-        changes,
+      asChunkedSequence(
+        providedItems ??
+          groupTurns(
+            buildFeed(events, { childSessionCards: rich, groupChildSessions: dockEnabled }),
+            pending,
+            specContent,
+            changes,
+          ),
       ),
     [providedItems, events, pending, rich, changes, specContent, dockEnabled],
   );
@@ -2745,30 +2684,44 @@ export function MessageFeed({
     freshAppResponsesRef.current = freshAppResponseState;
   }, [freshAppResponseState]);
   const freshAppResponseTexts = freshAppResponseState.texts;
-  const renderedFeedRef = useRef<{ identity: string; keys: Set<string> } | null>(null);
+  const renderedFeedRef = useRef<{ identity: string; items: FeedItem[] } | null>(null);
   const previousFeed = renderedFeedRef.current;
   useEffect(() => {
     renderedFeedRef.current = {
       identity: feedIdentity,
-      keys: new Set(items.map((item) => item.key)),
+      items,
     };
   }, [feedIdentity, items]);
   // Track item identity (not list index) so prepended older-history items and
   // every already-rendered item stay still; only genuinely appended tail items
   // enter with the rise animation.
-  const animateKeys = appendedFeedItemKeys(items, previousFeed, feedIdentity);
+  const animateKeys = appendedFeedItemKeysFromProjection(
+    items,
+    previousFeed,
+    feedIdentity,
+    updateKind,
+    rebuiltFromItemIndex,
+  );
+
+  useEffect(() => {
+    onMountedRowsChange?.(items.length);
+  }, [items.length, onMountedRowsChange]);
+  useEffect(
+    () => () => {
+      onMountedRowsChange?.(0);
+    },
+    [onMountedRowsChange],
+  );
 
   // The copy button appears only on a turn's final model response.
-  const finalResponseKeys = useMemo(
-    () => new Set(finalResponseAnchorsFromItems(items).map((a) => a.id)),
-    [items],
+  const finalResponseStateRef = useRef<FinalResponseKeyState | null>(null);
+  const finalResponseState = useMemo(
+    () => projectFinalResponseKeys(finalResponseStateRef.current, feedIdentity, items, updateKind),
+    [feedIdentity, items, updateKind],
   );
-  // The conversation timeline anchors a dot on each user prompt; stamp those
-  // rows so the rail (driven by the same data) can scroll to them.
-  const promptKeys = useMemo(
-    () => new Set(promptAnchorsFromItems(items).map((a) => a.id)),
-    [items],
-  );
+  useEffect(() => {
+    finalResponseStateRef.current = finalResponseState;
+  }, [finalResponseState]);
   const worktreeInsertAfter = createdWorktreePath
     ? items.findIndex((item) => item.type === 'message' && item.event.author === 'user')
     : -1;
@@ -2827,6 +2780,56 @@ export function MessageFeed({
         : 'Working';
   // Time the check from the poll itself; the visible tail can be minutes old.
   const workingStart = rich ? (subagentPoll?.ts ?? tailTimestamp(last)) : undefined;
+  const rowSharedProps = useMemo<FeedRowsSharedProps>(
+    () => ({
+      pending,
+      cwd,
+      onOpenDiff: stableOnOpenDiff,
+      onOpenReviewFile: stableOnOpenReviewFile,
+      onOpenChildSession: stableOnOpenChildSession,
+      childSessionActivity: stableChildSessionActivity,
+      subagentsDock,
+      liveTiming: rich,
+      specContent,
+    }),
+    [
+      pending,
+      cwd,
+      stableOnOpenDiff,
+      stableOnOpenReviewFile,
+      stableOnOpenChildSession,
+      stableChildSessionActivity,
+      subagentsDock,
+      rich,
+      specContent,
+    ],
+  );
+  const rowChunks = chunkedSequenceChunks(items);
+  let itemOffset = 0;
+  const renderedRowChunks = rowChunks.map((chunk, chunkIndex) => {
+    const offset = itemOffset;
+    itemOffset += chunk.length;
+    return (
+      <FeedRowsChunk
+        key={chunk[0]?.key ?? `empty-${String(chunkIndex)}`}
+        items={chunk}
+        itemOffset={offset}
+        lastItemIndex={lastIdx}
+        isLiveChunk={chunkIndex === rowChunks.length - 1}
+        shared={rowSharedProps}
+        activityRevision={events}
+        animateKeys={animateKeys}
+        freshAppResponseTexts={freshAppResponseTexts}
+        finalResponseState={finalResponseState}
+        compacting={compacting}
+        subagentPoll={Boolean(subagentPoll)}
+        worktreeInsertAfter={worktreeInsertAfter}
+        createdWorktreePath={createdWorktreePath}
+        itemView={FeedItemView}
+        areItemPropsEqual={feedItemPropsEqual}
+      />
+    );
+  });
 
   return (
     <div className="space-y-4">
@@ -2836,54 +2839,7 @@ export function MessageFeed({
         </div>
       )}
 
-      {items.map((item, idx) => {
-        const isNewItem = animateKeys.has(item.key);
-        return (
-          <Fragment key={item.key}>
-            <motion.div
-              data-feed-row-id={feedRowId(item)}
-              {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
-              style={FEED_ROW_RENDER_STYLE}
-              className={`mx-auto min-w-0 ${
-                item.type === 'message' &&
-                item.event.author !== 'user' &&
-                hasAppBlock(item.event.text ?? '')
-                  ? 'max-w-4xl'
-                  : 'max-w-2xl'
-              }`}
-              initial={isNewItem ? { opacity: 0, y: 4 } : false}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: EASE }}
-            >
-              <FeedItemView
-                item={item}
-                live={pending && idx === lastIdx && !subagentPoll}
-                autoPlayAppBlocks={
-                  item.type === 'message' &&
-                  item.event.author !== 'user' &&
-                  freshAppResponseTexts.has(item.event.text ?? '')
-                }
-                sessionLive={pending}
-                compacting={compacting && idx === lastIdx}
-                cwd={cwd}
-                onOpenDiff={stableOnOpenDiff}
-                onOpenReviewFile={stableOnOpenReviewFile}
-                onOpenChildSession={stableOnOpenChildSession}
-                childSessionActivity={stableChildSessionActivity}
-                subagentsDock={subagentsDock}
-                liveTiming={rich}
-                specContent={specContent}
-                isFinalResponse={finalResponseKeys.has(item.key)}
-              />
-            </motion.div>
-            {idx === worktreeInsertAfter && createdWorktreePath && (
-              <div className="mx-auto min-w-0 max-w-2xl">
-                <WorktreeCreatedCard path={createdWorktreePath} />
-              </div>
-            )}
-          </Fragment>
-        );
-      })}
+      {renderedRowChunks}
 
       {showWorking && (
         <div className="mx-auto min-w-0 max-w-2xl">

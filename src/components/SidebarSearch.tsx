@@ -17,13 +17,13 @@ interface SearchEntry {
 }
 
 const DEBOUNCE_MS = 250;
-const MIN_CONTENT_QUERY = 2;
+const MIN_CONTENT_QUERY = 3;
 const MAX_ENTRIES = 12;
 const RECENT_ENTRIES = 8;
 const SNIPPETS_PER_ROW = 2;
 
 // Sidebar-wide session search (Codex-style): matches session titles locally
-// and chat message text via the sidecar's transcript scan, showing a snippet
+// and chat message text via the sidecar's persisted FTS5 index, showing a snippet
 // preview so a query like "hi bro whatsapp" finds the session that contains
 // it even when the title says something else. Local state only — the palette
 // is a sidebar-local feature and closes itself after opening a session.

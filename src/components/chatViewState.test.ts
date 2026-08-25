@@ -52,11 +52,41 @@ test('chat selector ignores background session stream updates', () => {
       ...previous.transcriptRetainedCost,
       background: 10,
     },
+    transcriptMutations: {
+      background: {
+        revision: 1,
+        baseRevision: 0,
+        kind: 'append',
+        previousLength: 0,
+        firstChangedIndex: 0,
+      },
+    },
   };
 
   assert.equal(
     equalVisibleChatState(selectChatViewState(previous), selectChatViewState(next)),
     true,
+  );
+});
+
+test('chat selector observes active transcript provenance updates', () => {
+  const previous = activeState();
+  const next: AppState = {
+    ...previous,
+    transcriptMutations: {
+      active: {
+        revision: 1,
+        baseRevision: 0,
+        kind: 'append',
+        previousLength: 0,
+        firstChangedIndex: 0,
+      },
+    },
+  };
+
+  assert.equal(
+    equalVisibleChatState(selectChatViewState(previous), selectChatViewState(next)),
+    false,
   );
 });
 

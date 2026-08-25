@@ -1,6 +1,6 @@
 # Architecture
 
-DROIDEX is split into three runtime surfaces: the React renderer, the Electron host, and the Node sidecar. A dedicated Node worker owns high-frequency history persistence and search indexing so SQLite work does not block agent orchestration.
+DROIDEX is split into three runtime surfaces: the React renderer, the Electron host, and the Node sidecar. Dedicated Node worker threads isolate high-frequency history persistence, provider-file reconciliation, transcript parsing, and full-text indexing from agent orchestration.
 
 ## Runtime flow
 
@@ -12,8 +12,12 @@ flowchart LR
   Main --> Sidecar[Node sidecar WebSocket bridge]
   Sidecar --> DroidSDK[Factory Droid SDK]
   Sidecar --> DroidCLI[Droid CLI child processes]
-  Sidecar --> HistoryWorker[History persistence worker]
-  HistoryWorker --> SQLite[(SQLite history index)]
+  Sidecar --> HistoryWriter[History persistence worker]
+  Sidecar --> HistorySearch[History search worker]
+  HistoryWriter --> CanonicalHistory[(Canonical SQLite history)]
+  HistorySearch --> SessionFiles[(Provider transcript files)]
+  HistorySearch --> CanonicalHistory
+  HistorySearch --> SearchCache[(Derived SQLite FTS5 cache)]
   Main --> Updater[Download and update endpoints]
 ```
 
@@ -26,7 +30,7 @@ flowchart LR
 | Electron preload | `electron/preload.cjs` | Narrow API boundary between renderer and Electron main process |
 | Native browser preload | `electron/nativeBrowserPreload.cjs` | Browser automation bridge for embedded native browser flows |
 | Sidecar | `sidecar/src/` | Local WebSocket bridge, Droid SDK session lifecycle, Mission Control integration, CLI discovery |
-| History worker | `sidecar/src/historyPersistenceWorker.ts` | Batched SQLite writes and bounded cached transcript search away from the sidecar event loop |
+| History worker threads | `sidecar/src/historyPersistenceWorker.ts` | Independently supervised writer and index workers for batched durability, file reconciliation, transcript extraction, and SQLite FTS away from the sidecar event loop |
 
 ## Data and control boundaries
 
@@ -58,10 +62,13 @@ flowchart LR
 
 - `HistoryPersistence` is the sidecar-facing history seam. It keeps canonical live summary and child overlays immediately readable while persistence is pending.
 - `HistoryPersistenceQueue` retains transcript metadata losslessly, collapses pending summaries and child records by stable identity, and enforces explicit row and byte ceilings.
-- Ordinary writes flush on a short debounce or batch limit. Session creation, turn settlement, provider replacement, compaction, child settlement, unregister, and shutdown force a synchronous durability boundary before the corresponding completed state is published.
-- `historyPersistenceWorker.ts` owns the write connection and executes each batch inside one `BEGIN IMMEDIATE` transaction. Failed transactions roll back completely and the queue restores the batch for delayed retry; terminal worker failures latch visibly and reject further writes instead of retrying forever.
-- Search also runs in the worker. Candidate scans and decoded transcript extractions are freshness-cached and invalidated by session-file reconciliation, so repeated queries do not compete with model streaming.
-- The SQLite schema and user-data paths are unchanged. Existing installations continue using the version-2 index and the worker bundle ships beside `sidecar.mjs` in packaged updates.
+- Ordinary writes flush on a short debounce or batch limit with SQLite WAL `synchronous=NORMAL`. Reconciliation drains pending transactions for read consistency without forcing a durability checkpoint. Session creation, turn settlement, provider replacement, compaction, child settlement, unregister, and shutdown additionally force a `synchronous=FULL` WAL checkpoint before the corresponding completed state is published.
+- One writer worker thread owns the SQLite connection and executes each batch inside one `BEGIN IMMEDIATE` transaction. A transactional writer-generation lease rejects work from a timed-out worker after its replacement starts, so late termination cannot overwrite recovered state or cross a durability checkpoint. Failed transactions roll back completely, the queue retains the batch, and the supervised client recreates a failed worker with bounded exponential retry. Live output continues while bounded queue capacity remains; durability boundaries fail visibly until recovery.
+- A separate index worker owns provider-file tree reconciliation, targeted watcher reconciliation, search-text extraction, and SQLite FTS5 updates. It returns revisioned cache deltas; a missed delta triggers an authoritative snapshot before the sidecar changes its in-memory historical summaries or provider-path index. The orchestration thread never walks the provider-file tree or rebuilds the derived cache; explicit history page loads still parse only the indexed provider paths needed for that page. The first session list and a post-close list publish only after their reconciliation result is applied.
+- Full-text content indexing is incremental and restartable. Each transaction advances a persisted byte cursor and indexed-tail fingerprint, so appends index only new JSONL records and a restart resumes at the last committed boundary. File replacement, truncation, or a changed indexed tail rebuilds only that provider's derived rows; deletion removes rows through an indexed provider-to-row mapping.
+- Upgrade backfill is deliberately resource-light. Chats updated during the last seven days are processed first in 256 KiB target slices, paced at one slice every 250 ms; a single larger JSONL record completes at its newline so its text is not silently omitted. Older chats advance one slice every five seconds only after Electron reports at least 60 seconds of operating-system idle time. Live transcript, streaming-session, running-child, and interactive search work pause the idle lane; the next desktop activity sample resumes it only if the machine remains idle. Large archives may therefore take days to finish without delaying active agent work.
+- Renderer search commands carry a `requestId` and query. Queries of at least three characters run against the persisted FTS5 trigram index, preserve case-insensitive substring/snippet behavior, resolve provider and compaction aliases to canonical app sessions, and discard superseded request results. Results remain useful while backfill is partial and grow as older slices commit.
+- Canonical durability uses `session-index.sqlite`; rebuildable file-summary and FTS5 state uses the separate `session-search.sqlite`. The canonical schema version and user-data rows are unchanged. An absent, old, or corrupt derived database is rebuilt from provider JSONL without modifying canonical sessions, children, or event rows; deleting `session-search.sqlite` plus its WAL/SHM files is the explicit recovery step for derived-index corruption. The worker bundle ships beside `sidecar.mjs` in packaged updates.
 
 ### Renderer child navigation
 
@@ -69,6 +76,16 @@ flowchart LR
 - The active parent's canonical child summaries appear in the right context panel, including historical and same-role siblings.
 - Selection, readiness, transcript filtering, settings, send, steer, Stop, and interrupt all resolve through one visible target keyed by `parentAppSessionId + childSessionId`.
 - A provider runtime identity is never stored as a renderer child key. Historical or unavailable children remain selectable for transcript review while mutating actions stay disabled.
+
+### Renderer transcript runtime
+
+- The renderer store exposes one canonical array-shaped transcript per `appSessionId`, backed by immutable 128-event chunks. Streaming replaces only the bounded live chunk; settled chunks remain shared across store revisions, history slices, feed projection, snapshots, and inactive-session caching. The adapter is read-compatible with existing array consumers but rejects mutation.
+- Each transcript runtime owns a persistent bucketed event-ID index, first-user pointer, latest child activity by source, and merged child-spawn index. Duplicate checks and child-panel derivations therefore do not scan retained history. Ordered bridge batches still preserve every non-transcript action as an ordering barrier.
+- Each transcript write publishes a revision record with its prior revision, prior length, and first changed index. Exact older-page insertion publishes prepend provenance; history replacement, retained-window release, and any uncertain batch lineage publish a reset. Duplicate events do not advance the revision, and session removal prunes the transcript and its revision together.
+- `ChatView` derives the visible primary or child transcript and grouped feed through a bounded projector. A proven append rebuilds only the earliest affected user turn, expanding backward when tool-call/result correlation crosses the boundary. Settled visible/feed chunks retain reference identity, and `MessageFeed` memoizes those chunks so a live token reconciles current rows rather than recreating every historical row element. Reset, missed revision, source-length mismatch, selection change, pending-state change, or feed-option change uses the canonical full builder.
+- Mission Control visibility, spec-path discovery, timeline anchors, final-response markers, entrance keys, and child-session panels consume the same mutation lineage or runtime indexes. Normal live-tail updates inspect only the changed suffix/current turn; older-history prepends may deliberately process the inserted page while retaining the existing suffix chunks and viewport row identities.
+- Child or sibling output that is invisible to the selected conversation advances provenance without replacing the visible transcript or feed references. Agent execution, event ingestion, persistence, settlement, and child supervision always continue for inactive or obscured conversations; only derived renderer work is reused.
+- The projector keeps at most two inactive feed projections and only when both the complete session transcript and selected transcript contain at most 1,600 events and the retained transcript payload remains below the store's high-water budget. Larger histories remain cacheable only while active and are released from the projector on navigation. Conversation scroll snapshots restore by stable feed-row tail identity, so history prepends and warm switches preserve the reader's anchor without changing row keys.
 
 ### Autonomy
 
@@ -107,19 +124,19 @@ replaceable session/context telemetry can collapse, and never across a
 non-replaceable event. Approvals, questions, errors, lifecycle boundaries,
 history responses, and turn settlement flush immediately.
 
-Batch-capable renderers advertise bridge protocol 2, apply one wire batch as one
+Renderers must advertise bridge protocol 2, apply one wire batch as one
 ordered store transition, and reconnect with the last fully applied generation
 and sequence. The sidecar retains a bounded same-process replay window and
-terminates clients whose socket buffers cross the hard ceiling. Older renderers
-that do not advertise batching continue receiving the legacy one-event format,
-which keeps application updates safe across temporary mixed-version states.
+terminates clients whose socket buffers cross the hard ceiling. Clients using
+another protocol version are rejected instead of entering a compatibility path.
 
 ### Renderer metrics
 
 - `src/lib/rendererPerf.ts` measures bridge receive → store commit → next
   paint per event batch, the age of `event.appended` messages at socket read,
-  long tasks (`PerformanceObserver`), and the mounted transcript row count
-  (reported by the conversation scroll window).
+  long tasks (`PerformanceObserver`), the mounted grouped feed-row count
+  (reported by the feed), and full, incremental, cached,
+  or invisible feed projection work with rebuilt/reused event totals.
 - The snapshot is available in the console via
   `window.__droidexPerf.getSnapshot()`.
 

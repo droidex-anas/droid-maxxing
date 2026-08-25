@@ -4,7 +4,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Page,
+} from '@playwright/test';
 
 type RecordedCommand = {
   type: string;
@@ -143,6 +149,19 @@ async function waitForCommand(
   return recordedCommands(logPath).find(predicate)!;
 }
 
+async function mountedFeedRows(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const performanceApi = Reflect.get(window, '__droidexPerf');
+    if (typeof performanceApi !== 'object' || performanceApi === null) return -1;
+    const getSnapshot = Reflect.get(performanceApi, 'getSnapshot');
+    if (typeof getSnapshot !== 'function') return -1;
+    const snapshot = Reflect.apply(getSnapshot, performanceApi, []);
+    if (typeof snapshot !== 'object' || snapshot === null) return -1;
+    const count = Reflect.get(snapshot, 'mountedFeedRows');
+    return typeof count === 'number' ? count : -1;
+  });
+}
+
 test('[E2] parent-scoped child navigation and visible commands', async () => {
   for (const artifact of [
     'dist/index.html',
@@ -220,6 +239,7 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
 
     await leftNavigation.locator('[data-app-session-id="parent-alpha"]').click();
     const chat = page.getByTestId('chat-view');
+    const conversationScroll = chat.locator('div.overflow-y-auto').first();
     await expect(chat.getByText('ALPHA PRIMARY OUTPUT', { exact: true })).toBeVisible();
 
     const rightPanel = page.getByTestId('right-context-panel');
@@ -237,7 +257,27 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
     await expect(chat.getByText('ALPHA PRIMARY OUTPUT', { exact: true })).toHaveCount(0);
     await expect(chat.getByText('Alpha Worker Two', { exact: true })).toBeVisible();
 
-    const conversationScroll = chat.locator('div.overflow-y-auto').first();
+    await expect
+      .poll(async () => {
+        const domRows = await conversationScroll.locator('[data-feed-row-id]').count();
+        const measuredRows = await mountedFeedRows(page);
+        return { domRows, measuredRows };
+      })
+      .toEqual({ domRows: 60, measuredRows: 60 });
+    await expect
+      .poll(() =>
+        conversationScroll
+          .locator('[data-feed-row-id]')
+          .evaluateAll(
+            (rows) =>
+              rows.filter(
+                (row) =>
+                  row instanceof HTMLElement && Boolean(row.style.opacity || row.style.transform),
+              ).length,
+          ),
+      )
+      .toBe(0);
+
     await conversationScroll.evaluate((element) => {
       element.scrollTop = 1_200;
       element.dispatchEvent(new Event('scroll', { bubbles: true }));
@@ -262,6 +302,13 @@ test('[E2] parent-scoped child navigation and visible commands', async () => {
         command.cursor === 'alpha-sibling:120',
     );
     await expect(chat.getByText('ALPHA CHILD HISTORY 0061', { exact: false })).toHaveCount(1);
+    await expect
+      .poll(async () => {
+        const domRows = await conversationScroll.locator('[data-feed-row-id]').count();
+        const measuredRows = await mountedFeedRows(page);
+        return measuredRows === domRows && domRows > 60;
+      })
+      .toBe(true);
     await expect
       .poll(async () => {
         const offsetTop = await conversationScroll.evaluate((element, rowId) => {

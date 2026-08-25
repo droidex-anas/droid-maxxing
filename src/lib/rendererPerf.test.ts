@@ -7,7 +7,8 @@ import {
   noteBridgeEventReceived,
   noteStoreCommitted,
   discardPendingBridgeEvent,
-  setMountedTranscriptRows,
+  noteFeedProjection,
+  setMountedFeedRows,
 } from './rendererPerf';
 import type { ServerEvent } from '../types/bridge';
 
@@ -104,14 +105,52 @@ test('without requestAnimationFrame the paint leg stays unmeasured', () => {
   assert.equal(snapshot.receiveToPaintMs.count, 0);
 });
 
-test('mounted transcript rows track current and peak values', () => {
+test('mounted feed rows track current and peak values', () => {
   resetRendererPerfForTest();
-  setMountedTranscriptRows(120);
-  setMountedTranscriptRows(80);
+  setMountedFeedRows(120);
+  setMountedFeedRows(80);
 
   const snapshot = getRendererPerfSnapshot();
-  assert.equal(snapshot.mountedTranscriptRows, 80);
-  assert.equal(snapshot.mountedTranscriptRowsMax, 120);
+  assert.equal(snapshot.mountedFeedRows, 80);
+  assert.equal(snapshot.mountedFeedRowsMax, 120);
+});
+
+test('feed projection metrics distinguish rebuilds, reuse, and invisible appends', () => {
+  resetRendererPerfForTest();
+  noteFeedProjection({
+    mode: 'full',
+    durationMs: 5,
+    visibleEventCount: 100,
+    reusedVisibleEventCount: 0,
+  });
+  noteFeedProjection({
+    mode: 'incremental',
+    durationMs: 1,
+    visibleEventCount: 101,
+    reusedVisibleEventCount: 100,
+  });
+  noteFeedProjection({
+    mode: 'cache',
+    durationMs: 0.1,
+    visibleEventCount: 101,
+    reusedVisibleEventCount: 101,
+  });
+  noteFeedProjection({
+    mode: 'invisible',
+    durationMs: 0.2,
+    visibleEventCount: 101,
+    reusedVisibleEventCount: 101,
+  });
+
+  const snapshot = getRendererPerfSnapshot().feedProjection;
+  assert.equal(snapshot.fullBuilds, 1);
+  assert.equal(snapshot.incrementalBuilds, 1);
+  assert.equal(snapshot.cacheHits, 1);
+  assert.equal(snapshot.invisibleAppendHits, 1);
+  assert.equal(snapshot.eventsRebuilt, 101);
+  assert.equal(snapshot.eventsReused, 302);
+  assert.equal(snapshot.durationMs.count, 4);
+  assert.equal(snapshot.durationMs.maxMs, 5);
 });
 
 test('discarded events never contribute a commit or paint sample', () => {

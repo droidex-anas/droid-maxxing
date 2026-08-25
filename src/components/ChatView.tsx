@@ -9,7 +9,6 @@ import {
   UserBubble,
   ChatSkeleton,
   TranscriptSkeleton,
-  buildGroupedFeed,
 } from './chat';
 import { readFile } from '../lib/desktop';
 import { interruptChild, loadChildHistory, loadSessionHistory } from '../lib/commands';
@@ -21,7 +20,6 @@ import {
   findChildSessionForTarget,
   orderedChildSessions,
   shouldRequestReleasedChildHistory,
-  transcriptForVisibleSession,
   visibleSessionTarget,
 } from '../lib/childSessions';
 import type { FileChange } from '../lib/diff';
@@ -37,6 +35,10 @@ import {
 import { transcriptRehydrationLimit } from '../lib/transcriptStoreMemory';
 import { VIEWPORT_TRANSCRIPT_POLICY } from '../lib/transcriptWindow';
 import { equalVisibleChatState, selectChatViewState, type ChatViewState } from './chatViewState';
+import { createChatFeedProjector } from './chatFeedProjector';
+import { setMountedFeedRows } from '../lib/rendererPerf';
+import { firstUserTranscriptEvent } from '../lib/transcriptIngestion';
+import { createTranscriptSpecPathProjector } from '../lib/transcriptSpecPath';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -203,6 +205,10 @@ export default function ChatView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeSession = state.activeSession;
   const allTranscript = state.allTranscript;
+  const specPathProjectorRef = useRef<ReturnType<typeof createTranscriptSpecPathProjector> | null>(
+    null,
+  );
+  specPathProjectorRef.current ??= createTranscriptSpecPathProjector();
 
   const visibleTarget = visibleSessionTarget(
     activeSession?.appSessionId,
@@ -213,7 +219,7 @@ export default function ChatView({
   const selectedChildSessionId =
     visibleTarget.kind === 'child' ? visibleTarget.childSessionId : undefined;
   const viewingChildSession = Boolean(selectedChildSessionId);
-  const firstUserEvent = allTranscript.find((event) => event.author === 'user');
+  const firstUserEvent = firstUserTranscriptEvent(allTranscript);
   const createdWorktreePath =
     activeSession &&
     firstUserEvent &&
@@ -252,12 +258,12 @@ export default function ChatView({
     : undefined;
   // childAccess is typed Record-of-Records but keys can be absent at runtime;
   // guard each lookup so a missing entry simply reads as not-opening.
+  const selectedParentChildAccess = activeSession
+    ? state.childAccess[activeSession.appSessionId]
+    : undefined;
   const selectedChildOpening = Boolean(
-    activeSession &&
     selectedChildSessionId &&
-    Object.hasOwn(state.childAccess, activeSession.appSessionId) &&
-    Object.hasOwn(state.childAccess[activeSession.appSessionId], selectedChildSessionId) &&
-    state.childAccess[activeSession.appSessionId][selectedChildSessionId].state === 'opening',
+    selectedParentChildAccess?.[selectedChildSessionId]?.state === 'opening',
   );
 
   // Click a spawn name to switch the main chat view to that exact child transcript.
@@ -307,10 +313,6 @@ export default function ChatView({
     return { sessions: childSessions, models: state.models };
   }, [viewingChildSession, childSessions, state.models]);
 
-  const transcript = useMemo(() => {
-    return transcriptForVisibleSession(allTranscript, selectedChildSessionId ?? null);
-  }, [allTranscript, viewingChildSession, selectedChildSessionId]);
-
   // Primary and logical-child transcripts each own their persisted cursor even
   // though live child events share the parent's in-memory event array.
   const historyAppSessionId = activeSession?.appSessionId;
@@ -348,7 +350,6 @@ export default function ChatView({
     dispatch({ type: 'SESSION_RESTORE_START', appSessionId: historyAppSessionId });
     loadSessionHistory(historyAppSessionId);
   }, [dispatch, historyAppSessionId, historyChildSessionId]);
-  const tailLen = transcript.length > 0 ? (transcript[transcript.length - 1].text?.length ?? 0) : 0;
   const primaryLive = useSessionLive(activeSession?.appSessionId ?? null);
   const live = visibleTarget.kind === 'child' ? visibleTarget.canInterrupt : primaryLive;
   const draftFolder = state.draftChat?.cwd.split('/').filter(Boolean).pop();
@@ -398,17 +399,12 @@ export default function ChatView({
   // The real deliverable in spec mode is a markdown file written to disk
   // (e.g. ~/.factory/specs/<date>-<slug>.md). Detect that path anywhere in the
   // transcript (assistant prose or the write tool's args) and load the file.
-  const specPath = useMemo(() => {
-    if (!hadSpec) return null;
-    const re = /(\/[^\s'"`)]*specs\/[^\s'"`)]+\.md)/;
-    for (let i = allTranscript.length - 1; i >= 0; i--) {
-      const t = allTranscript[i];
-      const hay = `${t.text ?? ''} ${t.toolArgs ? JSON.stringify(t.toolArgs) : ''}`;
-      const m = re.exec(hay);
-      if (m) return m[1];
-    }
-    return null;
-  }, [hadSpec, allTranscript]);
+  const specPath = specPathProjectorRef.current({
+    conversationKey: activeAppSessionId ?? 'none',
+    source: allTranscript,
+    mutation: state.transcriptMutation,
+    enabled: hadSpec,
+  });
 
   const [fileSpec, setFileSpec] = useState<{ path: string; content: string } | null>(null);
   // Re-read on `capturedPlan` changes too: a revised spec rewrites the same file
@@ -451,29 +447,40 @@ export default function ChatView({
     dispatch({
       type: 'SPEC_SET',
       appSessionId: activeAppSessionId,
-      path,
+      ...(path !== undefined ? { path } : {}),
       title,
       content: specContent,
     });
   }, [activeAppSessionId, specContent, hasFileSpec, fileSpec, storedSpec?.path, dispatch]);
 
-  // Build the grouped feed once and share it: MessageFeed renders it and the
-  // timeline derives its anchors from the same items, so switching sessions
-  // doesn't run buildFeed/groupTurns twice on every render.
-  const feedItems = useMemo(
-    // Primary view groups each turn's spawns into one subagents-dock wave item;
-    // child-session views keep the plain per-spawn lines.
-    () =>
-      buildGroupedFeed(transcript, live, {
-        childSessionCards: true,
-        specContent,
-        changes: true,
-        groupChildSessions: !viewingChildSession,
-      }),
-    [transcript, live, specContent, viewingChildSession],
-  );
+  const feedProjectorRef = useRef<ReturnType<typeof createChatFeedProjector> | null>(null);
+  feedProjectorRef.current ??= createChatFeedProjector();
+  // The projector owns visibility filtering because transcript mutation indices
+  // refer to the interleaved parent array. It reuses completed feed turns for a
+  // proven append and falls back to the canonical full builder on uncertainty.
+  const {
+    visibleTranscript: transcript,
+    feedItems,
+    updateKind: feedUpdateKind,
+    rebuiltFromFeedItemIndex,
+  } = feedProjectorRef.current({
+    conversationKey: visibleConversationKey ?? 'none:primary',
+    allTranscript,
+    transcriptMutation: state.transcriptMutation,
+    childSessionId: selectedChildSessionId ?? null,
+    pending: live,
+    retainedCost: activeAppSessionId ? (state.transcriptRetainedCost[activeAppSessionId] ?? 0) : 0,
+    options: {
+      childSessionCards: true,
+      specContent,
+      changes: true,
+      groupChildSessions: !viewingChildSession,
+    },
+  });
+  const tailLen = transcript.at(-1)?.text?.length ?? 0;
   const { timelineAnchors, isTimelinePriming, isAutoPagingOlderHistory } = useConversationTimeline({
     feedItems,
+    projectionMode: feedUpdateKind === 'append' ? 'incremental' : 'full',
     isViewingChildSession: viewingChildSession,
     conversationKey: visibleConversationKey,
     historyAppSessionId,
@@ -522,12 +529,12 @@ export default function ChatView({
   const chatHeaderSub = viewingChildSession
     ? {
         label: selectedChildLabel,
-        meta: selectedChildMeta,
+        ...(selectedChildMeta !== undefined ? { meta: selectedChildMeta } : {}),
         running: live,
         onBack: () => {
           dispatch({ type: 'SELECT_CHILD', selection: null });
         },
-        onStop: stopSelectedChild,
+        ...(stopSelectedChild !== undefined ? { onStop: stopSelectedChild } : {}),
       }
     : undefined;
   const openSpecWiki = activeAppSessionId
@@ -541,7 +548,9 @@ export default function ChatView({
     emptyChildActivity = (
       <WorkingIndicator
         label={`${selectedChildLabel} is working`}
-        startTs={visibleTarget.child.startedAt}
+        {...(visibleTarget.child.startedAt !== undefined
+          ? { startTs: visibleTarget.child.startedAt }
+          : {})}
       />
     );
   } else if (selectedChildOpening) {
@@ -554,6 +563,8 @@ export default function ChatView({
     );
   }
 
+  const messageFeedCwd = optionalValue(activeSession?.cwd);
+  const messageFeedSubagentsDock = optionalValue(subagentsDock);
   let conversationContent: ReactNode;
   if (activeSession && transcript.length > 0) {
     conversationContent = (
@@ -565,27 +576,42 @@ export default function ChatView({
         className="mx-auto min-w-0 px-6 py-6 max-w-4xl"
       >
         {restore?.status === 'failed' && (
-          <RestoreFailedBanner message={restore.error} onRetry={retryRestore} />
+          <RestoreFailedBanner
+            {...(restore.error !== undefined ? { message: restore.error } : {})}
+            onRetry={retryRestore}
+          />
         )}
         <EarlierHistoryControl hasMore={Boolean(olderCursor)} loading={loadingOlder} />
         <MessageFeed
           events={transcript}
           items={feedItems}
+          updateKind={feedUpdateKind}
+          rebuiltFromItemIndex={rebuiltFromFeedItemIndex}
           pending={live}
-          cwd={activeSession.cwd}
+          {...(messageFeedCwd !== undefined ? { cwd: messageFeedCwd } : {})}
           onOpenDiff={openDiff}
           onOpenReviewFile={openReviewFile}
           onOpenChildSession={openChildSession}
           childSessionActivity={childSessionActivity}
-          subagentsDock={subagentsDock}
+          {...(messageFeedSubagentsDock !== undefined
+            ? { subagentsDock: messageFeedSubagentsDock }
+            : {})}
           specContent={specContent}
-          onOpenSpecWiki={openSpecWiki}
-          createdWorktreePath={!viewingChildSession ? createdWorktreePath : undefined}
+          {...(openSpecWiki !== undefined ? { onOpenSpecWiki: openSpecWiki } : {})}
+          {...(!viewingChildSession && createdWorktreePath !== undefined
+            ? { createdWorktreePath }
+            : {})}
+          onMountedRowsChange={setMountedFeedRows}
         />
       </motion.div>
     );
   } else if (activeSession && restore?.status === 'failed') {
-    conversationContent = <RestoreFailedState message={restore.error} onRetry={retryRestore} />;
+    conversationContent = (
+      <RestoreFailedState
+        {...(restore.error !== undefined ? { message: restore.error } : {})}
+        onRetry={retryRestore}
+      />
+    );
   } else if (activeSession && viewingChildSession && restore?.status === 'loading') {
     conversationContent = <RestoringState />;
   } else if (activeSession && viewingChildSession) {
@@ -618,7 +644,7 @@ export default function ChatView({
   } else {
     conversationContent = (
       <WelcomeScreen
-        folder={draftFolder}
+        {...(draftFolder !== undefined ? { folder: draftFolder } : {})}
         onSeedPrompt={(text) => {
           dispatch({ type: 'SEED_COMPOSER', text });
         }}
@@ -632,7 +658,7 @@ export default function ChatView({
         <ChatHeader
           title={chatDisplayTitle(activeSession, state.chatMetadata[activeSession.appSessionId])}
           live={live}
-          sub={chatHeaderSub}
+          {...(chatHeaderSub !== undefined ? { sub: chatHeaderSub } : {})}
         />
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
@@ -674,4 +700,8 @@ export default function ChatView({
       </div>
     </div>
   );
+}
+
+function optionalValue<T>(value: T): T | undefined {
+  return value;
 }

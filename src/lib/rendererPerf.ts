@@ -1,6 +1,6 @@
 // Renderer hot-path measurement for perf phase 0 (#116): timestamps the
 // receive → store-commit → next-paint leg for bridge events, tracks long
-// tasks, and exposes the mounted transcript row count.
+// tasks, and exposes the mounted feed-row count.
 //
 // The module must import safely outside a browser (node --test) — every DOM
 // API is resolved lazily and observers start only where they exist.
@@ -33,8 +33,23 @@ export interface RendererPerfSnapshot {
     maxMs?: number;
   };
   longTasks: { count: number; totalMs: number; maxMs: number; over50Ms: number };
-  mountedTranscriptRows: number;
-  mountedTranscriptRowsMax: number;
+  mountedFeedRows: number;
+  mountedFeedRowsMax: number;
+  feedProjection: {
+    fullBuilds: number;
+    incrementalBuilds: number;
+    cacheHits: number;
+    invisibleAppendHits: number;
+    eventsRebuilt: number;
+    eventsReused: number;
+    durationMs: {
+      count: number;
+      p50Ms?: number;
+      p95Ms?: number;
+      p99Ms?: number;
+      maxMs?: number;
+    };
+  };
 }
 
 interface PendingEvent {
@@ -51,8 +66,9 @@ const MAX_AWAITING_PAINT = 4_096;
 const receiveToCommit = new Float64Array(CAPACITY);
 const receiveToPaint = new Float64Array(CAPACITY);
 const appendToReceive = new Float64Array(CAPACITY);
-const cursors = { commit: 0, paint: 0, append: 0 };
-const counts = { commit: 0, paint: 0, append: 0 };
+const feedProjectionDuration = new Float64Array(CAPACITY);
+const cursors = { commit: 0, paint: 0, append: 0, feed: 0 };
+const counts = { commit: 0, paint: 0, append: 0, feed: 0 };
 
 let startedAt = 0;
 let eventsReceived = 0;
@@ -61,9 +77,17 @@ let pending: PendingEvent[] = [];
 let awaitingPaint: PendingEvent[] = [];
 let paintScheduled = false;
 let longTasks = { count: 0, totalMs: 0, maxMs: 0, over50Ms: 0 };
-let mountedTranscriptRows = 0;
-let mountedTranscriptRowsMax = 0;
+let mountedFeedRows = 0;
+let mountedFeedRowsMax = 0;
 let observersStarted = false;
+let feedProjection = {
+  fullBuilds: 0,
+  incrementalBuilds: 0,
+  cacheHits: 0,
+  invisibleAppendHits: 0,
+  eventsRebuilt: 0,
+  eventsReused: 0,
+};
 
 export function startRendererPerfObservers(): void {
   if (observersStarted) return;
@@ -122,10 +146,28 @@ export function noteStoreCommitted(): void {
   schedulePaintStamp(batch);
 }
 
-/** Report how many transcript rows the visible conversation currently mounts. */
-export function setMountedTranscriptRows(count: number): void {
-  mountedTranscriptRows = count;
-  mountedTranscriptRowsMax = Math.max(mountedTranscriptRowsMax, count);
+/** Report how many grouped feed rows the visible conversation currently mounts. */
+export function setMountedFeedRows(count: number): void {
+  mountedFeedRows = count;
+  mountedFeedRowsMax = Math.max(mountedFeedRowsMax, count);
+}
+
+/** Measure canonical full builds versus proven transcript/feed reuse. */
+export function noteFeedProjection(options: {
+  mode: 'full' | 'incremental' | 'cache' | 'invisible';
+  durationMs: number;
+  visibleEventCount: number;
+  reusedVisibleEventCount: number;
+}): void {
+  const visibleEventCount = validCount(options.visibleEventCount);
+  const reusedEvents = Math.min(visibleEventCount, validCount(options.reusedVisibleEventCount));
+  if (options.mode === 'full') feedProjection.fullBuilds += 1;
+  else if (options.mode === 'incremental') feedProjection.incrementalBuilds += 1;
+  else if (options.mode === 'cache') feedProjection.cacheHits += 1;
+  else feedProjection.invisibleAppendHits += 1;
+  feedProjection.eventsRebuilt += visibleEventCount - reusedEvents;
+  feedProjection.eventsReused += reusedEvents;
+  record(feedProjectionDuration, 'feed', options.durationMs);
 }
 
 export function getRendererPerfSnapshot(): RendererPerfSnapshot {
@@ -137,8 +179,12 @@ export function getRendererPerfSnapshot(): RendererPerfSnapshot {
     receiveToPaintMs: stats(receiveToPaint, 'paint'),
     appendToReceiveMs: stats(appendToReceive, 'append'),
     longTasks: { ...longTasks },
-    mountedTranscriptRows,
-    mountedTranscriptRowsMax,
+    mountedFeedRows,
+    mountedFeedRowsMax,
+    feedProjection: {
+      ...feedProjection,
+      durationMs: stats(feedProjectionDuration, 'feed'),
+    },
   };
 }
 
@@ -147,17 +193,27 @@ export function resetRendererPerfForTest(): void {
   cursors.commit = 0;
   cursors.paint = 0;
   cursors.append = 0;
+  cursors.feed = 0;
   counts.commit = 0;
   counts.paint = 0;
   counts.append = 0;
+  counts.feed = 0;
   eventsReceived = 0;
   appendedReceived = 0;
   pending = [];
   awaitingPaint = [];
   paintScheduled = false;
   longTasks = { count: 0, totalMs: 0, maxMs: 0, over50Ms: 0 };
-  mountedTranscriptRows = 0;
-  mountedTranscriptRowsMax = 0;
+  mountedFeedRows = 0;
+  mountedFeedRowsMax = 0;
+  feedProjection = {
+    fullBuilds: 0,
+    incrementalBuilds: 0,
+    cacheHits: 0,
+    invisibleAppendHits: 0,
+    eventsRebuilt: 0,
+    eventsReused: 0,
+  };
   startedAt = 0;
   observersStarted = false;
 }
@@ -201,17 +257,16 @@ function noteLongTask(durationMs: number): void {
   if (durationMs > 50) longTasks.over50Ms += 1;
 }
 
-function record(target: Float64Array, key: 'commit' | 'paint' | 'append', value: number): void {
+type MetricKey = 'commit' | 'paint' | 'append' | 'feed';
+
+function record(target: Float64Array, key: MetricKey, value: number): void {
   if (!Number.isFinite(value) || value < 0) return;
   target[cursors[key]] = value;
   cursors[key] = (cursors[key] + 1) % CAPACITY;
   counts[key] += 1;
 }
 
-function stats(
-  ring: Float64Array,
-  key: 'commit' | 'paint' | 'append',
-): RendererPerfSnapshot['receiveToCommitMs'] {
+function stats(ring: Float64Array, key: MetricKey): RendererPerfSnapshot['receiveToCommitMs'] {
   const count = counts[key];
   if (count === 0) return { count: 0 };
   let window: Float64Array;
@@ -229,6 +284,10 @@ function stats(
     p99Ms: percentile(sorted, 0.99),
     maxMs: round(sorted[sorted.length - 1]),
   };
+}
+
+function validCount(value: number): number {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 function percentile(sorted: Float64Array, quantile: number): number | undefined {

@@ -85,6 +85,15 @@ test('viewport release removes only old in-memory events after a settled bottom-
   const transcript = events('active', 4_000);
   const state = stateWithTranscript('active', transcript, {
     historyCursor: { active: 'stale-before-release' },
+    transcriptMutations: {
+      active: {
+        revision: 7,
+        baseRevision: 6,
+        kind: 'append',
+        previousLength: 3_999,
+        firstChangedIndex: 3_999,
+      },
+    },
   });
 
   const next = reducer(state, {
@@ -98,10 +107,50 @@ test('viewport release removes only old in-memory events after a settled bottom-
   assert.equal(next.historyCursor.active, undefined);
   assert.equal(next.sessionRestore.active?.status, 'paged');
   assert.equal(next.sessionRestore.active?.hasMore, true);
+  assert.deepEqual(next.transcriptMutations.active, {
+    revision: 8,
+    baseRevision: 7,
+    kind: 'reset',
+    previousLength: transcript.length,
+    firstChangedIndex: 0,
+  });
   assert.equal(
     transcriptRehydrationLimit(next.sessionRestore.active),
     next.transcripts.active.length,
   );
+});
+
+test('exact older-history insertion records prepend provenance', () => {
+  const transcript = events('active', 2);
+  const state = stateWithTranscript('active', transcript, {
+    transcriptMutations: {
+      active: {
+        revision: 3,
+        baseRevision: 2,
+        kind: 'append',
+        previousLength: 1,
+        firstChangedIndex: 1,
+      },
+    },
+  });
+  const older = events('active', 1).map((event) => ({ ...event, id: 'older', ts: -1 }));
+
+  const next = reducer(state, {
+    type: 'SESSION_HISTORY',
+    appSessionId: 'active',
+    progress: [],
+    transcripts: older,
+    mode: 'prepend',
+  });
+
+  assert.deepEqual(next.transcriptMutations.active, {
+    revision: 4,
+    baseRevision: 3,
+    kind: 'prepend',
+    previousLength: transcript.length,
+    firstChangedIndex: 0,
+    insertedCount: 1,
+  });
 });
 
 test('primary release preserves child-session transcripts owned by separate history', () => {
@@ -163,30 +212,60 @@ test('emergency release bounds aggregate memory across many smaller child transc
     childHistory: { active: childHistory },
   });
 
-  const next = reducer(state, {
-    type: 'SESSION_TRANSCRIPT',
-    event: {
-      id: 'child-0-live',
-      appSessionId: 'active',
-      sourceSessionId: 'child-0',
-      role: 'worker',
-      kind: 'text',
-      text: 'live tail',
-      ts: 100_000,
+  const actions = [
+    {
+      type: 'SESSION_TRANSCRIPT' as const,
+      event: {
+        id: 'child-0-live',
+        appSessionId: 'active',
+        sourceSessionId: 'child-0',
+        role: 'worker' as const,
+        kind: 'text' as const,
+        author: 'assistant' as const,
+        text: 'live tail',
+        ts: 100_000,
+      },
     },
-  });
+    {
+      type: 'SESSION_TRANSCRIPT' as const,
+      event: {
+        id: 'child-1-live',
+        appSessionId: 'active',
+        sourceSessionId: 'child-1',
+        role: 'worker' as const,
+        kind: 'text' as const,
+        author: 'assistant' as const,
+        text: 'second live tail',
+        ts: 100_001,
+      },
+    },
+  ];
+  const sequential = actions.reduce(reducer, state);
+  const next = reducer(state, { type: 'BATCH', actions });
 
-  assert.ok(next.transcripts.active.length <= 1_200);
+  assert.deepEqual(
+    { ...next, transcriptMutations: {} },
+    { ...sequential, transcriptMutations: {} },
+  );
+  assert.equal(next.transcriptMutations.active.kind, 'reset');
+  assert.equal(next.transcriptMutations.active.baseRevision, 0);
+  // The first event crosses the ceiling and releases to the target; the second
+  // then remains live on that retained tail until the ceiling is reached again.
+  assert.ok(next.transcripts.active.length <= 1_201);
   for (const childSessionId of Object.keys(childSessions)) {
     const retained = next.transcripts.active.filter(
       (event) => event.sourceSessionId === childSessionId,
     );
-    assert.ok(retained.length <= 15);
+    assert.ok(retained.length <= (childSessionId === 'child-1' ? 16 : 15));
     assert.equal(next.childHistory.active[childSessionId].status, 'paged');
     assert.equal(next.childHistory.active[childSessionId].isLoaded, false);
   }
   assert.equal(
     next.transcripts.active.some((event) => event.id === 'child-0-live'),
+    true,
+  );
+  assert.equal(
+    next.transcripts.active.some((event) => event.id === 'child-1-live'),
     true,
   );
 });
@@ -339,9 +418,9 @@ test('child viewport release preserves parent and sibling rows and invalidates o
     hasMore: true,
     isLoaded: false,
     isLoadingOlder: false,
-    olderCursor: undefined,
     isViewportPinned: true,
   });
+  assert.equal(Object.hasOwn(next.childHistory.active['child-a'], 'olderCursor'), false);
   assert.equal(transcriptRehydrationLimit(next.childHistory.active['child-a']), 1_200);
   assert.equal(next.historyLoaded.active, true);
 });
@@ -543,6 +622,15 @@ test('authoritative session removal releases orphaned per-session state', () => 
   const transcript = events('gone', 2);
   const state = stateWithTranscript('gone', transcript, {
     listConfirmedSessionIds: ['gone'],
+    transcriptMutations: {
+      gone: {
+        revision: 1,
+        baseRevision: 0,
+        kind: 'append',
+        previousLength: 0,
+        firstChangedIndex: 0,
+      },
+    },
     progress: { gone: [] },
     childSessions: { gone: {} },
     historyCursor: { gone: 'cursor' },
@@ -554,6 +642,7 @@ test('authoritative session removal releases orphaned per-session state', () => 
   const next = reducer(state, { type: 'SESSION_LIST', sessions: [] });
 
   assert.equal(next.transcripts.gone, undefined);
+  assert.equal(next.transcriptMutations.gone, undefined);
   assert.equal(next.transcriptRetainedCost.gone, undefined);
   assert.equal(next.progress.gone, undefined);
   assert.equal(next.childSessions.gone, undefined);

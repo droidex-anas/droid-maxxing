@@ -50,7 +50,7 @@ import {
   childSelectionForFeature,
   findChildSessionForTarget,
   orderedChildSessions,
-  transcriptForVisibleSession,
+  transcriptEventIsVisible,
   visibleSessionIsPending,
   visibleSessionTarget,
   type ChildSessionActivity,
@@ -60,6 +60,7 @@ import { MessageFeed } from './chat';
 import EditorOpenMenu, { openCodebase, openCurrentDiff } from './EditorOpenMenu';
 import PromptInput from './PromptInput';
 import AutonomySelector from './AutonomySelector';
+import { createIncrementalTranscriptFilter } from '../lib/incrementalTranscriptFilter';
 
 const ACCENT = 'var(--droid-accent)';
 const accentMix = (pct: number) =>
@@ -860,6 +861,7 @@ export default function MissionControl() {
       transcript: appSessionId
         ? (state.transcripts[appSessionId] ?? EMPTY_TRANSCRIPT)
         : EMPTY_TRANSCRIPT,
+      transcriptMutation: appSessionId ? state.transcriptMutations[appSessionId] : undefined,
       progress: appSessionId ? (state.progress[appSessionId] ?? EMPTY_PROGRESS) : EMPTY_PROGRESS,
       childSessions: appSessionId
         ? (state.childSessions[appSessionId] ?? EMPTY_CHILD_SESSIONS)
@@ -883,6 +885,7 @@ export default function MissionControl() {
     mission,
     utilityOpen,
     transcript: allTx,
+    transcriptMutation,
     progress,
     childSessions: childSessionsById,
     childAccess,
@@ -897,9 +900,20 @@ export default function MissionControl() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [expanded, setExpanded] = useState<'features' | 'context' | null>(null);
   const [openDiff, setOpenDiff] = useState<FileChange | null>(null);
+  const visibleEventsProjectorRef = useRef<ReturnType<
+    typeof createIncrementalTranscriptFilter
+  > | null>(null);
+  visibleEventsProjectorRef.current ??= createIncrementalTranscriptFilter();
+  const featureEventsProjectorRef = useRef<ReturnType<
+    typeof createIncrementalTranscriptFilter
+  > | null>(null);
+  featureEventsProjectorRef.current ??= createIncrementalTranscriptFilter();
 
   const features = mission?.features ?? [];
-  const childSessions = mission ? orderedChildSessions(Object.values(childSessionsById)) : [];
+  const childSessions = useMemo(
+    () => (mission ? orderedChildSessions(Object.values(childSessionsById)) : []),
+    [mission, childSessionsById],
+  );
   const visibleTarget = visibleSessionTarget(
     mission?.appSessionId,
     selectedChild,
@@ -974,8 +988,13 @@ export default function MissionControl() {
     t.kind === 'tool_result' ||
     t.kind === 'status' ||
     t.kind === 'error' ||
-    t.isError;
-  const events = transcriptForVisibleSession(allTx, visibleChildSessionId).filter(visible);
+    Boolean(t.isError);
+  const events = visibleEventsProjectorRef.current({
+    conversationKey: `${mission.appSessionId}:${visibleChildSessionId ?? 'primary'}:mission`,
+    source: allTx,
+    mutation: transcriptMutation,
+    includes: (event) => transcriptEventIsVisible(event, visibleChildSessionId) && visible(event),
+  });
 
   const selectFeature = (f: BridgeFeature) => {
     setSelectedFeatureId(f.id);
@@ -988,7 +1007,12 @@ export default function MissionControl() {
     ? childSessionIdForFeature(progress, selectedFeature.id)
     : undefined;
   const selectedFeatureEvents = selectedFeatureChildSessionId
-    ? transcriptForVisibleSession(allTx, selectedFeatureChildSessionId)
+    ? featureEventsProjectorRef.current({
+        conversationKey: `${mission.appSessionId}:${selectedFeatureChildSessionId}:feature`,
+        source: allTx,
+        mutation: transcriptMutation,
+        includes: (event) => event.sourceSessionId === selectedFeatureChildSessionId,
+      })
     : [];
   const done = features.filter((f) => f.status === 'completed').length;
 

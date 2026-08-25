@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { loadChildHistory, loadSessionHistory } from '../lib/commands';
-import { setMountedTranscriptRows } from '../lib/rendererPerf';
 import {
   captureViewportAnchor,
   restoreViewportAnchor,
@@ -158,6 +157,23 @@ export function didCommitRequestedHistoryPrepend({
   return requestedCursor !== currentCursor && transcriptLength > previousTranscriptLength;
 }
 
+export function applyConversationContentResize(
+  element: HTMLDivElement,
+  anchor: ViewportAnchor | null,
+  isPinned: boolean,
+  allowHeightFallback: boolean,
+):
+  | { mode: 'follow-tail' | 'ignore'; anchor: ViewportAnchor | null; didFindRow: false }
+  | { mode: 'preserve-anchor'; anchor: ViewportAnchor; didFindRow: boolean } {
+  if (isPinned) {
+    element.scrollTop = element.scrollHeight;
+    return { mode: 'follow-tail', anchor, didFindRow: false };
+  }
+  if (anchor === null) return { mode: 'ignore', anchor, didFindRow: false };
+  const restored = restoreViewportAnchor(element, anchor, allowHeightFallback);
+  return { mode: 'preserve-anchor', ...restored };
+}
+
 export function useConversationScrollWindow({
   scrollRef,
   visibleConversationKey,
@@ -188,6 +204,7 @@ export function useConversationScrollWindow({
   const isOlderRequestPending = useRef(false);
   const settledTopLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scrollSnapshots] = useState(() => new Map<string, ScrollSnapshot>());
+  const hasTranscript = transcriptLength > 0;
 
   const cancelSettledTopLoad = useCallback(() => {
     if (settledTopLoadTimer.current === null) return;
@@ -196,12 +213,6 @@ export function useConversationScrollWindow({
   }, []);
 
   useEffect(() => cancelSettledTopLoad, [cancelSettledTopLoad, visibleConversationKey]);
-
-  // Perf phase 0: the retained transcript window is what the feed mounts, so
-  // report its size whenever it changes.
-  useEffect(() => {
-    setMountedTranscriptRows(transcriptLength);
-  }, [transcriptLength]);
 
   useEffect(() => {
     if (isLoadingOlder) return;
@@ -452,17 +463,26 @@ export function useConversationScrollWindow({
     let releaseFrame = 0;
     let ownedRestoreGeneration: number | null = null;
     const observer = new ResizeObserver(() => {
-      if (isPinned.current || viewportAnchor.current === null) return;
+      if (isPinned.current) {
+        // Images, interactive Apps, and disclosures can grow without changing
+        // transcript length. A bottom-pinned reader follows that growth just as
+        // they follow newly appended output.
+        applyConversationContentResize(element, viewportAnchor.current, true, false);
+        return;
+      }
+      if (viewportAnchor.current === null) return;
       const ownsRestore = !isRestoringViewport.current;
       const restoreGeneration = ownsRestore
         ? ++viewportRestoreGeneration.current
         : viewportRestoreGeneration.current;
       isRestoringViewport.current = true;
-      const restored = restoreViewportAnchor(
+      const restored = applyConversationContentResize(
         element,
         viewportAnchor.current,
+        false,
         isSettlingHistoryPrepend.current,
       );
+      if (restored.mode !== 'preserve-anchor') return;
       viewportAnchor.current = restored.anchor;
       expectedRestoredScrollTop.current = element.scrollTop;
       if (ownsRestore) {
@@ -496,7 +516,7 @@ export function useConversationScrollWindow({
         expectedRestoredScrollTop.current = null;
       }
     };
-  }, [scrollRef, transcriptLength, visibleConversationKey]);
+  }, [hasTranscript, scrollRef, visibleConversationKey]);
 
   useEffect(() => {
     const element = scrollRef.current;
