@@ -55,13 +55,18 @@ import {
   composePrompt,
   isVisualizeCommand,
   parseSlashSkillInvocation,
+  promptTextWithVisualize,
   responseFormatForPrompt,
+  submitCommandFor,
   VISUALIZE_COMMAND,
 } from '../lib/composePrompt';
 import { hasCompleteAppBlock } from './appBlockRuntime';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { compactionSettingsSnapshot } from '../lib/compactionSettings';
 import { composerTextAfterSeed, resetComposerAfterSubmit } from '../lib/composerReset';
+import { chipRemovedByBackspace } from '../lib/composerChips';
+import { composerTrigger, menuItemsForTrigger } from './composer/menuItems';
+import { useDraftSelections } from './composer/useDraftSelections';
 import {
   childRuntimeSubmitTarget,
   childSessionLabel,
@@ -71,15 +76,9 @@ import {
   visibleSessionTarget,
   type VisibleSessionTarget,
 } from '../lib/childSessions';
-import {
-  ArrowUp,
-  ChevronDown,
-  LoaderCircle,
-  Plus,
-  SlidersHorizontal,
-  Square,
-  X,
-} from 'lucide-react';
+import { ArrowUp, ChevronDown, LoaderCircle, SlidersHorizontal, Square } from 'lucide-react';
+import AddMenu from './composer/AddMenu';
+import { DraftSelections } from './composer/DraftSelections';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
 import ModelSelectorPopover from './ModelSelectorPopover';
 import AutonomySelector from './AutonomySelector';
@@ -167,33 +166,10 @@ export function shouldStopTurnStarting({
   );
 }
 
-interface Trigger {
-  kind: 'slash' | 'file';
-  query: string;
-  start: number;
-  end: number;
-}
-
-function getTrigger(text: string, caret: number): Trigger | null {
-  const upto = text.slice(0, caret);
-  const m = /(^|\s)([/@][^\s]*)$/.exec(upto);
-  if (!m) return null;
-  const token = m[2];
-  const start = caret - token.length;
-  return {
-    kind: token.startsWith('/') ? 'slash' : 'file',
-    query: token.slice(1),
-    start,
-    end: caret,
-  };
-}
-
 function basename(p: string): string {
   const i = p.lastIndexOf('/');
   return i >= 0 ? p.slice(i + 1) : p;
 }
-
-const COMPACT_COMMANDS = new Set(['/compact', '/compaction', '/compression']);
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -270,14 +246,58 @@ export default function PromptInput({
   // read-only lightbox instead of the composer's image viewer.
   const [viewerPath, setViewerPath] = useState<string | null>(null);
   const [feedbackReport, setFeedbackReport] = useState<FeedbackReportRequest | null>(null);
-  const [activeSkills, setActiveSkillsState] = useState<SkillInfo[]>([]);
-  const setActiveSkills = (value: SetStateAction<SkillInfo[]>) => {
-    composerRevisionRef.current += 1;
-    setActiveSkillsState(value);
+  const {
+    activeSkills,
+    setActiveSkills,
+    visualizeSelected,
+    setVisualizeSelected,
+    items: draftSelections,
+    hasSelection,
+    indentPx: selectionsIndent,
+    setIndentPx: setSelectionsIndent,
+    clear: clearDraftSelections,
+  } = useDraftSelections(
+    useCallback(() => {
+      composerRevisionRef.current += 1;
+    }, []),
+  );
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  // Skills and plugins live on the draft's first line; attachments keep their own
+  // row above it. Backspace on an empty draft unwinds both.
+  const hasAttachmentChips = attachedFiles.length > 0 || imageAttachments.images.length > 0;
+  const hasChips = hasSelection || hasAttachmentChips;
+
+  const removeLastChip = () => {
+    const { images, files: documents } = partitionImagePaths(attachedFiles);
+    const removal = chipRemovedByBackspace({
+      visualizeSelected,
+      pastedImageIds: imageAttachments.images.map((image) => image.id),
+      imagePaths: images,
+      skillFilePaths: activeSkills.map((skill) => skill.filePath),
+      documentPaths: documents,
+    });
+    if (removal === null) return;
+    switch (removal.chip) {
+      case 'attachment':
+        setAttachedFiles((prev) => prev.filter((path) => path !== removal.path));
+        return;
+      case 'skill':
+        setActiveSkills((prev) => prev.filter((skill) => skill.filePath !== removal.filePath));
+        return;
+      case 'pastedImage':
+        imageAttachments.remove(removal.id);
+        return;
+      case 'visualize':
+        setVisualizeSelected(false);
+        return;
+    }
   };
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // The draft and the selections that share its first line. Autosize holds this
+  // box still while it measures the draft.
+  const draftBoxRef = useRef<HTMLDivElement>(null);
   const submittingRef = useRef(false);
   const turnStartingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnStartingTargetKeyRef = useRef<string | null>(null);
@@ -429,7 +449,9 @@ export default function PromptInput({
   const slashCommands: SlashCommand[] = [
     {
       ...VISUALIZE_COMMAND,
-      replacement: `${VISUALIZE_COMMAND.cmd} `,
+      run: () => {
+        setVisualizeSelected(true);
+      },
     },
     {
       cmd: '/bug',
@@ -467,20 +489,6 @@ export default function PromptInput({
       },
     },
     {
-      cmd: '/compaction',
-      desc: 'Compact current session',
-      run: () => {
-        if (primaryActionsEnabled && activeSession) compactSession(activeSession.appSessionId);
-      },
-    },
-    {
-      cmd: '/compression',
-      desc: 'Compact current session',
-      run: () => {
-        if (primaryActionsEnabled && activeSession) compactSession(activeSession.appSessionId);
-      },
-    },
-    {
       cmd: '/spec',
       desc: 'Toggle spec mode',
       run: () => {
@@ -496,8 +504,10 @@ export default function PromptInput({
     },
   ];
 
-  const trigger = useMemo(() => getTrigger(input, caret), [input, caret]);
-  const overlayOpen = [trigger, modelsOpen, feedbackReport, isLive && sendHover].some(Boolean);
+  const trigger = useMemo(() => composerTrigger(input, caret), [input, caret]);
+  const overlayOpen = [trigger, modelsOpen, addMenuOpen, feedbackReport, isLive && sendHover].some(
+    Boolean,
+  );
 
   useEffect(() => {
     if (!isLive) setSendHover(false);
@@ -580,34 +590,17 @@ export default function PromptInput({
     trigger?.start,
   ]);
 
-  const menuItems = useMemo<MenuItem[]>(() => {
-    if (!trigger) return [];
-    const q = trigger.query.toLowerCase();
-    if (trigger.kind === 'slash') {
-      const cmds: MenuItem[] = slashCommands
-        .filter((c) => c.cmd.slice(1).toLowerCase().includes(q))
-        .map((command) => ({ type: 'command', command }));
-      const skills: MenuItem[] = invocableSkills
-        .filter(
-          (s) =>
-            s.name.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q),
-        )
-        .slice(0, 40)
-        .map((skill) => ({ type: 'skill', skill }));
-      return [...cmds, ...skills];
-    }
-    // file mode
-    const matches = files
-      .filter((f) => f.toLowerCase().includes(q))
-      .sort((a, b) => {
-        const aw = basename(a).toLowerCase().startsWith(q) ? 0 : 1;
-        const bw = basename(b).toLowerCase().startsWith(q) ? 0 : 1;
-        return aw - bw || a.length - b.length;
-      })
-      .slice(0, 50)
-      .map<MenuItem>((path) => ({ type: 'file', path }));
-    return matches;
-  }, [trigger, files, invocableSkills, slashCommands]);
+  const menuItems = useMemo<MenuItem[]>(
+    () =>
+      trigger
+        ? menuItemsForTrigger(trigger, {
+            commands: slashCommands,
+            skills: invocableSkills,
+            files,
+          })
+        : [],
+    [trigger, files, invocableSkills, slashCommands],
+  );
 
   const menuOpen = !!trigger && menuItems.length > 0;
 
@@ -639,13 +632,13 @@ export default function PromptInput({
   const clearAndDiscardImages = imageAttachments.clearAndDiscard;
   useEffect(() => {
     setHistoryIndex(null);
-    setActiveSkills([]);
+    clearDraftSelections();
     setAttachedFiles([]);
     // Both viewers show a dropped attachment, so they cannot outlive it.
     setViewerImageId(null);
     setViewerPath(null);
     clearAndDiscardImages();
-  }, [activeSession?.appSessionId, clearAndDiscardImages]);
+  }, [activeSession?.appSessionId, clearAndDiscardImages, clearDraftSelections]);
 
   // Welcome-screen suggestion cards and saved notes seed the composer through
   // the store so those surfaces and this input stay decoupled. The pendingCaret
@@ -659,17 +652,31 @@ export default function PromptInput({
     const text = composerTextAfterSeed(input, composerSeed.text, composerSeed.replace);
     setInput(text);
     pendingCaret.current = text.length;
+    setVisualizeSelected(false);
     // Consume the seed so a later remount (e.g. toggling Mission Control, which
     // unmounts this input) does not re-apply stale text over the user's edits.
     dispatch({ type: 'CLEAR_COMPOSER_SEED' });
-  }, [composerSeed, input, dispatch]);
+  }, [composerSeed, input, dispatch, setVisualizeSelected]);
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${String(Math.min(textareaRef.current.scrollHeight, 200))}px`;
-    }
-  }, [input]);
+    const draft = textareaRef.current;
+    const box = draftBoxRef.current;
+    if (!draft || !box) return;
+    // A textarea reports its content height in scrollHeight only while the
+    // content overflows the box, so measuring the draft means collapsing it to
+    // `auto` first. Left alone, that collapse hands the composer's space back to
+    // the transcript above for one layout pass: the browser clamps the
+    // transcript's scroll position away from the bottom and never restores it,
+    // so during a live turn the pin-to-bottom effect yanks it down again on the
+    // next token, once per keystroke. Holding this box at the height it already
+    // has keeps the collapse from reaching anything outside the composer, and
+    // the box goes back to sizing itself before the browser paints.
+    box.style.height = `${String(box.offsetHeight)}px`;
+    draft.style.height = 'auto';
+    draft.style.height = `${String(Math.min(draft.scrollHeight, 200))}px`;
+    box.style.height = '';
+    // The indent moves where the first line wraps, so it can change the height.
+  }, [input, selectionsIndent]);
 
   // Restore caret after programmatic token replacement.
   useEffect(() => {
@@ -814,7 +821,7 @@ export default function PromptInput({
     const readyImages = await imageAttachments.whenSettled();
     if (updateInterruptedSubmit()) return;
     const allFiles = [...attachedFiles, ...readyImages.map((i) => i.path)];
-    const hasPayload = text || activeSkills.length > 0 || allFiles.length > 0;
+    const hasPayload = text || visualizeSelected || activeSkills.length > 0 || allFiles.length > 0;
     if (!hasPayload) return;
     setHistoryIndex(null);
 
@@ -830,7 +837,7 @@ export default function PromptInput({
         },
         resetDraft: () => {
           setInput('');
-          setActiveSkills([]);
+          clearDraftSelections();
           setAttachedFiles([]);
         },
       });
@@ -843,13 +850,17 @@ export default function PromptInput({
       return;
     }
 
-    if (text === '/mission' && activeSkills.length === 0 && allFiles.length === 0) {
+    const submitCommand = submitCommandFor(text, {
+      visualizeSelected,
+      skillCount: activeSkills.length,
+      fileCount: allFiles.length,
+    });
+    if (submitCommand === 'mission') {
       dispatch({ type: 'TOGGLE_MISSION_CONTROL' });
       clearAfterSubmit();
       return;
     }
-
-    if (COMPACT_COMMANDS.has(text) && activeSkills.length === 0 && allFiles.length === 0) {
+    if (submitCommand === 'compact') {
       if (!primaryActionsEnabled) return;
       if (activeSession) compactSession(activeSession.appSessionId);
       clearAfterSubmit();
@@ -858,11 +869,12 @@ export default function PromptInput({
 
     if (!childActionsEnabled) return;
 
+    const promptText = promptTextWithVisualize(text, visualizeSelected);
     const slashSkill =
-      activeSkills.length === 0 && !isVisualizeCommand(text)
-        ? parseSlashSkillInvocation(text, invocableSkills)
+      activeSkills.length === 0 && !isVisualizeCommand(promptText)
+        ? parseSlashSkillInvocation(promptText, invocableSkills)
         : undefined;
-    const displayText = slashSkill?.prompt ?? text;
+    const displayText = slashSkill?.prompt ?? promptText;
     const responseFormat = responseFormatForPrompt(displayText, hasAppContext);
     const skillNames = slashSkill
       ? [slashSkill.skillName]
@@ -1205,6 +1217,9 @@ export default function PromptInput({
     // thumbnails again, so the restored draft looks like the one that was queued.
     setAttachedFiles(p.files);
     setActiveSkills(invocableSkills.filter((s) => p.skills.includes(s.name)));
+    // A queued App request already carries /visualize in its text, so the chip
+    // would add a second copy of the command.
+    setVisualizeSelected(false);
     dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id: p.id });
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -1246,14 +1261,9 @@ export default function PromptInput({
         return;
       }
     }
-    if (
-      e.key === 'Backspace' &&
-      input === '' &&
-      (attachedFiles.length > 0 || imageAttachments.images.length > 0)
-    ) {
+    if (e.key === 'Backspace' && input === '' && hasChips) {
       e.preventDefault();
-      if (attachedFiles.length > 0) setAttachedFiles((prev) => prev.slice(0, -1));
-      else imageAttachments.remove(imageAttachments.images[imageAttachments.images.length - 1].id);
+      removeLastChip();
       return;
     }
     // Shell-style history recall. ArrowUp starts only from the top of the field
@@ -1300,8 +1310,6 @@ export default function PromptInput({
     ? 'border-droid-orange/40 focus-within:border-droid-orange/60'
     : 'border-droid-border focus-within:border-droid-border-hover';
 
-  const hasChips =
-    activeSkills.length > 0 || attachedFiles.length > 0 || imageAttachments.images.length > 0;
   const viewerImage = imageAttachments.images.find((i) => i.id === viewerImageId) ?? null;
   // Files attached as paths (the @ menu, the picker, or a queued prompt brought
   // back for editing) show as thumbnails when they are displayable images, so a
@@ -1316,8 +1324,18 @@ export default function PromptInput({
   const idleSendTooltip = childActionsEnabled
     ? 'Enter: send\nShift+Enter: newline'
     : 'This child transcript is read-only';
+  const promptPlaceholder = missionPreview
+    ? activeSession
+      ? targetChildSessionId
+        ? 'Steer the selected child session…'
+        : 'Direct the orchestrator…'
+      : 'Describe the mission objective…'
+    : isSpecMode
+      ? 'Describe what to build in spec mode...'
+      : 'What would you like to work on?  (/ for skills, @ for files)';
   const hasContent =
     input.trim().length > 0 ||
+    visualizeSelected ||
     activeSkills.length > 0 ||
     attachedFiles.length > 0 ||
     imageAttachments.images.length > 0;
@@ -1388,8 +1406,8 @@ export default function PromptInput({
               : undefined
           }
         >
-          {hasChips && (
-            <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+          {hasAttachmentChips && (
+            <div className="flex flex-wrap items-center gap-1.5 px-3 pt-3">
               {imageAttachments.images.map((img) => (
                 <ImageChip
                   key={img.id}
@@ -1424,29 +1442,6 @@ export default function PromptInput({
                   />
                 );
               })}
-              {activeSkills.map((skill) => (
-                <span
-                  key={skill.filePath}
-                  className="group flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg text-[11px] font-medium"
-                  style={{
-                    background: accentMix(14),
-                    color: ACCENT,
-                    boxShadow: `inset 0 0 0 1px ${accentMix(35)}`,
-                  }}
-                  title={skill.description ?? skill.filePath}
-                >
-                  {skill.name}
-                  <button
-                    onClick={() => {
-                      setActiveSkills((prev) => prev.filter((s) => s.filePath !== skill.filePath));
-                    }}
-                    className="p-0.5 rounded hover:bg-black/20 transition-colors"
-                    title="Remove skill"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </span>
-              ))}
               {attachedDocumentPaths.map((f) => (
                 <AttachedFileChip
                   key={f}
@@ -1487,59 +1482,67 @@ export default function PromptInput({
             </div>
           )}
 
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              syncCaret(e.target);
-              setHistoryIndex(null);
-            }}
-            onKeyUp={(e) => {
-              syncCaret(e.currentTarget);
-            }}
-            onClick={(e) => {
-              syncCaret(e.currentTarget);
-            }}
-            onSelect={(e) => {
-              syncCaret(e.currentTarget);
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={(e) => {
-              const items = Array.from(e.clipboardData.items).filter(
-                (it) => it.kind === 'file' && it.type.startsWith('image/'),
-              );
-              if (items.length === 0) return;
-              e.preventDefault();
-              for (const item of items) {
-                const blob = item.getAsFile();
-                if (blob) imageAttachments.addBlob(blob);
-              }
-            }}
-            placeholder={
-              missionPreview
-                ? activeSession
-                  ? targetChildSessionId
-                    ? 'Steer the selected child session…'
-                    : 'Direct the orchestrator…'
-                  : 'Describe the mission objective…'
-                : isSpecMode
-                  ? 'Describe what to build in spec mode...'
-                  : 'What would you like to work on?  (/ for skills, @ for files)'
-            }
-            rows={1}
-            className="w-full bg-transparent px-4 pt-3 pb-2 text-sm text-droid-text placeholder-droid-text-muted/50 resize-none focus:outline-none min-h-[44px] max-h-[200px]"
-          />
+          <div className="relative" ref={draftBoxRef}>
+            <DraftSelections items={draftSelections} onWidthChange={setSelectionsIndent} />
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                syncCaret(e.target);
+                setHistoryIndex(null);
+              }}
+              onKeyUp={(e) => {
+                syncCaret(e.currentTarget);
+              }}
+              onClick={(e) => {
+                syncCaret(e.currentTarget);
+              }}
+              onSelect={(e) => {
+                syncCaret(e.currentTarget);
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={(e) => {
+                const items = Array.from(e.clipboardData.items).filter(
+                  (it) => it.kind === 'file' && it.type.startsWith('image/'),
+                );
+                if (items.length === 0) return;
+                e.preventDefault();
+                for (const item of items) {
+                  const blob = item.getAsFile();
+                  if (blob) imageAttachments.addBlob(blob);
+                }
+              }}
+              // A staged skill or plugin already says what this prompt will do,
+              // and the hint would only crowd it off the line.
+              placeholder={draftSelections.length > 0 ? '' : promptPlaceholder}
+              rows={1}
+              // A selection occupies the start of the first line, so the draft
+              // starts after it and the placeholder stays out from under it.
+              style={{
+                textIndent: selectionsIndent === 0 ? undefined : `${String(selectionsIndent)}px`,
+              }}
+              className="w-full bg-transparent px-4 pt-3 pb-2 text-sm text-droid-text placeholder-droid-text-muted/50 resize-none focus:outline-none min-h-[44px] max-h-[200px]"
+            />
+          </div>
 
           {/* Toolbar — one seamless surface with the textarea, no divider line */}
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
-            <button
-              onClick={() => void handleAttachFiles()}
-              className="p-1.5 rounded-lg text-droid-text-muted hover:text-droid-text hover:bg-droid-bg/50 transition-colors shrink-0"
-              title="Add files"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+            <AddMenu
+              open={addMenuOpen}
+              onOpenChange={setAddMenuOpen}
+              visualizeSelected={visualizeSelected}
+              // Both rows hand focus to the draft, which is where the prompt
+              // continues once the menu has added to it.
+              onAttachFiles={() => {
+                textareaRef.current?.focus();
+                void handleAttachFiles();
+              }}
+              onToggleVisualize={() => {
+                setVisualizeSelected(!visualizeSelected);
+                textareaRef.current?.focus();
+              }}
+            />
 
             <div className="relative shrink-0">
               <button

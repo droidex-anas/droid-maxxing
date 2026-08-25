@@ -1,0 +1,185 @@
+import { expect, test } from '@playwright/test';
+
+const appUrl = process.env.DROIDEX_TEST_URL || '/';
+
+test('the plus button offers plugins and Visualize joins the prompt as a selection', async ({
+  page,
+}) => {
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+
+  await page.getByTitle('Add files or a plugin').click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByText('Files', { exact: true })).toBeVisible();
+  await menu.getByText('Visualize', { exact: true }).click();
+
+  const removeChip = page.getByRole('button', { name: 'Remove Visualize' });
+  await expect(removeChip).toBeVisible();
+  await expect(menu).toHaveCount(0);
+  // The plugin rides along as a selection: the draft stays the user's own words.
+  await expect(composer).toHaveValue('');
+  // The selection is the command, so it can be sent on its own.
+  await expect(page.getByTitle(/Enter: send/)).toBeEnabled();
+
+  // It sits on the draft's own first line, so that line starts after it and
+  // typing continues from there.
+  // The indent lands in a layout effect after the selection commits, so poll it.
+  const indent = () =>
+    composer.evaluate((el) => Number.parseFloat(getComputedStyle(el).textIndent));
+  await expect.poll(indent).toBeGreaterThan(40);
+  await composer.pressSequentially('a chart of the last week');
+  await expect(composer).toHaveValue('a chart of the last week');
+  await expect(removeChip).toBeVisible();
+
+  // The row that added it takes it back off, and the line reclaims the space.
+  await page.getByTitle('Add files or a plugin').click();
+  await menu.getByRole('menuitemcheckbox', { name: /Visualize/ }).click();
+  await expect(removeChip).toHaveCount(0);
+  await expect.poll(indent).toBe(0);
+
+  // One Backspace at the start of an empty draft takes the whole selection off.
+  await page.getByTitle('Add files or a plugin').click();
+  await menu.getByText('Visualize', { exact: true }).click();
+  await composer.fill('');
+  await composer.click();
+  await composer.press('Backspace');
+  await expect(removeChip).toHaveCount(0);
+});
+
+test('the slash menu keeps /visualize out of the draft text', async ({ page }) => {
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+
+  await composer.fill('/visual');
+  await page.getByText('visualize', { exact: true }).click();
+
+  await expect(page.getByRole('button', { name: 'Remove Visualize' })).toBeVisible();
+  await expect(composer).toHaveValue('');
+});
+
+// /compaction and /compression stay accepted when typed in full, but neither
+// matches the command's name, so the menu never offered a row for them and
+// still doesn't. What it used to offer was three identical Compact rows.
+test('the slash menu lists a single Compact row', async ({ page }) => {
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+
+  await composer.fill('/compact');
+  await expect(page.getByRole('button').filter({ hasText: 'compact' })).toHaveCount(1);
+
+  for (const alias of ['/compaction', '/compression']) {
+    await composer.fill(alias);
+    await expect(page.getByRole('button').filter({ hasText: 'compact' })).toHaveCount(0);
+  }
+});
+
+// A selection wider than half the line would leave no room to type, so it stops
+// indenting and takes a row of its own instead of pushing the draft off-screen.
+test('a selection too wide for the first line moves above it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+  const indent = () =>
+    composer.evaluate((el) => Number.parseFloat(getComputedStyle(el).textIndent));
+
+  await page.getByTitle('Add files or a plugin').click();
+  await page.getByRole('menu').getByText('Visualize', { exact: true }).click();
+  await expect.poll(indent).toBeGreaterThan(40);
+
+  await page.setViewportSize({ width: 420, height: 900 });
+  await expect.poll(indent).toBe(0);
+  // Still staged, still visible, and still removable.
+  await expect(page.getByRole('button', { name: 'Remove Visualize' })).toBeVisible();
+  await expect(composer).toBeVisible();
+});
+
+test('the plus menu is reachable by keyboard and on a narrow window', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 900 });
+  await page.goto(appUrl);
+
+  const trigger = page.getByTitle('Add files or a plugin');
+  await trigger.click();
+  const menu = page.getByRole('menu');
+  const box = (await menu.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(420);
+
+  // Opening focuses the first row; the arrows walk between them.
+  const focusedRow = () => page.evaluate(() => document.activeElement?.textContent ?? '');
+  await expect.poll(focusedRow).toContain('Files');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(focusedRow).toContain('Visualize');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(focusedRow).toContain('Files');
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(focusedRow).toContain('Visualize');
+
+  // Escape closes it and hands focus back to the button that opened it.
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+// Measuring the draft collapses it to one line, and the transcript above owns
+// the space the composer gives up: in that layout pass the browser clamps the
+// transcript's scroll off the bottom and never restores it, so during a live
+// turn it jumps on every keystroke. The measurement therefore has to happen
+// with the draft's box held at the height it already has, and the box has to be
+// sizing itself again by the time anything paints.
+test('measuring the draft never lets its box give up height', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+  const draft = 'a draft long enough to wrap the composer onto a second line and a third';
+
+  await composer.click();
+  await composer.evaluate((el) => {
+    const box = el.parentElement;
+    if (!box) throw new Error('the draft has no box to hold still');
+    const seen: string[] = [];
+    new MutationObserver((records) => {
+      for (const record of records) seen.push(record.oldValue ?? '');
+    }).observe(box, { attributeFilter: ['style'], attributeOldValue: true });
+    (window as unknown as { __boxStyles: string[] }).__boxStyles = seen;
+  });
+  await composer.pressSequentially(draft);
+
+  // Every keystroke remeasures, and every remeasure has to release the height
+  // it pinned, which is what leaves a pinned height behind as a previous value.
+  const heldStill = await page.evaluate(
+    () =>
+      (window as unknown as { __boxStyles: string[] }).__boxStyles.filter((style) =>
+        /height: \d/.test(style),
+      ).length,
+  );
+  expect(heldStill).toBeGreaterThanOrEqual(draft.length);
+
+  // Nothing is left pinned, so the box tracks the draft again.
+  const leftover = await composer.evaluate((el) => el.parentElement?.style.height ?? 'no box');
+  expect(leftover).toBe('');
+});
+
+// Replacing a multi-line draft with a longer single-line one (what recalling a
+// prompt with ArrowUp does) adds characters while removing line breaks, so the
+// box has to shrink even though the draft grew.
+test('the composer shrinks when a longer draft needs fewer lines', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto(appUrl);
+  const composer = page.locator('textarea').first();
+  const height = () => composer.evaluate((el) => el.offsetHeight);
+
+  await composer.click();
+  await composer.pressSequentially('first');
+  const oneLine = await height();
+  for (const line of ['second', 'third']) {
+    await composer.press('Shift+Enter');
+    await composer.pressSequentially(line);
+  }
+  await expect.poll(height).toBeGreaterThan(oneLine);
+
+  // Longer than the three lines it replaces, but only one line tall.
+  await composer.press('ControlOrMeta+a');
+  await composer.pressSequentially('one line again');
+  await expect(composer).toHaveValue('one line again');
+  await expect.poll(height).toBe(oneLine);
+});

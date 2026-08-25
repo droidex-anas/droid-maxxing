@@ -98,11 +98,21 @@ button, input, select, textarea {
   // Reports coalesce on a timer, never an animation frame: the frame is hidden
   // until this first report arrives, and a hidden frame runs no animation
   // frames, so rAF would deadlock the report that reveals it.
+  // The root element always fills the frame viewport, so its scrollHeight can
+  // never fall below the height the host already applied. Measuring it turns
+  // every report into a ratchet: compact content is padded out to the default
+  // height and an App that shrinks keeps its taller frame forever. The body
+  // content height is the real measurement; the root is only the fallback for a
+  // document whose body reports nothing.
+  const measureHeight = () => {
+    const content = document.body?.scrollHeight ?? 0;
+    return content > 0 ? content : document.documentElement.scrollHeight;
+  };
   const reportHeight = () => {
     if (!initialRenderComplete || disposed || heightTimer) return;
     heightTimer = setTimeout(() => {
       heightTimer = 0;
-      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
+      const height = measureHeight();
       if (height === lastHeight) return;
       lastHeight = height;
       parent.postMessage({ type: 'droidex:app-height', instanceId, bridgeToken, height }, '*');
@@ -196,7 +206,7 @@ button, input, select, textarea {
 <body>
 ${source}
 <style data-droidex-app-host>
-html, body { overflow: hidden !important; }
+html, body { overflow: hidden !important; height: auto !important; }
 body { min-height: 0 !important; padding: 0 !important; }
 [data-droidex-app-root] {
   width: 100% !important;

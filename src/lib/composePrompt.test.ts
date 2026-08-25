@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { composePrompt, isVisualizeCommand, parseSlashSkillInvocation } from './composePrompt';
+import {
+  composePrompt,
+  isVisualizeCommand,
+  parseSlashSkillInvocation,
+  promptTextWithVisualize,
+  submitCommandFor,
+} from './composePrompt';
 
 test('one selected skill uses the provider-native slash invocation', () => {
   assert.equal(composePrompt('PR #100', ['review'], []), '/review PR #100');
@@ -43,6 +49,17 @@ test('/visualize without arguments remains the visible user command', () => {
   assert.equal(composed, '/visualize');
 });
 
+test('the Visualize chip sends exactly what typing the command sends', () => {
+  assert.equal(
+    promptTextWithVisualize('compare renderer timings', true),
+    '/visualize compare renderer timings',
+  );
+  assert.equal(promptTextWithVisualize('', true), '/visualize');
+  // Already typed: the chip must not double the command.
+  assert.equal(promptTextWithVisualize('/visualize a histogram', true), '/visualize a histogram');
+  assert.equal(promptTextWithVisualize('leave this alone', false), 'leave this alone');
+});
+
 test('/visualize remains an app command even when a provider skill has the same name', () => {
   assert.equal(isVisualizeCommand('/visualize chart these results'), true);
   assert.equal(isVisualizeCommand('/visualizer is a different prompt'), false);
@@ -63,4 +80,24 @@ test('an existing App keeps follow-up prompts App-capable without another slash 
   assert.equal(responseFormatForPrompt('make the points larger', true), 'app-followup');
   assert.equal(responseFormatForPrompt('ordinary question', false), undefined);
   assert.equal(responseFormatForPrompt('/visualize a histogram', false), 'app-create');
+});
+
+const nothingStaged = { visualizeSelected: false, skillCount: 0, fileCount: 0 };
+
+test('a bare command runs as a command, including the compact aliases', () => {
+  assert.equal(submitCommandFor('/mission', nothingStaged), 'mission');
+  for (const alias of ['/compact', '/compaction', '/compression']) {
+    assert.equal(submitCommandFor(alias, nothingStaged), 'compact');
+  }
+  assert.equal(submitCommandFor('/compact this thread please', nothingStaged), null);
+  assert.equal(submitCommandFor('what does /compact do?', nothingStaged), null);
+});
+
+// Skills and files already made the same words a prompt. Visualize did not, so
+// staging it and typing /compact compacted the session and dropped the plugin.
+test('anything staged makes the same words a prompt instead of a command', () => {
+  assert.equal(submitCommandFor('/compact', { ...nothingStaged, visualizeSelected: true }), null);
+  assert.equal(submitCommandFor('/mission', { ...nothingStaged, visualizeSelected: true }), null);
+  assert.equal(submitCommandFor('/compact', { ...nothingStaged, skillCount: 1 }), null);
+  assert.equal(submitCommandFor('/mission', { ...nothingStaged, fileCount: 1 }), null);
 });

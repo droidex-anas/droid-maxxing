@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createElement } from 'react';
+import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Markdown } from './Markdown';
+
+interface MarkdownProps {
+  children: string;
+  specMode?: boolean;
+  autoPlayAppBlocks?: boolean;
+}
 
 test('disabled diagrams render fenced SVG as escaped code', () => {
   const source = '```svg\n<svg onload="globalThis.pwned=true"></svg>\n```';
@@ -183,6 +189,58 @@ test('completed App fences inside quotes and lists keep their completed streamin
     assert.match(html, /<iframe/i);
     assert.doesNotMatch(html, />Building interactive app</);
   }
+});
+
+// The fence scan is deliberately simpler than a full CommonMark parser, so a
+// fence nested deeper than it follows is missing from its list. An unfinished
+// one must still not be mistaken for a finished app and auto-played.
+test('a streaming App fence nested past the fence scan keeps building', () => {
+  const source = [
+    '```app',
+    '<main>Complete</main>',
+    '```',
+    '',
+    '- item',
+    '  - nested',
+    '',
+    '      ```app',
+    '      <main>Still streaming',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(Markdown, { autoPlayAppBlocks: true, buildingAppBlocks: true }, source),
+  );
+
+  assert.equal(html.match(/<iframe/g)?.length, 1);
+  assert.equal(html.match(/>Building interactive app</g)?.length, 1);
+});
+
+test('a streaming response keeps the same element types across renders', () => {
+  // react-markdown uses each `components` entry as the JSX element type, so a
+  // map rebuilt per render makes React remount the whole response on every
+  // streamed token: App iframes reload, Mermaid diagrams restart, and anything
+  // the reader is interacting with is thrown away.
+  const renderMarkdown = (Markdown as unknown as { type: (props: MarkdownProps) => ReactElement })
+    .type;
+  const childOf = (element: ReactElement) => (element.props as { children: ReactElement }).children;
+  const componentsFor = (props: MarkdownProps) => {
+    // Markdown wraps the react-markdown element in a layout div and the fence
+    // options provider.
+    const markdown = childOf(childOf(renderMarkdown(props)));
+    return (markdown.props as { components: Record<string, unknown> }).components;
+  };
+
+  const source = '```app\n<main>Live app</main>\n```\n';
+  const first = componentsFor({ children: source, autoPlayAppBlocks: true });
+  const second = componentsFor({
+    children: `${source}\nTrailing prose while the answer streams.`,
+    autoPlayAppBlocks: true,
+  });
+
+  assert.equal(first, second);
+  assert.equal(first.code, second.code);
+  assert.equal(first.p, second.p);
+  // Spec mode is a different presentation, and so a different stable map.
+  assert.notEqual(first, componentsFor({ children: source, specMode: true }));
 });
 
 test('copy gracefully declines when the Clipboard API is unavailable', async () => {

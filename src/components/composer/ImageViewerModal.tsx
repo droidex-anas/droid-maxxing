@@ -160,7 +160,7 @@ function ImageViewerModalContent({
           e.stopPropagation();
         }}
       >
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-droid-text-muted">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-droid-text-muted">
           {cropping ? 'Drag across the image to choose a crop' : image.path}
         </span>
         {cropping ? (
