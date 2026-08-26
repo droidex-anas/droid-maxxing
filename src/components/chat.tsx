@@ -3,11 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
   Terminal,
-  Copy,
-  Check,
   FileText,
   Expand as ExpandIcon,
-  FoldVertical,
   MousePointer2,
   PenLine,
   Globe,
@@ -61,8 +58,18 @@ import {
 } from '../lib/childSessions';
 import { openExternal } from '../lib/onboarding';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
-import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
+import {
+  Caret,
+  CompactingIndicator,
+  CompactionDivider,
+  CopyButton,
+  ErrorTag,
+  Expand,
+  StreamingCaret,
+  WorkingIndicator,
+  useElapsed,
+} from './transcript/primitives';
 import {
   appendedFeedItemKeys,
   buildFeed,
@@ -96,111 +103,14 @@ function httpHref(url: string): string | undefined {
 const ACCENT = 'var(--droid-accent)';
 const EASE = [0.16, 1, 0.3, 1] as const;
 
-/* ── Live elapsed-time hook: ticks while active and visible. ── */
-function useElapsed(startTs: number | undefined, active: boolean): number {
-  const visible = useDocumentVisible();
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active || !visible) return;
-    setNow(Date.now());
-    const id = setInterval(() => {
-      setNow(Date.now());
-    }, 1000);
-    return () => {
-      clearInterval(id);
-    };
-  }, [active, visible]);
-  return startTs != null ? Math.max(0, now - startTs) : 0;
-}
-
-/* ── Streaming caret (text being written) ── */
-export function StreamingCaret() {
-  return (
-    <span
-      className="caret-blink inline-block w-[2px] h-[1.05em] -mb-[0.15em] ml-0.5 rounded-sm align-baseline"
-      style={{ background: ACCENT }}
-    />
-  );
-}
-
-/* ── Working indicator — minimal shimmer label, no icons/dots/bars ── */
-export function WorkingIndicator({
-  label = 'Working',
-  startTs,
-}: {
-  label?: string;
-  startTs?: number;
-}) {
-  const elapsed = useElapsed(startTs, true);
-  const suffix = startTs != null && elapsed >= 1000 ? ` ${formatDuration(elapsed)}` : '';
-  return (
-    <span className="shimmer-text text-[13px] font-medium tracking-tight" aria-live="polite">
-      {label}
-      {suffix}…
-    </span>
-  );
-}
-
-/* ── Loading skeleton — animated neutral shimmer blocks that stand in for an
-   assistant reply while a transcript restores or a fresh turn spins up. Tones
-   come only from the grayscale token scale (see .skeleton-block in index.css). ── */
-function SkeletonLine({ width }: { width: string }) {
-  return <div className="skeleton-block h-3" style={{ width }} />;
-}
-
-export function ChatSkeleton() {
-  return (
-    <div className="space-y-2.5" aria-hidden="true">
-      <SkeletonLine width="92%" />
-      <SkeletonLine width="84%" />
-      <SkeletonLine width="67%" />
-    </div>
-  );
-}
-
-// A couple of stacked reply blocks so a restoring conversation reads like
-// content is streaming in, not like an empty or broken view.
-export function TranscriptSkeleton() {
-  return (
-    <div className="space-y-8" aria-hidden="true">
-      <ChatSkeleton />
-      <div className="space-y-2.5">
-        <SkeletonLine width="38%" />
-        <SkeletonLine width="88%" />
-        <SkeletonLine width="74%" />
-      </div>
-    </div>
-  );
-}
-
-/* ── Compaction indicator — centered, larger shimmer while compacting ── */
-export function CompactingIndicator() {
-  return (
-    <div className="flex justify-center py-3">
-      <span className="shimmer-text text-[16px] font-semibold tracking-tight" aria-live="polite">
-        Compacting…
-      </span>
-    </div>
-  );
-}
-
-/* ── Compaction divider — persistent marker once compaction has completed ── */
-export function CompactionDivider({ compactType }: { compactType?: 'auto' | 'manual' }) {
-  const manual = compactType === 'manual';
-  const label = manual ? 'Session compacted' : 'Context automatically compacted';
-  return (
-    <div
-      className={`flex items-center gap-3 py-1 ${manual ? 'text-droid-text-secondary' : 'text-droid-text-muted'}`}
-    >
-      <div className="h-px flex-1 bg-droid-border/70" />
-      <span className="flex items-center gap-1.5 text-[12px] whitespace-nowrap">
-        <FoldVertical className="h-3.5 w-3.5" />
-        {label}
-      </span>
-      <div className="h-px flex-1 bg-droid-border/70" />
-    </div>
-  );
-}
+export {
+  ChatSkeleton,
+  CompactingIndicator,
+  CompactionDivider,
+  StreamingCaret,
+  TranscriptSkeleton,
+  WorkingIndicator,
+} from './transcript/primitives';
 
 // A status line that signals compaction is in progress (not the completion
 // line). Match the active gerund ("Compacting conversation...") specifically so
@@ -209,35 +119,6 @@ export function CompactionDivider({ compactType }: { compactType?: 'auto' | 'man
 export function isCompactingStatus(text?: string): boolean {
   const t = text ?? '';
   return /compacting/i.test(t) && !/complete/i.test(t);
-}
-
-/* ── Subtle expand affordance ── */
-function Caret({ open }: { open: boolean }) {
-  return (
-    <ChevronRight
-      className={`w-3 h-3 shrink-0 text-droid-text-muted/50 transition-transform duration-200 group-hover:text-droid-text-muted ${open ? 'rotate-90' : ''}`}
-    />
-  );
-}
-
-/* ── Animated expand/collapse, no chrome ── */
-function Expand({ open, children }: { open: boolean; children: React.ReactNode }) {
-  return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: 0.2, ease: EASE }}
-          className="overflow-hidden"
-          style={{ contain: 'layout paint' }}
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
 }
 
 /* ── Thinking / Thought ── */
@@ -341,35 +222,6 @@ function argStr(args: unknown, key: string): string | undefined {
   return undefined;
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      clearTimeout(timer.current ?? undefined);
-    },
-    [],
-  );
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        void navigator.clipboard?.writeText(text);
-        setCopied(true);
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => {
-          timer.current = null;
-          setCopied(false);
-        }, 1200);
-      }}
-      title="Copy"
-      className="p-1 rounded-md text-droid-text-muted/60 hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
-    >
-      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-    </button>
-  );
-}
-
 // Turn bare URLs in captured tool output into clickable links, so a web search
 // or page fetch shows the links it visited and the user can open them.
 const URL_RE = /(https?:\/\/[^\s<>()[\]"'`]+)/g;
@@ -405,21 +257,6 @@ function linkify(text: string): React.ReactNode {
 
 const RED = 'var(--droid-red)';
 const RED_TINT = 'color-mix(in srgb, var(--droid-red) 8%, transparent)';
-
-// A small red "error" pill shown on the right of a failed tool's header row.
-function ErrorTag() {
-  return (
-    <span
-      className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
-      style={{
-        backgroundColor: 'color-mix(in srgb, var(--droid-red) 15%, transparent)',
-        color: RED,
-      }}
-    >
-      error
-    </span>
-  );
-}
 
 function firstLine(text: string): string {
   const line = text.split('\n').find((l) => l.trim()) ?? text;

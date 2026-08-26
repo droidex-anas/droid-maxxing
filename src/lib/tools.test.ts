@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { FileText } from 'lucide-react';
 import {
   isWebSearchTool,
   isWebFetchTool,
@@ -14,6 +15,7 @@ import {
   activeTodoIndex,
   isChildSessionTool,
   toolMeta,
+  CAT_ICON,
   CAT_LABEL,
   type TodoItem,
 } from './tools';
@@ -303,4 +305,8 @@ test('only a real spawn is labeled a child session', () => {
     assert.equal(CAT_LABEL[toolMeta(name, { task_id: 'abc' }).cat], 'Subagent');
     assert.ok(!isChildSessionTool(name, { task_id: 'abc' }));
   }
+});
+
+test('CAT_ICON.read is FileText not Eye', () => {
+  assert.equal(CAT_ICON.read, FileText);
 });

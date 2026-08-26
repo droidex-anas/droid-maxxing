@@ -1,14 +1,4 @@
-import {
-  Eye,
-  FilePlus,
-  FilePen,
-  Terminal,
-  FileText,
-  Search,
-  Globe,
-  Boxes,
-  Bot,
-} from 'lucide-react';
+import { FilePlus, FilePen, Terminal, FileText, Search, Globe, Boxes, Bot } from 'lucide-react';
 import type { TranscriptEvent } from '../types/bridge';
 
 export type ToolCat =
@@ -24,7 +14,7 @@ export type ToolCat =
   | 'other';
 
 export const CAT_ICON: Record<ToolCat, React.ElementType> = {
-  read: Eye,
+  read: FileText,
   create: FilePlus,
   edit: FilePen,
   exec: Terminal,
