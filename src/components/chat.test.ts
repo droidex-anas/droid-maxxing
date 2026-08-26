@@ -1389,6 +1389,36 @@ test('final response projection retains settled turns while the live turn change
   assert.deepEqual([...nextTurn.liveKeys], []);
 });
 
+test('live final-response keys keep their reference while the live key is unchanged', () => {
+  const message = (id: string, author: 'user' | 'assistant'): FeedItem => ({
+    type: 'message',
+    key: id,
+    event: ev({ id, author, text: id }),
+  });
+  const initial = [message('user-1', 'user'), message('answer-1', 'assistant')];
+  const first = projectFinalResponseKeys(null, 'm:primary', initial, 'full');
+
+  // A non-message tail append leaves the turn's final response key unchanged,
+  // so chunks whose final-response display is unchanged stay memoized.
+  const streamed = projectFinalResponseKeys(
+    first,
+    'm:primary',
+    [...initial, { type: 'thinking', key: 'thinking-1', event: ev({ id: 'thinking-1' }) }],
+    'append',
+  );
+  assert.equal(streamed.liveKeys, first.liveKeys);
+  assert.equal(streamed.settledKeys, first.settledKeys);
+
+  const answered = projectFinalResponseKeys(
+    streamed,
+    'm:primary',
+    [...initial, message('answer-2', 'assistant')],
+    'append',
+  );
+  assert.deepEqual([...answered.liveKeys], ['answer-2']);
+  assert.notEqual(answered.liveKeys, streamed.liveKeys);
+});
+
 // The infinite status indicators (caret blink, shimmer) must honor
 // prefers-reduced-motion so the UI stays usable for motion-sensitive users.
 test('caret-blink is neutralized under prefers-reduced-motion', () => {

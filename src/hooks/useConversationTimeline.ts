@@ -129,20 +129,21 @@ export function useConversationTimeline({
 } {
   // Every loaded prompt gets a dot so the rail mirrors the whole reachable
   // thread; the rail itself scrolls once the dot list outgrows its gutter.
+  // Render only reads the projection; the committed ref update happens in the
+  // effect below, and a child view commits undefined to clear it.
   const anchorProjectionRef = useRef<TimelineAnchorProjection | undefined>(undefined);
-  const timelineAnchors = useMemo(() => {
-    if (isViewingChildSession) {
-      anchorProjectionRef.current = undefined;
-      return NO_TIMELINE_ANCHORS;
-    }
-    const projection = projectTimelineAnchors(anchorProjectionRef.current, {
+  const anchorProjection = useMemo(() => {
+    if (isViewingChildSession) return undefined;
+    return projectTimelineAnchors(anchorProjectionRef.current, {
       conversationKey,
       feedItems,
       projectionMode,
     });
-    anchorProjectionRef.current = projection;
-    return projection.anchors;
   }, [conversationKey, feedItems, isViewingChildSession, projectionMode]);
+  useEffect(() => {
+    anchorProjectionRef.current = anchorProjection;
+  }, [anchorProjection]);
+  const timelineAnchors = anchorProjection?.anchors ?? NO_TIMELINE_ANCHORS;
   const capacityBlockedConversationsRef = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
     capacityBlockedConversationsRef.current = rememberTimelineCapacityBlock(

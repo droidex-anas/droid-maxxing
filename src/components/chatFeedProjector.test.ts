@@ -214,7 +214,8 @@ test('tool-call tail replacement and grouped orchestration stay full-build equiv
     toolArgs: { subagent_type: 'worker' },
     ts: 2,
   });
-  const initialEvents = [user('user-1', 1), partialTask];
+  const firstPrompt = user('user-1', 1);
+  const initialEvents = [firstPrompt, partialTask];
   project(input(initialEvents, undefined));
 
   const completeTask = {
@@ -222,7 +223,7 @@ test('tool-call tail replacement and grouped orchestration stay full-build equiv
     toolArgs: { subagent_type: 'worker', description: 'Inspect the runtime' },
     endTs: 3,
   };
-  let events = [initialEvents[0], completeTask];
+  let events = [firstPrompt, completeTask];
   let revision = 1;
   let projectorInput = input(events, appendMutation(revision, initialEvents.length, 1));
   let projection = project(projectorInput);

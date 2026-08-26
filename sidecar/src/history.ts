@@ -272,7 +272,7 @@ export class HistoryIndex {
       HistoryIndex.initializeOrValidateHistorySchema(db);
       db.exec('PRAGMA journal_mode = WAL');
       this.db = db;
-      sessionIndexMemo = this.sessionFiles.pathIndex();
+      sessionIndexMemo ??= this.sessionFiles.pathIndex();
     } catch (error) {
       db.close();
       throw error;
@@ -330,7 +330,7 @@ export class HistoryIndex {
     return changed;
   }
 
-  private static initializeOrValidateHistorySchema(db: DatabaseSync): void {
+  static initializeOrValidateHistorySchema(db: DatabaseSync): void {
     const row = db.prepare('PRAGMA user_version').get() as Record<string, unknown> | undefined;
     const version = numberValue(row?.user_version) ?? 0;
     const nonEmpty =

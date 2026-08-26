@@ -149,9 +149,27 @@ export class HistoryIndexDatabase {
       this.cancel(this.indexingTimer);
       this.indexingTimer = null;
     }
-    if (this.activeSlice) await this.activeSlice;
-    this.derivedDb.close();
-    this.canonicalDb.close();
+    let firstError: unknown;
+    try {
+      if (this.activeSlice) await this.activeSlice;
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      this.derivedDb.close();
+    } catch (error) {
+      firstError ??= error;
+    }
+    try {
+      this.canonicalDb.close();
+    } catch (error) {
+      firstError ??= error;
+    }
+    if (firstError !== undefined) {
+      throw firstError instanceof Error
+        ? firstError
+        : new Error('History index shutdown failed.', { cause: firstError });
+    }
   }
 
   private ensurePlannedAll(): void {

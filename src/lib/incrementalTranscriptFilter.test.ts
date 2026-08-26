@@ -90,3 +90,54 @@ test('older page insertion retains the existing filtered suffix', () => {
   );
   assert.equal(next[1], initial[0]);
 });
+
+test('a changed includes predicate rebuilds in full instead of corrupting the suffix count', () => {
+  const project = createIncrementalTranscriptFilter();
+  const primaryOnly = (item: TranscriptEvent) => item.sourceSessionId === 'primary';
+  const source = [event('a', 'primary'), event('b', 'child'), event('c', 'primary')];
+  project({ conversationKey: 'mission', source, mutation: undefined, includes: primaryOnly });
+
+  const broader = (item: TranscriptEvent) => item.sourceSessionId !== 'elsewhere';
+  const next = project({
+    conversationKey: 'mission',
+    source: [...source, event('tail', 'child')],
+    mutation: appendMutation(source.length),
+    includes: broader,
+  });
+
+  assert.deepEqual(
+    next.map((item) => item.id),
+    ['a', 'b', 'c', 'tail'],
+  );
+});
+
+test('a mutable predicate falls back to a full rebuild instead of a negative prefix', () => {
+  const project = createIncrementalTranscriptFilter();
+  let includeEveryEvent = false;
+  const predicate = (item: TranscriptEvent) =>
+    includeEveryEvent || item.sourceSessionId === 'primary';
+  const first = event('a', 'primary');
+  const source = [first, event('b', 'child'), event('c', 'primary')];
+  project({ conversationKey: 'mission', source, mutation: undefined, includes: predicate });
+
+  includeEveryEvent = true;
+  const replacedChild = event('b', 'child');
+  const replacedTail = event('c', 'primary');
+  const next = project({
+    conversationKey: 'mission',
+    source: [first, replacedChild, replacedTail, event('tail', 'child')],
+    mutation: {
+      revision: 1,
+      baseRevision: 0,
+      kind: 'append',
+      previousLength: source.length,
+      firstChangedIndex: 0,
+    },
+    includes: predicate,
+  });
+
+  assert.deepEqual(
+    next.map((item) => item.id),
+    ['a', 'b', 'c', 'tail'],
+  );
+});

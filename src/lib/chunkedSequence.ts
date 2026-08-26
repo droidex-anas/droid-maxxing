@@ -44,6 +44,15 @@ export function asChunkedSequence<T>(values: readonly T[], chunkSize = DEFAULT_C
   return createSequence(stateFromChunks(chunks, chunkSize));
 }
 
+/**
+ * Derived operations resolve an existing sequence before normalization so its
+ * chunk geometry survives: renormalizing a custom-sized sequence would copy
+ * every retained chunk and break reference-based render memoization.
+ */
+function resolveChunkedSequence<T>(values: readonly T[]): T[] {
+  return getSequenceState(values) ? (values as T[]) : asChunkedSequence(values);
+}
+
 /** Replaces one suffix while retaining settled chunks by reference. */
 export function replaceChunkedSequenceSuffix<T>(
   values: readonly T[],
@@ -51,7 +60,7 @@ export function replaceChunkedSequenceSuffix<T>(
   replacement: readonly T[],
 ): T[] {
   validateIndex('start', start, values.length);
-  const sequence = asChunkedSequence(values);
+  const sequence = resolveChunkedSequence(values);
   const state = requiredSequenceState(sequence);
 
   if (start >= state.settledLength) {
@@ -74,7 +83,7 @@ export function insertChunkedSequence<T>(
 ): T[] {
   validateIndex('index', index, values.length);
   if (inserted.length === 0) return values as T[];
-  const sequence = asChunkedSequence(values);
+  const sequence = resolveChunkedSequence(values);
   const state = requiredSequenceState(sequence);
   const chunks = [
     ...chunksForRange(state, 0, index),
@@ -91,7 +100,7 @@ export function replaceChunkedSequencePrefix<T>(
   replacement: readonly T[],
 ): T[] {
   validateIndex('end', end, values.length);
-  const sequence = asChunkedSequence(values);
+  const sequence = resolveChunkedSequence(values);
   const state = requiredSequenceState(sequence);
   return createSequence(
     stateFromChunks(
@@ -105,7 +114,7 @@ export function replaceChunkedSequencePrefix<T>(
 }
 
 export function chunkedSequenceSlice<T>(values: readonly T[], start = 0, end = values.length): T[] {
-  const sequence = asChunkedSequence(values);
+  const sequence = resolveChunkedSequence(values);
   const state = requiredSequenceState(sequence);
   const normalizedStart = normalizeSliceIndex(start, sequence.length);
   const normalizedEnd = Math.max(normalizedStart, normalizeSliceIndex(end, sequence.length));
@@ -119,7 +128,7 @@ export function chunkedSequenceDiagnostics(values: readonly unknown[]): {
   settledEventCount: number;
   liveEventCount: number;
 } {
-  const sequence = asChunkedSequence(values);
+  const sequence = resolveChunkedSequence(values);
   const state = requiredSequenceState(sequence);
   return {
     settledChunkCount: state.settledChunks.length,
@@ -130,7 +139,7 @@ export function chunkedSequenceDiagnostics(values: readonly unknown[]): {
 
 /** Returns stable chunk references for coarse-grained render memoization. */
 export function chunkedSequenceChunks<T>(values: readonly T[]): readonly (readonly T[])[] {
-  const sequence = asChunkedSequence(values);
+  const sequence = resolveChunkedSequence(values);
   const state = requiredSequenceState(sequence);
   return state.liveChunk.length > 0
     ? [...state.settledChunks, state.liveChunk]

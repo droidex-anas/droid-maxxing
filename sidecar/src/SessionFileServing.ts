@@ -57,12 +57,8 @@ export class SessionFileServing {
   async finalizeClosedProvider(providerSessionId: string): Promise<void> {
     if (this.dependencies.isShutdownStarted()) return;
     const path = this.watcher?.consumeLiveSessionFile(providerSessionId);
-    if (path) {
-      await this.dependencies.history.reconcileSessionFilePaths([{ providerSessionId, path }]);
-    } else {
-      await this.dependencies.history.reconcileSessionFiles();
-    }
-    if (!this.dependencies.isShutdownStarted()) this.emit(this.lastListOptions);
+    const changes = path ? [{ providerSessionId, path }] : null;
+    await this.queueReconcile(() => this.reconcileExternal(changes));
   }
 
   async close(): Promise<void> {
@@ -149,6 +145,6 @@ export class SessionFileServing {
     this.dependencies.retryPendingLaunchSettings(
       changes?.map(({ providerSessionId }) => providerSessionId),
     );
-    if (this.lastListOptions) this.emit(this.lastListOptions);
+    this.emit(this.lastListOptions);
   }
 }

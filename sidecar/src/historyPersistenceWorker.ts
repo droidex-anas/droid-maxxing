@@ -43,10 +43,14 @@ if (workerLane === 'persistence') initializePersistenceDatabase();
 
 parentPort.on('message', (envelope: HistoryWorkerEnvelope) => {
   const searchEpoch = envelope.request.type === 'search' ? ++latestSearchEpoch : latestSearchEpoch;
-  operationTail = operationTail.then(
-    () => handle(envelope, searchEpoch),
-    () => handle(envelope, searchEpoch),
-  );
+  operationTail = operationTail
+    .then(
+      () => handle(envelope, searchEpoch),
+      () => handle(envelope, searchEpoch),
+    )
+    .catch((error: unknown) => {
+      console.error('History persistence worker operation failed:', error);
+    });
 });
 
 async function handle(envelope: HistoryWorkerEnvelope, searchEpoch: number): Promise<void> {

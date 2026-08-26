@@ -1,4 +1,5 @@
 import type { BridgeFeature, SessionSummary } from './protocol.js';
+import type { ReasoningEffort } from './protocol.js';
 import { objectValue, stringValue } from './values.js';
 
 interface PersistedSessionFileSummary {
@@ -6,7 +7,19 @@ interface PersistedSessionFileSummary {
   summary: SessionSummary;
 }
 
-const SESSION_FILE_SUMMARY_CACHE_VERSION = 1;
+export const SESSION_FILE_SUMMARY_CACHE_VERSION = 1;
+
+export const SESSION_FILE_REASONING_EFFORTS: Record<ReasoningEffort, true> = {
+  off: true,
+  none: true,
+  minimal: true,
+  low: true,
+  medium: true,
+  high: true,
+  xhigh: true,
+  max: true,
+  dynamic: true,
+};
 
 export function parseCachedSessionSummary(raw: unknown): SessionSummary | null | undefined {
   if (raw === null) return null;
@@ -78,9 +91,9 @@ function hasOptionalSummaryFields(summary: Record<string, unknown>): boolean {
       'proposal',
       'contextUpdatedAt',
     ]) &&
-    optionalRecordOneOf(summary, 'reasoningEffort', REASONING_EFFORTS) &&
-    optionalRecordOneOf(summary, 'workerReasoningEffort', REASONING_EFFORTS) &&
-    optionalRecordOneOf(summary, 'validatorReasoningEffort', REASONING_EFFORTS) &&
+    optionalRecordKeyOf(summary, 'reasoningEffort', SESSION_FILE_REASONING_EFFORTS) &&
+    optionalRecordKeyOf(summary, 'workerReasoningEffort', SESSION_FILE_REASONING_EFFORTS) &&
+    optionalRecordKeyOf(summary, 'validatorReasoningEffort', SESSION_FILE_REASONING_EFFORTS) &&
     optionalRecordOneOf(summary, 'contextAccuracy', ['exact', 'estimated']) &&
     optionalRecordOneOf(summary, 'workspaceKind', ['folder', 'none']) &&
     optionalFiniteNumber(summary, [
@@ -151,14 +164,11 @@ function optionalOneOf(value: unknown, allowed: readonly string[]): boolean {
   return value === undefined || oneOf(value, allowed);
 }
 
-const REASONING_EFFORTS = [
-  'off',
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-  'dynamic',
-] as const;
+function optionalRecordKeyOf<T extends string>(
+  record: Record<string, unknown>,
+  key: string,
+  allowed: Record<T, true>,
+): boolean {
+  const value = record[key];
+  return value === undefined || (typeof value === 'string' && value in allowed);
+}

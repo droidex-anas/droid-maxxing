@@ -12,6 +12,8 @@ export class HistoryPersistenceDatabase {
   private readonly writer: HistoryWriteStatements;
   private readonly readWriterLease;
   private readonly writeWriterLease;
+  private readonly clearWriterLease;
+  private claimedLease: HistoryWriterLease | null = null;
 
   constructor(dbPath: string) {
     this.db = new DatabaseSync(dbPath);
@@ -35,6 +37,10 @@ export class HistoryPersistenceDatabase {
       ON CONFLICT(scope) DO UPDATE SET
         value_json = excluded.value_json,
         updated_at = excluded.updated_at
+    `);
+    this.clearWriterLease = this.db.prepare(`
+      DELETE FROM settings
+      WHERE scope = 'history.persistence_writer_lease' AND value_json = ?
     `);
   }
 
@@ -87,6 +93,10 @@ export class HistoryPersistenceDatabase {
   }
 
   close(): void {
+    if (this.claimedLease) {
+      this.clearWriterLease.run(JSON.stringify(this.claimedLease));
+      this.claimedLease = null;
+    }
     this.db.close();
   }
 
@@ -96,12 +106,18 @@ export class HistoryPersistenceDatabase {
     if (current && !currentLease) {
       throw new Error('History persistence writer lease is invalid; rebuild the history database.');
     }
-    if (currentLease?.owner === lease.owner && currentLease.generation > lease.generation) {
-      throw new Error(
-        `History persistence writer generation ${String(lease.generation)} was replaced by generation ${String(currentLease.generation)}.`,
-      );
+    if (currentLease) {
+      if (currentLease.owner !== lease.owner && isProcessAlive(currentLease.processId)) {
+        throw new Error('History persistence writer lease is owned by another live worker.');
+      }
+      if (currentLease.owner === lease.owner && currentLease.generation > lease.generation) {
+        throw new Error(
+          `History persistence writer generation ${String(lease.generation)} was replaced by generation ${String(currentLease.generation)}.`,
+        );
+      }
     }
     this.writeWriterLease.run(JSON.stringify(lease), Date.now());
+    this.claimedLease = lease;
   }
 }
 
@@ -113,17 +129,40 @@ function parseWriterLease(value: unknown): HistoryWriterLease | null {
       typeof parsed !== 'object' ||
       parsed === null ||
       !('owner' in parsed) ||
-      typeof parsed.owner !== 'string' ||
-      parsed.owner.length === 0 ||
       !('generation' in parsed) ||
-      !Number.isSafeInteger(parsed.generation) ||
-      Number(parsed.generation) < 1
+      !('processId' in parsed)
     ) {
       return null;
     }
-    return { owner: parsed.owner, generation: Number(parsed.generation) };
+    const { owner, generation, processId } = parsed;
+    if (typeof owner !== 'string' || owner.length === 0) return null;
+    if (!isPositiveSafeInteger(generation)) return null;
+    if (!isPositiveSafeInteger(processId)) return null;
+    return {
+      owner,
+      generation,
+      processId,
+    };
   } catch {
     return null;
+  }
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function isProcessAlive(processId: number): boolean {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    return !(
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ESRCH'
+    );
   }
 }
 

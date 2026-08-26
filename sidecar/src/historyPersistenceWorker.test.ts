@@ -302,12 +302,20 @@ test('a synchronous timeout does not leak an unhandled promise rejection', async
   const dbPath = join(dir, 'history.sqlite');
   const unhandled: unknown[] = [];
   const onUnhandled = (error: unknown) => unhandled.push(error);
+  const workers: Worker[] = [];
   process.on('unhandledRejection', onUnhandled);
   try {
     createSchema(dbPath);
     const client = new HistoryWorkerClient({
-      workerData: { dbPath, lane: 'persistence' },
       syncTimeoutMs: 0,
+      workerFactory: () => {
+        const worker = new Worker(
+          new URL('./historyPersistenceWorkerLoader.mjs', import.meta.url),
+          { workerData: { dbPath, lane: 'persistence' }, execArgv: [] },
+        );
+        workers.push(worker);
+        return worker;
+      },
     });
     assert.throws(() => client.closeSync(), /did not respond within 0ms/);
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -315,6 +323,7 @@ test('a synchronous timeout does not leak an unhandled promise rejection', async
     assert.deepEqual(unhandled, []);
   } finally {
     process.removeListener('unhandledRejection', onUnhandled);
+    await Promise.all(workers.map(async (worker) => await worker.terminate()));
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -508,6 +517,38 @@ test('an asynchronous durability timeout recreates the worker without another bo
   } finally {
     await Promise.all(workers.map(async (worker) => await worker.terminate()));
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a search transport timeout fails only that call', async () => {
+  const watchdogs = createWatchdogScheduler();
+  const worker = new Worker(
+    `
+      const { parentPort } = require('node:worker_threads');
+      parentPort.on('message', ({ request, replyPort }) => {
+        if (request.type === 'search') return;
+        replyPort.postMessage({ ok: true, value: { accepted: true } });
+        replyPort.close();
+      });
+    `,
+    { eval: true },
+  );
+  try {
+    const client = new HistoryWorkerClient({
+      worker,
+      scheduleWatchdog: watchdogs.schedule,
+      cancelWatchdog: watchdogs.cancel,
+    });
+
+    const search = client.search('needle');
+    void search.catch(() => undefined);
+    watchdogs.fireNext();
+    await assert.rejects(settleWithin(search, 2_000), /did not respond within 60000ms/);
+    await assert.doesNotReject(() => settleWithin(client.setIndexingIdle(true), 2_000));
+    assert.equal(watchdogs.pendingCount(), 0);
+    client.closeSync();
+  } finally {
+    await worker.terminate();
   }
 });
 

@@ -11,6 +11,7 @@ interface FilterProjection {
   source: TranscriptEvent[];
   filtered: TranscriptEvent[];
   revision: number;
+  includes: (event: TranscriptEvent) => boolean;
 }
 
 interface FilterInput {
@@ -29,7 +30,8 @@ export function createIncrementalTranscriptFilter(): (input: FilterInput) => Tra
     if (
       previous?.conversationKey === input.conversationKey &&
       previous.source === input.source &&
-      previous.revision === revision
+      previous.revision === revision &&
+      previous.includes === input.includes
     ) {
       return previous.filtered;
     }
@@ -46,6 +48,7 @@ export function createIncrementalTranscriptFilter(): (input: FilterInput) => Tra
       source: input.source,
       filtered,
       revision,
+      includes: input.includes,
     };
     return filtered;
   };
@@ -59,6 +62,7 @@ function projectIncrementalFilter(
   const mutation = input.mutation;
   if (
     previous?.conversationKey !== input.conversationKey ||
+    previous.includes !== input.includes ||
     mutation?.baseRevision !== previous.revision ||
     mutation.previousLength !== previous.source.length
   ) {
@@ -79,12 +83,15 @@ function projectAppendedFilter(
   input: FilterInput,
   revision: number,
   mutation: Pick<TranscriptMutation, 'firstChangedIndex'>,
-): FilterProjection {
+): FilterProjection | undefined {
   let filteredPrefixLength = previous.filtered.length;
   for (let index = mutation.firstChangedIndex; index < previous.source.length; index += 1) {
     const event = previous.source.at(index);
     if (event && input.includes(event)) filteredPrefixLength -= 1;
   }
+  // A mutable predicate can drift away from the projection it produced; a
+  // negative count would corrupt the retained prefix, so rebuild in full.
+  if (filteredPrefixLength < 0) return undefined;
   const suffix = filterRange(
     input.source,
     mutation.firstChangedIndex,
@@ -96,6 +103,7 @@ function projectAppendedFilter(
     source: input.source,
     filtered: replaceChunkedSequenceSuffix(previous.filtered, filteredPrefixLength, suffix),
     revision,
+    includes: input.includes,
   };
 }
 
@@ -121,6 +129,7 @@ function projectPrependedFilter(
     source: input.source,
     filtered: insertChunkedSequence(previous.filtered, filteredInsertionIndex, inserted),
     revision,
+    includes: input.includes,
   };
 }
 

@@ -377,9 +377,11 @@ test('an in-flight old slice cannot overwrite a newer watcher entry', async () =
     schedule: slices.schedule,
     cancel: slices.cancel,
   });
+  let activeSlice: Promise<void> | undefined;
+  let activeSliceError: unknown;
   try {
     database.reconcileSessionFiles();
-    void slices.runNext();
+    activeSlice = slices.runNext();
 
     appendFileSync(
       path,
@@ -403,10 +405,20 @@ test('an in-flight old slice cannot overwrite a newer watcher entry', async () =
     }
     assert.equal(result, 'racing-provider');
   } finally {
+    try {
+      await activeSlice;
+    } catch (error) {
+      activeSliceError = error;
+    }
     await database.close();
     if (previousHome === undefined) delete process.env['HOME'];
     else process.env['HOME'] = previousHome;
     rmSync(home, { recursive: true, force: true });
+  }
+  if (activeSliceError) {
+    throw activeSliceError instanceof Error
+      ? activeSliceError
+      : new Error(String(activeSliceError));
   }
 });
 
@@ -492,17 +504,29 @@ test('a full reconcile cancels a deleted file in flight before stale rows commit
     schedule: slices.schedule,
     cancel: slices.cancel,
   });
+  let activeSlice: Promise<void> | undefined;
+  let activeSliceError: unknown;
   try {
     database.reconcileSessionFiles();
-    void slices.runNext();
+    activeSlice = slices.runNext();
     rmSync(path);
     database.reconcileSessionFiles();
 
     assert.deepEqual(await database.search('deleted narwhal'), []);
   } finally {
+    try {
+      await activeSlice;
+    } catch (error) {
+      activeSliceError = error;
+    }
     await database.close();
     if (previousHome === undefined) delete process.env['HOME'];
     else process.env['HOME'] = previousHome;
     rmSync(home, { recursive: true, force: true });
+  }
+  if (activeSliceError) {
+    throw activeSliceError instanceof Error
+      ? activeSliceError
+      : new Error(String(activeSliceError));
   }
 });

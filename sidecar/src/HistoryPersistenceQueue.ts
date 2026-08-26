@@ -185,10 +185,10 @@ export class HistoryPersistenceQueue {
 
   private afterEnqueue(): void {
     this.notePeak();
-    if (
+    const thresholdReached =
       this.pending.rowCount >= MAX_PERSISTENCE_BATCH_ROWS ||
-      this.pending.estimatedByteCount >= MAX_PERSISTENCE_BATCH_BYTES
-    ) {
+      this.pending.estimatedByteCount >= MAX_PERSISTENCE_BATCH_BYTES;
+    if (thresholdReached && !this.retryTimer) {
       this.clearFlushTimer();
       this.startNext();
       return;

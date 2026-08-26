@@ -20,6 +20,9 @@ export interface ChildSessionsDependencies {
   runtime: Pick<FactoryRuntime, 'loadSession'>;
   registry: Pick<SessionRegistry<ChildParentLease>, 'getLive'>;
   history: Pick<HistoryIndex, 'childSessions' | 'childSession' | 'sessionLaunchSettings'> & {
+    // Mirrors HistoryIndex.upsertChildSession: false means the child update is
+    // queued behind durability and must not be published yet; true/undefined
+    // both mean the update is safe to publish immediately.
     upsertChildSession(child: PersistedChildSession): boolean | undefined;
   };
   timeline: Pick<

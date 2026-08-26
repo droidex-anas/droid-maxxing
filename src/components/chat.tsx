@@ -65,7 +65,7 @@ import { openExternal } from '../lib/onboarding';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { feedItemTailId } from '../hooks/conversationViewportAnchor';
 import { asChunkedSequence, chunkedSequenceChunks } from '../lib/chunkedSequence';
-import { FeedRowsChunk, type FeedRowsSharedProps } from './messageFeedRows';
+import { FeedRowsChunk, feedRowsChunkKey, type FeedRowsSharedProps } from './messageFeedRows';
 import {
   appendedFeedItemKeysFromProjection,
   projectFinalResponseKeys,
@@ -2811,7 +2811,7 @@ export function MessageFeed({
     itemOffset += chunk.length;
     return (
       <FeedRowsChunk
-        key={chunk[0]?.key ?? `empty-${String(chunkIndex)}`}
+        key={feedRowsChunkKey(chunkIndex)}
         items={chunk}
         itemOffset={offset}
         lastItemIndex={lastIdx}

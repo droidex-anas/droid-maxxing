@@ -17,22 +17,16 @@ export function projectFinalResponseKeys(
   updateKind: 'full' | 'append' | 'prepend',
 ): FinalResponseKeyState {
   const { index: latestPromptIndex, event: latestPromptEvent } = latestPrompt(items);
+  const projectedLiveKeys = finalResponseKeysInRange(items, latestPromptIndex + 1);
+  const liveKeys = reuseLiveKeys(previous, identity, projectedLiveKeys);
 
   if (previous?.identity === identity && updateKind === 'append') {
     if (previous.latestPromptEvent === latestPromptEvent) {
-      return {
-        ...previous,
-        liveKeys: finalResponseKeysInRange(items, latestPromptIndex + 1),
-      };
+      return { ...previous, liveKeys };
     }
     const settledKeys = new Set(previous.settledKeys);
     for (const key of previous.liveKeys) settledKeys.add(key);
-    return {
-      identity,
-      latestPromptEvent,
-      settledKeys,
-      liveKeys: finalResponseKeysInRange(items, latestPromptIndex + 1),
-    };
+    return { identity, latestPromptEvent, settledKeys, liveKeys };
   }
 
   const settledKeys = new Set<string>();
@@ -48,12 +42,28 @@ export function projectFinalResponseKeys(
     }
   }
   if (pendingKey) settledKeys.add(pendingKey);
-  return {
-    identity,
-    latestPromptEvent,
-    settledKeys,
-    liveKeys: finalResponseKeysInRange(items, latestPromptIndex + 1),
-  };
+  return { identity, latestPromptEvent, settledKeys, liveKeys };
+}
+
+function reuseLiveKeys(
+  previous: FinalResponseKeyState | null,
+  identity: string,
+  next: ReadonlySet<string>,
+): ReadonlySet<string> {
+  return previous?.identity === identity ? stableLiveKeys(previous.liveKeys, next) : next;
+}
+
+// The live set is at most one key; reuse the previous reference when its
+// content is unchanged so chunk memoization can compare it by identity.
+function stableLiveKeys(
+  previous: ReadonlySet<string>,
+  next: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (previous.size !== next.size) return next;
+  for (const key of next) {
+    if (!previous.has(key)) return next;
+  }
+  return previous;
 }
 
 function finalResponseKeysInRange(items: FeedItem[], start: number): ReadonlySet<string> {

@@ -11,6 +11,7 @@ import {
 import {
   applyConversationContentResize,
   didCommitRequestedHistoryPrepend,
+  shouldBindConversationContentResize,
   shouldLoadOlderHistoryAtTop,
   shouldReleaseConversationTranscript,
 } from './useConversationScrollWindow';
@@ -217,4 +218,67 @@ test('content resize follows a pinned tail and preserves an unpinned row anchor'
   assert.equal(unpinned.mode, 'preserve-anchor');
   assert.equal(unpinned.didFindRow, true);
   assert.equal(unpinnedElement.scrollTop, 1_150);
+});
+
+test('content resize binding follows the live first child even with an empty transcript', () => {
+  const container = {} as HTMLDivElement;
+  const welcome = {} as Element;
+  const composeSkeleton = {} as Element;
+
+  // First bind while the transcript is still empty.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding: null,
+      element: container,
+      content: welcome,
+      conversationKey: 'session-a',
+    }),
+    true,
+  );
+  const binding = { element: container, content: welcome, conversationKey: 'session-a' };
+
+  // Same child and conversation: nothing to rebind.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding,
+      element: container,
+      content: welcome,
+      conversationKey: 'session-a',
+    }),
+    false,
+  );
+
+  // The conversation content element is swapped with the transcript still at
+  // zero events; the observer must follow the replacement child.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding,
+      element: container,
+      content: composeSkeleton,
+      conversationKey: 'session-a',
+    }),
+    true,
+  );
+
+  // A conversation switch rebinds even when the container keeps its child.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding,
+      element: container,
+      content: welcome,
+      conversationKey: 'session-b',
+    }),
+    true,
+  );
+
+  // No container or child means nothing can be observed.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding: null,
+      element: null,
+      content: null,
+      conversationKey: 'session-a',
+    }),
+    false,
+  );
 });

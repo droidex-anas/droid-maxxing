@@ -66,6 +66,7 @@ export async function readSessionSearchSlice(
           lineParts,
           lineBytes,
           isDiscardingLine,
+          maxBytes,
           buffer.subarray(lineStart, index),
         ));
         if (!isDiscardingLine) {
@@ -96,6 +97,7 @@ export async function readSessionSearchSlice(
           lineParts,
           lineBytes,
           isDiscardingLine,
+          maxBytes,
           buffer.subarray(lineStart, bytesRead),
         ));
       }
@@ -179,10 +181,15 @@ function appendLinePart(
   lineParts: Buffer[],
   lineBytes: number,
   isDiscardingLine: boolean,
+  maxBytes: number,
   part: Buffer,
 ): { lineBytes: number; isDiscardingLine: boolean } {
   if (isDiscardingLine) return { lineBytes: 0, isDiscardingLine: true };
   const nextLineBytes = lineBytes + part.length;
+  if (nextLineBytes > maxBytes) {
+    lineParts.length = 0;
+    return { lineBytes: 0, isDiscardingLine: true };
+  }
   lineParts.push(part);
   return { lineBytes: nextLineBytes, isDiscardingLine: false };
 }

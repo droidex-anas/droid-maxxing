@@ -60,7 +60,7 @@ async function readAll(candidate: SessionSearchCandidate): Promise<SessionSearch
   const records: SessionSearchRecord[] = [];
   let byteOffset = 0;
   for (;;) {
-    const slice = await readSessionSearchSlice(candidate, byteOffset, 1);
+    const slice = await readSessionSearchSlice(candidate, byteOffset);
     assert.ok(slice.nextByteOffset > byteOffset || slice.reachedEnd);
     records.push(...slice.records);
     byteOffset = slice.nextByteOffset;
@@ -111,7 +111,7 @@ test('excludes tool IO, llm-only context, internal notices, and corrupt lines', 
   }
 });
 
-test('oversized JSONL records remain searchable and advance at a complete-record boundary', async () => {
+test('oversized JSONL records are discarded and scanning resumes at the next record', async () => {
   const oversized = messageLine(
     'oversized',
     'user',
@@ -123,9 +123,7 @@ test('oversized JSONL records remain searchable and advance at a complete-record
   try {
     const first = await readSessionSearchSlice(fixture.candidate, 0, DEFAULT_SEARCH_SLICE_BYTES);
     assert.ok(first.nextByteOffset > DEFAULT_SEARCH_SLICE_BYTES);
-    assert.equal(first.records.length, 1);
-    assert.equal(first.records[0]?.author, 'user');
-    assert.ok(first.records[0]?.text.startsWith('do not retain'));
+    assert.deepEqual(first.records, []);
     assert.deepEqual(content(await readAllFrom(fixture.candidate, first.nextByteOffset)), [
       { ts: 2_000, author: 'assistant', text: 'bounded otter marker' },
     ]);

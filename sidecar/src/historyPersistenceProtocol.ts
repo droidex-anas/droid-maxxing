@@ -34,6 +34,7 @@ export interface HistoryPersistenceResult {
 export interface HistoryWriterLease {
   owner: string;
   generation: number;
+  processId: number;
 }
 
 export interface HistoryPersistenceQueueSnapshot {

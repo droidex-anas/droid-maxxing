@@ -135,7 +135,13 @@ export class HistorySearchReader {
       identities.set(appSessionId, identity);
       const providerSessionId = stringValue(raw.provider_session_id);
       if (providerSessionId) identities.set(providerSessionId, identity);
-      for (const alias of decodeProviderSessionIdList(raw.compacted_from_provider_session_ids)) {
+      let aliases: string[];
+      try {
+        aliases = decodeProviderSessionIdList(raw.compacted_from_provider_session_ids);
+      } catch {
+        aliases = [];
+      }
+      for (const alias of aliases) {
         identities.set(alias, identity);
       }
     }

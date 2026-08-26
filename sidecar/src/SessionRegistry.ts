@@ -265,33 +265,34 @@ export class SessionRegistry<TLive extends RegisteredSession> {
 
   private ensureHistoricalSummaries(): void {
     const revision = this.dependencies.history.revision;
-    const ordinaryHistoryChanged =
+    const historicalChanged =
       !this.historicalLoaded || revision === undefined || revision !== this.historicalRevision;
-    if (ordinaryHistoryChanged) {
-      const { patches, hiddenProviderSessionIds } =
-        this.dependencies.history.summaryPatchesAndHidden();
-      this.historicalPatches = patches;
-      this.hiddenHistoricalProviderSessionIds = hiddenProviderSessionIds;
-      this.ordinaryHistoricalSummaries = new Map<string, SessionSummary>();
-      this.mergeHistoricalSummaries(
-        this.ordinaryHistoricalSummaries,
-        this.dependencies.loadOrdinarySessions(),
-        patches,
-        hiddenProviderSessionIds,
-      );
-      this.historicalRevision = revision;
-      this.historicalLoaded = true;
-    }
+    if (!historicalChanged) return;
 
-    const summaries = new Map(this.ordinaryHistoricalSummaries);
+    const { patches, hiddenProviderSessionIds } =
+      this.dependencies.history.summaryPatchesAndHidden();
+    const ordinarySummaries = new Map<string, SessionSummary>();
+    this.mergeHistoricalSummaries(
+      ordinarySummaries,
+      this.dependencies.loadOrdinarySessions(),
+      patches,
+      hiddenProviderSessionIds,
+    );
+    const summaries = new Map(ordinarySummaries);
     this.mergeHistoricalSummaries(
       summaries,
       this.dependencies.loadMissionControlSessions(),
-      this.historicalPatches,
-      this.hiddenHistoricalProviderSessionIds,
+      patches,
+      hiddenProviderSessionIds,
     );
+
+    this.historicalPatches = patches;
+    this.hiddenHistoricalProviderSessionIds = hiddenProviderSessionIds;
+    this.ordinaryHistoricalSummaries = ordinarySummaries;
     this.historicalSummaries = summaries;
     this.rebuildHistoricalAliases(summaries.values());
+    this.historicalRevision = revision;
+    this.historicalLoaded = true;
   }
 
   private mergeHistoricalSummaries(

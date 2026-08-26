@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   asChunkedSequence,
+  chunkedSequenceChunks,
   chunkedSequenceDiagnostics,
   chunkedSequenceSlice,
   insertChunkedSequence,
@@ -53,4 +54,30 @@ test('slice, insertion, and prefix replacement retain exact ordering', () => {
   assert.deepEqual(chunkedSequenceSlice(sequence, 1, 5), [1, 2, 3, 4]);
   assert.deepEqual(insertChunkedSequence(sequence, 2, [8, 9]), [0, 1, 8, 9, 2, 3, 4, 5]);
   assert.deepEqual(replaceChunkedSequencePrefix(sequence, 2, [8, 9]), [8, 9, 2, 3, 4, 5]);
+});
+
+test('derived operations keep an existing sequence chunk size instead of renormalizing', () => {
+  const sequence = asChunkedSequence([0, 1, 2, 3, 4, 5], 2);
+  const sequenceChunks = chunkedSequenceChunks(sequence);
+
+  const inserted = insertChunkedSequence(sequence, 2, [8, 9]);
+
+  assert.deepEqual([...inserted], [0, 1, 8, 9, 2, 3, 4, 5]);
+  assert.deepEqual(chunkedSequenceDiagnostics(inserted), {
+    settledChunkCount: 3,
+    settledEventCount: 6,
+    liveEventCount: 2,
+  });
+  const insertedChunks = chunkedSequenceChunks(inserted);
+  assert.equal(insertedChunks[0], sequenceChunks[0]);
+  assert.equal(insertedChunks[3], sequenceChunks[2]);
+
+  const replaced = replaceChunkedSequenceSuffix(sequence, 4, [7]);
+  assert.deepEqual([...replaced], [0, 1, 2, 3, 7]);
+  assert.deepEqual(chunkedSequenceDiagnostics(replaced), {
+    settledChunkCount: 2,
+    settledEventCount: 4,
+    liveEventCount: 1,
+  });
+  assert.equal(chunkedSequenceChunks(replaced)[0], sequenceChunks[0]);
 });

@@ -17,7 +17,7 @@ export function useHistoryIndexingIdle(): void {
     const sample = async (): Promise<void> => {
       try {
         const idleSeconds = await systemIdleTime();
-        if (!disposed && idleSeconds !== null) {
+        if (!disposed) {
           // Send every sample, not only transitions: the sidecar also pauses
           // backfill for live transcript work between desktop samples.
           setHistoryIndexingIdle(shouldRunHistoryBackfill(idleSeconds));

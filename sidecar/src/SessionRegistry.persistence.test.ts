@@ -136,14 +136,17 @@ test('historical provider replacement preserves aliases at a stable history revi
   assert.equal(registry.resolveSummary('provider-old')?.providerSessionId, 'provider-next');
 });
 
-test('Mission Control history refreshes independently of ordinary history revision', () => {
+test('Mission Control history is cached until the history revision changes', () => {
   let mission = summary('mission-one', 'mission-provider-one', {
     sessionPurpose: 'mission-control',
   });
   let missionLoads = 0;
+  let revision = 1;
   const registry = new SessionRegistry<LiveSession>({
     history: {
-      revision: 1,
+      get revision() {
+        return revision;
+      },
       syncSummaries: () => undefined,
       summaryPatchesAndHidden: () => ({
         patches: new Map<string, Partial<SessionSummary>>(),
@@ -165,11 +168,15 @@ test('Mission Control history refreshes independently of ordinary history revisi
     sessionPurpose: 'mission-control',
   });
 
+  assert.equal(registry.listSummaries()[0]?.appSessionId, 'mission-one');
+  assert.equal(missionLoads, 1);
+  revision += 1;
   assert.equal(registry.listSummaries()[0]?.appSessionId, 'mission-two');
   assert.equal(missionLoads, 2);
 });
 
 test('a removed Mission row is not retained by a direct historical mutation', () => {
+  let revision = 1;
   let missions = [
     summary('mission-one', 'mission-provider-current', {
       sessionPurpose: 'mission-control',
@@ -178,7 +185,9 @@ test('a removed Mission row is not retained by a direct historical mutation', ()
   ];
   const registry = new SessionRegistry<LiveSession>({
     history: {
-      revision: 1,
+      get revision() {
+        return revision;
+      },
       syncSummaries: () => undefined,
       summaryPatchesAndHidden: () => ({
         patches: new Map<string, Partial<SessionSummary>>(),
@@ -194,6 +203,7 @@ test('a removed Mission row is not retained by a direct historical mutation', ()
 
   registry.replaceProvider('mission-provider-old', 'mission-provider-next');
   missions = [];
+  revision += 1;
 
   assert.deepEqual(registry.listSummaries(), []);
 });

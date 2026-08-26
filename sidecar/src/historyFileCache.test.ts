@@ -98,8 +98,13 @@ test('compaction summary lookup uses a partial event index instead of scanning a
          GROUP BY app_session_id`,
       )
       .all() as Array<{ detail: string }>;
-    assert.ok(plan.some((row) => row.detail.includes('INDEX')));
-    assert.ok(!plan.some((row) => row.detail === 'SCAN events'));
+    assert.ok(
+      plan.some(
+        (row) =>
+          row.detail.includes('SEARCH events') && row.detail.includes('events_compaction_summary'),
+      ),
+    );
+    assert.ok(!plan.some((row) => row.detail.includes('SCAN events')));
   } finally {
     db.close();
   }

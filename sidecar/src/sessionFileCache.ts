@@ -8,8 +8,10 @@ import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import type { ReasoningEffort, SessionSummary } from './protocol.js';
 import {
   parseCachedSessionSummary,
+  SESSION_FILE_REASONING_EFFORTS,
   serializeCachedSessionSummary,
 } from './sessionFileSummaryCache.js';
+import { copySessionFileEntry } from './sessionFileEntries.js';
 import { numberValue, stringValue } from './values.js';
 import { initializeSessionFileCacheSchema } from './sessionFileCacheSchema.js';
 
@@ -157,7 +159,7 @@ export class SessionFileCache {
     return {
       revision: this.revisionValue,
       changed,
-      entries: [...this.files.values()].map(copyEntry),
+      entries: [...this.files.values()].map(copySessionFileEntry),
     };
   }
 
@@ -219,18 +221,20 @@ export class SessionFileCache {
       this.files.delete(providerSessionId);
     }
     for (const entry of result.upserts) {
-      this.files.set(entry.providerSessionId, copyEntry(entry));
+      this.files.set(entry.providerSessionId, copySessionFileEntry(entry));
     }
     this.revisionValue = result.revision;
     return true;
   }
 
-  replaceSnapshot(snapshot: SessionFileSnapshot): void {
+  replaceSnapshot(snapshot: SessionFileSnapshot): boolean {
+    const changed = snapshot.revision !== this.revisionValue;
     this.files.clear();
     for (const entry of snapshot.entries) {
-      this.files.set(entry.providerSessionId, copyEntry(entry));
+      this.files.set(entry.providerSessionId, copySessionFileEntry(entry));
     }
     this.revisionValue = snapshot.revision;
+    return changed;
   }
 
   private collectRemovals(onDisk: Map<string, SessionFileStat>, isComplete: boolean): string[] {
@@ -409,13 +413,6 @@ export class SessionFileCache {
   }
 }
 
-function copyEntry(entry: SessionFileCacheEntry): SessionFileCacheEntry {
-  return {
-    ...entry,
-    summary: entry.summary ? structuredClone(entry.summary) : null,
-  };
-}
-
 function writeCacheEntry(statement: StatementSync, entry: SessionFileCacheEntry): void {
   statement.run(
     entry.providerSessionId,
@@ -449,22 +446,10 @@ function parseLaunchSettings(raw: unknown): SessionFileLaunchSettings | null | u
   }
 }
 
-const SESSION_FILE_REASONING_EFFORTS = new Set([
-  'off',
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-  'dynamic',
-]);
-
 function isSessionFileReasoningEffort(
   value: unknown,
 ): value is NonNullable<SessionFileLaunchSettings['reasoningEffort']> {
-  return typeof value === 'string' && SESSION_FILE_REASONING_EFFORTS.has(value);
+  return typeof value === 'string' && value in SESSION_FILE_REASONING_EFFORTS;
 }
 
 function rollback(db: DatabaseSync): void {

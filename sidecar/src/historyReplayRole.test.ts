@@ -9,8 +9,11 @@ const home = mkdtempSync(join(tmpdir(), 'droid-history-role-'));
 process.env.HOME = home;
 
 const { HistoryIndex, loadSessionPage, loadSessionTranscriptWindow } = await import('./history.js');
+const index = new HistoryIndex();
+let sessionFileRevision = 0;
 
 test.after(() => {
+  index.close();
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
   rmSync(home, { recursive: true, force: true });
@@ -37,11 +40,12 @@ function writeTranscript(
   const path = join(dir, `${id}.jsonl`);
   writeFileSync(path, `${lines.join('\n')}\n`);
   const stat = statSync(path);
-  const index = new HistoryIndex();
-  try {
+  const previousRevision = sessionFileRevision;
+  sessionFileRevision += 1;
+  assert.equal(
     index.applySessionFileReconciliation({
-      previousRevision: 0,
-      revision: 1,
+      previousRevision,
+      revision: sessionFileRevision,
       changed: 1,
       upserts: [
         {
@@ -55,10 +59,9 @@ function writeTranscript(
         },
       ],
       removedProviderSessionIds: [],
-    });
-  } finally {
-    index.close();
-  }
+    }),
+    true,
+  );
 }
 
 test('loadSessionPage replays a marker-only Task child with worker role keyed to its provider id', () => {

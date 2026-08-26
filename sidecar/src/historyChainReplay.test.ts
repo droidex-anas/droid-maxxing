@@ -92,24 +92,27 @@ function writeSession(id: string, lines: string[]): void {
 function publishSessionPaths(): void {
   const index = new HistoryIndex();
   try {
-    index.applySessionFileReconciliation({
-      previousRevision: 0,
-      revision: 1,
-      changed: sessionPaths.size,
-      upserts: [...sessionPaths].map(([providerSessionId, path]) => {
-        const stat = statSync(path);
-        return {
-          providerSessionId,
-          path,
-          birthtimeMs: stat.birthtimeMs,
-          mtimeMs: stat.mtimeMs,
-          sizeBytes: stat.size,
-          settingsMtimeMs: null,
-          summary: null,
-        };
+    assert.equal(
+      index.applySessionFileReconciliation({
+        previousRevision: 0,
+        revision: 1,
+        changed: sessionPaths.size,
+        upserts: [...sessionPaths].map(([providerSessionId, path]) => {
+          const stat = statSync(path);
+          return {
+            providerSessionId,
+            path,
+            birthtimeMs: stat.birthtimeMs,
+            mtimeMs: stat.mtimeMs,
+            sizeBytes: stat.size,
+            settingsMtimeMs: null,
+            summary: null,
+          };
+        }),
+        removedProviderSessionIds: [],
       }),
-      removedProviderSessionIds: [],
-    });
+      true,
+    );
   } finally {
     index.close();
   }

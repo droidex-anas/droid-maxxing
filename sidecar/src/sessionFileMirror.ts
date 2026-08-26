@@ -4,6 +4,11 @@ import type {
   SessionFileReconciliation,
   SessionFileSnapshot,
 } from './sessionFileCache.js';
+import {
+  applySessionFileEntries,
+  mapSessionFileEntries,
+  sameSessionFileEntries,
+} from './sessionFileEntries.js';
 import type { SessionSummary } from './protocol.js';
 
 /** In-memory main-thread view of the index worker's revisioned file cache. */
@@ -40,52 +45,18 @@ export class SessionFileMirror {
 
   applyReconciliation(result: SessionFileReconciliation): boolean {
     if (result.previousRevision !== this.revisionValue) return false;
-    for (const providerSessionId of result.removedProviderSessionIds) {
-      this.files.delete(providerSessionId);
-    }
-    for (const entry of result.upserts) {
-      this.files.set(entry.providerSessionId, copyEntry(entry));
-    }
+    applySessionFileEntries(this.files, result.upserts, result.removedProviderSessionIds);
     this.revisionValue = result.revision;
     return true;
   }
 
   replaceSnapshot(snapshot: SessionFileSnapshot): boolean {
     const changed =
-      snapshot.revision !== this.revisionValue || !sameEntries(this.files, snapshot.entries);
+      snapshot.revision !== this.revisionValue ||
+      !sameSessionFileEntries(this.files, snapshot.entries);
     this.files.clear();
-    for (const entry of snapshot.entries) {
-      this.files.set(entry.providerSessionId, copyEntry(entry));
-    }
+    for (const [id, entry] of mapSessionFileEntries(snapshot.entries)) this.files.set(id, entry);
     this.revisionValue = snapshot.revision;
     return changed;
   }
-}
-
-function copyEntry(entry: SessionFileCacheEntry): SessionFileCacheEntry {
-  return {
-    ...entry,
-    summary: entry.summary ? structuredClone(entry.summary) : null,
-  };
-}
-
-function sameEntries(
-  current: ReadonlyMap<string, SessionFileCacheEntry>,
-  next: readonly SessionFileCacheEntry[],
-): boolean {
-  if (current.size !== next.length) return false;
-  for (const entry of next) {
-    const existing = current.get(entry.providerSessionId);
-    if (
-      existing?.path !== entry.path ||
-      existing.birthtimeMs !== entry.birthtimeMs ||
-      existing.mtimeMs !== entry.mtimeMs ||
-      existing.sizeBytes !== entry.sizeBytes ||
-      existing.settingsMtimeMs !== entry.settingsMtimeMs ||
-      JSON.stringify(existing.summary) !== JSON.stringify(entry.summary) ||
-      JSON.stringify(existing.launchSettings) !== JSON.stringify(entry.launchSettings)
-    )
-      return false;
-  }
-  return true;
 }

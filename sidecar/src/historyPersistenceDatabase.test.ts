@@ -5,71 +5,14 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
+import { HistoryIndex } from './history.js';
 import { HistoryPersistenceDatabase } from './historyPersistenceDatabase.js';
 import type { HistoryPersistenceBatch, HistoryWriterLease } from './historyPersistenceProtocol.js';
 import type { SessionSummary } from './protocol.js';
 
 function createSchema(path: string): void {
   const db = new DatabaseSync(path);
-  db.exec(`
-    CREATE TABLE app_sessions (
-      app_session_id TEXT PRIMARY KEY,
-      provider_session_id TEXT NOT NULL,
-      compacted_from_provider_session_ids TEXT NOT NULL DEFAULT '[]',
-      session_purpose TEXT NOT NULL,
-      interaction_mode TEXT NOT NULL,
-      title TEXT NOT NULL,
-      cwd TEXT,
-      workspace_kind TEXT,
-      updated_at INTEGER NOT NULL,
-      model_id TEXT,
-      reasoning_effort TEXT,
-      compaction_model TEXT,
-      worker_model_id TEXT,
-      worker_reasoning_effort TEXT,
-      validator_model_id TEXT,
-      validator_reasoning_effort TEXT,
-      autonomy TEXT,
-      tokens_in INTEGER NOT NULL DEFAULT 0,
-      tokens_out INTEGER NOT NULL DEFAULT 0,
-      context_tokens INTEGER NOT NULL DEFAULT 0,
-      context_remaining_tokens INTEGER,
-      context_accuracy TEXT,
-      context_updated_at TEXT,
-      max_context_tokens INTEGER,
-      auto_compactions INTEGER
-    );
-    CREATE TABLE child_sessions (
-      parent_app_session_id TEXT NOT NULL,
-      child_session_id TEXT NOT NULL,
-      provider_session_id TEXT,
-      previous_provider_session_ids TEXT NOT NULL DEFAULT '[]',
-      role TEXT NOT NULL CHECK (role IN ('worker', 'validator')),
-      label TEXT,
-      prompt TEXT,
-      status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'paused', 'completed')),
-      model_id TEXT NOT NULL,
-      reasoning_effort TEXT,
-      spawn_link_kind TEXT CHECK (spawn_link_kind IN ('tool-use', 'spawn')),
-      spawn_link_id TEXT,
-      transcript_available INTEGER NOT NULL CHECK (transcript_available IN (0, 1)),
-      started_at INTEGER,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (parent_app_session_id, child_session_id)
-    );
-    CREATE TABLE events (
-      id TEXT PRIMARY KEY,
-      source_session_id TEXT NOT NULL,
-      app_session_id TEXT,
-      kind TEXT NOT NULL,
-      ts INTEGER NOT NULL
-    );
-    CREATE TABLE settings (
-      scope TEXT PRIMARY KEY,
-      value_json TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
+  HistoryIndex.initializeOrValidateHistorySchema(db);
   db.close();
 }
 
@@ -113,7 +56,11 @@ function batch(value = summary(9)): HistoryPersistenceBatch {
   };
 }
 
-const writerLease: HistoryWriterLease = { owner: 'test-writer', generation: 1 };
+const writerLease: HistoryWriterLease = {
+  owner: 'test-writer',
+  generation: 1,
+  processId: process.pid,
+};
 
 test('applies events, latest summaries, and child state in one transaction', () => {
   const dir = mkdtempSync(join(tmpdir(), 'droidex-history-db-'));
@@ -195,8 +142,16 @@ test('rolls back the complete batch when one row is invalid', () => {
 test('rejects a replaced writer before it can commit stale state', () => {
   const dir = mkdtempSync(join(tmpdir(), 'droidex-history-db-lease-'));
   const path = join(dir, 'history.sqlite');
-  const firstGeneration: HistoryWriterLease = { owner: 'worker', generation: 1 };
-  const secondGeneration: HistoryWriterLease = { owner: 'worker', generation: 2 };
+  const firstGeneration: HistoryWriterLease = {
+    owner: 'worker',
+    generation: 1,
+    processId: process.pid,
+  };
+  const secondGeneration: HistoryWriterLease = {
+    owner: 'worker',
+    generation: 2,
+    processId: process.pid,
+  };
   try {
     createSchema(path);
     const staleWriter = new HistoryPersistenceDatabase(path);
@@ -231,6 +186,67 @@ test('rejects a replaced writer before it can commit stale state', () => {
       20,
     );
     db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rejects a foreign live writer and accepts takeover after owner exits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-history-db-foreign-lease-'));
+  const path = join(dir, 'history.sqlite');
+  const firstLease: HistoryWriterLease = {
+    owner: 'first-worker',
+    generation: 1,
+    processId: process.pid,
+  };
+  const secondLease: HistoryWriterLease = {
+    owner: 'second-worker',
+    generation: 1,
+    processId: process.pid,
+  };
+  try {
+    createSchema(path);
+    const firstWriter = new HistoryPersistenceDatabase(path);
+    const secondWriter = new HistoryPersistenceDatabase(path);
+    firstWriter.persist(batch(summary(12)), firstLease);
+
+    assert.throws(
+      () => secondWriter.persist(batch(summary(13)), secondLease),
+      /owned by another live worker/,
+    );
+    firstWriter.close();
+    assert.equal(secondWriter.persist(batch(summary(14)), secondLease).summariesWritten, 1);
+    secondWriter.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('takes over a foreign writer lease left by an exited process', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-history-db-exited-lease-'));
+  const path = join(dir, 'history.sqlite');
+  const deadProcessLease: HistoryWriterLease = {
+    owner: 'exited-worker',
+    generation: 1,
+    processId: 2_147_483_647,
+  };
+  const replacementLease: HistoryWriterLease = {
+    owner: 'replacement-worker',
+    generation: 1,
+    processId: process.pid,
+  };
+  try {
+    createSchema(path);
+    const db = new DatabaseSync(path);
+    db.prepare(
+      `INSERT INTO settings (scope, value_json, updated_at)
+       VALUES ('history.persistence_writer_lease', ?, ?)`,
+    ).run(JSON.stringify(deadProcessLease), Date.now());
+    db.close();
+
+    const replacement = new HistoryPersistenceDatabase(path);
+    assert.equal(replacement.persist(batch(summary(15)), replacementLease).summariesWritten, 1);
+    replacement.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

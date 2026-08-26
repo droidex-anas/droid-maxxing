@@ -21,6 +21,48 @@ import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 import { persistTestChild } from './testing/historyPersistenceFixture.js';
 
+function withTemporaryHome(prefix: string): { home: string; restore: () => void } {
+  const home = mkdtempSync(join(tmpdir(), prefix));
+  const previousHome = process.env['HOME'];
+  const previousUserProfile = process.env['USERPROFILE'];
+  process.env['HOME'] = home;
+  process.env['USERPROFILE'] = home;
+  return {
+    home,
+    restore: () => {
+      if (previousHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = previousHome;
+      if (previousUserProfile === undefined) delete process.env['USERPROFILE'];
+      else process.env['USERPROFILE'] = previousUserProfile;
+      rmSync(home, { recursive: true, force: true });
+    },
+  };
+}
+
+function stubSearchClient(overrides: Partial<HistorySearchClient> = {}): HistorySearchClient {
+  return {
+    reconcileSessionFiles: async () => ({
+      previousRevision: 0,
+      revision: 0,
+      changed: 0,
+      upserts: [],
+      removedProviderSessionIds: [],
+    }),
+    reconcileSessionFilePaths: async () => ({
+      previousRevision: 0,
+      revision: 0,
+      changed: 0,
+      upserts: [],
+      removedProviderSessionIds: [],
+    }),
+    sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
+    setIndexingIdle: async () => undefined,
+    search: async () => [],
+    closeSync: () => undefined,
+    ...overrides,
+  };
+}
+
 function summary(patch: Partial<SessionSummary> = {}): SessionSummary {
   return {
     appSessionId: 'app',
@@ -56,10 +98,17 @@ function child(status: PersistedChildSession['status']): PersistedChildSession {
   };
 }
 
+test('test persistence helpers reject a missing canonical history schema', () => {
+  const { restore } = withTemporaryHome('droidex-missing-history-schema-');
+  try {
+    assert.throws(() => persistTestChild(child('paused')), /Canonical history schema is missing/);
+  } finally {
+    restore();
+  }
+});
+
 test('a failed settlement is held while live transcript output continues until recovery', () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-persistence-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { home, restore } = withTemporaryHome('droidex-history-persistence-');
   const persistence = new HistoryPersistence();
   try {
     persistence.syncSummaries([summary()]);
@@ -99,16 +148,12 @@ test('a failed settlement is held while live transcript output continues until r
     }
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('a failed child settlement is held until a later strict boundary recovers durability', () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-child-persistence-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { home, restore } = withTemporaryHome('droidex-child-persistence-');
   const persistence = new HistoryPersistence();
   try {
     persistence.upsertChildSession(child('running'));
@@ -136,16 +181,12 @@ test('a failed child settlement is held until a later strict boundary recovers d
     }
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('a hydrated running child replacement crosses a durability boundary', () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-hydrated-child-durability-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-hydrated-child-durability-');
   new HistoryIndex().close();
   persistTestChild({
     ...child('running'),
@@ -168,16 +209,12 @@ test('a hydrated running child replacement crosses a durability boundary', () =>
   } finally {
     persistence.close();
     hotPathMetrics.reset();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('search excludes session files that the canonical history cache did not admit', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-search-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { home, restore } = withTemporaryHome('droidex-history-search-');
   const persistence = new HistoryPersistence();
   try {
     const sessionsDirectory = join(home, '.factory', 'sessions', '2026', '08');
@@ -200,41 +237,20 @@ test('search excludes session files that the canonical history cache did not adm
     assert.deepEqual(await persistence.searchSessions('hello'), []);
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('search results resolve through pending in-memory provider aliases', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-search-alias-overlay-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
-  const searchClient: HistorySearchClient = {
-    reconcileSessionFiles: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    reconcileSessionFilePaths: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
-    setIndexingIdle: async () => undefined,
+  const { restore } = withTemporaryHome('droidex-history-search-alias-overlay-');
+  const searchClient = stubSearchClient({
     search: async () => [
       {
         appSessionId: 'provider',
         matches: [{ snippet: 'pending alias needle', author: 'user', ts: 1 }],
       },
     ],
-    closeSync: () => undefined,
-  };
+  });
   const persistence = new HistoryPersistence({ searchClient });
   try {
     persistence.syncSummaries([summary({ appSessionId: 'stable-app' })]);
@@ -245,16 +261,12 @@ test('search results resolve through pending in-memory provider aliases', async 
     assert.equal((await persistence.searchSessions('needle'))[0]?.appSessionId, 'stable-app');
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('reconciliation awaits the index worker and applies its delta to the live historical cache', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-worker-reconcile-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-worker-reconcile-');
   let reconciles = 0;
   const historical = summary({
     appSessionId: 'historical-app',
@@ -263,7 +275,7 @@ test('reconciliation awaits the index worker and applies its delta to the live h
     phase: 'paused',
     streaming: false,
   });
-  const searchClient: HistorySearchClient = {
+  const searchClient = stubSearchClient({
     reconcileSessionFiles: async () => {
       reconciles += 1;
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -285,18 +297,8 @@ test('reconciliation awaits the index worker and applies its delta to the live h
         removedProviderSessionIds: [],
       };
     },
-    reconcileSessionFilePaths: async () => ({
-      previousRevision: 1,
-      revision: 1,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
     sessionFileSnapshot: async () => ({ revision: 1, changed: 0, entries: [] }),
-    setIndexingIdle: async () => undefined,
-    search: async () => [],
-    closeSync: () => undefined,
-  };
+  });
   const persistence = new HistoryPersistence({ searchClient });
   try {
     const operation = persistence.reconcileSessionFiles();
@@ -311,16 +313,12 @@ test('reconciliation awaits the index worker and applies its delta to the live h
     );
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('a reconciliation revision gap replaces the main cache from an authoritative snapshot', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-worker-resync-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-worker-resync-');
   const oldEntry = {
     providerSessionId: 'old-provider',
     path: '/sessions/old-provider.jsonl',
@@ -349,7 +347,7 @@ test('a reconciliation revision gap replaces the main cache from an authoritativ
     }),
   };
   let snapshotRequests = 0;
-  const searchClient: HistorySearchClient = {
+  const searchClient = stubSearchClient({
     reconcileSessionFiles: async () => ({
       previousRevision: 0,
       revision: 1,
@@ -368,10 +366,7 @@ test('a reconciliation revision gap replaces the main cache from an authoritativ
       snapshotRequests += 1;
       return { revision: 3, changed: 0, entries: [newEntry] };
     },
-    setIndexingIdle: async () => undefined,
-    search: async () => [],
-    closeSync: () => undefined,
-  };
+  });
   const persistence = new HistoryPersistence({ searchClient });
   try {
     await persistence.reconcileSessionFiles();
@@ -385,40 +380,19 @@ test('a reconciliation revision gap replaces the main cache from an authoritativ
     );
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('an active search cannot delay a synchronous persistence boundary', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-lanes-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-lanes-');
   let resolveSearch: ((results: SessionSearchResult[]) => void) | undefined;
-  const searchClient: HistorySearchClient = {
-    reconcileSessionFiles: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    reconcileSessionFilePaths: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
-    setIndexingIdle: async () => undefined,
+  const searchClient = stubSearchClient({
     search: () =>
       new Promise<SessionSearchResult[]>((resolve) => {
         resolveSearch = resolve;
       }),
-    closeSync: () => undefined,
-  };
+  });
   const persisted: HistoryPersistenceBatch[] = [];
   const persistenceClient: HistoryPersistenceClient = {
     startPersist: (batch): HistoryPersistenceCall<HistoryPersistenceResult> => {
@@ -462,39 +436,18 @@ test('an active search cannot delay a synchronous persistence boundary', async (
     await search;
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('live transcript work pauses an idle history backfill until the next desktop sample', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-idle-pause-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-idle-pause-');
   const idleStates: boolean[] = [];
-  const searchClient: HistorySearchClient = {
-    reconcileSessionFiles: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    reconcileSessionFilePaths: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
+  const searchClient = stubSearchClient({
     setIndexingIdle: async (isIdle) => {
       idleStates.push(isIdle);
     },
-    search: async () => [],
-    closeSync: () => undefined,
-  };
+  });
   const persistence = new HistoryPersistence({ searchClient });
   try {
     await persistence.setIndexingIdle(true);
@@ -512,39 +465,18 @@ test('live transcript work pauses an idle history backfill until the next deskto
     assert.deepEqual(idleStates, [true, false]);
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('desktop idle samples do not resume archive indexing while live work is active', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-idle-active-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-idle-active-');
   const idleStates: boolean[] = [];
-  const searchClient: HistorySearchClient = {
-    reconcileSessionFiles: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    reconcileSessionFilePaths: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
+  const searchClient = stubSearchClient({
     setIndexingIdle: async (isIdle) => {
       idleStates.push(isIdle);
     },
-    search: async () => [],
-    closeSync: () => undefined,
-  };
+  });
   const persistence = new HistoryPersistence({ searchClient });
   try {
     persistence.syncSummaries([summary()]);
@@ -560,16 +492,12 @@ test('desktop idle samples do not resume archive indexing while live work is act
     assert.deepEqual(idleStates, [false, false, true]);
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('reconciliation drains pending commits without running a durability barrier', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-reconcile-drain-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-reconcile-drain-');
   hotPathMetrics.reset();
   const persisted: string[][] = [];
   let barriers = 0;
@@ -632,16 +560,12 @@ test('reconciliation drains pending commits without running a durability barrier
     allowBarrier = true;
     persistence.close();
     hotPathMetrics.reset();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('forgetSession removes live summary and child overlays', () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-forget-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-forget-');
   const persistenceClient: HistoryPersistenceClient = {
     startPersist: (batch) => {
       const result: HistoryPersistenceResult = {
@@ -676,16 +600,12 @@ test('forgetSession removes live summary and child overlays', () => {
     assert.deepEqual(persistence.childSessions('app'), []);
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('persistence reports degraded state once and reports recovery after retained work commits', () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-status-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-history-status-');
   const statuses: string[] = [];
   let attempts = 0;
   const persistenceClient: HistoryPersistenceClient = {
@@ -712,26 +632,7 @@ test('persistence reports degraded state once and reports recovery after retaine
     },
     closeSync: () => undefined,
   };
-  const searchClient: HistorySearchClient = {
-    reconcileSessionFiles: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    reconcileSessionFilePaths: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
-    setIndexingIdle: async () => undefined,
-    search: async () => [],
-    closeSync: () => undefined,
-  };
+  const searchClient = stubSearchClient();
   const persistence = new HistoryPersistence({
     persistenceClient,
     searchClient,
@@ -755,37 +656,14 @@ test('persistence reports degraded state once and reports recovery after retaine
     assert.deepEqual(statuses, ['degraded', 'healthy']);
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });
 
 test('persistence does not start the independent search worker until the first search', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-lazy-search-worker-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
+  const { restore } = withTemporaryHome('droidex-lazy-search-worker-');
   let searchWorkersCreated = 0;
-  const searchClient: HistorySearchClient = {
-    reconcileSessionFiles: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    reconcileSessionFilePaths: async () => ({
-      previousRevision: 0,
-      revision: 0,
-      changed: 0,
-      upserts: [],
-      removedProviderSessionIds: [],
-    }),
-    sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
-    setIndexingIdle: async () => undefined,
-    search: async () => [],
-    closeSync: () => undefined,
-  };
+  const searchClient = stubSearchClient();
   const persistence = new HistoryPersistence({
     createSearchClient: () => {
       searchWorkersCreated += 1;
@@ -800,8 +678,6 @@ test('persistence does not start the independent search worker until the first s
     assert.equal(searchWorkersCreated, 1);
   } finally {
     persistence.close();
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
+    restore();
   }
 });

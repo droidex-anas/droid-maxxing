@@ -178,7 +178,7 @@ test('indexed search survives raw-file removal and preserves aliases and substri
   }
 });
 
-test('canonical provider aliases reject malformed persisted identities', async () => {
+test('canonical provider aliases ignore malformed alias lists for one row', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'droid-history-fts-aliases-'));
   const db = createDatabase(join(directory, 'history.sqlite'));
   try {
@@ -188,15 +188,22 @@ test('canonical provider aliases reject malformed persisted identities', async (
       [messageLine('one', 'user', 'malformed alias needle', 1_000)],
       1_000,
     );
+    const aliasEntry = writeSession(
+      directory,
+      'provider-old',
+      [messageLine('two', 'user', 'old alias needle', 2_000)],
+      2_000,
+    );
     db.prepare(
       `INSERT INTO app_sessions (
         app_session_id, provider_session_id, compacted_from_provider_session_ids, updated_at
       ) VALUES (?, ?, ?, ?)`,
     ).run('app-malformed-alias', 'provider-malformed-alias', '["provider-old", 42]', 1_000);
     const index = new HistorySearchIndex(db);
-    await reconcileAll(index, [entry]);
+    await reconcileAll(index, [entry, aliasEntry]);
 
-    assert.throws(() => index.search('needle'), /provider-session aliases/i);
+    assert.equal(index.search('malformed alias')[0]?.appSessionId, 'app-malformed-alias');
+    assert.equal(index.search('old alias')[0]?.appSessionId, 'provider-old');
   } finally {
     db.close();
     rmSync(directory, { recursive: true, force: true });

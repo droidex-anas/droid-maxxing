@@ -67,11 +67,12 @@ function createHarness(
   const upsertChildSession = history.upsertChildSession.bind(history);
   history.upsertChildSession = (child) => {
     if (child.status === 'running') throwDriveSetup('commit');
-    upsertChildSession(child);
+    const durable = upsertChildSession(child);
     if (child.status === deferDurabilityForStatus) {
       deferDurabilityForStatus = undefined;
       return false;
     }
+    return durable;
   };
   history.seedChildSessions(records);
   let parent = parentLease(parentId, calls);

@@ -22,20 +22,17 @@ function controlledSessionWatch(): {
   emit: (filename: string | null) => void;
 } {
   let onChange: ((filename: string | null) => void) | undefined;
-  let isClosed = false;
   return {
     watchDirectory: (_root, listener) => {
       onChange = listener;
       return {
         onError: () => {},
-        close: () => {
-          isClosed = true;
-        },
+        close: () => {},
       };
     },
     emit: (filename) => {
       if (!onChange) throw new Error('Controlled session watch has not started');
-      if (!isClosed) onChange(filename);
+      onChange(filename);
     },
   };
 }

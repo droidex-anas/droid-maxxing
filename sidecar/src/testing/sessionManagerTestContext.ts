@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -193,26 +193,32 @@ export function createSessionManagerTestContext(
         );
       },
       publishSessionFiles: (changes) => {
-        const upserts = changes.map(({ providerSessionId, path: sessionPath }) => {
+        const upserts = changes.flatMap(({ providerSessionId, path: sessionPath }) => {
+          if (!existsSync(sessionPath)) return [];
           const stat = statSync(sessionPath);
-          return {
-            providerSessionId,
-            path: sessionPath,
-            birthtimeMs: stat.birthtimeMs,
-            mtimeMs: stat.mtimeMs,
-            sizeBytes: stat.size,
-            settingsMtimeMs: null,
-            summary: null,
-          };
+          return [
+            {
+              providerSessionId,
+              path: sessionPath,
+              birthtimeMs: stat.birthtimeMs,
+              mtimeMs: stat.mtimeMs,
+              sizeBytes: stat.size,
+              settingsMtimeMs: null,
+              summary: null,
+            },
+          ];
         });
+        const removedProviderSessionIds = changes
+          .filter(({ path: sessionPath }) => !existsSync(sessionPath))
+          .map(({ providerSessionId }) => providerSessionId);
         const previousRevision = sessionFileRevision;
         sessionFileRevision += 1;
         const applied = sessionFileMirror.applySessionFileReconciliation({
           previousRevision,
           revision: sessionFileRevision,
-          changed: upserts.length,
+          changed: upserts.length + removedProviderSessionIds.length,
           upserts,
-          removedProviderSessionIds: [],
+          removedProviderSessionIds,
         });
         if (!applied) throw new Error('Test session-file mirror revision diverged.');
       },

@@ -26,6 +26,7 @@ import type { SessionSearchResult } from './protocol.js';
 
 const SYNC_WAIT_SLICE_MS = 5;
 const DEFAULT_SYNC_TIMEOUT_MS = 10_000;
+const SEARCH_TRANSPORT_TIMEOUT_MS = 60_000;
 const sleepSignal = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
 export interface HistoryPersistenceCall<T> {
@@ -146,7 +147,8 @@ export class HistoryWorkerClient implements HistoryPersistenceClient, HistorySea
         this.activeCalls.delete(call);
       },
       (error) => {
-        this.fail(error);
+        if (isSearchLaneRequest(request)) call.failExternal(error);
+        else this.fail(error);
       },
     );
     this.activeCalls.add(call);
@@ -165,7 +167,11 @@ export class HistoryWorkerClient implements HistoryPersistenceClient, HistorySea
       this.fail(failure);
       throw failure;
     }
-    call.startTransportWatchdog(this.syncTimeoutMs, this.scheduleWatchdog, this.cancelWatchdog);
+    call.startTransportWatchdog(
+      isSearchLaneRequest(request) ? SEARCH_TRANSPORT_TIMEOUT_MS : this.syncTimeoutMs,
+      this.scheduleWatchdog,
+      this.cancelWatchdog,
+    );
     return call;
   }
 
@@ -196,12 +202,22 @@ export class HistoryWorkerClient implements HistoryPersistenceClient, HistorySea
   }
 
   private writerLease(): HistoryWriterLease {
-    return { owner: this.writerOwner, generation: this.writerGeneration };
+    return { owner: this.writerOwner, generation: this.writerGeneration, processId: process.pid };
   }
 }
 
 function isPersistenceRequest(request: HistoryWorkerRequest): boolean {
   return request.type === 'persist' || request.type === 'durability-barrier';
+}
+
+function isSearchLaneRequest(request: HistoryWorkerRequest): boolean {
+  return (
+    request.type === 'reconcile-files' ||
+    request.type === 'reconcile-file-paths' ||
+    request.type === 'session-file-snapshot' ||
+    request.type === 'indexing-idle' ||
+    request.type === 'search'
+  );
 }
 
 class PortWorkerCall<T extends HistoryWorkerValue> implements HistoryPersistenceCall<T> {

@@ -87,19 +87,18 @@ test('aggregation preserves one linked prepend and resets mixed mutation chains'
   };
 
   assert.deepEqual(aggregateTranscriptMutations(10, [prepend]), prepend);
-  assert.equal(
-    aggregateTranscriptMutations(10, [
-      prepend,
-      {
-        revision: 12,
-        baseRevision: 11,
-        kind: 'append',
-        previousLength: 140,
-        firstChangedIndex: 140,
-      },
-    ])?.kind,
-    'reset',
-  );
+  const mixed = aggregateTranscriptMutations(10, [
+    prepend,
+    {
+      revision: 12,
+      baseRevision: 11,
+      kind: 'append',
+      previousLength: 140,
+      firstChangedIndex: 140,
+    },
+  ]);
+  assert.ok(mixed);
+  assert.equal(mixed.kind, 'reset');
 });
 
 test('aggregation combines a contiguous append chain from the batch boundary', () => {
@@ -154,14 +153,15 @@ test('aggregation conservatively resets for an explicit reset or revision gap', 
       firstChangedIndex: 3,
     },
   ];
+  const lateAppend: TranscriptMutation = {
+    revision: 8,
+    baseRevision: 7,
+    kind: 'append',
+    previousLength: 3,
+    firstChangedIndex: 3,
+  };
   const revisionGap: TranscriptMutation[] = [
-    {
-      revision: 8,
-      baseRevision: 7,
-      kind: 'append',
-      previousLength: 3,
-      firstChangedIndex: 3,
-    },
+    lateAppend,
     {
       revision: 10,
       baseRevision: 9,
@@ -185,7 +185,9 @@ test('aggregation conservatively resets for an explicit reset or revision gap', 
     previousLength: 3,
     firstChangedIndex: 0,
   });
-  assert.equal(aggregateTranscriptMutations(6, [revisionGap[0]]).kind, 'reset');
+  const gapped = aggregateTranscriptMutations(6, [lateAppend]);
+  assert.ok(gapped);
+  assert.equal(gapped.kind, 'reset');
 });
 
 test('aggregation preserves a restarted revision lineage after the batch record was pruned', () => {
