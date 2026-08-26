@@ -1,6 +1,6 @@
 // Deterministic end-to-end replay runner (#116 phase 0): boots the REAL
 // sidecar pipeline (SessionManager + SessionEventFlow + SessionTimeline +
-// HistoryIndex SQLite + bridgeServer WebSocket transport) against a scripted
+// worker-backed history persistence + bridgeServer WebSocket transport) against a scripted
 // provider, then measures every stage and reports against budgets.
 //
 // Determinism contract: same scenario + seed → identical event stream, order,
@@ -14,7 +14,7 @@ import { WebSocket } from 'ws';
 import { McpServerConfigSchema, type McpServerConfig } from '@factory/droid-sdk';
 
 import { SessionManager, type SessionManagerDependencies } from '../SessionManager.js';
-import { HistoryIndex } from '../history.js';
+import { HistoryPersistence } from '../HistoryPersistence.js';
 import { BrowserSessionManager } from '../browser/BrowserSessionManager.js';
 import { startBridgeServer } from '../bridgeServer.js';
 import { hotPathMetrics, type HotPathMetricsSnapshot } from '../telemetry/hotPathMetrics.js';
@@ -100,9 +100,14 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
       server.broadcast(event);
     },
   });
+  // Worker startup is a sidecar-start concern, not a steady-state settlement
+  // sample. Establish the writer and its durability checkpoint before metrics
+  // begin so the boundary histogram measures live orchestration behavior.
+  const history = new HistoryPersistence();
+  history.flushSync();
   const dependencies: SessionManagerDependencies = {
     runtime,
-    history: new HistoryIndex(),
+    history,
     browsers,
     createLocalMcpResource: () => stubMcpResource(),
     mcpConfiguration: {

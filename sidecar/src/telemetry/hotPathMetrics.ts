@@ -35,6 +35,8 @@ export interface HotPathMetricsSnapshot {
   counters: {
     normalized: number;
     persisted: number;
+    persistenceFailures: number;
+    persistenceRecoveries: number;
     emitted: number;
     transportSends: number;
     coalesceFlushes: number;
@@ -48,7 +50,9 @@ export interface HotPathMetricsSnapshot {
   };
   histograms: {
     normalizeMs: HistogramStats;
+    persistenceStartupMs: HistogramStats;
     persistMs: HistogramStats;
+    persistenceBoundaryMs: HistogramStats;
     emitMs: HistogramStats;
     transportMs: HistogramStats;
     coalesceMerged: HistogramStats;
@@ -102,6 +106,8 @@ function emptyCounters(): HotPathMetricsSnapshot['counters'] {
   return {
     normalized: 0,
     persisted: 0,
+    persistenceFailures: 0,
+    persistenceRecoveries: 0,
     emitted: 0,
     transportSends: 0,
     coalesceFlushes: 0,
@@ -132,7 +138,9 @@ function emptyReplayBuffer(): HotPathMetricsSnapshot['transport']['replayBuffer'
 
 export class HotPathMetrics {
   private readonly normalize = new ReservoirHistogram();
+  private readonly persistenceStartup = new ReservoirHistogram();
   private readonly persist = new ReservoirHistogram();
+  private readonly persistenceBoundary = new ReservoirHistogram();
   private readonly emit = new ReservoirHistogram();
   private readonly transport = new ReservoirHistogram();
   private readonly coalesce = new ReservoirHistogram();
@@ -169,7 +177,9 @@ export class HotPathMetrics {
   reset(): void {
     this.disable();
     this.normalize.reset();
+    this.persistenceStartup.reset();
     this.persist.reset();
+    this.persistenceBoundary.reset();
     this.emit.reset();
     this.transport.reset();
     this.coalesce.reset();
@@ -200,9 +210,25 @@ export class HotPathMetrics {
     this.normalize.add(durationMs);
   }
 
-  recordPersist(durationMs: number): void {
-    this.counters.persisted += 1;
+  recordPersist(durationMs: number, rows = 1): void {
+    this.counters.persisted += rows;
     this.persist.add(durationMs);
+  }
+
+  recordPersistenceStartup(durationMs: number): void {
+    this.persistenceStartup.add(durationMs);
+  }
+
+  recordPersistenceBoundary(durationMs: number): void {
+    this.persistenceBoundary.add(durationMs);
+  }
+
+  recordPersistenceFailure(): void {
+    this.counters.persistenceFailures += 1;
+  }
+
+  recordPersistenceRecovery(): void {
+    this.counters.persistenceRecoveries += 1;
   }
 
   recordEmit(durationMs: number): void {
@@ -286,7 +312,9 @@ export class HotPathMetrics {
       counters: { ...this.counters },
       histograms: {
         normalizeMs: this.normalize.stats(),
+        persistenceStartupMs: this.persistenceStartup.stats(),
         persistMs: this.persist.stats(),
+        persistenceBoundaryMs: this.persistenceBoundary.stats(),
         emitMs: this.emit.stats(),
         transportMs: this.transport.stats(),
         coalesceMerged: this.coalesce.stats(),

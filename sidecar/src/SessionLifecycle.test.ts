@@ -28,12 +28,13 @@ class TestHistory {
   readonly hidden = new Set<string>();
   nextSyncError?: Error;
   constructor(private readonly calls: RecordedCall[]) {}
-  syncSummaries(summaries: SessionSummary[]): void {
+  syncSummaries(summaries: SessionSummary[]): boolean | undefined {
     const error = this.nextSyncError;
     delete this.nextSyncError;
     if (error) throw error;
     this.persisted.push(...summaries.map((summary) => ({ ...summary })));
     this.calls.push({ target: 'history', method: 'syncSummaries', args: summaries });
+    return undefined;
   }
   summaryPatchesAndHidden(): {
     patches: Map<string, Partial<SessionSummary>>;
@@ -88,6 +89,8 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   let compactionLimit = (): Promise<number> => Promise.resolve(800);
   let shutdownStarted = false;
   let closeChildren: (appSessionId: string) => Promise<void> = () => Promise.resolve();
+  let emitSessionList: (closedProviderSessionId: string) => void | Promise<void> = () =>
+    recordEvent({ type: 'sessions.list', sessions: registry.listSummaries() });
   let nextEmitFailure: { type: ServerEvent['type']; error: Error } | undefined;
   let now = 10_000;
   let mcpId = 0;
@@ -261,8 +264,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     emitStatus: (appSessionId, text) => {
       calls.push({ target: 'protocol', method: 'status', args: [appSessionId, text] });
     },
-    emitSessionList: () =>
-      recordEvent({ type: 'sessions.list', sessions: registry.listSummaries() }),
+    emitSessionList: (closedProviderSessionId) => emitSessionList(closedProviderSessionId),
   });
 
   return {
@@ -287,6 +289,9 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     },
     setCompactionLimit: (action: () => Promise<number>) => {
       compactionLimit = action;
+    },
+    setEmitSessionList: (action: (closedProviderSessionId: string) => void | Promise<void>) => {
+      emitSessionList = action;
     },
     setShutdownStarted: (started: boolean) => {
       shutdownStarted = started;
@@ -981,6 +986,30 @@ test('close follows ownership order and closeAll closes its initial snapshot', a
   );
   await all.lifecycle.closeAll();
   assert.equal(all.registry.liveSessionsSnapshot().length, 0);
+});
+
+test('close waits for the authoritative post-close session list', async () => {
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'await-list');
+  await harness.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+
+  let releaseList = (): void => undefined;
+  const listReady = new Promise<void>((resolve) => {
+    releaseList = resolve;
+  });
+  harness.setEmitSessionList(() => listReady);
+
+  let closed = false;
+  const closing = harness.lifecycle.close('await-list').then(() => {
+    closed = true;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(closed, false);
+
+  releaseList();
+  await closing;
+  assert.equal(closed, true);
 });
 
 test('closeAll marks its full snapshot before sequential cleanup', async () => {

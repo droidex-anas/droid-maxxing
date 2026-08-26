@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState, reducer, type AppState } from './useStore';
-import type { SessionSummary } from '../types/bridge';
+import type { SessionSummary, TranscriptEvent } from '../types/bridge';
 
 function session(appSessionId: string, updatedAt: number): SessionSummary {
   return {
@@ -81,6 +81,197 @@ test('batched actions preserve sequential reducer ordering', () => {
   assert.deepEqual(batched, sequential);
 });
 
+test('batched transcript actions index the retained window once', () => {
+  let retainedIdReads = 0;
+  const retained: TranscriptEvent[] = Array.from({ length: 2_000 }, (_, index) => {
+    const event: TranscriptEvent = {
+      id: `retained-${index}`,
+      appSessionId: 'sess-a',
+      sourceSessionId: 'primary',
+      role: 'primary',
+      kind: 'text',
+      author: 'assistant',
+      text: `retained ${index}`,
+      ts: index,
+    };
+    Object.defineProperty(event, 'id', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        retainedIdReads += 1;
+        return `retained-${index}`;
+      },
+    });
+    return event;
+  });
+  const state: AppState = {
+    ...initialState,
+    transcripts: { 'sess-a': retained },
+    transcriptRetainedCost: { 'sess-a': 1 },
+  };
+  const actions = Array.from({ length: 200 }, (_, index) => ({
+    type: 'SESSION_TRANSCRIPT' as const,
+    event: {
+      id: `incoming-${index}`,
+      appSessionId: 'sess-a',
+      sourceSessionId: 'primary',
+      role: 'primary' as const,
+      kind: 'text' as const,
+      author: 'assistant' as const,
+      text: `incoming ${index}`,
+      ts: retained.length + index,
+    },
+  }));
+
+  reducer(state, { type: 'BATCH', actions });
+
+  assert.equal(retainedIdReads, retained.length);
+});
+
+test('non-transcript actions remain ordering barriers inside a batch', () => {
+  const state: AppState = {
+    ...initialState,
+    sessions: { 'sess-a': session('sess-a', 3_000) },
+    sessionOrder: ['sess-a'],
+    listConfirmedSessionIds: ['sess-a'],
+  };
+  const beforeClose: TranscriptEvent = {
+    id: 'before-close',
+    appSessionId: 'sess-a',
+    sourceSessionId: 'primary',
+    role: 'primary',
+    kind: 'text',
+    author: 'assistant',
+    text: 'before close',
+    ts: 1,
+  };
+  const afterClose: TranscriptEvent = { ...beforeClose, id: 'after-close', text: 'after close' };
+  const actions = [
+    { type: 'SESSION_TRANSCRIPT' as const, event: beforeClose },
+    { type: 'SESSION_LIST' as const, sessions: [] },
+    { type: 'SESSION_TRANSCRIPT' as const, event: afterClose },
+  ];
+
+  const sequential = actions.reduce(reducer, state);
+  const batched = reducer(state, { type: 'BATCH', actions });
+
+  assert.deepEqual(
+    { ...batched, transcriptMutations: {} },
+    { ...sequential, transcriptMutations: {} },
+  );
+  assert.deepEqual(batched.transcripts['sess-a'], [afterClose]);
+  assert.deepEqual(batched.transcriptMutations['sess-a'], {
+    revision: 1,
+    baseRevision: 0,
+    kind: 'reset',
+    previousLength: 0,
+    firstChangedIndex: 0,
+  });
+});
+
+test('nested batches remain ordering barriers between transcript runs', () => {
+  const state: AppState = {
+    ...initialState,
+    sessions: { 'sess-a': session('sess-a', 3_000) },
+    sessionOrder: ['sess-a'],
+    listConfirmedSessionIds: ['sess-a'],
+  };
+  const beforePrune: TranscriptEvent = {
+    id: 'before-prune',
+    appSessionId: 'sess-a',
+    sourceSessionId: 'primary',
+    role: 'primary',
+    kind: 'text',
+    author: 'assistant',
+    text: 'before prune',
+    ts: 1,
+  };
+  const insideNestedBatch: TranscriptEvent = {
+    ...beforePrune,
+    id: 'inside-nested-batch',
+    text: 'inside nested batch',
+    ts: 2,
+  };
+  const afterNestedBatch: TranscriptEvent = {
+    ...beforePrune,
+    id: 'after-nested-batch',
+    text: 'after nested batch',
+    ts: 3,
+  };
+  const flattened = [
+    { type: 'SESSION_TRANSCRIPT' as const, event: beforePrune },
+    { type: 'SESSION_LIST' as const, sessions: [] },
+    { type: 'SESSION_TRANSCRIPT' as const, event: insideNestedBatch },
+    { type: 'SESSION_TRANSCRIPT' as const, event: afterNestedBatch },
+  ];
+
+  const sequential = flattened.reduce(reducer, state);
+  const nested = reducer(state, {
+    type: 'BATCH',
+    actions: [flattened[0], { type: 'BATCH', actions: flattened.slice(1, 3) }, flattened[3]],
+  });
+
+  assert.deepEqual(
+    { ...nested, transcriptMutations: {} },
+    { ...sequential, transcriptMutations: {} },
+  );
+  assert.deepEqual(nested.transcripts['sess-a'], [insideNestedBatch, afterNestedBatch]);
+  assert.deepEqual(nested.transcriptMutations['sess-a'], {
+    revision: 2,
+    baseRevision: 0,
+    kind: 'reset',
+    previousLength: 0,
+    firstChangedIndex: 0,
+  });
+});
+
+test('batched transcript provenance spans ordering barriers from the published revision', () => {
+  const retained: TranscriptEvent = {
+    id: 'retained',
+    appSessionId: 'sess-a',
+    sourceSessionId: 'primary',
+    role: 'primary',
+    kind: 'text',
+    author: 'assistant',
+    text: 'retained',
+    ts: 1,
+  };
+  const state: AppState = {
+    ...initialState,
+    sessions: { 'sess-a': session('sess-a', 3_000) },
+    sessionOrder: ['sess-a'],
+    transcripts: { 'sess-a': [retained] },
+    transcriptMutations: {
+      'sess-a': {
+        revision: 7,
+        baseRevision: 6,
+        kind: 'append',
+        previousLength: 0,
+        firstChangedIndex: 0,
+      },
+    },
+  };
+  const first = { ...retained, id: 'first', text: 'first', ts: 2 };
+  const second = { ...retained, id: 'second', text: 'second', ts: 3 };
+
+  const next = reducer(state, {
+    type: 'BATCH',
+    actions: [
+      { type: 'SESSION_TRANSCRIPT', event: first },
+      { type: 'MARK_ALL_SESSIONS_READ', seenAt: 4_000 },
+      { type: 'SESSION_TRANSCRIPT', event: second },
+    ],
+  });
+
+  assert.deepEqual(next.transcriptMutations['sess-a'], {
+    revision: 9,
+    baseRevision: 7,
+    kind: 'append',
+    previousLength: 1,
+    firstChangedIndex: 1,
+  });
+});
+
 test('session creation records the exact request-to-session settlement', () => {
   const state: AppState = {
     ...initialState,
@@ -92,7 +283,7 @@ test('session creation records the exact request-to-session settlement', () => {
   const created = reducer(state, {
     type: 'SESSION_CREATED',
     clientRef: 'client-1',
-    session: session('created-session', 3_000),
+    session: { ...session('created-session', 3_000), goal: 'hello' },
   });
 
   assert.deepEqual(created.lastCreatedSessionRequest, {
@@ -100,4 +291,12 @@ test('session creation records the exact request-to-session settlement', () => {
     appSessionId: 'created-session',
   });
   assert.equal(created.pendingCompose['client-1'], undefined);
+  assert.equal(created.transcripts['created-session'][0].text, 'hello');
+  assert.deepEqual(created.transcriptMutations['created-session'], {
+    revision: 1,
+    baseRevision: 0,
+    kind: 'append',
+    previousLength: 0,
+    firstChangedIndex: 0,
+  });
 });

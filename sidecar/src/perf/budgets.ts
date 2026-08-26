@@ -26,7 +26,9 @@ export function evaluateBudgets(
 ): BudgetEvaluation {
   const results: BudgetResult[] = [
     stage('normalize p95', 2, sidecar.histograms.normalizeMs.p95Ms),
+    stage('sqlite writer startup', 500, sidecar.histograms.persistenceStartupMs.p95Ms),
     stage('sqlite persist p95', 10, sidecar.histograms.persistMs.p95Ms),
+    stage('durability boundary p95', 25, sidecar.histograms.persistenceBoundaryMs.p95Ms),
     stage('emit dispatch p95', 15, sidecar.histograms.emitMs.p95Ms),
     stage('transport fan-out p95', 5, sidecar.histograms.transportMs.p95Ms),
     // Coalesced deltas intentionally dwell up to the coalesce window before

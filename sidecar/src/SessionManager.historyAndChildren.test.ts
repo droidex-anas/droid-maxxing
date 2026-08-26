@@ -3,8 +3,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
-import { HistoryIndex } from './history.js';
+import type { SessionFileChange } from './sessionFileCache.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
 import type { ChildSessionSummary, SessionSummary, ServerEvent } from './protocol.js';
 
 type SessionHistoryEvent = Extract<ServerEvent, { type: 'session.history' }>;
@@ -23,11 +24,12 @@ function writeHistorySession(
   id: string,
   lines: unknown[],
   sessionStart: Record<string, unknown> = {},
-): void {
+): SessionFileChange {
   const dir = path.join(home, '.factory', 'sessions', '2026', '07');
   mkdirSync(dir, { recursive: true });
+  const sessionPath = path.join(dir, `${id}.jsonl`);
   writeFileSync(
-    path.join(dir, `${id}.jsonl`),
+    sessionPath,
     [
       JSON.stringify({
         type: 'session_start',
@@ -40,6 +42,7 @@ function writeHistorySession(
       ...lines.map((line) => JSON.stringify(line)),
     ].join('\n') + '\n',
   );
+  return { providerSessionId: id, path: sessionPath };
 }
 
 function writeHistoryChain(
@@ -51,14 +54,12 @@ function writeHistoryChain(
   const previousHome = process.env.HOME;
   process.env.HOME = home;
   try {
-    const index = new HistoryIndex();
-    index.syncSummaries([
+    persistTestSummaries([
       {
         ...summary(appSessionId, sessionId),
         compactedFromProviderSessionIds,
       },
     ]);
-    index.close();
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
@@ -120,7 +121,9 @@ test('[H1] Initial history restore', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
 
   try {
-    writeHistorySession(h.home, 'app-h1', [assistantMessage('m1', 'restored', 0)]);
+    h.fixture.publishSessionFiles([
+      writeHistorySession(h.home, 'app-h1', [assistantMessage('m1', 'restored', 0)]),
+    ]);
 
     await h.handle({ type: 'session.loadHistory', appSessionId: 'app-h1' });
 
@@ -168,14 +171,16 @@ test('[H2] Paging, empty history, and retry', { concurrency: false }, async () =
 
   const h = createSessionManagerTestContext();
   try {
-    writeHistorySession(h.home, 'old-h2', [assistantMessage('old', 'old', 0)]);
-    writeHistorySession(
-      h.home,
-      'new-h2',
-      Array.from({ length: 400 }, (_, index) =>
-        assistantMessage(`new-${index}`, `new-${index}`, index + 1),
+    h.fixture.publishSessionFiles([
+      writeHistorySession(h.home, 'old-h2', [assistantMessage('old', 'old', 0)]),
+      writeHistorySession(
+        h.home,
+        'new-h2',
+        Array.from({ length: 400 }, (_, index) =>
+          assistantMessage(`new-${index}`, `new-${index}`, index + 1),
+        ),
       ),
-    );
+    ]);
     writeHistoryChain(h.home, 'app-h2', 'new-h2', ['old-h2']);
 
     await h.handle({ type: 'session.loadHistory', appSessionId: 'app-h2' });
@@ -215,7 +220,9 @@ test('[H2] Paging, empty history, and retry', { concurrency: false }, async () =
       true,
     );
 
-    writeHistorySession(h.home, 'missing-h2', [assistantMessage('retry', 'retried', 402)]);
+    h.fixture.publishSessionFiles([
+      writeHistorySession(h.home, 'missing-h2', [assistantMessage('retry', 'retried', 402)]),
+    ]);
     await h.handle({ type: 'session.loadHistory', appSessionId: 'missing-h2' });
     const retried = h.events.filter(isSessionHistory).at(-1);
     assert.ok(retried);
@@ -240,10 +247,12 @@ test(
   async () => {
     const h = createSessionManagerTestContext();
     try {
-      writeHistorySession(h.home, 'provider-child-history', [
-        assistantMessage('oldest', 'oldest', 1),
-        assistantMessage('middle', 'middle', 2),
-        assistantMessage('newest', 'newest', 3),
+      h.fixture.publishSessionFiles([
+        writeHistorySession(h.home, 'provider-child-history', [
+          assistantMessage('oldest', 'oldest', 1),
+          assistantMessage('middle', 'middle', 2),
+          assistantMessage('newest', 'newest', 3),
+        ]),
       ]);
       h.history.seedChildSessions([
         {
@@ -316,8 +325,10 @@ test(
   async () => {
     const h = createSessionManagerTestContext();
     try {
-      writeHistorySession(h.home, 'provider-child-a', [assistantMessage('a', 'child a', 1)]);
-      writeHistorySession(h.home, 'provider-child-b', [assistantMessage('b', 'child b', 1)]);
+      h.fixture.publishSessionFiles([
+        writeHistorySession(h.home, 'provider-child-a', [assistantMessage('a', 'child a', 1)]),
+        writeHistorySession(h.home, 'provider-child-b', [assistantMessage('b', 'child b', 1)]),
+      ]);
       h.history.seedChildSessions([
         {
           parentAppSessionId: 'parent-isolation',
@@ -391,7 +402,11 @@ test(
   async () => {
     const h = createSessionManagerTestContext();
     try {
-      writeHistorySession(h.home, 'provider-known-child', [assistantMessage('known', 'known', 1)]);
+      h.fixture.publishSessionFiles([
+        writeHistorySession(h.home, 'provider-known-child', [
+          assistantMessage('known', 'known', 1),
+        ]),
+      ]);
       h.history.seedChildSessions([
         {
           parentAppSessionId: 'parent-known',
@@ -681,19 +696,21 @@ test('[A2] Open and replay a linked child session', { concurrency: false }, asyn
       linkedWorker('app-a2', 'worker-a2', 'tool-a2', 'paused'),
       linkedWorker('app-a2', 'worker-unknown-a2', 'tool-unknown-a2'),
     ]);
-    writeHistorySession(h.home, 'provider-a2', [
-      {
-        type: 'message',
-        id: 'user-a2',
-        timestamp: new Date(0).toISOString(),
-        message: { role: 'user', content: [{ type: 'text', text: 'parent prompt' }] },
-      },
-      assistantMessage('parent-a2', 'parent response', 1),
+    h.fixture.publishSessionFiles([
+      writeHistorySession(h.home, 'provider-a2', [
+        {
+          type: 'message',
+          id: 'user-a2',
+          timestamp: new Date(0).toISOString(),
+          message: { role: 'user', content: [{ type: 'text', text: 'parent prompt' }] },
+        },
+        assistantMessage('parent-a2', 'parent response', 1),
+      ]),
+      writeHistorySession(h.home, 'worker-a2', [assistantMessage('child-a2', 'child replay', 0)], {
+        callingSessionId: 'provider-a2',
+        callingToolUseId: 'tool-a2',
+      }),
     ]);
-    writeHistorySession(h.home, 'worker-a2', [assistantMessage('child-a2', 'child replay', 0)], {
-      callingSessionId: 'provider-a2',
-      callingToolUseId: 'tool-a2',
-    });
 
     await h.handle({ type: 'session.loadHistory', appSessionId: 'app-a2' });
     const historical = h.events.filter(isSessionHistory).at(-1);

@@ -8,11 +8,14 @@
  * reported files (or runs a full diff when events are unexplained), so this
  * module holds no session state and can never serve stale rows.
  */
-import { mkdirSync, statSync, watch, type FSWatcher } from 'node:fs';
+import { mkdirSync, statSync, watch } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { errMsg } from './sessionHelpers.js';
+import type { SessionFileChange } from './sessionFileCache.js';
+
+export type { SessionFileChange } from './sessionFileCache.js';
 
 export interface SessionFileWatcher {
   // Returns and forgets the last path observed for a live session. The close
@@ -20,12 +23,6 @@ export interface SessionFileWatcher {
   // whole sessions tree.
   consumeLiveSessionFile(providerSessionId: string): string | undefined;
   close(): void;
-}
-
-export interface SessionFileChange {
-  providerSessionId: string;
-  // Absolute path of the session (.jsonl) file; it may no longer exist.
-  path: string;
 }
 
 export interface SessionFileWatcherOptions {
@@ -46,6 +43,33 @@ export interface SessionFileWatcherOptions {
 
 const SESSION_FILE_SUFFIX = '.jsonl';
 const SESSION_SETTINGS_SUFFIX = '.settings.json';
+
+interface SessionDirectoryWatcher {
+  onError(listener: (error: unknown) => void): void;
+  close(): void;
+}
+
+type WatchSessionDirectory = (
+  root: string,
+  onChange: (filename: string | null) => void,
+) => SessionDirectoryWatcher;
+
+function watchSessionDirectory(
+  root: string,
+  onChange: (filename: string | null) => void,
+): SessionDirectoryWatcher {
+  const watcher = watch(root, { recursive: true }, (_eventType, filename) => {
+    onChange(filename);
+  });
+  return {
+    onError(listener) {
+      watcher.on('error', listener);
+    },
+    close() {
+      watcher.close();
+    },
+  };
+}
 
 // Session files are named <providerSessionId>.jsonl inside per-cwd
 // directories. Anything else (directory events, unknown names) returns
@@ -78,6 +102,7 @@ function sessionTargetFromFileName(
 // degrades gracefully: the cache is still reconciled on the next boot.
 export function startSessionFileWatcher(
   options: SessionFileWatcherOptions,
+  watchDirectory: WatchSessionDirectory = watchSessionDirectory,
 ): SessionFileWatcher | null {
   const root = options.root ?? join(homedir(), '.factory', 'sessions');
   const debounceMs = options.debounceMs ?? 1500;
@@ -113,9 +138,9 @@ export function startSessionFileWatcher(
   let pendingUnexplainable = false;
   let closed = false;
 
-  let watcher: FSWatcher;
+  let watcher: SessionDirectoryWatcher;
   try {
-    watcher = watch(root, { recursive: true }, (_eventType, filename) => {
+    watcher = watchDirectory(root, (filename) => {
       // An fs callback can race close(); never arm a new timer afterwards.
       if (closed) return;
       const target = sessionTargetFromFileName(filename);
@@ -175,7 +200,7 @@ export function startSessionFileWatcher(
   }
   // A watcher error must never take the sidecar down; the next boot
   // reconcile still picks up every change.
-  watcher.on('error', (error) => {
+  watcher.onError((error) => {
     console.error(`Session file watcher failed; live republish disabled: ${errMsg(error)}`);
   });
 

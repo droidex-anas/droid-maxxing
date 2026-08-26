@@ -20,7 +20,7 @@ interface HarnessOptions {
   childSessions?: ChildSessionSummary[];
   loaders?: Partial<SessionTimelineLoaders>;
   now?: () => number;
-  onRecordEvent?: (event: TranscriptEvent) => void;
+  onRecordEvent?: (event: TranscriptEvent) => boolean | void;
   streamingCoalesceMs?: number;
   streamingCoalesceMaxBytes?: number;
 }
@@ -55,8 +55,9 @@ function createHarness(options: HarnessOptions = {}) {
     history: {
       recordEvent: (event) => {
         trace.push(`record:${event.id}`);
-        options.onRecordEvent?.(event);
+        const durable = options.onRecordEvent?.(event);
         recorded.push(event);
+        return durable;
       },
     },
     getChildSessions: () => options.childSessions ?? [],
@@ -545,7 +546,11 @@ test('older restore prepends only transcripts and preserves page telemetry', () 
       resolveSummary: () => summary('app-1', 'provider-1'),
       getLive: () => undefined,
     },
-    history: { recordEvent: (recorded) => harness.recorded.push(recorded) },
+    history: {
+      recordEvent: (recorded) => {
+        harness.recorded.push(recorded);
+      },
+    },
     getChildSessions: () => {
       childLinkReads += 1;
       return [];

@@ -617,6 +617,7 @@ export type ClientCommand =
     }
   | { type: 'session.loadHistory'; appSessionId: string; cursor?: string; limit?: number }
   | { type: 'sessions.search'; requestId: string; query: string }
+  | { type: 'history.indexingIdle'; isIdle: boolean }
   | {
       type: 'child.open';
       parentAppSessionId: string;

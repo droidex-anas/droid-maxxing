@@ -71,6 +71,25 @@ export function rowIntersectsViewport({
   return rowBottom > viewportTop + 1 && rowTop < viewportBottom - 1;
 }
 
+/** Return the first vertically ordered row whose bottom is below the viewport top. */
+export function firstRowNotAboveViewport(
+  rowCount: number,
+  rowBottomAt: (index: number) => number,
+  viewportTop: number,
+): number {
+  let low = 0;
+  let high = rowCount;
+  const cutoff = viewportTop + 1;
+
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (rowBottomAt(middle) <= cutoff) low = middle + 1;
+    else high = middle;
+  }
+
+  return low;
+}
+
 function feedRows(element: HTMLDivElement): NodeListOf<HTMLElement> {
   return element.querySelectorAll<HTMLElement>('[data-feed-row-id]');
 }
@@ -96,27 +115,29 @@ export function captureViewportAnchor(
   element: HTMLDivElement,
   allowFullScan = false,
 ): ViewportAnchor | null {
-  const visibleRow = rowNearViewportTop(element);
-  const visibleRowId = visibleRow?.dataset.feedRowId;
-  if (visibleRow && visibleRowId) {
-    return {
-      rowId: visibleRowId,
-      rowOffsetTop: measureRowOffsetTop(element, visibleRow),
-      scrollTop: element.scrollTop,
-      scrollHeight: element.scrollHeight,
-    };
+  if (!allowFullScan) {
+    const visibleRow = rowNearViewportTop(element);
+    const visibleRowId = visibleRow?.dataset.feedRowId;
+    return visibleRow && visibleRowId
+      ? {
+          rowId: visibleRowId,
+          rowOffsetTop: measureRowOffsetTop(element, visibleRow),
+          scrollTop: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+        }
+      : null;
   }
-  if (!allowFullScan) return null;
 
   const rows = feedRows(element);
   const root = element.getBoundingClientRect();
-  let fallback: HTMLElement | null = null;
-  for (const row of rows) {
+  const visibleIndex = firstRowNotAboveViewport(
+    rows.length,
+    (index) => rows[index].getBoundingClientRect().bottom,
+    root.top,
+  );
+  if (visibleIndex < rows.length) {
+    const row = rows[visibleIndex];
     const rect = row.getBoundingClientRect();
-    if (rect.bottom <= root.top + 1) {
-      fallback = row;
-      continue;
-    }
     if (
       rowIntersectsViewport({
         viewportTop: root.top,
@@ -129,18 +150,21 @@ export function captureViewportAnchor(
       if (!rowId) return null;
       return {
         rowId,
-        rowOffsetTop: measureRowOffsetTop(element, row),
+        rowOffsetTop: rect.top - root.top,
         scrollTop: element.scrollTop,
         scrollHeight: element.scrollHeight,
       };
     }
-    if (rect.top >= root.bottom - 1) return null;
+    return null;
   }
-  const rowId = fallback?.dataset.feedRowId;
-  return fallback && rowId
+
+  if (rows.length === 0) return null;
+  const fallback = rows[rows.length - 1];
+  const rowId = fallback.dataset.feedRowId;
+  return rowId
     ? {
         rowId,
-        rowOffsetTop: measureRowOffsetTop(element, fallback),
+        rowOffsetTop: fallback.getBoundingClientRect().top - root.top,
         scrollTop: element.scrollTop,
         scrollHeight: element.scrollHeight,
       }
@@ -148,6 +172,12 @@ export function captureViewportAnchor(
 }
 
 function findFeedRow(element: HTMLDivElement, rowId: string): HTMLElement | null {
+  const escape = (globalThis as { CSS?: { escape?: (value: string) => string } }).CSS?.escape;
+  if (escape) {
+    return element.querySelector<HTMLElement>(`[data-feed-row-id="${escape(rowId)}"]`);
+  }
+
+  // CSS.escape is unavailable in Node-based tests and older DOM shims.
   for (const row of feedRows(element)) {
     if (row.dataset.feedRowId === rowId) return row;
   }

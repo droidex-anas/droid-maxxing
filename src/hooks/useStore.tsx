@@ -110,11 +110,13 @@ import {
   releaseSessionTranscriptWindow,
   withUpdatedTranscript,
 } from '../lib/transcriptStoreMemory';
+import { detectPureTranscriptPrepend, type TranscriptMutation } from '../lib/transcriptMutation';
 import {
   reconcilePrependedTranscript,
   reconcileRestoredTranscript,
   reconcileTranscriptSourcePage,
 } from '../lib/transcriptHistory';
+import { reduceStoreActionBatch } from './storeActionBatch';
 
 export type AgentKind = 'primary' | 'worker' | 'validator';
 export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
@@ -223,6 +225,9 @@ export interface AppState {
   // persisted in localStorage; the harness session data is never touched.
   chatMetadata: ChatMetadataMap;
   transcripts: Record<string, TranscriptEvent[]>;
+  // Exact provenance for the latest transcript change. Derived renderers use
+  // the revision chain to update a safe suffix or rebuild on any uncertainty.
+  transcriptMutations: Record<string, TranscriptMutation>;
   // Relative retained-payload estimate for each in-memory transcript window.
   // This is budgeting telemetry, not a claim about exact V8 heap bytes.
   transcriptRetainedCost: Record<string, number>;
@@ -1076,6 +1081,7 @@ export const initialState: AppState = {
   transcripts: sessionSnapshot?.transcript
     ? { [sessionSnapshot.transcript.appSessionId]: sessionSnapshot.transcript.events }
     : {},
+  transcriptMutations: {},
   transcriptRetainedCost: sessionSnapshot?.transcript
     ? {
         [sessionSnapshot.transcript.appSessionId]: estimateTranscriptCost(
@@ -1339,7 +1345,7 @@ function withHistoricalCompactionGeneration(
 
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === 'BATCH') {
-    return action.actions.reduce(reducer, state);
+    return reduceStoreActionBatch(state, action.actions, reducer, syncBrowserOpen);
   }
   return syncBrowserOpen(baseReducer(state, action));
 }
@@ -1380,11 +1386,10 @@ function baseReducer(state: AppState, action: Action): AppState {
 
       // Seed the first user message: the goal is the user's opening prompt and the
       // backend never echoes it back, so without this the first message never shows.
-      let transcripts = state.transcripts;
-      let transcriptRetainedCost = state.transcriptRetainedCost;
+      let seed: TranscriptEvent | undefined;
       const hasTranscript = (state.transcripts[action.session.appSessionId]?.length ?? 0) > 0;
       if (action.session.goal && !hasTranscript) {
-        const seed: TranscriptEvent = {
+        seed = {
           id: `seed-${action.session.appSessionId}`,
           appSessionId: action.session.appSessionId,
           sourceSessionId: 'user',
@@ -1396,11 +1401,6 @@ function baseReducer(state: AppState, action: Action): AppState {
           skills: pending?.skills.length ? pending.skills : undefined,
           files: pending?.files.length ? pending.files : undefined,
         };
-        transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
-        transcriptRetainedCost = {
-          ...state.transcriptRetainedCost,
-          [action.session.appSessionId]: estimateTranscriptCost([seed]),
-        };
       }
 
       const pendingCompose = pending
@@ -1409,7 +1409,7 @@ function baseReducer(state: AppState, action: Action): AppState {
           )
         : state.pendingCompose;
 
-      const next = {
+      const next: AppState = {
         ...childReset,
         sessions: {
           ...state.sessions,
@@ -1419,8 +1419,6 @@ function baseReducer(state: AppState, action: Action): AppState {
           ),
         },
         sessionOrder: order,
-        transcripts,
-        transcriptRetainedCost,
         activeAppSessionId: shouldActivate ? action.session.appSessionId : state.activeAppSessionId,
         draftChat: shouldActivate ? null : state.draftChat,
         draftAutonomy: shouldActivate ? null : state.draftAutonomy,
@@ -1445,7 +1443,17 @@ function baseReducer(state: AppState, action: Action): AppState {
             }
           : state.sessionLastSeen,
       };
-      return next;
+      return seed
+        ? withUpdatedTranscript(
+            next,
+            action.session.appSessionId,
+            [seed],
+            estimateTranscriptCost([seed]),
+            {
+              mutation: { kind: 'append', previousLength: 0, firstChangedIndex: 0 },
+            },
+          )
+        : next;
     }
 
     case 'SET_PENDING_COMPOSE':
@@ -2187,7 +2195,13 @@ function baseReducer(state: AppState, action: Action): AppState {
               action.appSessionId,
               reconciled.transcript,
               estimateTranscriptCost(reconciled.transcript),
-              action.childSessionId,
+              {
+                childSessionId: action.childSessionId,
+                mutation:
+                  action.mode === 'prepend'
+                    ? detectPureTranscriptPrepend(existing, reconciled.transcript)
+                    : undefined,
+              },
             )
           : historyState;
         const isSelected =
@@ -2220,6 +2234,7 @@ function baseReducer(state: AppState, action: Action): AppState {
               action.appSessionId,
               mergedTranscript,
               estimateTranscriptCost(mergedTranscript),
+              { mutation: detectPureTranscriptPrepend(existing, mergedTranscript) },
             )
           : historyState;
         return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RefObject } from 'react';
 import type { ConversationAnchor } from './chat';
@@ -11,7 +11,7 @@ import type { ConversationAnchor } from './chat';
  * top. The preview is positioned with fixed coordinates measured from the dot so
  * it escapes the rail's scroll clipping instead of being cut off.
  */
-export function ConversationTimeline({
+export const ConversationTimeline = memo(function ConversationTimeline({
   scrollRef,
   anchors,
 }: {
@@ -40,9 +40,7 @@ export function ConversationTimeline({
     if (!root || anchors.length === 0) return undefined;
     const seen = visible.current;
     seen.clear();
-    const els = anchors
-      .map((a) => root.querySelector<HTMLElement>(`[data-anchor-id="${CSS.escape(a.id)}"]`))
-      .filter((el): el is HTMLElement => el !== null);
+    const els = root.querySelectorAll<HTMLElement>('[data-anchor-id]');
     if (els.length === 0) return undefined;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -163,4 +161,4 @@ export function ConversationTimeline({
         )}
     </div>
   );
-}
+});

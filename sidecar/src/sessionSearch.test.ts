@@ -1,24 +1,17 @@
 import assert from 'node:assert/strict';
-import {
-  appendFileSync,
-  mkdtempSync,
-  rmSync,
-  statSync,
-  truncateSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import {
-  resetSessionSearchCache,
-  searchSessionFiles,
+  buildSessionSearchSnippet,
+  DEFAULT_SEARCH_SLICE_BYTES,
+  readSessionSearchSlice,
   type SessionSearchCandidate,
+  type SessionSearchRecord,
 } from './sessionSearch.js';
 
-// Mirrors the daemon's JSONL message record shape that sessionTranscriptParser
-// consumes: a message row holds role-tagged content blocks.
 function messageLine(
   id: string,
   role: 'user' | 'assistant',
@@ -47,215 +40,119 @@ function toolUseLine(id: string, input: string, ts: number): string {
   });
 }
 
-const dirs: string[] = [];
-
-function writeSession(id: string, lines: string[]): SessionSearchCandidate {
-  const dir = dirs[0] ?? mkdtempSync(join(tmpdir(), 'session-search-'));
-  if (dirs.length === 0) dirs.push(dir);
-  const path = join(dir, `${id}.jsonl`);
-  writeFileSync(path, lines.join('\n') + '\n');
+function writeSession(lines: string[]): { candidate: SessionSearchCandidate; directory: string } {
+  const directory = mkdtempSync(join(tmpdir(), 'session-search-extraction-'));
+  const path = join(directory, 'provider.jsonl');
+  writeFileSync(path, `${lines.join('\n')}\n`);
   const stat = statSync(path);
   return {
-    providerSessionId: id,
-    appSessionId: id,
-    path,
-    mtimeMs: stat.mtimeMs,
-    sizeBytes: stat.size,
+    directory,
+    candidate: {
+      providerSessionId: 'provider',
+      appSessionId: 'app',
+      path,
+      sizeBytes: stat.size,
+    },
   };
 }
 
-test('finds chat text across sessions with case-insensitive snippets', async () => {
-  const candidate = writeSession('s1', [
-    messageLine('m1', 'user', 'hi bro whatsapp, long time no see', 1000),
-    messageLine('m2', 'assistant', 'Hey! All good here.', 2000),
+async function readAll(candidate: SessionSearchCandidate): Promise<SessionSearchRecord[]> {
+  const records: SessionSearchRecord[] = [];
+  let byteOffset = 0;
+  for (;;) {
+    const slice = await readSessionSearchSlice(candidate, byteOffset);
+    assert.ok(slice.nextByteOffset > byteOffset || slice.reachedEnd);
+    records.push(...slice.records);
+    byteOffset = slice.nextByteOffset;
+    if (slice.reachedEnd) return records;
+  }
+}
+
+function content(
+  records: SessionSearchRecord[],
+): Omit<SessionSearchRecord, 'sourceByteOffset' | 'eventIndex'>[] {
+  return records.map(({ ts, author, text }) => ({ ts, author, text }));
+}
+
+test('extracts searchable user and assistant text with whitespace flattened', async () => {
+  const fixture = writeSession([
+    messageLine('one', 'user', 'hello\nthere', 1_000),
+    messageLine('two', 'assistant', 'general   kenobi', 2_000),
   ]);
-  const results = await searchSessionFiles([candidate], 'HI BRO WHATSAPP');
-  assert.equal(results.length, 1);
-  assert.equal(results[0]?.appSessionId, 's1');
-  const match = results[0]?.matches[0];
-  assert.equal(match?.author, 'user');
-  assert.equal(match?.ts, 1000);
-  assert.ok(match?.snippet.includes('hi bro whatsapp'));
+  try {
+    assert.deepEqual(content(await readAll(fixture.candidate)), [
+      { ts: 1_000, author: 'user', text: 'hello there' },
+      { ts: 2_000, author: 'assistant', text: 'general kenobi' },
+    ]);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
 });
 
-test('assistant replies match with assistant attribution', async () => {
-  const candidate = writeSession('s1', [
-    messageLine('m1', 'assistant', 'The WhatsApp bridge is ready.', 5000),
-  ]);
-  const results = await searchSessionFiles([candidate], 'whatsapp bridge');
-  assert.equal(results.length, 1);
-  assert.equal(results[0]?.matches[0]?.author, 'assistant');
-});
-
-test('snippets are centered on the match and ellipsized at the cut', async () => {
-  const candidate = writeSession('s1', [
-    messageLine('m1', 'assistant', `${'x'.repeat(120)} needle in a haystack ${'y'.repeat(120)}`, 1),
-  ]);
-  const snippet = (await searchSessionFiles([candidate], 'needle'))[0]?.matches[0]?.snippet;
-  assert.ok(snippet?.startsWith('…'));
-  assert.ok(snippet?.endsWith('…'));
-  assert.ok(snippet.includes('needle in a haystack'));
-  assert.ok(snippet.length < 260);
-});
-
-test('returns up to three matches per session, newest first', async () => {
-  const candidate = writeSession('s1', [
-    messageLine('m1', 'user', 'deploy v1', 1000),
-    messageLine('m2', 'assistant', 'deploy v1 done', 2000),
-    messageLine('m3', 'user', 'deploy v2', 3000),
-    messageLine('m4', 'assistant', 'deploy v2 done', 4000),
-    messageLine('m5', 'user', 'deploy v3', 5000),
-  ]);
-  const matches = (await searchSessionFiles([candidate], 'deploy'))[0]?.matches ?? [];
-  assert.equal(matches.length, 3);
-  assert.deepEqual(
-    matches.map((m) => m.ts),
-    [5000, 4000, 3000],
-  );
-});
-
-test('skips sessions without a match and tool I/O is not searchable', async () => {
-  const chat = writeSession('chat', [messageLine('m1', 'user', 'nothing relevant', 1)]);
-  const tools = writeSession('tools', [toolUseLine('m2', 'grep needle src/', 2)]);
-  const results = await searchSessionFiles([chat, tools], 'needle');
-  assert.deepEqual(
-    results.map((r) => r.appSessionId),
-    [],
-  );
-});
-
-test('llm-only orchestration context is not searchable', async () => {
-  const candidate = writeSession('s1', [
-    messageLine('m1', 'user', 'secret handshake', 1, 'llm_only'),
-  ]);
-  assert.equal((await searchSessionFiles([candidate], 'secret handshake')).length, 0);
-});
-
-test('internal skill notifications are not searchable as user messages', async () => {
-  const candidate = writeSession('s1', [
+test('excludes tool IO, llm-only context, internal notices, and corrupt lines', async () => {
+  const fixture = writeSession([
+    toolUseLine('tool', 'grep secret src/', 1_000),
+    messageLine('hidden', 'user', 'private review instructions', 2_000, 'llm_only'),
     messageLine(
-      'm1',
+      'internal',
       'user',
       '<system-notification>private review instructions</system-notification>',
-      1,
+      3_000,
     ),
+    '{not-json',
+    messageLine('visible', 'user', 'the token llm_only is ordinary chat here', 4_000),
   ]);
-  assert.equal((await searchSessionFiles([candidate], 'private review instructions')).length, 0);
+  try {
+    assert.deepEqual(content(await readAll(fixture.candidate)), [
+      { ts: 4_000, author: 'user', text: 'the token llm_only is ordinary chat here' },
+    ]);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
 });
 
-test('a chat message whose text is the token llm_only stays searchable', async () => {
-  const candidate = writeSession('s1', [
-    messageLine('m1', 'user', 'llm_only', 1),
-    messageLine('m2', 'assistant', 'what does llm_only mean', 2),
-  ]);
-  const results = await searchSessionFiles([candidate], 'llm_only');
-  assert.equal(results.length, 1);
-  assert.equal(results[0]?.matches[0]?.snippet, 'what does llm_only mean');
-  assert.ok(results[0]?.matches.some((m) => m.snippet === 'llm_only'));
-
-  resetSessionSearchCache();
-});
-
-test('corrupt lines are skipped like the transcript reader does', async () => {
-  const candidate = writeSession('s1', [
-    '{"type":"message",broken',
-    messageLine('m1', 'assistant', 'the answer is forty-two', 1),
-  ]);
-  const results = await searchSessionFiles([candidate], 'forty-two');
-  assert.equal(results.length, 1);
-});
-
-test('a file deleted after the snapshot is skipped instead of failing the scan', async () => {
-  const ghost = writeSession('ghost', [messageLine('m1', 'user', 'shared topic ghost', 1)]);
-  const alive = writeSession('alive', [messageLine('m2', 'user', 'shared topic alive', 2)]);
-  // The candidate list is a snapshot of the file cache; the file can vanish
-  // before the search reads it.
-  rmSync(ghost.path);
-  const results = await searchSessionFiles([ghost, alive], 'shared topic');
-  assert.deepEqual(
-    results.map((r) => r.appSessionId),
-    ['alive'],
+test('oversized JSONL records are discarded and scanning resumes at the next record', async () => {
+  const oversized = messageLine(
+    'oversized',
+    'user',
+    `do not retain ${'x'.repeat(DEFAULT_SEARCH_SLICE_BYTES * 4)}`,
+    1_000,
   );
-
-  resetSessionSearchCache();
+  const wanted = messageLine('wanted', 'assistant', 'bounded otter marker', 2_000);
+  const fixture = writeSession([oversized, wanted]);
+  try {
+    const first = await readSessionSearchSlice(fixture.candidate, 0, DEFAULT_SEARCH_SLICE_BYTES);
+    assert.ok(first.nextByteOffset > DEFAULT_SEARCH_SLICE_BYTES);
+    assert.deepEqual(first.records, []);
+    assert.deepEqual(content(await readAllFrom(fixture.candidate, first.nextByteOffset)), [
+      { ts: 2_000, author: 'assistant', text: 'bounded otter marker' },
+    ]);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
 });
 
-test('a blank query never scans anything', async () => {
-  const candidate = writeSession('s1', [messageLine('m1', 'user', 'anything', 1)]);
-  assert.equal((await searchSessionFiles([candidate], '   ')).length, 0);
+test('centers and ellipsizes a case-insensitive search snippet', () => {
+  const text = `${'x'.repeat(120)} Needle in a haystack ${'y'.repeat(120)}`;
+  const snippet = buildSessionSearchSnippet(text, 'needle');
+  assert.ok(snippet);
+  assert.ok(snippet.startsWith('…'));
+  assert.ok(snippet.endsWith('…'));
+  assert.ok(snippet.includes('Needle in a haystack'));
+  assert.equal(buildSessionSearchSnippet(text, 'missing'), null);
 });
 
-test('results cap at 25 sessions, keeping the candidates’ recency order', async () => {
-  const candidates = Array.from({ length: 30 }, (_, i) =>
-    writeSession(`s${String(i)}`, [
-      messageLine('m1', 'user', `shared topic ${String(i)}`, 100 + i),
-    ]),
-  );
-  const results = await searchSessionFiles(candidates, 'shared topic');
-  assert.equal(results.length, 25);
-  assert.equal(results[0]?.appSessionId, 's0');
-  assert.equal(results[24]?.appSessionId, 's24');
-});
-
-test('the byte budget charges the tail window actually read, not the file size', async () => {
-  // A sparse 41 MB session file: larger than the 40 MB query budget, but the
-  // reader only scans the newest 5 MB tail, so the needle lives at the end.
-  const big = writeSession('big-budget', [
-    messageLine('m0', 'user', 'old history outside the window', 0),
-  ]);
-  truncateSync(big.path, 41_000_000);
-  appendFileSync(big.path, '\n' + messageLine('m1', 'user', 'shared topic big', 1) + '\n');
-  const stat = statSync(big.path);
-  const oversized: SessionSearchCandidate = {
-    ...big,
-    mtimeMs: stat.mtimeMs,
-    sizeBytes: stat.size,
-  };
-  const small = writeSession('small-budget', [messageLine('m2', 'user', 'shared topic small', 2)]);
-  // Charging the full 41 MB would bust the 40 MB budget before `small` is
-  // scanned; charging the 5 MB tail window leaves room for it.
-  const results = await searchSessionFiles([oversized, small], 'shared topic');
-  assert.deepEqual(
-    results.map((r) => r.appSessionId),
-    ['big-budget', 'small-budget'],
-  );
-
-  resetSessionSearchCache();
-});
-
-test('a superseded query stops the scan before spending the file budget', async () => {
-  const candidates = [
-    writeSession('s1', [messageLine('m1', 'user', 'shared topic one', 1)]),
-    writeSession('s2', [messageLine('m2', 'user', 'shared topic two', 2)]),
-  ];
-  let probes = 0;
-  const results = await searchSessionFiles(candidates, 'shared topic', () => {
-    probes += 1;
-    return probes > 1;
-  });
-  assert.deepEqual(
-    results.map((r) => r.appSessionId),
-    ['s1'],
-  );
-
-  resetSessionSearchCache();
-});
-
-test('extractions are cached by file freshness and re-read after writes', async () => {
-  const candidate = writeSession('s1', [messageLine('m1', 'user', 'first version', 1)]);
-  assert.equal((await searchSessionFiles([candidate], 'second version')).length, 0);
-  assert.equal((await searchSessionFiles([candidate], 'first version')).length, 1);
-
-  // A later write changes mtime+size, so the next query re-reads the file.
-  appendFileSync(candidate.path, messageLine('m2', 'user', 'second version', 2) + '\n');
-  const stat = statSync(candidate.path);
-  const fresh: SessionSearchCandidate = {
-    ...candidate,
-    mtimeMs: stat.mtimeMs,
-    sizeBytes: stat.size,
-  };
-  const results = await searchSessionFiles([fresh], 'second version');
-  assert.equal(results.length, 1);
-
-  resetSessionSearchCache();
-});
+async function readAllFrom(
+  candidate: SessionSearchCandidate,
+  initialByteOffset: number,
+): Promise<SessionSearchRecord[]> {
+  const records: SessionSearchRecord[] = [];
+  let byteOffset = initialByteOffset;
+  for (;;) {
+    const slice = await readSessionSearchSlice(candidate, byteOffset);
+    assert.ok(slice.nextByteOffset > byteOffset || slice.reachedEnd);
+    records.push(...slice.records);
+    byteOffset = slice.nextByteOffset;
+    if (slice.reachedEnd) return records;
+  }
+}

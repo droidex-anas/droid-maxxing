@@ -21,7 +21,11 @@ test('stage records feed counters, histograms, and snapshot gauges', async () =>
   metrics.enable();
   metrics.recordNormalize(0.5);
   metrics.recordNormalize(1.5);
+  metrics.recordPersistenceStartup(4);
   metrics.recordPersist(2);
+  metrics.recordPersistenceBoundary(7);
+  metrics.recordPersistenceFailure();
+  metrics.recordPersistenceRecovery();
   metrics.recordEmit(3);
   metrics.recordTransport(0.25, 1_000, 1);
   metrics.recordCoalesce(4);
@@ -35,11 +39,15 @@ test('stage records feed counters, histograms, and snapshot gauges', async () =>
 
   assert.equal(snapshot.counters.normalized, 2);
   assert.equal(snapshot.counters.persisted, 1);
+  assert.equal(snapshot.counters.persistenceFailures, 1);
+  assert.equal(snapshot.counters.persistenceRecoveries, 1);
   assert.equal(snapshot.counters.emitted, 1);
   assert.equal(snapshot.counters.transportSends, 1);
   assert.equal(snapshot.counters.coalesceFlushes, 1);
   assert.equal(snapshot.histograms.normalizeMs.p50Ms, 0.5);
+  assert.equal(snapshot.histograms.persistenceStartupMs.maxMs, 4);
   assert.equal(snapshot.histograms.persistMs.maxMs, 2);
+  assert.equal(snapshot.histograms.persistenceBoundaryMs.maxMs, 7);
   assert.equal(snapshot.histograms.coalesceMerged.maxMs, 4);
   assert.equal(snapshot.transport.bytesTotal, 1_000);
   assert.ok(snapshot.transport.bytesPerSecondAvg > 0);
@@ -145,6 +153,8 @@ test('reset clears samples so consecutive runs stay independent', () => {
   assert.deepEqual(snapshot.counters, {
     normalized: 0,
     persisted: 0,
+    persistenceFailures: 0,
+    persistenceRecoveries: 0,
     emitted: 0,
     transportSends: 0,
     coalesceFlushes: 0,

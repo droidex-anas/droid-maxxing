@@ -165,6 +165,7 @@ interface DroidControlApi {
   clearApiKey: () => Promise<void>;
   listFiles: (dir: string) => Promise<string[]>;
   getPerformanceMetrics: () => Promise<DesktopPerformanceMetrics>;
+  systemIdleTime: () => Promise<number>;
   readFile: (path: string) => Promise<string>;
   repoStatus: (dir: string) => Promise<RepoStatus | null>;
   listEditors: () => Promise<EditorId[]>;
@@ -294,6 +295,13 @@ function desktopApi(): DroidControlApi | undefined {
 }
 
 export const isDesktop = () => Boolean(desktopApi());
+
+export async function systemIdleTime(): Promise<number | null> {
+  const api = desktopApi();
+  if (!api) return null;
+  const seconds = await api.systemIdleTime();
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
 
 function requireDesktopApi(message: string): DroidControlApi {
   const api = desktopApi();

@@ -1,4 +1,3 @@
-import type { HistoryIndex } from './history.js';
 import {
   hydrateHistoricalSession,
   loadSessionHistory,
@@ -18,7 +17,9 @@ import type { CompactType } from './compaction.js';
 import { errMsg } from './sessionHelpers.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
-type TimelineHistory = Pick<HistoryIndex, 'recordEvent'>;
+interface TimelineHistory {
+  recordEvent(event: TranscriptEvent): void;
+}
 type TimelineError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
 export interface SessionTimelineLoaders {
@@ -452,10 +453,14 @@ export class SessionTimeline {
 
   private recordAndEmit(event: TranscriptEvent): void {
     this.dependencies.history.recordEvent(event);
+    this.emitRecordedEvent(event);
+  }
+
+  private emitRecordedEvent(event: TranscriptEvent): void {
     // Emit timing covers handoff into the ordered bridge queue. Priority or
     // size-boundary events can synchronously trigger a flush inside that call;
     // transportMs isolates the serialization + fan-out slice. Persistence is
-    // measured independently by HistoryIndex.
+    // measured independently by the worker-backed persistence queue.
     const emitStartedAt = performance.now();
     this.dependencies.emit({ type: 'event.appended', event });
     hotPathMetrics.recordEmit(performance.now() - emitStartedAt);

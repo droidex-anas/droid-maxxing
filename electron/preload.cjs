@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('droidControl', {
   clearApiKey: () => ipcRenderer.invoke('clear-api-key'),
   listFiles: (dir) => ipcRenderer.invoke('list-files', { dir }),
   getPerformanceMetrics: () => ipcRenderer.invoke('get-performance-metrics'),
+  systemIdleTime: () => ipcRenderer.invoke('system-idle-time'),
   readFile: (path) => ipcRenderer.invoke('read-file', { path }),
   repoStatus: (dir) => ipcRenderer.invoke('repo-status', { dir }),
   listEditors: () => ipcRenderer.invoke('list-editors'),

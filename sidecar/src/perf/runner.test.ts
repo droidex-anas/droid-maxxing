@@ -28,7 +28,8 @@ test('replay run drives the real sidecar pipeline and reports measurements', asy
   const sidecar = report.sidecar;
   assert.ok(sidecar.counters.normalized >= report.providerEvents);
   assert.ok(sidecar.counters.persisted >= report.client.appendedReceived);
-  assert.ok(sidecar.histograms.persistMs.count >= report.client.appendedReceived);
+  assert.ok(sidecar.histograms.persistMs.count > 0);
+  assert.ok(sidecar.histograms.persistMs.count <= sidecar.counters.persisted);
   assert.ok(sidecar.histograms.transportMs.count > 0);
   assert.ok(sidecar.eventLoop !== null);
   assert.ok(sidecar.resources !== null);

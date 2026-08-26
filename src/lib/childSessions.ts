@@ -1,40 +1,17 @@
 import type { ChildStatus, ProgressEntry, TranscriptEvent } from '../types/bridge';
 import type { ChildAccess, ChildSessionInfo } from '../hooks/useStore';
-import { childSessionInfo, isChildSessionTool, toolMeta, CAT_LABEL } from './tools';
+import { toolMeta, CAT_LABEL } from './tools';
+import { childSessionInfo } from './childSessionEvents';
+import {
+  childSpawnTranscriptEvents,
+  latestTranscriptActivityForSource,
+} from './transcriptIngestion';
 
 // A single Task spawn streams many tool_call/tool_call_delta events sharing one
 // toolUseId; the subagent_type (label) and description can arrive in separate
 // deltas, so merge their args rather than picking one event and dropping the
 // field the other carried.
-export function mergeChildSessionSpawn(
-  existing: TranscriptEvent,
-  next: TranscriptEvent,
-): TranscriptEvent {
-  const e = childSessionInfo(existing.toolArgs);
-  const n = childSessionInfo(next.toolArgs);
-  const label = n.label ?? e.label;
-  const description = n.description ?? e.description;
-  // The spawn happened when its first event arrived; later deltas only refine
-  // the args, so the earliest identity and timestamp stay authoritative — a row
-  // timed from the last delta would start a beat late.
-  const origin = { id: existing.id, ts: existing.ts };
-  // The latest delta is the freshest base; only rebuild its args when an earlier
-  // delta carried a label/description this one is missing.
-  if (label === n.label && description === n.description) return { ...next, ...origin };
-  const base =
-    next.toolArgs && typeof next.toolArgs === 'object'
-      ? (next.toolArgs as Record<string, unknown>)
-      : {};
-  return {
-    ...next,
-    ...origin,
-    toolArgs: {
-      ...base,
-      ...(label ? { subagent_type: label } : {}),
-      ...(description ? { description } : {}),
-    },
-  };
-}
+export { mergeChildSessionSpawn } from './childSessionEvents';
 
 export interface ChildSessionLatest {
   kind: TranscriptEvent['kind'];
@@ -151,15 +128,18 @@ export function visibleSessionTarget(
     access,
     canSend: ready,
     canInterrupt: ready && child.status === 'running',
-    settingsReadiness:
-      child.status === 'completed'
-        ? 'failed'
-        : ready
-          ? 'ready'
-          : access === undefined || access.state === 'opening'
-            ? 'opening'
-            : 'failed',
+    settingsReadiness: childSettingsReadiness(child, access, ready),
   };
+}
+
+function childSettingsReadiness(
+  child: ChildSessionInfo,
+  access: ChildAccess | undefined,
+  isReady: boolean,
+): 'failed' | 'opening' | 'ready' {
+  if (child.status === 'completed') return 'failed';
+  if (isReady) return 'ready';
+  return access === undefined || access.state === 'opening' ? 'opening' : 'failed';
 }
 
 export function visibleSessionIsPending(
@@ -180,13 +160,16 @@ export function transcriptForVisibleSession(
   transcript: TranscriptEvent[],
   childSessionId: string | null,
 ): TranscriptEvent[] {
-  if (childSessionId) {
-    return transcript.filter((event) => event.sourceSessionId === childSessionId);
-  }
-  return transcript.filter(
-    (event) =>
-      event.role === 'primary' || (event.author === 'user' && event.sourceSessionId === 'user'),
-  );
+  return transcript.filter((event) => transcriptEventIsVisible(event, childSessionId));
+}
+
+export function transcriptEventIsVisible(
+  event: TranscriptEvent,
+  childSessionId: string | null,
+): boolean {
+  return childSessionId
+    ? event.sourceSessionId === childSessionId
+    : event.role === 'primary' || (event.author === 'user' && event.sourceSessionId === 'user');
 }
 
 export function shouldOpenSelectedChild(access: ChildAccess | undefined): boolean {
@@ -306,14 +289,7 @@ export function spawnedChildSessions(
   transcript: readonly TranscriptEvent[],
   childSessions: readonly ChildSessionInfo[],
 ): ChildSessionInfo[] {
-  const spawns = new Map<string, TranscriptEvent>();
-  for (const event of transcript) {
-    if (event.kind !== 'tool_call' || !isChildSessionTool(event.toolName, event.toolArgs)) continue;
-    const key = event.toolUseId ?? event.id;
-    const merged = spawns.get(key);
-    spawns.set(key, merged ? mergeChildSessionSpawn(merged, event) : event);
-  }
-  const resolved = resolveWaveSessions([...spawns.values()], childSessions);
+  const resolved = resolveWaveSessions(childSpawnTranscriptEvents(transcript), childSessions);
   const seen = new Set(resolved.map((child) => child.childSessionId));
   // A registered child whose spawn scrolled out of the loaded transcript window
   // (paged or compacted history) still belongs to the session.
@@ -393,24 +369,16 @@ export function childSessionActivityForTarget(
 ): ChildSessionActivity | undefined {
   const childSession = findChildSessionForTarget(childSessions, target);
   if (!childSession) return undefined;
+  const latestEvent = latestTranscriptActivityForSource(allTx, childSession.childSessionId);
   let latest: ChildSessionLatest | undefined;
-  for (let i = allTx.length - 1; i >= 0; i--) {
-    const t = allTx[i];
-    if (
-      t.appSessionId !== childSession.parentAppSessionId ||
-      t.sourceSessionId !== childSession.childSessionId ||
-      (t.kind === 'tool_result' && !t.isError) ||
-      t.author === 'user'
-    )
-      continue;
+  if (latestEvent?.appSessionId === childSession.parentAppSessionId) {
     latest = {
-      kind: t.kind,
-      text: t.text,
-      toolName: t.toolName,
-      toolArgs: t.toolArgs,
-      isError: t.isError,
+      kind: latestEvent.kind,
+      text: latestEvent.text,
+      toolName: latestEvent.toolName,
+      toolArgs: latestEvent.toolArgs,
+      isError: latestEvent.isError,
     };
-    break;
   }
   return {
     // Autonomous subagents never open a runtime, so runtime availability must

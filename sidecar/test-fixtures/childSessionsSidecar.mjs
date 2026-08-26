@@ -9,6 +9,9 @@ const token = process.env.BRIDGE_TOKEN ?? '';
 const logPath = process.env.CHILD_SESSIONS_SMOKE_LOG;
 const allowAnyToken = process.env.CHILD_SESSIONS_SMOKE_ALLOW_ANY_TOKEN === '1';
 const streamEventCount = Number(process.env.CHILD_SESSIONS_SMOKE_STREAM_EVENTS ?? '0');
+const bridgeProtocolVersion = '2';
+const bridgeGeneration = `child-session-smoke-${String(process.pid)}`;
+let nextBridgeSequence = 1;
 
 if (
   !Number.isSafeInteger(port) ||
@@ -178,7 +181,18 @@ const timers = new Set();
 const streamingSockets = new WeakSet();
 
 function send(socket, event) {
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
+  if (socket.readyState !== WebSocket.OPEN) return;
+  const seq = nextBridgeSequence;
+  nextBridgeSequence += 1;
+  socket.send(
+    JSON.stringify({
+      type: 'events.batch',
+      generation: bridgeGeneration,
+      firstSeq: seq,
+      lastSeq: seq,
+      events: [{ seq, event }],
+    }),
+  );
 }
 
 function history(socket, appSessionId) {
@@ -325,11 +339,14 @@ function openChild(socket, command) {
 }
 
 server.on('connection', (socket, request) => {
-  const provided = new URL(request.url ?? '/', `http://${request.headers.host}`).searchParams.get(
-    'token',
-  );
+  const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  const provided = requestUrl.searchParams.get('token');
   if (!allowAnyToken && provided !== token) {
     socket.close(1008, 'invalid bridge token');
+    return;
+  }
+  if (requestUrl.searchParams.get('bridgeProtocol') !== bridgeProtocolVersion) {
+    socket.close(1002, 'unsupported bridge protocol');
     return;
   }
   send(socket, { type: 'connection', status: 'connected' });
