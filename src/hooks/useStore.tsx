@@ -55,6 +55,11 @@ import { addWorkspaceCwd } from '../lib/workspaces';
 import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
 import {
+  loadToolActivityDensity,
+  saveToolActivityDensity,
+  type ToolActivityDensity,
+} from '../lib/toolActivity';
+import {
   applyFactoryCompactionDefaults,
   compactionSettingsSnapshot,
   loadCompactionTokenLimit,
@@ -310,6 +315,8 @@ export interface AppState {
   // Persisted app-wide default autonomy for new sessions. Owned by Settings;
   // factory-default reloads and draft/session changes never overwrite it.
   defaultAutonomy: Autonomy;
+  // Compact folds chat tool calls into one group; verbose shows each tool.
+  toolActivity: ToolActivityDensity;
   // Autonomy override for the current unsent draft. Null means the draft
   // follows `defaultAutonomy`; reset whenever the draft lifecycle resets.
   draftAutonomy: Autonomy | null;
@@ -608,6 +615,7 @@ type Action =
   | { type: 'SET_LIVE_ENTER_BEHAVIOR'; behavior: LiveEnterBehavior }
   | { type: 'SET_IMAGE_PASTE_QUALITY'; quality: ImagePasteQuality }
   | { type: 'SET_DEFAULT_AUTONOMY'; autonomy: Autonomy }
+  | { type: 'SET_TOOL_ACTIVITY'; density: ToolActivityDensity }
   | { type: 'SET_DRAFT_AUTONOMY'; autonomy: Autonomy }
   | { type: 'AUTONOMY_UPDATE_REQUESTED'; appSessionId: string; autonomy: Autonomy }
   | { type: 'AUTONOMY_UPDATE_SETTLED'; appSessionId: string };
@@ -1135,6 +1143,7 @@ export const initialState: AppState = {
   missionControlMode: persistedUiState.missionControlMode ?? false,
   draftChat: null,
   defaultAutonomy: loadDefaultAutonomy(),
+  toolActivity: loadToolActivityDensity(),
   draftAutonomy: null,
   pendingAutonomy: {},
   composerSeed: null,
@@ -3002,6 +3011,9 @@ function baseReducer(state: AppState, action: Action): AppState {
       saveDefaultAutonomy(action.autonomy);
       return { ...state, defaultAutonomy: action.autonomy };
     }
+
+    case 'SET_TOOL_ACTIVITY':
+      return { ...state, toolActivity: saveToolActivityDensity(action.density) };
 
     case 'SET_DRAFT_AUTONOMY':
       return { ...state, draftAutonomy: action.autonomy };

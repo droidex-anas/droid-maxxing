@@ -32,6 +32,7 @@ import {
   tabMatchesQuery,
   type SettingsSearchHit,
 } from '../lib/settingsSearch';
+import type { ToolActivityDensity } from '../lib/toolActivity';
 
 interface NavItem {
   label: string;
@@ -740,9 +741,33 @@ function SetupSection({ onClose }: { onClose: () => void }) {
 function ConfigurationSection() {
   const dispatch = useStoreDispatch();
   const defaultAutonomy = useStoreSelector((state) => state.defaultAutonomy);
+  const toolActivity = useStoreSelector((state) => state.toolActivity);
   return (
     <div className="max-w-2xl mx-auto">
       <SectionTitle title="Configuration" />
+      <GroupLabel>Transcript</GroupLabel>
+      <div className="rounded-xl border border-droid-border bg-droid-surface divide-y divide-droid-border mb-8">
+        <SettingRow
+          label="Tool activity"
+          description="Compact folds reads, shells, and edits into one group. Verbose shows each tool as it runs."
+        >
+          <Dropdown
+            value={toolActivity}
+            width="w-44"
+            ariaLabel="Tool activity"
+            options={[
+              { value: 'compact', label: 'Compact' },
+              { value: 'verbose', label: 'Verbose' },
+            ]}
+            onChange={(value) => {
+              dispatch({
+                type: 'SET_TOOL_ACTIVITY',
+                density: value as ToolActivityDensity,
+              });
+            }}
+          />
+        </SettingRow>
+      </div>
       <GroupLabel>Sessions</GroupLabel>
       <div className="rounded-xl border border-droid-border bg-droid-surface divide-y divide-droid-border mb-8">
         <SettingRow
