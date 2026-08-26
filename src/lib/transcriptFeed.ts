@@ -4,8 +4,9 @@ import { feedItemTailId } from '../hooks/conversationViewportAnchor';
 import { hasCompleteAppBlock } from './appBlocks';
 import { mergeChildSessionSpawn, type ChildSessionActivity } from './childSessions';
 import { extractFileChange, type FileChange } from './diff';
+import type { ToolActivityDensity } from './toolActivity';
 import { classifyEvent } from './transcript';
-import { hasTodoPayload, isChildSessionTool, isSubagentBookkeepingTool } from './tools';
+import { hasTodoPayload, isChildSessionTool, isSubagentBookkeepingTool, toolMeta } from './tools';
 
 // Whether `next` is the tool_result produced by the `call` event. Result events
 // carry no usable `toolName` (the live SDK emits "" and history reads the empty
@@ -62,6 +63,13 @@ export function correlateResults(events: TranscriptEvent[]): {
 }
 
 /* ── Feed model ── */
+export type ActivityFeedItem = {
+  type: 'activity';
+  key: string;
+  items: FeedItem[];
+  active: boolean;
+};
+
 export type FeedItem =
   | { type: 'message'; key: string; event: TranscriptEvent }
   | { type: 'thinking'; key: string; event: TranscriptEvent; durationMs?: number }
@@ -74,6 +82,7 @@ export type FeedItem =
   // single subagents dock card scoped to just these spawns.
   | { type: 'child_sessions'; key: string; events: TranscriptEvent[] }
   | { type: 'tools'; key: string; events: TranscriptEvent[] }
+  | ActivityFeedItem
   | { type: 'worked'; key: string; items: FeedItem[]; durationMs: number }
   | TurnChangesItem;
 
@@ -504,14 +513,21 @@ export function trailingSubagentPoll(
 export type GroupedFeedOptions = BuildFeedOptions & {
   specContent?: string;
   changes?: boolean;
+  density?: ToolActivityDensity;
 };
 
 export function buildGroupedFeed(
   events: TranscriptEvent[],
   pending: boolean,
-  { specContent, changes = false, ...feedOptions }: GroupedFeedOptions = {},
+  { specContent, changes = false, density, ...feedOptions }: GroupedFeedOptions = {},
 ): FeedItem[] {
-  return groupTurns(buildFeed(events, feedOptions), pending, specContent, changes);
+  return groupTurns(
+    buildFeed(events, feedOptions),
+    pending,
+    specContent,
+    changes,
+    density ?? 'compact',
+  );
 }
 
 // Public helper so the chat view can derive the same anchors MessageFeed stamps.
@@ -527,6 +543,7 @@ export function conversationAnchors(
 export function tailTimestamp(item?: FeedItem): number | undefined {
   if (!item) return undefined;
   if (item.type === 'worked' || item.type === 'turnChanges') return undefined;
+  if (item.type === 'activity') return tailTimestamp(item.items.at(-1));
   if (item.type === 'tools') {
     const e = item.events[item.events.length - 1];
     return e?.endTs ?? e?.ts;
@@ -564,7 +581,10 @@ function spanOf(items: FeedItem[]): { start: number; end: number } {
       it.events.forEach((e) => {
         consider(e.ts, e.endTs);
       });
-    else if (it.type !== 'worked' && it.type !== 'turnChanges')
+    else if (it.type === 'activity') {
+      const nested = spanOf(it.items);
+      consider(nested.start, nested.end);
+    } else if (it.type !== 'worked' && it.type !== 'turnChanges')
       consider(it.event.ts, it.event.endTs);
   }
   if (start === Infinity) return { start: 0, end: 0 };
@@ -693,15 +713,127 @@ function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
   return out;
 }
 
+function isFoldableToolItem(it: FeedItem): boolean {
+  return it.type === 'tools' || it.type === 'diff' || it.type === 'diffs';
+}
+
+export function foldActivityItems(items: FeedItem[], trailingLive: boolean): FeedItem[] {
+  const out: FeedItem[] = [];
+  let buf: FeedItem[] = [];
+  const flush = (active: boolean) => {
+    if (buf.length === 0) return;
+    out.push({
+      type: 'activity',
+      key: `activity-${buf[0].key}`,
+      items: [...buf],
+      active,
+    });
+    buf = [];
+  };
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (isFoldableToolItem(it)) buf.push(it);
+    else {
+      flush(false);
+      out.push(it);
+    }
+  }
+  const live = trailingLive && buf.length > 0;
+  flush(live);
+  return out;
+}
+
+function appendTurnChanges(out: FeedItem[], run: FeedItem[]): void {
+  const files = collectTurnFiles(run);
+  if (files.length === 0) return;
+  out.push({
+    type: 'turnChanges',
+    key: `changes-${run[0].key}`,
+    tailEventId: feedItemTailId(run[run.length - 1]),
+    files,
+    added: files.reduce((s, f) => s + f.added, 0),
+    removed: files.reduce((s, f) => s + f.removed, 0),
+  });
+}
+
+export function summarizeActivity(items: FeedItem[], active: boolean): string {
+  let files = 0;
+  let commands = 0;
+  let reads = 0;
+  let searches = 0;
+  let fetches = 0;
+  let plans = 0;
+  let others = 0;
+
+  const countCall = (e: TranscriptEvent) => {
+    if (e.kind !== 'tool_call') return;
+    if (classifyEvent(e) === 'plan_update') {
+      plans += 1;
+      return;
+    }
+    switch (toolMeta(e.toolName, e.toolArgs).cat) {
+      case 'exec':
+        commands += 1;
+        return;
+      case 'read':
+        reads += 1;
+        return;
+      case 'search':
+        searches += 1;
+        return;
+      case 'web':
+        fetches += 1;
+        return;
+      case 'edit':
+      case 'create':
+        files += 1;
+        return;
+      default:
+        others += 1;
+    }
+  };
+
+  for (const it of items) {
+    if (it.type === 'diff') files += 1;
+    else if (it.type === 'diffs') files += it.changes.length;
+    else if (it.type === 'tools') it.events.forEach(countCall);
+  }
+
+  const kindCount =
+    Number(files > 0) +
+    Number(commands > 0) +
+    Number(reads > 0) +
+    Number(searches > 0) +
+    Number(fetches > 0) +
+    Number(plans > 0) +
+    Number(others > 0);
+
+  // Reads join a files+commands header without a third clause.
+  if (files > 0 && commands > 0 && searches === 0 && fetches === 0 && plans === 0 && others === 0) {
+    return active ? 'Editing files, running commands' : 'Edited files, ran commands';
+  }
+  if (kindCount === 1) {
+    if (commands > 0) return active ? `Running ${commands} commands` : `Ran ${commands} commands`;
+    if (files > 0) return active ? 'Editing files' : 'Edited files';
+    if (reads > 0) return active ? 'Reading files' : `Read ${reads} files`;
+    if (searches > 0) return active ? 'Searching' : 'Searched';
+    if (fetches > 0) return active ? 'Fetching' : 'Fetched pages';
+    if (plans > 0) return active ? 'Updating plan' : 'Updated plan';
+  }
+  return active ? 'Working' : 'Ran tools';
+}
+
 // Fold completed assistant turns into "Worked for …" groups. The in-flight turn
 // (while pending) is left expanded so live thinking/tools/status keep streaming.
-// When `changes` is set, a completed turn that edited files gets a top-level
-// "Changes · N files" summary appended so it survives the Worked-for folding.
+// Compact density instead folds foldable tool/diff items into activity groups
+// on every run, including the live last run. When `changes` is set, a completed
+// turn that edited files gets a top-level "Changes · N files" summary.
 export function groupTurns(
   items: FeedItem[],
   pending: boolean,
   specContent?: string,
   changes = false,
+  density: ToolActivityDensity = 'verbose',
 ): FeedItem[] {
   const out: FeedItem[] = [];
   let i = 0;
@@ -717,23 +849,17 @@ export function groupTurns(
       i++;
     }
     const isLastRun = i >= items.length;
-    if (isLastRun && pending) {
+    const trailingLive = isLastRun && pending;
+    if (density === 'compact') {
+      out.push(...foldActivityItems(run, trailingLive));
+      if (!trailingLive && changes) appendTurnChanges(out, run);
+      continue;
+    }
+    if (trailingLive) {
       out.push(...run);
     } else {
       out.push(...collapseRun(run, specContent));
-      if (changes) {
-        const files = collectTurnFiles(run);
-        if (files.length > 0) {
-          out.push({
-            type: 'turnChanges',
-            key: `changes-${run[0].key}`,
-            tailEventId: feedItemTailId(run[run.length - 1]),
-            files,
-            added: files.reduce((s, f) => s + f.added, 0),
-            removed: files.reduce((s, f) => s + f.removed, 0),
-          });
-        }
-      }
+      if (changes) appendTurnChanges(out, run);
     }
   }
   return out;
@@ -757,6 +883,13 @@ export function sameFeedEvents(a: FeedItem, b: FeedItem): boolean {
   }
   if (a.type === 'child_sessions' && b.type === 'child_sessions') {
     return a.events.length === b.events.length && a.events.every((e, i) => e === b.events[i]);
+  }
+  if (a.type === 'activity' && b.type === 'activity') {
+    return (
+      a.active === b.active &&
+      a.items.length === b.items.length &&
+      a.items.every((it, i) => sameFeedEvents(it, b.items[i]))
+    );
   }
   // message | thinking | status | error | diff | child session each carry one event.
   return (a as { event: TranscriptEvent }).event === (b as { event: TranscriptEvent }).event;

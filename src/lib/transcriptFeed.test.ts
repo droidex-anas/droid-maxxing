@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   appendedFeedItemKeys,
   buildFeed,
+  buildGroupedFeed,
   childSessionLineIsRunning,
   collectTurnFiles,
   conversationAnchors,
@@ -10,6 +11,7 @@ import {
   groupTurns,
   isResultFor,
   sameFeedEvents,
+  summarizeActivity,
   type FeedItem,
 } from './transcriptFeed';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
@@ -1037,4 +1039,173 @@ test('appendedFeedItemKeys animates only genuinely appended tail items', () => {
     [...appendedFeedItemKeys(keys(['x', 'a', 'b', 'c', 'd']), previous, identity)],
     ['d'],
   );
+});
+
+test('compact folds live reads, shells, and edits into one activity group', () => {
+  const events = [
+    userMsg('do it'),
+    ev({ kind: 'thinking', text: 'plan' }),
+    ev({ kind: 'tool_call', toolName: 'Read', toolArgs: { file_path: 'a.ts' } }),
+    ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'npm test' } }),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Edit',
+      toolArgs: { file_path: 'a.ts', old_string: 'a', new_string: 'b' },
+    }),
+  ];
+  const items = buildGroupedFeed(events, true, { density: 'compact' });
+  const types = items.map((it) => it.type);
+  assert.deepEqual(types, ['message', 'thinking', 'activity']);
+  const activity = items[2];
+  assert.equal(activity.type, 'activity');
+  if (activity.type === 'activity') {
+    assert.equal(activity.active, true);
+    assert.match(summarizeActivity(activity.items, true), /editing files, running commands/i);
+  }
+});
+
+test('compact keeps thoughts and assistant text outside the activity group', () => {
+  const events = [
+    userMsg('q'),
+    ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'ls' } }),
+    asst('done'),
+    ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'pwd' } }),
+  ];
+  const items = buildGroupedFeed(events, false, { density: 'compact' });
+  assert.equal(items.filter((it) => it.type === 'activity').length, 2);
+  assert.ok(items.some((it) => it.type === 'message' && it.event.text === 'done'));
+  assert.ok(!items.some((it) => it.type === 'worked'));
+});
+
+test('compact keeps standalone errors and child sessions outside', () => {
+  const events = [
+    userMsg('q'),
+    ev({ kind: 'tool_call', toolName: 'Grep', toolArgs: { pattern: 'x' } }),
+    ev({ kind: 'error', text: 'boom', isError: true }),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Task',
+      toolArgs: { subagent_type: 'explore', description: 'look around' },
+    }),
+  ];
+  const items = buildGroupedFeed(events, false, {
+    density: 'compact',
+    childSessionCards: true,
+  });
+  assert.ok(items.some((it) => it.type === 'error'));
+  assert.ok(items.some((it) => it.type === 'child_session' || it.type === 'child_sessions'));
+  for (const it of items) {
+    if (it.type !== 'activity') continue;
+    assert.ok(!it.items.some((child) => child.type === 'error' || child.type === 'child_session'));
+  }
+});
+
+test('compact failed execute stays inside the activity group', () => {
+  const call = ev({
+    kind: 'tool_call',
+    toolName: 'Execute',
+    toolArgs: { command: 'npm test' },
+    toolUseId: 'e1',
+  });
+  const failed = ev({
+    kind: 'tool_result',
+    toolName: '',
+    toolUseId: 'e1',
+    isError: true,
+    text: 'permission denied',
+  });
+  const items = buildGroupedFeed([userMsg('q'), call, failed], false, { density: 'compact' });
+  const activity = items.find((it) => it.type === 'activity');
+  assert.ok(activity && activity.type === 'activity');
+  if (activity.type !== 'activity') return;
+  const tools = activity.items.find((it) => it.type === 'tools');
+  assert.ok(tools && tools.type === 'tools');
+  if (tools.type !== 'tools') return;
+  assert.ok(tools.events.includes(failed));
+});
+
+test('verbose still folds a completed turn into worked', () => {
+  const events = [userMsg('q'), grep(), asst('answer')];
+  const items = buildGroupedFeed(events, false, { density: 'verbose' });
+  assert.ok(items.some((it) => it.type === 'worked'));
+});
+
+test('summarizeActivity names the sole kind and mixed files-and-commands work', () => {
+  const commands = buildFeed([
+    ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'ls' } }),
+    ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'pwd' } }),
+  ]);
+  assert.equal(summarizeActivity(commands, true), 'Running 2 commands');
+  assert.equal(summarizeActivity(commands, false), 'Ran 2 commands');
+
+  const files = buildFeed([
+    ev({
+      kind: 'tool_call',
+      toolName: 'Edit',
+      toolArgs: { file_path: 'a.ts', old_string: 'a', new_string: 'b' },
+    }),
+  ]);
+  assert.equal(summarizeActivity(files, true), 'Editing files');
+  assert.equal(summarizeActivity(files, false), 'Edited files');
+
+  const reads = buildFeed([
+    ev({ kind: 'tool_call', toolName: 'Read', toolArgs: { file_path: 'a.ts' } }),
+    ev({ kind: 'tool_call', toolName: 'Read', toolArgs: { file_path: 'b.ts' } }),
+  ]);
+  assert.equal(summarizeActivity(reads, true), 'Reading files');
+  assert.equal(summarizeActivity(reads, false), 'Read 2 files');
+
+  const searches = buildFeed([grep()]);
+  assert.equal(summarizeActivity(searches, true), 'Searching');
+  assert.equal(summarizeActivity(searches, false), 'Searched');
+
+  const fetches = buildFeed([
+    ev({ kind: 'tool_call', toolName: 'WebFetch', toolArgs: { url: 'https://example.com' } }),
+  ]);
+  assert.equal(summarizeActivity(fetches, true), 'Fetching');
+  assert.equal(summarizeActivity(fetches, false), 'Fetched pages');
+
+  const plan = buildFeed([todo('1. [in_progress] x')]);
+  assert.equal(summarizeActivity(plan, true), 'Updating plan');
+  assert.equal(summarizeActivity(plan, false), 'Updated plan');
+
+  const mixed = buildFeed([
+    grep(),
+    ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'ls' } }),
+  ]);
+  assert.equal(summarizeActivity(mixed, true), 'Working');
+  assert.equal(summarizeActivity(mixed, false), 'Ran tools');
+});
+
+test('sameFeedEvents compares nested activity items and live state', () => {
+  const call = ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'ls' } });
+  const prompt = userMsg('q');
+  const settledA = buildGroupedFeed([prompt, call], false, { density: 'compact' }).find(
+    (it) => it.type === 'activity',
+  );
+  const settledB = buildGroupedFeed([prompt, call], false, { density: 'compact' }).find(
+    (it) => it.type === 'activity',
+  );
+  const live = buildGroupedFeed([prompt, call], true, { density: 'compact' }).find(
+    (it) => it.type === 'activity',
+  );
+  assert.ok(settledA && settledB && live);
+  assert.equal(sameFeedEvents(settledA, settledB), true);
+  assert.equal(sameFeedEvents(settledA, live), false);
+});
+
+test('compact still appends turnChanges on a completed file-edit run', () => {
+  const events = [
+    userMsg('edit'),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Edit',
+      toolArgs: { file_path: 'a.ts', old_string: 'a', new_string: 'b' },
+    }),
+    asst('done'),
+  ];
+  const items = buildGroupedFeed(events, false, { density: 'compact', changes: true });
+  assert.ok(items.some((it) => it.type === 'activity'));
+  assert.ok(items.some((it) => it.type === 'turnChanges'));
+  assert.ok(!items.some((it) => it.type === 'worked'));
 });

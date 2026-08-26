@@ -13,7 +13,7 @@ export interface ViewportAnchorRestore {
 }
 
 export function feedItemTailId(item: FeedItem): string {
-  if (item.type === 'worked') {
+  if (item.type === 'worked' || item.type === 'activity') {
     const tail = item.items.at(-1);
     return tail ? feedItemTailId(tail) : item.key;
   }
