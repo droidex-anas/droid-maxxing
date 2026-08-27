@@ -7,6 +7,7 @@ import type {
   ServerEvent,
   ServerEventBatch,
   ServerWireMessage,
+  StreamFidelity,
 } from '../types/bridge';
 
 export function serverWireMessage(value: unknown): ServerWireMessage | null {
@@ -256,11 +257,16 @@ function isSessionSummary(value: unknown): boolean {
   );
 }
 
+function isStreamFidelity(value: unknown): value is StreamFidelity {
+  return value === 'token' || value === 'tool' || value === 'state';
+}
+
 function isChildSessionSummary(value: unknown): boolean {
   return (
     isRecord(value) &&
     hasStrings(value, ['parentAppSessionId', 'childSessionId', 'role', 'status', 'modelId']) &&
-    typeof value.transcriptAvailable === 'boolean'
+    typeof value.transcriptAvailable === 'boolean' &&
+    isStreamFidelity(value.streamFidelity)
   );
 }
 

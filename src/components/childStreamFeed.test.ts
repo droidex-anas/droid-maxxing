@@ -124,6 +124,7 @@ test('a streaming child update does not rebuild the parent feed', () => {
 
   const metrics = getRendererPerfSnapshot();
   assert.equal(metrics.feedProjection.fullBuilds, 1);
+  assert.equal(revision, 32);
   assert.ok(metrics.feedProjection.invisibleAppendHits >= 4);
 });
 
@@ -194,6 +195,7 @@ test('childStreamSnapshot identity is what feed isolation compares through the d
     transcriptAvailable: true,
     spawnLink: { kind: 'tool-use', id: 't1' },
     startedAt: 1,
+    streamFidelity: 'token',
   };
   const first = childStreamSnapshot(session, {
     status: 'running',
