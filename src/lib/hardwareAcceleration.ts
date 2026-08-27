@@ -4,31 +4,50 @@ interface HardwareAccelerationPreference {
   enabled: boolean;
 }
 
+export function isHardwareAccelerationSettingAvailable(): boolean {
+  return hardwareAccelerationBridge() !== null;
+}
+
 export async function getHardwareAcceleration(): Promise<HardwareAccelerationPreference> {
-  return normalizePreference(await invokeHardwareAccelerationBridge('getHardwareAcceleration'));
+  const bridge = requireHardwareAccelerationBridge();
+  const value = await bridge.getHardwareAcceleration();
+  return readHardwareAccelerationPreference(value);
 }
 
 export async function setHardwareAcceleration(
   enabled: boolean,
 ): Promise<HardwareAccelerationPreference> {
-  return normalizePreference(
-    await invokeHardwareAccelerationBridge('setHardwareAcceleration', [enabled]),
-  );
+  const bridge = requireHardwareAccelerationBridge();
+  const value = await bridge.setHardwareAcceleration(enabled);
+  return readHardwareAccelerationPreference(value);
 }
 
 export async function restartForHardwareAcceleration(): Promise<void> {
   await relaunchApp();
 }
 
-function invokeHardwareAccelerationBridge(name: string, args: unknown[] = []): Promise<unknown> {
+function hardwareAccelerationBridge() {
+  if (typeof window === 'undefined') return null;
   const bridge = window.droidControl;
-  if (!bridge) return Promise.resolve({ enabled: true });
-  const method: unknown = Reflect.get(bridge, name);
-  if (typeof method !== 'function') return Promise.resolve({ enabled: true });
-  return Promise.resolve(Reflect.apply(method, bridge, args));
+  if (
+    !bridge ||
+    typeof bridge.getHardwareAcceleration !== 'function' ||
+    typeof bridge.setHardwareAcceleration !== 'function'
+  ) {
+    return null;
+  }
+  return bridge;
 }
 
-function normalizePreference(value: unknown): HardwareAccelerationPreference {
+function requireHardwareAccelerationBridge() {
+  const bridge = hardwareAccelerationBridge();
+  if (!bridge) {
+    throw new Error('Hardware acceleration settings are only available in the DROIDEX app.');
+  }
+  return bridge;
+}
+
+function readHardwareAccelerationPreference(value: unknown): HardwareAccelerationPreference {
   if (!value || typeof value !== 'object' || !('enabled' in value)) {
     throw new Error('Hardware acceleration preference response is invalid.');
   }

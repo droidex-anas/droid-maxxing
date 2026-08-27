@@ -492,10 +492,7 @@ function GeneralSection() {
         </SettingRow>
       </div>
 
-      <GroupLabel>Performance</GroupLabel>
-      <div className="mb-8">
-        <HardwareAccelerationSetting />
-      </div>
+      <HardwareAccelerationSetting />
 
       <GroupLabel>Compaction</GroupLabel>
       <div className="rounded-xl border border-droid-border bg-droid-surface divide-y divide-droid-border mb-8">
