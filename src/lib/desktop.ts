@@ -352,7 +352,7 @@ export async function systemIdleTime(): Promise<number | null> {
 
 export async function desktopPowerTier(): Promise<DesktopPowerTierSnapshot | null> {
   const api = desktopApi();
-  if (!api?.powerTier) return null;
+  if (!api) return null;
   try {
     return await api.powerTier();
   } catch {
@@ -363,11 +363,15 @@ export async function desktopPowerTier(): Promise<DesktopPowerTierSnapshot | nul
 export function onDesktopPowerTier(
   handler: (snapshot: DesktopPowerTierSnapshot) => void,
 ): () => void {
-  return desktopApi()?.onPowerTier?.(handler) ?? (() => {});
+  const api = desktopApi();
+  if (!api) return () => undefined;
+  return api.onPowerTier(handler);
 }
 
 export function onDesktopMemoryPressure(handler: (payload: { at: number }) => void): () => void {
-  return desktopApi()?.onMemoryPressure?.(handler) ?? (() => {});
+  const api = desktopApi();
+  if (!api) return () => undefined;
+  return api.onMemoryPressure(handler);
 }
 
 function requireDesktopApi(message: string): DroidControlApi {
