@@ -1,6 +1,7 @@
 import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
-import { useStoreDispatch, useStoreSelector, type SessionRestore } from '../hooks/useStore';
+import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import type { SessionRestore } from '../hooks/storeChildSession';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { AnimatePresence, motion } from 'framer-motion';
 import {

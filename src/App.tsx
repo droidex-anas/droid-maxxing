@@ -19,7 +19,7 @@ import {
   nativeBrowserRequestTargetsActiveSession,
 } from './lib/browserSessionIdentity';
 import { shouldOpenSelectedChild } from './lib/childSessions';
-import type { ChildAccess } from './hooks/useStore';
+import type { ChildAccess } from './hooks/storeChildSession';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import PromptInput from './components/PromptInput';

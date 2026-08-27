@@ -129,39 +129,37 @@ import {
   appendTranscriptEvent,
   applyMemoryPressureRelease,
   pruneRemovedSessionState,
-  releaseSessionChildTranscriptWindow,
   releaseSessionTranscriptWindow,
   withUpdatedTranscript,
 } from '../lib/transcriptStoreMemory';
-import { detectPureTranscriptPrepend, type TranscriptMutation } from '../lib/transcriptMutation';
-import {
-  reconcilePrependedTranscript,
-  reconcileRestoredTranscript,
-  reconcileTranscriptSourcePage,
-} from '../lib/transcriptHistory';
+import { type TranscriptMutation } from '../lib/transcriptMutation';
 import { reduceStoreActionBatch } from './storeActionBatch';
+import {
+  invalidateSelectedChildOpening,
+  reduceChildError,
+  reduceChildHistoryLoading,
+  reduceChildHistoryLoadingOlder,
+  reduceChildTranscriptReleaseViewport,
+  reduceChildTranscriptViewport,
+  reduceChildUpdated,
+  reduceSelectChild,
+  reduceSessionChild,
+  releaseInactiveSelectedChild,
+  type ChildAccess,
+  type ChildHistoryState,
+  type ChildRuntimeState,
+  type ChildSelection,
+  type ChildSessionInfo,
+  type SessionRestore,
+} from './storeChildSession';
+import {
+  reduceSessionHistory,
+  reduceSessionHistoryFailed,
+  reduceSessionHistoryLoadingOlder,
+  reduceSessionRestoreStart,
+} from './storeSessionRestore';
 
-export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
 export type { ImagePasteQuality } from '../lib/images';
-
-export type ChildSessionInfo = ChildSessionSummary;
-
-export interface ChildSelection {
-  parentAppSessionId: string;
-  childSessionId: string;
-}
-
-export type ChildAccess =
-  | { state: 'opening'; requestId: string }
-  | { state: 'ready'; requestId: string; runtimeGeneration: number }
-  | { state: 'history'; requestId: string }
-  | { state: 'failed'; requestId: string | null }
-  | { state: 'closed'; requestId: null };
-
-export interface ChildRuntimeState {
-  available: boolean;
-  runtimeGeneration: number;
-}
 
 export interface QueuedDesignContext {
   browserKey: string;
@@ -175,22 +173,6 @@ export interface QueuedPrompt {
   skills: string[];
   files: string[];
   design?: QueuedDesignContext;
-}
-
-export type SessionRestoreStatus = 'loading' | 'paged' | 'loaded' | 'failed';
-
-export interface SessionRestore {
-  status: SessionRestoreStatus;
-  loadedCount: number;
-  hasMore: boolean;
-  error?: string;
-}
-
-export interface ChildHistoryState extends SessionRestore {
-  isLoaded: boolean;
-  isLoadingOlder: boolean;
-  olderCursor?: string;
-  isViewportPinned: boolean;
 }
 
 export interface AppState {
@@ -768,148 +750,6 @@ function closeActiveUtilityPanel(state: AppState): AppState {
     : { ...state, utilityPanels: { ...state.utilityPanels, [appSessionId]: panel } };
 }
 
-function withChildAccess(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-  access: ChildAccess,
-): AppState {
-  const parent = state.childAccess[parentAppSessionId] ?? {};
-  return {
-    ...state,
-    childAccess: {
-      ...state.childAccess,
-      [parentAppSessionId]: { ...parent, [childSessionId]: access },
-    },
-  };
-}
-
-function withoutChildAccess(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-): AppState {
-  const parent = { ...(state.childAccess[parentAppSessionId] ?? {}) };
-  delete parent[childSessionId];
-  const childAccess = { ...state.childAccess };
-  if (Object.keys(parent).length === 0) delete childAccess[parentAppSessionId];
-  else childAccess[parentAppSessionId] = parent;
-  return { ...state, childAccess };
-}
-
-function withChildRuntime(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-  runtime: ChildRuntimeState,
-): AppState {
-  const parent = state.childRuntime[parentAppSessionId] ?? {};
-  return {
-    ...state,
-    childRuntime: {
-      ...state.childRuntime,
-      [parentAppSessionId]: { ...parent, [childSessionId]: runtime },
-    },
-  };
-}
-
-function withChildHistory(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-  history: ChildHistoryState,
-): AppState {
-  return {
-    ...state,
-    childHistory: {
-      ...state.childHistory,
-      [parentAppSessionId]: {
-        ...state.childHistory[parentAppSessionId],
-        [childSessionId]: history,
-      },
-    },
-  };
-}
-
-function releaseInactiveChildTranscript(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-): AppState {
-  // These keyed renderer maps are intentionally sparse at runtime despite
-  // their long-standing Record types.
-  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-  const history = state.childHistory[parentAppSessionId]?.[childSessionId];
-  if (history && (!history.isLoaded || !history.isViewportPinned)) return state;
-  const child = state.childSessions[parentAppSessionId]?.[childSessionId];
-  const runtime = state.childRuntime[parentAppSessionId]?.[childSessionId];
-  if (child?.status === 'running' && runtime?.available) return state;
-  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-  return releaseSessionChildTranscriptWindow(
-    state,
-    parentAppSessionId,
-    childSessionId,
-    INACTIVE_TRANSCRIPT_POLICY,
-  );
-}
-
-function releaseInactiveSelectedChild(state: AppState): AppState {
-  const selected = state.selectedChild;
-  return selected
-    ? releaseInactiveChildTranscript(state, selected.parentAppSessionId, selected.childSessionId)
-    : state;
-}
-
-function invalidateSelectedChildOpening(state: AppState): AppState {
-  const selected = state.selectedChild;
-  if (!selected) return state;
-  const access = state.childAccess[selected.parentAppSessionId]?.[selected.childSessionId];
-  return access?.state === 'opening'
-    ? withChildAccess(state, selected.parentAppSessionId, selected.childSessionId, {
-        state: 'closed',
-        requestId: null,
-      })
-    : state;
-}
-
-function withHistoricalCompactionGeneration(
-  state: AppState,
-  appSessionId: string,
-  transcript: TranscriptEvent[],
-): AppState {
-  const session = state.sessions[appSessionId];
-  if (!session) return state;
-
-  const compactionMarkers = transcript.filter(
-    (event) => event.kind === 'compaction' && event.role === 'primary',
-  );
-  const restoredCompactions = Math.max(
-    compactionMarkers.filter((event) => event.id.startsWith('compaction-')).length,
-    compactionMarkers.filter((event) => !event.id.startsWith('compaction-')).length,
-  );
-  const currentCompactions = session.autoCompactions ?? 0;
-  if (restoredCompactions <= currentCompactions) return state;
-
-  const primaryContext = Object.fromEntries(
-    Object.entries(state.contextStats.primary).filter(([id]) => id !== appSessionId),
-  );
-  return {
-    ...state,
-    sessions: {
-      ...state.sessions,
-      [appSessionId]: {
-        ...session,
-        autoCompactions: restoredCompactions,
-        contextTokens: 0,
-        contextRemainingTokens: undefined,
-        contextAccuracy: undefined,
-        contextUpdatedAt: undefined,
-      },
-    },
-    contextStats: { ...state.contextStats, primary: primaryContext },
-  };
-}
-
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === 'BATCH') {
     return reduceStoreActionBatch(state, action.actions, reducer, syncBrowserOpen);
@@ -1187,152 +1027,14 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
     }
 
-    case 'SESSION_CHILD': {
-      const child = action.child;
-      const parent = state.childSessions[child.parentAppSessionId] ?? {};
-      const previousChild = parent[child.childSessionId];
-      const runtimeParent = state.childRuntime[child.parentAppSessionId] ?? {};
-      const previousRuntime = runtimeParent[child.childSessionId];
-      if (previousRuntime && action.runtimeGeneration < previousRuntime.runtimeGeneration)
-        return state;
-      const settledWhileInactive =
-        previousChild?.status === 'running' &&
-        previousRuntime?.available &&
-        (child.status !== 'running' || !action.runtimeAvailable) &&
-        (state.activeAppSessionId !== child.parentAppSessionId ||
-          state.selectedChild?.parentAppSessionId !== child.parentAppSessionId ||
-          state.selectedChild.childSessionId !== child.childSessionId);
-      const clearContext =
-        !action.runtimeAvailable ||
-        (previousRuntime !== undefined &&
-          action.runtimeGeneration > previousRuntime.runtimeGeneration);
-      const contextParent = state.contextStats.child[child.parentAppSessionId] ?? {};
-      let next = {
-        ...state,
-        childSessions: {
-          ...state.childSessions,
-          [child.parentAppSessionId]: {
-            ...parent,
-            [child.childSessionId]: child,
-          },
-        },
-        contextStats: clearContext
-          ? {
-              ...state.contextStats,
-              child: {
-                ...state.contextStats.child,
-                [child.parentAppSessionId]: Object.fromEntries(
-                  Object.entries(contextParent).filter(
-                    ([childSessionId]) => childSessionId !== child.childSessionId,
-                  ),
-                ),
-              },
-            }
-          : state.contextStats,
-      };
-      const runtimeUnchanged =
-        // Keep the existence guard because the following comparison dereferences previousRuntime.
-        // eslint-disable-next-line @typescript-eslint/prefer-optional-chain
-        previousRuntime &&
-        action.runtimeGeneration === previousRuntime.runtimeGeneration &&
-        action.runtimeAvailable === previousRuntime.available;
-      if (!runtimeUnchanged) {
-        next = {
-          ...next,
-          childRuntime: {
-            ...state.childRuntime,
-            [child.parentAppSessionId]: {
-              ...runtimeParent,
-              [child.childSessionId]: {
-                available: action.runtimeAvailable,
-                runtimeGeneration: action.runtimeGeneration,
-              },
-            },
-          },
-        };
-        const access = state.childAccess[child.parentAppSessionId]?.[child.childSessionId];
-        if (!action.runtimeAvailable && (access?.state === 'opening' || access?.state === 'ready'))
-          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-            state: 'closed',
-            requestId: null,
-          });
-        else if (action.runtimeAvailable && access?.state === 'ready')
-          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-            ...access,
-            runtimeGeneration: action.runtimeGeneration,
-          });
-      }
-      return settledWhileInactive
-        ? releaseInactiveChildTranscript(next, child.parentAppSessionId, child.childSessionId)
-        : next;
-    }
+    case 'SESSION_CHILD':
+      return reduceSessionChild(state, action);
 
-    case 'CHILD_UPDATED': {
-      if (
-        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild.childSessionId !== action.childSessionId
-      )
-        return state;
-      const current = state.childAccess[action.parentAppSessionId]?.[action.childSessionId];
-      if (current?.state !== 'opening' || current.requestId !== action.requestId) return state;
-      const runtime = state.childRuntime[action.parentAppSessionId]?.[action.childSessionId];
-      if (
-        action.access === 'ready' &&
-        runtime &&
-        (action.runtimeGeneration < runtime.runtimeGeneration ||
-          (action.runtimeGeneration === runtime.runtimeGeneration && !runtime.available))
-      )
-        return state;
-      const settled = withChildAccess(
-        state,
-        action.parentAppSessionId,
-        action.childSessionId,
-        action.access === 'ready'
-          ? {
-              state: 'ready',
-              requestId: action.requestId,
-              runtimeGeneration: action.runtimeGeneration,
-            }
-          : { state: 'history', requestId: action.requestId },
-      );
-      return action.access === 'ready'
-        ? withChildRuntime(settled, action.parentAppSessionId, action.childSessionId, {
-            available: true,
-            runtimeGeneration: action.runtimeGeneration,
-          })
-        : settled;
-    }
+    case 'CHILD_UPDATED':
+      return reduceChildUpdated(state, action);
 
-    case 'CHILD_ERROR': {
-      if (action.operation === 'loadHistory') {
-        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
-        const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-        const next = withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
-          status: 'failed',
-          loadedCount: previous?.loadedCount ?? 0,
-          hasMore: previous?.hasMore ?? false,
-          error: action.message,
-          isLoaded: previous?.isLoaded ?? false,
-          isLoadingOlder: false,
-          olderCursor: previous?.olderCursor,
-          isViewportPinned: previous?.isViewportPinned ?? true,
-        });
-        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-        return next;
-      }
-      if (action.operation !== 'open' || !action.requestId) return state;
-      if (
-        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild.childSessionId !== action.childSessionId
-      )
-        return state;
-      const current = state.childAccess[action.parentAppSessionId]?.[action.childSessionId];
-      if (current?.state !== 'opening' || current.requestId !== action.requestId) return state;
-      return withChildAccess(state, action.parentAppSessionId, action.childSessionId, {
-        state: 'failed',
-        requestId: action.requestId,
-      });
-    }
+    case 'CHILD_ERROR':
+      return reduceChildError(state, action);
 
     case 'SESSION_TOKENS': {
       const mid = action.appSessionId;
@@ -1415,49 +1117,16 @@ function baseReducer(state: AppState, action: Action): AppState {
       if (!session || sessionIsLive(session)) return state;
       return releaseSessionTranscriptWindow(state, action.appSessionId, VIEWPORT_TRANSCRIPT_POLICY);
     }
+    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
     case 'MEMORY_PRESSURE':
       return applyMemoryPressureRelease(state);
 
-    case 'CHILD_TRANSCRIPT_VIEWPORT': {
-      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      if (!previous || previous.isViewportPinned === action.pinned) return state;
-      return {
-        ...state,
-        childHistory: {
-          ...state.childHistory,
-          [action.parentAppSessionId]: {
-            ...state.childHistory[action.parentAppSessionId],
-            [action.childSessionId]: {
-              ...previous,
-              isViewportPinned: action.pinned,
-            },
-          },
-        },
-      };
-    }
+    case 'CHILD_TRANSCRIPT_VIEWPORT':
+      return reduceChildTranscriptViewport(state, action);
 
-    case 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT': {
-      if (
-        state.activeAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild.childSessionId !== action.childSessionId
-      ) {
-        return state;
-      }
-      const history = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      if (!history?.isLoaded || !history.isViewportPinned) return state;
-      const child = state.childSessions[action.parentAppSessionId]?.[action.childSessionId];
-      const runtime = state.childRuntime[action.parentAppSessionId]?.[action.childSessionId];
-      if (child?.status === 'running' && runtime?.available) return state;
-      return releaseSessionChildTranscriptWindow(
-        state,
-        action.parentAppSessionId,
-        action.childSessionId,
-        VIEWPORT_TRANSCRIPT_POLICY,
-      );
-    }
-    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+    case 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT':
+      return reduceChildTranscriptReleaseViewport(state, action);
 
     case 'QUEUE_PROMPT': {
       const prev = state.promptQueue[action.appSessionId] ?? [];
@@ -1666,199 +1335,22 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'SESSION_HISTORY_LOADING_OLDER':
-      return {
-        ...state,
-        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: true },
-      };
+      return reduceSessionHistoryLoadingOlder(state, action);
 
-    /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
-    case 'CHILD_HISTORY_LOADING': {
-      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
-        status: 'loading',
-        loadedCount: previous?.loadedCount ?? 0,
-        hasMore: previous?.hasMore ?? false,
-        isLoaded: false,
-        isLoadingOlder: false,
-        olderCursor: undefined,
-        isViewportPinned: previous?.isViewportPinned ?? true,
-      });
-    }
+    case 'CHILD_HISTORY_LOADING':
+      return reduceChildHistoryLoading(state, action);
 
-    case 'CHILD_HISTORY_LOADING_OLDER': {
-      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      if (!previous || previous.isLoadingOlder) return state;
-      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
-        ...previous,
-        isLoadingOlder: true,
-      });
-    }
+    case 'CHILD_HISTORY_LOADING_OLDER':
+      return reduceChildHistoryLoadingOlder(state, action);
 
-    case 'SESSION_RESTORE_START': {
-      const prev = state.sessionRestore[action.appSessionId];
-      return {
-        ...state,
-        sessionRestore: {
-          ...state.sessionRestore,
-          [action.appSessionId]: {
-            status: 'loading',
-            loadedCount: prev?.loadedCount ?? 0,
-            hasMore: prev?.hasMore ?? false,
-          },
-        },
-      };
-    }
+    case 'SESSION_RESTORE_START':
+      return reduceSessionRestoreStart(state, action);
 
-    case 'SESSION_HISTORY_FAILED': {
-      if (action.childSessionId) {
-        const prev = state.childHistory[action.appSessionId]?.[action.childSessionId];
-        return withChildHistory(state, action.appSessionId, action.childSessionId, {
-          status: 'failed',
-          loadedCount: prev?.loadedCount ?? 0,
-          hasMore: prev?.hasMore ?? false,
-          error: action.message,
-          isLoaded: prev?.isLoaded ?? false,
-          isLoadingOlder: false,
-          olderCursor: prev?.olderCursor,
-          isViewportPinned: prev?.isViewportPinned ?? true,
-        });
-      }
-      const prev = state.sessionRestore[action.appSessionId];
-      return {
-        ...state,
-        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-        sessionRestore: {
-          ...state.sessionRestore,
-          [action.appSessionId]: {
-            status: 'failed',
-            loadedCount: prev?.loadedCount ?? 0,
-            hasMore: prev?.hasMore ?? false,
-            error: action.message,
-          },
-        },
-      };
-    }
+    case 'SESSION_HISTORY_FAILED':
+      return reduceSessionHistoryFailed(state, action);
 
-    case 'SESSION_HISTORY': {
-      const existing = state.transcripts[action.appSessionId] ?? [];
-      const hasMore = Boolean(action.olderCursor);
-
-      if (action.childSessionId) {
-        const reconciled = reconcileTranscriptSourcePage(
-          existing,
-          action.childSessionId,
-          action.transcripts,
-          action.mode ?? 'replace',
-          hasMore,
-        );
-        const transcriptChanged = reconciled.transcript !== existing;
-        const previousHistory = state.childHistory[action.appSessionId]?.[action.childSessionId];
-        const historyState = withChildHistory(state, action.appSessionId, action.childSessionId, {
-          status: hasMore ? 'paged' : 'loaded',
-          loadedCount: reconciled.sourceEvents.length,
-          hasMore,
-          isLoaded: true,
-          isLoadingOlder: false,
-          olderCursor: action.olderCursor,
-          isViewportPinned: previousHistory?.isViewportPinned ?? true,
-        });
-        const next = transcriptChanged
-          ? withUpdatedTranscript(
-              historyState,
-              action.appSessionId,
-              reconciled.transcript,
-              estimateTranscriptCost(reconciled.transcript),
-              {
-                childSessionId: action.childSessionId,
-                mutation:
-                  action.mode === 'prepend'
-                    ? detectPureTranscriptPrepend(existing, reconciled.transcript)
-                    : undefined,
-              },
-            )
-          : historyState;
-        const isSelected =
-          next.selectedChild?.parentAppSessionId === action.appSessionId &&
-          next.selectedChild.childSessionId === action.childSessionId;
-        return isSelected
-          ? next
-          : releaseInactiveChildTranscript(next, action.appSessionId, action.childSessionId);
-      }
-
-      if (action.mode === 'prepend') {
-        const mergedTranscript = reconcilePrependedTranscript(existing, action.transcripts);
-        const transcriptChanged = mergedTranscript !== existing;
-        const historyState: AppState = {
-          ...state,
-          historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-          historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-          sessionRestore: {
-            ...state.sessionRestore,
-            [action.appSessionId]: {
-              status: hasMore ? 'paged' : 'loaded',
-              loadedCount: mergedTranscript.length,
-              hasMore,
-            },
-          },
-        };
-        const next = transcriptChanged
-          ? withUpdatedTranscript(
-              historyState,
-              action.appSessionId,
-              mergedTranscript,
-              estimateTranscriptCost(mergedTranscript),
-              { mutation: detectPureTranscriptPrepend(existing, mergedTranscript) },
-            )
-          : historyState;
-        return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
-      }
-
-      const mergedTranscript = reconcileRestoredTranscript(existing, action.transcripts, !hasMore);
-      const transcriptChanged = mergedTranscript !== existing;
-      const historicalChildren = action.childSessions ?? [];
-      const existingChildSessions = state.childSessions[action.appSessionId] ?? {};
-      let childSessions = state.childSessions;
-      if (historicalChildren.length > 0) {
-        const byChild = { ...existingChildSessions };
-        for (const child of historicalChildren)
-          byChild[child.childSessionId] = byChild[child.childSessionId] ?? child;
-        childSessions = {
-          ...state.childSessions,
-          [action.appSessionId]: byChild,
-        };
-      }
-      // An empty restore (e.g. a live session with no persisted history yet)
-      // must not wipe progress already delivered by live events; only adopt the
-      // replayed progress when it actually carries entries.
-      const existingProgress = state.progress[action.appSessionId] ?? [];
-      const mergedProgress = action.progress.length > 0 ? action.progress : existingProgress;
-      const historyState: AppState = {
-        ...state,
-        progress: { ...state.progress, [action.appSessionId]: mergedProgress },
-        childSessions,
-        historyLoaded: { ...state.historyLoaded, [action.appSessionId]: true },
-        historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-        sessionRestore: {
-          ...state.sessionRestore,
-          [action.appSessionId]: {
-            status: hasMore ? 'paged' : 'loaded',
-            loadedCount: mergedTranscript.length,
-            hasMore,
-          },
-        },
-      };
-      const next = transcriptChanged
-        ? withUpdatedTranscript(
-            historyState,
-            action.appSessionId,
-            mergedTranscript,
-            estimateTranscriptCost(mergedTranscript),
-          )
-        : historyState;
-      return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
-    }
-    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+    case 'SESSION_HISTORY':
+      return reduceSessionHistory(state, action);
 
     case 'CLEAR_PERMISSION': {
       return {
@@ -2370,48 +1862,8 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'SELECT_FEATURE':
       return { ...state, selectedFeatureId: action.id };
 
-    case 'SELECT_CHILD': {
-      const previous = state.selectedChild;
-      let next =
-        previous &&
-        (action.selection?.parentAppSessionId !== previous.parentAppSessionId ||
-          action.selection.childSessionId !== previous.childSessionId)
-          ? invalidateSelectedChildOpening(releaseInactiveSelectedChild(state))
-          : state;
-      if (!action.selection) return { ...next, selectedChild: null };
-      const { parentAppSessionId, childSessionId } = action.selection;
-      if (
-        next.activeAppSessionId !== parentAppSessionId ||
-        !next.childSessions[parentAppSessionId]?.[childSessionId]
-      )
-        return { ...next, selectedChild: null };
-      next = { ...next, selectedChild: action.selection };
-      if (action.requestId) {
-        const opening = withChildAccess(next, parentAppSessionId, childSessionId, {
-          state: 'opening',
-          requestId: action.requestId,
-        });
-        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
-        const history = opening.childHistory[parentAppSessionId]?.[childSessionId];
-        if (history?.isLoaded) return opening;
-        const loadedCount = (opening.transcripts[parentAppSessionId] ?? []).filter(
-          (event) => event.sourceSessionId === childSessionId,
-        ).length;
-        return withChildHistory(opening, parentAppSessionId, childSessionId, {
-          status: 'loading',
-          loadedCount,
-          hasMore: false,
-          isLoaded: false,
-          isLoadingOlder: false,
-          isViewportPinned: history?.isViewportPinned ?? true,
-        });
-        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-      }
-      const access = next.childAccess[parentAppSessionId]?.[childSessionId];
-      return access?.state === 'failed' || access?.state === 'closed'
-        ? withoutChildAccess(next, parentAppSessionId, childSessionId)
-        : next;
-    }
+    case 'SELECT_CHILD':
+      return reduceSelectChild(state, action);
 
     case 'MODELS_LIST':
       return {

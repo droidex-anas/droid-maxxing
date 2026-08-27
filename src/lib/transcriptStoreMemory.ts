@@ -1,4 +1,9 @@
-import type { AppState, ChildHistoryState } from '../hooks/useStore';
+import type { AppState } from '../hooks/useStore';
+import type {
+  ChildHistoryState,
+  ChildSessionStore,
+  SessionRestore,
+} from '../hooks/storeChildSession';
 import type { TranscriptEvent } from '../types/bridge';
 import { sessionIsLive } from './sessions';
 import { ingestTranscriptEvents, normalizeTranscriptUpdate } from './transcriptIngestion';
@@ -15,15 +20,14 @@ import {
   type TranscriptWindowPolicy,
 } from './transcriptWindow';
 
+type TranscriptMemoryState = ChildSessionStore;
+
 // Protocol mirror of sidecar/src/SessionTimeline.ts. Normal older-page scrolls
 // stay smaller; this larger one-shot page only repairs a released recent tail.
 const MAX_RECENT_REHYDRATION_EVENTS = 1_600;
 
 export function transcriptRehydrationLimit(
-  restore:
-    | AppState['sessionRestore'][string]
-    | AppState['childHistory'][string][string]
-    | undefined,
+  restore: SessionRestore | undefined,
 ): number | undefined {
   if (restore?.status !== 'paged') return undefined;
   return Math.min(MAX_RECENT_REHYDRATION_EVENTS, Math.max(1, restore.loadedCount));
@@ -84,11 +88,11 @@ function couldReachEmergencyWindow(
   return false;
 }
 
-export function releaseSessionTranscriptWindow(
-  state: AppState,
+export function releaseSessionTranscriptWindow<S extends TranscriptMemoryState>(
+  state: S,
   appSessionId: string,
   policy: TranscriptWindowPolicy,
-): AppState {
+): S {
   const transcript = state.transcripts[appSessionId] ?? [];
   if (transcript.length === 0) return state;
   const estimatedCost =
@@ -151,12 +155,12 @@ export function applyMemoryPressureRelease(state: AppState): AppState {
   return next;
 }
 
-export function releaseSessionChildTranscriptWindow(
-  state: AppState,
+export function releaseSessionChildTranscriptWindow<S extends TranscriptMemoryState>(
+  state: S,
   parentAppSessionId: string,
   childSessionId: string,
   policy: TranscriptWindowPolicy,
-): AppState {
+): S {
   // These keyed renderer maps are intentionally sparse at runtime despite
   // their long-standing Record types.
   /* eslint-disable @typescript-eslint/no-unnecessary-condition */
@@ -198,8 +202,8 @@ export function releaseSessionChildTranscriptWindow(
   /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 }
 
-export function withUpdatedTranscript(
-  state: AppState,
+export function withUpdatedTranscript<S extends TranscriptMemoryState>(
+  state: S,
   appSessionId: string,
   transcript: TranscriptEvent[],
   estimatedCost: number,
@@ -207,7 +211,7 @@ export function withUpdatedTranscript(
     childSessionId?: string;
     mutation?: TranscriptMutationChange;
   } = {},
-): AppState {
+): S {
   // This keyed renderer map is intentionally sparse despite its Record type.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const previousLength = state.transcripts[appSessionId]?.length ?? 0;
@@ -230,7 +234,10 @@ export function withUpdatedTranscript(
   return releaseSessionTranscriptWindow(next, appSessionId, EMERGENCY_TRANSCRIPT_POLICY);
 }
 
-function releaseAggregateChildTranscriptWindows(state: AppState, appSessionId: string): AppState {
+function releaseAggregateChildTranscriptWindows<S extends TranscriptMemoryState>(
+  state: S,
+  appSessionId: string,
+): S {
   /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
   const transcript = state.transcripts[appSessionId] ?? [];
   const estimatedCost =
@@ -356,13 +363,13 @@ export function pruneRemovedSessionState(
   };
 }
 
-function replaceTranscript(
-  state: AppState,
+function replaceTranscript<S extends TranscriptMemoryState>(
+  state: S,
   appSessionId: string,
   transcript: TranscriptEvent[],
   estimatedCost: number,
   mutation: TranscriptMutationChange,
-): AppState {
+): S {
   const previous = state.transcripts[appSessionId] ?? [];
   const normalized = normalizeTranscriptUpdate(previous, transcript, mutation);
   return {

@@ -45,19 +45,16 @@
   },
   "src/hooks/useStore.tsx": {
     "@typescript-eslint/no-dynamic-delete": {
-      "count": 9
+      "count": 7
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 48
+      "count": 25
     },
     "@typescript-eslint/no-unnecessary-type-conversion": {
       "count": 1
     },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 1
-    },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
+      "count": 1
     },
     "@typescript-eslint/restrict-template-expressions": {
       "count": 1
