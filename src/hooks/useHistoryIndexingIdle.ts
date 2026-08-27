@@ -23,7 +23,7 @@ export function useHistoryIndexingIdle(): void {
           setHistoryIndexingIdle(shouldRunHistoryBackfill(idleSeconds));
         }
       } catch {
-        if (!disposed) setHistoryIndexingIdle(false);
+        if (!disposed) setHistoryIndexingIdle(true);
       } finally {
         if (!disposed) timer = setTimeout(() => void sample(), IDLE_SAMPLE_INTERVAL_MS);
       }

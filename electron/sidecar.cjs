@@ -282,6 +282,9 @@ function createSidecarSupervisor(options) {
           if (lifecycle === 'degraded' || lifecycle === 'starting') setLifecycle('healthy');
         },
         () => {
+          // A missed or slow /health while the child is still alive is
+          // degraded, never death. Only the process `exit` handler restarts.
+          // The JSON body is unused: busy vs gone is HTTP success vs timeout.
           if (activeRun !== run || !processAlive) return;
           bridgeResponsive = false;
           if (lifecycle === 'healthy' || lifecycle === 'starting') {
@@ -354,10 +357,11 @@ async function defaultRequestHealth({ port, token, timeoutMs }) {
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Sidecar health returned ${String(response.status)}.`);
+    // Success is HTTP 200. eventLoopDelayMs and other body fields are unused.
     return response.json();
   } finally {
     clearTimeout(timer);
   }
 }
 
-module.exports = { createSidecarSupervisor };
+module.exports = { createSidecarSupervisor, defaultRequestHealth };

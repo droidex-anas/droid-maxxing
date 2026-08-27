@@ -77,6 +77,7 @@ export async function runSoak(spec: PerfScenarioSpec): Promise<ReplayReport> {
   );
   hotPathMetrics.reset();
   hotPathMetrics.enable();
+  hotPathMetrics.enableEventLoop();
   hotPathMetrics.setGaugeProvider(() => manager.resourceCounts());
 
   try {
