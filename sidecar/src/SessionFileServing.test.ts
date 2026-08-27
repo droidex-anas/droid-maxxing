@@ -26,7 +26,7 @@ test('start begins boot reconcile without emitting a list', async () => {
     isLiveSession: () => false,
     isShutdownStarted: () => false,
     retryPendingLaunchSettings: () => undefined,
-    listSummaries: () => [] as SessionSummary[],
+    listSummaries: () => ({ sessions: [] as SessionSummary[], earlierSessionsByCwd: {} }),
     emitList: () => {
       emitted += 1;
     },

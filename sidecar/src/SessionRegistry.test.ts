@@ -308,11 +308,15 @@ test('a retained settlement publishes only after durability recovery', () => {
 
   assert.equal(pending?.streaming, false);
   assert.equal(session.summary.streaming, false, 'the owner advances its internal state');
-  assert.equal(registry.listSummaries()[0]?.streaming, true, 'renderer list stays durable');
+  assert.equal(
+    registry.listSummaries().sessions[0]?.streaming,
+    true,
+    'renderer list stays durable',
+  );
   assert.deepEqual(published, []);
 
   registry.retryPendingDurability();
-  assert.equal(registry.listSummaries()[0]?.streaming, false);
+  assert.equal(registry.listSummaries().sessions[0]?.streaming, false);
   assert.deepEqual(streamingStates(published), [false]);
 });
 
@@ -328,7 +332,7 @@ test('new live state supersedes a held settlement without replaying it later', (
   registry.retryPendingDurability();
 
   assert.deepEqual(streamingStates(published), [true]);
-  assert.equal(registry.listSummaries()[0]?.streaming, true);
+  assert.equal(registry.listSummaries().sessions[0]?.streaming, true);
 });
 
 test('reanchorHistoricalCwd moves idle sessions and preserves nested directories', () => {
@@ -476,7 +480,7 @@ test('historical provider replacement is applied before hidden-provider filterin
   registry.replaceProvider('mission-provider-old', 'mission-provider-current');
   history.hiddenProviderIds.add('mission-provider-old');
 
-  const listed = registry.listSummaries();
+  const listed = registry.listSummaries().sessions;
   assert.equal(listed.length, 1);
   assert.equal(listed[0]?.appSessionId, 'historical-mission');
   assert.equal(listed[0]?.providerSessionId, 'mission-provider-current');
@@ -534,7 +538,7 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   registry.register(liveSession);
   history.clearPatches();
 
-  const listed = registry.listSummaries();
+  const listed = registry.listSummaries().sessions;
   const firstListed = listed[0];
   assert.ok(firstListed);
 
@@ -568,9 +572,9 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   assert.equal(resolved?.title, 'projected: live');
   assert.deepEqual(
     registry
-      .listSummaries({ workspaceCwds: ['/workspace'], limitPerWorkspace: 1 })
-      .map((item) => item.appSessionId),
-    ['live-wins'],
+      .listSummaries({ workspaceCwds: ['/workspace'] })
+      .sessions.map((item) => item.appSessionId),
+    ['live-wins', 'mission-wins', 'ordinary-only'],
   );
 
   registry.updateSummary('live-wins', { title: 'canonical update' });
@@ -605,7 +609,7 @@ test('projected and caller-owned feature state cannot mutate canonical summaries
   resolvedFeature.preconditions.push('resolved-caller-mutation');
   resolvedFeature.expectedBehavior.push('resolved-caller-mutation');
 
-  const listedFeature = registry.listSummaries()[0]?.features[0];
+  const listedFeature = registry.listSummaries().sessions[0]?.features[0];
   assert.ok(listedFeature);
   listedFeature.verificationSteps.push('listed-caller-mutation');
   listedFeature.fulfills?.push('listed-caller-mutation');
@@ -638,30 +642,49 @@ test('summary patches copy caller-owned feature state', () => {
   ]);
 });
 
-test('workspace limits apply after canonical source precedence', () => {
-  const ordinary = historicalRows([summary('shared', { title: 'ordinary', updatedAt: 100 })]);
-  const missionControl = historicalRows([
-    summary('shared', {
-      title: 'mission control',
-      sessionPurpose: 'mission-control',
-      updatedAt: 50,
-    }),
-  ]);
-  const loadWithSourceLimit =
-    (rows: HistoricalSession[]): SessionRegistryDependencies['loadOrdinarySessions'] =>
-    (options) =>
-      options?.limitPerWorkspace === undefined ? rows : rows.slice(0, options.limitPerWorkspace);
+test('workspace scoping applies after canonical source precedence', () => {
   const { registry } = createHarness({
-    loadOrdinarySessions: loadWithSourceLimit(ordinary),
-    loadMissionControlSessions: loadWithSourceLimit(missionControl),
+    ordinary: [summary('shared', { title: 'ordinary', updatedAt: 100 })],
+    missionControl: [
+      summary('shared', {
+        title: 'mission control',
+        sessionPurpose: 'mission-control',
+        updatedAt: 50,
+      }),
+    ],
   });
 
   assert.deepEqual(
     registry
-      .listSummaries({ workspaceCwds: ['/workspace'], limitPerWorkspace: 1 })
-      .map((item) => [item.appSessionId, item.title]),
+      .listSummaries({ workspaceCwds: ['/workspace'] })
+      .sessions.map((item) => [item.appSessionId, item.title]),
     [['shared', 'mission control']],
   );
+});
+
+test('a persisted app-session row keeps an old session listed past the pre-existing bound', () => {
+  const preexisting = Array.from({ length: 8 }, (_, index) =>
+    summary(`preexisting-${String(index)}`, { updatedAt: 100 + index }),
+  );
+  const { history, registry } = createHarness({
+    ordinary: [summary('ours', { updatedAt: 1 }), ...preexisting],
+  });
+
+  const bounded = registry.listSummaries({ workspaceCwds: ['/workspace'] });
+  assert.ok(!bounded.sessions.some((item) => item.appSessionId === 'ours'));
+  assert.deepEqual(bounded.earlierSessionsByCwd, { '/workspace': 4 });
+
+  history.syncSummaries([summary('ours', { updatedAt: 1 })]);
+  const owned = registry.listSummaries({ workspaceCwds: ['/workspace'] });
+  assert.ok(owned.sessions.some((item) => item.appSessionId === 'ours'));
+  assert.deepEqual(owned.earlierSessionsByCwd, { '/workspace': 3 });
+
+  const revealed = registry.listSummaries({
+    workspaceCwds: ['/workspace'],
+    revealEarlierCwds: ['/workspace'],
+  });
+  assert.equal(revealed.sessions.length, 9);
+  assert.deepEqual(revealed.earlierSessionsByCwd, {});
 });
 
 test('snapshot permits sequential unregister without skipping sessions', () => {

@@ -625,7 +625,8 @@ export type ClientCommand =
       type: 'sessions.list';
       workspaceCwds?: string[];
       includePlainChats?: boolean;
-      limitPerWorkspace?: number;
+      // Workspaces whose pre-existing session bound the user lifted.
+      revealEarlierCwds?: string[];
     }
   | { type: 'session.loadHistory'; appSessionId: string; cursor?: string; limit?: number }
   | { type: 'sessions.search'; requestId: string; query: string }
@@ -867,7 +868,13 @@ export type ServerEvent =
   | { type: 'mission.progress'; appSessionId: string; missionId?: string; entries: ProgressEntry[] }
   | SessionChildEvent
   | { type: 'spec.content'; appSessionId: string; path: string; content: string }
-  | { type: 'sessions.list'; sessions: SessionSummary[] }
+  | {
+      type: 'sessions.list';
+      sessions: SessionSummary[];
+      // Pre-existing sessions withheld per requested cwd; a missing key means
+      // the folder has nothing more to reveal.
+      earlierSessionsByCwd: Record<string, number>;
+    }
   | {
       type: 'session.history';
       appSessionId: string;

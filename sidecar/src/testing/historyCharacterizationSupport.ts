@@ -11,7 +11,6 @@ import {
   type HistoricalSummaryFilter,
   type PersistedChildSession,
 } from '../history.js';
-import { filterSessionListSummaries } from '../sessionListFilter.js';
 import type { RecordedCall } from './fakeFactoryRuntime.js';
 import { providerSessionJsonl } from './providerSessionFixtures.js';
 
@@ -123,11 +122,13 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
     const rows = loadHistoricalSessions();
     if (!options.workspaceCwds && options.includePlainChats === undefined) return rows;
     const { patches } = this.summaryPatchesAndHidden();
-    const summaries = rows.map((row) => applyCachedSummary(row.summary, patches));
-    return filterSessionListSummaries(summaries, options).map((summary) => ({
-      summary,
-      progress: [],
-    }));
+    const workspaceCwds = new Set(options.workspaceCwds ?? []);
+    return rows
+      .map((row) => applyCachedSummary(row.summary, patches))
+      .filter((summary) =>
+        summary.cwd ? workspaceCwds.has(summary.cwd) : Boolean(options.includePlainChats),
+      )
+      .map((summary) => ({ summary, progress: [] }));
   }
 
   // The fake does not scan transcripts; tests that exercise the

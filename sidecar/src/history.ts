@@ -1,13 +1,4 @@
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-  statSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -33,6 +24,7 @@ import {
   type SessionFileScan,
   type SessionFileSnapshot,
   type SessionFileStat,
+  type SessionFileSummary,
 } from './sessionFileCache.js';
 import { SessionFileMirror } from './sessionFileMirror.js';
 import {
@@ -44,7 +36,7 @@ import {
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
 import { decodeProviderSessionIdList } from './historyProviderIds.js';
-import { hasCompletedConversation } from './sessionHistoryAdmission.js';
+import { readSessionFileHead, readSessionStart } from './sessionFileHead.js';
 
 interface StoredMissionState {
   missionId?: string;
@@ -88,7 +80,6 @@ interface StoredProgressEntry extends ProgressEntry {
 export interface HistoricalSummaryFilter {
   workspaceCwds?: string[];
   includePlainChats?: boolean;
-  limitPerWorkspace?: number;
 }
 
 interface SummaryPatchesAndHidden {
@@ -174,7 +165,7 @@ export function loadMissionControlSessions(
     ? new Set(options.workspaceCwds.filter(Boolean))
     : null;
   if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
-  const rows = missionDirs()
+  return missionDirs()
     .filter((dir) => {
       if (!workspaceCwds && !options.includePlainChats) return true;
       const state = readJson<StoredMissionState>(join(dir, 'state.json'));
@@ -186,12 +177,6 @@ export function loadMissionControlSessions(
     })
     .map((dir) => loadMissionControlSession(dir))
     .sort((a, b) => b.summary.updatedAt - a.summary.updatedAt);
-  return limitHistoricalRows(
-    rows,
-    workspaceCwds,
-    options.limitPerWorkspace,
-    options.includePlainChats,
-  );
 }
 
 export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): HistoricalSession[] {
@@ -202,7 +187,7 @@ export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): H
     : null;
   if (workspaceCwds?.size === 0 && !options.includePlainChats) return [];
   for (const [providerSessionId, file] of scanSessionFiles()) {
-    const summary = summarizeSessionFile(providerSessionId, file);
+    const { summary } = summarizeSessionFile(providerSessionId, file);
     if (!summary) continue;
     const patched = applyCachedSummary(summary, cached);
     if (
@@ -215,19 +200,14 @@ export function loadHistoricalSessions(options: HistoricalSummaryFilter = {}): H
       progress: [],
     });
   }
-  return limitHistoricalRows(
-    rows.sort((a, b) => b.summary.updatedAt - a.summary.updatedAt),
-    workspaceCwds,
-    options.limitPerWorkspace,
-    options.includePlainChats,
-  );
+  return rows.sort((a, b) => b.summary.updatedAt - a.summary.updatedAt);
 }
 
 export function loadSessionHistory(): SessionHistoryEntry[] {
   const rows: SessionHistoryEntry[] = [];
   for (const [providerSessionId, path] of buildSessionIndex()) {
-    const start = readSessionStart(path);
     const stat = statSync(path);
+    const start = readSessionStart(path, stat.size);
     rows.push({
       providerSessionId,
       title: start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`,
@@ -248,7 +228,7 @@ export function loadSessionPage(
 ): HistoryPage {
   const path = sessionIndex().get(providerSessionId);
   if (!path) throw new Error(`Session history not found for ${providerSessionId}`);
-  const role = roleFromSessionStart(readSessionStart(path));
+  const role = roleFromSessionStart(readSessionStart(path, statSync(path).size));
   const all = parseFullSessionTranscript(appSessionId, providerSessionId, path, role);
   const safeLimit = Math.max(1, Math.min(limit, 500));
   const end = cursor ? Math.max(0, Number(cursor) || 0) : all.length;
@@ -309,12 +289,7 @@ export class HistoryIndex {
         continue;
       rows.push({ summary, progress: [] });
     }
-    return limitHistoricalRows(
-      rows.sort((a, b) => b.summary.updatedAt - a.summary.updatedAt),
-      workspaceCwds,
-      options.limitPerWorkspace,
-      options.includePlainChats,
-    );
+    return rows.sort((a, b) => b.summary.updatedAt - a.summary.updatedAt);
   }
 
   applySessionFileReconciliation(result: SessionFileReconciliation): boolean {
@@ -511,13 +486,7 @@ export class HistoryIndex {
 }
 
 export function createHistorySessionFileCache(db: DatabaseSync): SessionFileCache {
-  return new SessionFileCache(
-    db,
-    scanSessionFileTree,
-    summarizeSessionFile,
-    statSessionFile,
-    (_providerSessionId, file) => sessionLaunchSettingsFromFile(file.path),
-  );
+  return new SessionFileCache(db, scanSessionFileTree, summarizeSessionFile, statSessionFile);
 }
 
 const CANONICAL_TABLE_COLUMNS = {
@@ -1371,28 +1340,6 @@ function resolveMissionDir(missionId: string): string | null {
   return null;
 }
 
-function limitHistoricalRows(
-  rows: HistoricalSession[],
-  workspaceCwds: Set<string> | null,
-  limitPerWorkspace?: number,
-  includePlainChats?: boolean,
-): HistoricalSession[] {
-  if (!workspaceCwds && !includePlainChats) return rows;
-  // An omitted limit means "no cap" so the sidebar can load every persisted
-  // session and reveal the older ones behind "Show more".
-  const limit =
-    limitPerWorkspace === undefined ? undefined : Math.max(1, Math.min(limitPerWorkspace, 50));
-  const cap = <T>(items: T[]): T[] => (limit === undefined ? items : items.slice(0, limit));
-  const limited: HistoricalSession[] = [];
-  if (includePlainChats) {
-    limited.push(...cap(rows.filter((row) => !row.summary.cwd)));
-  }
-  for (const cwd of workspaceCwds ?? []) {
-    limited.push(...cap(rows.filter((row) => row.summary.cwd === cwd)));
-  }
-  return limited.sort((a, b) => b.summary.updatedAt - a.summary.updatedAt);
-}
-
 function shouldIncludeCwd(
   cwd: string,
   workspaceCwds: Set<string> | null,
@@ -1509,51 +1456,54 @@ function sessionIndex(): Map<string, string> {
   return buildSessionIndex();
 }
 
-// Builds the base summary for one on-disk session file, or null when the file
-// is not admitted to durable top-level history. The app_sessions patch overlay
-// is applied by the caller.
+// Builds the base summary and launch settings for one on-disk session file
+// from a single bounded head read. The summary is null when the file is not
+// admitted to durable top-level history. The app_sessions patch overlay is
+// applied by the caller.
 function summarizeSessionFile(
   providerSessionId: string,
   file: SessionFileStat,
-): SessionSummary | null {
-  const start = readSessionStart(file.path);
-  const classification = classifyStoredSession(start);
-  if (!classification) return null;
-  // A provider writes session_start before the first prompt. Interrupted or
-  // abandoned turns therefore leave valid JSONL files without a completed
-  // user/model exchange; those are not durable conversations and must not
-  // become permanent sidebar rows. Live sessions are registered separately,
-  // so this historical-only check cannot hide a first turn while it is running.
-  if (!hasCompletedConversation(file.path, file.sizeBytes)) return null;
-  const title = start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`;
+): SessionFileSummary {
+  const { start, hasCompletedConversation } = readSessionFileHead(file.path, file.sizeBytes);
   const settings = readSessionModelSettings(start, file.path);
+  // Resuming a session needs its model even when the session never earns a
+  // sidebar row, so launch settings are cached independently of admission.
+  const launch = launchSettings(settings);
+  const cachedLaunch = launch ? { launchSettings: launch } : {};
+  const classification = classifyStoredSession(start);
+  // Live sessions are registered separately, so refusing an unfinished
+  // exchange here cannot hide a first turn while it is running.
+  if (!classification || !hasCompletedConversation) return { summary: null, ...cachedLaunch };
+  const title = start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`;
   return {
-    appSessionId: providerSessionId,
-    providerSessionId,
-    missionId: classification.missionId,
-    sessionPurpose: classification.sessionPurpose,
-    interactionMode: classification.interactionMode,
-    role: classification.role,
-    title,
-    goal: title,
-    cwd: start.cwd ?? '',
-    workspaceKind: start.cwd ? 'folder' : 'none',
-    ...settings,
-    autonomy: settings.autonomy ?? 'low',
-    phase: 'paused',
-    streaming: false,
-    queuedSends: 0,
-    features: [],
-    tokensIn: 0,
-    tokensOut: 0,
-    contextTokens: 0,
-    createdAt: file.birthtimeMs,
-    updatedAt: file.mtimeMs,
+    summary: {
+      appSessionId: providerSessionId,
+      providerSessionId,
+      missionId: classification.missionId,
+      sessionPurpose: classification.sessionPurpose,
+      interactionMode: classification.interactionMode,
+      role: classification.role,
+      title,
+      goal: title,
+      cwd: start.cwd ?? '',
+      workspaceKind: start.cwd ? 'folder' : 'none',
+      ...settings,
+      autonomy: settings.autonomy ?? 'low',
+      phase: 'paused',
+      streaming: false,
+      queuedSends: 0,
+      features: [],
+      tokensIn: 0,
+      tokensOut: 0,
+      contextTokens: 0,
+      createdAt: file.birthtimeMs,
+      updatedAt: file.mtimeMs,
+    },
+    ...cachedLaunch,
   };
 }
 
-function sessionLaunchSettingsFromFile(path: string): SessionFileLaunchSettings | undefined {
-  const settings = readSessionModelSettings(readSessionStart(path), path);
+function launchSettings(settings: FactoryDefaults): SessionFileLaunchSettings | undefined {
   if (!settings.modelId) return undefined;
   return {
     modelId: settings.modelId,
@@ -1567,41 +1517,6 @@ function readJson<T>(path: string): T {
 
 function readJsonLines<T>(path: string): T[] {
   return parseJsonLines(readFileSync(path, 'utf8'));
-}
-
-// The session_start record lives at the head of the file; cap that head read
-// instead of scanning the whole file.
-const SESSION_START_BYTES = 256_000;
-
-function readSessionStart(path: string): StoredSessionStart {
-  const size = statSync(path).size;
-  const bytes = Math.min(size, SESSION_START_BYTES);
-  const fd = openSync(path, 'r');
-  try {
-    const buffer = Buffer.alloc(bytes);
-    const read = readSync(fd, buffer, 0, bytes, 0);
-    // The session_start record is the first JSONL line, so decode and parse only
-    // the leading lines instead of the whole (up to 256 KB) head. The session
-    // list reads every session file on startup, so parsing one line instead of
-    // thousands is what keeps the sidebar fast to populate.
-    let offset = 0;
-    for (let i = 0; i < 8 && offset < read; i++) {
-      let nl = buffer.indexOf(0x0a, offset);
-      if (nl < 0 || nl > read) nl = read;
-      const line = buffer.toString('utf8', offset, nl).trim();
-      offset = nl + 1;
-      if (!line) continue;
-      try {
-        const row = JSON.parse(line) as StoredSessionStart;
-        if (row.type === 'session_start') return row;
-      } catch {
-        // Not a complete JSON line yet; keep scanning the first few lines.
-      }
-    }
-    return {};
-  } finally {
-    closeSync(fd);
-  }
 }
 
 function classifyStoredSession(

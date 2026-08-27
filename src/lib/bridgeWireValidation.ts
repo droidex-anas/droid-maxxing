@@ -196,7 +196,11 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'spec.content':
       return hasStrings(value, ['appSessionId', 'path', 'content']);
     case 'sessions.list':
-      return Array.isArray(value.sessions) && value.sessions.every(isSessionSummary);
+      return (
+        Array.isArray(value.sessions) &&
+        value.sessions.every(isSessionSummary) &&
+        isEarlierSessionCounts(value.earlierSessionsByCwd)
+      );
     case 'session.history':
       return (
         typeof value.appSessionId === 'string' &&
@@ -420,6 +424,12 @@ function progressArray(value: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isEarlierSessionCounts(value: unknown): boolean {
+  return (
+    isRecord(value) && !Array.isArray(value) && Object.values(value).every(nonNegativeSafeInteger)
+  );
 }
 
 function positiveSafeInteger(value: unknown): value is number {
