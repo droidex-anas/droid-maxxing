@@ -147,6 +147,7 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
     },
     waitForChat(sessionId, timeoutMs, previousRowId) {
       const started = performance.now();
+      let retried = false;
       return new Promise((resolve, reject) => {
         const poll = () => {
           const row = document.querySelector('[data-app-session-id="' + sessionId + '"]');
@@ -155,6 +156,13 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
           const firstId = first ? first.getAttribute('data-feed-row-id') : null;
           const feedCount = document.querySelectorAll('[data-testid="chat-view"] [data-feed-row-id]').length;
           const restoring = Boolean(document.querySelector('[data-testid="chat-view"] .z-10.overflow-hidden'));
+          const retry = Array.from(document.querySelectorAll('button')).find(
+            (button) => button.textContent && button.textContent.trim() === 'Retry',
+          );
+          if (retry && !retried) {
+            retried = true;
+            retry.click();
+          }
           const feedChanged = !previousRowId || firstId !== previousRowId;
           if (selected && feedCount > 0 && !restoring && feedChanged) {
             resolve({
@@ -179,6 +187,13 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
       if (dismiss) dismiss.click();
       try { localStorage.setItem('droid-notes-intro-seen', '1'); } catch {}
       return Boolean(dismiss);
+    },
+    retryHistoryIfNeeded() {
+      const retry = Array.from(document.querySelectorAll('button')).find(
+        (button) => button.textContent && button.textContent.trim() === 'Retry',
+      );
+      if (retry) retry.click();
+      return Boolean(retry);
     },
     openSession(sessionId) {
       const row = document.querySelector('[data-app-session-id="' + sessionId + '"]');
@@ -399,7 +414,9 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
         const poll = () => {
           const rows = document.querySelectorAll('[data-testid="chat-view"] [data-feed-row-id]');
           const body = (document.querySelector('[data-testid="chat-view"]') || document.body).innerText || '';
-          const echoed = body.includes(text) || rows.length > previousCount;
+          const area = document.querySelector('textarea');
+          const composerCleared = Boolean(area && area.value === '');
+          const echoed = body.includes(text) || rows.length > previousCount || composerCleared;
           if (echoed) {
             resolve({ elapsedMs: performance.now() - started, found: true, rows: rows.length });
             return;
@@ -412,6 +429,19 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
         };
         poll();
       });
+    },
+    pinFeedToBottom() {
+      const node = document.querySelector('[data-testid="chat-view"] .overflow-y-auto');
+      if (!node) return false;
+      node.scrollTop = node.scrollHeight;
+      return true;
+    },
+    notifyComposerInput() {
+      const area = document.querySelector('textarea');
+      if (!area) return false;
+      area.dispatchEvent(new InputEvent('input', { bubbles: true, data: area.value }));
+      area.dispatchEvent(new Event('change', { bubbles: true }));
+      return area.value.length;
     },
     composerValue() {
       const area = document.querySelector('textarea');

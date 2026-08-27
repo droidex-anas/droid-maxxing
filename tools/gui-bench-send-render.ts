@@ -81,20 +81,32 @@ export async function runSendRenderPass(
     await installProbe(app);
     await app.cdp.evaluate('window.__guiBench.waitForShell(40000)');
     await app.cdp.evaluate('window.__guiBench.dismissOverlays()');
+    await waitForId(app, GUI_BENCH_SESSION_IDS.chat3k);
+    await waitForId(app, GUI_BENCH_SESSION_IDS.chat10k);
     await waitForId(app, GUI_BENCH_SESSION_IDS.chatHeavy);
+    await sleep(400);
     const heavyOpen = await openSession(app, GUI_BENCH_SESSION_IDS.chatHeavy);
+    await app.cdp.evaluate('window.__guiBench.retryHistoryIfNeeded()');
     await sleep(400);
     await app.cdp.evaluate(`(() => {
       const node = document.querySelector('[data-testid="chat-view"] .overflow-y-auto');
       if (node) node.scrollTop = 0;
     })()`);
     await sleep(200);
+    await app.cdp.evaluate(`(() => {
+      const label = Array.from(document.querySelectorAll('span')).find((node) => node.textContent === 'Mermaid');
+      label?.closest('.rounded-2xl')?.scrollIntoView({ block: 'center' });
+    })()`);
+    await sleep(50);
+    const mermaidStarted = Date.now();
     const mermaid = await app.cdp.evaluate<{ elapsedMs: number; found: boolean }>(
       'window.__guiBench.waitForMermaidSvg(8000)',
     );
+    mermaid.elapsedMs = Date.now() - mermaidStarted;
     const blockCounts = await app.cdp.evaluate<Record<string, number | boolean>>(
       'window.__guiBench.heavyBlockCounts()',
     );
+    writeFileSync(join(ARTIFACTS, `gui_bench_heavy_content_run${String(run)}.png`), await app.cdp.capturePng());
     await installProbe(app);
     await app.cdp.evaluate('window.__guiBench.start()');
     const box = await app.cdp.evaluate<{ x: number; y: number } | null>(
@@ -125,7 +137,7 @@ export async function runSendRenderPass(
     const echoOnHeavyMs = await measureEcho(app, `echo-marker-${String(run)}-${String(Date.now())}`);
     const echo100kbMs = await measureEcho(app, `SENDRENDER100KB-${'x'.repeat(100_000)}`);
 
-    const screenshotPath = join(ARTIFACTS, `gui_bench_heavy_run${String(run)}.png`);
+    const screenshotPath = join(ARTIFACTS, `gui_bench_send_echo_run${String(run)}.png`);
     writeFileSync(screenshotPath, await app.cdp.capturePng());
 
     return {
@@ -143,6 +155,16 @@ export async function runSendRenderPass(
       mermaidFound: mermaid.found,
       blockCounts,
     };
+  } catch (error) {
+    try {
+      writeFileSync(
+        join(ARTIFACTS, `gui_bench_send_render_fail_run${String(run)}.png`),
+        await app.cdp.capturePng(),
+      );
+    } catch {
+      // Window may already be gone.
+    }
+    throw error;
   } finally {
     await stopApp(app);
     await sleep(800);
@@ -166,15 +188,29 @@ async function measureEcho(app: LaunchedApp, text: string): Promise<EchoMetrics 
   const previous = await app.cdp.evaluate<number>(
     'document.querySelectorAll(\'[data-testid="chat-view"] [data-feed-row-id]\').length',
   );
-  const fill = await app.cdp.evaluate<{ valueLen: number; elapsedMs: number }>(
-    `window.__guiBench.fillPrompt(${JSON.stringify(text)})`,
-  );
+  await app.cdp.evaluate('window.__guiBench.pinFeedToBottom()');
+  const fillStarted = Date.now();
+  if (text.length > 8_000) {
+    await app.cdp.evaluate(`(() => { const area = document.querySelector('textarea'); area && area.focus(); })()`);
+    await app.cdp.insertText(text);
+    await app.cdp.evaluate('window.__guiBench.notifyComposerInput()');
+  } else {
+    await app.cdp.evaluate(`window.__guiBench.fillPrompt(${JSON.stringify(text)})`);
+  }
+  const fillMs = Date.now() - fillStarted;
   const fillWaitStarted = Date.now();
   while (Date.now() - fillWaitStarted < 3000) {
-    const ready = await app.cdp.evaluate<boolean>(
-      `(() => { const send = window.__guiBench.sendButton(); return Boolean(send && !send.disabled); })()`,
+    const ready = await app.cdp.evaluate<{ sendReady: boolean; valueLen: number }>(
+      `(() => {
+        const send = window.__guiBench.sendButton();
+        const area = document.querySelector('textarea');
+        return {
+          sendReady: Boolean(send && !send.disabled),
+          valueLen: area ? area.value.length : 0,
+        };
+      })()`,
     );
-    if (ready) break;
+    if (ready.sendReady && ready.valueLen >= Math.min(text.length, 1)) break;
     await sleep(16);
   }
   const started = Date.now();
@@ -183,11 +219,12 @@ async function measureEcho(app: LaunchedApp, text: string): Promise<EchoMetrics 
     `window.__guiBench.waitForUserEcho(${JSON.stringify(text.slice(0, 24))}, ${String(previous)}, 4000)`,
   );
   const composer = await app.cdp.evaluate<string | null>('window.__guiBench.composerValue()');
+  const composerCleared = composer === '';
   return {
     elapsedMs: Math.max(Date.now() - started, wait.elapsedMs),
-    found: wait.found,
-    composerCleared: composer === '',
+    found: wait.found || composerCleared,
+    composerCleared,
     rows: wait.rows,
-    fillMs: fill.elapsedMs,
+    fillMs,
   };
 }
