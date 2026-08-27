@@ -1,5 +1,5 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { useEffect, useState, type ComponentType } from 'react';
+import { createElement, useEffect, useState, type ComponentType } from 'react';
 
 import { useHistoryHealth } from '../hooks/useHistoryHealth';
 import { useRuntimeHealth } from '../hooks/useRuntimeHealth';
@@ -29,11 +29,11 @@ export default function RuntimeStatusBanner() {
   return (
     <>
       {runtimeMessage ? (
-        <StatusBannerRow Icon={runtimeIcon} accent={runtimeAccent} message={runtimeMessage} />
+        <StatusBannerRow icon={runtimeIcon} accent={runtimeAccent} message={runtimeMessage} />
       ) : null}
       {persistenceDegraded ? (
         <StatusBannerRow
-          Icon={AlertTriangle}
+          icon={AlertTriangle}
           accent="text-droid-orange"
           message={HISTORY_PERSISTENCE_DEGRADED_MESSAGE}
           testId="history-persistence-banner"
@@ -44,12 +44,12 @@ export default function RuntimeStatusBanner() {
 }
 
 function StatusBannerRow({
-  Icon,
+  icon,
   accent,
   message,
   testId,
 }: {
-  Icon: ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   accent: string;
   message: string;
   testId?: string;
@@ -60,7 +60,7 @@ function StatusBannerRow({
       data-testid={testId}
       className="shrink-0 flex items-center gap-2 px-4 h-8 border-b border-droid-border bg-droid-elevated/60 text-[12px]"
     >
-      <Icon className={`w-3.5 h-3.5 ${accent}`} />
+      {createElement(icon, { className: `w-3.5 h-3.5 ${accent}` })}
       <span className="text-droid-text">{message}</span>
     </div>
   );

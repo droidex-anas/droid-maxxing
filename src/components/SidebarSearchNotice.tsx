@@ -11,20 +11,8 @@ export default function SidebarSearchNotice({
   kind: SidebarSearchNoticeKind;
   layout: 'empty' | 'inline';
 }) {
-  const message =
-    kind === 'unavailable'
-      ? HISTORY_SEARCH_UNAVAILABLE_MESSAGE
-      : kind === 'indexing'
-        ? HISTORY_INDEXING_INCOMPLETE_MESSAGE
-        : kind === 'pending'
-          ? 'Searching messages...'
-          : 'No sessions found';
-  const testId =
-    kind === 'unavailable'
-      ? 'sidebar-search-unavailable'
-      : kind === 'indexing'
-        ? 'sidebar-search-indexing'
-        : undefined;
+  const message = noticeMessage(kind);
+  const testId = noticeTestId(kind);
 
   if (layout === 'inline') {
     return (
@@ -47,4 +35,29 @@ export default function SidebarSearchNotice({
       {message}
     </div>
   );
+}
+
+function noticeMessage(kind: SidebarSearchNoticeKind): string {
+  switch (kind) {
+    case 'unavailable':
+      return HISTORY_SEARCH_UNAVAILABLE_MESSAGE;
+    case 'indexing':
+      return HISTORY_INDEXING_INCOMPLETE_MESSAGE;
+    case 'pending':
+      return 'Searching messages...';
+    case 'empty':
+      return 'No sessions found';
+  }
+}
+
+function noticeTestId(kind: SidebarSearchNoticeKind): string | undefined {
+  switch (kind) {
+    case 'unavailable':
+      return 'sidebar-search-unavailable';
+    case 'indexing':
+      return 'sidebar-search-indexing';
+    case 'pending':
+    case 'empty':
+      return undefined;
+  }
 }
