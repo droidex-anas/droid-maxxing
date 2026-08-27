@@ -1,9 +1,11 @@
 import type { AppState, ChildHistoryState } from '../hooks/useStore';
 import type { TranscriptEvent } from '../types/bridge';
+import { sessionIsLive } from './sessions';
 import { ingestTranscriptEvents, normalizeTranscriptUpdate } from './transcriptIngestion';
 import { nextTranscriptMutation, type TranscriptMutationChange } from './transcriptMutation';
 import {
   EMERGENCY_TRANSCRIPT_POLICY,
+  INACTIVE_TRANSCRIPT_POLICY,
   estimateAppendedTranscriptCost,
   estimateTranscriptCost,
   releaseChildTranscriptWindow,
@@ -137,6 +139,16 @@ export function releaseSessionTranscriptWindow(
       },
     },
   };
+}
+
+export function applyMemoryPressureRelease(state: AppState): AppState {
+  let next = state;
+  for (const [appSessionId, session] of Object.entries(state.sessions)) {
+    if (sessionIsLive(session)) continue;
+    if (state.transcriptViewportPinned[appSessionId] === false) continue;
+    next = releaseSessionTranscriptWindow(next, appSessionId, INACTIVE_TRANSCRIPT_POLICY);
+  }
+  return next;
 }
 
 export function releaseSessionChildTranscriptWindow(

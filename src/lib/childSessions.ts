@@ -215,9 +215,10 @@ export function orderedChildSessions(
 }
 
 export function childSessionIsLive(
-  childSession: Pick<ChildSessionInfo, 'status'>,
+  childSession: Pick<ChildSessionInfo, 'status' | 'queued'>,
   runtime?: { available: boolean },
 ): boolean {
+  if (childSession.queued) return false;
   return childSession.status === 'running' && runtime?.available === true;
 }
 
@@ -326,7 +327,8 @@ export function workingFirstChildSessions(
       key: childSessionKey(child),
     }))
     .sort((a, b) => {
-      const runningRank = (row: NamedChildSession) => (row.child.status === 'running' ? 0 : 1);
+      const runningRank = (row: NamedChildSession) =>
+        row.child.status === 'running' && !row.child.queued ? 0 : 1;
       return (
         runningRank(a) - runningRank(b) ||
         (b.child.startedAt ?? 0) - (a.child.startedAt ?? 0) ||

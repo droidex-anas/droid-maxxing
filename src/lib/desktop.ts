@@ -183,6 +183,9 @@ interface DroidControlApi {
   listFiles: (dir: string) => Promise<string[]>;
   getPerformanceMetrics: () => Promise<DesktopPerformanceMetrics>;
   systemIdleTime: () => Promise<number>;
+  powerTier: () => Promise<DesktopPowerTierSnapshot>;
+  onPowerTier: (handler: (snapshot: DesktopPowerTierSnapshot) => void) => () => void;
+  onMemoryPressure: (handler: (payload: { at: number }) => void) => () => void;
   readFile: (path: string) => Promise<string>;
   repoStatus: (dir: string) => Promise<RepoStatus | null>;
   listEditors: () => Promise<EditorId[]>;
@@ -312,9 +315,26 @@ export interface DesktopPerformanceMetrics {
   timestamp: number;
   webContentsTotal: number;
   ptys: number;
+  nativeBrowsers?: {
+    total: number;
+    live: number;
+    attached: number;
+    warm: number;
+    serialized: number;
+    maxLive: number;
+    idleMs: number;
+  };
+  terminals?: { live: number; retained: number; total: number };
+  powerTier?: 'interactive' | 'hidden' | 'low-power';
   memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
   /** Cumulative since app start, not per sample: difference polls for a rate. */
   cpu: { userMs: number; systemMs: number };
+}
+
+export interface DesktopPowerTierSnapshot {
+  tier: 'interactive' | 'hidden' | 'low-power';
+  windowVisible: boolean;
+  onBattery: boolean;
 }
 
 function desktopApi(): DroidControlApi | undefined {
@@ -328,6 +348,26 @@ export async function systemIdleTime(): Promise<number | null> {
   if (!api) return null;
   const seconds = await api.systemIdleTime();
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
+
+export async function desktopPowerTier(): Promise<DesktopPowerTierSnapshot | null> {
+  const api = desktopApi();
+  if (!api?.powerTier) return null;
+  try {
+    return await api.powerTier();
+  } catch {
+    return null;
+  }
+}
+
+export function onDesktopPowerTier(
+  handler: (snapshot: DesktopPowerTierSnapshot) => void,
+): () => void {
+  return desktopApi()?.onPowerTier?.(handler) ?? (() => {});
+}
+
+export function onDesktopMemoryPressure(handler: (payload: { at: number }) => void): () => void {
+  return desktopApi()?.onMemoryPressure?.(handler) ?? (() => {});
 }
 
 function requireDesktopApi(message: string): DroidControlApi {

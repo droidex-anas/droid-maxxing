@@ -109,6 +109,7 @@ import {
 } from '../lib/transcriptWindow';
 import {
   appendTranscriptEvent,
+  applyMemoryPressureRelease,
   pruneRemovedSessionState,
   releaseSessionChildTranscriptWindow,
   releaseSessionTranscriptWindow,
@@ -460,6 +461,7 @@ type Action =
   | { type: 'SESSION_TRANSCRIPT'; event: TranscriptEvent }
   | { type: 'TRANSCRIPT_VIEWPORT'; appSessionId: string; pinned: boolean }
   | { type: 'TRANSCRIPT_RELEASE_VIEWPORT'; appSessionId: string }
+  | { type: 'MEMORY_PRESSURE' }
   | { type: 'QUEUE_PROMPT'; appSessionId: string; prompt: QueuedPrompt }
   | { type: 'REMOVE_QUEUED_PROMPT'; appSessionId: string; id: string }
   | { type: 'REORDER_QUEUE'; appSessionId: string; from: number; to: number }
@@ -1876,6 +1878,9 @@ function baseReducer(state: AppState, action: Action): AppState {
       if (!session || sessionIsLive(session)) return state;
       return releaseSessionTranscriptWindow(state, action.appSessionId, VIEWPORT_TRANSCRIPT_POLICY);
     }
+
+    case 'MEMORY_PRESSURE':
+      return applyMemoryPressureRelease(state);
 
     case 'CHILD_TRANSCRIPT_VIEWPORT': {
       const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];

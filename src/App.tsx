@@ -44,6 +44,7 @@ import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
 import { useWorkspaceScopes } from './hooks/useWorkspaceScopes';
 import { useHistoryIndexingIdle } from './hooks/useHistoryIndexingIdle';
+import { useBackgroundWorkTier } from './hooks/useBackgroundWorkTier';
 import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
 import {
   bindLazySurfaceIntent,
@@ -137,6 +138,7 @@ export default function App() {
   const onboard = useOnboarding();
   useDiagnosticsContext();
   useHistoryIndexingIdle();
+  useBackgroundWorkTier();
   const [forceWizard, setForceWizard] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [expandedBrowserAppSessionId, setExpandedBrowserAppSessionId] = useState<string | null>(

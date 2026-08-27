@@ -340,6 +340,13 @@ export const setHistoryIndexingIdle = (isIdle: boolean) => {
   return bridge.sendIfConnected({ type: 'history.indexingIdle', isIdle });
 };
 
+export const setBackgroundWork = (
+  tier: 'interactive' | 'hidden' | 'low-power',
+  focusedAppSessionId?: string | null,
+) => {
+  return bridge.sendIfConnected({ type: 'app.backgroundWork', tier, focusedAppSessionId });
+};
+
 export const updateAgentSettings = (input: {
   appSessionId?: string;
   agent: ConfigurableSessionRole;
