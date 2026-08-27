@@ -49,6 +49,7 @@ function resolveSubagentStatus(
   child: ChildSessionSummary,
   activity?: ChildSessionActivity,
 ): ChildStatus {
+  if (child.queued) return 'pending';
   return activity?.status ?? child.status;
 }
 
@@ -370,8 +371,9 @@ export function SubagentsDock({
                         body: polled.preview,
                       }
                     : {
-                        head:
-                          row.status === 'pending'
+                        head: row.child.queued
+                          ? 'Queued'
+                          : row.status === 'pending'
                             ? 'Awaiting runtime status'
                             : row.status === 'completed'
                               ? 'No activity captured'

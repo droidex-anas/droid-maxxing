@@ -77,6 +77,8 @@ export interface ChildSessionState {
   turn: ChildTurnState;
   closeWhenIdle: boolean;
   mutationTail?: Promise<void>;
+  queued?: boolean;
+  queuedRequestId?: string | null;
 }
 export interface ChildOpenAttempt {
   settled: Promise<void>;
@@ -95,6 +97,7 @@ export interface ParentChildSessions {
   pendingSpawns: Map<string, ChildSpawnObservation>;
   openAttempts: Map<string, ChildOpenAttempt>;
   reservedOpenSlots: Set<string>;
+  runtimeQueue: string[];
   closing: boolean;
 }
 export interface ChildRuntimeTarget {
@@ -217,6 +220,7 @@ export function childSummary(child: ChildSessionState | PersistedChildSession) {
     // Autonomy is runtime-scoped: only a live child reports its confirmed value.
     ...(live?.runtime && live.autonomy ? { autonomy: live.autonomy } : {}),
     ...(live?.activity ? { activity: live.activity } : {}),
+    ...(live?.queued ? { queued: true } : {}),
   };
 }
 

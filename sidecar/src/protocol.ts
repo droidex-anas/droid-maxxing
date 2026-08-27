@@ -98,6 +98,8 @@ export interface ChildSessionSummary {
   // Live-only (never persisted) and absent unless the parent actually polled the
   // child; autonomous children stream nothing to the parent themselves.
   activity?: ChildActivity;
+  // Live-only: waiting for a runtime slot. Never persisted; never means running.
+  queued?: boolean;
 }
 
 export interface SessionSummary {
@@ -608,6 +610,11 @@ export type ClientCommand =
   | { type: 'session.loadHistory'; appSessionId: string; cursor?: string; limit?: number }
   | { type: 'sessions.search'; requestId: string; query: string }
   | { type: 'history.indexingIdle'; isIdle: boolean }
+  | {
+      type: 'app.backgroundWork';
+      tier: 'interactive' | 'hidden' | 'low-power';
+      focusedAppSessionId?: string | null;
+    }
   | {
       type: 'child.open';
       parentAppSessionId: string;

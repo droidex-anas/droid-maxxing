@@ -213,6 +213,17 @@ test('system idle time IPC carries no renderer-controlled payload', async () => 
   assert.deepEqual(calls[0], { channel: 'system-idle-time', payload: undefined });
 });
 
+test('power tier IPC carries no renderer-controlled payload', async () => {
+  const { api, calls } = loadApi({ tier: 'interactive', windowVisible: true, onBattery: false });
+
+  assert.deepEqual(await api.powerTier(), {
+    tier: 'interactive',
+    windowVisible: true,
+    onBattery: false,
+  });
+  assert.deepEqual(calls[0], { channel: 'power-tier', payload: undefined });
+});
+
 test('sidecar status IPC is exposed to the trusted renderer', async () => {
   const expected = {
     lifecycle: 'healthy',

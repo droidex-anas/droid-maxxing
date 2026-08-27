@@ -166,6 +166,8 @@ export interface SessionManagerDependencies {
   // delta coalescing and assert appended events synchronously; the merge
   // behavior itself is covered by SessionTimeline unit tests.
   streamingCoalesceMs?: number;
+  maxLiveRuntimes?: number;
+  maxQueuedRuntimes?: number;
 }
 
 export interface SessionManagerOptions {
@@ -184,6 +186,18 @@ const MAX_OPEN_CHILD_SESSIONS = boundedInt(
   4,
   1,
   24,
+);
+const MAX_LIVE_CHILD_RUNTIMES = boundedInt(
+  process.env.DROID_CONTROL_MAX_LIVE_CHILD_RUNTIMES,
+  MAX_OPEN_CHILD_SESSIONS,
+  1,
+  MAX_OPEN_CHILD_SESSIONS,
+);
+const MAX_QUEUED_CHILD_RUNTIMES = boundedInt(
+  process.env.DROID_CONTROL_MAX_QUEUED_CHILD_RUNTIMES,
+  16,
+  0,
+  64,
 );
 const BROWSER_NATIVE_TIMEOUT_MS = boundedInt(
   process.env.DROID_CONTROL_BROWSER_NATIVE_TIMEOUT_MS,
@@ -442,6 +456,8 @@ export class SessionManager {
       },
       nextChildSessionId: this.nextChildSessionId,
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
+      maxLiveRuntimes: options.dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
+      maxQueuedRuntimes: options.dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
       now: Date.now,
     });
     this.sessionFiles = new SessionFileServing({
@@ -567,10 +583,17 @@ export class SessionManager {
   // each count stays owned by its registry; the composition root wires it in.
   resourceCounts(): HotPathResourceCounts {
     const children = this.childSessions.counts();
+    const pollers = this.context.pollerCounts();
     return {
       livePrimarySessions: this.registry.liveCount,
       childAgentsTotal: children.total,
       childAgentsActive: children.active,
+      childAgentsLive: children.live,
+      childAgentsQueued: children.queued,
+      contextPollers: pollers.total,
+      contextPollersActive: pollers.active,
+      autoCompactionWatchdogs: this.compaction.watchdogCount(),
+      sessionFileWatchers: this.sessionFiles.watcherCount(),
     };
   }
 
@@ -759,6 +782,9 @@ export class SessionManager {
       }
       case 'history.indexingIdle':
         await this.history.setIndexingIdle(cmd.isIdle);
+        return;
+      case 'app.backgroundWork':
+        this.context.setBackgroundWork(cmd.tier, cmd.focusedAppSessionId);
         return;
       case 'settings.agent.update':
         await this.updateAgentSettings(cmd);

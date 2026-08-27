@@ -86,7 +86,7 @@ export function renderReportMarkdown(report: ReplayReport): string {
     `- Persistence recovery: ${n(counters.persistenceFailures)} degraded transitions / ${n(counters.persistenceRecoveries)} recoveries`,
     `- Event-loop delay p95: ${report.sidecar.eventLoop ? ms(report.sidecar.eventLoop.p95Ms) : 'n/a'}`,
     `- Memory rss: ${n(report.sidecar.process.rssBytes)} bytes; cpu: user ${ms(report.sidecar.process.cpuUserMs)} / system ${ms(report.sidecar.process.cpuSystemMs)}`,
-    `- Resources: ${report.sidecar.resources ? `${n(report.sidecar.resources.livePrimarySessions)} live sessions, ${n(report.sidecar.resources.childAgentsTotal)} child agents (${n(report.sidecar.resources.childAgentsActive)} active)` : 'n/a'}`,
+    `- Resources: ${report.sidecar.resources ? `${n(report.sidecar.resources.livePrimarySessions)} live sessions, ${n(report.sidecar.resources.childAgentsTotal)} child agents (${n(report.sidecar.resources.childAgentsActive)} active, ${n(report.sidecar.resources.childAgentsLive)} live, ${n(report.sidecar.resources.childAgentsQueued)} queued), ${n(report.sidecar.resources.contextPollersActive)}/${n(report.sidecar.resources.contextPollers)} context pollers` : 'n/a'}`,
   ];
   if (report.drift) {
     lines.push(

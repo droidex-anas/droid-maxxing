@@ -40,6 +40,8 @@ function createHarness(
   records: PersistedChildSession[],
   options: {
     maxOpenSessions?: number;
+    maxLiveRuntimes?: number;
+    maxQueuedRuntimes?: number;
     failForgetChild?: string;
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
     failFlushStreamingOnce?: boolean;
@@ -173,6 +175,8 @@ function createHarness(
     },
     nextChildSessionId: () => 'generated-child',
     maxOpenSessions: options.maxOpenSessions ?? 4,
+    maxLiveRuntimes: options.maxLiveRuntimes ?? options.maxOpenSessions ?? 4,
+    maxQueuedRuntimes: options.maxQueuedRuntimes ?? 16,
     now: () => 100,
   };
   const owner = new ChildSessions(dependencies);
@@ -1518,4 +1522,116 @@ test('one child cleanup failure cannot block sibling provider close', async () =
       .sort(),
     ['provider-first', 'provider-second'],
   );
+});
+
+test('live runtime budget queues overflow children instead of reporting them as running', async () => {
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const h = createHarness([first, second], { maxOpenSessions: 4, maxLiveRuntimes: 1 });
+  const firstSession = new FakeFactorySession('provider-first', {}, h.calls);
+  const streamGate = firstSession.deferNextStream();
+  await h.open(first, firstSession);
+  const sending = h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: first.childSessionId },
+    'keep busy',
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  const secondSession = await h.open(second);
+  const queued = h.owner.list(h.parentId).find((child) => child.childSessionId === 'second');
+  assert.equal(queued?.queued, true);
+  assert.notEqual(queued?.status, 'running');
+  assert.equal(h.owner.counts().live, 1);
+  assert.equal(h.owner.counts().queued, 1);
+  assert.equal(
+    h.events.some((event) => event.type === 'child.error' && event.code === 'child.open_failed'),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(
+      h.history.childSessions(h.parentId).find((child) => child.childSessionId === 'second') ?? {},
+      'queued',
+    ),
+    false,
+  );
+
+  await h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'queued send',
+  );
+  await h.owner.sendNow(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'queued first',
+  );
+
+  streamGate.resolve();
+  await sending;
+  for (let i = 0; i < 12 && secondSession.prompts.length < 2; i += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(h.owner.counts().queued, 0);
+  assert.equal(h.owner.counts().live, 1);
+  const opened = h.owner.list(h.parentId).find((child) => child.childSessionId === 'second');
+  assert.equal(Boolean(opened?.queued), false);
+  assert.deepEqual(secondSession.prompts, ['queued first', 'queued send']);
+});
+
+test('four live runtimes stay concurrent and a fifth child queues instead of running', async () => {
+  const records = ['a', 'b', 'c', 'd', 'e'].map((id) => childRecord(id, `provider-${id}`));
+  const h = createHarness(records, { maxOpenSessions: 4, maxLiveRuntimes: 4 });
+  const sending: Promise<void>[] = [];
+  const gates: Array<{ resolve: () => void }> = [];
+  for (const record of records.slice(0, 4)) {
+    const session = new FakeFactorySession(record.providerSessionId!, {}, h.calls);
+    gates.push(session.deferNextStream());
+    await h.open(record, session);
+    sending.push(
+      h.owner.send(
+        { parentAppSessionId: h.parentId, childSessionId: record.childSessionId },
+        'keep busy',
+      ),
+    );
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  await h.open(records[4]!);
+  const listed = h.owner.list(h.parentId);
+  assert.equal(h.owner.counts().live, 4);
+  assert.equal(h.owner.counts().queued, 1);
+  assert.equal(listed.find((child) => child.childSessionId === 'e')?.queued, true);
+  assert.notEqual(listed.find((child) => child.childSessionId === 'e')?.status, 'running');
+  assert.equal(
+    listed.filter((child) => child.childSessionId !== 'e' && child.status === 'running').length,
+    4,
+  );
+
+  for (const gate of gates) gate.resolve();
+  await Promise.all(sending);
+});
+
+test('interrupt dequeues a waiting child without opening a runtime', async () => {
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const h = createHarness([first, second], { maxOpenSessions: 4, maxLiveRuntimes: 1 });
+  const firstSession = new FakeFactorySession('provider-first', {}, h.calls);
+  const streamGate = firstSession.deferNextStream();
+  await h.open(first, firstSession);
+  const sending = h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: first.childSessionId },
+    'keep busy',
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await h.open(second);
+  await h.owner.interrupt({
+    parentAppSessionId: h.parentId,
+    childSessionId: second.childSessionId,
+  });
+  assert.equal(h.owner.counts().queued, 0);
+  assert.equal(
+    h.owner.list(h.parentId).find((child) => child.childSessionId === 'second')?.queued,
+    undefined,
+  );
+  streamGate.resolve();
+  await sending;
 });

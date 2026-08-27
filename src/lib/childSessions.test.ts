@@ -10,6 +10,7 @@ import {
   childSessionMeta,
   childRuntimeSubmitTarget,
   commitChildPromptAfterBaseline,
+  childSessionIsLive,
   childSessionKey,
   findChildSessionForTarget,
   isPendingChildPlaceholder,
@@ -294,6 +295,31 @@ test('the panel order pins working agents on top, then newest first, without ren
       ['c3', 'Worker 3'],
       ['c1', 'Worker 1'],
     ],
+  );
+});
+
+test('queued children are not live and do not sort as working', () => {
+  const queued = {
+    parentAppSessionId: 'app-1',
+    childSessionId: 'queued',
+    role: 'worker' as const,
+    status: 'running' as const,
+    queued: true,
+    modelId: 'model-default',
+    transcriptAvailable: false,
+    startedAt: 50,
+  };
+  const running = {
+    ...queued,
+    childSessionId: 'live',
+    queued: undefined,
+    startedAt: 10,
+  };
+  assert.equal(childSessionIsLive(queued, { available: true }), false);
+  assert.equal(childSessionIsLive(running, { available: true }), true);
+  assert.deepEqual(
+    workingFirstChildSessions([queued, running]).map((row) => row.child.childSessionId),
+    ['live', 'queued'],
   );
 });
 
