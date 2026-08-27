@@ -151,8 +151,8 @@ test('range extractor keeps a minimum window without exceeding the list', () => 
     overscan: CONVERSATION_LIST_OVERSCAN,
     count: 3_000,
   });
-  assert.equal(mid[0], 100 - Math.ceil((CONVERSATION_LIST_MIN_WINDOW - 16) / 2));
   assert.equal(mid.length, CONVERSATION_LIST_MIN_WINDOW);
+  assert.equal(mid[0], 115 - (CONVERSATION_LIST_MIN_WINDOW - 1));
   const tail = conversationRangeExtractor({
     startIndex: 2_985,
     endIndex: 2_999,
@@ -160,8 +160,8 @@ test('range extractor keeps a minimum window without exceeding the list', () => 
     count: 3_000,
   });
   assert.equal(tail[tail.length - 1], 2_999);
-  assert.ok(tail.length <= CONVERSATION_LIST_MIN_WINDOW);
-  assert.ok(tail.length > CONVERSATION_LIST_OVERSCAN);
+  assert.equal(tail.length, CONVERSATION_LIST_MIN_WINDOW);
+  assert.equal(tail[0], 2_999 - (CONVERSATION_LIST_MIN_WINDOW - 1));
 });
 
 test('visible-hole threshold is twice the list gap, not an estimated row', () => {
