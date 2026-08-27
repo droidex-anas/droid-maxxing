@@ -89,6 +89,7 @@ import {
 } from './SessionLifecycle.js';
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSettings } from './ChildSessionState.js';
+import { CHILD_RUNTIME_IDLE_RETIREMENT_MS } from './childRuntimeRetirement.js';
 import { MissionControlPolicy } from './MissionControlPolicy.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
 import type { HotPathResourceCounts } from './telemetry/hotPathMetrics.js';
@@ -171,6 +172,7 @@ export interface SessionManagerDependencies {
   streamingCoalesceMs?: number;
   maxLiveRuntimes?: number;
   maxQueuedRuntimes?: number;
+  childRuntimeIdleMs?: number;
 }
 
 export interface SessionManagerOptions {
@@ -444,6 +446,8 @@ export class SessionManager {
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
       maxLiveRuntimes: options.dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
       maxQueuedRuntimes: options.dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
+      childRuntimeIdleMs:
+        options.dependencies?.childRuntimeIdleMs ?? CHILD_RUNTIME_IDLE_RETIREMENT_MS,
       now: Date.now,
     });
     this.sessionFiles = new SessionFileServing({

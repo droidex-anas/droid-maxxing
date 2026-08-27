@@ -39,6 +39,12 @@ import {
 } from './ChildSessionState.js';
 import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
 import { childRuntimeAdmission } from './childRuntimeBudget.js';
+import {
+  ChildRuntimeRetirementTimer,
+  CHILD_RUNTIME_RETIRED_STATUS,
+  nextChildRuntimeRetirementAt,
+  retirableChildRuntimes,
+} from './childRuntimeRetirement.js';
 
 type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 type ChildSettingsCommand = Extract<ClientCommand, { type: 'child.updateSettings' }>;
@@ -67,6 +73,9 @@ export class ChildSessions {
   >();
   private nextParentGeneration = 0;
   private shuttingDown = false;
+  private readonly retirementTimer = new ChildRuntimeRetirementTimer(() => {
+    void this.retireIdleRuntimes();
+  });
 
   constructor(private readonly d: ChildSessionsDependencies) {}
 
@@ -535,7 +544,43 @@ export class ChildSessions {
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    this.retirementTimer.cancel();
     for (const parent of this.parents.values()) await this.closeParent(parent.parentAppSessionId);
+  }
+
+  // Release the provider process behind every child that has been settled and
+  // untouched past the idle budget. The child, its transcript, and its history
+  // all survive; opening it again reloads the provider session.
+  async retireIdleRuntimes(): Promise<void> {
+    for (const { parent, child } of retirableChildRuntimes(
+      this.parents.values(),
+      this.d.now(),
+      this.d.childRuntimeIdleMs,
+      (candidate) => this.childrenAwaitingDurability.has(childDurabilityKey(candidate.identity)),
+    )) {
+      this.d.timeline.appendStatus(
+        parent.parentAppSessionId,
+        CHILD_RUNTIME_RETIRED_STATUS,
+        undefined,
+        child.identity.childSessionId,
+        child.role,
+      );
+      await this.closeRuntime(parent, child, true);
+    }
+    this.armRetirement();
+  }
+
+  private armRetirement(): void {
+    if (this.shuttingDown) {
+      this.retirementTimer.cancel();
+      return;
+    }
+    this.retirementTimer.armFor(
+      nextChildRuntimeRetirementAt(this.parents.values(), this.d.childRuntimeIdleMs, (candidate) =>
+        this.childrenAwaitingDurability.has(childDurabilityKey(candidate.identity)),
+      ),
+      this.d.now(),
+    );
   }
 
   private async openFor(
@@ -1404,6 +1449,7 @@ export class ChildSessions {
   }
 
   private publish(child: ChildSessionState): void {
+    this.armRetirement();
     this.d.emit({
       type: 'session.child',
       event: 'upserted',

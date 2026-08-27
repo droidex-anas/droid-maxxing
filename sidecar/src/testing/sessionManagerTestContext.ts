@@ -87,6 +87,7 @@ export function createSessionManagerTestContext(
     getFactoryDefaults?: () => Promise<Protocol.FactoryDefaultSettings>;
     startSessionFileWatcher?: SessionManagerDependencies['startSessionFileWatcher'];
     streamingCoalesceMs?: number;
+    childRuntimeIdleMs?: number;
   } = {},
 ): SessionManagerTestContext {
   const calls: RecordedCall[] = [];
@@ -121,6 +122,11 @@ export function createSessionManagerTestContext(
     // even if a host lowers DROID_CONTROL_MAX_LIVE_CHILD_RUNTIMES.
     maxLiveRuntimes: 4,
     maxQueuedRuntimes: 16,
+    // Zero means "anything already settled is retirable now", so retirement
+    // tests drive the real sweep without waiting on a clock.
+    ...(options.childRuntimeIdleMs === undefined
+      ? {}
+      : { childRuntimeIdleMs: options.childRuntimeIdleMs }),
     // Integration assertions read appended events synchronously; the timer
     // coalescing behavior is covered by SessionTimeline unit tests.
     streamingCoalesceMs: options.streamingCoalesceMs ?? 0,
