@@ -31,7 +31,15 @@ test('native browser avoids Chromium device emulation APIs', () => {
     path.join(__dirname, 'nativeBrowserEmulation.cjs'),
     'utf8',
   );
-  const source = `${mainSource}\n${debuggerSource}`;
+  const nativeBrowserSource = [
+    'nativeBrowser.cjs',
+    'nativeBrowserView.cjs',
+    'nativeBrowserPage.cjs',
+    'nativeBrowserHost.cjs',
+  ]
+    .map((file) => fs.readFileSync(path.join(__dirname, file), 'utf8'))
+    .join('\n');
+  const source = `${mainSource}\n${debuggerSource}\n${nativeBrowserSource}`;
 
   assert.doesNotMatch(source, /enableDeviceEmulation/);
   assert.doesNotMatch(source, /Emulation\.setDeviceMetricsOverride/);
