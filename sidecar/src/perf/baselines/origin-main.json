@@ -1,7 +1,7 @@
 {
   "baselineRef": "origin/main",
   "baselineCommit": "99f5ca882147a1641298072e5b64deeaa3d52062",
-  "measuredAt": "2026-08-27T13:16:42.163Z",
+  "measuredAt": "2026-08-27T15:15:30.979Z",
   "probes": {
     "treeRoot": "origin/main@99f5ca882147a1641298072e5b64deeaa3d52062",
     "metrics": [
@@ -31,7 +31,7 @@
       },
       {
         "id": "feed.projectionMsPerDelta",
-        "value": 0.21370899999999438,
+        "value": 0.17974200000003293,
         "unit": "ms",
         "method": "buildGroupedFeed full rebuild per delta"
       },
@@ -49,7 +49,7 @@
       },
       {
         "id": "markdown.perDeltaRenderMs",
-        "value": 1.000554999999963,
+        "value": 0.9266460000000052,
         "unit": "ms",
         "method": "renderToStaticMarkup of this tree’s Markdown on a growing stream"
       },
@@ -58,6 +58,18 @@
         "value": 1000,
         "unit": "messages",
         "method": "ipc sender.send data events after a 1000-chunk flood"
+      },
+      {
+        "id": "sidecar.readyMs",
+        "value": 117.96354699999995,
+        "unit": "ms",
+        "method": "median of 5 spawn→SIDECAR_READY timings on sidecar/dist/sidecar.mjs"
+      },
+      {
+        "id": "sidecar.firstSessionsListMs",
+        "value": 123.67402699999991,
+        "unit": "ms",
+        "method": "median of 5 spawn→first sessions.list timings via direct server events"
       }
     ],
     "notes": []
