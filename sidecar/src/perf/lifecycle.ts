@@ -103,7 +103,9 @@ export async function runSoak(spec: PerfScenarioSpec): Promise<ReplayReport> {
       appendedReceived: 0,
       appendToReceiveMs: { count: 0 },
       providerToReceiveMs: { count: 0 },
+      firstTokenMs: { count: 0 },
       markerSamples: 0,
+      firstTokenSamples: 0,
       bytesReceived: 0,
     };
     return {
