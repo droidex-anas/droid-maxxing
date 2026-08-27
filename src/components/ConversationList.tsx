@@ -100,6 +100,7 @@ export function ConversationList({
     useFlushSync: false,
     onChange: (instance) => {
       const list = listElRef.current;
+      // Height must be in the DOM this frame; React's style below lands next commit and would clip a pinned tail.
       if (list) list.style.height = `${String(instance.getTotalSize())}px`;
       const range = instance.range;
       const mounted = instance.getVirtualIndexes();
