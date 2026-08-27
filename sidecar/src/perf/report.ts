@@ -6,7 +6,7 @@ import type { BudgetEvaluation } from './budgets.js';
 import type { GateEvaluation } from './gates.js';
 import type { PerfScenarioSpec } from './scenario.js';
 
-interface ReplayClientStats {
+export interface ReplayClientStats {
   appendedReceived: number;
   appendToReceiveMs: HistogramStats;
   providerToReceiveMs: HistogramStats;
