@@ -7,7 +7,11 @@ import {
   type ParentChildSessions,
 } from './ChildSessionState.js';
 import type { PersistedChildSession } from './history.js';
-import { nextChildRuntimeRetirementAt, retirableChildRuntimes } from './childRuntimeRetirement.js';
+import {
+  nextChildRuntimeRetirementAt,
+  parentHasUnsettledChildren,
+  retirableChildRuntimes,
+} from './childRuntimeRetirement.js';
 import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
 import { FakeFactorySession } from './testing/fakeFactoryRuntime.js';
 
@@ -172,4 +176,67 @@ test('the timer arms for the earliest deadline and disarms when nothing is idle'
     Reflect.set(globalThis, 'setTimeout', realSetTimeout);
     Reflect.set(globalThis, 'clearTimeout', realClearTimeout);
   }
+});
+
+test('a parent is unsettled while anything in its child subtree is still in flight', () => {
+  const settled = liveChild('settled', 1_000);
+  assert.equal(
+    parentHasUnsettledChildren(undefined, () => false),
+    false,
+  );
+  assert.equal(
+    parentHasUnsettledChildren(parentOf(settled), () => false),
+    false,
+  );
+
+  const pending = parentOf(settled);
+  pending.pendingSpawns.set('spawn', {
+    parentAppSessionId: 'parent',
+    role: 'worker',
+  });
+  assert.equal(
+    parentHasUnsettledChildren(pending, () => false),
+    true,
+  );
+
+  const opening = parentOf(settled);
+  opening.openAttempts.set('settled', {
+    settled: Promise.resolve(),
+    settle: () => undefined,
+    cancelled: Promise.resolve(),
+    cancel: () => undefined,
+    isCancelled: false,
+  });
+  assert.equal(
+    parentHasUnsettledChildren(opening, () => false),
+    true,
+  );
+
+  const reserved = parentOf(settled);
+  reserved.reservedOpenSlots.add('other');
+  assert.equal(
+    parentHasUnsettledChildren(reserved, () => false),
+    true,
+  );
+
+  const queued = parentOf(settled);
+  queued.runtimeQueue = ['other'];
+  assert.equal(
+    parentHasUnsettledChildren(queued, () => false),
+    true,
+  );
+
+  const working = parentOf(liveChild('working', 1_000, { status: 'running' }));
+  assert.equal(
+    parentHasUnsettledChildren(working, () => false),
+    true,
+  );
+
+  assert.equal(
+    parentHasUnsettledChildren(
+      parentOf(settled),
+      (child) => child.identity.childSessionId === 'settled',
+    ),
+    true,
+  );
 });

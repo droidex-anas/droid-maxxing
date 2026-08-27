@@ -1,4 +1,4 @@
-import { factoryReasoningEffort, type FactorySession } from './DroidRuntime.js';
+import { factoryReasoningEffort } from './DroidRuntime.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
 import type { ChildSessionSummary, ClientCommand } from './protocol.js';
 import type { ChildOperationTarget } from './SessionContext.js';
@@ -13,13 +13,11 @@ import {
 import { errMsg, isUserCancellation } from './sessionHelpers.js';
 import { isReportedStreamingTranscriptError } from './SessionTimeline.js';
 import {
-  applyChildLaunchSettings,
+  applyObservedChild,
   childAcceptsWork,
   childDurabilityKey,
-  childHasWorkInFlight,
   childHistoryProviderSessionIds,
   childIdentity,
-  childSettingsFromInit,
   childStateFromRecord,
   childSummary,
   findChildByProvider,
@@ -32,7 +30,6 @@ import {
   rememberPendingChildObservation,
   restoredChildStatus,
   type ChildIdentity,
-  type ChildOpenAttempt,
   type ChildRuntimeState,
   type ChildRuntimeTarget,
   type ChildSettings,
@@ -40,26 +37,36 @@ import {
   type ChildSpawnObservation,
   type ParentChildSessions,
 } from './ChildSessionState.js';
-import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
-import { childRuntimeAdmission } from './childRuntimeBudget.js';
+import type {
+  ChildOperation,
+  ChildSessionsDependencies,
+  ChildSettingsTarget,
+} from './ChildSessionsTypes.js';
+import {
+  childRuntimeLimits,
+  decideChildRuntimeCapacity,
+  enqueueChildRuntime,
+  takeNextQueuedChild,
+} from './childRuntimeBudget.js';
 import {
   CHILD_RUNTIME_RETIRED_STATUS,
   nextChildRuntimeRetirementAt,
+  parentHasUnsettledChildren,
   retirableChildRuntimes,
 } from './childRuntimeRetirement.js';
+import {
+  cancelOpenAttempts,
+  installChildRuntime,
+  openChildHistory,
+  type ChildRuntimeInstallHost,
+} from './childRuntimeOpen.js';
 import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
 import { childTokenStream } from './childStreamFidelity.js';
-import {
-  dequeueQueuedChild,
-  prepareChildInterrupt,
-  takeAdmittedSend,
-} from './childTurnCancellation.js';
+import { dequeueQueuedChild, prepareChildInterrupt } from './childTurnCancellation.js';
 
-type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 type ChildSettingsCommand = Extract<ClientCommand, { type: 'child.updateSettings' }>;
 type ChildLoadHistoryCommand = Extract<ClientCommand, { type: 'child.loadHistory' }>;
 
-const CHILD_OPEN_CANCELLED = Symbol('child-open-cancelled');
 const ignoreError = (): undefined => undefined;
 const runCleanup = (operation: () => void | Promise<void>) =>
   Promise.resolve().then(operation).catch(ignoreError);
@@ -126,19 +133,10 @@ export class ChildSessions {
     return { total, active, live, queued };
   }
 
-  // Retiring a parent closes its whole child subtree, so it must wait for every
-  // child to settle. Scoped to one parent and allocation-free: the session
-  // retirement sweep re-evaluates this whenever a summary changes.
   hasUnsettledChildren(parentAppSessionId: string): boolean {
-    const parent = this.parents.get(parentAppSessionId);
-    if (!parent) return false;
-    if (parent.pendingSpawns.size > 0 || parent.openAttempts.size > 0) return true;
-    if (parent.reservedOpenSlots.size > 0 || parent.runtimeQueue.length > 0) return true;
-    for (const child of parent.children.values()) {
-      if (childHasWorkInFlight(child)) return true;
-      if (this.childrenAwaitingDurability.has(childDurabilityKey(child.identity))) return true;
-    }
-    return false;
+    return parentHasUnsettledChildren(this.parents.get(parentAppSessionId), (child) =>
+      this.childrenAwaitingDurability.has(childDurabilityKey(child.identity)),
+    );
   }
 
   liveChildSummaries(): ChildSessionSummary[] {
@@ -215,29 +213,15 @@ export class ChildSessions {
     const apply = () => {
       if (!this.isCurrentChild(parent, child) || !childAcceptsWork(child)) return;
       if (child.retiredProviderSessionIds.has(providerSessionId)) return;
-      if (child.providerSessionId && child.providerSessionId !== providerSessionId)
-        child.retiredProviderSessionIds.add(child.providerSessionId);
-      const previousPrompt = child.prompt;
-      if (child.role !== observed.role) {
-        if (child.turn.autoCompacting)
-          this.d.compaction.cancel(this.automaticTarget(parent, child));
-        child.role = observed.role;
-        child.configurationGeneration += 1;
-      }
-      child.providerSessionId = providerSessionId;
-      child.status = 'running';
-      applyChildLaunchSettings(child, {
-        modelId: observed.modelId,
-        reasoningEffort: observed.reasoningEffort,
-      });
-      // First label wins: the spawn call's label is set at admission, and
-      // later poll observations echo the same metadata with different casing.
-      child.label ??= observed.label;
-      child.prompt = observed.prompt ?? child.prompt;
-      child.spawnLink = linkForApply ?? child.spawnLink;
-      child.activity = observed.activity ?? child.activity;
-      child.transcriptAvailable = true;
-      child.startedAt ??= this.d.now();
+      if (child.role !== observed.role && child.turn.autoCompacting)
+        this.d.compaction.cancel(this.automaticTarget(parent, child));
+      const { previousPrompt } = applyObservedChild(
+        child,
+        observed,
+        linkForApply,
+        providerSessionId,
+        this.d.now(),
+      );
       if (observed.done) this.complete(parent, child);
       else this.commit(child);
       if (child.prompt && child.prompt !== previousPrompt)
@@ -546,7 +530,7 @@ export class ChildSessions {
     const parent = this.parents.get(parentAppSessionId);
     if (!parent) return;
     parent.closing = true;
-    await this.cancelOpenAttempts(parent);
+    await cancelOpenAttempts(parent);
     for (const child of parent.children.values()) await this.closeRuntime(parent, child, false);
     parent.pendingSpawns.clear();
     parent.reservedOpenSlots.clear();
@@ -621,7 +605,17 @@ export class ChildSessions {
     }
     const parent = this.parents.get(parentAppSessionId);
     if (!parent || record.status === 'completed') {
-      this.openHistory(record, operation, requestId);
+      openChildHistory(record, operation, requestId, {
+        emitError: (identity, op, id, code, message) => {
+          this.emitError(identity, op, id, code, message);
+        },
+        emit: (event) => {
+          this.d.emit(event);
+        },
+        loadChildHistory: (query) => {
+          this.d.timeline.loadChildHistory(query);
+        },
+      });
       return;
     }
     let child = parent.children.get(childSessionId);
@@ -671,158 +665,45 @@ export class ChildSessions {
       return;
     }
 
-    const attempt = this.beginOpenAttempt(parent, childSessionId);
-    let loaded: FactorySession | undefined;
-    try {
-      // Paint persisted history immediately. This is deliberately best effort:
-      // a live child may not have flushed history yet, but its provider runtime
-      // must still open without waiting for that file.
-      this.d.timeline.loadChildHistory({
-        appSessionId: parentAppSessionId,
-        childSessionId,
-        childProviderSessionIds: childHistoryProviderSessionIds(child),
-        role: child.role,
-      });
-      const admitted = await this.awaitOpenStep(
-        attempt,
-        this.reserveCapacity(parent, child, operation, requestId),
-      );
-      if (admitted === CHILD_OPEN_CANCELLED || admitted === 'queued' || !admitted) return;
-      if (!this.isCurrentOpenAttempt(parent, child, attempt)) return;
-      const ref = { id: parentAppSessionId };
-      const load = this.d.runtime.loadSession(child.providerSessionId, {
-        permissionHandler: this.d.interactions.makePermissionHandler(ref),
-        askUserHandler: this.d.interactions.makeAskUserHandler(ref),
-        cwd: parent.lease.summary.cwd,
-        mcpServers: parent.lease.mcpConfigs,
-      });
-      const result = await this.awaitOpenStep(attempt, load, (late) =>
-        late.close().catch(ignoreError),
-      );
-      if (result === CHILD_OPEN_CANCELLED) return;
-      loaded = result;
-      attempt.provisionalSession = loaded;
-      if (!this.isCurrentOpenAttempt(parent, child, attempt)) return;
-      const actual = childSettingsFromInit(loaded.initResult);
-      const defaults = this.d.resolveDefaultSettings(
-        parent.lease.summary,
-        parent.lease.session.initResult,
-        child.role,
-      );
-      const settings = {
-        modelId: actual.modelId ?? child.modelId,
-        reasoningEffort:
-          actual.reasoningEffort ?? child.reasoningEffort ?? defaults.reasoningEffort,
-      };
-      if (!settings.modelId) throw new Error(`No accepted model is available for ${child.role}.`);
-      const limit = await this.awaitOpenStep(
-        attempt,
-        this.d.compaction.resolveLimit({ modelId: settings.modelId }),
-      );
-      if (limit === CHILD_OPEN_CANCELLED || !this.isCurrentOpenAttempt(parent, child, attempt))
-        return;
-      const armed = await this.awaitOpenStep(
-        attempt,
-        this.d.compaction.arm(
-          {
-            appSessionId: parentAppSessionId,
-            session: loaded,
-            isCurrent: () =>
-              attempt.provisionalSession === loaded &&
-              this.isCurrentOpenAttempt(parent, child, attempt),
-          },
-          limit,
-        ),
-      );
-      if (armed === CHILD_OPEN_CANCELLED || !this.isCurrentOpenAttempt(parent, child, attempt))
-        return;
-      const runtime: ChildRuntimeState = {
-        session: loaded,
-        generation: ++child.runtimeGeneration,
-        lastUsedAt: this.d.now(),
-      };
-      child.runtime = runtime;
-      attempt.provisionalSession = undefined;
-      child.queued = false;
-      child.queuedRequestId = undefined;
-      child.modelId = settings.modelId;
-      child.reasoningEffort = settings.reasoningEffort;
-      child.autonomy = actual.autonomy;
-      // Opening a runtime is how the app *watches* a child. A child the harness
-      // is still driving (a background Task) keeps working while we mirror it,
-      // so observing it must not report it as idle; only a turn we drive, an
-      // interrupt, or a settlement may settle its status.
-      if (child.status !== 'running') child.status = 'paused';
-      child.transcriptAvailable = true;
-      let active: ChildAutomaticCompactionTarget | undefined;
-      runtime.unsubscribe = loaded.onNotification((note: Record<string, unknown>) => {
-        if (!this.isCurrentRuntime(parent, child, runtime)) return;
-        const target = active?.isAutoCompacting() ? active : this.automaticTarget(parent, child);
-        if (!target.isCurrent()) return;
-        if (this.d.compaction.handleChildNotification(target, note)) {
-          active = target.isAutoCompacting() ? target : undefined;
-          return;
-        }
-        if (!target.isCurrent()) return;
-        this.d.eventFlow.applyNotification(
-          parentAppSessionId,
-          runtime.session.sessionId,
-          child.role,
-          note,
-          childSessionId,
-        );
-      });
-      this.persist(child);
-      this.publish(child);
-      // Seed child context telemetry immediately so compaction policy can learn
-      // a provider-reported model window before the first turn settles.
-      void this.d.context.refresh(this.contextTarget(parent, child, runtime));
-      if (requestId) this.emitReady(runtime, child, requestId);
-      const queuedSend = takeAdmittedSend(child);
-      if (queuedSend !== undefined) void this.drive(parent, child, queuedSend);
-    } catch (error) {
-      const runtimeInstalled = loaded !== undefined && child.runtime?.session === loaded;
-      const reportFailure = runtimeInstalled || this.isCurrentOpenAttempt(parent, child, attempt);
-      if (runtimeInstalled) await this.closeRuntime(parent, child, false);
-      if (reportFailure && this.isCurrentParent(parent))
-        this.emitError(identity, operation, requestId, 'child.open_failed', errMsg(error));
-    } finally {
-      this.finishOpenAttempt(parent, childSessionId, attempt);
-      parent.reservedOpenSlots.delete(childSessionId);
-      if (loaded) await this.closeProvisional(attempt);
-      this.admitNextQueued(parent);
-    }
+    await installChildRuntime({
+      parent,
+      child,
+      identity,
+      requestId,
+      operation,
+      host: this.runtimeOpenHost(),
+    });
   }
 
-  private openHistory(
-    record: PersistedChildSession,
-    operation: Exclude<ChildOperation, 'settings'>,
-    requestId: string | null,
-  ): void {
-    if (!record.transcriptAvailable || !record.providerSessionId) {
-      this.emitError(
-        childIdentity(record.parentAppSessionId, record.childSessionId),
-        operation,
-        requestId,
-        'child.runtime_unavailable',
-        'No transcript is available for this child session.',
-      );
-      return;
-    }
-    this.d.timeline.loadChildHistory({
-      appSessionId: record.parentAppSessionId,
-      childSessionId: record.childSessionId,
-      childProviderSessionIds: childHistoryProviderSessionIds(record),
-      role: record.role,
-    });
-    if (requestId)
-      this.d.emit({
-        type: 'child.updated',
-        parentAppSessionId: record.parentAppSessionId,
-        childSessionId: record.childSessionId,
-        requestId,
-        access: 'history',
-      });
+  private runtimeOpenHost(): ChildRuntimeInstallHost {
+    return {
+      d: this.d,
+      isCurrentParent: (parent) => this.isCurrentParent(parent),
+      isCurrentChild: (parent, child) => this.isCurrentChild(parent, child),
+      isCurrentRuntime: (parent, child, runtime) => this.isCurrentRuntime(parent, child, runtime),
+      reserveCapacity: (parent, child, operation, requestId) =>
+        this.reserveCapacity(parent, child, operation, requestId),
+      emitReady: (runtime, child, requestId) => {
+        this.emitReady(runtime, child, requestId);
+      },
+      emitError: (identity, operation, requestId, code, message) => {
+        this.emitError(identity, operation, requestId, code, message);
+      },
+      persist: (child) => this.persist(child),
+      publish: (child) => {
+        this.publish(child);
+      },
+      drive: (parent, child, text) => this.drive(parent, child, text),
+      closeRuntime: (parent, child, publish) => this.closeRuntime(parent, child, publish),
+      admitNextQueued: (parent) => {
+        this.admitNextQueued(parent);
+      },
+      automaticTarget: (parent, child) => this.automaticTarget(parent, child),
+      contextTarget: (parent, child, runtime) => this.contextTarget(parent, child, runtime),
+      onOpenAttemptFinished: () => {
+        this.armRetirement();
+      },
+    };
   }
 
   private async requireRuntime(
@@ -1070,44 +951,18 @@ export class ChildSessions {
     operation: Exclude<ChildOperation, 'settings'>,
     requestId: string | null,
   ): Promise<boolean | 'queued'> {
-    const idle = [...parent.children.values()]
-      .filter(
-        (child): child is ChildSessionState & { runtime: ChildRuntimeState } =>
-          child !== requested &&
-          child.runtime !== undefined &&
-          child.turn.phase === 'idle' &&
-          !child.turn.autoCompacting &&
-          child.turn.pendingSends.length === 0,
-      )
-      .sort((left, right) => left.runtime.lastUsedAt - right.runtime.lastUsedAt);
-    const occupancy = {
-      live: [...parent.children.values()].filter((child) => child.runtime).length,
-      reserved: parent.reservedOpenSlots.size,
-      queued: parent.runtimeQueue.length,
-      idleLive: idle.length,
-    };
-    const admission = childRuntimeAdmission(
-      {
-        maxLive: Math.min(this.d.maxLiveRuntimes, this.d.maxOpenSessions),
-        maxQueued: this.d.maxQueuedRuntimes,
-      },
-      occupancy,
-    );
-    if (admission === 'admit') {
-      if (
-        occupancy.live + occupancy.reserved >=
-        Math.min(this.d.maxLiveRuntimes, this.d.maxOpenSessions)
-      ) {
-        const victim = idle.at(0);
-        if (!victim) return this.enqueueRuntime(parent, requested, requestId);
-        parent.reservedOpenSlots.add(requested.identity.childSessionId);
-        await this.closeRuntime(parent, victim, true);
-        return true;
-      }
+    const limits = childRuntimeLimits(this.d);
+    const decision = decideChildRuntimeCapacity(parent, requested, limits);
+    if (decision.action === 'reserve' || decision.action === 'evict') {
       parent.reservedOpenSlots.add(requested.identity.childSessionId);
+      if (decision.action === 'evict') await this.closeRuntime(parent, decision.victim, true);
       return true;
     }
-    if (admission === 'queue') return this.enqueueRuntime(parent, requested, requestId);
+    if (decision.action === 'queue') {
+      enqueueChildRuntime(parent, requested, requestId);
+      this.publish(requested);
+      return 'queued';
+    }
     this.emitError(
       requested.identity,
       operation,
@@ -1118,38 +973,17 @@ export class ChildSessions {
     return false;
   }
 
-  private enqueueRuntime(
-    parent: ParentChildSessions,
-    child: ChildSessionState,
-    requestId: string | null,
-  ): 'queued' {
-    const id = child.identity.childSessionId;
-    if (!parent.runtimeQueue.includes(id)) parent.runtimeQueue.push(id);
-    child.queued = true;
-    child.queuedRequestId = requestId;
-    this.publish(child);
-    return 'queued';
-  }
-
   private admitNextQueued(parent: ParentChildSessions): void {
     if (!this.isCurrentParent(parent) || parent.closing) return;
-    const maxLive = Math.min(this.d.maxLiveRuntimes, this.d.maxOpenSessions);
-    while (parent.runtimeQueue.length > 0) {
-      const live =
-        [...parent.children.values()].filter((child) => child.runtime).length +
-        parent.reservedOpenSlots.size;
-      if (live >= maxLive) return;
-      const childSessionId = parent.runtimeQueue.shift();
-      if (!childSessionId) return;
-      const child = parent.children.get(childSessionId);
-      if (!child || child.runtime) continue;
-      const requestId = child.queuedRequestId ?? null;
-      child.queued = false;
-      child.queuedRequestId = undefined;
-      this.publish(child);
-      void this.openFor(parent.parentAppSessionId, childSessionId, requestId, 'open');
-      return;
-    }
+    const next = takeNextQueuedChild(parent, childRuntimeLimits(this.d).maxLive);
+    if (!next) return;
+    this.publish(next.child);
+    void this.openFor(
+      parent.parentAppSessionId,
+      next.child.identity.childSessionId,
+      next.requestId,
+      'open',
+    );
   }
 
   private async closeRuntime(
@@ -1330,79 +1164,6 @@ export class ChildSessions {
       (target.configurationGeneration === undefined ||
         child.configurationGeneration === target.configurationGeneration)
     );
-  }
-
-  private beginOpenAttempt(parent: ParentChildSessions, childSessionId: string): ChildOpenAttempt {
-    let settle: () => void = ignoreError;
-    let cancel: () => void = ignoreError;
-    const settled = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
-    const cancelled = new Promise<void>((resolve) => {
-      cancel = resolve;
-    });
-    const attempt = { settled, settle, cancelled, cancel, isCancelled: false };
-    parent.openAttempts.set(childSessionId, attempt);
-    return attempt;
-  }
-
-  private isCurrentOpenAttempt(
-    parent: ParentChildSessions,
-    child: ChildSessionState,
-    attempt: ChildOpenAttempt,
-  ): boolean {
-    return (
-      this.isCurrentChild(parent, child) &&
-      !attempt.isCancelled &&
-      childAcceptsWork(child) &&
-      !child.runtime &&
-      parent.openAttempts.get(child.identity.childSessionId) === attempt
-    );
-  }
-
-  private finishOpenAttempt(
-    parent: ParentChildSessions,
-    childSessionId: string,
-    attempt: ChildOpenAttempt,
-  ): void {
-    if (parent.openAttempts.get(childSessionId) !== attempt) return;
-    parent.openAttempts.delete(childSessionId);
-    attempt.settle();
-    // A child publishes while its open attempt is still outstanding, so this is
-    // the first moment a freshly opened runtime can be seen as retirable.
-    this.armRetirement();
-  }
-
-  private async cancelOpenAttempts(parent: ParentChildSessions): Promise<void> {
-    const closes: Promise<void>[] = [];
-    for (const attempt of parent.openAttempts.values()) {
-      attempt.isCancelled = true;
-      attempt.cancel();
-      attempt.settle();
-      if (attempt.provisionalSession) closes.push(this.closeProvisional(attempt));
-    }
-    parent.openAttempts.clear();
-    await Promise.all(closes);
-  }
-
-  private closeProvisional(attempt: ChildOpenAttempt): Promise<void> {
-    if (!attempt.provisionalSession) return Promise.resolve();
-    attempt.provisionalClose ??= attempt.provisionalSession.close().catch(ignoreError);
-    return attempt.provisionalClose;
-  }
-
-  private async awaitOpenStep<T>(
-    attempt: ChildOpenAttempt,
-    operation: Promise<T>,
-    cleanupLate?: (value: T) => void | Promise<void>,
-  ): Promise<T | typeof CHILD_OPEN_CANCELLED> {
-    const result = await Promise.race<T | typeof CHILD_OPEN_CANCELLED>([
-      operation,
-      attempt.cancelled.then((): typeof CHILD_OPEN_CANCELLED => CHILD_OPEN_CANCELLED),
-    ]);
-    if (result === CHILD_OPEN_CANCELLED && cleanupLate)
-      void operation.then(cleanupLate, ignoreError);
-    return result;
   }
 
   private emitReady(runtime: ChildRuntimeState, child: ChildSessionState, id: string): void {
