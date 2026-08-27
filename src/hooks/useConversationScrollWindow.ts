@@ -468,9 +468,8 @@ export function useConversationScrollWindow({
       );
       viewportAnchor.current = restored.anchor;
       expectedRestoredScrollTop.current = element.scrollTop;
-      // content-visibility can exchange intrinsic estimates for measured row
-      // heights without changing the feed's total height. Recheck for a few
-      // frames even after finding the row, because a container-only observer
+      // Virtualizer measurement can keep shifting row offsets for a few frames
+      // after a prepend. Recheck until the cache settles; a container observer
       // cannot see that internal redistribution.
       if (remainingAttempts > 0) {
         remainingAttempts--;

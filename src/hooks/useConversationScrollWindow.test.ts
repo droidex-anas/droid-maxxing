@@ -194,16 +194,7 @@ test('content resize follows a pinned tail and preserves an unpinned row anchor'
   assert.equal(pinned.mode, 'follow-tail');
   assert.equal(pinnedElement.scrollTop, 2_400);
 
-  const row = {
-    dataset: { feedRowId: 'message-42' },
-    getBoundingClientRect: () => ({ top: 300 }),
-  } as HTMLElement;
-  const unpinnedElement = {
-    scrollTop: 1_000,
-    scrollHeight: 2_500,
-    getBoundingClientRect: () => ({ top: 100 }),
-    querySelectorAll: () => [row],
-  } as unknown as HTMLDivElement;
+  const unpinnedElement = { scrollTop: 1_000, scrollHeight: 2_500 } as HTMLDivElement;
   const unpinned = applyConversationContentResize(
     unpinnedElement,
     {
@@ -214,11 +205,58 @@ test('content resize follows a pinned tail and preserves an unpinned row anchor'
     },
     false,
     true,
+    { rowContentOffset: (rowId) => (rowId === 'message-42' ? 1_200 : undefined) },
   );
 
   assert.equal(unpinned.mode, 'preserve-anchor');
   assert.equal(unpinned.didFindRow, true);
   assert.equal(unpinnedElement.scrollTop, 1_150);
+});
+
+test('restore without a layout offset uses height fallback, not a mounted DOM row', () => {
+  const row = {
+    dataset: { feedRowId: 'message-42' },
+    getBoundingClientRect: () => ({ top: 300 }),
+  } as HTMLElement;
+  const element = {
+    scrollTop: 1_000,
+    scrollHeight: 2_500,
+    getBoundingClientRect: () => ({ top: 100 }),
+    querySelector: () => row,
+    querySelectorAll: () => [row],
+  } as unknown as HTMLDivElement;
+
+  const restored = restoreViewportAnchor(
+    element,
+    {
+      rowId: 'message-42',
+      rowOffsetTop: 50,
+      scrollTop: 1_000,
+      scrollHeight: 2_000,
+    },
+    true,
+  );
+
+  assert.equal(restored.didFindRow, false);
+  assert.equal(element.scrollTop, 1_500);
+});
+
+test('restore falls back to height delta when the layout misses the captured row', () => {
+  const element = { scrollTop: 1_000, scrollHeight: 2_500 } as HTMLDivElement;
+  const restored = restoreViewportAnchor(
+    element,
+    {
+      rowId: 'message:gone',
+      rowOffsetTop: 50,
+      scrollTop: 1_000,
+      scrollHeight: 2_000,
+    },
+    true,
+    { rowContentOffset: () => undefined },
+  );
+
+  assert.equal(restored.didFindRow, false);
+  assert.equal(element.scrollTop, 1_500);
 });
 
 test('virtual layout restore preserves an unpinned row when it is not mounted', () => {
