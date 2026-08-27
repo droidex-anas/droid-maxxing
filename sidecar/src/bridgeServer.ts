@@ -303,13 +303,14 @@ export function startBridgeServer(options: {
       return true;
     }
     const queue = batcher.snapshot();
+    const eventLoopDelayMs = eventLoopDelay.mean / 1e6;
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(
       JSON.stringify({
         ok: true,
         generation: queue.generation,
         lastSeq: queue.lastSeq,
-        eventLoopDelayMs: eventLoopDelay.mean / 1e6,
+        eventLoopDelayMs: Number.isFinite(eventLoopDelayMs) ? eventLoopDelayMs : 0,
       }),
     );
     return true;
