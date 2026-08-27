@@ -19,12 +19,14 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
+  createConversationRowSizeEstimator,
   estimatedListEndOffset,
   findConversationRowIndex,
   isConversationAtLatest,
   nearestOverflowParent,
   scrollMarginBetween,
   shouldAdjustConversationRowOnSizeChange,
+  stampConversationRowEstimates,
   syncMeasureConversationList,
 } from './conversationListState';
 
@@ -63,6 +65,8 @@ export function ConversationList({
   const onMountedRowsChangeRef = useRef(onMountedRowsChange);
   onMountedRowsChangeRef.current = onMountedRowsChange;
   const [scrollMargin, setScrollMargin] = useState(0);
+  const estimatorRef = useRef(createConversationRowSizeEstimator());
+  const stampingRef = useRef(false);
 
   const getScrollElement = useCallback((): HTMLElement | null => {
     if (scrollElementRef?.current) return scrollElementRef.current;
@@ -89,6 +93,19 @@ export function ConversationList({
     directDomUpdates: true,
     onChange: (instance) => {
       onMountedRowsChangeRef.current?.(instance.getVirtualIndexes().length);
+      if (stampingRef.current) return;
+      stampingRef.current = true;
+      try {
+        stampConversationRowEstimates(
+          instance.getVirtualIndexes(),
+          (index) => itemsRef.current[index]?.key ?? index,
+          instance.itemSizeCache,
+          instance.resizeItem,
+          estimatorRef.current.guess(),
+        );
+      } finally {
+        stampingRef.current = false;
+      }
     },
   });
 
@@ -124,7 +141,16 @@ export function ConversationList({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- size-stable; re-run after every commit
   useLayoutEffect(() => {
     const list = listElRef.current;
-    if (list) syncMeasureConversationList(list, virtualizer.resizeItem, cachedRowSize);
+    if (list) {
+      syncMeasureConversationList(
+        list,
+        (index, size) => {
+          estimatorRef.current.observe(size);
+          virtualizer.resizeItem(index, size);
+        },
+        cachedRowSize,
+      );
+    }
     const scroll = getScrollElement();
     if (!list || !scroll) return;
     const next = scrollMarginBetween(list, scroll);

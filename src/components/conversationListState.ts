@@ -103,6 +103,46 @@ export function shouldAdjustConversationRowOnSizeChange(
   return item.start + item.size <= scrollOffsetWithAdj && instance.scrollDirection !== 'backward';
 }
 
+const ESTIMATE_SAMPLE_LIMIT = 32;
+
+export function createConversationRowSizeEstimator(): {
+  observe: (sizePx: number) => void;
+  guess: () => number;
+} {
+  const recent: number[] = [];
+  let medianPx = CONVERSATION_LIST_ESTIMATE_PX;
+  let samples = 0;
+  return {
+    observe(sizePx: number) {
+      if (sizePx <= 0) return;
+      recent.push(sizePx);
+      if (recent.length > ESTIMATE_SAMPLE_LIMIT) recent.shift();
+      samples += 1;
+      const sorted = [...recent].sort((a, b) => a - b);
+      medianPx = sorted[Math.floor(sorted.length / 2)] ?? CONVERSATION_LIST_ESTIMATE_PX;
+    },
+    guess() {
+      return samples === 0 ? CONVERSATION_LIST_ESTIMATE_PX : medianPx;
+    },
+  };
+}
+
+// Stamp only the mounted window. Far unmeasured rows keep the 96 px fallback so
+// a moving median cannot collapse getTotalSize() for the rest of the list.
+export function stampConversationRowEstimates(
+  indexes: readonly number[],
+  getKey: (index: number) => string | number | bigint,
+  itemSizeCache: { has: (key: string | number | bigint) => boolean },
+  resizeItem: (index: number, size: number) => void,
+  guessPx: number,
+): void {
+  for (const index of indexes) {
+    const key = getKey(index);
+    if (itemSizeCache.has(key)) continue;
+    resizeItem(index, guessPx);
+  }
+}
+
 export function syncMeasureConversationList(
   list: HTMLElement,
   resizeItem: (index: number, size: number) => void,

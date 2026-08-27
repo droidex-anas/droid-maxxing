@@ -16,12 +16,14 @@ import {
   CONVERSATION_VISIBLE_HOLE_PX,
   conversationRowMountKey,
   conversationRowViewportId,
+  createConversationRowSizeEstimator,
   estimatedListEndOffset,
   estimatedListSize,
   findConversationRowIndex,
   isConversationAtLatest,
   measuredConversationRowSize,
   shouldAdjustConversationRowOnSizeChange,
+  stampConversationRowEstimates,
   syncMeasureConversationList,
   takeFeedRowEntrance,
 } from './conversationListState';
@@ -227,6 +229,100 @@ test('measuring a short row packs the next row to the list gap', () => {
   assert.ok(next);
   assert.equal(measured.size, 19);
   assert.equal(next.start - measured.end, CONVERSATION_LIST_GAP_PX);
+});
+
+test('row size guess is the median of recent measures and starts at the fallback', () => {
+  const estimator = createConversationRowSizeEstimator();
+  assert.equal(estimator.guess(), CONVERSATION_LIST_ESTIMATE_PX);
+  for (let i = 0; i < 20; i += 1) estimator.observe(19);
+  estimator.observe(800);
+  assert.equal(estimator.guess(), 19);
+});
+
+test('stamping a measured median does not resize already-cached rows', () => {
+  const cache = new Map<string | number | bigint, number>([['row-1', 120]]);
+  const resized: Array<[number, number]> = [];
+  const keys = ['row-0', 'row-1', 'row-2'];
+  stampConversationRowEstimates(
+    [0, 1, 2],
+    (index) => keys[index] ?? index,
+    cache,
+    (index, size) => resized.push([index, size]),
+    19,
+  );
+  assert.deepEqual(resized, [
+    [0, 19],
+    [2, 19],
+  ]);
+});
+
+test('a moving median does not collapse getTotalSize for far unmeasured rows', () => {
+  const items = history(400);
+  const estimator = createConversationRowSizeEstimator();
+  const { virtualizer } = createListEngine({
+    items,
+    scrollTop: estimatedListEndOffset(items.length),
+  });
+  virtualizer.getVirtualItems();
+  const totalBefore = virtualizer.getTotalSize();
+  for (let i = 0; i < 24; i += 1) estimator.observe(19);
+  virtualizer.getVirtualItems();
+  assert.equal(virtualizer.getTotalSize(), totalBefore);
+  assert.equal(virtualizer.measurementsCache[0]?.size, CONVERSATION_LIST_ESTIMATE_PX);
+
+  const mounted = virtualizer.getVirtualIndexes();
+  stampConversationRowEstimates(
+    mounted,
+    (index) => items[index]?.key ?? index,
+    virtualizer.itemSizeCache,
+    virtualizer.resizeItem,
+    estimator.guess(),
+  );
+  virtualizer.getVirtualItems();
+  const stamped = mounted.filter(
+    (index) => virtualizer.itemSizeCache.get(items[index]?.key ?? index) === 19,
+  );
+  assert.ok(stamped.length > 0);
+  const expectedShrink = stamped.length * (CONVERSATION_LIST_ESTIMATE_PX - 19);
+  assert.equal(virtualizer.getTotalSize(), totalBefore - expectedShrink);
+  assert.equal(virtualizer.measurementsCache[0]?.size, CONVERSATION_LIST_ESTIMATE_PX);
+});
+
+test('prepending after a stamped window keeps the captured row offset', () => {
+  const visible = history(80);
+  const estimator = createConversationRowSizeEstimator();
+  for (let i = 0; i < 16; i += 1) estimator.observe(19);
+  const { virtualizer, itemsRef } = createListEngine({
+    items: visible,
+    scrollTop: 200,
+    viewportHeight: 900,
+  });
+  virtualizer.getVirtualItems();
+  stampConversationRowEstimates(
+    virtualizer.getVirtualIndexes(),
+    (index) => visible[index]?.key ?? index,
+    virtualizer.itemSizeCache,
+    virtualizer.resizeItem,
+    estimator.guess(),
+  );
+  virtualizer.getVirtualItems();
+  const capturedStart = virtualizer.measurementsCache[2]?.start;
+  assert.ok(typeof capturedStart === 'number');
+  const captured = { scrollTop: 200, rowOffsetTop: capturedStart - 200 };
+
+  const older = history(40).map((item, index) =>
+    messageItem(
+      `older-${String(index)}`,
+      item.type === 'message' ? item.event.author : 'assistant',
+    ),
+  );
+  itemsRef.current = [...older, ...visible];
+  virtualizer.setOptions({ ...virtualizer.options, count: itemsRef.current.length });
+  virtualizer.getVirtualItems();
+  const nextStart = virtualizer.measurementsCache[42]?.start;
+  assert.ok(typeof nextStart === 'number');
+  const restoredTop = scrollTopForPreservedAnchor(captured, nextStart - 200);
+  assert.equal(restoredTop, 200 + (nextStart - capturedStart));
 });
 
 test('mounted row count stays bounded for 3k and 10k histories', () => {
