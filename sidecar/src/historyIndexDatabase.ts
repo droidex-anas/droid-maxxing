@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { createHistorySessionFileCache, SESSION_SEARCH_INDEX_FILENAME } from './history.js';
 import { HistorySearchIndex } from './historySearchIndex.js';
+import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import type {
   SearchableSessionFileEntry,
   SessionFileChange,
@@ -369,7 +370,8 @@ function openDerivedStorage(path: string, canonicalDb: DatabaseSync) {
   try {
     return createDerivedStorage(path, canonicalDb);
   } catch (error) {
-    if (!isDatabaseCorruption(error)) throw error;
+    // Missing FTS5 is a host capability gap, not a corrupt derived file.
+    if (isHistorySearchUnavailableError(error) || !isDatabaseCorruption(error)) throw error;
     removeDerivedStorage(path);
     try {
       return createDerivedStorage(path, canonicalDb);

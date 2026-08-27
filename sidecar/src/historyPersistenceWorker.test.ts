@@ -8,13 +8,22 @@ import { Worker } from 'node:worker_threads';
 
 import { HistoryPersistenceQueue } from './HistoryPersistenceQueue.js';
 import { HistoryWorkerClient } from './HistoryWorkerClient.js';
-import { SESSION_SEARCH_INDEX_FILENAME } from './history.js';
+import { HistoryPersistence } from './HistoryPersistence.js';
+import { SESSION_INDEX_FILENAME, SESSION_SEARCH_INDEX_FILENAME } from './history.js';
 import type { HistoryPersistenceBatch } from './historyPersistenceProtocol.js';
 import type { SessionSummary } from './protocol.js';
+import {
+  HistorySearchUnavailableError,
+  isHistorySearchUnavailableError,
+  sqliteSupportsFts5,
+} from './historySearchSchema.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 
 // Leave cold-worker headroom while staying below the search DB's 5s lock wait.
 const LOCKED_DERIVED_DB_PROBE_TIMEOUT_MS = 3_000;
+const FTS5_UNAVAILABLE_REASON = sqliteSupportsFts5()
+  ? false
+  : 'SQLite FTS5 is unavailable on this host';
 
 function createSchema(path: string): void {
   const db = new DatabaseSync(path);
@@ -195,102 +204,201 @@ test('worker lanes reject requests from the other persistence contract', async (
   }
 });
 
-test('index worker reconciles, searches, and removes provider files without candidate payloads', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-index-worker-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
-  const databaseDirectory = join(home, '.factory', 'droidex');
-  const sessionsDirectory = join(home, '.factory', 'sessions', '2026', '08');
-  mkdirSync(databaseDirectory, { recursive: true });
-  mkdirSync(sessionsDirectory, { recursive: true });
-  const dbPath = join(databaseDirectory, 'session-index.sqlite');
-  const providerSessionId = 'indexed-provider';
-  const sessionPath = join(sessionsDirectory, `${providerSessionId}.jsonl`);
-  writeFileSync(
-    sessionPath,
-    providerSessionJsonl({
-      type: 'session_start',
-      cwd: '/repo',
-      sessionTitle: 'Indexed worker session',
-      settings: { interactionMode: 'auto' },
-    }),
-  );
-  try {
-    createSchema(dbPath);
-    const client = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
-
-    const reconciliation = await client.reconcileSessionFiles();
-    assert.equal(reconciliation.changed, 1);
-    assert.equal(reconciliation.upserts[0]?.providerSessionId, providerSessionId);
-    assert.deepEqual(
-      await client.search('hello'),
-      [],
-      'search does not block on an uncommitted indexing slice',
+test(
+  'index worker reconciles, searches, and removes provider files without candidate payloads',
+  { skip: FTS5_UNAVAILABLE_REASON },
+  async () => {
+    const home = mkdtempSync(join(tmpdir(), 'droidex-history-index-worker-'));
+    const previousHome = process.env['HOME'];
+    process.env['HOME'] = home;
+    const databaseDirectory = join(home, '.factory', 'droidex');
+    const sessionsDirectory = join(home, '.factory', 'sessions', '2026', '08');
+    mkdirSync(databaseDirectory, { recursive: true });
+    mkdirSync(sessionsDirectory, { recursive: true });
+    const dbPath = join(databaseDirectory, 'session-index.sqlite');
+    const providerSessionId = 'indexed-provider';
+    const sessionPath = join(sessionsDirectory, `${providerSessionId}.jsonl`);
+    writeFileSync(
+      sessionPath,
+      providerSessionJsonl({
+        type: 'session_start',
+        cwd: '/repo',
+        sessionTitle: 'Indexed worker session',
+        settings: { interactionMode: 'auto' },
+      }),
     );
+    try {
+      createSchema(dbPath);
+      const client = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
 
-    unlinkSync(sessionPath);
-    const removal = await client.reconcileSessionFilePaths([
-      { providerSessionId, path: sessionPath },
-    ]);
-    assert.deepEqual(removal.removedProviderSessionIds, [providerSessionId]);
-    assert.deepEqual(await client.search('hello'), []);
-    client.closeSync();
-  } finally {
-    if (previousHome === undefined) delete process.env['HOME'];
-    else process.env['HOME'] = previousHome;
-    rmSync(home, { recursive: true, force: true });
-  }
-});
+      const reconciliation = await client.reconcileSessionFiles();
+      assert.equal(reconciliation.changed, 1);
+      assert.equal(reconciliation.upserts[0]?.providerSessionId, providerSessionId);
+      assert.deepEqual(
+        await client.search('hello'),
+        [],
+        'search does not block on an uncommitted indexing slice',
+      );
 
-test('a recreated index worker rebuilds derived search state before a targeted no-op', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'droidex-history-index-backfill-'));
-  const previousHome = process.env['HOME'];
-  process.env['HOME'] = home;
-  const databaseDirectory = join(home, '.factory', 'droidex');
-  const sessionsDirectory = join(home, '.factory', 'sessions');
-  mkdirSync(databaseDirectory, { recursive: true });
-  mkdirSync(sessionsDirectory, { recursive: true });
-  const dbPath = join(databaseDirectory, 'session-index.sqlite');
-  const providerSessionId = 'backfill-provider';
-  const sessionPath = join(sessionsDirectory, `${providerSessionId}.jsonl`);
-  writeFileSync(
-    sessionPath,
-    providerSessionJsonl({
-      type: 'session_start',
-      cwd: '/repo',
-      sessionTitle: 'Backfill worker session',
-      settings: { interactionMode: 'auto' },
-    }),
-  );
-  let first: HistoryWorkerClient | undefined;
-  let recreated: HistoryWorkerClient | undefined;
-  try {
-    createSchema(dbPath);
-    first = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
-    await first.reconcileSessionFiles();
-    first.closeSync();
+      unlinkSync(sessionPath);
+      const removal = await client.reconcileSessionFilePaths([
+        { providerSessionId, path: sessionPath },
+      ]);
+      assert.deepEqual(removal.removedProviderSessionIds, [providerSessionId]);
+      assert.deepEqual(await client.search('hello'), []);
+      client.closeSync();
+    } finally {
+      if (previousHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = previousHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  },
+);
 
-    const db = new DatabaseSync(join(databaseDirectory, SESSION_SEARCH_INDEX_FILENAME));
-    db.exec(`
+test(
+  'a recreated index worker rebuilds derived search state before a targeted no-op',
+  { skip: FTS5_UNAVAILABLE_REASON },
+  async () => {
+    const home = mkdtempSync(join(tmpdir(), 'droidex-history-index-backfill-'));
+    const previousHome = process.env['HOME'];
+    process.env['HOME'] = home;
+    const databaseDirectory = join(home, '.factory', 'droidex');
+    const sessionsDirectory = join(home, '.factory', 'sessions');
+    mkdirSync(databaseDirectory, { recursive: true });
+    mkdirSync(sessionsDirectory, { recursive: true });
+    const dbPath = join(databaseDirectory, 'session-index.sqlite');
+    const providerSessionId = 'backfill-provider';
+    const sessionPath = join(sessionsDirectory, `${providerSessionId}.jsonl`);
+    writeFileSync(
+      sessionPath,
+      providerSessionJsonl({
+        type: 'session_start',
+        cwd: '/repo',
+        sessionTitle: 'Backfill worker session',
+        settings: { interactionMode: 'auto' },
+      }),
+    );
+    let first: HistoryWorkerClient | undefined;
+    let recreated: HistoryWorkerClient | undefined;
+    try {
+      createSchema(dbPath);
+      first = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
+      await first.reconcileSessionFiles();
+      first.closeSync();
+
+      const db = new DatabaseSync(join(databaseDirectory, SESSION_SEARCH_INDEX_FILENAME));
+      db.exec(`
       DROP TABLE history_search_fts;
       DROP TABLE history_search_state;
       DROP TABLE history_search_metadata;
     `);
-    db.close();
+      db.close();
 
-    recreated = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
-    const unchanged = await recreated.reconcileSessionFilePaths([
-      { providerSessionId, path: sessionPath },
-    ]);
-    assert.equal(unchanged.changed, 0);
-    assert.equal(
-      (await recreated.sessionFileSnapshot()).entries[0]?.providerSessionId,
-      providerSessionId,
+      recreated = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
+      const unchanged = await recreated.reconcileSessionFilePaths([
+        { providerSessionId, path: sessionPath },
+      ]);
+      assert.equal(unchanged.changed, 0);
+      assert.equal(
+        (await recreated.sessionFileSnapshot()).entries[0]?.providerSessionId,
+        providerSessionId,
+      );
+      recreated.closeSync();
+    } finally {
+      first?.closeSync();
+      recreated?.closeSync();
+      if (previousHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = previousHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  },
+);
+
+test('missing FTS5 degrades search without affecting canonical persistence', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'droidex-history-fts5-unavailable-'));
+  const previousHome = process.env['HOME'];
+  process.env['HOME'] = home;
+  const databaseDirectory = join(home, '.factory', 'droidex');
+  mkdirSync(databaseDirectory, { recursive: true });
+  const dbPath = join(databaseDirectory, SESSION_INDEX_FILENAME);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (error: unknown) => unhandled.push(error);
+  process.on('unhandledRejection', onUnhandled);
+  const statuses: Array<string> = [];
+  let persistence: HistoryPersistence | undefined;
+  try {
+    const searchClient = new HistoryWorkerClient({
+      workerUrl: new URL(
+        './testing/historyPersistenceWorkerFts5UnavailableLoader.mjs',
+        import.meta.url,
+      ),
+      workerData: { dbPath, lane: 'search' },
+    });
+    persistence = new HistoryPersistence({
+      searchClient,
+      onStatusChanged: (status) => statuses.push(status.state),
+    });
+
+    persistence.recordEvent({
+      id: 'durable-event',
+      appSessionId: 'app',
+      sourceSessionId: 'app',
+      role: 'primary',
+      ts: 1,
+      kind: 'text',
+      text: 'canonical history stays durable',
+    });
+    persistence.flushSync();
+
+    const canonical = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      assert.equal(
+        (canonical.prepare('SELECT COUNT(*) AS count FROM events').get() as { count: number })
+          .count,
+        1,
+      );
+    } finally {
+      canonical.close();
+    }
+
+    await assert.rejects(persistence.searchSessions('needle'), (error: unknown) =>
+      isHistorySearchUnavailableError(error),
     );
-    recreated.closeSync();
+    await assert.rejects(
+      persistence.searchSessions('needle'),
+      (error: unknown) => error instanceof HistorySearchUnavailableError,
+    );
+    assert.equal(await persistence.reconcileSessionFiles(), 0);
+
+    persistence.recordEvent({
+      id: 'after-search',
+      appSessionId: 'app',
+      sourceSessionId: 'app',
+      role: 'primary',
+      ts: 2,
+      kind: 'text',
+      text: 'writes continue after search degrades',
+    });
+    persistence.flushSync();
+
+    const afterSearch = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      assert.equal(
+        (afterSearch.prepare('SELECT COUNT(*) AS count FROM events').get() as { count: number })
+          .count,
+        2,
+      );
+    } finally {
+      afterSearch.close();
+    }
+
+    assert.deepEqual(statuses, ['search_unavailable']);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
   } finally {
-    first?.closeSync();
-    recreated?.closeSync();
+    process.removeListener('unhandledRejection', onUnhandled);
+    persistence?.close();
     if (previousHome === undefined) delete process.env['HOME'];
     else process.env['HOME'] = previousHome;
     rmSync(home, { recursive: true, force: true });
