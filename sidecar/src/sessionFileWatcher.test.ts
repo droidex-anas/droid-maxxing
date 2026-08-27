@@ -45,6 +45,43 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
   }
 }
 
+function manualClock(): {
+  now: () => number;
+  schedule: (callback: () => void, delayMs: number) => NodeJS.Timeout;
+  cancel: (timer: NodeJS.Timeout) => void;
+  advance: (ms: number) => void;
+  pendingTimers: () => number;
+} {
+  let currentMs = 0;
+  const timers = new Map<number, { dueAt: number; callback: () => void }>();
+  let nextId = 0;
+  return {
+    now: () => currentMs,
+    schedule: (callback, delayMs) => {
+      nextId += 1;
+      timers.set(nextId, { dueAt: currentMs + delayMs, callback });
+      return nextId as unknown as NodeJS.Timeout;
+    },
+    cancel: (timer) => {
+      timers.delete(timer as unknown as number);
+    },
+    advance: (ms) => {
+      const targetMs = currentMs + ms;
+      for (;;) {
+        const due = [...timers].filter(([, entry]) => entry.dueAt <= targetMs);
+        if (due.length === 0) break;
+        due.sort((left, right) => left[1].dueAt - right[1].dueAt);
+        const [id, entry] = due[0];
+        timers.delete(id);
+        currentMs = entry.dueAt;
+        entry.callback();
+      }
+      currentMs = targetMs;
+    },
+    pendingTimers: () => timers.size,
+  };
+}
+
 test('sessionIdFromSessionFileName extracts the provider session id', () => {
   assert.equal(sessionIdFromSessionFileName('encoded-cwd/dir/abc-123.jsonl'), 'abc-123');
   assert.equal(sessionIdFromSessionFileName('abc-123.jsonl'), 'abc-123');
@@ -63,7 +100,7 @@ test('external session file changes fire once with the changed files after write
   const watcher = startSessionFileWatcher(
     {
       root,
-      debounceMs: 0,
+      batchWindowMs: 0,
       onExternalChange: (changes) => {
         payloads.push(changes);
       },
@@ -101,7 +138,7 @@ test('a settings sidecar change reports its session file', async () => {
   const watcher = startSessionFileWatcher(
     {
       root,
-      debounceMs: 0,
+      batchWindowMs: 0,
       onExternalChange: (changes) => {
         payloads.push(changes);
       },
@@ -130,7 +167,7 @@ test('writes from live in-app sessions do not fire', async () => {
   const watcher = startSessionFileWatcher(
     {
       root,
-      debounceMs: 0,
+      batchWindowMs: 0,
       isLiveSession: (id) => id === 'live-1',
       onExternalChange: () => {
         calls += 1;
@@ -160,6 +197,97 @@ test('writes from live in-app sessions do not fire', async () => {
   }
 });
 
+test('a subagent writing its own session file is reported while it keeps writing', () => {
+  const root = mkdtempSync(join(tmpdir(), 'session-watcher-'));
+  const dir = join(root, 'encoded-cwd');
+  mkdirSync(dir);
+  const payloads: (SessionFileChange[] | null)[] = [];
+  const clock = manualClock();
+  const controlledWatch = controlledSessionWatch();
+  const watcher = startSessionFileWatcher(
+    {
+      root,
+      batchWindowMs: 1_500,
+      onExternalChange: (changes) => {
+        payloads.push(changes);
+      },
+      now: clock.now,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+    },
+    controlledWatch.watchDirectory,
+  );
+  assert.ok(watcher);
+  const subagent = [{ providerSessionId: 'subagent', path: join(dir, 'subagent.jsonl') }];
+  try {
+    // A spawned subagent creates its session file and then writes to it for as
+    // long as it works.
+    controlledWatch.emit('encoded-cwd/subagent.jsonl');
+    clock.advance(50);
+    assert.deepEqual(payloads, [subagent], 'a file nobody has reported yet is not made to wait');
+
+    for (let elapsed = 0; elapsed < 1_500; elapsed += 100) {
+      controlledWatch.emit('encoded-cwd/subagent.jsonl');
+      clock.advance(100);
+    }
+    assert.deepEqual(payloads, [subagent, subagent], 'later writes report once per batch window');
+  } finally {
+    watcher.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('live session writes neither delay an external batch nor arm a timer', () => {
+  const root = mkdtempSync(join(tmpdir(), 'session-watcher-'));
+  const dir = join(root, 'encoded-cwd');
+  mkdirSync(dir);
+  const payloads: (SessionFileChange[] | null)[] = [];
+  const clock = manualClock();
+  const controlledWatch = controlledSessionWatch();
+  const watcher = startSessionFileWatcher(
+    {
+      root,
+      batchWindowMs: 1_500,
+      isLiveSession: (id) => id === 'live-1',
+      onExternalChange: (changes) => {
+        payloads.push(changes);
+      },
+      now: clock.now,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+    },
+    controlledWatch.watchDirectory,
+  );
+  assert.ok(watcher);
+  try {
+    for (let elapsed = 0; elapsed < 5_000; elapsed += 100) {
+      controlledWatch.emit('encoded-cwd/live-1.jsonl');
+      clock.advance(100);
+    }
+    assert.equal(clock.pendingTimers(), 0, 'a live session streaming alone schedules no work');
+    assert.equal(payloads.length, 0);
+
+    controlledWatch.emit('encoded-cwd/external-1.jsonl');
+    for (let elapsed = 0; elapsed < 1_500; elapsed += 100) {
+      controlledWatch.emit('encoded-cwd/live-1.jsonl');
+      clock.advance(100);
+    }
+    assert.deepEqual(
+      payloads,
+      [[{ providerSessionId: 'external-1', path: join(dir, 'external-1.jsonl') }]],
+      'the live stream neither delayed nor duplicated the external report',
+    );
+    assert.equal(
+      watcher.consumeLiveSessionFile('live-1'),
+      join(dir, 'live-1.jsonl'),
+      'live paths are still retained for targeted close reconciliation',
+    );
+  } finally {
+    watcher.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('close stops further callbacks', async () => {
   const root = mkdtempSync(join(tmpdir(), 'session-watcher-'));
   const dir = join(root, 'encoded-cwd');
@@ -169,7 +297,7 @@ test('close stops further callbacks', async () => {
   const watcher = startSessionFileWatcher(
     {
       root,
-      debounceMs: 0,
+      batchWindowMs: 0,
       onExternalChange: () => {
         calls += 1;
       },
@@ -210,7 +338,7 @@ test('a missing sessions root is created so the watcher starts on first run', ()
   const root = join(tmpdir(), 'session-watcher-first-run-', String(Date.now()), 'sessions');
   const watcher = startSessionFileWatcher({
     root,
-    debounceMs: 50,
+    batchWindowMs: 50,
     onExternalChange: () => {},
   });
   try {
