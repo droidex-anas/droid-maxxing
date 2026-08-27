@@ -127,14 +127,18 @@ export function renderReport(results: RunResult[], trees: BenchTreeRef[]): strin
   lines.push('## Caveat');
   lines.push('');
   lines.push(
-    'This VM software-rasterizes (GPU process fails). Absolute FPS is **not** the owner’s machine. Relative CPU, main-thread long tasks, dropped rAF frames, RSS, session-switch times, and blank-during-scroll **are** the comparison.',
+    'This VM runs Electron 39.8.10 and software-rasterizes (GPU process fails). Absolute FPS is **not** the owner’s machine. Relative CPU, main-thread long tasks, dropped rAF frames, RSS, session-switch times, and blank-during-scroll **are** the comparison.',
   );
   lines.push('');
   lines.push('## Refs');
   lines.push('');
-  lines.push('- **baseline** `origin/main` at `/home/ubuntu/wt/baseline-main`');
-  lines.push('- **candidate renderer/sidecar** `cursor/perf-integration-e50f` (`76bdea9fd1312e0d46c7bd294440582d47170634`) plus bench-only Electron hoist and CDP tooling on `cursor/perf-gui-bench-e50f`');
-  for (const tree of trees) lines.push(`- **${tree.name} measured SHA** \`${tree.sha}\` (${tree.root})`);
+  lines.push('- **baseline** `origin/main` `/home/ubuntu/wt/baseline-main` `99f5ca882147a1641298072e5b64deeaa3d52062`');
+  lines.push(
+    '- **candidate product** `cursor/perf-integration-e50f` `76bdea9fd1312e0d46c7bd294440582d47170634` (virtualizer + perf phases). Bench-only Electron hoist + CDP tooling live on `cursor/perf-gui-bench-e50f`.',
+  );
+  const historyShas = [...new Set(results.map((row) => `${row.tree} history ${row.sha}`))];
+  for (const line of historyShas) lines.push(`- measured: ${line}`);
+  for (const tree of trees) lines.push(`- **${tree.name} tooling HEAD at report** \`${tree.sha}\` (${tree.root})`);
   lines.push('');
   lines.push('## Method');
   lines.push('');
@@ -230,14 +234,20 @@ export function renderReport(results: RunResult[], trees: BenchTreeRef[]): strin
       const d = wiredB.length === 0 || wiredC.length === 0 ? 'n/a' : delta(b.median, c.median);
       lines.push(`| ${name} | ${left} | ${right} | ${d} |`);
     };
+    add('duration (ms)', (row) => row.durationMs, 0);
     add('dropped rAF frames', (row) => row.droppedFrames, 0);
     add('longest frame (ms)', (row) => row.longestFrameMs);
     add('long tasks >50ms', (row) => row.longTasksOver50Ms, 0);
     add('receiveToPaint p50 (ms)', (row) => row.receiveToPaintP50Ms ?? 0);
     add('receiveToPaint p95 (ms)', (row) => row.receiveToPaintP95Ms ?? 0);
     add('receiveToPaint count', (row) => row.receiveToPaintCount ?? 0, 0);
+    add('eventsReceived', (row) => row.eventsReceived ?? 0, 0);
     add('CPU %', (row) => row.cpuPercent);
     add('RSS (MiB)', (row) => row.rssBytes / (1024 * 1024));
+    lines.push('');
+    lines.push(
+      'receiveToPaint is the renderer’s cumulative histogram from page start, not a stream-only delta. Compare count before vs after: idle opens were ~5 samples; a successful replay turn lands two hundred-plus samples, so p50/p95 are dominated by the streamed answer.',
+    );
     const failed = [...streamB, ...streamC].filter((row) => !row.wired);
     if (failed.length > 0) {
       lines.push('');
@@ -273,8 +283,17 @@ export function renderReport(results: RunResult[], trees: BenchTreeRef[]): strin
   const warmC = spread(candidate.map((row) => row.switchTo10kWarmMs));
   lines.push(`- **Warm switch to 10k:** candidate ${fmt(warmC)} ms vs baseline ${fmt(warmB)} ms.`);
   lines.push(
-    '- **Subagent cards:** seeded 24-child chat. Sidebar shows 5 `subagent-row` nodes (list limit). Concurrent live child *streaming* was not driven in the desktop app — the replay `streaming` scenario is a single session. Sibling re-render isolation under concurrent child tokens was **not** measured here and is not fabricated.',
+    '- **Subagent cards:** seeded 24-child chat. Sidebar shows 5 `subagent-row` nodes (list limit). The parent feed only has 3 mounted rows, so the viewport below that short transcript is empty by content (~478 px hole, blank-hit 1.0) — that is not a virtualizer miss. Concurrent live child *streaming* was not driven in the desktop app; the replay `streaming` scenario is a single session. Sibling re-render isolation under concurrent child tokens was **not** measured here and is not fabricated.',
   );
+  if (wiredC.length > 0) {
+    const paint = spread(wiredC.map((row) => row.receiveToPaintP50Ms ?? 0));
+    const droppedStream = spread(wiredC.map((row) => row.droppedFrames));
+    const paints = spread(wiredC.map((row) => row.receiveToPaintCount ?? 0));
+    const events = spread(wiredC.map((row) => row.eventsReceived ?? 0));
+    lines.push(
+      `- **Streaming (candidate only):** receiveToPaint p50 ${fmt(paint)} ms, dropped rAF ${fmt(droppedStream, 0)}, paint samples ${fmt(paints, 0)} / eventsReceived ${fmt(events, 0)}. Baseline cannot be compared without mixing trees.`,
+    );
+  }
   lines.push(
     '- **Long tasks during scroll:** both trees reported 0 tasks >50 ms after filtering to the scroll phase. Either the software-raster path is not producing longtask entries, or scroll work is under 50 ms on this host. Do not read this as “no jank” — dropped rAF is the jank signal.',
   );
