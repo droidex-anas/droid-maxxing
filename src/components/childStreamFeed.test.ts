@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { TranscriptEvent } from '../types/bridge';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
-import { applyConversationContentResize } from '../hooks/useConversationScrollWindow';
+import { applyConversationContentResize } from '../hooks/conversationScrollWindow';
 import { sameFeedEvents, feedItemPropsEqual, type FeedItemViewProps } from './chat';
 import type { FeedItem } from './chatFeed';
 import { createChatFeedProjector, type ChatFeedProjectorInput } from './chatFeedProjector';
