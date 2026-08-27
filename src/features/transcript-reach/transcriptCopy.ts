@@ -14,9 +14,7 @@ export function copyTextForCommand(command: string, output?: string): string {
 }
 
 export function copyTextForFileChange(change: FileChange): string {
-  const body = change.ops
-    .map((op) => `${op.type === 'add' ? '+' : op.type === 'del' ? '-' : ' '}${op.text}`)
-    .join('\n');
+  const body = change.ops.map((op) => `${diffOpPrefix(op.type)}${op.text}`).join('\n');
   return body ? `${change.verb} ${change.path}\n${body}` : `${change.verb} ${change.path}`;
 }
 
@@ -71,6 +69,19 @@ function argStr(args: unknown, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+function firstPresent(...values: (string | undefined)[]): string {
+  for (const value of values) {
+    if (value) return value;
+  }
+  return '';
+}
+
+function diffOpPrefix(type: FileChange['ops'][number]['type']): string {
+  if (type === 'add') return '+';
+  if (type === 'del') return '-';
+  return ' ';
+}
+
 function copyTextForChildSession(event: TranscriptEvent): string {
   const info = childSessionInfo(event.toolArgs);
   return joinCopyParts([info.label ?? '', info.description ?? '', event.text ?? '']);
@@ -79,16 +90,16 @@ function copyTextForChildSession(event: TranscriptEvent): string {
 function copyTextForToolCall(call: TranscriptEvent, result?: TranscriptEvent): string {
   const meta = toolMeta(call.toolName, call.toolArgs);
   if (meta.cat === 'exec') {
-    const command =
-      argStr(call.toolArgs, 'command') ??
-      argStr(call.toolArgs, 'cmd') ??
-      argStr(call.toolArgs, 'script') ??
-      meta.detail ??
-      call.toolName ??
-      'command';
-    return copyTextForCommand(command, result?.text);
+    const command = firstPresent(
+      argStr(call.toolArgs, 'command'),
+      argStr(call.toolArgs, 'cmd'),
+      argStr(call.toolArgs, 'script'),
+      meta.detail,
+      call.toolName,
+    );
+    return copyTextForCommand(command || 'command', result?.text);
   }
-  const head = meta.detail || call.toolName || '';
+  const head = firstPresent(meta.detail, call.toolName);
   const out = result?.text ? stripAnsi(result.text).trimEnd() : '';
   if (head && out) return `${head}\n\n${out}`;
   return out || head;

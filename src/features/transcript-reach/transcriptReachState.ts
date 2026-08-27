@@ -86,7 +86,7 @@ function applyMatches(
   query: string,
   matches: readonly TranscriptFindMatch[],
 ): TranscriptReachState {
-  const previous = state.matches[state.activeIndex];
+  const previous = state.matches.at(state.activeIndex);
   const kept = previous
     ? matches.findIndex((match) => match.rowId === previous.rowId && match.start === previous.start)
     : -1;

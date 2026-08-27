@@ -39,10 +39,21 @@ function history(count: number): FeedItem[] {
 function createListEngine(items: readonly FeedItem[]) {
   const viewportHeight = CONVERSATION_LIST_INITIAL_RECT.height;
   let scrollTop = estimatedListEndOffset(items.length, viewportHeight);
+  let scrollHeight =
+    items.length * CONVERSATION_LIST_ESTIMATE_PX +
+    Math.max(0, items.length - 1) * CONVERSATION_LIST_GAP_PX;
   let offsetObserver: ((offset: number, isScrolling: boolean) => void) | undefined;
   const element = {
     clientHeight: viewportHeight,
     clientWidth: CONVERSATION_LIST_INITIAL_RECT.width,
+    offsetHeight: viewportHeight,
+    offsetWidth: CONVERSATION_LIST_INITIAL_RECT.width,
+    get scrollHeight() {
+      return scrollHeight;
+    },
+    set scrollHeight(value: number) {
+      scrollHeight = value;
+    },
     get scrollTop() {
       return scrollTop;
     },

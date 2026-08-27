@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { FeedItem } from '../../components/chat';
 import { feedRowId } from '../../hooks/conversationViewportAnchor';
-import { parseTruncatedTail } from '../../lib/tools';
+import { parseTruncatedTail, stripAnsi } from '../../lib/tools';
 import type { TranscriptEvent } from '../../types/bridge';
 import { copyTextForCommand, copyTextForFeedItem, copyTextForMessage } from './transcriptCopy';
 import {
@@ -108,6 +108,5 @@ test('message copy text matches the per-message copy button path', () => {
 test('command copy text matches the terminal copy button path', () => {
   const command = 'npm test';
   const output = '\u001b[31mFAIL\u001b[0m stack trace';
-  const out = output.replace(/\u001b\[\d+m/g, '').trimEnd();
-  assert.equal(copyTextForCommand(command, output), `${command}\n\n${out}`);
+  assert.equal(copyTextForCommand(command, output), `${command}\n\n${stripAnsi(output).trimEnd()}`);
 });

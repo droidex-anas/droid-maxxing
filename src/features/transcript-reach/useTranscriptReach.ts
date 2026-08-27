@@ -92,7 +92,7 @@ export function useTranscriptReach({
     };
   }, [index, state.open, state.query]);
 
-  const activeMatch = state.matches[state.activeIndex];
+  const activeMatch = state.matches.at(state.activeIndex);
   const activeRowId = activeMatch?.rowId ?? null;
   useEffect(() => {
     if (!state.open || !activeRowId) return;
@@ -141,9 +141,11 @@ export function useTranscriptReach({
     if (!keys) return false;
     const text = copyTextForFeedItemRange(items, keys.fromKey, keys.toKey);
     if (!text) return false;
-    const clipboard = writeText ?? navigator.clipboard?.writeText.bind(navigator.clipboard);
-    if (!clipboard) return false;
-    await clipboard(text);
+    if (writeText) {
+      await writeText(text);
+      return true;
+    }
+    await navigator.clipboard.writeText(text);
     return true;
   }, [items, state.rangeEndKey, state.rangeStartKey, writeText]);
 

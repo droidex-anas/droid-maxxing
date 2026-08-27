@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, type Dispatch, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, Copy, Search, X } from 'lucide-react';
 
 import type { TranscriptReachAction, TranscriptReachState } from './transcriptReachState';
@@ -30,7 +30,7 @@ export function TranscriptReachBar({
 
   if (!state.open) return null;
 
-  const onSubmit = (event: FormEvent) => {
+  const onSubmit = (event: { preventDefault(): void }) => {
     event.preventDefault();
     dispatch({ type: 'next' });
   };
@@ -115,13 +115,7 @@ export function TranscriptReachBar({
           data-testid="transcript-find-scope"
           className="flex flex-wrap items-center gap-2 px-1 text-[11px] text-droid-text-muted"
         >
-          <span>
-            {scopeNotice.kind === 'loading-older'
-              ? 'Loading older history…'
-              : scopeNotice.empty
-                ? 'Older history isn’t loaded, so this can miss earlier turns.'
-                : 'Showing matches in loaded history. Older turns may also match.'}
-          </span>
+          <span>{scopeNoticeMessage(scopeNotice)}</span>
           {scopeNotice.kind === 'older-history' && (
             <button
               type="button"
@@ -139,13 +133,7 @@ export function TranscriptReachBar({
           data-testid="transcript-range-bar"
           className="flex flex-wrap items-center gap-2 px-1 text-[11px] text-droid-text-muted"
         >
-          <span>
-            {rangeReady
-              ? 'Range selected from conversation state.'
-              : state.rangeStartKey
-                ? 'Click the last message to copy.'
-                : 'Click the first message, then the last.'}
-          </span>
+          <span>{rangePrompt(rangeReady, state.rangeStartKey)}</span>
           {activeMatchActions(state, dispatch)}
           <button
             type="button"
@@ -166,7 +154,7 @@ function activeMatchActions(
   state: TranscriptReachState,
   dispatch: Dispatch<TranscriptReachAction>,
 ) {
-  const match = state.matches[state.activeIndex];
+  const match = state.matches.at(state.activeIndex);
   if (!match) return null;
   return (
     <>
@@ -224,4 +212,18 @@ function IconButton({
       {children}
     </button>
   );
+}
+
+function scopeNoticeMessage(
+  notice: NonNullable<ReturnType<typeof transcriptFindScopeNotice>>,
+): string {
+  if (notice.kind === 'loading-older') return 'Loading older history…';
+  if (notice.empty) return 'Older history isn’t loaded, so this can miss earlier turns.';
+  return 'Showing matches in loaded history. Older turns may also match.';
+}
+
+function rangePrompt(rangeReady: boolean, rangeStartKey: string | null): string {
+  if (rangeReady) return 'Range selected from conversation state.';
+  if (rangeStartKey) return 'Click the last message to copy.';
+  return 'Click the first message, then the last.';
 }

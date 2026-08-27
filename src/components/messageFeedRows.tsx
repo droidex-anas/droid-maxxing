@@ -44,8 +44,7 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
     rangeStartKey: reach.rangeStartKey,
     rangeEndKey: reach.rangeEndKey,
   });
-  const hit =
-    reach.activeRowId === rowId ? 'active' : reach.matchRowIds.has(rowId) ? 'match' : undefined;
+  const hit = feedRowHitKind(rowId, reach.activeRowId, reach.matchRowIds);
 
   return (
     <div
@@ -66,11 +65,7 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
           }}
           className="mb-1 rounded-md border border-droid-border px-1.5 py-0.5 text-[10px] text-droid-text-muted hover:text-droid-text"
         >
-          {reach.rangeStartKey === item.key
-            ? 'Range start'
-            : reach.rangeEndKey === item.key
-              ? 'Range end'
-              : 'Add to range'}
+          {rangeRowLabel(item.key, reach.rangeStartKey, reach.rangeEndKey)}
         </button>
       )}
       <ItemView {...itemProps} />
@@ -104,4 +99,24 @@ export function optionalFeedRowProps(shared: FeedRowsSharedProps): Partial<FeedI
     ...(shared.subagentsDock !== undefined ? { subagentsDock: shared.subagentsDock } : {}),
     ...(shared.specContent !== undefined ? { specContent: shared.specContent } : {}),
   };
+}
+
+function feedRowHitKind(
+  rowId: string,
+  activeRowId: string | null,
+  matchRowIds: ReadonlySet<string>,
+): 'active' | 'match' | undefined {
+  if (activeRowId === rowId) return 'active';
+  if (matchRowIds.has(rowId)) return 'match';
+  return undefined;
+}
+
+function rangeRowLabel(
+  itemKey: string,
+  rangeStartKey: string | null,
+  rangeEndKey: string | null,
+): string {
+  if (rangeStartKey === itemKey) return 'Range start';
+  if (rangeEndKey === itemKey) return 'Range end';
+  return 'Add to range';
 }

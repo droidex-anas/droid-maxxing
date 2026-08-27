@@ -35,7 +35,7 @@ export function projectTranscriptSearchIndex(
   updateKind: 'full' | 'append' | 'prepend',
   rebuiltFromItemIndex: number,
 ): TranscriptSearchIndex {
-  if (!previous || previous.identity !== identity || updateKind === 'full') {
+  if (previous?.identity !== identity || updateKind === 'full') {
     return { identity, rows: items.map(searchRowForItem) };
   }
   if (updateKind === 'prepend') {
