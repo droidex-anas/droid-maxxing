@@ -29,6 +29,8 @@ test('new issue-126 scenarios resolve and skipped names stay documented', () => 
 test('A/B catalog never labels sidecar pipeline metrics as ab', () => {
   assert.equal(metricClass('bundle.initialJsBytes'), 'ab');
   assert.equal(metricClass('feed.mountedRowsAt10k'), 'ab');
+  assert.equal(metricClass('sidecar.readyMs'), 'ab');
+  assert.equal(metricClass('sidecar.firstSessionsListMs'), 'ab');
   assert.equal(metricClass('sidecar.eventReductionRatio'), 'candidate');
   assert.equal(metricClass('sidecar.pendingEventsMax'), 'candidate');
 });
