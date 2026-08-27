@@ -47,6 +47,9 @@ const isSvgLang = (className?: string) => hasLanguage(className, 'svg');
 const isMermaidLang = (className?: string) => hasLanguage(className, 'mermaid');
 const isAppLang = (className?: string) => hasLanguage(className, 'app');
 
+// Per-token JSON spans are fine for a snippet and a long task for a dumped payload.
+export const JSON_HIGHLIGHT_MAX_CHARS = 8_192;
+
 function HighlightJson({ code }: { code: string }) {
   const nodes = useMemo(() => {
     const tokens = code.split(
@@ -192,7 +195,11 @@ function MarkdownFence({
       code={codeText}
       className={className}
       specMode={specMode}
-      highlighted={isJsonLang(className) ? <HighlightJson code={codeText} /> : undefined}
+      highlighted={
+        isJsonLang(className) && codeText.length <= JSON_HIGHLIGHT_MAX_CHARS ? (
+          <HighlightJson code={codeText} />
+        ) : undefined
+      }
     />
   );
 }
