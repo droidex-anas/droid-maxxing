@@ -6,6 +6,7 @@ const {
   createTerminalSubscriptionRegistry,
   TERMINAL_BATCH_MAX_BYTES,
   TERMINAL_BATCH_WINDOW_MS,
+  TERMINAL_MAX_INPUT_BYTES,
   TERMINAL_MAX_PENDING_BYTES,
 } = require('./terminalPort.cjs');
 
@@ -347,4 +348,43 @@ test('double close after exit is idempotent', async () => {
   registry.clear(sender.id);
   assert.equal(port.closed, true);
   assert.equal(port.posted.filter((payload) => payload.kind === 'exit').length, 1);
+});
+
+test('malformed and unknown port messages are ignored without tearing down', async () => {
+  const { manager, instances, registry } = createHarness();
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  const sender = fakeSender();
+  const port = fakePort();
+  registry.subscribe(sender, terminal.id, port);
+
+  port.emitMessage(null);
+  port.emitMessage('write-me');
+  port.emitMessage(['input', 'x']);
+  port.emitMessage({ type: 'input' });
+  port.emitMessage({ type: 'input', data: 12 });
+  port.emitMessage({ type: 'input', data: { text: 'x' } });
+  port.emitMessage({ type: 'poke', data: 'x' });
+  port.emitMessage({ type: 'ack', bytes: '1', byteOffset: 1 });
+
+  assert.deepEqual(instances[0].writes, []);
+  assert.equal(port.closed, false);
+
+  port.emitMessage({ type: 'input', data: 'ok' });
+  assert.deepEqual(instances[0].writes, ['ok']);
+});
+
+test('an oversized input post is ignored and does not tear down the terminal', async () => {
+  const { manager, instances, registry } = createHarness();
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  const sender = fakeSender();
+  const port = fakePort();
+  registry.subscribe(sender, terminal.id, port);
+
+  port.emitMessage({ type: 'input', data: 'x'.repeat(TERMINAL_MAX_INPUT_BYTES + 1) });
+  assert.deepEqual(instances[0].writes, []);
+  assert.equal(port.closed, false);
+
+  port.emitMessage({ type: 'input', data: 'x'.repeat(TERMINAL_MAX_INPUT_BYTES) });
+  assert.equal(instances[0].writes.length, 1);
+  assert.equal(instances[0].writes[0].length, TERMINAL_MAX_INPUT_BYTES);
 });
