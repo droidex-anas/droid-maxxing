@@ -21,7 +21,7 @@
   },
   "src/components/chat.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 15
+      "count": 7
     },
     "@typescript-eslint/prefer-for-of": {
       "count": 1
@@ -31,6 +31,16 @@
     },
     "@typescript-eslint/restrict-template-expressions": {
       "count": 3
+    }
+  },
+  "src/components/chatFeed.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/components/chatFeedTurns.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
     }
   },
   "src/hooks/useStore.tsx": {
