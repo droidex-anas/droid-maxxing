@@ -213,6 +213,50 @@ test('replay trimming preserves complete UTF-8 characters', async () => {
   assert.equal(events[0].droppedBytes, 4);
 });
 
+test('replaySince owns window arithmetic at every offset boundary', async () => {
+  const { manager, instances } = fixture();
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  const overflow = 32;
+  instances[0].emitData('x'.repeat(MAX_REPLAY_BYTES + overflow));
+  const emitted = MAX_REPLAY_BYTES + overflow;
+  const windowStart = overflow;
+
+  const beforeWindow = manager.replaySince(terminal.id, 10);
+  assert.equal(beforeWindow.truncated, true);
+  assert.equal(beforeWindow.droppedBytes, windowStart - 10);
+  assert.equal(Buffer.byteLength(beforeWindow.data), MAX_REPLAY_BYTES);
+  assert.equal(beforeWindow.byteOffset, emitted);
+  assert.equal(beforeWindow.totalEmittedBytes, emitted);
+
+  const atStart = manager.replaySince(terminal.id, windowStart);
+  assert.equal(atStart.truncated, false);
+  assert.equal(atStart.droppedBytes, 0);
+  assert.equal(Buffer.byteLength(atStart.data), MAX_REPLAY_BYTES);
+  assert.equal(atStart.data, 'x'.repeat(MAX_REPLAY_BYTES));
+
+  const midOffset = windowStart + 100;
+  const midWindow = manager.replaySince(terminal.id, midOffset);
+  assert.equal(midWindow.truncated, false);
+  assert.equal(midWindow.droppedBytes, 0);
+  assert.equal(Buffer.byteLength(midWindow.data), MAX_REPLAY_BYTES - 100);
+  assert.equal(midWindow.data, 'x'.repeat(MAX_REPLAY_BYTES - 100));
+
+  const atHead = manager.replaySince(terminal.id, emitted);
+  assert.equal(atHead.data, '');
+  assert.equal(atHead.truncated, false);
+  assert.equal(atHead.droppedBytes, 0);
+  assert.equal(atHead.byteOffset, emitted);
+
+  const fromOrigin = manager.replaySince(terminal.id, 0);
+  const subscribed = [];
+  manager.subscribe(terminal.id, (event) => subscribed.push(event));
+  assert.equal(subscribed[0].kind, 'replay');
+  assert.equal(subscribed[0].data, fromOrigin.data);
+  assert.equal(subscribed[0].droppedBytes, fromOrigin.droppedBytes);
+  assert.equal(subscribed[0].truncated, fromOrigin.truncated);
+  assert.equal(subscribed[0].sequence, fromOrigin.sequence);
+});
+
 test('terminal manager releases capacity when node-pty fails to load', async () => {
   const manager = createTerminalManager({
     platform: 'darwin',

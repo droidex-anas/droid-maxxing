@@ -12,6 +12,9 @@ const { MAX_REPLAY_BYTES } = require('./terminal.cjs');
 const TERMINAL_BATCH_WINDOW_MS = 4;
 const TERMINAL_BATCH_MAX_BYTES = 32 * 1024;
 const TERMINAL_MAX_PENDING_BYTES = MAX_REPLAY_BYTES;
+// Match one output batch: a keystroke/paste stays in the same size class as a
+// PTY flush; a renderer cannot dump megabytes into node-pty in one post.
+const TERMINAL_MAX_INPUT_BYTES = TERMINAL_BATCH_MAX_BYTES;
 
 function payloadBytes(payload) {
   if (!payload || typeof payload.data !== 'string') return 0;
@@ -40,26 +43,7 @@ function messageData(event) {
 }
 
 function resyncPayload(terminalManager, terminalId, fromByteOffset) {
-  const state = terminalManager.replayState(terminalId);
-  const bufferStart = state.droppedBytes;
-  let start = 0;
-  let droppedBytes = 0;
-  let truncated = false;
-  if (fromByteOffset < bufferStart) {
-    truncated = true;
-    droppedBytes = bufferStart - fromByteOffset;
-  } else {
-    start = Math.min(state.buffer.length, fromByteOffset - bufferStart);
-  }
-  return {
-    kind: 'data',
-    data: state.buffer.subarray(start).toString('utf8'),
-    sequence: state.sequence,
-    byteOffset: state.totalEmittedBytes,
-    truncated,
-    droppedBytes,
-    totalEmittedBytes: state.totalEmittedBytes,
-  };
+  return { kind: 'data', ...terminalManager.replaySince(terminalId, fromByteOffset) };
 }
 
 function createPortLink(options) {
@@ -73,6 +57,7 @@ function createPortLink(options) {
     batchWindowMs,
     batchMaxBytes,
     maxPendingBytes,
+    maxInputBytes,
     onClosed,
   } = options;
 
@@ -217,27 +202,29 @@ function createPortLink(options) {
 
   function onPortMessage(event) {
     if (closed) return;
-    const data = messageData(event);
-    if (!data || typeof data !== 'object') return;
-    if (data.type === 'input') {
-      if (typeof data.data !== 'string') return;
-      try {
-        terminalManager.write(terminalId, data.data);
-      } catch {
-        // PTY may have exited between the keystroke and this turn.
+    try {
+      const data = messageData(event);
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+      if (data.type === 'input') {
+        if (typeof data.data !== 'string') return;
+        if (Buffer.byteLength(data.data, 'utf8') > maxInputBytes) return;
+        try {
+          terminalManager.write(terminalId, data.data);
+        } catch {
+          // PTY may have exited between the keystroke and this turn.
+        }
+        return;
       }
-      return;
-    }
-    if (data.type === 'ack') {
-      const bytes = Number(data.bytes);
-      const byteOffset = Number(data.byteOffset);
-      if (Number.isFinite(bytes) && bytes > 0) {
-        unackedBytes = Math.max(0, unackedBytes - bytes);
-      }
-      if (Number.isFinite(byteOffset) && byteOffset > lastAckedByteOffset) {
-        lastAckedByteOffset = byteOffset;
-      }
+      if (data.type !== 'ack') return;
+      const bytes = data.bytes;
+      const byteOffset = data.byteOffset;
+      if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return;
+      if (typeof byteOffset !== 'number' || !Number.isFinite(byteOffset) || byteOffset < 0) return;
+      if (bytes > 0) unackedBytes = Math.max(0, unackedBytes - bytes);
+      if (byteOffset > lastAckedByteOffset) lastAckedByteOffset = byteOffset;
       if (overflowed && unackedBytes < maxPendingBytes / 2) resync();
+    } catch {
+      // Malformed renderer messages must not tear down the PTY or the port.
     }
   }
 
@@ -297,6 +284,7 @@ function createTerminalSubscriptionRegistry(terminalManager, options = {}) {
   const batchWindowMs = options.batchWindowMs ?? TERMINAL_BATCH_WINDOW_MS;
   const batchMaxBytes = options.batchMaxBytes ?? TERMINAL_BATCH_MAX_BYTES;
   const maxPendingBytes = options.maxPendingBytes ?? TERMINAL_MAX_PENDING_BYTES;
+  const maxInputBytes = options.maxInputBytes ?? TERMINAL_MAX_INPUT_BYTES;
   const senders = new Map();
 
   function clear(senderId) {
@@ -339,6 +327,7 @@ function createTerminalSubscriptionRegistry(terminalManager, options = {}) {
       batchWindowMs,
       batchMaxBytes,
       maxPendingBytes,
+      maxInputBytes,
       onClosed: () => {
         const current = senders.get(sender.id);
         if (current?.subscriptions.get(terminalId) === link) {
@@ -372,4 +361,5 @@ module.exports = {
   TERMINAL_BATCH_WINDOW_MS,
   TERMINAL_BATCH_MAX_BYTES,
   TERMINAL_MAX_PENDING_BYTES,
+  TERMINAL_MAX_INPUT_BYTES,
 };
