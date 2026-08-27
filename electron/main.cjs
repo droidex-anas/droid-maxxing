@@ -23,7 +23,8 @@ const { pathToFileURL } = require('node:url');
 const gitVcs = require('./git.cjs');
 const githubVcs = require('./github.cjs');
 const githubPrConversation = require('./githubPrConversation.cjs');
-const { createTerminalManager, createTerminalSubscriptionRegistry } = require('./terminal.cjs');
+const { createTerminalManager } = require('./terminal.cjs');
+const { createTerminalSubscriptionRegistry } = require('./terminalPort.cjs');
 const { createPerformanceMetricsCollector } = require('./performanceMetrics.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
@@ -536,10 +537,6 @@ function registerIpc() {
       rows: args?.rows,
     });
   });
-  ipcMain.handle('terminal-write', (event, { id, data }) => {
-    assertMainRenderer(event);
-    terminalManager.write(id, data);
-  });
   ipcMain.handle('terminal-resize', (event, { id, cols, rows }) => {
     assertMainRenderer(event);
     terminalManager.resize(id, cols, rows);
@@ -553,9 +550,33 @@ function registerIpc() {
     assertMainRenderer(event);
     return terminalManager.list({ appSessionId: filter?.appSessionId });
   });
-  ipcMain.handle('terminal-subscribe', (event, { id }) => {
-    assertMainRenderer(event);
-    terminalSubscriptions.subscribe(event.sender, id);
+  ipcMain.on('terminal-subscribe', (event, payload) => {
+    const port = event.ports?.[0];
+    try {
+      assertMainRenderer(event);
+      const id = payload?.id;
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new Error('terminal-subscribe requires an id');
+      }
+      if (!port) throw new Error('terminal-subscribe requires a MessagePort');
+      terminalSubscriptions.subscribe(event.sender, id, port);
+    } catch (error) {
+      if (port) {
+        try {
+          port.postMessage({
+            kind: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        } catch {
+          // port already closed
+        }
+        try {
+          port.close();
+        } catch {
+          // already closed
+        }
+      }
+    }
   });
   ipcMain.handle('terminal-unsubscribe', (event, { id }) => {
     assertMainRenderer(event);

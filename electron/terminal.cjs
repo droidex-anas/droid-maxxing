@@ -311,6 +311,34 @@ function createTerminalManager(opts) {
     }
   }
 
+  function replaySinceEntry(e, fromByteOffset) {
+    const emitted = e.totalEmittedBytes;
+    const from =
+      Number.isFinite(fromByteOffset) && fromByteOffset > 0 ? Math.min(fromByteOffset, emitted) : 0;
+    const bufferStart = e.droppedBytes;
+    let start = 0;
+    let droppedBytes = 0;
+    let truncated = false;
+    if (from < bufferStart) {
+      truncated = true;
+      droppedBytes = bufferStart - from;
+    } else {
+      start = Math.min(e.buffer.length, from - bufferStart);
+    }
+    return {
+      data: e.buffer.subarray(start).toString('utf8'),
+      sequence: e.sequence,
+      byteOffset: emitted,
+      droppedBytes,
+      totalEmittedBytes: emitted,
+      truncated,
+    };
+  }
+
+  function replaySince(id, fromByteOffset) {
+    return replaySinceEntry(requireEntry(id), fromByteOffset);
+  }
+
   // Register a subscriber for `data`/`exit` events. The current replay buffer
   // is delivered immediately as a `replay` payload (with byte-offset and
   // truncation info), followed by a synthetic `exit` event if the PTY has
@@ -322,17 +350,8 @@ function createTerminalManager(opts) {
       throw new Error('subscribe() callback must be a function');
     }
     e.subscribers.add(callback);
-    const replay = {
-      kind: 'replay',
-      data: e.buffer.toString('utf8'),
-      byteOffset: e.totalEmittedBytes,
-      droppedBytes: e.droppedBytes,
-      totalEmittedBytes: e.totalEmittedBytes,
-      truncated: e.droppedBytes > 0,
-      sequence: e.sequence,
-    };
     try {
-      callback(replay);
+      callback({ kind: 'replay', ...replaySinceEntry(e, 0) });
     } catch {
       // swallow subscriber errors
     }
@@ -463,6 +482,7 @@ function createTerminalManager(opts) {
     write,
     resize,
     subscribe,
+    replaySince,
     onExit,
     kill,
     summary,
@@ -473,48 +493,8 @@ function createTerminalManager(opts) {
   };
 }
 
-function createTerminalSubscriptionRegistry(terminalManager) {
-  const senders = new Map();
-
-  function clear(senderId) {
-    const entries =
-      senderId === undefined ? [...senders.entries()] : [[senderId, senders.get(senderId)]];
-    for (const [id, entry] of entries) {
-      if (!entry) continue;
-      entry.sender.removeListener('destroyed', entry.onDestroyed);
-      for (const unsubscribe of entry.subscriptions.values()) unsubscribe();
-      senders.delete(id);
-    }
-  }
-
-  function unsubscribe(sender, terminalId) {
-    const subscriptions = senders.get(sender.id)?.subscriptions;
-    const dispose = subscriptions?.get(terminalId);
-    if (dispose) dispose();
-    subscriptions?.delete(terminalId);
-  }
-
-  function subscribe(sender, terminalId) {
-    unsubscribe(sender, terminalId);
-    let entry = senders.get(sender.id);
-    if (!entry) {
-      const onDestroyed = () => clear(sender.id);
-      entry = { sender, onDestroyed, subscriptions: new Map() };
-      senders.set(sender.id, entry);
-      sender.once('destroyed', onDestroyed);
-    }
-    const dispose = terminalManager.subscribe(terminalId, (payload) => {
-      if (!sender.isDestroyed()) sender.send('terminal-event', { terminalId, ...payload });
-    });
-    entry.subscriptions.set(terminalId, dispose);
-  }
-
-  return { subscribe, unsubscribe, clear };
-}
-
 module.exports = {
   createTerminalManager,
-  createTerminalSubscriptionRegistry,
   defaultShell,
   buildPtyEnv,
   validateCwd,
