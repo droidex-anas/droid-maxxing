@@ -16,7 +16,7 @@ import {
   shouldCompensateConversationContentResize,
   shouldLoadOlderHistoryAtTop,
   shouldReleaseConversationTranscript,
-} from './useConversationScrollWindow';
+} from './conversationScrollWindow';
 
 const settledPinned = {
   isConversationLive: false,

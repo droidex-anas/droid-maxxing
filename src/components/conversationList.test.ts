@@ -25,7 +25,7 @@ import {
   syncMeasureConversationList,
   takeFeedRowEntrance,
 } from './conversationListState';
-import { applyConversationContentResize } from '../hooks/useConversationScrollWindow';
+import { applyConversationContentResize } from '../hooks/conversationScrollWindow';
 import {
   feedRowId,
   restoreViewportAnchor,
