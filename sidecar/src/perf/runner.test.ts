@@ -36,6 +36,7 @@ test('replay run drives the real sidecar pipeline and reports measurements', asy
   assert.ok(sidecar.resources.livePrimarySessions >= 1);
 
   assert.ok(report.budgets.results.length > 0);
+  assert.ok(report.gates.results.length > 0);
   for (const result of report.budgets.results) {
     assert.ok(['pass', 'fail', 'unmeasured'].includes(result.status));
     assert.ok(result.budgetMs > 0);

@@ -4,6 +4,7 @@
 import type { HistogramStats } from '../telemetry/histogram.js';
 import type { HotPathMetricsSnapshot } from '../telemetry/hotPathMetrics.js';
 import type { BudgetEvaluation } from './budgets.js';
+import type { GateEvaluation } from './gates.js';
 import type { PerfScenarioSpec } from './scenario.js';
 
 export interface ReplayClientStats {
@@ -28,6 +29,7 @@ export interface ReplayReport {
   drift: ReplayDrift | null;
   sidecar: HotPathMetricsSnapshot;
   budgets: BudgetEvaluation;
+  gates: GateEvaluation;
   environment: {
     node: string;
     platform: string;
@@ -110,8 +112,21 @@ export function renderReportMarkdown(report: ReplayReport): string {
     ),
     '',
     report.budgets.allMeasuredPassed
-      ? 'All measured budgets passed.'
-      : 'One or more budgets failed or were unmeasured.',
+      ? 'All measured timing budgets passed (calibration; not CI-hard).'
+      : 'One or more timing budgets failed or were unmeasured (calibration; not CI-hard).',
+    '',
+    '## Deterministic gates',
+    '',
+    '| Gate | Actual | Budget | Mode | Status |',
+    '| --- | --- | --- | --- | --- |',
+    ...report.gates.results.map(
+      (result) =>
+        `| ${result.name} | ${formatGateActual(result.actual, result.unit)} | ${formatGateActual(result.budget, result.unit)} | ${result.mode} | ${result.status} |`,
+    ),
+    '',
+    report.gates.hardPassed
+      ? 'All measured hard gates passed.'
+      : 'One or more hard gates failed or were unmeasured.',
     '',
   );
   return lines.join('\n');
@@ -139,4 +154,13 @@ function ms(value: number | undefined): string {
 
 function percent(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`;
+}
+
+function formatGateActual(value: number | null, unit: string): string {
+  if (value === null) return '—';
+  if (!Number.isFinite(value)) return 'n/a';
+  if (unit === 'bytes' || unit === 'ms' || unit === 'events' || unit === 'rows') {
+    return `${value.toFixed(value % 1 === 0 ? 0 : 2)} ${unit}`;
+  }
+  return `${String(value)} ${unit}`;
 }
