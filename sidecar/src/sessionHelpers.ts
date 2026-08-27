@@ -16,7 +16,7 @@ import type {
   SessionSummary,
 } from './protocol.js';
 import type { CompactionTokenLimitPatch } from './compaction.js';
-import { mapFeature } from './normalize.js';
+import { bridgeFeature } from './missionFeatures.js';
 import { stringValue } from './values.js';
 
 export interface SessionInitResult {
@@ -516,7 +516,7 @@ function resumedFeatures(
   init: SessionInitResult,
   purpose: SessionSummary['sessionPurpose'],
 ): SessionSummary['features'] {
-  return purpose === 'mission-control' ? (init.mission?.features ?? []).map(mapFeature) : [];
+  return purpose === 'mission-control' ? (init.mission?.features ?? []).map(bridgeFeature) : [];
 }
 
 function exposedCompaction(init: SessionInitResult): CompactionTokenLimitPatch {
