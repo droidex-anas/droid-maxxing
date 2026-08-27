@@ -33,3 +33,15 @@ test('queues busy overflow under the live limit and rejects a full queue', () =>
     'reject',
   );
 });
+
+test('hard-max occupancy of four live runtimes still admits the fourth and queues the fifth', () => {
+  const hardMax = { maxLive: 4, maxQueued: 16 };
+  assert.equal(
+    childRuntimeAdmission(hardMax, { live: 3, reserved: 0, queued: 0, idleLive: 0 }),
+    'admit',
+  );
+  assert.equal(
+    childRuntimeAdmission(hardMax, { live: 4, reserved: 0, queued: 0, idleLive: 0 }),
+    'queue',
+  );
+});

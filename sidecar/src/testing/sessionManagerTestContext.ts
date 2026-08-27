@@ -117,8 +117,8 @@ export function createSessionManagerTestContext(
       },
     },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
-    // Production live-child default is 2; the harness keeps the hard-open
-    // maximum live so existing eviction races still fire at that boundary.
+    // Pin live runtimes at the hard-open maximum so eviction races stay valid
+    // even if a host lowers DROID_CONTROL_MAX_LIVE_CHILD_RUNTIMES.
     maxLiveRuntimes: 4,
     maxQueuedRuntimes: 16,
     // Integration assertions read appended events synchronously; the timer
