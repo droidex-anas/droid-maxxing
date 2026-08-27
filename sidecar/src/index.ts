@@ -26,14 +26,19 @@ const manager = new SessionManager(
   },
 );
 
+let shuttingDown = false;
+
 server.ready
   .then(() => {
     hotPathMetrics.enable();
     hotPathMetrics.setGaugeProvider(() => manager.resourceCounts());
     // Stdout line consumed by the desktop supervisor to confirm readiness.
     process.stdout.write(`SIDECAR_READY ${String(server.port)}\n`);
-    // Isolate start only needs to overlap the first list, not the ready stamp.
-    manager.startSessionFileServing();
+    // Yield so the supervisor observes ready before the search isolate starts.
+    setImmediate(() => {
+      if (shuttingDown) return;
+      manager.startSessionFileServing();
+    });
   })
   .catch((error: unknown) => {
     console.error(
@@ -41,8 +46,6 @@ server.ready
     );
     process.exit(1);
   });
-
-let shuttingDown = false;
 
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
