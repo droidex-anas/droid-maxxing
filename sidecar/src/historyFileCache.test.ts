@@ -14,7 +14,11 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { HistoryIndex as HistoryIndexType } from './history.js';
 import type * as Protocol from './protocol.js';
-import { SessionFileCache, type SessionFileStat } from './sessionFileCache.js';
+import {
+  SessionFileCache,
+  type SessionFileStat,
+  type SessionFileSummary,
+} from './sessionFileCache.js';
 import { HistoryPersistenceDatabase } from './historyPersistenceDatabase.js';
 import { SessionManager } from './SessionManager.js';
 import {
@@ -135,6 +139,10 @@ function patchFor(appSessionId: string, cwd: string): Protocol.SessionSummary {
   };
 }
 
+function summaryFor(appSessionId: string, cwd: string): SessionFileSummary {
+  return { summary: patchFor(appSessionId, cwd) };
+}
+
 function reconcileHistoryIndex(index: HistoryIndexType): number {
   return reconcileHistoryIndexChanges(index).changed;
 }
@@ -230,7 +238,7 @@ test('reconciliation deltas update a second in-memory cache without scanning fil
     const writer = new SessionFileCache(
       writerDb,
       () => ({ files: onDisk, isComplete: true }),
-      (providerSessionId, file) => patchFor(providerSessionId, file.path),
+      (providerSessionId, file) => summaryFor(providerSessionId, file.path),
       () => null,
     );
     const reader = new SessionFileCache(
@@ -730,7 +738,7 @@ test('a file that breaks mid-reconcile is skipped without aborting the diff', ()
       (providerSessionId, file) => {
         // The bad file vanished between the scan and the read.
         if (providerSessionId === 'bad-session') throw new Error('ENOENT');
-        return patchFor(providerSessionId, file.path);
+        return summaryFor(providerSessionId, file.path);
       },
       () => null,
     );
@@ -766,7 +774,7 @@ test('an incomplete tree scan does not delete rows from unreadable subtrees', ()
     const cache = new SessionFileCache(
       db,
       () => ({ files: onDisk, isComplete }),
-      (providerSessionId, file) => patchFor(providerSessionId, file.path),
+      (providerSessionId, file) => summaryFor(providerSessionId, file.path),
       () => null,
     );
     assert.equal(cache.reconcileChanges().changed, 2);
@@ -841,7 +849,7 @@ test('a SQLite write failure leaves the in-memory cache unchanged', () => {
   const cache = new SessionFileCache(
     db,
     () => ({ files: onDisk, isComplete: true }),
-    (providerSessionId) => patchFor(providerSessionId, '/sessions/fail.jsonl'),
+    (providerSessionId) => summaryFor(providerSessionId, '/sessions/fail.jsonl'),
     () => null,
   );
   assert.throws(() => cache.reconcileChanges(), /sqlite busy/);
@@ -864,7 +872,7 @@ test('a SQLite delete failure leaves the in-memory cache unchanged', () => {
     const cache = new SessionFileCache(
       db,
       () => ({ files: onDisk, isComplete: true }),
-      (providerSessionId) => patchFor(providerSessionId, path),
+      (providerSessionId) => summaryFor(providerSessionId, path),
       (candidate) => (candidate === path ? (onDisk.get('fail-delete') ?? null) : null),
     );
     assert.equal(cache.reconcileChanges().changed, 1);

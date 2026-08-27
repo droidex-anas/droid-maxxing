@@ -51,6 +51,15 @@ export interface SessionFileCacheEntry extends SessionFileStat {
   launchSettings?: SessionFileLaunchSettings;
 }
 
+// Everything one session file contributes to the cache. Summary and launch
+// settings come from the same read: they answer questions about the same
+// bytes, and reading the file twice per reconcile is the discovery path's
+// dominant cost.
+export interface SessionFileSummary {
+  summary: SessionSummary | null;
+  launchSettings?: SessionFileLaunchSettings;
+}
+
 export interface SessionFileReconciliation {
   previousRevision: number;
   revision: number;
@@ -132,15 +141,11 @@ export class SessionFileCache {
     private readonly summarizeFile: (
       providerSessionId: string,
       file: SessionFileStat,
-    ) => SessionSummary | null,
+    ) => SessionFileSummary,
     // Stats one session file and its settings sidecar; null when the file is
     // gone. Used by the targeted reconcile so watcher events do not trigger
     // a full sessions-tree walk.
     private readonly statFile: (path: string) => SessionFileStat | null,
-    private readonly readLaunchSettings: (
-      providerSessionId: string,
-      file: SessionFileStat,
-    ) => SessionFileLaunchSettings | undefined = () => undefined,
   ) {
     initializeSessionFileCacheSchema(db);
     this.revisionValue = this.readRevision();
@@ -251,8 +256,7 @@ export class SessionFileCache {
       const cached = this.files.get(id);
       if (cached && matchesFreshnessKey(cached, file)) continue;
       try {
-        const summary = this.summarizeFile(id, file);
-        const launchSettings = this.readLaunchSettings(id, file);
+        const { summary, launchSettings } = this.summarizeFile(id, file);
         candidates.push({
           providerSessionId: id,
           ...file,
@@ -288,8 +292,7 @@ export class SessionFileCache {
       const cached = this.files.get(providerSessionId);
       if (cached && matchesFreshnessKey(cached, file)) continue;
       try {
-        const summary = this.summarizeFile(providerSessionId, file);
-        const launchSettings = this.readLaunchSettings(providerSessionId, file);
+        const { summary, launchSettings } = this.summarizeFile(providerSessionId, file);
         upserts.push({
           providerSessionId,
           ...file,

@@ -65,7 +65,7 @@ test('loadHistoricalSessions applies app summaries before plain chat filtering',
   persistTestSummaries([summary('plain-runtime-home', '')]);
   index.close();
 
-  const rows = loadHistoricalSessions({ includePlainChats: true, limitPerWorkspace: 5 });
+  const rows = loadHistoricalSessions({ includePlainChats: true });
 
   assert.deepEqual(
     rows.map((row) => row.summary.appSessionId),
