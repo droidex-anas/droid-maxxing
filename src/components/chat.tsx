@@ -1,4 +1,4 @@
-import { useMemo, useState, memo, useEffect, useRef } from 'react';
+import { useMemo, useState, memo, useEffect, useRef, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
@@ -66,9 +66,19 @@ import {
 } from '../lib/childSessions';
 import { openExternal } from '../lib/onboarding';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
-import { feedItemTailId } from '../hooks/conversationViewportAnchor';
-import { asChunkedSequence, chunkedSequenceChunks } from '../lib/chunkedSequence';
-import { FeedRowsChunk, feedRowsChunkKey, type FeedRowsSharedProps } from './messageFeedRows';
+import {
+  feedItemTailId,
+  type ConversationViewportLayout,
+} from '../hooks/conversationViewportAnchor';
+import { asChunkedSequence } from '../lib/chunkedSequence';
+import {
+  ConversationList,
+  type ConversationListHandle,
+  type ConversationVisibleRange,
+} from './ConversationList';
+import { takeFeedRowEntrance } from './conversationListState';
+import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
+import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import {
   appendedFeedItemKeysFromProjection,
   projectFinalResponseKeys,
@@ -2606,6 +2616,11 @@ export function MessageFeed({
   onOpenSpecWiki,
   createdWorktreePath,
   onMountedRowsChange,
+  onVisibleRangeChange,
+  scrollElementRef,
+  viewportLayoutRef,
+  listRef,
+  initialScrollOffset,
   updateKind = 'full',
   rebuiltFromItemIndex = 0,
 }: {
@@ -2624,6 +2639,11 @@ export function MessageFeed({
   onOpenSpecWiki?: () => void;
   createdWorktreePath?: string;
   onMountedRowsChange?: (count: number) => void;
+  onVisibleRangeChange?: (range: ConversationVisibleRange) => void;
+  scrollElementRef?: RefObject<HTMLElement | null>;
+  viewportLayoutRef?: RefObject<ConversationViewportLayout | null>;
+  listRef?: RefObject<ConversationListHandle | null>;
+  initialScrollOffset?: number;
   updateKind?: 'full' | 'append' | 'prepend';
   rebuiltFromItemIndex?: number;
 }) {
@@ -2712,16 +2732,12 @@ export function MessageFeed({
     updateKind,
     rebuiltFromItemIndex,
   );
-
-  useEffect(() => {
-    onMountedRowsChange?.(items.length);
-  }, [items.length, onMountedRowsChange]);
-  useEffect(
-    () => () => {
-      onMountedRowsChange?.(0);
-    },
-    [onMountedRowsChange],
-  );
+  const enteredKeysRef = useRef(new Set<string>());
+  const enteredIdentityRef = useRef(feedIdentity);
+  if (enteredIdentityRef.current !== feedIdentity) {
+    enteredKeysRef.current = new Set();
+    enteredIdentityRef.current = feedIdentity;
+  }
 
   // The copy button appears only on a turn's final model response.
   const finalResponseStateRef = useRef<FinalResponseKeyState | null>(null);
@@ -2814,32 +2830,8 @@ export function MessageFeed({
       specContent,
     ],
   );
-  const rowChunks = chunkedSequenceChunks(items);
-  let itemOffset = 0;
-  const renderedRowChunks = rowChunks.map((chunk, chunkIndex) => {
-    const offset = itemOffset;
-    itemOffset += chunk.length;
-    return (
-      <FeedRowsChunk
-        key={feedRowsChunkKey(chunkIndex)}
-        items={chunk}
-        itemOffset={offset}
-        lastItemIndex={lastIdx}
-        isLiveChunk={chunkIndex === rowChunks.length - 1}
-        shared={rowSharedProps}
-        activityRevision={events}
-        animateKeys={animateKeys}
-        freshAppResponseTexts={freshAppResponseTexts}
-        finalResponseState={finalResponseState}
-        compacting={compacting}
-        subagentPoll={Boolean(subagentPoll)}
-        worktreeInsertAfter={worktreeInsertAfter}
-        createdWorktreePath={createdWorktreePath}
-        itemView={FeedItemView}
-        areItemPropsEqual={feedItemPropsEqual}
-      />
-    );
-  });
+  const optionalItemProps = optionalFeedRowProps(rowSharedProps);
+  const subagentPollActive = Boolean(subagentPoll);
 
   return (
     <div className="space-y-4">
@@ -2849,7 +2841,45 @@ export function MessageFeed({
         </div>
       )}
 
-      {renderedRowChunks}
+      <ConversationList
+        items={items}
+        {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
+        {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
+        {...(listRef !== undefined ? { listRef } : {})}
+        {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
+        {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
+        {...(onVisibleRangeChange !== undefined ? { onVisibleRangeChange } : {})}
+      >
+        {(item, index) => (
+          <>
+            <FeedRow
+              item={item}
+              itemView={FeedItemView}
+              areItemPropsEqual={feedItemPropsEqual}
+              animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
+              live={pending && index === lastIdx && !subagentPollActive}
+              autoPlayAppBlocks={
+                item.type === 'message' &&
+                item.event.author !== 'user' &&
+                freshAppResponseTexts.has(item.event.text ?? '')
+              }
+              sessionLive={pending}
+              compacting={compacting && index === lastIdx}
+              {...optionalItemProps}
+              liveTiming={rowSharedProps.liveTiming}
+              isFinalResponse={
+                finalResponseState.settledKeys.has(item.key) ||
+                finalResponseState.liveKeys.has(item.key)
+              }
+            />
+            {index === worktreeInsertAfter && createdWorktreePath ? (
+              <div className="mx-auto min-w-0 max-w-2xl">
+                <WorktreeCreatedCard path={createdWorktreePath} />
+              </div>
+            ) : null}
+          </>
+        )}
+      </ConversationList>
 
       {showWorking && (
         <div className="mx-auto min-w-0 max-w-2xl">

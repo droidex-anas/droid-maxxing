@@ -2,11 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ComponentType } from 'react';
 
-import { asChunkedSequence, chunkedSequenceChunks } from '../lib/chunkedSequence';
-import type { TranscriptEvent } from '../types/bridge';
 import type { FeedItem, FeedItemViewProps } from './chat';
-import { areFeedRowsChunkPropsEqual, feedRowsChunkKey } from './messageFeedRows';
-import type { FinalResponseKeyState } from './messageFeedState';
+import { areFeedRowPropsEqual } from './messageFeedRows';
+import { feedRowId } from '../hooks/conversationViewportAnchor';
+import type { TranscriptEvent } from '../types/bridge';
 
 function messageItem(id: string, author: 'user' | 'assistant'): FeedItem {
   const event: TranscriptEvent = {
@@ -22,85 +21,43 @@ function messageItem(id: string, author: 'user' | 'assistant'): FeedItem {
   return { type: 'message', key: id, event };
 }
 
-const finalResponseState = (): FinalResponseKeyState => ({
-  identity: 'm:primary',
-  latestPromptEvent: undefined,
-  settledKeys: new Set(['answer-1']),
-  liveKeys: new Set(['answer-2']),
-});
-
 const itemView = (() => {}) as unknown as ComponentType<FeedItemViewProps>;
-const areItemPropsEqual = () => true;
+const areItemPropsEqual = (previous: FeedItemViewProps, next: FeedItemViewProps) =>
+  previous.item === next.item &&
+  previous.live === next.live &&
+  previous.isFinalResponse === next.isFinalResponse;
 
-function chunkProps(overrides: Partial<Parameters<typeof areFeedRowsChunkPropsEqual>[0]> = {}) {
+function rowProps(overrides: Partial<Parameters<typeof areFeedRowPropsEqual>[0]> = {}) {
+  const item = messageItem('answer-1', 'assistant');
   return {
-    items: [messageItem('user-1', 'user'), messageItem('answer-1', 'assistant')],
-    itemOffset: 0,
-    lastItemIndex: 1,
-    isLiveChunk: false,
-    shared: {
-      pending: false,
-      liveTiming: true,
-    },
-    activityRevision: [],
-    animateKeys: new Set<string>(),
-    freshAppResponseTexts: new Set<string>(),
-    finalResponseState: finalResponseState(),
-    compacting: false,
-    subagentPoll: false,
-    worktreeInsertAfter: -1,
+    item,
+    live: false,
+    animateOnMount: false,
     itemView,
     areItemPropsEqual,
+    isFinalResponse: false,
     ...overrides,
   };
 }
 
-test('chunk keys are positional so a sliding capped window keeps chunk identity', () => {
-  const windowSize = 900;
-  const items = Array.from({ length: windowSize }, (_, index) =>
-    messageItem(`item-${String(index)}`, index % 2 === 0 ? 'user' : 'assistant'),
-  );
-  const before = chunkedSequenceChunks(asChunkedSequence(items));
-  // The capped window drops the oldest event for every newly appended one, so
-  // every chunk boundary lands on different content after the slide.
-  const after = chunkedSequenceChunks(
-    asChunkedSequence([...items.slice(1), messageItem('item-new', 'assistant')]),
-  );
+test('row mount identity follows item.key across a sliding capped window', () => {
+  const kept = messageItem('item-5', 'assistant');
+  const before = [messageItem('item-4', 'user'), kept];
+  const after = [kept, messageItem('item-6', 'user')];
 
-  assert.equal(after.length, before.length);
-  assert.deepEqual(
-    after.map((_, index) => feedRowsChunkKey(index)),
-    before.map((_, index) => feedRowsChunkKey(index)),
-  );
-  assert.notEqual(after[0]?.[0]?.key, before[0]?.[0]?.key);
+  assert.equal(after[0]?.key, before[1]?.key);
+  assert.equal(feedRowId(after[0]!), feedRowId(before[1]!));
+  assert.notEqual(after[0]?.key, after[1]?.key);
 });
 
-test('chunk comparison re-renders when only the live final-response key set changes', () => {
-  const previous = chunkProps();
-  const liveKeysChanged = {
-    ...previous,
-    finalResponseState: {
-      ...previous.finalResponseState,
-      settledKeys: previous.finalResponseState.settledKeys,
-      liveKeys: new Set(['answer-3']),
-    },
-  };
-
-  assert.equal(
-    previous.finalResponseState.settledKeys,
-    liveKeysChanged.finalResponseState.settledKeys,
-  );
-  assert.equal(areFeedRowsChunkPropsEqual(previous, liveKeysChanged), false);
+test('a row re-renders when its live final-response flag changes', () => {
+  const previous = rowProps({ isFinalResponse: true });
+  const next = { ...previous, isFinalResponse: false };
+  assert.equal(areFeedRowPropsEqual(previous, next), false);
 });
 
-test('chunk comparison still skips chunks whose final-response state is unchanged', () => {
-  const previous = chunkProps();
-  const unchanged = {
-    ...previous,
-    finalResponseState: { ...previous.finalResponseState },
-  };
-
-  assert.equal(previous.finalResponseState.settledKeys, unchanged.finalResponseState.settledKeys);
-  assert.equal(previous.finalResponseState.liveKeys, unchanged.finalResponseState.liveKeys);
-  assert.equal(areFeedRowsChunkPropsEqual(previous, unchanged), true);
+test('a settled row skips re-render when only sibling live state is unchanged', () => {
+  const previous = rowProps();
+  const unchanged = { ...previous };
+  assert.equal(areFeedRowPropsEqual(previous, unchanged), true);
 });

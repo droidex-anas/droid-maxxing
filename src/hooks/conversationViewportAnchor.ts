@@ -12,6 +12,10 @@ export interface ViewportAnchorRestore {
   didFindRow: boolean;
 }
 
+export interface ConversationViewportLayout {
+  rowContentOffset(rowId: string): number | undefined;
+}
+
 export function feedItemTailId(item: FeedItem): string {
   if (item.type === 'worked') {
     const tail = item.items.at(-1);
@@ -188,7 +192,24 @@ export function restoreViewportAnchor(
   element: HTMLDivElement,
   anchor: ViewportAnchor,
   allowHeightFallback = true,
+  layout?: ConversationViewportLayout | null,
 ): ViewportAnchorRestore {
+  const contentOffset = layout?.rowContentOffset(anchor.rowId);
+  if (contentOffset !== undefined) {
+    const nextRowOffsetTop = contentOffset - element.scrollTop;
+    const nextScrollTop = scrollTopForPreservedAnchor(anchor, nextRowOffsetTop);
+    if (Math.abs(element.scrollTop - nextScrollTop) > 0.5) element.scrollTop = nextScrollTop;
+    return {
+      anchor: updateViewportAnchorGeometry(
+        anchor,
+        contentOffset - element.scrollTop,
+        element.scrollTop,
+        element.scrollHeight,
+      ),
+      didFindRow: true,
+    };
+  }
+
   const row = findFeedRow(element, anchor.rowId);
   if (row) {
     const nextRowOffsetTop = measureRowOffsetTop(element, row);

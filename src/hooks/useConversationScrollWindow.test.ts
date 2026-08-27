@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   firstRowNotAboveViewport,
+  restoreViewportAnchor,
   rowIntersectsViewport,
   scrollTopForPreservedAnchor,
   shouldCancelViewportRestore,
@@ -218,6 +219,25 @@ test('content resize follows a pinned tail and preserves an unpinned row anchor'
   assert.equal(unpinned.mode, 'preserve-anchor');
   assert.equal(unpinned.didFindRow, true);
   assert.equal(unpinnedElement.scrollTop, 1_150);
+});
+
+test('virtual layout restore preserves an unpinned row when it is not mounted', () => {
+  const element = { scrollTop: 400, scrollHeight: 12_000 } as HTMLDivElement;
+  const restored = restoreViewportAnchor(
+    element,
+    {
+      rowId: 'message:anchor',
+      rowOffsetTop: 40,
+      scrollTop: 400,
+      scrollHeight: 8_000,
+    },
+    true,
+    { rowContentOffset: (rowId) => (rowId === 'message:anchor' ? 3_200 : undefined) },
+  );
+
+  assert.equal(restored.didFindRow, true);
+  assert.equal(element.scrollTop, 3_160);
+  assert.equal(restored.anchor.rowId, 'message:anchor');
 });
 
 test('content resize binding follows the live first child even with an empty transcript', () => {
