@@ -568,6 +568,13 @@ export class SessionLifecycle {
 
   private async prepareToSend(appSessionId: string): Promise<LiveSession | undefined> {
     let liveSession = this.dependencies.registry.getLive(appSessionId);
+    // A send that lands while the runtime is being released must wait for that
+    // close and reopen, not vanish. Retirement makes this window reachable.
+    if (liveSession?.closeMode) {
+      await liveSession.closePromise;
+      if (this.dependencies.isShutdownStarted()) return undefined;
+      liveSession = this.dependencies.registry.getLive(appSessionId);
+    }
     if (!liveSession) {
       const resumed = await this.resume(appSessionId);
       if (!resumed) return undefined;

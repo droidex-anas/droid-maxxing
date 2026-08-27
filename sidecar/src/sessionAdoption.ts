@@ -6,6 +6,7 @@ import type {
 import type { InterruptedSessionRecord, SessionPhase, SessionSummary } from './protocol.js';
 import { errMsg } from './sessionHelpers.js';
 import type { SessionLifecycle } from './SessionLifecycle.js';
+import { adoptedSessionFacts, isDueForRetirement } from './sessionRuntimeRetirement.js';
 
 const TURN_INTERRUPTED =
   'The agent runtime restarted and this turn did not continue. Send a message to resume.';
@@ -31,6 +32,8 @@ export interface SessionAdoptionDependencies {
   liveChildren: () => readonly LiveChildIdentity[];
   persistSummaries: (summaries: SessionSummary[]) => void;
   emitStatus: (appSessionId: string, text: string) => void;
+  sessionRuntimeIdleMs: number;
+  now: () => number;
 }
 
 export interface SessionAdoptionResult {
@@ -64,6 +67,7 @@ export class SessionAdoption {
             providerSessionId,
             phase: live.summary.phase,
             streaming: live.summary.streaming === true,
+            lastActiveAt: live.summary.updatedAt,
           },
         ];
       });
@@ -75,10 +79,39 @@ export class SessionAdoption {
 
   private async adoptOnce(): Promise<SessionAdoptionResult> {
     const identities = this.dependencies.journal.read();
-    for (const session of identities.sessions) await this.adoptSession(session);
+    for (const session of identities.sessions) {
+      if (!this.shouldResurrect(session, identities.children)) continue;
+      await this.adoptSession(session);
+    }
     for (const child of identities.children) this.markChildInterrupted(child);
     this.persistLiveSet();
     return { interrupted: [...this.interrupted] };
+  }
+
+  // Resurrecting a session already past the idle budget would spawn a provider
+  // process for the first sweep to release moments later, so a restart would
+  // pay a process and its memory per session to reclaim them seconds after.
+  // Leaving it closed costs the user nothing the restart had not already cost:
+  // the transcript is served from history and the session reopens on its next
+  // prompt exactly as a retired one does. The retirement rules take this
+  // decision so there is one owner of it rather than an adoption-shaped copy.
+  private shouldResurrect(
+    identity: LiveSessionIdentity,
+    children: readonly LiveChildIdentity[],
+  ): boolean {
+    const facts = adoptedSessionFacts({
+      appSessionId: identity.appSessionId,
+      phase: identity.phase,
+      streaming: identity.streaming,
+      lastActiveAt: identity.lastActiveAt,
+      hasUnsettledChildren: children.some(
+        (child) =>
+          child.parentAppSessionId === identity.appSessionId &&
+          (child.status === 'running' || child.status === 'pending'),
+      ),
+    });
+    const { now, sessionRuntimeIdleMs } = this.dependencies;
+    return !isDueForRetirement(facts, now(), sessionRuntimeIdleMs);
   }
 
   private async adoptSession(identity: LiveSessionIdentity): Promise<void> {

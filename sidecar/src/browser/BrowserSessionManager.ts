@@ -394,6 +394,10 @@ export class BrowserSessionManager {
     };
   }
 
+  hasSession(appSessionId: string): boolean {
+    return this.resolveSession(appSessionId) !== undefined;
+  }
+
   async close(appSessionId: string): Promise<void> {
     const session = this.resolveSession(appSessionId);
     if (!session) return;

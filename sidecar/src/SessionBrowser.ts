@@ -17,6 +17,8 @@ export type SessionBrowsers = Pick<
   | 'open'
   | 'close'
   | 'closeAll'
+  // Runtime retirement asks whether a session is still holding a browser.
+  | 'hasSession'
   | 'reload'
   | 'refresh'
   | 'resizeViewport'

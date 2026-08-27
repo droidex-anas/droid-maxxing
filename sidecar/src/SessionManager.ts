@@ -85,6 +85,10 @@ import {
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSettings } from './ChildSessionState.js';
 import { CHILD_RUNTIME_IDLE_RETIREMENT_MS } from './childRuntimeRetirement.js';
+import {
+  SESSION_RUNTIME_IDLE_RETIREMENT_MS,
+  SessionRuntimeRetirement,
+} from './sessionRuntimeRetirement.js';
 import { MissionControlPolicy } from './MissionControlPolicy.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
 import type { HotPathResourceCounts } from './telemetry/hotPathMetrics.js';
@@ -150,6 +154,7 @@ export interface SessionManagerDependencies {
   maxLiveRuntimes?: number;
   maxQueuedRuntimes?: number;
   childRuntimeIdleMs?: number;
+  sessionRuntimeIdleMs?: number;
 }
 
 export interface SessionManagerOptions {
@@ -182,6 +187,17 @@ const MAX_QUEUED_CHILD_RUNTIMES = boundedInt(
   0,
   64,
 );
+// Production runtime limits. The overrides exist so tests can drive admission,
+// queueing, and retirement without waiting on a clock.
+function runtimeLimits(dependencies: SessionManagerDependencies | undefined) {
+  return {
+    maxLiveRuntimes: dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
+    maxQueuedRuntimes: dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
+    childRuntimeIdleMs: dependencies?.childRuntimeIdleMs ?? CHILD_RUNTIME_IDLE_RETIREMENT_MS,
+    sessionRuntimeIdleMs: dependencies?.sessionRuntimeIdleMs ?? SESSION_RUNTIME_IDLE_RETIREMENT_MS,
+  };
+}
+
 const ignoreError = (): undefined => undefined;
 
 const nextChildSessionId = () => `child-${randomUUID()}`;
@@ -203,6 +219,7 @@ export class SessionManager {
   private readonly childSessions: ChildSessions;
   private readonly missionControlPolicy: MissionControlPolicy;
   private readonly lifecycle: SessionLifecycle;
+  private readonly runtimeRetirement: SessionRuntimeRetirement;
   private readonly adoption: SessionAdoption;
   private readonly sessionFiles: SessionFileServing;
   private readonly sessionBrowser: SessionBrowser;
@@ -227,6 +244,7 @@ export class SessionManager {
     private readonly emit: Emit,
     options: SessionManagerOptions = {},
   ) {
+    const limits = runtimeLimits(options.dependencies);
     let startWatcher: (
       options: SessionFileWatcherOptions,
     ) => ReturnType<typeof startSessionFileWatcher>;
@@ -293,12 +311,14 @@ export class SessionManager {
       projectSummary: (summary) => this.applyPendingSettingsToSummary({ ...summary }),
       onSummaryUpdated: (summary) => {
         this.emit({ type: 'session.updated', session: summary });
+        this.runtimeRetirement.arm();
       },
       onLiveProviderReplaced: (providerSessionId) => {
         this.sessionFiles.finalizeReplacedProvider(providerSessionId);
       },
       onLiveSetChanged: () => {
         this.adoption.persistLiveSet();
+        this.runtimeRetirement.arm();
       },
       now: Date.now,
     });
@@ -401,14 +421,15 @@ export class SessionManager {
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       emit: (event) => {
         this.emit(event);
-        if (event.type === 'session.child') this.adoption.persistLiveSet();
+        if (event.type !== 'session.child') return;
+        this.adoption.persistLiveSet();
+        this.runtimeRetirement.arm();
       },
       nextChildSessionId: this.nextChildSessionId,
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
-      maxLiveRuntimes: options.dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
-      maxQueuedRuntimes: options.dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
-      childRuntimeIdleMs:
-        options.dependencies?.childRuntimeIdleMs ?? CHILD_RUNTIME_IDLE_RETIREMENT_MS,
+      maxLiveRuntimes: limits.maxLiveRuntimes,
+      maxQueuedRuntimes: limits.maxQueuedRuntimes,
+      childRuntimeIdleMs: limits.childRuntimeIdleMs,
       now: Date.now,
     });
     this.sessionFiles = new SessionFileServing({
@@ -476,6 +497,22 @@ export class SessionManager {
         await this.sessionFiles.finalizeClosedProvider(closedProviderSessionId);
       },
     });
+    this.runtimeRetirement = new SessionRuntimeRetirement({
+      liveSessions: () => this.registry.liveSessionsSnapshot(),
+      focusedAppSessionId: () => this.context.focusedSession(),
+      hasUnsettledChildren: (id) => this.childSessions.hasUnsettledChildren(id),
+      hasOpenBrowser: (id) => this.browsers.hasSession(id),
+      hasPendingSettings: (id) => this.pendingAgentSettings.has(id),
+      retire: (id) => this.lifecycle.close(id, 'preserve-pending'),
+      emitStatus: (id, text) => {
+        this.timeline.appendStatus(id, text);
+      },
+      emitError: (appSessionId, message) => {
+        this.emitError({ appSessionId, message });
+      },
+      idleMs: limits.sessionRuntimeIdleMs,
+      now: Date.now,
+    });
     this.adoption = new SessionAdoption({
       journal: new LiveRuntimeJournal(liveRuntimeJournalPath(droidexUserDataDir())),
       registry: this.registry,
@@ -493,6 +530,8 @@ export class SessionManager {
       emitStatus: (appSessionId, text) => {
         this.timeline.appendStatus(appSessionId, text);
       },
+      sessionRuntimeIdleMs: limits.sessionRuntimeIdleMs,
+      now: Date.now,
     });
     this.sessionBrowser = new SessionBrowser({
       browsers: this.browsers,
@@ -539,6 +578,11 @@ export class SessionManager {
       persistence,
       interrupted: [...this.adoption.records()],
     });
+  }
+
+  // Runs on its own idle timer; exposed so callers can force the sweep.
+  retireIdleSessionRuntimes(): Promise<void> {
+    return this.runtimeRetirement.sweep();
   }
 
   resourceCounts(): HotPathResourceCounts {
@@ -723,9 +767,12 @@ export class SessionManager {
       case 'history.indexingIdle':
         await this.history.setIndexingIdle(cmd.isIdle);
         return;
-      case 'app.backgroundWork':
+      case 'app.backgroundWork': {
+        const previouslyFocused = this.context.focusedSession();
         this.context.setBackgroundWork(cmd.tier, cmd.focusedAppSessionId);
+        this.runtimeRetirement.noteFocus(previouslyFocused);
         return;
+      }
       case 'settings.agent.update':
         await this.updateAgentSettings(cmd);
         return;
@@ -737,6 +784,8 @@ export class SessionManager {
         return;
       case 'browser.close':
         await this.sessionBrowser.close(cmd);
+        // Closing the last resource a session was holding can make it retirable.
+        this.runtimeRetirement.arm();
         return;
       case 'browser.reload':
         await this.sessionBrowser.reload(cmd);
@@ -1627,6 +1676,7 @@ export class SessionManager {
 
   private async performShutdown(): Promise<void> {
     this.historyQueries.forget();
+    this.runtimeRetirement.stop();
     let firstError: unknown;
     const run = async (action: () => void | Promise<void>): Promise<void> => {
       try {

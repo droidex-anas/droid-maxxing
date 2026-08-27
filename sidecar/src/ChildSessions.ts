@@ -16,6 +16,7 @@ import {
   applyChildLaunchSettings,
   childAcceptsWork,
   childDurabilityKey,
+  childHasWorkInFlight,
   childHistoryProviderSessionIds,
   childIdentity,
   childSettingsFromInit,
@@ -42,11 +43,11 @@ import {
 import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
 import { childRuntimeAdmission } from './childRuntimeBudget.js';
 import {
-  ChildRuntimeRetirementTimer,
   CHILD_RUNTIME_RETIRED_STATUS,
   nextChildRuntimeRetirementAt,
   retirableChildRuntimes,
 } from './childRuntimeRetirement.js';
+import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
 import { childTokenStream } from './childStreamFidelity.js';
 import {
   dequeueQueuedChild,
@@ -71,7 +72,7 @@ export class ChildSessions {
   >();
   private nextParentGeneration = 0;
   private shuttingDown = false;
-  private readonly retirementTimer = new ChildRuntimeRetirementTimer(() => {
+  private readonly retirementTimer = new RuntimeRetirementTimer(() => {
     void this.retireIdleRuntimes();
   });
 
@@ -123,6 +124,21 @@ export class ChildSessions {
       }
     }
     return { total, active, live, queued };
+  }
+
+  // Retiring a parent closes its whole child subtree, so it must wait for every
+  // child to settle. Scoped to one parent and allocation-free: the session
+  // retirement sweep re-evaluates this whenever a summary changes.
+  hasUnsettledChildren(parentAppSessionId: string): boolean {
+    const parent = this.parents.get(parentAppSessionId);
+    if (!parent) return false;
+    if (parent.pendingSpawns.size > 0 || parent.openAttempts.size > 0) return true;
+    if (parent.reservedOpenSlots.size > 0 || parent.runtimeQueue.length > 0) return true;
+    for (const child of parent.children.values()) {
+      if (childHasWorkInFlight(child)) return true;
+      if (this.childrenAwaitingDurability.has(childDurabilityKey(child.identity))) return true;
+    }
+    return false;
   }
 
   liveChildSummaries(): ChildSessionSummary[] {

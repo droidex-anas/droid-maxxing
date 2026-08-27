@@ -7,11 +7,8 @@ import {
   type ParentChildSessions,
 } from './ChildSessionState.js';
 import type { PersistedChildSession } from './history.js';
-import {
-  ChildRuntimeRetirementTimer,
-  nextChildRuntimeRetirementAt,
-  retirableChildRuntimes,
-} from './childRuntimeRetirement.js';
+import { nextChildRuntimeRetirementAt, retirableChildRuntimes } from './childRuntimeRetirement.js';
+import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
 import { FakeFactorySession } from './testing/fakeFactoryRuntime.js';
 
 const IDLE_MS = 300_000;
@@ -154,7 +151,7 @@ test('the timer arms for the earliest deadline and disarms when nothing is idle'
     cleared.push(timer.id);
   });
   try {
-    const timer = new ChildRuntimeRetirementTimer(() => undefined);
+    const timer = new RuntimeRetirementTimer(() => undefined);
 
     timer.armFor(5_000, 1_000);
     assert.deepEqual(scheduled, [4_000]);
