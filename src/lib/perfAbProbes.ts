@@ -113,14 +113,16 @@ export async function measureMountedRows(treeRoot: string, count: number): Promi
 
 async function measureFeedProjection(treeRoot: string): Promise<AbProbeMetric[]> {
   const chatPath = join(treeRoot, 'src/components/chat.tsx');
-  if (!existsSync(chatPath)) {
+  const turnsPath = join(treeRoot, 'src/components/chatFeedTurns.ts');
+  if (!existsSync(chatPath) && !existsSync(turnsPath)) {
     return [
       metric('feed.projectionMsPerDelta', NaN, 'ms', 'chat.tsx missing'),
       metric('feed.eventsRebuiltPerDelta', NaN, 'events', 'chat.tsx missing'),
       metric('feed.rowVisitsPerTailDeltaAt10k', NaN, 'rows', 'chat.tsx missing'),
     ];
   }
-  const chat = (await import(pathToFileURL(chatPath).href)) as ChatModule;
+  const groupedFeedPath = existsSync(turnsPath) ? turnsPath : chatPath;
+  const chat = (await import(pathToFileURL(groupedFeedPath).href)) as ChatModule;
   const projectorPath = join(treeRoot, 'src/components/chatFeedProjector.ts');
   const mutationPath = join(treeRoot, 'src/lib/transcriptMutation.ts');
   const events: ReturnType<typeof textEvent>[] = [];

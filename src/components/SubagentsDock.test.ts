@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildFeed, groupTurns, MessageFeed, trailingSubagentPoll } from './chat';
+import { MessageFeed } from './chat';
+import { buildFeed } from './chatFeed';
+import { groupTurns, trailingSubagentPoll } from './chatFeedTurns';
 import {
   DOCK_VISIBLE_ROW_LIMIT,
   foldedDockRows,

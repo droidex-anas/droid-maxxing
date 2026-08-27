@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Virtualizer } from '@tanstack/virtual-core';
 
-import type { FeedItem } from '../../components/chat';
+import type { FeedItem } from '../../components/chatFeed';
 import {
   buildConversationRowLookup,
   CONVERSATION_LIST_ESTIMATE_PX,

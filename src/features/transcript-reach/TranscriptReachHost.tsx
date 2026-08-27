@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import type { FeedItem } from '../../components/chat';
+import type { FeedItem } from '../../components/chatFeed';
 import { toast } from '../../lib/toast';
 import { TranscriptReachBar } from './TranscriptReachBar';
 import { TranscriptReachChromeContext } from './transcriptReachContext';
