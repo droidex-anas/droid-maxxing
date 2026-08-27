@@ -41,12 +41,20 @@ export function SidebarSessionList({
 
   const remaining = sessions.length - count;
   const isExpanded = count > SIDEBAR_VISIBLE_SESSION_LIMIT;
-  const canShowEarlier = remaining === 0 && earlierSessionCount > 0 && onShowEarlier !== undefined;
+  // Revealing also pages the window forward, otherwise the newly loaded
+  // sessions land below it and the click looks like it did nothing.
+  const showEarlier =
+    remaining === 0 && earlierSessionCount > 0 && onShowEarlier
+      ? () => {
+          onShowEarlier();
+          onShowMore();
+        }
+      : undefined;
 
   return (
     <div className="mt-0.5 space-y-0.5">
       {visible.map(renderRow)}
-      {(remaining > 0 || isExpanded || canShowEarlier) && (
+      {(remaining > 0 || isExpanded || showEarlier) && (
         <div className="flex items-center gap-3 pl-3 pr-2 pt-0.5">
           {remaining > 0 && (
             <button onClick={onShowMore} className={CONTROL_CLASS}>
@@ -58,9 +66,9 @@ export function SidebarSessionList({
               Show less
             </button>
           )}
-          {canShowEarlier && (
+          {showEarlier && (
             <button
-              onClick={onShowEarlier}
+              onClick={showEarlier}
               title="Load older Droid sessions already in this folder"
               className={CONTROL_CLASS}
             >

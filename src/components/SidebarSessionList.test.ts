@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createElement } from 'react';
+import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { SidebarSessionList, type SidebarSessionListProps } from './SidebarSessionList.js';
@@ -41,6 +41,46 @@ function render(overrides: Partial<SidebarSessionListProps> = {}): string {
       ...overrides,
     }),
   );
+}
+
+// The repo has no DOM test host, so a control's behavior is exercised by
+// finding its element in the rendered tree and calling the handler it wired.
+function clickControl(props: Partial<SidebarSessionListProps>, label: string): void {
+  const tree = SidebarSessionList({
+    sessions: [],
+    visibleCount: SIDEBAR_VISIBLE_SESSION_LIMIT,
+    activeAppSessionId: null,
+    renderRow: (item) => createElement('div', { key: item.appSessionId }, item.appSessionId),
+    onShowMore: () => undefined,
+    onShowLess: () => undefined,
+    ...props,
+  });
+  const button = findButton(tree, label);
+  assert.ok(button, `no control labelled ${label}`);
+  const onClick = (button.props as { onClick?: () => void }).onClick;
+  assert.ok(onClick, `control ${label} has no click handler`);
+  onClick();
+}
+
+function findButton(node: ReactNode, label: string): ReactElement | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findButton(child, label);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!isValidElement(node)) return null;
+  const props = node.props as { children?: ReactNode };
+  if (node.type === 'button' && flatten(props.children).includes(label)) return node;
+  return findButton(props.children, label);
+}
+
+function flatten(node: ReactNode): string {
+  if (Array.isArray(node)) return node.map(flatten).join('');
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (!isValidElement(node)) return '';
+  return flatten((node.props as { children?: ReactNode }).children);
 }
 
 const eight = Array.from({ length: 8 }, (_, index) => session(`s-${String(index)}`, index));
@@ -88,6 +128,28 @@ test('earlier sessions wait until the loaded list has been paged through', () =>
 
   assert.ok(html.includes('Show more'));
   assert.ok(!html.includes('Show 943 earlier'));
+});
+
+test('revealing earlier sessions also pages them into view', () => {
+  let revealed = 0;
+  let paged = 0;
+
+  clickControl(
+    {
+      sessions: eight.slice(0, 3),
+      earlierSessionCount: 943,
+      onShowEarlier: () => {
+        revealed += 1;
+      },
+      onShowMore: () => {
+        paged += 1;
+      },
+    },
+    'Show 943 earlier',
+  );
+
+  assert.equal(revealed, 1);
+  assert.equal(paged, 1);
 });
 
 test('a folder with nothing withheld shows no reveal control', () => {
