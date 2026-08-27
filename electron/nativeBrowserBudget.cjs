@@ -1,7 +1,3 @@
-// Live WebContents budget for native browser sessions. Ownership of the
-// views stays in main.cjs; this module only decides which hidden sessions
-// may keep a live view and what to restore after an eviction.
-//
 // Destroying a WebContents does not clear persist:droidex-browser. Cookies,
 // localStorage, and passkeys therefore survive eviction and come back on restore.
 
@@ -96,7 +92,8 @@ function createNativeBrowserBudget(options = {}) {
   }
 
   function isEvictionClose(reason) {
-    return reason === 'evict';
+    // restore-failed tears down a blank view the same way eviction does; neither is a crash.
+    return reason === 'evict' || reason === 'restore-failed';
   }
 
   return {
@@ -111,6 +108,28 @@ function createNativeBrowserBudget(options = {}) {
   };
 }
 
+async function restoreSerialized(entry, hooks) {
+  const snapshot = entry.serialized;
+  if (!snapshot) return true;
+  if (snapshot.viewport) entry.viewport = snapshot.viewport;
+  if (snapshot.state) entry.state = snapshot.state;
+  const url = snapshot.url || entry.targetUrl;
+  if (!url) {
+    entry.serialized = null;
+    return true;
+  }
+  entry.targetUrl = url;
+  const loaded = await hooks.loadUrl(entry, url);
+  if (loaded?.ok !== true) {
+    hooks.reportFailure(entry, url, loaded?.error);
+    await hooks.releaseFailedView(entry);
+    return false;
+  }
+  if (snapshot.scroll) await hooks.restoreScroll(entry, snapshot.scroll);
+  entry.serialized = null;
+  return true;
+}
+
 const CAPTURE_SCROLL_SCRIPT = '(function(){return{x:window.scrollX||0,y:window.scrollY||0};})()';
 
 function restoreScrollScript(scroll) {
@@ -121,8 +140,7 @@ function restoreScrollScript(scroll) {
 
 module.exports = {
   createNativeBrowserBudget,
+  restoreSerialized,
   CAPTURE_SCROLL_SCRIPT,
   restoreScrollScript,
-  DEFAULT_MAX_LIVE,
-  DEFAULT_IDLE_MS,
 };

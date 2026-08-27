@@ -6,7 +6,7 @@ import { setBackgroundWork } from '../lib/commands';
 import { resolveBackgroundWorkTier, type BackgroundWorkTier } from '../lib/backgroundWork';
 import { desktopPowerTier, onDesktopMemoryPressure, onDesktopPowerTier } from '../lib/desktop';
 
-export function useBackgroundWorkTier(): BackgroundWorkTier {
+export function useBackgroundWorkTier(): void {
   const documentVisible = useDocumentVisible();
   const focusedAppSessionId = useStoreSelector((state) => state.activeAppSessionId);
   const connected = useStoreSelector((state) => state.connection === 'connected');
@@ -57,6 +57,4 @@ export function useBackgroundWorkTier(): BackgroundWorkTier {
       stopPressure();
     };
   }, [connected, dispatch, documentVisible, focusedAppSessionId]);
-
-  return resolveBackgroundWorkTier({ documentVisible });
 }

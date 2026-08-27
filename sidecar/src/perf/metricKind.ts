@@ -1,7 +1,5 @@
 export type MetricClass = 'ab' | 'candidate';
 
-export type GateMode = 'hard' | 'warn';
-
 export interface MetricDefinition {
   id: string;
   class: MetricClass;
@@ -68,6 +66,20 @@ export const METRIC_CATALOG: readonly MetricDefinition[] = [
     unit: 'messages',
     availability:
       'Uses each tree’s own output path: sender.send on main, MessagePort batches when terminalPort exists.',
+  },
+  {
+    id: 'sidecar.readyMs',
+    class: 'ab',
+    unit: 'ms',
+    availability:
+      'Both refs build sidecar/dist/sidecar.mjs; median spawn→SIDECAR_READY on each tree’s production entry.',
+  },
+  {
+    id: 'sidecar.firstSessionsListMs',
+    class: 'ab',
+    unit: 'ms',
+    availability:
+      'Both refs answer sessions.list over the bridge; median spawn→first list on each tree’s production sidecar.',
   },
   {
     id: 'sidecar.eventReductionRatio',

@@ -23,8 +23,6 @@ export function contextPollIntervalMs(input: ContextPollCadenceInput): number {
 export interface ContextPollerCounts {
   total: number;
   active: number;
-  paused: number;
-  cadencesMs: number[];
 }
 
 export interface ContextPollHostOptions<T extends { session: object }> {
@@ -89,17 +87,13 @@ export class ContextPollHost<T extends { session: object }> {
   }
 
   counts(): ContextPollerCounts {
-    const cadencesMs: number[] = [];
     let active = 0;
     for (const poller of this.pollers.values()) {
-      cadencesMs.push(poller.intervalMs);
       if (poller.timer) active += 1;
     }
     return {
       total: this.pollers.size,
       active,
-      paused: this.pollers.size - active,
-      cadencesMs,
     };
   }
 

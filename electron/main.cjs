@@ -28,6 +28,7 @@ const { createTerminalSubscriptionRegistry } = require('./terminalPort.cjs');
 const { createPerformanceMetricsCollector } = require('./performanceMetrics.cjs');
 const {
   createNativeBrowserBudget,
+  restoreSerialized,
   CAPTURE_SCROLL_SCRIPT,
   restoreScrollScript,
 } = require('./nativeBrowserBudget.cjs');
@@ -1838,17 +1839,23 @@ function isPrivateHost(hostname) {
 async function loadNativeBrowserUrl(entry, url, options = {}) {
   url = normalizeNativeBrowserUrl(entry, url);
   const contents = safeWebContents(entry.view);
-  if (!contents) return;
-  if (url === 'about:blank' && contents.getURL() === 'about:blank') return;
-  if (!options.force && contents.getURL() === url) return;
+  if (!contents) return { ok: false };
+  if (url === 'about:blank' && contents.getURL() === 'about:blank') return { ok: true };
+  if (!options.force && contents.getURL() === url) return { ok: true };
   if (entry.loadingUrl === url && entry.loadingPromise) return entry.loadingPromise;
   entry.targetUrl = url;
   const load = contents
     .loadURL(url)
+    .then(() => {
+      const current = safeWebContents(entry.view);
+      if (!current || isChromeErrorUrl(current.getURL())) return { ok: false };
+      return { ok: true };
+    })
     .catch((err) => {
       if (entry.targetUrl === url) entry.targetUrl = null;
       if (!contents.isDestroyed() && !isLoadAbortError(err))
         console.error(`failed to load native browser URL: ${err.message}`);
+      return { ok: false, error: err };
     })
     .finally(() => {
       if (entry.loadingPromise === load) {
@@ -1868,7 +1875,7 @@ async function restoreNativeBrowserForAction(browserSessionId) {
     setHiddenNativeBrowserBounds(entry, entry.viewport);
     addHiddenNativeBrowserViewToWindow(entry);
   }
-  if (entry.targetUrl) await loadNativeBrowserUrl(entry, entry.targetUrl);
+  if (entry.targetUrl && !entry.serialized) await loadNativeBrowserUrl(entry, entry.targetUrl);
   return entry;
 }
 
@@ -1994,22 +2001,24 @@ async function evictNativeBrowserView(entry) {
 }
 
 async function restoreNativeBrowserSerialized(entry) {
-  const snapshot = entry.serialized;
-  if (!snapshot) return;
-  if (snapshot.viewport) entry.viewport = snapshot.viewport;
-  if (snapshot.state) entry.state = snapshot.state;
-  const url = snapshot.url || entry.targetUrl;
-  if (url) {
-    entry.targetUrl = url;
-    await loadNativeBrowserUrl(entry, url, { force: true });
-  }
-  const contents = safeWebContents(entry.view);
-  if (contents && snapshot.scroll) {
-    await contents
-      .executeJavaScript(restoreScrollScript(snapshot.scroll), true)
-      .catch(() => undefined);
-  }
-  entry.serialized = null;
+  await restoreSerialized(entry, {
+    loadUrl: (target, url) => loadNativeBrowserUrl(target, url, { force: true }),
+    restoreScroll: async (target, scroll) => {
+      const contents = safeWebContents(target.view);
+      if (!contents) return;
+      await contents.executeJavaScript(restoreScrollScript(scroll), true).catch(() => undefined);
+    },
+    reportFailure: (target, url, error) => {
+      const message = error?.message || 'Navigation failed';
+      console.error(`failed to restore native browser URL: ${message}`);
+      emitNativeBrowserLoadFailed(target, url, message);
+    },
+    releaseFailedView: (target) => {
+      if (!isBrowserViewUsable(target.view)) return;
+      target.viewCloseReason = 'restore-failed';
+      closeNativeBrowserEntry(target, false);
+    },
+  });
 }
 
 function clearNativeBrowserIdleTimer(entry) {

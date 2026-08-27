@@ -29,7 +29,7 @@ export const DEFAULT_COMPARE_SCENARIOS = [
   'soak',
 ] as const;
 
-export const GATE_SCENARIOS = ['smoke', 'soak'] as const;
+const GATE_SCENARIOS = ['smoke', 'soak'] as const;
 
 export interface CompareOptions {
   baselineRef: string;
@@ -44,7 +44,7 @@ export function defaultCandidateRoot(): string {
   return resolve(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), '..');
 }
 
-export function baselineCachePath(candidateRoot: string): string {
+function baselineCachePath(candidateRoot: string): string {
   return join(candidateRoot, 'sidecar/src/perf/baselines/origin-main.json');
 }
 
@@ -82,6 +82,7 @@ export async function runComparison(options: CompareOptions): Promise<Comparison
   }
 
   if (!options.skipBundle) ensureViteBuild(candidateRoot);
+  ensureSidecarBuild(candidateRoot);
   const candidateProbes = runProbes(candidateRoot, candidateRoot);
   const probeMetrics = diffProbes(baselineProbes, candidateProbes);
   const candidateReplays: ComparisonReport['candidateReplays'] = [];
@@ -146,6 +147,7 @@ function measureBaselineTree(
     linkModules(candidateRoot, worktree);
   }
   if (!skipBundle) ensureViteBuild(worktree);
+  ensureSidecarBuild(worktree);
   const probes = runProbes(candidateRoot, worktree);
   return { ...probes, treeRoot: `${baselineRef}@${baselineCommit}` };
 }
@@ -166,6 +168,16 @@ function ensureViteBuild(treeRoot: string): void {
     cwd: treeRoot,
     stdio: 'inherit',
     env: { ...process.env, NODE_ENV: 'production' },
+  });
+}
+
+function ensureSidecarBuild(treeRoot: string): void {
+  const entry = join(treeRoot, 'sidecar/dist/sidecar.mjs');
+  const worker = join(treeRoot, 'sidecar/dist/historyPersistenceWorker.mjs');
+  if (existsSync(entry) && existsSync(worker)) return;
+  execFileSync('npm', ['run', 'build', '--prefix', join(treeRoot, 'sidecar')], {
+    cwd: treeRoot,
+    stdio: 'inherit',
   });
 }
 

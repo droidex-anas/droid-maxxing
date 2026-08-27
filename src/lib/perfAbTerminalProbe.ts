@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { dirname, join } from 'node:path';
 
 export const TERMINAL_FLOOD_CHUNKS = 1_000;
-export const TERMINAL_CHUNK = 'x'.repeat(64);
+const TERMINAL_CHUNK = 'x'.repeat(64);
 
 export async function measureTerminalFlood(treeRoot: string): Promise<AbProbeMetric> {
   const terminalPath = join(treeRoot, 'electron/terminal.cjs');

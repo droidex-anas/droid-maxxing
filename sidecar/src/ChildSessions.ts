@@ -102,9 +102,6 @@ export class ChildSessions {
       .map((record) => childSummary({ ...record, status: restoredChildStatus(record.status) }));
   }
 
-  // Resource gauge for hot-path metrics: how many child agents are held
-  // across attached parents, and how many can still be offered work (same
-  // predicate the runtime itself uses when admitting work).
   counts(): { total: number; active: number; live: number; queued: number } {
     let total = 0;
     let active = 0;

@@ -100,46 +100,94 @@ function isTextLikeKind(kind: TranscriptEvent['kind'] | undefined): boolean {
   return kind === 'text' || kind === 'thinking' || kind === 'status';
 }
 
+function optionalText(value: string | undefined): string {
+  return value ?? '';
+}
+
+function childStreamStatus(
+  child: ChildSessionSummary,
+  activity: ChildSessionActivity | undefined,
+): ChildStatus {
+  if (child.queued) return child.status;
+  return activity?.status ?? child.status;
+}
+
+function childStreamRawPreview(
+  latest: ChildSessionActivity['latest'],
+  polledPreview: string,
+): string {
+  if (!isTextLikeKind(latest?.kind)) return polledPreview;
+  return optionalText(latest?.text);
+}
+
+function childStreamHasOutput(
+  rawPreview: string,
+  toolName: string | undefined,
+  latestBody: string,
+  polledPreview: string,
+  polledPhase: string,
+): boolean {
+  return (
+    rawPreview !== '' ||
+    toolName !== undefined ||
+    latestBody !== '' ||
+    polledPreview !== '' ||
+    polledPhase !== ''
+  );
+}
+
+function childStreamPreviewKind(
+  phase: ChildStreamPhase,
+  kind: TranscriptEvent['kind'] | undefined,
+): ChildStreamSnapshot['previewKind'] {
+  if (phase === 'streaming' && isTextLikeKind(kind)) return 'markdown';
+  return 'plain';
+}
+
+export function childStreamPreviewBoxClass(expanded: boolean): string {
+  return expanded ? CHILD_STREAM_PREVIEW_EXPANDED_BOX_CLASS : CHILD_STREAM_PREVIEW_BOX_CLASS;
+}
+
 export function childStreamSnapshot(
   child: ChildSessionSummary,
   activity: ChildSessionActivity | undefined,
   interruptReason?: string,
 ): ChildStreamSnapshot {
-  const status = child.queued ? child.status : (activity?.status ?? child.status);
   const latest = activity?.latest;
-  const latestView = childSessionLatest(latest);
   const polled = child.activity;
-  const rawPreview = isTextLikeKind(latest?.kind) ? (latest?.text ?? '') : (polled?.preview ?? '');
-  const hasOutput =
-    rawPreview !== '' ||
-    latest?.toolName !== undefined ||
-    (latestView?.body ?? '') !== '' ||
-    (polled?.preview ?? '') !== '' ||
-    (polled?.phase ?? '') !== '';
+  const latestBody = optionalText(childSessionLatest(latest)?.body);
+  const polledPreview = optionalText(polled?.preview);
+  const rawPreview = childStreamRawPreview(latest, polledPreview);
   const phase = childStreamPhase({
     queued: child.queued,
-    status,
+    status: childStreamStatus(child, activity),
     latestKind: latest?.kind,
     isError: latest?.isError,
-    hasOutput,
-    ...(interruptReason !== undefined ? { interruptReason } : {}),
+    hasOutput: childStreamHasOutput(
+      rawPreview,
+      latest?.toolName,
+      latestBody,
+      polledPreview,
+      optionalText(polled?.phase),
+    ),
+    interruptReason,
   });
-  const markdown = phase === 'streaming' && isTextLikeKind(latest?.kind);
-  const previewSource = childStreamPreviewSource({
-    markdown,
-    rawPreview,
-    latestBody: latestView?.body ?? '',
-    polledPreview: polled?.preview ?? '',
-    phase,
-    prompt: child.prompt ?? '',
-  });
-  const live = phase === 'streaming' || phase === 'starting';
+  const previewKind = childStreamPreviewKind(phase, latest?.kind);
   return {
     key: childSessionKey(child),
     phase,
-    preview: boundChildStreamPreview(previewSource),
-    previewKind: markdown ? 'markdown' : 'plain',
-    live,
+    preview: boundChildStreamPreview(
+      childStreamPreviewSource({
+        markdown: previewKind === 'markdown',
+        rawPreview,
+        latestBody,
+        polledPreview,
+        phase,
+        prompt: optionalText(child.prompt),
+      }),
+    ),
+    previewKind,
+    live: phase === 'streaming' || phase === 'starting',
   };
 }
 
