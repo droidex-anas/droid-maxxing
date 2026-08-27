@@ -174,11 +174,13 @@ export function ConversationList({
     [],
   );
 
-  // History chrome above the list can appear without a range change; keep margin in this layout.
+  // While the wheel owns scrollTop, packing already-visible estimates would
+  // open a viewport-sized hole (compensation is off). New rows are born at
+  // estimateSize; measure them once isScrolling clears.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- size-stable; re-run after every commit
   useLayoutEffect(() => {
     const list = listElRef.current;
-    if (list) {
+    if (list && !virtualizer.isScrolling) {
       syncMeasureConversationList(
         list,
         (index, size) => {
