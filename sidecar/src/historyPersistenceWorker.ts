@@ -97,11 +97,15 @@ async function handle(envelope: HistoryWorkerEnvelope, searchEpoch: number): Pro
         reply(replyPort, { ok: true, value: { accepted: true } });
         return;
       case 'search': {
-        const results = getIndexDatabase().search(
+        const index = getIndexDatabase();
+        const results = index.search(
           request.query,
           () => searchEpoch !== latestSearchEpoch || closed,
         );
-        reply(replyPort, { ok: true, value: results });
+        reply(replyPort, {
+          ok: true,
+          value: { results, indexingIncomplete: index.isIndexingIncomplete() },
+        });
         return;
       }
       case 'close':

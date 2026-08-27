@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { adaptEvent, initialState, reducer, toastMessageForEvent } from './useStore';
+import {
+  applyHistoryServerEvent,
+  getHistoryHealth,
+  resetHistoryHealthForTests,
+} from '../lib/historyHealth';
 import type { SessionSummary } from '../types/bridge';
 
 const session: SessionSummary = {
@@ -230,4 +235,39 @@ test('unflushed history and interrupted sessions toast instead of looking durabl
   assert.equal(adaptEvent(unflushed), null);
   assert.equal(toastMessageForEvent(interrupted), interrupted.message);
   assert.equal(adaptEvent(interrupted), null);
+});
+
+test('history persistence and search status stay out of toasts and session errors', () => {
+  const degraded = {
+    type: 'error' as const,
+    code: 'history.persistence_degraded',
+    message: 'History durability is temporarily degraded.',
+    recoverable: true,
+  };
+  const unavailable = {
+    type: 'error' as const,
+    code: 'history.search_unavailable',
+    message: 'History search is unavailable.',
+    recoverable: false,
+  };
+  const recovered = { type: 'history.persistenceRecovered' as const };
+
+  assert.equal(toastMessageForEvent(degraded), undefined);
+  assert.equal(adaptEvent(degraded), null);
+  assert.equal(toastMessageForEvent(unavailable), undefined);
+  assert.equal(adaptEvent(unavailable), null);
+  assert.equal(toastMessageForEvent(recovered), undefined);
+  assert.equal(adaptEvent(recovered), null);
+
+  try {
+    applyHistoryServerEvent(degraded);
+    applyHistoryServerEvent(degraded);
+    assert.deepEqual(getHistoryHealth(), { persistence: 'degraded', search: 'ok' });
+    applyHistoryServerEvent(recovered);
+    assert.deepEqual(getHistoryHealth(), { persistence: 'ok', search: 'ok' });
+    applyHistoryServerEvent(unavailable);
+    assert.deepEqual(getHistoryHealth(), { persistence: 'ok', search: 'unavailable' });
+  } finally {
+    resetHistoryHealthForTests();
+  }
 });

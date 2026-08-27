@@ -17,7 +17,7 @@ import type {
   HistoryPersistenceBatch,
   HistoryPersistenceResult,
 } from './historyPersistenceProtocol.js';
-import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './protocol.js';
+import type { HistorySearchReply, SessionSummary, TranscriptEvent } from './protocol.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 import { persistTestChild } from './testing/historyPersistenceFixture.js';
@@ -60,7 +60,7 @@ function stubSearchClient(overrides: Partial<HistorySearchClient> = {}): History
     }),
     sessionFileSnapshot: async () => ({ revision: 0, changed: 0, entries: [] }),
     setIndexingIdle: async () => undefined,
-    search: async () => [],
+    search: async () => ({ results: [], indexingIncomplete: false }),
     closeSync: () => undefined,
     ...overrides,
   };
@@ -240,7 +240,10 @@ test(
 
       await persistence.reconcileSessionFiles();
 
-      assert.deepEqual(await persistence.searchSessions('hello'), []);
+      assert.deepEqual(await persistence.searchSessions('hello'), {
+        results: [],
+        indexingIncomplete: false,
+      });
     } finally {
       persistence.close();
       restore();
@@ -251,12 +254,15 @@ test(
 test('search results resolve through pending in-memory provider aliases', async () => {
   const { restore } = withTemporaryHome('droidex-history-search-alias-overlay-');
   const searchClient = stubSearchClient({
-    search: async () => [
-      {
-        appSessionId: 'provider',
-        matches: [{ snippet: 'pending alias needle', author: 'user', ts: 1 }],
-      },
-    ],
+    search: async () => ({
+      results: [
+        {
+          appSessionId: 'provider',
+          matches: [{ snippet: 'pending alias needle', author: 'user', ts: 1 }],
+        },
+      ],
+      indexingIncomplete: false,
+    }),
   });
   const persistence = new HistoryPersistence({ searchClient });
   try {
@@ -265,7 +271,10 @@ test('search results resolve through pending in-memory provider aliases', async 
       summary({ appSessionId: 'stable-app', title: 'Pending overlay', tokensOut: 2 }),
     ]);
 
-    assert.equal((await persistence.searchSessions('needle'))[0]?.appSessionId, 'stable-app');
+    assert.equal(
+      (await persistence.searchSessions('needle')).results[0]?.appSessionId,
+      'stable-app',
+    );
   } finally {
     persistence.close();
     restore();
@@ -393,10 +402,10 @@ test('a reconciliation revision gap replaces the main cache from an authoritativ
 
 test('an active search cannot delay a synchronous persistence boundary', async () => {
   const { restore } = withTemporaryHome('droidex-history-lanes-');
-  let resolveSearch: ((results: SessionSearchResult[]) => void) | undefined;
+  let resolveSearch: ((reply: HistorySearchReply) => void) | undefined;
   const searchClient = stubSearchClient({
     search: () =>
-      new Promise<SessionSearchResult[]>((resolve) => {
+      new Promise<HistorySearchReply>((resolve) => {
         resolveSearch = resolve;
       }),
   });
@@ -439,7 +448,7 @@ test('an active search cannot delay a synchronous persistence boundary', async (
       persisted.flatMap((batch) => batch.events.map((item) => item.id)),
       ['during-search'],
     );
-    resolveSearch?.([]);
+    resolveSearch?.({ results: [], indexingIncomplete: false });
     await search;
   } finally {
     persistence.close();

@@ -164,21 +164,25 @@ test(
       const reconciliation = database.reconcileSessionFiles();
       assert.equal(reconciliation.upserts.length, 2);
       assert.equal(slices.nextDelay(), 2_000, 'recent history is paced while the user is active');
+      assert.equal(database.isIndexingIncomplete(), true);
       assert.deepEqual(await database.search('old albatross'), []);
       assert.deepEqual(
         await database.search('recent narwhal'),
         [],
         'interactive search returns the committed index without doing file work',
       );
+      assert.equal(database.isIndexingIncomplete(), true);
       assert.equal(slices.nextDelay(), 2_000);
 
       await slices.runNext();
       assert.equal(await waitForSearch(database, 'recent narwhal'), 'recent-provider');
+      assert.equal(database.isIndexingIncomplete(), true, 'older history is still unindexed');
 
       database.setIdle(true);
       assert.equal(slices.nextDelay(), 5_000, 'old history uses the slower idle-only pace');
       await slices.runNext();
       assert.equal((await database.search('old albatross'))[0]?.appSessionId, 'old-provider');
+      assert.equal(database.isIndexingIncomplete(), false);
     } finally {
       await database.close();
       if (previousHome === undefined) delete process.env['HOME'];
@@ -588,6 +592,7 @@ test('indexing does not arm a slice timer when there is nothing to index', async
   try {
     database.reconcileSessionFiles();
     assert.equal(slices.nextDelay(), undefined);
+    assert.equal(database.isIndexingIncomplete(), false);
     database.setIdle(true);
     assert.equal(slices.nextDelay(), undefined);
     database.setIdle(false);

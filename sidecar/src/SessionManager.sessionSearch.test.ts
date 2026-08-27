@@ -19,8 +19,31 @@ test('sessions.search answers the requester with indexed history results', async
     const reply = ctx.events.find((event) => event.type === 'sessions.searchResults');
     assert.equal(reply?.type, 'sessions.searchResults');
     assert.equal(reply?.requestId, 'req-7');
+    assert.equal(reply?.indexingIncomplete, false);
     assert.equal(ctx.history.lastSearchQuery, 'whatsapp');
     assert.deepEqual(reply?.results, ctx.history.nextSearchResults);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test('sessions.search labels results as incomplete while indexing is outstanding', async () => {
+  const ctx = createSessionManagerTestContext();
+  try {
+    ctx.history.nextSearchResults = [
+      {
+        appSessionId: 'app-1',
+        matches: [{ snippet: 'partial hit', author: 'user', ts: 1 }],
+      },
+    ];
+    ctx.history.nextIndexingIncomplete = true;
+
+    await ctx.handle({ type: 'sessions.search', requestId: 'req-incomplete', query: 'partial' });
+
+    const reply = ctx.events.find((event) => event.type === 'sessions.searchResults');
+    assert.equal(reply?.type, 'sessions.searchResults');
+    assert.equal(reply?.indexingIncomplete, true);
+    assert.equal(reply?.results.length, 1);
   } finally {
     await ctx.dispose();
   }
@@ -38,11 +61,14 @@ test('a superseded sessions.search scan does not emit its results', async () => 
     ctx.history.searchSessions = async (
       _query?: string,
       isStale?: () => boolean,
-    ): Promise<Protocol.SessionSearchResult[]> => {
+    ): Promise<Protocol.HistorySearchReply> => {
       await gate;
-      return isStale?.()
-        ? []
-        : [{ appSessionId: 'app-1', matches: [{ snippet: 'hit', author: 'user', ts: 1 }] }];
+      return {
+        results: isStale?.()
+          ? []
+          : [{ appSessionId: 'app-1', matches: [{ snippet: 'hit', author: 'user', ts: 1 }] }],
+        indexingIncomplete: false,
+      };
     };
 
     const first = ctx.handle({ type: 'sessions.search', requestId: 'req-1', query: 'a' });

@@ -7,7 +7,7 @@ import type {
   SessionFileReconciliation,
   SessionFileSnapshot,
 } from './sessionFileCache.js';
-import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './protocol.js';
+import type { HistorySearchReply, SessionSummary, TranscriptEvent } from './protocol.js';
 
 export interface PersistedEventMetadata {
   id: string;
@@ -68,7 +68,7 @@ export type HistoryWorkerValue =
   | HistoryPersistenceResult
   | SessionFileReconciliation
   | SessionFileSnapshot
-  | SessionSearchResult[]
+  | HistorySearchReply
   | { durable: true }
   | { accepted: true }
   | { closed: true };

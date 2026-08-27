@@ -32,6 +32,29 @@ test('rejects approval requests with unknown permission kinds', () => {
   );
 });
 
+test('rejects search results that omit the indexing completeness flag', () => {
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'sessions.searchResults',
+        requestId: 'req-1',
+        results: [],
+      }),
+    ),
+    null,
+  );
+  assert.ok(
+    serverWireMessage(
+      batch({
+        type: 'sessions.searchResults',
+        requestId: 'req-1',
+        results: [],
+        indexingIncomplete: false,
+      }),
+    ),
+  );
+});
+
 test('rejects malformed features in session summaries and mission updates', () => {
   const malformedFeature = { status: 'pending' };
   const session = {

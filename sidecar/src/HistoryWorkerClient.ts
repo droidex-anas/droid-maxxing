@@ -22,7 +22,7 @@ import type {
   SessionFileReconciliation,
   SessionFileSnapshot,
 } from './sessionFileCache.js';
-import type { SessionSearchResult } from './protocol.js';
+import type { HistorySearchReply } from './protocol.js';
 
 const SYNC_WAIT_SLICE_MS = 5;
 const DEFAULT_SYNC_TIMEOUT_MS = 10_000;
@@ -45,7 +45,7 @@ export interface HistorySearchClient {
   reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<SessionFileReconciliation>;
   sessionFileSnapshot(): Promise<SessionFileSnapshot>;
   setIndexingIdle(isIdle: boolean): Promise<void>;
-  search(query: string): Promise<SessionSearchResult[]>;
+  search(query: string): Promise<HistorySearchReply>;
   closeSync(): void;
 }
 
@@ -115,8 +115,8 @@ export class HistoryWorkerClient implements HistoryPersistenceClient, HistorySea
     await this.call<{ accepted: true }>({ type: 'indexing-idle', isIdle }).promise;
   }
 
-  async search(query: string): Promise<SessionSearchResult[]> {
-    return await this.call<SessionSearchResult[]>({ type: 'search', query }).promise;
+  async search(query: string): Promise<HistorySearchReply> {
+    return await this.call<HistorySearchReply>({ type: 'search', query }).promise;
   }
 
   closeSync(): void {

@@ -144,6 +144,16 @@ export class HistoryIndexDatabase {
     return results;
   }
 
+  isIndexingIncomplete(): boolean {
+    this.assertOpen();
+    return (
+      !this.hasPlannedAll ||
+      this.recentQueue.size > 0 ||
+      this.backfillQueue.size > 0 ||
+      this.activeSlice !== null
+    );
+  }
+
   setIdle(isIdle: boolean): void {
     this.assertOpen();
     const changed = this.isIdle !== isIdle;
