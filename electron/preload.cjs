@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('droidControl', {
   getAutomaticDiagnostics: () => ipcRenderer.invoke('diagnostics-preference-get'),
   setAutomaticDiagnostics: (enabled) =>
     ipcRenderer.invoke('diagnostics-preference-set', { enabled }),
+  getHardwareAcceleration: () => ipcRenderer.invoke('hardware-acceleration-preference-get'),
+  setHardwareAcceleration: (enabled) =>
+    ipcRenderer.invoke('hardware-acceleration-preference-set', { enabled }),
   relaunchApp: () => ipcRenderer.invoke('app-relaunch'),
   setAppIcon: (mode) => ipcRenderer.invoke('app-set-icon', { mode }),
   openExternal: (url) => ipcRenderer.invoke('open-external', { url }),

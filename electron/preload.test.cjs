@@ -117,6 +117,20 @@ test('automatic diagnostics preference uses closed IPC payloads', async () => {
   assert.equal(calls[1].payload.enabled, false);
 });
 
+test('hardware acceleration preference uses closed IPC payloads', async () => {
+  const { api, calls } = loadApi();
+
+  await api.getHardwareAcceleration();
+  await api.setHardwareAcceleration(false);
+
+  assert.deepEqual(calls[0], {
+    channel: 'hardware-acceleration-preference-get',
+    payload: undefined,
+  });
+  assert.equal(calls[1].channel, 'hardware-acceleration-preference-set');
+  assert.equal(calls[1].payload.enabled, false);
+});
+
 test('GitHub setup IPC accepts no renderer-controlled command payload', async () => {
   const expected = { ok: true };
   const { api, calls } = loadApi(expected);

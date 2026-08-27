@@ -42,6 +42,13 @@ const { autoUpdater } = require('electron-updater');
 const { createAppUpdater } = require('./appUpdater.cjs');
 const Sentry = require('@sentry/electron/main');
 const { createDiagnostics } = require('./diagnostics.cjs');
+const {
+  preferenceFilePath: hardwareAccelerationPreferenceFilePath,
+  readHardwareAccelerationPreferenceSync,
+  resolveUserDataDir: resolveHardwareAccelerationUserDataDir,
+  loadHardwareAccelerationPreference,
+  saveHardwareAccelerationPreference,
+} = require('./hardwareAcceleration.cjs');
 const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 const APP_NAME = 'DROIDEX';
 const buildMetadata = readBuildMetadata();
@@ -119,6 +126,14 @@ app.setPath(
   'userData',
   process.env.DROIDEX_USER_DATA_DIR || path.join(app.getPath('appData'), APP_NAME),
 );
+const hardwareAccelerationPreferencePath = hardwareAccelerationPreferenceFilePath(
+  resolveHardwareAccelerationUserDataDir({ app }),
+);
+if (
+  !readHardwareAccelerationPreferenceSync({ filePath: hardwareAccelerationPreferencePath }).enabled
+) {
+  app.disableHardwareAcceleration();
+}
 const diagnosticsInitialization = diagnostics.initialize();
 app.whenReady().then(async () => {
   await diagnosticsInitialization;
@@ -490,6 +505,21 @@ function registerIpc() {
   ipcMain.handle('diagnostics-preference-set', async (event, { enabled }) => {
     assertMainRenderer(event);
     return diagnostics.setAutomaticDiagnosticsEnabled(enabled);
+  });
+  ipcMain.handle('hardware-acceleration-preference-get', (event) => {
+    assertMainRenderer(event);
+    return loadHardwareAccelerationPreference({
+      filePath: hardwareAccelerationPreferencePath,
+      fs: fsp,
+    });
+  });
+  ipcMain.handle('hardware-acceleration-preference-set', async (event, { enabled }) => {
+    assertMainRenderer(event);
+    return saveHardwareAccelerationPreference({
+      filePath: hardwareAccelerationPreferencePath,
+      enabled,
+      fs: fsp,
+    });
   });
   ipcMain.handle('app-relaunch', () => relaunchApp());
   ipcMain.handle('app-set-icon', (event, payload) => {
