@@ -235,3 +235,30 @@ test('terminal subscribe transfers one MessagePort and posts input without invok
   assert.equal(rendererPort.posted[1].type, 'input');
   assert.equal(rendererPort.posted[1].data, 'x');
 });
+
+test('preload queues stay bounded before a consumer attaches and report dropped bytes', () => {
+  const { api, channels } = loadApi();
+  const channel = api.terminalSubscribe('pty-1');
+  const rendererPort = channels[0].port2;
+  const chunk = 'x'.repeat(64 * 1024);
+  const flood = 40;
+
+  for (let index = 0; index < flood; index += 1) {
+    rendererPort.deliver({
+      kind: 'data',
+      data: chunk,
+      sequence: index + 1,
+      byteOffset: (index + 1) * chunk.length,
+    });
+  }
+
+  const received = [];
+  channel.onEvent((event) => received.push(event));
+  const queuedBytes = received.reduce(
+    (total, payload) => total + Buffer.byteLength(payload.data || '', 'utf8'),
+    0,
+  );
+  assert.ok(queuedBytes <= 2 * 1024 * 1024);
+  assert.ok(received.some((payload) => payload.truncated === true && payload.droppedBytes > 0));
+  assert.ok(received.length < flood);
+});
