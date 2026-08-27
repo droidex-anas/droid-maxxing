@@ -28,6 +28,7 @@ import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
 import { isEmbedded } from '../lib/embed';
 import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
+import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
 import {
   restoreStatusForConversationTimeline,
   useConversationTimeline,
@@ -39,6 +40,7 @@ import { createChatFeedProjector } from './chatFeedProjector';
 import { setMountedFeedRows } from '../lib/rendererPerf';
 import { firstUserTranscriptEvent } from '../lib/transcriptIngestion';
 import { createTranscriptSpecPathProjector } from '../lib/transcriptSpecPath';
+import type { ConversationListHandle } from './ConversationList';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -203,6 +205,8 @@ export default function ChatView({
   );
   const state = useStoreSelector(selectChatViewState, equalChatState);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const conversationListRef = useRef<ConversationListHandle>(null);
+  const viewportLayoutRef = useRef<ConversationViewportLayout | null>(null);
   const activeSession = state.activeSession;
   const allTranscript = state.allTranscript;
   const specPathProjectorRef = useRef<ReturnType<typeof createTranscriptSpecPathProjector> | null>(
@@ -494,7 +498,7 @@ export default function ChatView({
         : false),
     restoreStatus: restoreStatusForConversationTimeline(restore?.status, !isEmbedded()),
   });
-  const { onScroll, requestOlderHistory } = useConversationScrollWindow({
+  const { onScroll, requestOlderHistory, restoredScrollOffset } = useConversationScrollWindow({
     scrollRef,
     visibleConversationKey,
     isViewingChildSession: viewingChildSession,
@@ -509,6 +513,7 @@ export default function ChatView({
     isConversationLive: live,
     isAutoPagingOlderHistory,
     dispatch,
+    viewportLayoutRef,
   });
 
   // Old/large chats restore only a recent window, which can hold too few final
@@ -602,6 +607,12 @@ export default function ChatView({
             ? { createdWorktreePath }
             : {})}
           onMountedRowsChange={setMountedFeedRows}
+          scrollElementRef={scrollRef}
+          viewportLayoutRef={viewportLayoutRef}
+          listRef={conversationListRef}
+          {...(restoredScrollOffset !== undefined
+            ? { initialScrollOffset: restoredScrollOffset }
+            : {})}
         />
       </motion.div>
     );
@@ -663,7 +674,13 @@ export default function ChatView({
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
         {activeSession && !isTimelinePriming && timelineAnchors.length >= 2 && (
-          <ConversationTimeline scrollRef={scrollRef} anchors={timelineAnchors} />
+          <ConversationTimeline
+            scrollRef={scrollRef}
+            anchors={timelineAnchors}
+            onJumpToAnchor={(id) => {
+              conversationListRef.current?.scrollToRow(id);
+            }}
+          />
         )}
         <div
           ref={scrollRef}

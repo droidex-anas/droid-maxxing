@@ -1,7 +1,3 @@
-// Always-on sidecar hot-path measurement. Phase 1 extends the phase 0 stage
-// metrics with ordered transport batching, queue pressure, replay, and bounded
-// slow-client diagnostics.
-
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 import { ReservoirHistogram, type HistogramStats } from './histogram.js';

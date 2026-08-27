@@ -24,7 +24,6 @@ export function childSessionInfo(args: unknown): { label?: string; description?:
   };
 }
 
-/** Merges streamed snapshots while retaining the spawn's original identity. */
 export function mergeChildSessionSpawn(
   existing: TranscriptEvent,
   next: TranscriptEvent,

@@ -24,6 +24,7 @@ import {
   persistenceChildKey,
   persistenceChildKeyPrefix,
 } from './historyPersistenceQueueValues.js';
+import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import { PersistenceDirtyMarker, persistenceDirtyMarkerPath } from './persistenceDirtyMarker.js';
 import type {
   PersistenceRecovery,
@@ -31,7 +32,7 @@ import type {
   SessionSummary,
   TranscriptEvent,
 } from './protocol.js';
-import type { SessionFileChange } from './sessionFileCache.js';
+import type { SessionFileChange, SessionFileReconciliation } from './sessionFileCache.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 export interface HistoryPersistenceOptions {
@@ -42,23 +43,17 @@ export interface HistoryPersistenceOptions {
   onDurabilityRecovered?: () => void;
 }
 
-export type HistoryPersistenceStatus =
+type HistoryPersistenceStatus =
   | { state: 'healthy' }
-  | { state: 'degraded'; message: string };
+  | { state: 'degraded'; message: string }
+  | { state: 'search_unavailable'; message: string };
 
-/**
- * Worker-backed write seam around the existing read/index implementation.
- *
- * HistoryIndex remains the schema and read owner. This class owns live
- * canonical overlays plus the bounded write-behind queue. Ordinary transcript
- * output remains live while SQLite work runs away from the orchestration event
- * loop; settlement and identity publication waits for confirmed durability.
- */
 export class HistoryPersistence {
   private readonly core: HistoryIndex;
   private readonly queue: HistoryPersistenceQueue;
   private searchClient: HistorySearchClient | null;
   private readonly createSearchClient: () => HistorySearchClient;
+  private readonly onStatusChanged: HistoryPersistenceOptions['onStatusChanged'];
   private readonly runtimeSummaries = new Map<string, SessionSummary>();
   private readonly runtimeChildren = new Map<string, PersistedChildSession>();
   private readonly durability = new HistoryDurabilityPolicy();
@@ -66,6 +61,8 @@ export class HistoryPersistence {
   private historyRevision = 0;
   private lastFailureLogAt = 0;
   private indexingIdle = false;
+  private searchUnavailable: Error | null = null;
+  private searchUnavailableReported = false;
 
   constructor(options: HistoryPersistenceOptions = {}) {
     if (options.searchClient && options.createSearchClient) {
@@ -77,6 +74,7 @@ export class HistoryPersistence {
     this.createSearchClient =
       options.createSearchClient ??
       (() => new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } }));
+    this.onStatusChanged = options.onStatusChanged;
     this.dirtyMarker = new PersistenceDirtyMarker(persistenceDirtyMarkerPath(dirname(dbPath)));
     this.queue = new HistoryPersistenceQueue({
       dbPath,
@@ -163,7 +161,7 @@ export class HistoryPersistence {
     this.pauseBackgroundIndexing();
     if (isStale?.()) return [];
     const runtimeAliases = searchAliases(this.runtimeSummaries.values());
-    const results = await this.getSearchClient().search(query);
+    const results = await this.withSearchClient((client) => client.search(query));
     if (isStale?.()) return [];
     for (const [providerSessionId, appSessionId] of searchAliases(this.runtimeSummaries.values())) {
       runtimeAliases.set(providerSessionId, appSessionId);
@@ -173,37 +171,27 @@ export class HistoryPersistence {
 
   async setIndexingIdle(isIdle: boolean): Promise<void> {
     this.indexingIdle = isIdle && !this.hasActiveIndexingWork();
-    if (this.searchClient) await this.searchClient.setIndexingIdle(this.indexingIdle);
+    if (!this.searchClient || this.searchUnavailable) return;
+    try {
+      await this.searchClient.setIndexingIdle(this.indexingIdle);
+    } catch (error) {
+      if (!isHistorySearchUnavailableError(error)) throw error;
+      this.noteSearchUnavailable(asError(error));
+    }
   }
 
   async reconcileSessionFiles(): Promise<number> {
     await this.queue.drain();
-    const client = this.getSearchClient();
-    const result = await client.reconcileSessionFiles();
-    let changed = result.changed;
-    if (!this.core.applySessionFileReconciliation(result)) {
-      const snapshot = await client.sessionFileSnapshot();
-      if (this.core.replaceSessionFileSnapshot(snapshot)) changed = Math.max(1, changed);
-    }
-    if (changed > 0) {
-      this.historyRevision += 1;
-    }
-    return changed;
+    return await this.applySearchReconciliation(
+      await this.getSearchClient().reconcileSessionFiles(),
+    );
   }
 
   async reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number> {
     await this.queue.drain();
-    const client = this.getSearchClient();
-    const result = await client.reconcileSessionFilePaths(changes);
-    let changed = result.changed;
-    if (!this.core.applySessionFileReconciliation(result)) {
-      const snapshot = await client.sessionFileSnapshot();
-      if (this.core.replaceSessionFileSnapshot(snapshot)) changed = Math.max(1, changed);
-    }
-    if (changed > 0) {
-      this.historyRevision += 1;
-    }
-    return changed;
+    return await this.applySearchReconciliation(
+      await this.getSearchClient().reconcileSessionFilePaths(changes),
+    );
   }
 
   syncSummaries(summaries: SessionSummary[]): boolean {
@@ -321,6 +309,43 @@ export class HistoryPersistence {
       }
     }
     return this.searchClient;
+  }
+
+  private async withSearchClient<T>(
+    operation: (client: HistorySearchClient) => Promise<T>,
+  ): Promise<T> {
+    if (this.searchUnavailable) throw this.searchUnavailable;
+    try {
+      return await operation(this.getSearchClient());
+    } catch (error) {
+      if (!isHistorySearchUnavailableError(error)) throw error;
+      const unavailable = asError(error);
+      this.noteSearchUnavailable(unavailable);
+      throw unavailable;
+    }
+  }
+
+  private async applySearchReconciliation(result: SessionFileReconciliation): Promise<number> {
+    let changed = result.changed;
+    if (!this.core.applySessionFileReconciliation(result)) {
+      const snapshot = await this.getSearchClient().sessionFileSnapshot();
+      if (this.core.replaceSessionFileSnapshot(snapshot)) changed = Math.max(1, changed);
+    }
+    if (changed > 0) {
+      this.historyRevision += 1;
+    }
+    return changed;
+  }
+
+  private noteSearchUnavailable(error: Error): void {
+    this.searchUnavailable = error;
+    if (this.searchUnavailableReported) return;
+    this.searchUnavailableReported = true;
+    try {
+      this.onStatusChanged?.({ state: 'search_unavailable', message: error.message });
+    } catch (reportError) {
+      console.error('History search unavailability reporting failed:', reportError);
+    }
   }
 
   private pauseBackgroundIndexing(): void {

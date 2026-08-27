@@ -1,34 +1,29 @@
-// Deterministic replay scenarios for the perf harness (#116 phase 0).
-//
-// A scenario fully determines the provider workload: how many sessions stream
-// concurrently, the event mix, inter-arrival schedule, payload sizes, and the
-// sidecar's streaming coalesce window. Given the same seed the generated plan
-// is byte-identical, so before/after comparisons across code changes measure
-// the code, not the workload.
+// Deterministic replay scenarios. Given the same seed the generated plan is
+// byte-identical, so before/after comparisons measure the code, not the workload.
 
 import type { DroidStreamEvent } from '@factory/droid-sdk';
+
+export type PerfScenarioKind = 'replay' | 'soak' | 'session-switch';
 
 export interface PerfScenarioSpec {
   name: string;
   description: string;
+  kind: PerfScenarioKind;
   seed: number;
   sessions: number;
   turnsPerSession: number;
   deltasPerTurn: number;
-  // Scheduled provider events per second, per session.
   eventsPerSecond: number;
-  // Character range of each streamed text delta.
   deltaChars: { min: number; max: number };
-  // Insert a tool_call/tool_result marker pair every N deltas. Markers are
-  // never coalesced, so they yield exact provider-to-wire end-to-end samples.
+  // Markers are never coalesced, so they yield exact provider-to-wire samples.
   toolMarkerEvery: number;
-  // SessionTimeline streamingCoalesceMs forwarded into the sidecar wiring.
   coalesceMs: number;
-  // Wall-clock target derived from the schedule (informational).
   expectedDurationMs: number;
+  soakCycles: number;
+  switchCount: number;
 }
 
-export interface ReplayStep {
+interface ReplayStep {
   atMs: number;
   event: DroidStreamEvent;
   marker: string | null;
@@ -58,6 +53,7 @@ function scenario(
   const spec: PerfScenarioSpec = {
     name,
     description,
+    kind: 'replay',
     seed: 11,
     sessions: 1,
     turnsPerSession: 1,
@@ -67,13 +63,15 @@ function scenario(
     toolMarkerEvery: 20,
     coalesceMs: 35,
     expectedDurationMs: 0,
+    soakCycles: 0,
+    switchCount: 0,
     ...overrides,
   };
   spec.expectedDurationMs = expectedDurationMs(spec);
   return spec;
 }
 
-export function expectedDurationMs(spec: PerfScenarioSpec): number {
+function expectedDurationMs(spec: PerfScenarioSpec): number {
   const eventsPerTurn = spec.deltasPerTurn + markerPairs(spec.deltasPerTurn, spec.toolMarkerEvery);
   const eventsPerSession = eventsPerTurn * spec.turnsPerSession;
   return Math.ceil((eventsPerSession / spec.eventsPerSecond) * 1_000) + spec.coalesceMs + 250;
@@ -83,6 +81,13 @@ export function expectedDurationMs(spec: PerfScenarioSpec): number {
 // scenario name must fail fast instead of narrowing to a phantom builder.
 export const PERF_SCENARIOS: Record<string, (() => PerfScenarioSpec) | undefined> = {
   smoke: () => scenario('smoke', 'One session, one short turn; sanity-checks the harness itself.'),
+  idle: () =>
+    scenario('idle', 'One normal session after a short turn; idle sidecar cost.', {
+      seed: 13,
+      deltasPerTurn: 8,
+      eventsPerSecond: 20,
+      toolMarkerEvery: 8,
+    }),
   streaming: () =>
     scenario('streaming', 'Sustained single-session token streaming.', {
       seed: 23,
@@ -98,6 +103,30 @@ export const PERF_SCENARIOS: Record<string, (() => PerfScenarioSpec) | undefined
       deltasPerTurn: 200,
       eventsPerSecond: 25,
     }),
+  'agents-4': () =>
+    scenario('agents-4', 'Four interleaved agents streaming concurrently.', {
+      seed: 41,
+      sessions: 4,
+      turnsPerSession: 2,
+      deltasPerTurn: 80,
+      eventsPerSecond: 40,
+    }),
+  'agents-16': () =>
+    scenario('agents-16', 'Sixteen interleaved agents streaming concurrently.', {
+      seed: 43,
+      sessions: 16,
+      turnsPerSession: 1,
+      deltasPerTurn: 60,
+      eventsPerSecond: 40,
+    }),
+  'agents-27': () =>
+    scenario('agents-27', 'Twenty-seven interleaved agents streaming concurrently.', {
+      seed: 47,
+      sessions: 27,
+      turnsPerSession: 1,
+      deltasPerTurn: 40,
+      eventsPerSecond: 40,
+    }),
   'long-history': () =>
     scenario('long-history', 'Thousands of accumulated events; compares early vs late latency.', {
       seed: 51,
@@ -106,6 +135,54 @@ export const PERF_SCENARIOS: Record<string, (() => PerfScenarioSpec) | undefined
       eventsPerSecond: 300,
       toolMarkerEvery: 50,
     }),
+  'long-tail': () =>
+    scenario('long-tail', 'One session of ~3k events streaming at the tail.', {
+      seed: 53,
+      turnsPerSession: 1,
+      deltasPerTurn: 2_800,
+      eventsPerSecond: 400,
+      toolMarkerEvery: 50,
+    }),
+  'session-switch': () =>
+    scenario(
+      'session-switch',
+      'Four background streams with rapid session.loadHistory while they run.',
+      {
+        kind: 'session-switch',
+        seed: 59,
+        sessions: 4,
+        turnsPerSession: 1,
+        deltasPerTurn: 80,
+        eventsPerSecond: 40,
+        switchCount: 24,
+      },
+    ),
+  soak: () =>
+    scenario(
+      'soak',
+      'Repeated session create/close cycles; live resource counts must return to 0.',
+      {
+        kind: 'soak',
+        seed: 61,
+        sessions: 1,
+        turnsPerSession: 0,
+        deltasPerTurn: 0,
+        eventsPerSecond: 1,
+        toolMarkerEvery: 0,
+        soakCycles: 12,
+      },
+    ),
+};
+
+export const SKIPPED_PERF_SCENARIOS: Record<string, string> = {
+  'history-10k':
+    'Renderer probe, not a sidecar replay: synthetic 10k-row mounted-window measurement.',
+  'terminal-flood':
+    'Electron probe, not a sidecar replay: PTY flood through the tree’s own output delivery.',
+  'browser-workspace': 'Needs a GUI browser/design workspace; not headless-feasible.',
+  'hidden-window': 'Needs a real Electron window and visibility signals; not headless-feasible.',
+  'sidecar-restart':
+    'Owned by the concurrent supervision phase; this suite records the gap and does not build it.',
 };
 
 function scenarioBuilderByName(name: string): (() => PerfScenarioSpec) | undefined {

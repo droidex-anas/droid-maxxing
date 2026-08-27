@@ -11,7 +11,6 @@ import {
 } from './sessionFileEntries.js';
 import type { SessionSummary } from './protocol.js';
 
-/** In-memory main-thread view of the index worker's revisioned file cache. */
 export class SessionFileMirror {
   private readonly files = new Map<string, SessionFileCacheEntry>();
   private revisionValue = 0;

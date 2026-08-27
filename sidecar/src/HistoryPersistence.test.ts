@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { HistoryIndex, type PersistedChildSession } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
+import { sqliteFts5UnavailableSkipReason } from './historySearchSchema.js';
 import type {
   HistoryPersistenceCall,
   HistoryPersistenceClient,
@@ -20,6 +21,8 @@ import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './pro
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 import { persistTestChild } from './testing/historyPersistenceFixture.js';
+
+const FTS5_UNAVAILABLE_REASON = sqliteFts5UnavailableSkipReason();
 
 function withTemporaryHome(prefix: string): { home: string; restore: () => void } {
   const home = mkdtempSync(join(tmpdir(), prefix));
@@ -213,33 +216,37 @@ test('a hydrated running child replacement crosses a durability boundary', () =>
   }
 });
 
-test('search excludes session files that the canonical history cache did not admit', async () => {
-  const { home, restore } = withTemporaryHome('droidex-history-search-');
-  const persistence = new HistoryPersistence();
-  try {
-    const sessionsDirectory = join(home, '.factory', 'sessions', '2026', '08');
-    mkdirSync(sessionsDirectory, { recursive: true });
-    writeFileSync(
-      join(sessionsDirectory, 'abandoned.jsonl'),
-      providerSessionJsonl(
-        {
-          type: 'session_start',
-          cwd: '/repo',
-          sessionTitle: 'Abandoned session',
-          settings: { interactionMode: 'auto' },
-        },
-        ['user'],
-      ),
-    );
+test(
+  'search excludes session files that the canonical history cache did not admit',
+  { skip: FTS5_UNAVAILABLE_REASON },
+  async () => {
+    const { home, restore } = withTemporaryHome('droidex-history-search-');
+    const persistence = new HistoryPersistence();
+    try {
+      const sessionsDirectory = join(home, '.factory', 'sessions', '2026', '08');
+      mkdirSync(sessionsDirectory, { recursive: true });
+      writeFileSync(
+        join(sessionsDirectory, 'abandoned.jsonl'),
+        providerSessionJsonl(
+          {
+            type: 'session_start',
+            cwd: '/repo',
+            sessionTitle: 'Abandoned session',
+            settings: { interactionMode: 'auto' },
+          },
+          ['user'],
+        ),
+      );
 
-    await persistence.reconcileSessionFiles();
+      await persistence.reconcileSessionFiles();
 
-    assert.deepEqual(await persistence.searchSessions('hello'), []);
-  } finally {
-    persistence.close();
-    restore();
-  }
-});
+      assert.deepEqual(await persistence.searchSessions('hello'), []);
+    } finally {
+      persistence.close();
+      restore();
+    }
+  },
+);
 
 test('search results resolve through pending in-memory provider aliases', async () => {
   const { restore } = withTemporaryHome('droidex-history-search-alias-overlay-');

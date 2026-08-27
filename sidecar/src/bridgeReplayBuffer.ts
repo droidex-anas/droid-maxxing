@@ -12,7 +12,6 @@ export interface SerializedEventBatch {
   bytes: number;
 }
 
-/** Bounded same-process replay history for renderer reconnects. */
 export class BridgeReplayBuffer {
   private entries: (SerializedEventBatch | undefined)[] = [];
   private head = 0;

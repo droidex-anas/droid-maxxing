@@ -2,7 +2,7 @@ import { lazy } from 'react';
 import type { UtilityTool } from './utilityPanel';
 import { PanelSkeleton, UtilityPaneSkeleton } from '../components/skeletons/WorkspaceSkeletons';
 
-const lazySurfaceLoaders = {
+export const LAZY_SURFACE_LOADERS = {
   settings: () => import('../components/SettingsPanel'),
   commandPalette: () => import('../components/CommandPalette'),
   specWiki: () => import('../components/SpecWikiModal'),
@@ -30,20 +30,18 @@ const lazySurfaceLoaders = {
   },
 };
 
-export type LazySurface = keyof typeof lazySurfaceLoaders;
+export type LazySurface = keyof typeof LAZY_SURFACE_LOADERS;
 
-export const LAZY_SURFACE_LOADERS = lazySurfaceLoaders;
-
-export const LazySettingsPanel = lazy(lazySurfaceLoaders.settings);
-export const LazyCommandPalette = lazy(lazySurfaceLoaders.commandPalette);
-export const LazySpecWikiModal = lazy(lazySurfaceLoaders.specWiki);
-export const LazyOnboardingWizard = lazy(lazySurfaceLoaders.onboarding);
-export const LazyMissionControl = lazy(lazySurfaceLoaders.missionControl);
-export const LazyPullRequestsView = lazy(lazySurfaceLoaders.pullRequests);
-export const LazyReviewPanel = lazy(lazySurfaceLoaders.review);
-export const LazyBrowserFocusWorkspace = lazy(lazySurfaceLoaders.browser);
-export const LazyTerminalWorkspace = lazy(lazySurfaceLoaders.terminal);
-export const LazyFilesWorkspace = lazy(lazySurfaceLoaders.files);
+export const LazySettingsPanel = lazy(LAZY_SURFACE_LOADERS.settings);
+export const LazyCommandPalette = lazy(LAZY_SURFACE_LOADERS.commandPalette);
+export const LazySpecWikiModal = lazy(LAZY_SURFACE_LOADERS.specWiki);
+export const LazyOnboardingWizard = lazy(LAZY_SURFACE_LOADERS.onboarding);
+export const LazyMissionControl = lazy(LAZY_SURFACE_LOADERS.missionControl);
+export const LazyPullRequestsView = lazy(LAZY_SURFACE_LOADERS.pullRequests);
+export const LazyReviewPanel = lazy(LAZY_SURFACE_LOADERS.review);
+export const LazyBrowserFocusWorkspace = lazy(LAZY_SURFACE_LOADERS.browser);
+export const LazyTerminalWorkspace = lazy(LAZY_SURFACE_LOADERS.terminal);
+export const LazyFilesWorkspace = lazy(LAZY_SURFACE_LOADERS.files);
 
 export function utilityToolFallback(tool: UtilityTool) {
   switch (tool) {

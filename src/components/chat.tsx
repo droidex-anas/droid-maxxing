@@ -1,4 +1,4 @@
-import { useMemo, useState, memo, useEffect, useRef } from 'react';
+import { useMemo, useState, memo, useEffect, useRef, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
@@ -15,9 +15,8 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
-import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlockRuntime';
+import { hasAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
-import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
   extractFileChange,
   MAX_DIFF_CARDS_PER_COMMIT,
@@ -66,9 +65,20 @@ import {
 } from '../lib/childSessions';
 import { openExternal } from '../lib/onboarding';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
-import { feedItemTailId } from '../hooks/conversationViewportAnchor';
-import { asChunkedSequence, chunkedSequenceChunks } from '../lib/chunkedSequence';
-import { FeedRowsChunk, feedRowsChunkKey, type FeedRowsSharedProps } from './messageFeedRows';
+import {
+  feedItemTailId,
+  type ConversationViewportLayout,
+} from '../hooks/conversationViewportAnchor';
+import { asChunkedSequence } from '../lib/chunkedSequence';
+import {
+  ConversationList,
+  type ConversationListHandle,
+  type ConversationVisibleRange,
+} from './ConversationList';
+import { takeFeedRowEntrance } from './conversationListState';
+import { MessageBody } from './MessageBody';
+import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
+import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import {
   appendedFeedItemKeysFromProjection,
   projectFinalResponseKeys,
@@ -2021,58 +2031,6 @@ const InlineSpecCard = memo(function InlineSpecCard({
   );
 });
 
-/* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({
-  text,
-  live,
-  autoPlayAppBlocks,
-}: {
-  text: string;
-  live: boolean;
-  autoPlayAppBlocks: boolean;
-}) {
-  // Strip the history "[truncated N chars]" sentinel so the raw marker never
-  // shows; the cut itself is intentionally not surfaced.
-  const { body, truncatedChars } = parseTruncatedTail(text);
-  const hasCompleteApp = hasCompleteAppBlock(body);
-  const buildingAppBlocks = live && hasAppBlock(body);
-  // History caps message text. When that cut landed inside an App fence the
-  // source can never run, so the block says so instead of offering a Play
-  // control that would start an empty App. Only replayed text can be cut: a
-  // live answer whose tail merely looks like the sentinel is still streaming.
-  const cutOffAppBlocks = !live && truncatedChars !== null && hasIncompleteAppBlock(body);
-  const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
-  if (!hasJsonRender(body))
-    return (
-      <Markdown
-        autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-        buildingAppBlocks={buildingAppBlocks}
-        cutOffAppBlocks={cutOffAppBlocks}
-      >
-        {body}
-      </Markdown>
-    );
-  const segments = splitJsonRender(body);
-  return (
-    <>
-      {segments.map((seg, i) =>
-        seg.type === 'json-render' ? (
-          <JsonRender key={i} source={seg.value} />
-        ) : seg.value.trim() ? (
-          <Markdown
-            key={i}
-            autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-            buildingAppBlocks={buildingAppBlocks}
-            cutOffAppBlocks={cutOffAppBlocks}
-          >
-            {seg.value}
-          </Markdown>
-        ) : null,
-      )}
-    </>
-  );
-});
-
 export interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
@@ -2225,7 +2183,12 @@ const FeedItemView = memo(function FeedItemView({
       const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
-          <MessageBody text={text} live={live} autoPlayAppBlocks={autoPlayAppBlocks} />
+          <MessageBody
+            text={text}
+            live={live}
+            autoPlayAppBlocks={autoPlayAppBlocks}
+            cacheId={item.key}
+          />
           {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
@@ -2606,6 +2569,11 @@ export function MessageFeed({
   onOpenSpecWiki,
   createdWorktreePath,
   onMountedRowsChange,
+  onVisibleRangeChange,
+  scrollElementRef,
+  viewportLayoutRef,
+  listRef,
+  initialScrollOffset,
   updateKind = 'full',
   rebuiltFromItemIndex = 0,
 }: {
@@ -2624,6 +2592,11 @@ export function MessageFeed({
   onOpenSpecWiki?: () => void;
   createdWorktreePath?: string;
   onMountedRowsChange?: (count: number) => void;
+  onVisibleRangeChange?: (range: ConversationVisibleRange) => void;
+  scrollElementRef?: RefObject<HTMLElement | null>;
+  viewportLayoutRef?: RefObject<ConversationViewportLayout | null>;
+  listRef?: RefObject<ConversationListHandle | null>;
+  initialScrollOffset?: number;
   updateKind?: 'full' | 'append' | 'prepend';
   rebuiltFromItemIndex?: number;
 }) {
@@ -2712,16 +2685,12 @@ export function MessageFeed({
     updateKind,
     rebuiltFromItemIndex,
   );
-
-  useEffect(() => {
-    onMountedRowsChange?.(items.length);
-  }, [items.length, onMountedRowsChange]);
-  useEffect(
-    () => () => {
-      onMountedRowsChange?.(0);
-    },
-    [onMountedRowsChange],
-  );
+  const enteredKeysRef = useRef(new Set<string>());
+  const enteredIdentityRef = useRef(feedIdentity);
+  if (enteredIdentityRef.current !== feedIdentity) {
+    enteredKeysRef.current = new Set();
+    enteredIdentityRef.current = feedIdentity;
+  }
 
   // The copy button appears only on a turn's final model response.
   const finalResponseStateRef = useRef<FinalResponseKeyState | null>(null);
@@ -2814,32 +2783,8 @@ export function MessageFeed({
       specContent,
     ],
   );
-  const rowChunks = chunkedSequenceChunks(items);
-  let itemOffset = 0;
-  const renderedRowChunks = rowChunks.map((chunk, chunkIndex) => {
-    const offset = itemOffset;
-    itemOffset += chunk.length;
-    return (
-      <FeedRowsChunk
-        key={feedRowsChunkKey(chunkIndex)}
-        items={chunk}
-        itemOffset={offset}
-        lastItemIndex={lastIdx}
-        isLiveChunk={chunkIndex === rowChunks.length - 1}
-        shared={rowSharedProps}
-        activityRevision={events}
-        animateKeys={animateKeys}
-        freshAppResponseTexts={freshAppResponseTexts}
-        finalResponseState={finalResponseState}
-        compacting={compacting}
-        subagentPoll={Boolean(subagentPoll)}
-        worktreeInsertAfter={worktreeInsertAfter}
-        createdWorktreePath={createdWorktreePath}
-        itemView={FeedItemView}
-        areItemPropsEqual={feedItemPropsEqual}
-      />
-    );
-  });
+  const optionalItemProps = optionalFeedRowProps(rowSharedProps);
+  const subagentPollActive = Boolean(subagentPoll);
 
   return (
     <div className="space-y-4">
@@ -2849,7 +2794,45 @@ export function MessageFeed({
         </div>
       )}
 
-      {renderedRowChunks}
+      <ConversationList
+        items={items}
+        {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
+        {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
+        {...(listRef !== undefined ? { listRef } : {})}
+        {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
+        {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
+        {...(onVisibleRangeChange !== undefined ? { onVisibleRangeChange } : {})}
+      >
+        {(item, index) => (
+          <>
+            <FeedRow
+              item={item}
+              itemView={FeedItemView}
+              areItemPropsEqual={feedItemPropsEqual}
+              animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
+              live={pending && index === lastIdx && !subagentPollActive}
+              autoPlayAppBlocks={
+                item.type === 'message' &&
+                item.event.author !== 'user' &&
+                freshAppResponseTexts.has(item.event.text ?? '')
+              }
+              sessionLive={pending}
+              compacting={compacting && index === lastIdx}
+              {...optionalItemProps}
+              liveTiming={rowSharedProps.liveTiming}
+              isFinalResponse={
+                finalResponseState.settledKeys.has(item.key) ||
+                finalResponseState.liveKeys.has(item.key)
+              }
+            />
+            {index === worktreeInsertAfter && createdWorktreePath ? (
+              <div className="mx-auto min-w-0 max-w-2xl">
+                <WorktreeCreatedCard path={createdWorktreePath} />
+              </div>
+            ) : null}
+          </>
+        )}
+      </ConversationList>
 
       {showWorking && (
         <div className="mx-auto min-w-0 max-w-2xl">

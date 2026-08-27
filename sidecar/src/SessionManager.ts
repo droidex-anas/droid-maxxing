@@ -47,6 +47,7 @@ import {
   resolveSessionChain,
 } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
+import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
 import { SessionAdoption } from './sessionAdoption.js';
 import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
@@ -264,6 +265,17 @@ export class SessionManager {
       this.history = new HistoryPersistence({
         onStatusChanged: (status) => {
           if (status.state === 'healthy') return;
+          if (status.state === 'search_unavailable') {
+            this.emit({
+              type: 'error',
+              code: 'history.search_unavailable',
+              message:
+                `History search is unavailable: ${status.message} ` +
+                'Canonical session history is unaffected.',
+              recoverable: false,
+            });
+            return;
+          }
           this.emit({
             type: 'error',
             code: 'history.persistence_degraded',
@@ -727,9 +739,21 @@ export class SessionManager {
         // publishing results the renderer would discard by requestId anyway.
         this.latestSearchRequestId = cmd.requestId;
         const isStale = (): boolean => this.latestSearchRequestId !== cmd.requestId;
-        const results = await this.history.searchSessions(cmd.query, isStale);
-        if (!isStale()) {
-          this.emit({ type: 'sessions.searchResults', requestId: cmd.requestId, results });
+        try {
+          const results = await this.history.searchSessions(cmd.query, isStale);
+          if (!isStale()) {
+            this.emit({ type: 'sessions.searchResults', requestId: cmd.requestId, results });
+          }
+        } catch (error) {
+          if (!isHistorySearchUnavailableError(error)) throw error;
+          if (!isStale()) {
+            this.emitError({
+              code: 'history.search_unavailable',
+              requestId: cmd.requestId,
+              message: errMsg(error),
+              recoverable: false,
+            });
+          }
         }
         return;
       }
@@ -1732,6 +1756,7 @@ export class SessionManager {
   private emitError(error: {
     code?: string;
     clientRef?: string;
+    requestId?: string;
     providerSessionId?: string;
     appSessionId?: string;
     message: string;

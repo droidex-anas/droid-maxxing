@@ -8,6 +8,10 @@ import type {
   HistoryWorkerResponse,
 } from './historyPersistenceProtocol.js';
 import { serializeHistoryWorkerError } from './historyPersistenceProtocol.js';
+import {
+  HistorySearchUnavailableError,
+  isHistorySearchUnavailableError,
+} from './historySearchSchema.js';
 
 interface HistoryWorkerData {
   dbPath: string;
@@ -32,6 +36,7 @@ function historyWorkerData(value: unknown): HistoryWorkerData | null {
 let persistenceDatabase: HistoryPersistenceDatabase | null = null;
 let persistenceInitializationMs: number | undefined;
 let indexDatabase: HistoryIndexDatabase | null = null;
+let indexUnavailable: HistorySearchUnavailableError | null = null;
 let latestSearchEpoch = 0;
 let operationTail: Promise<void> = Promise.resolve();
 let closed = false;
@@ -139,8 +144,18 @@ function assertRequestMatchesLane(
 }
 
 function getIndexDatabase(): HistoryIndexDatabase {
-  indexDatabase ??= new HistoryIndexDatabase(dbPath);
-  return indexDatabase;
+  if (indexUnavailable) throw indexUnavailable;
+  if (indexDatabase) return indexDatabase;
+  try {
+    indexDatabase = new HistoryIndexDatabase(dbPath);
+    return indexDatabase;
+  } catch (error) {
+    if (isHistorySearchUnavailableError(error)) {
+      indexUnavailable = new HistorySearchUnavailableError();
+      throw indexUnavailable;
+    }
+    throw error;
+  }
 }
 
 function getPersistenceDatabase(): HistoryPersistenceDatabase {

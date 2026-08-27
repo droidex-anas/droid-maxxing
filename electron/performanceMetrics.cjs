@@ -1,7 +1,3 @@
-// Electron main-process performance gauges for perf phase 0 (#116): live
-// WebContents, live PTYs, and process memory/CPU. Accessors are injected so
-// the collector is unit-testable without Electron or node-pty.
-
 function createPerformanceMetricsCollector({ countPtys, listWebContents } = {}) {
   const cpuBaseline = process.cpuUsage();
 
