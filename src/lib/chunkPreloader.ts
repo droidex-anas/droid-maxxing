@@ -1,12 +1,13 @@
 import { LAZY_SURFACE_LOADERS, type LazySurface } from './lazySurfaces';
 
 type IdleCallbackHandle = number;
-type PreloadTrigger = 'intent' | 'idle';
 
 const warmed = new Set<LazySurface>();
 const intentCleanups = new Map<LazySurface, () => void>();
+const loaderCalls = new Map<LazySurface, number>();
 let idleHandle: IdleCallbackHandle | null = null;
-let idleScheduled = false;
+let idleGeneration = 0;
+let loaderOverride: Partial<Record<LazySurface, () => Promise<unknown>>> | null = null;
 
 const IDLE_SURFACES: LazySurface[] = [
   'settings',
@@ -17,16 +18,21 @@ const IDLE_SURFACES: LazySurface[] = [
   'browser',
 ];
 
-function preloadSurface(surface: LazySurface, trigger: PreloadTrigger): void {
+function loaderFor(surface: LazySurface): () => Promise<unknown> {
+  return loaderOverride?.[surface] ?? LAZY_SURFACE_LOADERS[surface];
+}
+
+function preloadSurface(surface: LazySurface): void {
   if (warmed.has(surface)) return;
   warmed.add(surface);
-  void LAZY_SURFACE_LOADERS[surface]().catch(() => {
-    if (trigger === 'idle') warmed.delete(surface);
+  loaderCalls.set(surface, (loaderCalls.get(surface) ?? 0) + 1);
+  void loaderFor(surface)().catch(() => {
+    warmed.delete(surface);
   });
 }
 
 export function preloadLazySurface(surface: LazySurface): void {
-  preloadSurface(surface, 'intent');
+  preloadSurface(surface);
 }
 
 export function bindLazySurfaceIntent(
@@ -55,14 +61,13 @@ export function bindLazySurfaceIntent(
 }
 
 export function scheduleIdleLazyWarmup(): void {
-  if (idleScheduled) return;
-  idleScheduled = true;
+  if (idleHandle !== null) return;
+  const generation = idleGeneration;
 
   const run = () => {
     idleHandle = null;
-    if (!idleScheduled) return;
-    idleScheduled = false;
-    for (const surface of IDLE_SURFACES) preloadSurface(surface, 'idle');
+    if (generation !== idleGeneration) return;
+    for (const surface of IDLE_SURFACES) preloadSurface(surface);
   };
 
   const requestIdle = (
@@ -71,33 +76,36 @@ export function scheduleIdleLazyWarmup(): void {
     }
   ).requestIdleCallback;
 
-  if (requestIdle) {
-    idleHandle = requestIdle(run, { timeout: 4_000 });
-    return;
-  }
-
-  idleHandle = setTimeout(run, 1_500) as unknown as IdleCallbackHandle;
+  idleHandle = requestIdle
+    ? requestIdle(run, { timeout: 4_000 })
+    : (setTimeout(run, 1_500) as unknown as IdleCallbackHandle);
 }
 
 export function cancelIdleLazyWarmup(): void {
-  idleScheduled = false;
+  idleGeneration += 1;
   if (idleHandle === null) return;
+  const handle = idleHandle;
+  idleHandle = null;
   const cancelIdle = (globalThis as { cancelIdleCallback?: (handle: number) => void })
     .cancelIdleCallback;
-  if (cancelIdle) cancelIdle(idleHandle);
-  else clearTimeout(idleHandle);
-  idleHandle = null;
+  if (cancelIdle) cancelIdle(handle);
+  else clearTimeout(handle);
 }
 
 /** @internal Reset module state for deterministic tests. */
-export function resetChunkPreloaderForTest(): void {
+export function __resetChunkPreloaderForTest(options?: {
+  loaders?: Partial<Record<LazySurface, () => Promise<unknown>>>;
+}): void {
   for (const cleanup of intentCleanups.values()) cleanup();
   intentCleanups.clear();
   cancelIdleLazyWarmup();
   warmed.clear();
+  loaderCalls.clear();
+  loaderOverride = options?.loaders ?? null;
+  idleGeneration += 1;
 }
 
-/** @internal Test-only visibility into warmed surfaces. */
-export function warmedLazySurfacesForTest(): ReadonlySet<LazySurface> {
-  return warmed;
+/** @internal Count loader invocations per surface during tests. */
+export function __loaderCallsForTest(): ReadonlyMap<LazySurface, number> {
+  return loaderCalls;
 }
