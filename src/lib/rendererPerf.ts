@@ -7,8 +7,27 @@
 
 import type { ServerEvent } from '../types/bridge';
 
+export type StartupPhase =
+  | 'rendererHtmlLoaded'
+  | 'firstMeaningfulShellPaint'
+  | 'composerInteractive'
+  | 'sidecarConnected'
+  | 'sessionListReady';
+
+export interface StartupPhaseTimings {
+  rendererHtmlLoadedMs?: number;
+  firstMeaningfulShellPaintMs?: number;
+  composerInteractive:
+    | { status: 'pending' }
+    | { status: 'marked'; atMs: number }
+    | { status: 'notApplicable' };
+  sidecarConnectedMs?: number;
+  sessionListReadyMs?: number;
+}
+
 export interface RendererPerfSnapshot {
   startedAt: number;
+  startupPhases: StartupPhaseTimings;
   eventsReceived: number;
   appendedReceived: number;
   receiveToCommitMs: {
@@ -71,6 +90,8 @@ const cursors = { commit: 0, paint: 0, append: 0, feed: 0 };
 const counts = { commit: 0, paint: 0, append: 0, feed: 0 };
 
 let startedAt = 0;
+const startupPhases: Partial<Record<StartupPhase, number>> = {};
+let composerInteractiveStatus: StartupPhaseTimings['composerInteractive'] = { status: 'pending' };
 let eventsReceived = 0;
 let appendedReceived = 0;
 let pending: PendingEvent[] = [];
@@ -111,11 +132,45 @@ export function startRendererPerfObservers(): void {
   }
 }
 
+/** Record a renderer startup phase once; timestamps are performance.now() marks. */
+export function noteStartupPhase(phase: StartupPhase): void {
+  if (startupPhases[phase] !== undefined) return;
+  startedAt ||= Date.now();
+  startupPhases[phase] = performance.now();
+}
+
+export function noteRendererHtmlLoaded(): void {
+  noteStartupPhase('rendererHtmlLoaded');
+}
+
+export function noteFirstMeaningfulShellPaint(): void {
+  noteStartupPhase('firstMeaningfulShellPaint');
+}
+
+export function noteComposerInteractive(): void {
+  if (composerInteractiveStatus.status !== 'pending') return;
+  startedAt ||= Date.now();
+  composerInteractiveStatus = { status: 'marked', atMs: performance.now() };
+  noteStartupPhase('composerInteractive');
+}
+
+/** Startup landed on a surface with no composer; do not fabricate a composer mark. */
+export function noteComposerNotApplicable(): void {
+  if (composerInteractiveStatus.status !== 'pending') return;
+  composerInteractiveStatus = { status: 'notApplicable' };
+}
+
 /** Stamp a bridge event at socket-read time; called from Bridge.onmessage. */
 export function noteBridgeEventReceived(event: ServerEvent): void {
   startedAt ||= Date.now();
   eventsReceived += 1;
   const now = performance.now();
+  if (event.type === 'connection' && event.status === 'connected') {
+    noteStartupPhase('sidecarConnected');
+  }
+  if (event.type === 'sessions.list') {
+    noteStartupPhase('sessionListReady');
+  }
   if (event.type === 'event.appended') {
     appendedReceived += 1;
     record(appendToReceive, 'append', now - clampEpoch(event.event.ts));
@@ -173,6 +228,13 @@ export function noteFeedProjection(options: {
 export function getRendererPerfSnapshot(): RendererPerfSnapshot {
   return {
     startedAt,
+    startupPhases: {
+      rendererHtmlLoadedMs: startupPhases.rendererHtmlLoaded,
+      firstMeaningfulShellPaintMs: startupPhases.firstMeaningfulShellPaint,
+      composerInteractive: { ...composerInteractiveStatus },
+      sidecarConnectedMs: startupPhases.sidecarConnected,
+      sessionListReadyMs: startupPhases.sessionListReady,
+    },
     eventsReceived,
     appendedReceived,
     receiveToCommitMs: stats(receiveToCommit, 'commit'),
@@ -215,6 +277,12 @@ export function resetRendererPerfForTest(): void {
     eventsReused: 0,
   };
   startedAt = 0;
+  startupPhases.rendererHtmlLoaded = undefined;
+  startupPhases.firstMeaningfulShellPaint = undefined;
+  startupPhases.composerInteractive = undefined;
+  startupPhases.sidecarConnected = undefined;
+  startupPhases.sessionListReady = undefined;
+  composerInteractiveStatus = { status: 'pending' };
   observersStarted = false;
 }
 

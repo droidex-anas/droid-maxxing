@@ -77,6 +77,7 @@ import {
   type VisibleSessionTarget,
 } from '../lib/childSessions';
 import { ArrowUp, ChevronDown, LoaderCircle, SlidersHorizontal, Square } from 'lucide-react';
+import { noteComposerInteractive } from '../lib/rendererPerf';
 import AddMenu from './composer/AddMenu';
 import { DraftSelections } from './composer/DraftSelections';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
@@ -295,6 +296,11 @@ export default function PromptInput({
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!textareaRef.current) return;
+    noteComposerInteractive();
+  }, []);
   // The draft and the selections that share its first line. Autosize holds this
   // box still while it measures the draft.
   const draftBoxRef = useRef<HTMLDivElement>(null);

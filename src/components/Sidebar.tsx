@@ -9,12 +9,13 @@
 // heading (collapse, new chat, context-menu remove) lives in
 // SidebarWorkspaceRow.tsx. Reviewed ceiling: ~750 lines; extract the
 // workspace section if it grows past that.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { pickDirectory } from '../lib/desktop';
 import { dismissSidebarCard, loadSidebarCardSeen } from '../lib/sidebarCards';
+import { bindLazySurfaceIntent } from '../lib/chunkPreloader';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
@@ -136,6 +137,9 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
     null,
   );
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
 
   const documentVisible = useDocumentVisible();
   const [now, setNow] = useState(() => Date.now());
@@ -668,6 +672,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
         </AnimatePresence>
         <div className="flex items-center gap-1">
           <button
+            ref={settingsButtonRef}
             onClick={() => {
               dispatch({ type: 'TOGGLE_SETTINGS' });
             }}
