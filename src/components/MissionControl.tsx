@@ -136,6 +136,7 @@ function ChatArea({
           onOpenDiff={onOpenDiff}
           onOpenChildSession={onOpenChildSession}
           childSessionActivity={childSessionActivity}
+          scrollElementRef={scrollRef}
         />
 
         {events.length === 0 && !pending && (

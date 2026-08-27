@@ -5,6 +5,7 @@ import {
   restoreViewportAnchor,
   shouldCancelViewportRestore,
   viewportAnchorAfterScroll,
+  type ConversationViewportLayout,
   type ViewportAnchor,
 } from './conversationViewportAnchor';
 
@@ -57,6 +58,7 @@ interface ConversationScrollWindowOptions {
   isConversationLive: boolean;
   isAutoPagingOlderHistory: boolean;
   dispatch: ScrollDispatch;
+  viewportLayoutRef?: RefObject<ConversationViewportLayout | null>;
 }
 
 interface PendingHistoryPrepend {
@@ -162,6 +164,7 @@ export function applyConversationContentResize(
   anchor: ViewportAnchor | null,
   isPinned: boolean,
   allowHeightFallback: boolean,
+  layout?: ConversationViewportLayout | null,
 ):
   | { mode: 'follow-tail' | 'ignore'; anchor: ViewportAnchor | null; didFindRow: false }
   | { mode: 'preserve-anchor'; anchor: ViewportAnchor; didFindRow: boolean } {
@@ -170,7 +173,7 @@ export function applyConversationContentResize(
     return { mode: 'follow-tail', anchor, didFindRow: false };
   }
   if (anchor === null) return { mode: 'ignore', anchor, didFindRow: false };
-  const restored = restoreViewportAnchor(element, anchor, allowHeightFallback);
+  const restored = restoreViewportAnchor(element, anchor, allowHeightFallback, layout);
   return { mode: 'preserve-anchor', ...restored };
 }
 
@@ -221,9 +224,11 @@ export function useConversationScrollWindow({
   isConversationLive,
   isAutoPagingOlderHistory,
   dispatch,
+  viewportLayoutRef,
 }: ConversationScrollWindowOptions): {
   onScroll: () => void;
   requestOlderHistory: (limit?: number) => void;
+  restoredScrollOffset: number | undefined;
 } {
   const viewportAnchor = useRef<ViewportAnchor | null>(null);
   const isRestoringViewport = useRef(false);
@@ -267,7 +272,7 @@ export function useConversationScrollWindow({
     element.scrollTop = snapshot?.top ?? element.scrollHeight;
     if (!isPinned.current) {
       viewportAnchor.current = snapshot?.anchor
-        ? restoreViewportAnchor(element, snapshot.anchor).anchor
+        ? restoreViewportAnchor(element, snapshot.anchor, true, viewportLayoutRef?.current).anchor
         : captureViewportAnchor(element, true);
     }
     if (activeAppSessionId) {
@@ -297,6 +302,7 @@ export function useConversationScrollWindow({
     isViewingChildSession,
     scrollRef,
     scrollSnapshots,
+    viewportLayoutRef,
     visibleConversationKey,
   ]);
 
@@ -454,12 +460,16 @@ export function useConversationScrollWindow({
         expectedRestoredScrollTop.current = null;
         return;
       }
-      const restored = restoreViewportAnchor(element, viewportAnchor.current);
+      const restored = restoreViewportAnchor(
+        element,
+        viewportAnchor.current,
+        true,
+        viewportLayoutRef?.current,
+      );
       viewportAnchor.current = restored.anchor;
       expectedRestoredScrollTop.current = element.scrollTop;
-      // content-visibility can exchange intrinsic estimates for measured row
-      // heights without changing the feed's total height. Recheck for a few
-      // frames even after finding the row, because a container-only observer
+      // Virtualizer measurement can keep shifting row offsets for a few frames
+      // after a prepend. Recheck until the cache settles; a container observer
       // cannot see that internal redistribution.
       if (remainingAttempts > 0) {
         remainingAttempts--;
@@ -482,7 +492,14 @@ export function useConversationScrollWindow({
         expectedRestoredScrollTop.current = null;
       }
     };
-  }, [isLoadingOlder, olderCursor, scrollRef, transcriptLength, visibleConversationKey]);
+  }, [
+    isLoadingOlder,
+    olderCursor,
+    scrollRef,
+    transcriptLength,
+    viewportLayoutRef,
+    visibleConversationKey,
+  ]);
 
   // Keep compensating after the prepend commit while dynamic chat content
   // settles. This applies equally to today's markdown/tool cards and future
@@ -528,7 +545,13 @@ export function useConversationScrollWindow({
           // Images, interactive Apps, and disclosures can grow without changing
           // transcript length. A bottom-pinned reader follows that growth just as
           // they follow newly appended output.
-          applyConversationContentResize(element, viewportAnchor.current, true, false);
+          applyConversationContentResize(
+            element,
+            viewportAnchor.current,
+            true,
+            false,
+            viewportLayoutRef?.current,
+          );
           return;
         }
         if (viewportAnchor.current === null) return;
@@ -542,6 +565,7 @@ export function useConversationScrollWindow({
           viewportAnchor.current,
           false,
           isSettlingHistoryPrepend.current,
+          viewportLayoutRef?.current,
         );
         if (restored.mode !== 'preserve-anchor') return;
         viewportAnchor.current = restored.anchor;
@@ -551,7 +575,12 @@ export function useConversationScrollWindow({
           if (binding.releaseFrame) cancelAnimationFrame(binding.releaseFrame);
           binding.releaseFrame = requestAnimationFrame(() => {
             if (viewportAnchor.current !== null && !restored.didFindRow) {
-              const retried = restoreViewportAnchor(element, viewportAnchor.current, false);
+              const retried = restoreViewportAnchor(
+                element,
+                viewportAnchor.current,
+                false,
+                viewportLayoutRef?.current,
+              );
               viewportAnchor.current = retried.didFindRow
                 ? retried.anchor
                 : captureViewportAnchor(element, true);
@@ -609,5 +638,12 @@ export function useConversationScrollWindow({
     retainedTranscriptLength,
   ]);
 
-  return { onScroll, requestOlderHistory };
+  return {
+    onScroll,
+    requestOlderHistory,
+    restoredScrollOffset:
+      visibleConversationKey && scrollSnapshots.has(visibleConversationKey)
+        ? scrollSnapshots.get(visibleConversationKey)?.top
+        : undefined,
+  };
 }

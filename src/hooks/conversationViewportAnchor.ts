@@ -12,6 +12,10 @@ export interface ViewportAnchorRestore {
   didFindRow: boolean;
 }
 
+export interface ConversationViewportLayout {
+  rowContentOffset(rowId: string): number | undefined;
+}
+
 export function feedItemTailId(item: FeedItem): string {
   if (item.type === 'worked') {
     const tail = item.items.at(-1);
@@ -171,33 +175,21 @@ export function captureViewportAnchor(
     : null;
 }
 
-function findFeedRow(element: HTMLDivElement, rowId: string): HTMLElement | null {
-  const escape = (globalThis as { CSS?: { escape?: (value: string) => string } }).CSS?.escape;
-  if (escape) {
-    return element.querySelector<HTMLElement>(`[data-feed-row-id="${escape(rowId)}"]`);
-  }
-
-  // CSS.escape is unavailable in Node-based tests and older DOM shims.
-  for (const row of feedRows(element)) {
-    if (row.dataset.feedRowId === rowId) return row;
-  }
-  return null;
-}
-
 export function restoreViewportAnchor(
   element: HTMLDivElement,
   anchor: ViewportAnchor,
   allowHeightFallback = true,
+  layout?: ConversationViewportLayout | null,
 ): ViewportAnchorRestore {
-  const row = findFeedRow(element, anchor.rowId);
-  if (row) {
-    const nextRowOffsetTop = measureRowOffsetTop(element, row);
+  const contentOffset = layout?.rowContentOffset(anchor.rowId);
+  if (contentOffset !== undefined) {
+    const nextRowOffsetTop = contentOffset - element.scrollTop;
     const nextScrollTop = scrollTopForPreservedAnchor(anchor, nextRowOffsetTop);
     if (Math.abs(element.scrollTop - nextScrollTop) > 0.5) element.scrollTop = nextScrollTop;
     return {
       anchor: updateViewportAnchorGeometry(
         anchor,
-        measureRowOffsetTop(element, row),
+        contentOffset - element.scrollTop,
         element.scrollTop,
         element.scrollHeight,
       ),

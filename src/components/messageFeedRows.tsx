@@ -1,56 +1,48 @@
-/* eslint-disable react/prop-types -- TypeScript owns this internal renderer contract. */
-import { Fragment, memo, useRef, type ComponentType } from 'react';
+import { memo, useRef, type ComponentType } from 'react';
 
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import type { ChildSessionActivity, ChildSessionTarget } from '../lib/childSessions';
 import type { FileChange } from '../lib/diff';
-import type { TranscriptEvent } from '../types/bridge';
 import { hasAppBlock } from './appBlockRuntime';
-import type { FeedItem, FeedItemViewProps } from './chat';
-import type { FinalResponseKeyState } from './messageFeedState';
+import type { FeedItemViewProps } from './chat';
 import type { SubagentsDockData } from './SubagentsDock';
-import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 
-const FEED_ROW_RENDER_STYLE = {
-  contentVisibility: 'auto',
-  containIntrinsicSize: 'auto 96px',
-} as const;
-
-interface FeedRowProps extends FeedItemViewProps {
+export interface FeedRowProps extends FeedItemViewProps {
   animateOnMount: boolean;
   itemView: ComponentType<FeedItemViewProps>;
   areItemPropsEqual: (previous: FeedItemViewProps, next: FeedItemViewProps) => boolean;
 }
 
-const FeedRow = memo(
-  function FeedRow(props: FeedRowProps) {
-    const { animateOnMount, itemView, areItemPropsEqual, ...itemProps } = props;
-    void areItemPropsEqual;
-    const ItemView = itemView;
-    const animate = useRef(animateOnMount).current;
-    const { item } = itemProps;
-    const isPrompt = item.type === 'message' && item.event.author === 'user';
-    const isWideAppResponse =
-      item.type === 'message' && item.event.author !== 'user' && hasAppBlock(item.event.text ?? '');
-
-    return (
-      <div
-        data-feed-row-id={feedRowId(item)}
-        data-anchor-id={isPrompt ? item.key : undefined}
-        style={FEED_ROW_RENDER_STYLE}
-        className={`mx-auto min-w-0 ${isWideAppResponse ? 'max-w-4xl' : 'max-w-2xl'} ${
-          animate ? 'feed-row-enter' : ''
-        }`}
-      >
-        <ItemView {...itemProps} />
-      </div>
-    );
-  },
-  (previous, next) =>
+export function areFeedRowPropsEqual(previous: FeedRowProps, next: FeedRowProps): boolean {
+  return (
     previous.itemView === next.itemView &&
     previous.areItemPropsEqual === next.areItemPropsEqual &&
-    next.areItemPropsEqual(previous, next),
-);
+    next.areItemPropsEqual(previous, next)
+  );
+}
+
+export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
+  const { animateOnMount, itemView, areItemPropsEqual, ...itemProps } = props;
+  void areItemPropsEqual;
+  const ItemView = itemView;
+  const animate = useRef(animateOnMount).current;
+  const { item } = itemProps;
+  const isPrompt = item.type === 'message' && item.event.author === 'user';
+  const isWideAppResponse =
+    item.type === 'message' && item.event.author !== 'user' && hasAppBlock(item.event.text ?? '');
+
+  return (
+    <div
+      data-feed-row-id={feedRowId(item)}
+      data-anchor-id={isPrompt ? item.key : undefined}
+      className={`mx-auto min-w-0 ${isWideAppResponse ? 'max-w-4xl' : 'max-w-2xl'} ${
+        animate ? 'feed-row-enter' : ''
+      }`}
+    >
+      <ItemView {...itemProps} />
+    </div>
+  );
+}, areFeedRowPropsEqual);
 
 export interface FeedRowsSharedProps {
   pending: boolean;
@@ -64,112 +56,7 @@ export interface FeedRowsSharedProps {
   specContent?: string;
 }
 
-interface FeedRowsChunkProps {
-  items: readonly FeedItem[];
-  itemOffset: number;
-  lastItemIndex: number;
-  isLiveChunk: boolean;
-  shared: FeedRowsSharedProps;
-  activityRevision: readonly TranscriptEvent[];
-  animateKeys: ReadonlySet<string>;
-  freshAppResponseTexts: ReadonlySet<string>;
-  finalResponseState: FinalResponseKeyState;
-  compacting: boolean;
-  subagentPoll: boolean;
-  worktreeInsertAfter: number;
-  createdWorktreePath?: string;
-  itemView: ComponentType<FeedItemViewProps>;
-  areItemPropsEqual: (previous: FeedItemViewProps, next: FeedItemViewProps) => boolean;
-}
-
-const volatileFeedChunks = new WeakMap<readonly FeedItem[], boolean>();
-
-/**
- * Chunk keys are positional in the projected feed sequence, never derived from
- * chunk content: a capped transcript window (for example Mission Control's
- * sliding event window) re-chunks from scratch, so a content-derived key would
- * remount every chunk and drop row-local disclosure state on each slide.
- * Rows inside a chunk stay keyed by their own stable item keys.
- */
-export function feedRowsChunkKey(chunkIndex: number): string {
-  return `feed-rows-${String(chunkIndex)}`;
-}
-
-export function areFeedRowsChunkPropsEqual(
-  previous: FeedRowsChunkProps,
-  next: FeedRowsChunkProps,
-): boolean {
-  if (
-    previous.items !== next.items ||
-    previous.itemOffset !== next.itemOffset ||
-    previous.shared !== next.shared ||
-    previous.isLiveChunk ||
-    next.isLiveChunk ||
-    previous.worktreeInsertAfter !== next.worktreeInsertAfter ||
-    previous.createdWorktreePath !== next.createdWorktreePath ||
-    previous.finalResponseState.settledKeys !== next.finalResponseState.settledKeys ||
-    previous.finalResponseState.liveKeys !== next.finalResponseState.liveKeys ||
-    previous.itemView !== next.itemView ||
-    previous.areItemPropsEqual !== next.areItemPropsEqual
-  ) {
-    return false;
-  }
-  return (
-    !feedChunkHasChildActivity(next.items) || previous.activityRevision === next.activityRevision
-  );
-}
-
-export const FeedRowsChunk = memo(function FeedRowsChunk({
-  items,
-  itemOffset,
-  lastItemIndex,
-  shared,
-  animateKeys,
-  freshAppResponseTexts,
-  finalResponseState,
-  compacting,
-  subagentPoll,
-  worktreeInsertAfter,
-  createdWorktreePath,
-  itemView,
-  areItemPropsEqual,
-}: FeedRowsChunkProps) {
-  const optionalItemProps = optionalFeedRowProps(shared);
-  return items.map((item, localIndex) => {
-    const index = itemOffset + localIndex;
-    return (
-      <Fragment key={item.key}>
-        <FeedRow
-          item={item}
-          itemView={itemView}
-          areItemPropsEqual={areItemPropsEqual}
-          animateOnMount={animateKeys.has(item.key)}
-          live={shared.pending && index === lastItemIndex && !subagentPoll}
-          autoPlayAppBlocks={
-            item.type === 'message' &&
-            item.event.author !== 'user' &&
-            freshAppResponseTexts.has(item.event.text ?? '')
-          }
-          sessionLive={shared.pending}
-          compacting={compacting && index === lastItemIndex}
-          {...optionalItemProps}
-          liveTiming={shared.liveTiming}
-          isFinalResponse={
-            finalResponseState.settledKeys.has(item.key) ||
-            finalResponseState.liveKeys.has(item.key)
-          }
-        />
-        {index === worktreeInsertAfter && createdWorktreePath && (
-          <div className="mx-auto min-w-0 max-w-2xl">
-            <WorktreeCreatedCard path={createdWorktreePath} />
-          </div>
-        )}
-      </Fragment>
-    );
-  });
-}, areFeedRowsChunkPropsEqual);
-
-function optionalFeedRowProps(shared: FeedRowsSharedProps): Partial<FeedItemViewProps> {
+export function optionalFeedRowProps(shared: FeedRowsSharedProps): Partial<FeedItemViewProps> {
   return {
     ...(shared.cwd !== undefined ? { cwd: shared.cwd } : {}),
     ...(shared.onOpenDiff !== undefined ? { onOpenDiff: shared.onOpenDiff } : {}),
@@ -183,20 +70,4 @@ function optionalFeedRowProps(shared: FeedRowsSharedProps): Partial<FeedItemView
     ...(shared.subagentsDock !== undefined ? { subagentsDock: shared.subagentsDock } : {}),
     ...(shared.specContent !== undefined ? { specContent: shared.specContent } : {}),
   };
-}
-
-function feedChunkHasChildActivity(items: readonly FeedItem[]): boolean {
-  const cached = volatileFeedChunks.get(items);
-  if (cached !== undefined) return cached;
-  const hasChildActivity = items.some(feedItemHasChildActivity);
-  volatileFeedChunks.set(items, hasChildActivity);
-  return hasChildActivity;
-}
-
-function feedItemHasChildActivity(item: FeedItem): boolean {
-  return (
-    item.type === 'child_session' ||
-    item.type === 'child_sessions' ||
-    (item.type === 'worked' && item.items.some(feedItemHasChildActivity))
-  );
 }
