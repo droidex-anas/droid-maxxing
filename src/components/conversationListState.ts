@@ -78,15 +78,15 @@ export function measuredConversationRowSize(
 export interface ConversationRowSizeChange {
   start: number;
   size: number;
-  key: string | number;
+  key: string | number | bigint;
 }
 
 export interface ConversationRowSizeChangeHost {
   isScrolling: boolean;
   scrollDirection: 'forward' | 'backward' | null;
   scrollAdjustments: number;
-  itemSizeCache: { has: (key: string | number) => boolean };
-  getScrollOffset: () => number;
+  itemSizeCache: { has: (key: string | number | bigint) => boolean };
+  scrollOffset: number | null;
 }
 
 // Mirrors TanStack's default, except user-driven scroll: estimate→actual must
@@ -97,7 +97,7 @@ export function shouldAdjustConversationRowOnSizeChange(
   instance: ConversationRowSizeChangeHost,
 ): boolean {
   if (instance.isScrolling) return false;
-  const scrollOffsetWithAdj = instance.getScrollOffset() + instance.scrollAdjustments;
+  const scrollOffsetWithAdj = (instance.scrollOffset ?? 0) + instance.scrollAdjustments;
   const isFirstMeasure = !instance.itemSizeCache.has(item.key);
   if (isFirstMeasure) return item.start < scrollOffsetWithAdj;
   return item.start + item.size <= scrollOffsetWithAdj && instance.scrollDirection !== 'backward';

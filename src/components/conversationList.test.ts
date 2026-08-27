@@ -155,8 +155,8 @@ test('size-change compensation is off while the user is scrolling', () => {
     isScrolling: true,
     scrollDirection: 'backward' as const,
     scrollAdjustments: 0,
-    itemSizeCache: new Map<string | number, number>(),
-    getScrollOffset: () => 2_000,
+    itemSizeCache: new Map<string | number | bigint, number>(),
+    scrollOffset: 2_000,
   };
   assert.equal(shouldAdjustConversationRowOnSizeChange(aboveFold, -77, scrolling), false);
 
@@ -166,7 +166,7 @@ test('size-change compensation is off while the user is scrolling', () => {
   const growingInView = { start: 1_920, size: 96, key: 'live' };
   const idleMeasured = {
     ...idle,
-    itemSizeCache: new Map<string | number, number>([['live', 96]]),
+    itemSizeCache: new Map<string | number | bigint, number>([['live', 96]]),
   };
   assert.equal(shouldAdjustConversationRowOnSizeChange(growingInView, 24, idleMeasured), false);
 });
