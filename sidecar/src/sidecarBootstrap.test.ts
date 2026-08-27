@@ -74,9 +74,9 @@ test('SIDECAR_READY is emitted before optional persistence warm finishes', async
   const home = mkdtempSync(join(tmpdir(), 'droid-sidecar-boot-'));
   const token = 'a'.repeat(64);
   const assetToken = 'b'.repeat(64);
-  const entry = fileURLToPath(new URL('./index.ts', import.meta.url));
+  const entry = fileURLToPath(new URL('../dist/sidecar.mjs', import.meta.url));
   const start = performance.now();
-  const child = spawn(process.execPath, ['--import', 'tsx', entry], {
+  const child = spawn(process.execPath, [entry], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
