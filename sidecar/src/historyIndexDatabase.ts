@@ -146,6 +146,7 @@ export class HistoryIndexDatabase {
 
   isIndexingIncomplete(): boolean {
     this.assertOpen();
+    if (this.searchUnavailable) return false;
     return (
       !this.hasPlannedAll ||
       this.recentQueue.size > 0 ||
