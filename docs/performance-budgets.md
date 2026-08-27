@@ -47,6 +47,8 @@ dedicated hardware is understood.
 | Transport pending estimated bytes | 32 MiB | Product cap of the replay buffer. |
 | Persistence overflow on a normal replay | 0 failures | Write-behind is capped at 50k rows / 64 MiB; overflow is explicit, not unbounded growth. |
 | Live primary sessions after soak cleanup | 0 | 12 create/close cycles must release every session. |
+| History worker third-party modules | 0 | `historyWorkerBundle.test.ts`. Both worker isolates compile this graph; a value import of the Droid SDK once cost ~83 MiB of sidecar RSS. |
+| History worker bundle | 200_000 bytes | Same test, ~2× the 98 KiB the workers actually need. |
 | Initial renderer JS | 1_280_000 bytes | `tools/check-bundle-budgets.mjs`, measured post-split with modest headroom. |
 | Initial CSS | 95_000 bytes | Same bundle check. |
 | Largest lazy JS chunk | 680_000 bytes | Same bundle check. |
