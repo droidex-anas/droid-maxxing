@@ -50,7 +50,7 @@ import type {
   BrowserViewportMode,
   DesignReference,
 } from '../types/bridge';
-import { addWorkspaceCwd } from '../lib/workspaces';
+import { addWorkspaceCwd, removeWorkspaceCwd } from '../lib/workspaces';
 import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
 import {
@@ -567,6 +567,7 @@ type Action =
   | { type: 'SESSION_NOTE_MARK_USED'; appSessionId: string; noteId: string }
   | { type: 'SESSION_NOTE_REMOVE'; appSessionId: string; noteId: string }
   | { type: 'ADD_WORKSPACE'; cwd: string }
+  | { type: 'REMOVE_WORKSPACE'; cwd: string }
   | { type: 'SET_WORKSPACE_CWDS'; cwds: string[] }
   | { type: 'TOGGLE_BROWSER' }
   | { type: 'SET_BROWSER_OPEN'; open: boolean }
@@ -2654,7 +2655,11 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         workspaceCwds: saveWorkspaceCwds(addWorkspaceCwd(state.workspaceCwds, action.cwd)),
       };
-
+    case 'REMOVE_WORKSPACE':
+      return {
+        ...state,
+        workspaceCwds: saveWorkspaceCwds(removeWorkspaceCwd(state.workspaceCwds, action.cwd)),
+      };
     case 'SET_WORKSPACE_CWDS':
       return { ...state, workspaceCwds: saveWorkspaceCwds(action.cwds) };
 

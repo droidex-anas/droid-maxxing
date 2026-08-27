@@ -5,8 +5,9 @@
 // (SessionRow, marquee, inline rename) already lives in SidebarSessionRow.tsx;
 // further splitting was rejected because the remaining handlers are composition
 // glue that fail the deletion test (extracting them would only forward store
-// state), and the Expand/WorkspaceFolderIcon primitives are too small to
-// justify their own modules. Reviewed ceiling: ~750 lines; extract the
+// state), and Expand is too small to justify its own module. The workspace
+// heading (collapse, new chat, context-menu remove) lives in
+// SidebarWorkspaceRow.tsx. Reviewed ceiling: ~750 lines; extract the
 // workspace section if it grows past that.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -19,7 +20,6 @@ import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import {
   CirclePlus,
-  Folder,
   FolderOpen,
   Plus,
   Search,
@@ -41,6 +41,7 @@ import { exportSessionMarkdown, renameSession } from '../lib/commands';
 import { toast } from '../lib/toast';
 import { SessionContextMenu } from './SessionContextMenu';
 import { SessionRow } from './SidebarSessionRow';
+import { SidebarWorkspaceRow } from './SidebarWorkspaceRow';
 import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
 import { sessionAttention } from '../lib/sessionAttention';
 import type { SessionSummary } from '../types/bridge';
@@ -99,33 +100,6 @@ function Expand({ open, children }: { open: boolean; children: ReactNode }) {
         </motion.div>
       )}
     </AnimatePresence>
-  );
-}
-
-// The workspace folder glyph doubles as the collapse indicator: closed while
-// the workspace is collapsed, open while expanded, crossfading between states.
-function WorkspaceFolderIcon({ open }: { open: boolean }) {
-  const reduceMotion = useReducedMotion();
-  const duration = reduceMotion ? 0 : 0.15;
-  return (
-    <span className="relative block w-4 h-4 shrink-0 text-droid-text-muted">
-      <motion.span
-        className="absolute inset-0 flex items-center justify-center"
-        initial={false}
-        animate={{ opacity: open ? 0 : 1 }}
-        transition={{ duration, ease: EASE }}
-      >
-        <Folder className="w-4 h-4" />
-      </motion.span>
-      <motion.span
-        className="absolute inset-0 flex items-center justify-center"
-        initial={false}
-        animate={{ opacity: open ? 1 : 0 }}
-        transition={{ duration, ease: EASE }}
-      >
-        <FolderOpen className="w-4 h-4" />
-      </motion.span>
-    </span>
   );
 }
 
@@ -607,32 +581,22 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
                   {workspaces.map((ws) => {
                     const wsOpen = !collapsed.has(ws.cwd);
                     return (
-                      <div key={ws.cwd}>
-                        <div className="group flex items-center gap-1 px-1 py-1">
-                          <button
-                            onClick={() => {
-                              toggleCollapse(ws.cwd);
-                            }}
-                            aria-expanded={wsOpen}
-                            className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-droid-elevated/40 transition-colors"
-                          >
-                            <WorkspaceFolderIcon open={wsOpen} />
-                            <span className="min-w-0 flex-1 truncate text-[13.5px] text-droid-text">
-                              {ws.name}
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              startChat(ws.cwd);
-                            }}
-                            title="New chat here"
-                            className="p-0.5 rounded-md text-droid-text-muted/0 group-hover:text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                      <SidebarWorkspaceRow
+                        key={ws.cwd}
+                        name={ws.name}
+                        open={wsOpen}
+                        onToggle={() => {
+                          toggleCollapse(ws.cwd);
+                        }}
+                        onNewChat={() => {
+                          startChat(ws.cwd);
+                        }}
+                        onRemove={() => {
+                          dispatch({ type: 'REMOVE_WORKSPACE', cwd: ws.cwd });
+                        }}
+                      >
                         <Expand open={wsOpen}>{renderSessionList(ws.cwd, ws.sessions)}</Expand>
-                      </div>
+                      </SidebarWorkspaceRow>
                     );
                   })}
 
