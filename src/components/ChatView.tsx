@@ -27,7 +27,10 @@ import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
 import { isEmbedded } from '../lib/embed';
-import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
+import {
+  CONVERSATION_OLDER_HISTORY_PAGE_EVENT_LIMIT,
+  useConversationScrollWindow,
+} from '../hooks/useConversationScrollWindow';
 import { useChildStreamSnapshots } from '../hooks/useChildStreamSnapshots';
 import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
 import {
@@ -42,6 +45,7 @@ import { setMountedFeedRows } from '../lib/rendererPerf';
 import { firstUserTranscriptEvent } from '../lib/transcriptIngestion';
 import { createTranscriptSpecPathProjector } from '../lib/transcriptSpecPath';
 import type { ConversationListHandle } from './ConversationList';
+import { TranscriptReachHost } from '../features/transcript-reach/TranscriptReachHost';
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -679,47 +683,63 @@ export default function ChatView({
         />
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
-        {activeSession && !isTimelinePriming && timelineAnchors.length >= 2 && (
-          <ConversationTimeline
-            scrollRef={scrollRef}
-            anchors={timelineAnchors}
-            onJumpToAnchor={(id) => {
-              conversationListRef.current?.scrollToRow(id);
-            }}
-          />
-        )}
-        <div
-          ref={scrollRef}
-          onScroll={onScroll}
-          className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden"
-          style={{
-            paddingRight: rightInset ? 312 : undefined,
-            transition: 'padding-right 0.2s ease',
-            overflowAnchor: 'none',
+        <TranscriptReachHost
+          items={feedItems}
+          updateKind={feedUpdateKind}
+          rebuiltFromItemIndex={rebuiltFromFeedItemIndex}
+          conversationKey={visibleConversationKey}
+          hasOlderHistory={Boolean(olderCursor)}
+          isLoadingOlder={loadingOlder}
+          onLoadOlder={() => {
+            requestOlderHistory(CONVERSATION_OLDER_HISTORY_PAGE_EVENT_LIMIT);
           }}
+          onScrollToRow={(rowId) => {
+            conversationListRef.current?.scrollToRow(rowId);
+          }}
+          enabled={Boolean(activeSession && transcript.length > 0)}
         >
-          {conversationContent}
-        </div>
-        <AnimatePresence>
-          {transcript.length > 0 &&
-            isConversationOpeningSettling({
-              isConversationLive: live,
-              isViewingChildSession: viewingChildSession,
-              isTimelinePriming,
-              hasOlderHistory: Boolean(olderCursor),
-              isLoadingOlder: loadingOlder,
-            }) && (
-              <motion.div
-                key="opening-settling-skeleton"
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2, ease: 'easeOut' }}
-                className="absolute inset-0 z-10 overflow-hidden bg-droid-bg"
-                style={{ paddingRight: rightInset ? 312 : undefined }}
-              >
-                <RestoringState />
-              </motion.div>
-            )}
-        </AnimatePresence>
+          {activeSession && !isTimelinePriming && timelineAnchors.length >= 2 && (
+            <ConversationTimeline
+              scrollRef={scrollRef}
+              anchors={timelineAnchors}
+              onJumpToAnchor={(id) => {
+                conversationListRef.current?.scrollToRow(id);
+              }}
+            />
+          )}
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden"
+            style={{
+              paddingRight: rightInset ? 312 : undefined,
+              transition: 'padding-right 0.2s ease',
+              overflowAnchor: 'none',
+            }}
+          >
+            {conversationContent}
+          </div>
+          <AnimatePresence>
+            {transcript.length > 0 &&
+              isConversationOpeningSettling({
+                isConversationLive: live,
+                isViewingChildSession: viewingChildSession,
+                isTimelinePriming,
+                hasOlderHistory: Boolean(olderCursor),
+                isLoadingOlder: loadingOlder,
+              }) && (
+                <motion.div
+                  key="opening-settling-skeleton"
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className="absolute inset-0 z-10 overflow-hidden bg-droid-bg"
+                  style={{ paddingRight: rightInset ? 312 : undefined }}
+                >
+                  <RestoringState />
+                </motion.div>
+              )}
+          </AnimatePresence>
+        </TranscriptReachHost>
       </div>
     </div>
   );

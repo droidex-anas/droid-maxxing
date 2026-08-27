@@ -13,7 +13,7 @@ const HISTORY_PAGE_EVENT_LIMIT = 240;
 // Reading near the thread's top pulls a large page so reaching the start of a
 // long thread takes a few loads, not dozens. Protocol mirror of
 // sidecar/src/SessionTimeline.ts MAX_HISTORY_PAGE_EVENTS.
-const OLDER_HISTORY_PAGE_EVENT_LIMIT = 1_600;
+export const CONVERSATION_OLDER_HISTORY_PAGE_EVENT_LIMIT = 1_600;
 const TOP_AUTO_LOAD_PX = 600;
 // Prepending while a flick is still in motion fights the reader's momentum and
 // feels laggy; a prepend against a settled viewport restores with zero drift.
@@ -432,7 +432,7 @@ export function useConversationScrollWindow({
         settledTopLoadTimer.current = null;
         const settled = scrollRef.current;
         if (!settled || settled.scrollTop >= TOP_AUTO_LOAD_PX) return;
-        requestOlderHistory(OLDER_HISTORY_PAGE_EVENT_LIMIT);
+        requestOlderHistory(CONVERSATION_OLDER_HISTORY_PAGE_EVENT_LIMIT);
       }, SCROLL_SETTLE_MS);
     }
   }, [
