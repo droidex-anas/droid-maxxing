@@ -147,6 +147,7 @@ function createSidecarSupervisor(options) {
     const run = {
       child: nextChild,
       intentionalStop: false,
+      concluded: false,
       cancelStartup: null,
       resolveExit: null,
     };
@@ -174,24 +175,20 @@ function createSidecarSupervisor(options) {
       }
       run.cancelStartup = () => fail(new Error('Sidecar startup was cancelled.'));
 
-      nextChild.once('error', fail);
+      nextChild.once('error', (error) => {
+        const failure = new Error(`Sidecar failed to start (${error.message}).`);
+        fail(failure);
+        concludeRun(run, failure);
+      });
       nextChild.once('exit', (code, signal) => {
-        run.resolveExit?.();
-        const current = activeRun === run;
-        if (current) {
-          activeRun = null;
-          child = null;
-          bridgeInfo = null;
-          processAlive = false;
-          bridgeResponsive = false;
-          stopHeartbeat();
-        }
         if (!settled) {
           fail(new Error(`Sidecar exited before ready (${code ?? signal ?? 'unknown'}).`));
-          if (current) handleUnexpectedExit(run, code, signal);
-          return;
         }
-        if (current) handleUnexpectedExit(run, code, signal);
+        const failure =
+          run.intentionalStop || lifecycle === 'stopped'
+            ? undefined
+            : new Error(`Sidecar exited unexpectedly (${code ?? signal}).`);
+        concludeRun(run, failure);
       });
       nextChild.stdout.on('data', (chunk) => {
         const text = String(chunk);
@@ -227,13 +224,22 @@ function createSidecarSupervisor(options) {
     return pendingStart;
   }
 
-  function handleUnexpectedExit(run, code, signal) {
-    if (run.intentionalStop || lifecycle === 'stopped') return;
-    const diagnostic = `Sidecar exited unexpectedly (${code ?? signal}).`;
-    const error = new Error(diagnostic);
-    errorOutput.write(`${error.message}\n`);
-    options.onUnexpectedExit?.(error);
-    scheduleRestart(diagnostic);
+  function concludeRun(run, failure) {
+    if (run.concluded) return;
+    run.concluded = true;
+    run.resolveExit?.();
+    if (activeRun === run) {
+      activeRun = null;
+      child = null;
+      bridgeInfo = null;
+      processAlive = false;
+      bridgeResponsive = false;
+      stopHeartbeat();
+    }
+    if (!failure || run.intentionalStop || lifecycle === 'stopped') return;
+    errorOutput.write(`${failure.message}\n`);
+    options.onUnexpectedExit?.(failure);
+    scheduleRestart(failure.message);
   }
 
   function scheduleRestart(reason) {
@@ -252,6 +258,8 @@ function createSidecarSupervisor(options) {
       if (lifecycle !== 'restarting') return;
       void start().catch((error) => {
         errorOutput.write(`${error.message}\n`);
+        // Spawn `error` and process `exit` already scheduled via concludeRun.
+        if (cancelRestart) return;
         if (lifecycle === 'restarting' || lifecycle === 'starting') {
           scheduleRestart(error.message);
         }
