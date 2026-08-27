@@ -9,6 +9,7 @@ import { performance } from 'node:perf_hooks';
 const BRIDGE_PROTOCOL = 3;
 const READY_TIMEOUT_MS = 20_000;
 const SESSIONS_LIST_TIMEOUT_MS = 30_000;
+const READY_PATTERN = /SIDECAR_READY (\d+)/;
 
 export interface AbProbeMetric {
   id: string;
@@ -31,7 +32,9 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
   }
   const requireFromTree = createRequire(entry);
   const wsPath = resolve(treeRoot, 'sidecar/node_modules/ws');
-  const { WebSocket } = requireFromTree(wsPath) as { WebSocket: WebSocketConstructor };
+  const { WebSocket: WebSocketClass } = requireFromTree(wsPath) as {
+    WebSocket: WebSocketConstructor;
+  };
   const orderedBridge = usesOrderedBridge(treeRoot);
   const runs = startupRuns();
   const readySamples: number[] = [];
@@ -42,7 +45,7 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
     await rm(home, { recursive: true, force: true });
     await mkdir(home, { recursive: true });
     try {
-      const sample = await measureOnce(entry, home, WebSocket, orderedBridge);
+      const sample = await measureOnce(entry, home, WebSocketClass, orderedBridge);
       readySamples.push(sample.readyMs);
       listSamples.push(sample.firstSessionsListMs);
     } finally {
@@ -70,7 +73,7 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
 async function measureOnce(
   entry: string,
   home: string,
-  WebSocketCtor: WebSocketConstructor,
+  webSocketCtor: WebSocketConstructor,
   orderedBridge: boolean,
 ): Promise<{ readyMs: number; firstSessionsListMs: number }> {
   const token = randomBytes(32).toString('hex');
@@ -97,7 +100,7 @@ async function measureOnce(
     }, READY_TIMEOUT_MS);
     child.stdout.on('data', (chunk) => {
       stdout += String(chunk);
-      const match = stdout.match(/SIDECAR_READY (\d+)/);
+      const match = READY_PATTERN.exec(stdout);
       if (!match || settled) return;
       settled = true;
       clearTimeout(timeout);
@@ -112,39 +115,36 @@ async function measureOnce(
   });
   const readyMs = performance.now() - spawnAt;
 
-  const listEvent = await waitForSessionsList(WebSocketCtor, port, token, orderedBridge);
+  await waitForSessionsList(webSocketCtor, port, token, orderedBridge);
   const firstSessionsListMs = performance.now() - spawnAt;
   child.kill();
-
-  if (listEvent.type !== 'sessions.list' || !Array.isArray(listEvent.sessions)) {
-    throw new Error(`sessions.list missing or malformed: ${JSON.stringify(listEvent)}`);
-  }
 
   return { readyMs, firstSessionsListMs };
 }
 
 async function waitForSessionsList(
-  WebSocketCtor: WebSocketConstructor,
+  webSocketCtor: WebSocketConstructor,
   port: number,
   token: string,
   orderedBridge: boolean,
 ): Promise<SessionsListEvent> {
-  const socket = new WebSocketCtor(bridgeUrl(port, token, orderedBridge));
+  const socket = new webSocketCtor(bridgeUrl(port, token, orderedBridge));
   await new Promise<void>((resolveOpen, reject) => {
-    socket.once('open', () => resolveOpen());
+    socket.once('open', () => {
+      resolveOpen();
+    });
     socket.once('error', (error: unknown) => {
       reject(error instanceof Error ? error : new Error(String(error)));
     });
   });
 
   const listPromise = new Promise<SessionsListEvent>((resolveList, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error('sessions.list timeout')),
-      SESSIONS_LIST_TIMEOUT_MS,
-    );
+    const timeout = setTimeout(() => {
+      reject(new Error('sessions.list timeout'));
+    }, SESSIONS_LIST_TIMEOUT_MS);
     socket.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
       try {
-        const message = JSON.parse(String(raw)) as WireMessage;
+        const message = JSON.parse(messageText(raw)) as WireMessage;
         const event = parseSessionsList(message);
         if (!event) return;
         clearTimeout(timeout);
@@ -173,17 +173,23 @@ function bridgeUrl(port: number, token: string, orderedBridge: boolean): string 
 
 function parseSessionsList(message: WireMessage): SessionsListEvent | null {
   if (message.type === 'sessions.list' && Array.isArray(message.sessions)) {
-    return message;
+    return { type: 'sessions.list', sessions: message.sessions };
   }
   if (message.type !== 'events.batch' || !Array.isArray(message.events)) return null;
   for (const entry of message.events) {
-    if (entry?.event?.type === 'sessions.list') return entry.event;
+    if (entry.event?.type === 'sessions.list') return entry.event;
   }
   return null;
 }
 
 function metric(id: string, value: number, unit: string, method: string): AbProbeMetric {
   return { id, value, unit, method };
+}
+
+function messageText(raw: Buffer | ArrayBuffer | Buffer[]): string {
+  if (Buffer.isBuffer(raw)) return raw.toString('utf8');
+  if (Array.isArray(raw)) return Buffer.concat(raw).toString('utf8');
+  return Buffer.from(new Uint8Array(raw)).toString('utf8');
 }
 
 function median(values: number[]): number {
@@ -203,9 +209,7 @@ interface WireMessage {
   events?: { event?: SessionsListEvent }[];
 }
 
-interface WebSocketConstructor {
-  new (url: string): WebSocketLike;
-}
+type WebSocketConstructor = new (url: string) => WebSocketLike;
 
 interface WebSocketLike {
   once(event: 'open' | 'error', listener: (...args: unknown[]) => void): void;
