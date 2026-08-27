@@ -10,7 +10,11 @@ export interface ReplayClientStats {
   appendedReceived: number;
   appendToReceiveMs: HistogramStats;
   providerToReceiveMs: HistogramStats;
+  // A turn's first provider yield to the first transcript event of that source
+  // reaching the client: what decides whether a card looks alive or stuck.
+  firstTokenMs: HistogramStats;
   markerSamples: number;
+  firstTokenSamples: number;
   bytesReceived: number;
 }
 
@@ -46,7 +50,7 @@ export function renderReportMarkdown(report: ReplayReport): string {
     `- Duration: ${ms(report.durationMs)}`,
     `- Scenario: ${report.scenario.description}`,
     `- Seed: ${n(report.scenario.seed)}, sessions: ${n(report.scenario.sessions)}, turns/session: ${n(report.scenario.turnsPerSession)}, deltas/turn: ${n(report.scenario.deltasPerTurn)}, rate: ${n(report.scenario.eventsPerSecond)}/s per session, coalesce: ${ms(report.scenario.coalesceMs)}`,
-    `- Provider events yielded: ${n(report.providerEvents)}; appended events received: ${n(report.client.appendedReceived)}; marker e2e samples: ${n(report.client.markerSamples)}`,
+    `- Provider events yielded: ${n(report.providerEvents)}; appended events received: ${n(report.client.appendedReceived)}; marker e2e samples: ${n(report.client.markerSamples)}; first-token samples: ${n(report.client.firstTokenSamples)}`,
     `- Node ${report.environment.node} on ${report.environment.platform} (${n(report.environment.cpus)} cpus)`,
     '',
     '## Stage latencies (sidecar)',
@@ -75,6 +79,7 @@ export function renderReportMarkdown(report: ReplayReport): string {
     '| --- | --- | --- | --- | --- | --- |',
     stageRow('append → ws receive', report.client.appendToReceiveMs),
     stageRow('provider yield → ws receive (markers)', report.client.providerToReceiveMs),
+    stageRow('turn first token → ws receive', report.client.firstTokenMs),
     '',
     '## Throughput and health',
     '',

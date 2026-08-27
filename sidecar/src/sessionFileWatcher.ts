@@ -28,10 +28,10 @@ export interface SessionFileWatcher {
 export interface SessionFileWatcherOptions {
   // Watched directory; defaults to ~/.factory/sessions. Injectable for tests.
   root?: string;
-  // Trailing debounce: the callback fires once after writes settle. There is
-  // deliberately no maximum wait, so a continuously streaming session never
-  // triggers a mid-stream reconcile of the sessions tree.
-  debounceMs?: number;
+  // How long one batch of changes is collected before it is reported, measured
+  // from the batch's first event. A trailing debounce would never report a
+  // subagent that writes its own session file for as long as it works.
+  batchWindowMs?: number;
   // Live in-app sessions already push their updates through the session
   // registry, so writes to their files must not trigger a reconcile.
   isLiveSession?: (providerSessionId: string) => boolean;
@@ -39,10 +39,17 @@ export interface SessionFileWatcherOptions {
   // explained by them, or with null when unexplained events (a removed
   // directory tree, foreign files) require a full reconcile.
   onExternalChange: (changes: SessionFileChange[] | null) => void;
+  now?: () => number;
+  schedule?: (callback: () => void, delayMs: number) => NodeJS.Timeout;
+  cancel?: (timer: NodeJS.Timeout) => void;
 }
 
 const SESSION_FILE_SUFFIX = '.jsonl';
 const SESSION_SETTINGS_SUFFIX = '.settings.json';
+// A session file nobody has reported yet is what a spawned subagent's card is
+// waiting for, so it is reported almost at once; long enough to absorb the
+// create-then-write burst that produces it.
+const FIRST_SIGHTING_MS = 50;
 
 interface SessionDirectoryWatcher {
   onError(listener: (error: unknown) => void): void;
@@ -105,7 +112,10 @@ export function startSessionFileWatcher(
   watchDirectory: WatchSessionDirectory = watchSessionDirectory,
 ): SessionFileWatcher | null {
   const root = options.root ?? join(homedir(), '.factory', 'sessions');
-  const debounceMs = options.debounceMs ?? 1500;
+  const batchWindowMs = options.batchWindowMs ?? 1500;
+  const now = options.now ?? Date.now;
+  const schedule = options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+  const cancel = options.cancel ?? clearTimeout;
   // On a first run (no Droid CLI history yet) the sessions root may not
   // exist, which makes watch() throw and live republish silently never
   // starts. The app observes this directory, so ensure it exists; a path
@@ -122,6 +132,7 @@ export function startSessionFileWatcher(
   // name (or '.'), not as a path inside the tree.
   const rootName = root.split(/[\\/]/).pop() ?? '';
   let timer: NodeJS.Timeout | undefined;
+  let timerDueAt = 0;
   // State for the batch of events inside one debounce window. Changed
   // session files are tracked individually so the callback reconciles
   // exactly those files instead of rescanning the whole sessions tree.
@@ -129,14 +140,68 @@ export function startSessionFileWatcher(
   // directory event only justifies a full reconcile when no changed file in
   // the same batch explains it.
   let pendingPaths = new Map<string, string>();
-  // Live writes and unknown names are deduped sets: a continuously streaming
-  // session keeps resetting the debounce timer, and an unbounded array would
-  // grow for the whole stream.
+  // Live writes and unknown names are deduped sets: one batch can absorb a
+  // whole stream of writes, and an unbounded array would grow with it.
   let pendingLiveFiles = new Set<string>();
   const liveSessionFiles = new Map<string, string>();
   let pendingUnknown = new Set<string>();
   let pendingUnexplainable = false;
+  // Session files already reported at least once. Bounded by the files written
+  // while this sidecar runs, and only their ids are kept.
+  const reportedSessionIds = new Set<string>();
   let closed = false;
+
+  const report = (): void => {
+    timer = undefined;
+    const paths = pendingPaths;
+    const unknown = pendingUnknown;
+    const live = pendingLiveFiles;
+    const unexplainable = pendingUnexplainable;
+    pendingPaths = new Map();
+    pendingUnknown = new Set();
+    pendingLiveFiles = new Set();
+    pendingUnexplainable = false;
+    if (closed) return;
+    const explains = (name: string): boolean => {
+      // A change to the root itself (a per-cwd directory created or removed
+      // directly under it) is explained by any changed file in the batch;
+      // alone, it means a whole tree vanished and only a full reconcile
+      // restores freshness.
+      if (name === rootName || name === '.' || name === root) {
+        return paths.size > 0 || live.size > 0;
+      }
+      const prefixes = [`${name}/`, `${name}\\`];
+      const inside = (file: string) => prefixes.some((prefix) => file.startsWith(prefix));
+      return [...paths.values()].some(inside) || [...live].some(inside);
+    };
+    for (const providerSessionId of paths.keys()) reportedSessionIds.add(providerSessionId);
+    // Unexplained events (a removed tree, foreign files, a lost event stream)
+    // fall back to a full reconcile; anything else reconciles exactly the
+    // changed files.
+    if (unexplainable || [...unknown].some((name) => !explains(name))) {
+      options.onExternalChange(null);
+    } else if (paths.size > 0) {
+      options.onExternalChange(
+        [...paths].map(([providerSessionId, file]) => ({
+          providerSessionId,
+          path: join(root, file),
+        })),
+      );
+    }
+  };
+
+  // A batch is only ever shortened, never extended: that is what keeps a
+  // continuously written file from postponing its own report forever.
+  const arm = (windowMs: number): void => {
+    const at = now();
+    const dueAt = at + Math.min(windowMs, batchWindowMs);
+    if (timer !== undefined) {
+      if (dueAt >= timerDueAt) return;
+      cancel(timer);
+    }
+    timerDueAt = dueAt;
+    timer = schedule(report, Math.max(0, dueAt - at));
+  };
 
   let watcher: SessionDirectoryWatcher;
   try {
@@ -146,54 +211,19 @@ export function startSessionFileWatcher(
       const target = sessionTargetFromFileName(filename);
       if (target) {
         if (options.isLiveSession?.(target.id)) {
+          // A live session's writes are never reported, so they must not hold
+          // open the batch a spawned subagent's file is waiting in.
           pendingLiveFiles.add(target.sessionFile);
           liveSessionFiles.set(target.id, join(root, target.sessionFile));
-        } else {
-          pendingPaths.set(target.id, target.sessionFile);
+          return;
         }
-      } else if (filename) {
-        pendingUnknown.add(filename);
-      } else {
-        pendingUnexplainable = true;
+        pendingPaths.set(target.id, target.sessionFile);
+        arm(reportedSessionIds.has(target.id) ? batchWindowMs : FIRST_SIGHTING_MS);
+        return;
       }
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = undefined;
-        const paths = pendingPaths;
-        const unknown = pendingUnknown;
-        const live = pendingLiveFiles;
-        const unexplainable = pendingUnexplainable;
-        pendingPaths = new Map();
-        pendingUnknown = new Set();
-        pendingLiveFiles = new Set();
-        pendingUnexplainable = false;
-        if (closed) return;
-        const explains = (name: string): boolean => {
-          // A change to the root itself (a per-cwd directory created or
-          // removed directly under it) is explained by any changed file in
-          // the batch; alone, it means a whole tree vanished and only a full
-          // reconcile restores freshness.
-          if (name === rootName || name === '.' || name === root) {
-            return paths.size > 0 || live.size > 0;
-          }
-          const prefixes = [`${name}/`, `${name}\\`];
-          const inside = (file: string) => prefixes.some((prefix) => file.startsWith(prefix));
-          return [...paths.values()].some(inside) || [...live].some(inside);
-        };
-        // Unexplained events (a removed tree, foreign files, a lost event
-        // stream) fall back to a full reconcile; anything else reconciles
-        // exactly the changed files.
-        if (unexplainable || [...unknown].some((name) => !explains(name))) {
-          options.onExternalChange(null);
-        } else if (paths.size > 0) {
-          options.onExternalChange(
-            [...paths].map(([providerSessionId, file]) => ({
-              providerSessionId,
-              path: join(root, file),
-            })),
-          );
-        }
-      }, debounceMs);
+      if (filename) pendingUnknown.add(filename);
+      else pendingUnexplainable = true;
+      arm(batchWindowMs);
     });
   } catch {
     return null;
@@ -212,7 +242,7 @@ export function startSessionFileWatcher(
     },
     close() {
       closed = true;
-      if (timer) clearTimeout(timer);
+      if (timer) cancel(timer);
       timer = undefined;
       liveSessionFiles.clear();
       watcher.close();

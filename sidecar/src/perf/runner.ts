@@ -40,6 +40,7 @@ interface AppendedSample {
   eventTs: number;
   kind: TranscriptEvent['kind'];
   toolUseId: string | undefined;
+  appSessionId: string;
 }
 
 const DRAIN_QUIET_MS = 350;
@@ -56,6 +57,8 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   const assetToken = `perf-asset-${Math.random().toString(36).slice(2)}`;
   const providerEvents: ReplayYieldReport[] = [];
   const markerYields = new Map<string, number>();
+  // First provider yield of each turn, keyed sessionIndex:turn.
+  const turnFirstYields = new Map<string, number>();
   const appended: AppendedSample[] = [];
   const settledTurns = new Set<string>();
   const turnsBySession = new Map<number, ReplayTurnPlan[]>();
@@ -90,6 +93,8 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
     onYield: (report) => {
       providerEvents.push(report);
       if (report.marker) markerYields.set(report.marker, report.at);
+      const turnKey = `${String(report.sessionIndex)}:${String(report.turn)}`;
+      if (!turnFirstYields.has(turnKey)) turnFirstYields.set(turnKey, report.at);
     },
     onTurnSettled: (sessionIndex, turn) => {
       settledTurns.add(`${String(sessionIndex)}:${String(turn)}`);
@@ -178,6 +183,7 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
             eventTs: transcript.ts,
             kind: transcript.kind,
             toolUseId: transcript.toolUseId,
+            appSessionId: transcript.appSessionId,
           });
         }
       }
@@ -293,12 +299,15 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         }
       }
     }
+    const firstToken = firstTokenStats();
     const drift = driftStats();
     const client = {
       appendedReceived: appended.length,
       appendToReceiveMs: appendToReceive.stats(),
       providerToReceiveMs: providerToReceive.stats(),
+      firstTokenMs: firstToken.histogram.stats(),
       markerSamples,
+      firstTokenSamples: firstToken.samples,
       bytesReceived,
     };
     return {
@@ -317,6 +326,34 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         cpus: availableParallelism(),
       },
     };
+  }
+
+  // Per turn: the gap between the provider's first yield and the first
+  // transcript event of that session reaching the client. Samples are consumed
+  // in turn order so a later turn cannot claim an earlier turn's event.
+  function firstTokenStats(): { histogram: ReservoirHistogram; samples: number } {
+    const histogram = new ReservoirHistogram();
+    let samples = 0;
+    for (let index = 0; index < spec.sessions; index += 1) {
+      const appSessionId = sessionIds[index];
+      if (appSessionId === undefined) continue;
+      let cursor = 0;
+      for (let turn = 0; turn < spec.turnsPerSession; turn += 1) {
+        const yieldedAt = turnFirstYields.get(`${String(index)}:${String(turn)}`);
+        if (yieldedAt === undefined) continue;
+        while (
+          cursor < appended.length &&
+          (appended[cursor].appSessionId !== appSessionId || appended[cursor].at < yieldedAt)
+        ) {
+          cursor += 1;
+        }
+        if (cursor >= appended.length) break;
+        histogram.add(appended[cursor].at - yieldedAt);
+        samples += 1;
+        cursor += 1;
+      }
+    }
+    return { histogram, samples };
   }
 
   function driftStats(): ReplayReport['drift'] {

@@ -67,7 +67,9 @@ test('replay gates fail on marker loss and pass a clean smoke-shaped snapshot', 
     appendedReceived: 0,
     appendToReceiveMs: { count: 0 },
     providerToReceiveMs: { count: 0 },
+    firstTokenMs: { count: 0 },
     markerSamples: 0,
+    firstTokenSamples: 0,
     bytesReceived: 0,
   });
   assert.equal(fail.results.find((result) => result.id === 'sidecar.markerLoss')?.status, 'fail');
@@ -77,7 +79,9 @@ test('replay gates fail on marker loss and pass a clean smoke-shaped snapshot', 
     appendedReceived: 4,
     appendToReceiveMs: { count: 4 },
     providerToReceiveMs: { count: 2 },
+    firstTokenMs: { count: 1 },
     markerSamples: 2,
+    firstTokenSamples: 1,
     bytesReceived: 100,
   });
   assert.equal(pass.results.find((result) => result.id === 'sidecar.markerLoss')?.status, 'pass');

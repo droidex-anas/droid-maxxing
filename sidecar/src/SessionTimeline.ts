@@ -15,6 +15,7 @@ import type {
 } from './protocol.js';
 import type { CompactType } from './compaction.js';
 import { errMsg } from './sessionHelpers.js';
+import { StreamingDeltaCoalescer, streamingEventOwner } from './streamingDeltaCoalescer.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 interface TimelineHistory {
@@ -112,27 +113,10 @@ function streamingSourceKey(appSessionId: string, sourceSessionId: string): stri
   return `${appSessionId}\u0000${sourceSessionId}`;
 }
 
-function streamingEventOwner(event: TranscriptEvent): string {
-  return event.role === 'primary' ? event.appSessionId : event.sourceSessionId;
-}
-
 export class SessionTimeline {
   private statusSeq = 0;
   private readonly loaders: SessionTimelineLoaders;
-  private readonly streamingCoalesceMs: number;
-  private readonly streamingCoalesceMaxBytes: number;
-  // At most one buffered run: the most recent streaming delta and everything
-  // merged into it. A single slot mirrors the renderer reducer, which only
-  // merges into the *last* transcript event, so interleaved sources flush each
-  // other and ordering is preserved exactly.
-  private streamingBuffer: {
-    event: TranscriptEvent;
-    estimatedBytes: number;
-    // Deltas merged into this buffered run so far; reported at flush as the
-    // coalescing batch-size metric.
-    mergedCount: number;
-    timer: ReturnType<typeof setTimeout>;
-  } | null = null;
+  private readonly streaming: StreamingDeltaCoalescer;
   private readonly streamingFlushFailures = new Map<string, StreamingTranscriptPersistenceError>();
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
@@ -143,9 +127,13 @@ export class SessionTimeline {
       resolveChain: resolveSessionChain,
       transcriptWindow: loadSessionTranscriptWindow,
     };
-    this.streamingCoalesceMs = dependencies.streamingCoalesceMs ?? DEFAULT_STREAMING_COALESCE_MS;
-    this.streamingCoalesceMaxBytes =
-      dependencies.streamingCoalesceMaxBytes ?? DEFAULT_STREAMING_COALESCE_MAX_BYTES;
+    this.streaming = new StreamingDeltaCoalescer({
+      windowMs: dependencies.streamingCoalesceMs ?? DEFAULT_STREAMING_COALESCE_MS,
+      maxBytes: dependencies.streamingCoalesceMaxBytes ?? DEFAULT_STREAMING_COALESCE_MAX_BYTES,
+      deliver: (event) => {
+        this.deliverStreamingRun(event);
+      },
+    });
   }
 
   list(): void {
@@ -300,90 +288,29 @@ export class SessionTimeline {
 
   append(event: TranscriptEvent): void {
     // Non-streaming appends (status lines, compaction dividers, replay) must
-    // never overtake a buffered delta run, so the buffer flushes first.
-    this.flushStreamingBefore(event);
+    // never overtake their own source's buffered delta run.
+    this.streaming.flushSource(event.appSessionId, streamingEventOwner(event));
     this.recordAndEmit(event);
   }
 
-  // Live provider stream deltas arrive per token. Emitting each one costs a
-  // history insert, a JSON serialization, and a full renderer re-render, so
-  // consecutive deltas of one run coalesce into a single event flushed after
-  // at most `streamingCoalesceMs`. The merge mirrors the renderer reducer's
-  // delta merging exactly (same shape either way), so live UI output is
-  // unchanged; only the message rate drops.
   appendStreaming(event: TranscriptEvent): void {
-    if (this.streamingCoalesceMs <= 0) {
-      this.append(event);
-      return;
-    }
-    const buffer = this.streamingBuffer;
-    if (buffer) {
-      const merged = mergeStreamingDelta(buffer.event, event);
-      if (merged) {
-        const incomingBytes = estimateStreamingDeltaBytes(event);
-        if (buffer.estimatedBytes + incomingBytes > this.streamingCoalesceMaxBytes) {
-          this.flushStreamingBefore(event);
-          this.bufferStreamingEvent(event, incomingBytes);
-          return;
-        }
-        buffer.event = merged;
-        buffer.estimatedBytes += incomingBytes;
-        buffer.mergedCount += 1;
-        return;
-      }
-    }
-    this.flushStreamingBefore(event);
-    if (isCoalescableDelta(event)) {
-      this.bufferStreamingEvent(event, estimateStreamingDeltaBytes(event));
-      return;
-    }
-    this.recordAndEmit(event);
+    this.streaming.accept(event);
   }
 
-  private flushStreamingBefore(event: TranscriptEvent): void {
-    try {
-      this.flushStreaming();
-    } catch (error) {
-      if (
-        !isReportedStreamingTranscriptError(error) ||
-        (error.appSessionId === event.appSessionId &&
-          error.sourceSessionId === streamingEventOwner(event))
-      ) {
-        throw error;
-      }
-      // One conversation's sticky persistence failure must not abort another
-      // conversation that happened to arrive while its buffered tail flushed.
-    }
-  }
-
-  // Emits any buffered delta run immediately. Called at turn settlement so the
-  // final text lands before the turn reads as settled, and by every
-  // non-streaming append to preserve transcript ordering.
+  // Emits every buffered delta run immediately. Shutdown only: turn settlement
+  // and mid-turn side effects flush the one source that owns the run.
   flushStreaming(): void {
-    const buffer = this.streamingBuffer;
-    if (!buffer) return;
-    this.streamingBuffer = null;
-    clearTimeout(buffer.timer);
-    hotPathMetrics.recordCoalesce(buffer.mergedCount);
-    try {
-      this.recordAndEmit(buffer.event);
-    } catch (error) {
-      throw this.rememberStreamingFailure(buffer.event, error);
-    }
+    this.streaming.flushAll();
   }
 
   flushStreamingFor(appSessionId: string, sourceSessionId: string): void {
-    const buffer = this.streamingBuffer;
-    if (!buffer) return;
-    if (buffer.event.appSessionId !== appSessionId) return;
-    if (streamingEventOwner(buffer.event) !== sourceSessionId) return;
-    this.flushStreaming();
+    this.streaming.flushSource(appSessionId, sourceSessionId);
   }
 
   settleStreaming(appSessionId: string, sourceSessionId: string): void {
     let flushError: Error | undefined;
     try {
-      this.flushStreamingFor(appSessionId, sourceSessionId);
+      this.streaming.endTurn(appSessionId, sourceSessionId);
     } catch (error) {
       flushError =
         error instanceof Error
@@ -399,21 +326,12 @@ export class SessionTimeline {
     if (flushError) throw flushError;
   }
 
-  private bufferStreamingEvent(event: TranscriptEvent, estimatedBytes: number): void {
-    if (estimatedBytes >= this.streamingCoalesceMaxBytes) {
+  private deliverStreamingRun(event: TranscriptEvent): void {
+    try {
       this.recordAndEmit(event);
-      return;
+    } catch (error) {
+      throw this.rememberStreamingFailure(event, error);
     }
-    const timer = setTimeout(() => {
-      try {
-        this.flushStreaming();
-      } catch {
-        // The failure is reported and retained by flushStreaming. Turn
-        // settlement remains its sole consumer.
-      }
-    }, this.streamingCoalesceMs);
-    timer.unref();
-    this.streamingBuffer = { event, estimatedBytes, mergedCount: 1, timer };
   }
 
   private rememberStreamingFailure(
@@ -547,86 +465,4 @@ export class SessionTimeline {
   private record(events: TranscriptEvent[]): void {
     for (const event of events) this.dependencies.history.recordEvent(event);
   }
-}
-
-/* ── Streaming delta coalescing ──
-   Mirrors the renderer's SESSION_TRANSCRIPT delta merging (src/hooks/
-   useStore.tsx): text/thinking runs concatenate, tool_call partials collapse
-   onto one event per toolUseId. Keep both sides synchronized in the same
-   change, or live rendering and replay drift apart. */
-
-function isTextDelta(event: TranscriptEvent): boolean {
-  return (
-    (event.kind === 'text' || event.kind === 'thinking') &&
-    !event.author &&
-    !!event.text &&
-    !event.toolName &&
-    !event.toolUseId
-  );
-}
-
-function isToolCallDelta(event: TranscriptEvent): boolean {
-  return event.kind === 'tool_call' && !event.author && !!event.toolUseId;
-}
-
-function isCoalescableDelta(event: TranscriptEvent): boolean {
-  return isTextDelta(event) || isToolCallDelta(event);
-}
-
-function estimateStreamingDeltaBytes(event: TranscriptEvent): number {
-  let bytes = 192;
-  if (event.text) bytes += Buffer.byteLength(event.text, 'utf8');
-  if (event.toolName) bytes += Buffer.byteLength(event.toolName, 'utf8');
-  if (event.toolArgs !== undefined) {
-    try {
-      const serialized = JSON.stringify(event.toolArgs);
-      if (serialized) bytes += Buffer.byteLength(serialized, 'utf8');
-    } catch {
-      // Cyclic provider payloads are not valid bridge JSON anyway. Treat them
-      // as over-budget so they bypass the coalescer and fail at the usual seam.
-      return Number.POSITIVE_INFINITY;
-    }
-  }
-  return bytes;
-}
-
-function sameDeltaRun(previous: TranscriptEvent, next: TranscriptEvent): boolean {
-  return (
-    previous.appSessionId === next.appSessionId &&
-    previous.sourceSessionId === next.sourceSessionId &&
-    previous.role === next.role
-  );
-}
-
-// Protocol mirror of the renderer's mergeToolArgs (src/hooks/useStore.tsx).
-function mergeToolArgs(previous: unknown, next: unknown): unknown {
-  if (isPlainRecord(previous) && isPlainRecord(next)) return { ...previous, ...next };
-  return next ?? previous;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function mergeStreamingDelta(
-  previous: TranscriptEvent,
-  next: TranscriptEvent,
-): TranscriptEvent | null {
-  if (!sameDeltaRun(previous, next)) return null;
-  if (isTextDelta(previous) && isTextDelta(next) && previous.kind === next.kind) {
-    return {
-      ...previous,
-      text: (previous.text ?? '') + (next.text ?? ''),
-      endTs: next.endTs ?? next.ts,
-    };
-  }
-  if (isToolCallDelta(previous) && isToolCallDelta(next) && previous.toolUseId === next.toolUseId) {
-    return {
-      ...previous,
-      toolName: next.toolName ?? previous.toolName,
-      toolArgs: mergeToolArgs(previous.toolArgs, next.toolArgs),
-      endTs: next.endTs ?? next.ts,
-    };
-  }
-  return null;
 }

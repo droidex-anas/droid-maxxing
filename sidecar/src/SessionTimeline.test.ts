@@ -270,13 +270,17 @@ test('one child persistence failure does not abort another child append', () => 
       }),
     );
   });
+  // A sibling's delta must neither publish nor abort child A's buffered run.
+  assert.deepEqual(emitted, []);
   timeline.flushStreamingFor('parent-1', 'child-b');
 
   assert.deepEqual(
     recorded.map((event) => event.id),
     ['b'],
   );
-  assert.deepEqual(emitted, [
+  assert.deepEqual(emitted, [{ type: 'event.appended', event: recorded[0] }]);
+  assert.throws(() => timeline.settleStreaming('parent-1', 'child-a'), /child A disk failure/);
+  assert.deepEqual(emitted.slice(1), [
     {
       type: 'child.error',
       parentAppSessionId: 'parent-1',
@@ -287,9 +291,7 @@ test('one child persistence failure does not abort another child append', () => 
       message: 'Unable to persist buffered child output: child A disk failure',
       recoverable: true,
     },
-    { type: 'event.appended', event: recorded[0] },
   ]);
-  assert.throws(() => timeline.settleStreaming('parent-1', 'child-a'), /child A disk failure/);
   assert.doesNotThrow(() => timeline.settleStreaming('parent-1', 'child-b'));
 });
 
