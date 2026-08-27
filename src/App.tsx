@@ -50,25 +50,25 @@ import {
   scheduleIdleLazyWarmup,
   cancelIdleLazyWarmup,
 } from './lib/chunkPreloader';
+import { OnboardingLazyHost } from './components/onboarding/OnboardingLazyHost';
+import {
+  CommandPaletteSkeleton,
+  MissionControlSkeleton,
+  PullRequestsSkeleton,
+} from './components/skeletons/WorkspaceSkeletons';
 import {
   LazyBrowserFocusWorkspace,
   LazyCommandPalette,
   LazyFilesWorkspace,
   LazyMissionControl,
-  LazyOnboardingWizard,
   LazyPullRequestsView,
   LazyReviewPanel,
   LazySettingsPanel,
   LazySpecWikiModal,
   LazyTerminalWorkspace,
-  commandPaletteFallback,
-  missionControlFallback,
-  onboardingFallback,
-  pullRequestsFallback,
-  settingsPanelFallback,
   utilityToolFallback,
 } from './lib/lazySurfaces';
-import { noteComposerInteractive, noteFirstMeaningfulShellPaint } from './lib/rendererPerf';
+import { noteComposerNotApplicable, noteFirstMeaningfulShellPaint } from './lib/rendererPerf';
 
 function ContextListIcon({ className }: { className?: string }) {
   return (
@@ -202,6 +202,7 @@ export default function App() {
   const [contentRowWidth, setContentRowWidth] = useState(0);
   const utilityPaneToggleRef = useRef<HTMLButtonElement>(null);
   const shellPaintMarked = useRef(false);
+  const composerStartupResolved = useRef(false);
 
   useEffect(() => {
     if (shellPaintMarked.current) return;
@@ -217,8 +218,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (composerStartupResolved.current) return;
     if (!isMissionControlView && !prWorkspaceView) return;
-    noteComposerInteractive();
+    composerStartupResolved.current = true;
+    noteComposerNotApplicable();
   }, [isMissionControlView, prWorkspaceView]);
 
   useEffect(() => {
@@ -558,7 +561,7 @@ export default function App() {
               }`}
             >
               {!embedded && state.mainView === 'pull-requests' ? (
-                <Suspense fallback={pullRequestsFallback()}>
+                <Suspense fallback={<PullRequestsSkeleton />}>
                   <LazyPullRequestsView />
                 </Suspense>
               ) : isMissionControlView ? (
@@ -569,7 +572,7 @@ export default function App() {
                   animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
                   transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                 >
-                  <Suspense fallback={missionControlFallback()}>
+                  <Suspense fallback={<MissionControlSkeleton />}>
                     <LazyMissionControl />
                   </Suspense>
                 </motion.div>
@@ -783,15 +786,13 @@ export default function App() {
       )}
 
       {state.commandPaletteOpen && (
-        <Suspense fallback={commandPaletteFallback()}>
+        <Suspense fallback={<CommandPaletteSkeleton />}>
           <LazyCommandPalette />
         </Suspense>
       )}
-      {state.settingsOpen && (
-        <Suspense fallback={settingsPanelFallback()}>
-          <LazySettingsPanel />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <LazySettingsPanel />
+      </Suspense>
       <Suspense fallback={null}>
         <LazySpecWikiModal />
       </Suspense>
@@ -799,15 +800,13 @@ export default function App() {
 
       <AnimatePresence>
         {showWizard && onboard.ready && (
-          <Suspense fallback={onboardingFallback()}>
-            <LazyOnboardingWizard
-              controller={onboard}
-              onComplete={() => {
-                setForceWizard(false);
-                setBannerDismissed(false);
-              }}
-            />
-          </Suspense>
+          <OnboardingLazyHost
+            controller={onboard}
+            onComplete={() => {
+              setForceWizard(false);
+              setBannerDismissed(false);
+            }}
+          />
         )}
       </AnimatePresence>
     </div>

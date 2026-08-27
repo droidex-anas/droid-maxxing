@@ -12,6 +12,7 @@ import {
   noteRendererHtmlLoaded,
   noteFirstMeaningfulShellPaint,
   noteComposerInteractive,
+  noteComposerNotApplicable,
 } from './rendererPerf';
 import type { ServerEvent } from '../types/bridge';
 
@@ -48,7 +49,7 @@ function appendedEvent(ts: number): Extract<ServerEvent, { type: 'event.appended
   };
 }
 
-test('startup phases are recorded once in order', () => {
+test('startup phases are recorded once in order for composer sessions', () => {
   resetRendererPerfForTest();
   noteRendererHtmlLoaded();
   noteFirstMeaningfulShellPaint();
@@ -65,13 +66,27 @@ test('startup phases are recorded once in order', () => {
   const phases = getRendererPerfSnapshot().startupPhases;
   assert.ok(phases.rendererHtmlLoadedMs !== undefined);
   assert.ok(phases.firstMeaningfulShellPaintMs !== undefined);
-  assert.ok(phases.composerInteractiveMs !== undefined);
+  assert.equal(phases.composerInteractive.status, 'marked');
+  if (phases.composerInteractive.status !== 'marked') throw new Error('unreachable');
+  assert.ok(phases.composerInteractive.atMs !== undefined);
   assert.ok(phases.sidecarConnectedMs !== undefined);
   assert.ok(phases.sessionListReadyMs !== undefined);
   assert.ok(phases.rendererHtmlLoadedMs <= phases.firstMeaningfulShellPaintMs!);
-  assert.ok(phases.firstMeaningfulShellPaintMs! <= phases.composerInteractiveMs!);
-  assert.ok(phases.composerInteractiveMs! <= phases.sidecarConnectedMs!);
+  assert.ok(phases.firstMeaningfulShellPaintMs! <= phases.composerInteractive.atMs);
+  assert.ok(phases.composerInteractive.atMs <= phases.sidecarConnectedMs!);
   assert.ok(phases.sidecarConnectedMs! <= phases.sessionListReadyMs!);
+});
+
+test('composer-less startup records notApplicable instead of a fabricated mark', () => {
+  resetRendererPerfForTest();
+  noteRendererHtmlLoaded();
+  noteFirstMeaningfulShellPaint();
+  noteComposerNotApplicable();
+  noteComposerInteractive();
+
+  const phases = getRendererPerfSnapshot().startupPhases;
+  assert.equal(phases.composerInteractive.status, 'notApplicable');
+  assert.equal(phases.composerInteractive.status === 'marked', false);
 });
 
 test('receive → commit → paint legs are measured per batch', () => {

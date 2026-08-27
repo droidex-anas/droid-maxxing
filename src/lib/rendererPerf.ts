@@ -17,7 +17,10 @@ export type StartupPhase =
 export interface StartupPhaseTimings {
   rendererHtmlLoadedMs?: number;
   firstMeaningfulShellPaintMs?: number;
-  composerInteractiveMs?: number;
+  composerInteractive:
+    | { status: 'pending' }
+    | { status: 'marked'; atMs: number }
+    | { status: 'notApplicable' };
   sidecarConnectedMs?: number;
   sessionListReadyMs?: number;
 }
@@ -88,6 +91,7 @@ const counts = { commit: 0, paint: 0, append: 0, feed: 0 };
 
 let startedAt = 0;
 const startupPhases: Partial<Record<StartupPhase, number>> = {};
+let composerInteractiveStatus: StartupPhaseTimings['composerInteractive'] = { status: 'pending' };
 let eventsReceived = 0;
 let appendedReceived = 0;
 let pending: PendingEvent[] = [];
@@ -144,7 +148,16 @@ export function noteFirstMeaningfulShellPaint(): void {
 }
 
 export function noteComposerInteractive(): void {
+  if (composerInteractiveStatus.status !== 'pending') return;
+  startedAt ||= Date.now();
+  composerInteractiveStatus = { status: 'marked', atMs: performance.now() };
   noteStartupPhase('composerInteractive');
+}
+
+/** Startup landed on a surface with no composer; do not fabricate a composer mark. */
+export function noteComposerNotApplicable(): void {
+  if (composerInteractiveStatus.status !== 'pending') return;
+  composerInteractiveStatus = { status: 'notApplicable' };
 }
 
 /** Stamp a bridge event at socket-read time; called from Bridge.onmessage. */
@@ -218,7 +231,7 @@ export function getRendererPerfSnapshot(): RendererPerfSnapshot {
     startupPhases: {
       rendererHtmlLoadedMs: startupPhases.rendererHtmlLoaded,
       firstMeaningfulShellPaintMs: startupPhases.firstMeaningfulShellPaint,
-      composerInteractiveMs: startupPhases.composerInteractive,
+      composerInteractive: { ...composerInteractiveStatus },
       sidecarConnectedMs: startupPhases.sidecarConnected,
       sessionListReadyMs: startupPhases.sessionListReady,
     },
@@ -269,6 +282,7 @@ export function resetRendererPerfForTest(): void {
   startupPhases.composerInteractive = undefined;
   startupPhases.sidecarConnected = undefined;
   startupPhases.sessionListReady = undefined;
+  composerInteractiveStatus = { status: 'pending' };
   observersStarted = false;
 }
 
