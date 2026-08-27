@@ -171,6 +171,34 @@ test('a recoverable parent error stays out of reducer state', () => {
   assert.equal(action, null);
 });
 
+test('a bridge resync requirement becomes an actionable connection error', () => {
+  const resync = {
+    type: 'error' as const,
+    code: 'bridge.resync_required',
+    message: 'The renderer fell behind. Reopen the active session to refresh it.',
+    recoverable: false,
+  };
+
+  assert.equal(toastMessageForEvent(resync), resync.message);
+  assert.deepEqual(adaptEvent(resync), {
+    type: 'SET_CONNECTION',
+    status: 'error',
+    message: resync.message,
+  });
+});
+
+test('a recoverable bridge resync keeps connection state available for reconnect', () => {
+  const resync = {
+    type: 'error' as const,
+    code: 'bridge.resync_required',
+    message: 'The runtime sent a malformed batch. Reconnecting with a fresh cursor.',
+    recoverable: true,
+  };
+
+  assert.equal(toastMessageForEvent(resync), resync.message);
+  assert.equal(adaptEvent(resync), null);
+});
+
 test('an unsupported-command error toasts its restart guidance', () => {
   // Bridge version skew (e.g. a dev app running across a sidecar rebuild)
   // surfaces as bridge.unsupported_command; the message must reach the user

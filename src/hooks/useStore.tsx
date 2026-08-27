@@ -64,6 +64,7 @@ import {
 } from '../lib/compactionSettings';
 import { sanitizeForLog } from '../lib/sensitiveLogRedaction';
 import { sessionIsLive } from '../lib/sessions';
+import { noteStoreCommitted, discardPendingBridgeEvent } from '../lib/rendererPerf';
 import {
   addSessionNote,
   loadSessionNotes,
@@ -113,11 +114,13 @@ import {
   releaseSessionTranscriptWindow,
   withUpdatedTranscript,
 } from '../lib/transcriptStoreMemory';
+import { detectPureTranscriptPrepend, type TranscriptMutation } from '../lib/transcriptMutation';
 import {
   reconcilePrependedTranscript,
   reconcileRestoredTranscript,
   reconcileTranscriptSourcePage,
 } from '../lib/transcriptHistory';
+import { reduceStoreActionBatch } from './storeActionBatch';
 
 export type AgentKind = 'primary' | 'worker' | 'validator';
 export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
@@ -226,6 +229,9 @@ export interface AppState {
   // persisted in localStorage; the harness session data is never touched.
   chatMetadata: ChatMetadataMap;
   transcripts: Record<string, TranscriptEvent[]>;
+  // Exact provenance for the latest transcript change. Derived renderers use
+  // the revision chain to update a safe suffix or rebuild on any uncertainty.
+  transcriptMutations: Record<string, TranscriptMutation>;
   // Relative retained-payload estimate for each in-memory transcript window.
   // This is budgeting telemetry, not a claim about exact V8 heap bytes.
   transcriptRetainedCost: Record<string, number>;
@@ -1099,6 +1105,7 @@ export const initialState: AppState = {
   transcripts: sessionSnapshot?.transcript
     ? { [sessionSnapshot.transcript.appSessionId]: sessionSnapshot.transcript.events }
     : {},
+  transcriptMutations: {},
   transcriptRetainedCost: sessionSnapshot?.transcript
     ? {
         [sessionSnapshot.transcript.appSessionId]: estimateTranscriptCost(
@@ -1366,7 +1373,7 @@ function withHistoricalCompactionGeneration(
 
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === 'BATCH') {
-    return action.actions.reduce(reducer, state);
+    return reduceStoreActionBatch(state, action.actions, reducer, syncBrowserOpen);
   }
   return syncBrowserOpen(baseReducer(state, action));
 }
@@ -1407,11 +1414,10 @@ function baseReducer(state: AppState, action: Action): AppState {
 
       // Seed the first user message: the goal is the user's opening prompt and the
       // backend never echoes it back, so without this the first message never shows.
-      let transcripts = state.transcripts;
-      let transcriptRetainedCost = state.transcriptRetainedCost;
+      let seed: TranscriptEvent | undefined;
       const hasTranscript = (state.transcripts[action.session.appSessionId]?.length ?? 0) > 0;
       if (action.session.goal && !hasTranscript) {
-        const seed: TranscriptEvent = {
+        seed = {
           id: `seed-${action.session.appSessionId}`,
           appSessionId: action.session.appSessionId,
           sourceSessionId: 'user',
@@ -1425,11 +1431,6 @@ function baseReducer(state: AppState, action: Action): AppState {
           // another window or a resumed session is restored-equivalent content.
           files: pending?.files,
         };
-        transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
-        transcriptRetainedCost = {
-          ...state.transcriptRetainedCost,
-          [action.session.appSessionId]: estimateTranscriptCost([seed]),
-        };
       }
 
       const pendingCompose = pending
@@ -1438,7 +1439,7 @@ function baseReducer(state: AppState, action: Action): AppState {
           )
         : state.pendingCompose;
 
-      const next = {
+      const next: AppState = {
         ...childReset,
         sessions: {
           ...state.sessions,
@@ -1448,8 +1449,6 @@ function baseReducer(state: AppState, action: Action): AppState {
           ),
         },
         sessionOrder: order,
-        transcripts,
-        transcriptRetainedCost,
         activeAppSessionId: shouldActivate ? action.session.appSessionId : state.activeAppSessionId,
         draftChat: shouldActivate ? null : state.draftChat,
         draftAutonomy: shouldActivate ? null : state.draftAutonomy,
@@ -1474,7 +1473,17 @@ function baseReducer(state: AppState, action: Action): AppState {
             }
           : state.sessionLastSeen,
       };
-      return next;
+      return seed
+        ? withUpdatedTranscript(
+            next,
+            action.session.appSessionId,
+            [seed],
+            estimateTranscriptCost([seed]),
+            {
+              mutation: { kind: 'append', previousLength: 0, firstChangedIndex: 0 },
+            },
+          )
+        : next;
     }
 
     case 'SET_PENDING_COMPOSE':
@@ -2216,7 +2225,13 @@ function baseReducer(state: AppState, action: Action): AppState {
               action.appSessionId,
               reconciled.transcript,
               estimateTranscriptCost(reconciled.transcript),
-              action.childSessionId,
+              {
+                childSessionId: action.childSessionId,
+                mutation:
+                  action.mode === 'prepend'
+                    ? detectPureTranscriptPrepend(existing, reconciled.transcript)
+                    : undefined,
+              },
             )
           : historyState;
         const isSelected =
@@ -2249,6 +2264,7 @@ function baseReducer(state: AppState, action: Action): AppState {
               action.appSessionId,
               mergedTranscript,
               estimateTranscriptCost(mergedTranscript),
+              { mutation: detectPureTranscriptPrepend(existing, mergedTranscript) },
             )
           : historyState;
         return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
@@ -3116,7 +3132,12 @@ function finiteNumber(value: unknown): number | undefined {
 
 /* ── Bridge event adapter ── */
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
-  if (ev.type === 'error' && ev.code === 'bridge.unsupported_command') return ev.message;
+  if (
+    ev.type === 'error' &&
+    (ev.code === 'bridge.unsupported_command' || ev.code === 'bridge.resync_required')
+  ) {
+    return ev.message;
+  }
   if (
     ev.type === 'error' &&
     (ev.code === 'session.autonomy_update_failed' || ev.code === 'session.create_failed')
@@ -3184,6 +3205,9 @@ export function adaptEvent(ev: ServerEvent): Action | null {
     case 'question.requested':
       return { type: 'SESSION_QUESTION', question: ev.question };
     case 'error':
+      if (ev.code === 'bridge.resync_required' && !ev.recoverable) {
+        return { type: 'SET_CONNECTION', status: 'error', message: ev.message };
+      }
       // A failed autonomy change is recoverable: the session keeps its last
       // confirmed level, the pending state settles, and the toast carries the
       // message (see toastMessageForEvent).
@@ -3303,6 +3327,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     stateRef.current = state;
+    // Closes the perf receive→commit leg for events reduced by this commit.
+    noteStoreCommitted();
     for (const listener of listenersRef.current) listener();
   }, [state]);
 
@@ -3394,16 +3420,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       delayMs: 16,
     });
     bridgeActionBatcherRef.current = batcher;
-    const unsub = bridge.subscribe((ev) => {
-      // Verbose per-event logging runs on every streaming token and eagerly
-      // deep-clones + redacts the whole event, so keep it to dev builds only;
-      // production strips this branch entirely.
-      if (import.meta.env.DEV) console.log('[bridge]', ev.type, sanitizeForLog(ev));
-      const toastMessage = toastMessageForEvent(ev);
-      if (toastMessage !== undefined) toast.error(toastMessage);
-      const action = adaptEvent(ev);
-      if (!action) return;
-      batcher.pushBridge(action);
+    const unsub = bridge.subscribeBatch((events) => {
+      const actions: Action[] = [];
+      for (const ev of events) {
+        // Verbose per-event logging runs on every streaming token and eagerly
+        // deep-clones + redacts the whole event, so keep it to dev builds only;
+        // production strips this branch entirely.
+        if (import.meta.env.DEV) console.log('[bridge]', ev.type, sanitizeForLog(ev));
+        const toastMessage = toastMessageForEvent(ev);
+        if (toastMessage !== undefined) toast.error(toastMessage);
+        const action = adaptEvent(ev);
+        if (!action) {
+          // No reducer work means no commit: drop the perf leg instead of
+          // closing it against the next unrelated commit.
+          discardPendingBridgeEvent(ev);
+          continue;
+        }
+        actions.push(action);
+      }
+      batcher.pushBridgeBatch(actions);
     });
     return () => {
       unsub();

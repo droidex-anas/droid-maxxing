@@ -1,5 +1,6 @@
 export interface OrderedActionBatcher<Action> {
   pushBridge(action: Action): void;
+  pushBridgeBatch(actions: readonly Action[]): void;
   dispatchLocal(action: Action): void;
   dispose(): void;
 }
@@ -30,16 +31,22 @@ export function createOrderedActionBatcher<Action, Timer>({
     dispatchBatch(actions);
   };
 
+  const pushBridgeBatch = (actions: readonly Action[]) => {
+    if (disposed || actions.length === 0) return;
+    if (timer === null) {
+      if (actions.length === 1) dispatchOne(actions[0]);
+      else dispatchBatch([...actions]);
+      timer = schedule(flushFollowers, delayMs);
+      return;
+    }
+    queued.push(...actions);
+  };
+
   return {
     pushBridge(action) {
-      if (disposed) return;
-      if (timer === null) {
-        dispatchOne(action);
-        timer = schedule(flushFollowers, delayMs);
-        return;
-      }
-      queued.push(action);
+      pushBridgeBatch([action]);
     },
+    pushBridgeBatch,
     dispatchLocal(action) {
       flushFollowers();
       dispatchOne(action);

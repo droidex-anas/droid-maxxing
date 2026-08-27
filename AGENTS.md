@@ -293,6 +293,10 @@ npm run build
 `npm run lint` is currently non-blocking because of existing backlog. New and
 changed files remain responsible for their diagnostics.
 
+Performance changes are validated with the deterministic replay harness
+(`npm run perf:replay -- --scenario <smoke|streaming|multi-agent|long-history>`)
+instead of intuition; artifacts land in `reports/perf/`.
+
 ## Project map
 
 - `src/`: React UI, state, hooks, and frontend tests

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,10 +8,12 @@ const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-role-'));
 process.env.HOME = home;
 
-const { invalidateSessionIndex, loadSessionPage, loadSessionTranscriptWindow } =
-  await import('./history.js');
+const { HistoryIndex, loadSessionPage, loadSessionTranscriptWindow } = await import('./history.js');
+const index = new HistoryIndex();
+let sessionFileRevision = 0;
 
 test.after(() => {
+  index.close();
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
   rmSync(home, { recursive: true, force: true });
@@ -35,8 +37,31 @@ function writeTranscript(
     JSON.stringify({ type: 'session_start', cwd: home, sessionTitle: 'S', ...start }),
     ...messages.map((message) => JSON.stringify(message)),
   ];
-  writeFileSync(join(dir, `${id}.jsonl`), `${lines.join('\n')}\n`);
-  invalidateSessionIndex();
+  const path = join(dir, `${id}.jsonl`);
+  writeFileSync(path, `${lines.join('\n')}\n`);
+  const stat = statSync(path);
+  const previousRevision = sessionFileRevision;
+  sessionFileRevision += 1;
+  assert.equal(
+    index.applySessionFileReconciliation({
+      previousRevision,
+      revision: sessionFileRevision,
+      changed: 1,
+      upserts: [
+        {
+          providerSessionId: id,
+          path,
+          birthtimeMs: stat.birthtimeMs,
+          mtimeMs: stat.mtimeMs,
+          sizeBytes: stat.size,
+          settingsMtimeMs: null,
+          summary: null,
+        },
+      ],
+      removedProviderSessionIds: [],
+    }),
+    true,
+  );
 }
 
 test('loadSessionPage replays a marker-only Task child with worker role keyed to its provider id', () => {

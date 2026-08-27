@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { PersistedChildSession } from './history.js';
+import { persistTestChild } from './testing/historyPersistenceFixture.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-child-session-persistence-'));
@@ -43,9 +44,9 @@ function child(
 
 test('child persistence preserves exact identity, settings, role, and hierarchy across reopen', () => {
   const index = new HistoryIndex();
-  index.upsertChildSession(child('parent-a', 'child-a', { label: 'Same-role worker' }));
-  index.upsertChildSession(child('parent-a', 'child-b', { label: 'Same-role worker' }));
-  index.upsertChildSession(
+  persistTestChild(child('parent-a', 'child-a', { label: 'Same-role worker' }));
+  persistTestChild(child('parent-a', 'child-b', { label: 'Same-role worker' }));
+  persistTestChild(
     child('parent-b', 'child-a', {
       role: 'validator',
       label: 'Validator',
@@ -93,8 +94,8 @@ test('provider replacement updates runtime identity without changing logical chi
     providerSessionId: 'provider-old',
     status: 'paused',
   });
-  index.upsertChildSession(original);
-  index.upsertChildSession({
+  persistTestChild(original);
+  persistTestChild({
     ...original,
     providerSessionId: 'provider-new',
     previousProviderSessionIds: ['provider-old'],
@@ -116,7 +117,7 @@ test('malformed replacement chains fail with hard-cut index recovery guidance', 
   const parentAppSessionId = 'malformed-chain-parent';
   const childSessionId = 'malformed-chain-child';
   const index = new HistoryIndex();
-  index.upsertChildSession(child(parentAppSessionId, childSessionId));
+  persistTestChild(child(parentAppSessionId, childSessionId));
   index.close();
 
   const indexPath = join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME);
@@ -148,7 +149,7 @@ test('malformed replacement chains fail with hard-cut index recovery guidance', 
 
 test('canonical indexes reject duplicate provider and spawn ownership within one parent', () => {
   const index = new HistoryIndex();
-  index.upsertChildSession(
+  persistTestChild(
     child('identity-parent', 'child-one', {
       providerSessionId: 'shared-provider',
       spawnLink: { kind: 'tool-use', id: 'spawn-one' },
@@ -157,7 +158,7 @@ test('canonical indexes reject duplicate provider and spawn ownership within one
 
   assert.throws(
     () =>
-      index.upsertChildSession(
+      persistTestChild(
         child('identity-parent', 'child-two', {
           providerSessionId: 'shared-provider',
           spawnLink: { kind: 'tool-use', id: 'spawn-two' },
@@ -167,7 +168,7 @@ test('canonical indexes reject duplicate provider and spawn ownership within one
   );
   assert.throws(
     () =>
-      index.upsertChildSession(
+      persistTestChild(
         child('identity-parent', 'child-three', {
           providerSessionId: 'other-provider',
           spawnLink: { kind: 'tool-use', id: 'spawn-one' },
@@ -176,7 +177,7 @@ test('canonical indexes reject duplicate provider and spawn ownership within one
     /UNIQUE constraint failed/,
   );
   assert.doesNotThrow(() =>
-    index.upsertChildSession(
+    persistTestChild(
       child('other-parent', 'child-one', {
         providerSessionId: 'shared-provider',
         spawnLink: { kind: 'tool-use', id: 'spawn-one' },

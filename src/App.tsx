@@ -53,6 +53,7 @@ import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
 import { useWorkspaceScopes } from './hooks/useWorkspaceScopes';
+import { useHistoryIndexingIdle } from './hooks/useHistoryIndexingIdle';
 import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
 
 function ContextListIcon({ className }: { className?: string }) {
@@ -121,6 +122,7 @@ export default function App() {
   const embedded = isEmbedded();
   const onboard = useOnboarding();
   useDiagnosticsContext();
+  useHistoryIndexingIdle();
   const [forceWizard, setForceWizard] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [expandedBrowserAppSessionId, setExpandedBrowserAppSessionId] = useState<string | null>(

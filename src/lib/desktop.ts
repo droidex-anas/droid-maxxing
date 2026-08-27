@@ -169,6 +169,8 @@ interface DroidControlApi {
   setApiKey: (key: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
   listFiles: (dir: string) => Promise<string[]>;
+  getPerformanceMetrics: () => Promise<DesktopPerformanceMetrics>;
+  systemIdleTime: () => Promise<number>;
   readFile: (path: string) => Promise<string>;
   repoStatus: (dir: string) => Promise<RepoStatus | null>;
   listEditors: () => Promise<EditorId[]>;
@@ -293,11 +295,28 @@ declare global {
   }
 }
 
+/** Perf phase 0 gauge from the Electron main process. */
+export interface DesktopPerformanceMetrics {
+  timestamp: number;
+  webContentsTotal: number;
+  ptys: number;
+  memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
+  /** Cumulative since app start, not per sample: difference polls for a rate. */
+  cpu: { userMs: number; systemMs: number };
+}
+
 function desktopApi(): DroidControlApi | undefined {
   return typeof window !== 'undefined' ? window.droidControl : undefined;
 }
 
 export const isDesktop = () => Boolean(desktopApi());
+
+export async function systemIdleTime(): Promise<number | null> {
+  const api = desktopApi();
+  if (!api) return null;
+  const seconds = await api.systemIdleTime();
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
 
 function requireDesktopApi(message: string): DroidControlApi {
   const api = desktopApi();

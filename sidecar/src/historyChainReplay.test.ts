@@ -1,9 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionSummary } from './protocol.js';
+import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-chain-replay-'));
@@ -29,11 +38,13 @@ test.after(() => {
 // parsed-transcript readers) so each test sees the files it just wrote,
 // mirroring a freshly booted sidecar.
 test.beforeEach(() => {
+  sessionPaths.clear();
   invalidateSessionIndex();
   invalidateSessionTranscripts();
 });
 
 let clock = 0;
+const sessionPaths = new Map<string, string>();
 function assistant(text: string): string {
   clock += 1000;
   return JSON.stringify({
@@ -72,7 +83,39 @@ function writeSession(id: string, lines: string[]): void {
     JSON.stringify({ type: 'session_start', id, cwd: home, sessionTitle: 'S' }),
     ...lines,
   ];
-  writeFileSync(join(dir, `${id}.jsonl`), `${all.join('\n')}\n`);
+  const path = join(dir, `${id}.jsonl`);
+  writeFileSync(path, `${all.join('\n')}\n`);
+  sessionPaths.set(id, path);
+  publishSessionPaths();
+}
+
+function publishSessionPaths(): void {
+  const index = new HistoryIndex();
+  try {
+    assert.equal(
+      index.applySessionFileReconciliation({
+        previousRevision: 0,
+        revision: 1,
+        changed: sessionPaths.size,
+        upserts: [...sessionPaths].map(([providerSessionId, path]) => {
+          const stat = statSync(path);
+          return {
+            providerSessionId,
+            path,
+            birthtimeMs: stat.birthtimeMs,
+            mtimeMs: stat.mtimeMs,
+            sizeBytes: stat.size,
+            settingsMtimeMs: null,
+            summary: null,
+          };
+        }),
+        removedProviderSessionIds: [],
+      }),
+      true,
+    );
+  } finally {
+    index.close();
+  }
 }
 
 // A chat compacted twice: s0 (original) -> s1 -> s2 (current backing).
@@ -241,8 +284,9 @@ test('resolveSessionChain rebuilds the chain from the persisted app-session row'
   writeSession('mid1', [compactionState(3), assistant('c1')]);
   writeSession('cur2', [compactionState(4), assistant('c2')]);
   const index = new HistoryIndex();
-  index.syncSummaries([historicalSummary('app0', 'cur2', ['app0', 'mid1'])]);
   index.close();
+  persistTestSummaries([historicalSummary('app0', 'cur2', ['app0', 'mid1'])]);
+  publishSessionPaths();
 
   assert.deepEqual(resolveSessionChain('app0', 'cur2'), ['app0', 'mid1', 'cur2']);
   // Replaying that chain yields the full conversation in order.
@@ -263,8 +307,9 @@ test('export path replays the whole compaction chain in a single window', () => 
   writeSession('mid9', [compactionState(2), assistant('mid')]);
   writeSession('cur9', [compactionState(3), assistant('latest')]);
   const index = new HistoryIndex();
-  index.syncSummaries([historicalSummary('app9', 'cur9', ['app9', 'mid9'])]);
   index.close();
+  persistTestSummaries([historicalSummary('app9', 'cur9', ['app9', 'mid9'])]);
+  publishSessionPaths();
 
   const chain = resolveSessionChain('app9', 'cur9');
   const { events } = loadSessionTranscriptWindow('app9', chain, { limit: 100_000 });

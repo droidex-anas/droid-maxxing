@@ -145,3 +145,19 @@ test('GitHub device codes use a removable trusted event subscription', () => {
   assert.equal(removedListeners[0].channel, 'github-auth-code');
   assert.equal(removedListeners[0].listener, listeners[0].listener);
 });
+
+test('performance metrics IPC carries no payload', async () => {
+  const { api, calls } = loadApi();
+
+  await api.getPerformanceMetrics();
+
+  assert.equal(calls[0].channel, 'get-performance-metrics');
+  assert.equal(calls[0].payload, undefined);
+});
+
+test('system idle time IPC carries no renderer-controlled payload', async () => {
+  const { api, calls } = loadApi(75);
+
+  assert.equal(await api.systemIdleTime(), 75);
+  assert.deepEqual(calls[0], { channel: 'system-idle-time', payload: undefined });
+});

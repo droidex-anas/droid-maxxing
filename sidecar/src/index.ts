@@ -1,158 +1,63 @@
-import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { SessionManager } from './SessionManager.js';
-import type { ClientCommand, ServerEvent } from './protocol.js';
-import { assertValidResponseFormat } from './appPrompt.js';
-import { resolveBrowserAssetPath } from './browser/browserPaths.js';
+import { startBridgeServer } from './bridgeServer.js';
+import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 const REQUESTED_PORT = bridgePort(process.env.BRIDGE_PORT ?? '0');
 const TOKEN = requiredSecret('BRIDGE_TOKEN');
 const ASSET_TOKEN = requiredSecret('BROWSER_ASSET_TOKEN');
 const EXIT_ON_STDIN_CLOSE = process.env.BRIDGE_EXIT_ON_STDIN_CLOSE !== '0';
-const HOST = '127.0.0.1';
-let boundPort = REQUESTED_PORT;
 
-const clients = new Set<WebSocket>();
-
-function broadcast(event: ServerEvent): void {
-  const data = JSON.stringify(event);
-  for (const ws of clients) {
-    if (ws.readyState === ws.OPEN) ws.send(data);
-  }
-}
-
-function browserAssetUrl(filePath: string): string {
-  const url = new URL(`http://${HOST}:${String(boundPort)}/browser-assets`);
-  url.searchParams.set('path', filePath);
-  url.searchParams.set('token', ASSET_TOKEN);
-  return url.toString();
-}
-
-const manager = new SessionManager(broadcast, { assetUrlFor: browserAssetUrl });
-
-const server = createServer((req, res) => {
-  if (serveBrowserAsset(req, res)) return;
-  res.writeHead(404).end('not found');
+const server = startBridgeServer({
+  requestedPort: REQUESTED_PORT,
+  token: TOKEN,
+  assetToken: ASSET_TOKEN,
+  onCommand: async (command) => {
+    await manager.handle(command);
+  },
 });
 
-const wss = new WebSocketServer({ server });
-let shuttingDown = false;
+const manager = new SessionManager(
+  (event) => {
+    server.broadcast(event);
+  },
+  {
+    assetUrlFor: (filePath) => server.browserAssetUrl(filePath),
+  },
+);
 
-server.once('error', (error) => {
-  console.error(`Sidecar bridge failed to listen: ${error.message}`);
-  process.exit(1);
-});
-
-server.listen(REQUESTED_PORT, HOST, () => {
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    console.error('Sidecar bridge did not expose a TCP address.');
+server.ready
+  .then(() => {
+    hotPathMetrics.enable();
+    hotPathMetrics.setGaugeProvider(() => manager.resourceCounts());
+    // Stdout line consumed by the desktop supervisor to confirm readiness.
+    process.stdout.write(`SIDECAR_READY ${String(server.port)}\n`);
+  })
+  .catch((error: unknown) => {
+    console.error(
+      `Sidecar bridge failed to listen: ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exit(1);
-    return;
-  }
-  boundPort = address.port;
-  // Stdout line consumed by the desktop supervisor to confirm readiness.
-  process.stdout.write(`SIDECAR_READY ${String(boundPort)}\n`);
-});
+  });
 
-wss.on('connection', (ws, req) => {
-  const url = new URL(req.url ?? '', `http://${HOST}`);
-  if (url.searchParams.get('token') !== TOKEN) {
-    ws.close(1008, 'unauthorized');
-    return;
-  }
-  clients.add(ws);
-
-  ws.on('message', (raw) => void handleMessage(ws, raw));
-
-  ws.on('close', () => clients.delete(ws));
-  ws.on('error', () => clients.delete(ws));
-});
-
-async function handleMessage(ws: WebSocket, raw: RawData): Promise<void> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(messageText(raw));
-  } catch {
-    ws.send(
-      JSON.stringify({
-        type: 'error',
-        message: 'Invalid JSON command',
-      } satisfies ServerEvent),
-    );
-    return;
-  }
-  try {
-    if (typeof parsed === 'object' && parsed !== null && 'responseFormat' in parsed) {
-      assertValidResponseFormat(parsed.responseFormat);
-    }
-    await manager.handle(parsed as ClientCommand);
-  } catch (err) {
-    ws.send(
-      JSON.stringify({
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      } satisfies ServerEvent),
-    );
-  }
-}
-
-function messageText(raw: RawData): string {
-  if (Buffer.isBuffer(raw)) return raw.toString('utf8');
-  if (raw instanceof ArrayBuffer) return Buffer.from(raw).toString('utf8');
-  return Buffer.concat(raw).toString('utf8');
-}
+let shuttingDown = false;
 
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   const forceExit = setTimeout(() => process.exit(1), 5_000);
   forceExit.unref();
-  wss.close();
-  server.close();
   try {
+    // Keep the bridge available while manager cleanup emits final state.
+    // Bridge close is bounded and flushes its ordered queue after shutdown.
     await manager.shutdown();
+    hotPathMetrics.disable();
+    await server.close();
   } catch (error) {
     console.error(error);
     process.exitCode = 1;
   }
   clearTimeout(forceExit);
   process.exit();
-}
-
-function serveBrowserAsset(req: IncomingMessage, res: ServerResponse): boolean {
-  const url = new URL(req.url ?? '/', `http://${HOST}:${String(boundPort)}`);
-  if (url.pathname !== '/browser-assets') return false;
-  if (url.searchParams.get('token') !== ASSET_TOKEN) {
-    res.writeHead(401).end('unauthorized');
-    return true;
-  }
-  const filePath = url.searchParams.get('path');
-  if (!filePath) {
-    res.writeHead(403).end('forbidden');
-    return true;
-  }
-  void resolveBrowserAssetPath(filePath)
-    .then(async (resolvedPath) => {
-      if (!resolvedPath) {
-        res.writeHead(403).end('forbidden');
-        return;
-      }
-      const info = await stat(resolvedPath);
-      if (!info.isFile()) {
-        res.writeHead(404).end('not found');
-        return;
-      }
-      res.writeHead(200, {
-        'content-type': contentType(resolvedPath),
-        'cache-control': 'no-store',
-      });
-      createReadStream(resolvedPath).pipe(res);
-    })
-    .catch(() => res.writeHead(404).end('not found'));
-  return true;
 }
 
 function requiredSecret(name: 'BRIDGE_TOKEN' | 'BROWSER_ASSET_TOKEN'): string {
@@ -167,13 +72,6 @@ function bridgePort(value: string): number {
     throw new Error(`BRIDGE_PORT must be an integer from 0 to 65535; received ${value}.`);
   }
   return port;
-}
-
-function contentType(filePath: string): string {
-  if (filePath.endsWith('.png')) return 'image/png';
-  if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) return 'image/jpeg';
-  if (filePath.endsWith('.json')) return 'application/json';
-  return 'application/octet-stream';
 }
 
 process.on('SIGINT', () => void shutdown());

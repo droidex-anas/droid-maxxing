@@ -63,7 +63,7 @@ async function startFixture(
 }
 
 function openSocket(port: number): Promise<WebSocket> {
-  const socket = new WebSocket(`ws://127.0.0.1:${String(port)}/?token=fixture`);
+  const socket = new WebSocket(`ws://127.0.0.1:${String(port)}/?token=fixture&bridgeProtocol=2`);
   return new Promise((resolveOpen, reject) => {
     socket.once('open', () => resolveOpen(socket));
     socket.once('error', reject);

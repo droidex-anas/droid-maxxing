@@ -1,4 +1,3 @@
-import type { HistoryIndex } from './history.js';
 import {
   hydrateHistoricalSession,
   loadSessionHistory,
@@ -16,8 +15,11 @@ import type {
 } from './protocol.js';
 import type { CompactType } from './compaction.js';
 import { errMsg } from './sessionHelpers.js';
+import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
-type TimelineHistory = Pick<HistoryIndex, 'recordEvent'>;
+interface TimelineHistory {
+  recordEvent(event: TranscriptEvent): void;
+}
 type TimelineError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
 export interface SessionTimelineLoaders {
@@ -126,6 +128,9 @@ export class SessionTimeline {
   private streamingBuffer: {
     event: TranscriptEvent;
     estimatedBytes: number;
+    // Deltas merged into this buffered run so far; reported at flush as the
+    // coalescing batch-size metric.
+    mergedCount: number;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
   private readonly streamingFlushFailures = new Map<string, StreamingTranscriptPersistenceError>();
@@ -323,6 +328,7 @@ export class SessionTimeline {
         }
         buffer.event = merged;
         buffer.estimatedBytes += incomingBytes;
+        buffer.mergedCount += 1;
         return;
       }
     }
@@ -358,6 +364,7 @@ export class SessionTimeline {
     if (!buffer) return;
     this.streamingBuffer = null;
     clearTimeout(buffer.timer);
+    hotPathMetrics.recordCoalesce(buffer.mergedCount);
     try {
       this.recordAndEmit(buffer.event);
     } catch (error) {
@@ -406,7 +413,7 @@ export class SessionTimeline {
       }
     }, this.streamingCoalesceMs);
     timer.unref();
-    this.streamingBuffer = { event, estimatedBytes, timer };
+    this.streamingBuffer = { event, estimatedBytes, mergedCount: 1, timer };
   }
 
   private rememberStreamingFailure(
@@ -446,7 +453,17 @@ export class SessionTimeline {
 
   private recordAndEmit(event: TranscriptEvent): void {
     this.dependencies.history.recordEvent(event);
+    this.emitRecordedEvent(event);
+  }
+
+  private emitRecordedEvent(event: TranscriptEvent): void {
+    // Emit timing covers handoff into the ordered bridge queue. Priority or
+    // size-boundary events can synchronously trigger a flush inside that call;
+    // transportMs isolates the serialization + fan-out slice. Persistence is
+    // measured independently by the worker-backed persistence queue.
+    const emitStartedAt = performance.now();
     this.dependencies.emit({ type: 'event.appended', event });
+    hotPathMetrics.recordEmit(performance.now() - emitStartedAt);
   }
 
   appendStatus(

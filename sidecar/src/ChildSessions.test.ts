@@ -45,6 +45,7 @@ function createHarness(
     failFlushStreamingOnce?: boolean;
     failSettleStreamingOnce?: boolean;
     missReplayChildOnce?: boolean;
+    deferDurabilityForStatus?: PersistedChildSession['status'];
   } = {},
 ): Harness {
   const calls: RecordedCall[] = [];
@@ -57,6 +58,7 @@ function createHarness(
   let failDriveSetup = options.failDriveSetup;
   let failFlushStreaming = options.failFlushStreamingOnce;
   let failSettleStreaming = options.failSettleStreamingOnce;
+  let deferDurabilityForStatus = options.deferDurabilityForStatus;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
     if (failDriveSetup !== stage) return;
     failDriveSetup = undefined;
@@ -65,7 +67,12 @@ function createHarness(
   const upsertChildSession = history.upsertChildSession.bind(history);
   history.upsertChildSession = (child) => {
     if (child.status === 'running') throwDriveSetup('commit');
-    upsertChildSession(child);
+    const durable = upsertChildSession(child);
+    if (child.status === deferDurabilityForStatus) {
+      deferDurabilityForStatus = undefined;
+      return false;
+    }
+    return durable;
   };
   history.seedChildSessions(records);
   let parent = parentLease(parentId, calls);
@@ -782,6 +789,32 @@ test('child settlement stops polling and returns idle when streaming persistence
     'context.stopPolling',
   ]);
   assert.equal(h.owner.list(h.parentId)[0]?.status, 'paused');
+});
+
+test('completed child publication waits for durability recovery', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { deferDurabilityForStatus: 'completed' });
+  await h.open(record);
+  h.events.length = 0;
+
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    role: 'worker',
+    providerSessionId: 'provider',
+    done: true,
+  });
+
+  assert.equal(h.owner.list(h.parentId)[0]?.status, 'completed');
+  assert.equal(
+    h.events.some((event) => event.type === 'session.child' && event.child.status === 'completed'),
+    false,
+  );
+
+  h.owner.retryPendingDurability();
+  assert.equal(
+    h.events.some((event) => event.type === 'session.child' && event.child.status === 'completed'),
+    true,
+  );
 });
 
 test('completion invalidates a role observation queued behind settings', async () => {

@@ -157,6 +157,55 @@ export function didCommitRequestedHistoryPrepend({
   return requestedCursor !== currentCursor && transcriptLength > previousTranscriptLength;
 }
 
+export function applyConversationContentResize(
+  element: HTMLDivElement,
+  anchor: ViewportAnchor | null,
+  isPinned: boolean,
+  allowHeightFallback: boolean,
+):
+  | { mode: 'follow-tail' | 'ignore'; anchor: ViewportAnchor | null; didFindRow: false }
+  | { mode: 'preserve-anchor'; anchor: ViewportAnchor; didFindRow: boolean } {
+  if (isPinned) {
+    element.scrollTop = element.scrollHeight;
+    return { mode: 'follow-tail', anchor, didFindRow: false };
+  }
+  if (anchor === null) return { mode: 'ignore', anchor, didFindRow: false };
+  const restored = restoreViewportAnchor(element, anchor, allowHeightFallback);
+  return { mode: 'preserve-anchor', ...restored };
+}
+
+interface ConversationContentResizeBinding {
+  element: HTMLDivElement;
+  content: Element;
+  conversationKey: string | null;
+}
+
+interface ActiveConversationContentResizeBinding extends ConversationContentResizeBinding {
+  observer: ResizeObserver;
+  releaseFrame: number;
+  ownedRestoreGeneration: number | null;
+}
+
+/**
+ * The observer must follow the scroll container's live first child. That child
+ * is swapped for empty-transcript states (welcome, restore, compose skeleton)
+ * and keyed transcript swaps, so content identity decides rebinding even while
+ * the transcript length stays zero.
+ */
+export function shouldBindConversationContentResize(options: {
+  binding: ConversationContentResizeBinding | null;
+  element: HTMLDivElement | null;
+  content: Element | null;
+  conversationKey: string | null;
+}): boolean {
+  if (!options.element || !options.content) return false;
+  return (
+    options.binding?.element !== options.element ||
+    options.binding.content !== options.content ||
+    options.binding.conversationKey !== options.conversationKey
+  );
+}
+
 export function useConversationScrollWindow({
   scrollRef,
   visibleConversationKey,
@@ -438,58 +487,91 @@ export function useConversationScrollWindow({
   // Keep compensating after the prepend commit while dynamic chat content
   // settles. This applies equally to today's markdown/tool cards and future
   // interactive app blocks whose height changes after data or animation work.
+  const contentResizeBindingRef = useRef<ActiveConversationContentResizeBinding | null>(null);
+  const disposeContentResizeBinding = useCallback(() => {
+    const binding = contentResizeBindingRef.current;
+    if (!binding) return;
+    contentResizeBindingRef.current = null;
+    binding.observer.disconnect();
+    if (binding.releaseFrame) cancelAnimationFrame(binding.releaseFrame);
+    if (
+      binding.ownedRestoreGeneration !== null &&
+      viewportRestoreGeneration.current === binding.ownedRestoreGeneration
+    ) {
+      isRestoringViewport.current = false;
+      expectedRestoredScrollTop.current = null;
+    }
+  }, []);
   useLayoutEffect(() => {
     const element = scrollRef.current;
-    const content = element?.firstElementChild;
-    if (!element || !content || typeof ResizeObserver === 'undefined') return undefined;
-    let releaseFrame = 0;
-    let ownedRestoreGeneration: number | null = null;
-    const observer = new ResizeObserver(() => {
-      if (isPinned.current || viewportAnchor.current === null) return;
-      const ownsRestore = !isRestoringViewport.current;
-      const restoreGeneration = ownsRestore
-        ? ++viewportRestoreGeneration.current
-        : viewportRestoreGeneration.current;
-      isRestoringViewport.current = true;
-      const restored = restoreViewportAnchor(
+    const content = element?.firstElementChild ?? null;
+    if (typeof ResizeObserver === 'undefined' || !element || !content) {
+      disposeContentResizeBinding();
+      return;
+    }
+    if (
+      !shouldBindConversationContentResize({
+        binding: contentResizeBindingRef.current,
         element,
-        viewportAnchor.current,
-        isSettlingHistoryPrepend.current,
-      );
-      viewportAnchor.current = restored.anchor;
-      expectedRestoredScrollTop.current = element.scrollTop;
-      if (ownsRestore) {
-        ownedRestoreGeneration = restoreGeneration;
-        if (releaseFrame) cancelAnimationFrame(releaseFrame);
-        releaseFrame = requestAnimationFrame(() => {
-          if (viewportAnchor.current !== null && !restored.didFindRow) {
-            const retried = restoreViewportAnchor(element, viewportAnchor.current, false);
-            viewportAnchor.current = retried.didFindRow
-              ? retried.anchor
-              : captureViewportAnchor(element, true);
-            expectedRestoredScrollTop.current = element.scrollTop;
-          }
-          if (viewportRestoreGeneration.current === restoreGeneration) {
-            isRestoringViewport.current = false;
-            expectedRestoredScrollTop.current = null;
-          }
-          ownedRestoreGeneration = null;
-        });
-      }
-    });
-    observer.observe(content);
-    return () => {
-      observer.disconnect();
-      if (releaseFrame) cancelAnimationFrame(releaseFrame);
-      if (
-        ownedRestoreGeneration !== null &&
-        viewportRestoreGeneration.current === ownedRestoreGeneration
-      ) {
-        isRestoringViewport.current = false;
-        expectedRestoredScrollTop.current = null;
-      }
+        content,
+        conversationKey: visibleConversationKey,
+      })
+    )
+      return;
+    disposeContentResizeBinding();
+    const binding: ActiveConversationContentResizeBinding = {
+      element,
+      content,
+      conversationKey: visibleConversationKey,
+      observer: new ResizeObserver(() => {
+        if (isPinned.current) {
+          // Images, interactive Apps, and disclosures can grow without changing
+          // transcript length. A bottom-pinned reader follows that growth just as
+          // they follow newly appended output.
+          applyConversationContentResize(element, viewportAnchor.current, true, false);
+          return;
+        }
+        if (viewportAnchor.current === null) return;
+        const ownsRestore = !isRestoringViewport.current;
+        const restoreGeneration = ownsRestore
+          ? ++viewportRestoreGeneration.current
+          : viewportRestoreGeneration.current;
+        isRestoringViewport.current = true;
+        const restored = applyConversationContentResize(
+          element,
+          viewportAnchor.current,
+          false,
+          isSettlingHistoryPrepend.current,
+        );
+        if (restored.mode !== 'preserve-anchor') return;
+        viewportAnchor.current = restored.anchor;
+        expectedRestoredScrollTop.current = element.scrollTop;
+        if (ownsRestore) {
+          binding.ownedRestoreGeneration = restoreGeneration;
+          if (binding.releaseFrame) cancelAnimationFrame(binding.releaseFrame);
+          binding.releaseFrame = requestAnimationFrame(() => {
+            if (viewportAnchor.current !== null && !restored.didFindRow) {
+              const retried = restoreViewportAnchor(element, viewportAnchor.current, false);
+              viewportAnchor.current = retried.didFindRow
+                ? retried.anchor
+                : captureViewportAnchor(element, true);
+              expectedRestoredScrollTop.current = element.scrollTop;
+            }
+            if (viewportRestoreGeneration.current === restoreGeneration) {
+              isRestoringViewport.current = false;
+              expectedRestoredScrollTop.current = null;
+            }
+            binding.ownedRestoreGeneration = null;
+          });
+        }
+      }),
+      releaseFrame: 0,
+      ownedRestoreGeneration: null,
     };
-  }, [scrollRef, transcriptLength, visibleConversationKey]);
+    contentResizeBindingRef.current = binding;
+    binding.observer.observe(content);
+  });
+  useEffect(() => disposeContentResizeBinding, [disposeContentResizeBinding]);
 
   useEffect(() => {
     const element = scrollRef.current;

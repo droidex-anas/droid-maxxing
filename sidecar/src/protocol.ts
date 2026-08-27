@@ -605,6 +605,7 @@ export type ClientCommand =
     }
   | { type: 'session.loadHistory'; appSessionId: string; cursor?: string; limit?: number }
   | { type: 'sessions.search'; requestId: string; query: string }
+  | { type: 'history.indexingIdle'; isIdle: boolean }
   | {
       type: 'child.open';
       parentAppSessionId: string;
@@ -869,3 +870,30 @@ export type ServerEvent =
   | { type: 'browser.native.request'; request: BrowserNativeRequest }
   | { type: 'browser.closed'; appSessionId: string }
   | { type: 'browser.error'; appSessionId?: string; message: string };
+
+export const BRIDGE_PROTOCOL_VERSION = 2 as const;
+
+export interface SequencedServerEvent {
+  seq: number;
+  event: ServerEvent;
+}
+
+export interface ServerEventBatch {
+  type: 'events.batch';
+  generation: string;
+  firstSeq: number;
+  lastSeq: number;
+  events: SequencedServerEvent[];
+}
+
+export interface BridgeResetMessage {
+  type: 'bridge.reset';
+  generation: string;
+  lastSeq: number;
+  reason: 'generation_changed' | 'replay_unavailable' | 'invalid_resume';
+}
+
+export type ServerWireMessage =
+  | Extract<ServerEvent, { type: 'error' }>
+  | ServerEventBatch
+  | BridgeResetMessage;

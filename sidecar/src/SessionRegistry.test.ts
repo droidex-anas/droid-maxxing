@@ -19,9 +19,10 @@ class FakeHistory {
   readonly trace: string[] = [];
   summaryReadCount = 0;
   nextSyncError?: Error;
+  nextDurabilityPending = false;
   private readonly patches = new Map<string, Partial<SessionSummary>>();
 
-  syncSummaries(summaries: SessionSummary[]): void {
+  syncSummaries(summaries: SessionSummary[]): boolean | undefined {
     const error = this.nextSyncError;
     delete this.nextSyncError;
     if (error) throw error;
@@ -32,6 +33,11 @@ class FakeHistory {
       this.patches.set(summary.appSessionId, copy);
       if (summary.providerSessionId) this.patches.set(summary.providerSessionId, copy);
     }
+    if (this.nextDurabilityPending) {
+      this.nextDurabilityPending = false;
+      return false;
+    }
+    return undefined;
   }
 
   summaryPatchesAndHidden(): {
@@ -57,6 +63,7 @@ interface HarnessOptions {
   loadMissionControlSessions?: SessionRegistryDependencies['loadMissionControlSessions'];
   projectSummary?: SessionRegistryDependencies['projectSummary'];
   now?: () => number;
+  onLiveProviderReplaced?: (providerSessionId: string) => void;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -73,6 +80,9 @@ function createHarness(options: HarnessOptions = {}) {
       history.trace.push('publish');
       published.push(copySummary(summary));
     },
+    ...(options.onLiveProviderReplaced
+      ? { onLiveProviderReplaced: options.onLiveProviderReplaced }
+      : {}),
     now: options.now ?? (() => 100),
   };
 
@@ -122,6 +132,10 @@ function copySummary(value: Readonly<SessionSummary>): SessionSummary {
       : {}),
     features: value.features.map(copyFeature),
   };
+}
+
+function streamingStates(summaries: readonly SessionSummary[]): Array<boolean | undefined> {
+  return summaries.map((value) => value.streaming);
 }
 
 function copyFeature(feature: BridgeFeature): BridgeFeature {
@@ -279,6 +293,44 @@ test('failed summary persistence leaves live state unchanged and unpublished', (
   assert.deepEqual(published, []);
 });
 
+test('a retained settlement publishes only after durability recovery', () => {
+  const { history, published, registry } = createHarness();
+  const session = live(summary('durable-app', { streaming: true, phase: 'running' }));
+  registry.register(session);
+  history.trace.length = 0;
+  published.length = 0;
+  history.nextDurabilityPending = true;
+
+  const pending = registry.updateSummary('durable-app', {
+    streaming: false,
+    phase: 'paused',
+  });
+
+  assert.equal(pending?.streaming, false);
+  assert.equal(session.summary.streaming, false, 'the owner advances its internal state');
+  assert.equal(registry.listSummaries()[0]?.streaming, true, 'renderer list stays durable');
+  assert.deepEqual(published, []);
+
+  registry.retryPendingDurability();
+  assert.equal(registry.listSummaries()[0]?.streaming, false);
+  assert.deepEqual(streamingStates(published), [false]);
+});
+
+test('new live state supersedes a held settlement without replaying it later', () => {
+  const { history, published, registry } = createHarness();
+  const session = live(summary('continued-app', { streaming: true, phase: 'running' }));
+  registry.register(session);
+  published.length = 0;
+  history.nextDurabilityPending = true;
+  registry.updateSummary('continued-app', { streaming: false, phase: 'paused' });
+
+  registry.updateSummary('continued-app', { streaming: true, phase: 'running' });
+  registry.retryPendingDurability();
+
+  assert.deepEqual(streamingStates(published), [true]);
+  assert.equal(registry.listSummaries()[0]?.streaming, true);
+});
+
 test('reanchorHistoricalCwd moves idle sessions and preserves nested directories', () => {
   const historical = [
     summary('at-root', { cwd: '/repo/.worktrees/feature', updatedAt: 7 }),
@@ -320,6 +372,7 @@ test('reanchorHistoricalCwd refuses to move a worktree used by a live session', 
 
 test('replaceProvider retains the alias chain and supports live and historical sessions', () => {
   let timestamp = 10;
+  const retiredProviders: string[] = [];
   const historical = summary('historical-app', {
     providerSessionId: 'historical-provider',
     compactedFromProviderSessionIds: ['historical-provider-old'],
@@ -327,6 +380,9 @@ test('replaceProvider retains the alias chain and supports live and historical s
   const { history, published, registry } = createHarness({
     ordinary: [historical],
     now: () => timestamp++,
+    onLiveProviderReplaced: (providerSessionId) => {
+      retiredProviders.push(providerSessionId);
+    },
   });
   const session = live(
     summary('live-app', {
@@ -358,6 +414,9 @@ test('replaceProvider retains the alias chain and supports live and historical s
   assert.equal(registry.getLive('live-provider-next'), session);
   assert.equal(registry.getLive('live-provider'), session);
   assert.equal(registry.getLive('live-provider-old'), session);
+  assert.equal(registry.isCurrentLiveProvider('live-provider-next'), true);
+  assert.equal(registry.isCurrentLiveProvider('live-provider'), false);
+  assert.deepEqual(retiredProviders, ['live-provider']);
 
   const historicalUpdated = registry.replaceProvider(
     'historical-provider-old',
@@ -373,6 +432,11 @@ test('replaceProvider retains the alias chain and supports live and historical s
   assert.equal(historicalUpdated?.updatedAt, 1);
   assert.equal(registry.getLive('historical-provider-next'), undefined);
   assert.equal(registry.resolveSummary('historical-provider-next')?.appSessionId, 'historical-app');
+  assert.deepEqual(
+    retiredProviders,
+    ['live-provider'],
+    'historical swaps do not retire live files',
+  );
   assert.deepEqual(history.trace, ['persist', 'publish', 'persist', 'publish']);
   assert.equal(published.length, 2);
 });

@@ -254,6 +254,29 @@
     animation: droid-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
+  /* One-shot entrance motion for newly appended chat rows. Keeping this in CSS
+     avoids a Framer Motion component and animation state for every old row. */
+  @keyframes feed-row-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .feed-row-enter {
+    animation: feed-row-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .feed-row-enter {
+      animation: none;
+    }
+  }
+
   /* Toast TTL hairline: drains across the toast's lifetime (duration is set
      inline per toast). Hovering the toast pauses the drain. */
   @keyframes droid-toast-ttl {

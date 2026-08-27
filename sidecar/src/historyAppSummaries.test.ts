@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionSummary } from './protocol.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
+import { persistTestEvent, persistTestSummaries } from './testing/historyPersistenceFixture.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-home-'));
@@ -61,7 +62,7 @@ function summary(appSessionId: string, cwd: string): SessionSummary {
 test('loadHistoricalSessions applies app summaries before plain chat filtering', () => {
   writeSession('plain-runtime-home', home);
   const index = new HistoryIndex();
-  index.syncSummaries([summary('plain-runtime-home', '')]);
+  persistTestSummaries([summary('plain-runtime-home', '')]);
   index.close();
 
   const rows = loadHistoricalSessions({ includePlainChats: true, limitPerWorkspace: 5 });
@@ -78,7 +79,7 @@ test('syncSummaries persists autoCompactions and loadHistoricalSessions restores
   const cwd = join(home, 'workspace-autocompact');
   writeSession('autocompact-chat', cwd);
   const index = new HistoryIndex();
-  index.syncSummaries([{ ...summary('autocompact-chat', cwd), autoCompactions: 3 }]);
+  persistTestSummaries([{ ...summary('autocompact-chat', cwd), autoCompactions: 3 }]);
   index.close();
 
   const rows = loadHistoricalSessions({ workspaceCwds: [cwd] });
@@ -91,9 +92,9 @@ test('historical compaction markers hydrate the summary generation', () => {
   const cwd = join(home, 'workspace-external-compactions');
   writeSession('external-compactions', cwd);
   const index = new HistoryIndex();
-  index.syncSummaries([summary('external-compactions', cwd)]);
+  persistTestSummaries([summary('external-compactions', cwd)]);
   for (let i = 0; i < 4; i++) {
-    index.recordEvent({
+    persistTestEvent({
       id: `external-compaction-${String(i)}`,
       appSessionId: 'external-compactions',
       sourceSessionId: 'primary',
@@ -101,7 +102,7 @@ test('historical compaction markers hydrate the summary generation', () => {
       kind: 'compaction',
       ts: i,
     });
-    index.recordEvent({
+    persistTestEvent({
       id: `compaction-external-compactions-summary-${String(i)}`,
       appSessionId: 'external-compactions',
       sourceSessionId: 'external-compactions',
@@ -110,7 +111,7 @@ test('historical compaction markers hydrate the summary generation', () => {
       ts: i,
     });
   }
-  index.recordEvent({
+  persistTestEvent({
     id: 'compaction-worker-summary',
     appSessionId: 'external-compactions',
     sourceSessionId: 'worker-1',
@@ -207,7 +208,7 @@ test('summaryPatchesAndHidden derives patches and hidden ids from one read', () 
   const cwd = join(home, 'workspace-combined-read');
   writeSession('cur-1', cwd);
   const index = new HistoryIndex();
-  index.syncSummaries([
+  persistTestSummaries([
     {
       ...summary('app-1', cwd),
       providerSessionId: 'cur-1',
@@ -217,7 +218,7 @@ test('summaryPatchesAndHidden derives patches and hidden ids from one read', () 
     },
   ]);
   for (let i = 0; i < 2; i++) {
-    index.recordEvent({
+    persistTestEvent({
       id: `compaction-app-1-${String(i)}`,
       appSessionId: 'app-1',
       sourceSessionId: 'app-1',
