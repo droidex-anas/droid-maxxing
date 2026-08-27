@@ -87,6 +87,9 @@ const sidecarSupervisor = createSidecarSupervisor({
   userData: () => app.getPath('userData'),
   onUnexpectedExit: (error) => diagnostics.captureException(error, { process: 'sidecar' }),
 });
+// subscribe() replays the current status synchronously, so mainWindow must
+// already be initialized when this runs.
+let mainWindow = null;
 sidecarSupervisor.subscribe((status) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('sidecar-status', status);
@@ -103,7 +106,6 @@ const appUpdater = createAppUpdater({
 });
 const rendererOomRecovery = createRendererOomRecovery();
 
-let mainWindow = null;
 let hiddenNativeBrowserWindow = null;
 // Selected app-icon appearance. 'system' tracks the OS light/dark setting via
 // nativeTheme; 'light'/'dark' pin a specific artwork.
