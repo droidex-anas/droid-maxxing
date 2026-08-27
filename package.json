@@ -38,6 +38,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "quality:file-size": "node tools/check-file-size.mjs",
+    "quality:bundle-budgets": "node tools/check-bundle-budgets.mjs",
     "quality:tech-debt": "node tools/check-tech-debt.mjs",
     "quality:deadcode": "knip --include files,exports,types --max-issues 100 --no-config-hints && knip --directory sidecar --include files,exports,types --max-issues 100 --no-config-hints",
     "quality:deps": "knip --dependencies --no-config-hints && knip --directory sidecar --dependencies --no-config-hints",
