@@ -115,8 +115,32 @@ test(
     assert.ok(before !== null && after !== null);
     const bytesRead = after - before;
     assert.ok(
-      bytesRead < sizeBytes / 8,
+      bytesRead < 16 * 1024,
       `head read consumed ${String(bytesRead)} of ${String(sizeBytes)} bytes`,
     );
   },
 );
+
+test('a session_start larger than the first scan window is still read whole', () => {
+  const path = join(workspace, 'wide-start.jsonl');
+  writeFileSync(
+    path,
+    `${[
+      JSON.stringify({
+        type: 'session_start',
+        cwd: '/repo/app',
+        sessionTitle: 'Wide start',
+        // A settings blob well past the initial 8 KiB scan window.
+        settings: { notes: 'n'.repeat(40_000) },
+      }),
+      messageLine('user', 'hello'),
+      messageLine('assistant', 'hi'),
+    ].join('\n')}\n`,
+  );
+
+  const head = readSessionFileHead(path, statSync(path).size);
+
+  assert.equal(head.start.sessionTitle, 'Wide start');
+  assert.equal(head.start.cwd, '/repo/app');
+  assert.equal(head.hasCompletedConversation, true);
+});

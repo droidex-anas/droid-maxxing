@@ -16,7 +16,11 @@ export interface SessionFileHead {
   hasCompletedConversation: boolean;
 }
 
-const SCAN_CHUNK_BYTES = 64 * 1024;
+// A session_start plus an opening exchange almost always fits in the first few
+// kilobytes, and a folder can hold thousands of session files, so the window
+// starts small and only grows for files that hide it behind larger records.
+const FIRST_SCAN_CHUNK_BYTES = 8 * 1024;
+const MAX_SCAN_CHUNK_BYTES = 64 * 1024;
 // The session_start record is the first JSONL line, so give up on finding it
 // after a few lines rather than parsing an entire head.
 const MAX_START_LINES = 8;
@@ -63,14 +67,16 @@ function* sessionLines(path: string, sizeBytes: number): Generator<string> {
   if (sizeBytes <= 0) return;
   const fd = openSync(path, 'r');
   try {
-    const chunk = Buffer.alloc(Math.min(SCAN_CHUNK_BYTES, sizeBytes));
     const decoder = new StringDecoder('utf8');
+    let chunkBytes = FIRST_SCAN_CHUNK_BYTES;
     let offset = 0;
     let pending = '';
     while (offset < sizeBytes) {
+      const chunk = Buffer.alloc(Math.min(chunkBytes, sizeBytes - offset));
       const bytesRead = readSync(fd, chunk, 0, chunk.length, offset);
       if (bytesRead === 0) break;
       offset += bytesRead;
+      chunkBytes = Math.min(chunkBytes * 2, MAX_SCAN_CHUNK_BYTES);
       const lines = `${pending}${decoder.write(chunk.subarray(0, bytesRead))}`.split(/\r?\n/);
       pending = lines.pop() ?? '';
       for (const line of lines) if (line) yield line;
