@@ -1,9 +1,9 @@
-// A parent session's provider process is an OS process holding ~355 MiB and 17
-// threads. Nothing releases one today: the renderer never sends session.close,
-// so every session opened during an app run stays resident until quit. These
-// rules release the ones the user has demonstrably walked away from. The
-// transcript is served from history either way; only the next prompt pays for
-// the reload.
+// A top-level session's provider runtime is an OS process holding ~367 MiB and
+// 17 threads, measured by PID. Nothing releases one during an app run: the
+// renderer never sends session.close, so eight open workspaces hold eight of
+// them until quit. These rules release the ones the user has demonstrably
+// walked away from. The transcript is served from history either way; only the
+// next prompt pays for the reload.
 import type { LiveSession } from './SessionLifecycle.js';
 import type { SessionPhase } from './protocol.js';
 import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
