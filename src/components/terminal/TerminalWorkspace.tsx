@@ -11,7 +11,8 @@ import {
 } from '../../lib/desktop';
 import { createTerminalOutputPump } from '../../lib/terminalOutputPump';
 import { closeTerminalForTab, ensureTerminalForTab } from '../../lib/terminal';
-import { useStoreSelector, type ThemeConfig } from '../../hooks/useStore';
+import { useStoreSelector } from '../../hooks/useStore';
+import type { ThemeConfig } from '../../hooks/persistedThemePreferences';
 import { isTerminalTabShortcut } from '../../lib/keyboardShortcuts';
 
 export function TerminalWorkspace({

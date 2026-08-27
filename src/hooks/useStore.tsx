@@ -139,16 +139,6 @@ import {
 } from '../lib/transcriptHistory';
 import { reduceStoreActionBatch } from './storeActionBatch';
 
-export type {
-  AgentKind,
-  AgentConfig,
-  AgentModelConfig,
-  DiffViewMode,
-  LiveEnterBehavior,
-} from './persistedUiPreferences';
-export type { DiffStyle, ThemeConfig } from './persistedThemePreferences';
-export { normalizeDiffStyle, persistCustomThemes } from './persistedThemePreferences';
-export { loadPersistedUiState } from './persistedUiPreferences';
 export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
 export type { ImagePasteQuality } from '../lib/images';
 

@@ -2,11 +2,10 @@ import {
   shallowEqual,
   useStoreDispatch,
   useStoreSelector,
-  type DiffStyle,
-  type DiffViewMode,
   type ImagePasteQuality,
-  type LiveEnterBehavior,
 } from '../hooks/useStore';
+import type { DiffStyle } from '../hooks/persistedThemePreferences';
+import type { DiffViewMode, LiveEnterBehavior } from '../hooks/persistedUiPreferences';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronDown, Search, Check, X, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
