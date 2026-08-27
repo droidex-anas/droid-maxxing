@@ -242,11 +242,12 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
       const area = document.querySelector('textarea');
       if (!area) throw new Error('composer textarea not found');
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      const started = performance.now();
       setter.call(area, text);
       area.dispatchEvent(new Event('input', { bubbles: true }));
       area.dispatchEvent(new Event('change', { bubbles: true }));
       area.focus();
-      return area.value;
+      return { valueLen: area.value.length, elapsedMs: performance.now() - started };
     },
     sendButton() {
       const area = document.querySelector('textarea');
@@ -347,7 +348,12 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
       const started = performance.now();
       return new Promise((resolve) => {
         const poll = () => {
-          const svg = document.querySelector('[data-testid="chat-view"] svg');
+          const cards = Array.from(document.querySelectorAll('[data-testid="chat-view"] span')).filter(
+            (node) => node.textContent === 'Mermaid',
+          );
+          const svg = cards
+            .map((label) => label.closest('div')?.parentElement?.querySelector('svg:not(.lucide)'))
+            .find(Boolean);
           if (svg) {
             resolve({ elapsedMs: performance.now() - started, found: true });
             return;

@@ -49,6 +49,7 @@ interface EchoMetrics {
   found: boolean;
   composerCleared: boolean;
   rows: number;
+  fillMs?: number;
 }
 
 async function installProbe(app: LaunchedApp): Promise<void> {
@@ -83,6 +84,11 @@ export async function runSendRenderPass(
     await waitForId(app, GUI_BENCH_SESSION_IDS.chatHeavy);
     const heavyOpen = await openSession(app, GUI_BENCH_SESSION_IDS.chatHeavy);
     await sleep(400);
+    await app.cdp.evaluate(`(() => {
+      const node = document.querySelector('[data-testid="chat-view"] .overflow-y-auto');
+      if (node) node.scrollTop = 0;
+    })()`);
+    await sleep(200);
     const mermaid = await app.cdp.evaluate<{ elapsedMs: number; found: boolean }>(
       'window.__guiBench.waitForMermaidSvg(8000)',
     );
@@ -154,17 +160,27 @@ async function waitForId(app: LaunchedApp, sessionId: string, timeoutMs = 40_000
   throw new Error(`Session ${sessionId} never appeared.`);
 }
 
-async function measureEcho(app: LaunchedApp, text: string): Promise<EchoMetrics> {
+async function measureEcho(app: LaunchedApp, text: string): Promise<EchoMetrics & { fillMs: number }> {
   await installProbe(app);
   await app.cdp.evaluate('window.__guiBench.waitForSendReady(15000)');
   const previous = await app.cdp.evaluate<number>(
     'document.querySelectorAll(\'[data-testid="chat-view"] [data-feed-row-id]\').length',
   );
-  await app.cdp.evaluate(`window.__guiBench.fillPrompt(${JSON.stringify(text)})`);
+  const fill = await app.cdp.evaluate<{ valueLen: number; elapsedMs: number }>(
+    `window.__guiBench.fillPrompt(${JSON.stringify(text)})`,
+  );
+  const fillWaitStarted = Date.now();
+  while (Date.now() - fillWaitStarted < 3000) {
+    const ready = await app.cdp.evaluate<boolean>(
+      `(() => { const send = window.__guiBench.sendButton(); return Boolean(send && !send.disabled); })()`,
+    );
+    if (ready) break;
+    await sleep(16);
+  }
   const started = Date.now();
   await app.cdp.evaluate('window.__guiBench.clickSend()');
   const wait = await app.cdp.evaluate<{ elapsedMs: number; found: boolean; rows: number }>(
-    `window.__guiBench.waitForUserEcho(${JSON.stringify(text.slice(0, 48))}, ${String(previous)}, 4000)`,
+    `window.__guiBench.waitForUserEcho(${JSON.stringify(text.slice(0, 24))}, ${String(previous)}, 4000)`,
   );
   const composer = await app.cdp.evaluate<string | null>('window.__guiBench.composerValue()');
   return {
@@ -172,5 +188,6 @@ async function measureEcho(app: LaunchedApp, text: string): Promise<EchoMetrics>
     found: wait.found,
     composerCleared: composer === '',
     rows: wait.rows,
+    fillMs: fill.elapsedMs,
   };
 }
