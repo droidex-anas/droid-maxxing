@@ -301,6 +301,14 @@ deterministic invariants with `npm run perf:gates` (also `npm run quality:perf-g
 Convenience aliases: `npm run perf:multi-agent`, `npm run perf:long-session`,
 `npm run perf:soak`. Bundle budgets remain `npm run quality:bundle-budgets`.
 
+Desktop GUI comparison (dev-only, not shipped) seeds Factory session JSONL and
+drives a real Electron window over CDP:
+
+```bash
+npm run gui-bench:seed -- --home /tmp/droidex-gui-bench/template-home
+npm run gui-bench:run -- --runs 3
+```
+
 ## Project map
 
 - `src/`: React UI, state, hooks, and frontend tests

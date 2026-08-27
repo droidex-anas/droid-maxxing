@@ -56,6 +56,8 @@
     "perf:report": "npm --prefix sidecar run perf:replay -- --compare --commit-report --enforce-gates",
     "perf:gates": "npm --prefix sidecar run perf:replay -- --gates --enforce-gates",
     "perf:ab-probes": "tsx tools/perf-ab-probes.ts",
+    "gui-bench:seed": "tsx tools/gui-bench-seed.ts",
+    "gui-bench:run": "tsx tools/gui-bench-run.ts",
     "precommit": "lint-staged && npm run quality:file-size && npm run quality:tech-debt && npm run typecheck && npm run sidecar:typecheck && npm run electron:check",
     "prepare": "husky",
     "docs:generate": "node tools/generate-docs.mjs",
