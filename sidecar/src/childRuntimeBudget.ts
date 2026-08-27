@@ -1,11 +1,11 @@
-export type ChildRuntimeAdmission = 'admit' | 'queue' | 'reject';
+type ChildRuntimeAdmission = 'admit' | 'queue' | 'reject';
 
-export interface ChildRuntimeBudget {
+interface ChildRuntimeBudget {
   maxLive: number;
   maxQueued: number;
 }
 
-export interface ChildRuntimeOccupancy {
+interface ChildRuntimeOccupancy {
   live: number;
   reserved: number;
   queued: number;

@@ -1,8 +1,5 @@
-// Owns Electron power/battery plus window visibility for the low-background
-// work tier. Productive agent execution is not paused here; callers use the
-// tier only to drop informational/UI maintenance work.
-
-const TIERS = ['interactive', 'hidden', 'low-power'];
+// Productive agent execution is not paused here; the tier only drops
+// informational/UI maintenance work.
 
 function resolvePowerTier({ windowVisible, documentVisible, onBattery }) {
   const visible = windowVisible !== false && documentVisible !== false;
@@ -125,4 +122,4 @@ function createPowerTier(options = {}) {
   };
 }
 
-module.exports = { createPowerTier, resolvePowerTier, TIERS };
+module.exports = { createPowerTier, resolvePowerTier };

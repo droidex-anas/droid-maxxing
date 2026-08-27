@@ -1,7 +1,5 @@
 export type MetricClass = 'ab' | 'candidate';
 
-export type GateMode = 'hard' | 'warn';
-
 export interface MetricDefinition {
   id: string;
   class: MetricClass;

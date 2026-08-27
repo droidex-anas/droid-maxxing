@@ -579,8 +579,6 @@ export class SessionManager {
     });
   }
 
-  // Resource gauge sampled by the hot-path metrics endpoint. Composed here so
-  // each count stays owned by its registry; the composition root wires it in.
   resourceCounts(): HotPathResourceCounts {
     const children = this.childSessions.counts();
     const pollers = this.context.pollerCounts();

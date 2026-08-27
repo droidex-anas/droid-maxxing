@@ -29,7 +29,7 @@ export const DEFAULT_COMPARE_SCENARIOS = [
   'soak',
 ] as const;
 
-export const GATE_SCENARIOS = ['smoke', 'soak'] as const;
+const GATE_SCENARIOS = ['smoke', 'soak'] as const;
 
 export interface CompareOptions {
   baselineRef: string;
@@ -44,7 +44,7 @@ export function defaultCandidateRoot(): string {
   return resolve(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), '..');
 }
 
-export function baselineCachePath(candidateRoot: string): string {
+function baselineCachePath(candidateRoot: string): string {
   return join(candidateRoot, 'sidecar/src/perf/baselines/origin-main.json');
 }
 
