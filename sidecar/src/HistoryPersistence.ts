@@ -177,26 +177,16 @@ export class HistoryPersistence {
 
   async reconcileSessionFiles(): Promise<number> {
     await this.queue.drain();
-    try {
-      return await this.applySearchReconciliation(
-        await this.withSearchClient((client) => client.reconcileSessionFiles()),
-      );
-    } catch (error) {
-      if (!this.searchUnavailable) throw error;
-      return 0;
-    }
+    return await this.applySearchReconciliation(
+      await this.getSearchClient().reconcileSessionFiles(),
+    );
   }
 
   async reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number> {
     await this.queue.drain();
-    try {
-      return await this.applySearchReconciliation(
-        await this.withSearchClient((client) => client.reconcileSessionFilePaths(changes)),
-      );
-    } catch (error) {
-      if (!this.searchUnavailable) throw error;
-      return 0;
-    }
+    return await this.applySearchReconciliation(
+      await this.getSearchClient().reconcileSessionFilePaths(changes),
+    );
   }
 
   syncSummaries(summaries: SessionSummary[]): boolean {
@@ -333,7 +323,7 @@ export class HistoryPersistence {
   private async applySearchReconciliation(result: SessionFileReconciliation): Promise<number> {
     let changed = result.changed;
     if (!this.core.applySessionFileReconciliation(result)) {
-      const snapshot = await this.withSearchClient((client) => client.sessionFileSnapshot());
+      const snapshot = await this.getSearchClient().sessionFileSnapshot();
       if (this.core.replaceSessionFileSnapshot(snapshot)) changed = Math.max(1, changed);
     }
     if (changed > 0) {

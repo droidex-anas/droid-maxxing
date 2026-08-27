@@ -4,7 +4,10 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { createHistorySessionFileCache, SESSION_SEARCH_INDEX_FILENAME } from './history.js';
 import { HistorySearchIndex } from './historySearchIndex.js';
-import { isHistorySearchUnavailableError } from './historySearchSchema.js';
+import {
+  HistorySearchUnavailableError,
+  isHistorySearchUnavailableError,
+} from './historySearchSchema.js';
 import type {
   SearchableSessionFileEntry,
   SessionFileChange,
@@ -36,7 +39,8 @@ export class HistoryIndexDatabase {
   private readonly canonicalDb: DatabaseSync;
   private readonly derivedDb: DatabaseSync;
   private readonly sessionFiles;
-  private readonly searchIndex;
+  private readonly searchIndex: HistorySearchIndex | null;
+  private readonly searchUnavailable: HistorySearchUnavailableError | null;
   private readonly now: () => number;
   private readonly recentWindowMs: number;
   private readonly recentSliceDelayMs: number;
@@ -73,6 +77,7 @@ export class HistoryIndexDatabase {
     this.derivedDb = derived.db;
     this.sessionFiles = derived.sessionFiles;
     this.searchIndex = derived.searchIndex;
+    this.searchUnavailable = derived.searchUnavailable;
     this.now = options.now ?? Date.now;
     this.recentWindowMs = options.recentWindowMs ?? RECENT_HISTORY_WINDOW_MS;
     this.recentSliceDelayMs = options.recentSliceDelayMs ?? RECENT_SLICE_DELAY_MS;
@@ -92,7 +97,9 @@ export class HistoryIndexDatabase {
         .map((entry) => entry.providerSessionId),
     ];
     for (const providerSessionId of removed) this.removeQueued(providerSessionId);
-    const plan = this.searchIndex.reconcileEntries(this.sessionFiles.searchableEntries());
+    const searchIndex = this.searchIndex;
+    if (!searchIndex) return result;
+    const plan = searchIndex.reconcileEntries(this.sessionFiles.searchableEntries());
     this.hasPlannedAll = true;
     this.enqueueEntries(plan.pendingEntries, false);
     return result;
@@ -101,8 +108,10 @@ export class HistoryIndexDatabase {
   reconcileSessionFilePaths(changes: SessionFileChange[]): SessionFileReconciliation {
     this.assertOpen();
     const result = this.sessionFiles.reconcilePathChanges(changes);
+    const searchIndex = this.searchIndex;
+    if (!searchIndex) return result;
     if (!this.hasPlannedAll) {
-      const plan = this.searchIndex.reconcileEntries(this.sessionFiles.searchableEntries());
+      const plan = searchIndex.reconcileEntries(this.sessionFiles.searchableEntries());
       this.hasPlannedAll = true;
       this.enqueueEntries(plan.pendingEntries, false);
       return result;
@@ -114,7 +123,7 @@ export class HistoryIndexDatabase {
         .filter((entry) => entry.summary === null)
         .map((entry) => entry.providerSessionId),
     ];
-    const plan = this.searchIndex.applyEntryChanges(searchable, removed);
+    const plan = searchIndex.applyEntryChanges(searchable, removed);
     for (const providerSessionId of removed) this.removeQueued(providerSessionId);
     this.enqueueEntries(plan.pendingEntries, true);
     return result;
@@ -127,9 +136,10 @@ export class HistoryIndexDatabase {
 
   search(query: string, isStale?: () => boolean): SessionSearchResult[] {
     this.assertOpen();
+    if (this.searchUnavailable) throw this.searchUnavailable;
     this.ensurePlannedAll();
     this.pauseActiveBackfill();
-    const results = isStale?.() ? [] : this.searchIndex.search(query, isStale);
+    const results = isStale?.() ? [] : this.requireSearchIndex().search(query, isStale);
     this.scheduleNext();
     return results;
   }
@@ -137,6 +147,7 @@ export class HistoryIndexDatabase {
   setIdle(isIdle: boolean): void {
     this.assertOpen();
     this.isIdle = isIdle;
+    if (this.searchUnavailable) return;
     if (isIdle) this.ensurePlannedAll();
     else this.pauseActiveBackfill();
     if (this.indexingTimer && this.recentQueue.size === 0) this.cancelScheduledSlice();
@@ -174,8 +185,8 @@ export class HistoryIndexDatabase {
   }
 
   private ensurePlannedAll(): void {
-    if (this.hasPlannedAll) return;
-    const plan = this.searchIndex.reconcileEntries(this.sessionFiles.searchableEntries());
+    if (this.hasPlannedAll || this.searchUnavailable) return;
+    const plan = this.requireSearchIndex().reconcileEntries(this.sessionFiles.searchableEntries());
     this.hasPlannedAll = true;
     this.enqueueEntries(plan.pendingEntries, false);
   }
@@ -280,7 +291,7 @@ export class HistoryIndexDatabase {
     activeQueueEntry: { providerSessionId: string; superseded: boolean },
   ): Promise<void> {
     try {
-      const result = await this.searchIndex.indexSlice(
+      const result = await this.requireSearchIndex().indexSlice(
         entry,
         () => this.closed || activeQueueEntry.superseded,
       );
@@ -340,6 +351,11 @@ export class HistoryIndexDatabase {
     active.queue.set(active.providerSessionId, active.entry);
   }
 
+  private requireSearchIndex(): HistorySearchIndex {
+    if (this.searchIndex) return this.searchIndex;
+    throw this.searchUnavailable ?? new HistorySearchUnavailableError();
+  }
+
   private assertOpen(): void {
     if (this.closed) throw new Error('History index database is closed.');
   }
@@ -390,11 +406,23 @@ function createDerivedStorage(path: string, canonicalDb: DatabaseSync) {
   try {
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA busy_timeout = 5000');
-    return {
-      db,
-      sessionFiles: createHistorySessionFileCache(db),
-      searchIndex: new HistorySearchIndex(db, canonicalDb),
-    };
+    const sessionFiles = createHistorySessionFileCache(db);
+    try {
+      return {
+        db,
+        sessionFiles,
+        searchIndex: new HistorySearchIndex(db, canonicalDb),
+        searchUnavailable: null,
+      };
+    } catch (error) {
+      if (!isHistorySearchUnavailableError(error)) throw error;
+      return {
+        db,
+        sessionFiles,
+        searchIndex: null,
+        searchUnavailable: new HistorySearchUnavailableError(),
+      };
+    }
   } catch (error) {
     try {
       db.close();
