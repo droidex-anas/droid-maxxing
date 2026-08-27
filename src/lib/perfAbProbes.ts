@@ -261,6 +261,9 @@ function mountedWindow(state: ConversationListStateModule, count: number): numbe
     estimateSize: () => state.CONVERSATION_LIST_ESTIMATE_PX,
     overscan: state.CONVERSATION_LIST_OVERSCAN,
     gap: state.CONVERSATION_LIST_GAP_PX,
+    ...(state.conversationRangeExtractor
+      ? { rangeExtractor: state.conversationRangeExtractor }
+      : {}),
     initialRect: { width: state.CONVERSATION_LIST_INITIAL_RECT.width, height: viewportHeight },
     initialOffset: scrollTop,
     observeElementRect: (_instance, cb) => {
@@ -306,6 +309,12 @@ interface ConversationListStateModule {
   CONVERSATION_LIST_GAP_PX: number;
   CONVERSATION_LIST_INITIAL_RECT: { width: number; height: number };
   estimatedListEndOffset: (count: number, viewportHeight?: number) => number;
+  conversationRangeExtractor?: (range: {
+    startIndex: number;
+    endIndex: number;
+    overscan: number;
+    count: number;
+  }) => number[];
 }
 
 interface ChatModule {
