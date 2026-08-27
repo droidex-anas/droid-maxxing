@@ -117,6 +117,10 @@ export function createSessionManagerTestContext(
       },
     },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
+    // Production live-child default is 2; the harness keeps the hard-open
+    // maximum live so existing eviction races still fire at that boundary.
+    maxLiveRuntimes: 4,
+    maxQueuedRuntimes: 16,
     // Integration assertions read appended events synchronously; the timer
     // coalescing behavior is covered by SessionTimeline unit tests.
     streamingCoalesceMs: options.streamingCoalesceMs ?? 0,

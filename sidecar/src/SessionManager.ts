@@ -158,6 +158,8 @@ export interface SessionManagerDependencies {
   // delta coalescing and assert appended events synchronously; the merge
   // behavior itself is covered by SessionTimeline unit tests.
   streamingCoalesceMs?: number;
+  maxLiveRuntimes?: number;
+  maxQueuedRuntimes?: number;
 }
 
 export interface SessionManagerOptions {
@@ -430,8 +432,8 @@ export class SessionManager {
       },
       nextChildSessionId: this.nextChildSessionId,
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
-      maxLiveRuntimes: MAX_LIVE_CHILD_RUNTIMES,
-      maxQueuedRuntimes: MAX_QUEUED_CHILD_RUNTIMES,
+      maxLiveRuntimes: options.dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
+      maxQueuedRuntimes: options.dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
       now: Date.now,
     });
     this.sessionFiles = new SessionFileServing({

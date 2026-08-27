@@ -43,13 +43,8 @@ interface ContextPollerRecord<T extends { session: object }> {
 
 export class ContextPollHost<T extends { session: object }> {
   private readonly pollers = new Map<string, ContextPollerRecord<T>>();
-  private readonly setIntervalFn: typeof setInterval;
-  private readonly clearIntervalFn: typeof clearInterval;
 
-  constructor(private readonly options: ContextPollHostOptions<T>) {
-    this.setIntervalFn = options.setIntervalFn ?? setInterval;
-    this.clearIntervalFn = options.clearIntervalFn ?? clearInterval;
-  }
+  constructor(private readonly options: ContextPollHostOptions<T>) {}
 
   start(key: string, target: T): boolean {
     if (this.pollers.has(key)) return false;
@@ -110,14 +105,16 @@ export class ContextPollHost<T extends { session: object }> {
 
   private arm(poller: ContextPollerRecord<T>): void {
     if (poller.intervalMs <= 0) return;
-    poller.timer = this.setIntervalFn(() => {
+    const setIntervalFn = this.options.setIntervalFn ?? setInterval;
+    poller.timer = setIntervalFn(() => {
       this.options.poll(poller.target);
     }, poller.intervalMs);
   }
 
   private disarm(poller: ContextPollerRecord<T>): void {
     if (!poller.timer) return;
-    this.clearIntervalFn(poller.timer);
+    const clearIntervalFn = this.options.clearIntervalFn ?? clearInterval;
+    clearIntervalFn(poller.timer);
     poller.timer = null;
   }
 }
