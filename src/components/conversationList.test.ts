@@ -17,10 +17,12 @@ import {
   conversationRowViewportId,
   conversationVisibleRange,
   estimatedListEndOffset,
+  estimatedListSize,
   findConversationRowIndex,
   isConversationAtLatest,
   takeFeedRowEntrance,
 } from './conversationListState';
+import { applyConversationContentResize } from '../hooks/useConversationScrollWindow';
 import {
   feedRowId,
   restoreViewportAnchor,
@@ -49,6 +51,12 @@ function history(count: number): FeedItem[] {
   );
 }
 
+const VARIED_ROW_HEIGHTS = [40, 72, 180, 240, 48, 320, 56, 400] as const;
+
+function variedRowHeight(index: number): number {
+  return VARIED_ROW_HEIGHTS[index % VARIED_ROW_HEIGHTS.length]!;
+}
+
 function createListEngine(options: {
   items: readonly FeedItem[];
   viewportHeight?: number;
@@ -57,12 +65,19 @@ function createListEngine(options: {
   const itemsRef = { current: options.items };
   const viewportHeight = options.viewportHeight ?? CONVERSATION_LIST_INITIAL_RECT.height;
   let scrollTop = options.scrollTop ?? estimatedListEndOffset(options.items.length, viewportHeight);
+  let scrollHeight = estimatedListSize(options.items.length);
+  let offsetObserver: ((offset: number, isScrolling: boolean) => void) | undefined;
   const element = {
     clientHeight: viewportHeight,
     clientWidth: CONVERSATION_LIST_INITIAL_RECT.width,
     offsetHeight: viewportHeight,
     offsetWidth: CONVERSATION_LIST_INITIAL_RECT.width,
-    scrollHeight: estimatedListSizeFor(options.items.length),
+    get scrollHeight() {
+      return scrollHeight;
+    },
+    set scrollHeight(value: number) {
+      scrollHeight = value;
+    },
     get scrollTop() {
       return scrollTop;
     },
@@ -85,20 +100,44 @@ function createListEngine(options: {
       cb({ width: CONVERSATION_LIST_INITIAL_RECT.width, height: viewportHeight });
     },
     observeElementOffset: (_instance, cb) => {
+      offsetObserver = cb;
       cb(scrollTop, false);
     },
     scrollToFn: (offset) => {
       scrollTop = offset;
-      element.scrollTop = offset;
+      offsetObserver?.(offset, false);
     },
   });
   virtualizer._willUpdate();
-  return { virtualizer, element, itemsRef };
+  return {
+    virtualizer,
+    element,
+    itemsRef,
+    syncMeasuredHeight() {
+      scrollHeight = virtualizer.getTotalSize();
+    },
+    notifyOffset() {
+      offsetObserver?.(scrollTop, false);
+      virtualizer._willUpdate();
+    },
+  };
 }
 
-function estimatedListSizeFor(count: number): number {
-  if (count <= 0) return 0;
-  return count * CONVERSATION_LIST_ESTIMATE_PX + Math.max(0, count - 1) * CONVERSATION_LIST_GAP_PX;
+function measureVariedRows(
+  virtualizer: Virtualizer<HTMLDivElement, HTMLDivElement>,
+  count: number,
+) {
+  for (let index = 0; index < count; index += 1) {
+    virtualizer.resizeItem(index, variedRowHeight(index));
+  }
+}
+
+function pinFollowMeasuredEnd(engine: ReturnType<typeof createListEngine>) {
+  engine.syncMeasuredHeight();
+  applyConversationContentResize(engine.element, null, true, false);
+  const maxTop = Math.max(0, engine.element.scrollHeight - engine.element.clientHeight);
+  engine.element.scrollTop = Math.min(engine.element.scrollTop, maxTop);
+  engine.notifyOffset();
 }
 
 test('mounted row count stays bounded for 3k and 10k histories', () => {
@@ -288,4 +327,134 @@ test('MessageFeed mounts a bounded window for a long synthetic history', () => {
   assert.ok(mounted < 80, `expected a virtual window, mounted ${String(mounted)}`);
   assert.match(html, /row 399/);
   assert.doesNotMatch(html, /row 0</);
+});
+
+test('opening a 3k history with varied heights lands on the latest row after measure', () => {
+  const items = history(3_000);
+  const viewportHeight = CONVERSATION_LIST_INITIAL_RECT.height;
+  const engine = createListEngine({ items, viewportHeight });
+  const estimatedEnd = estimatedListEndOffset(items.length, viewportHeight);
+  assert.equal(engine.element.scrollTop, estimatedEnd);
+
+  measureVariedRows(engine.virtualizer, items.length);
+  pinFollowMeasuredEnd(engine);
+
+  const totalSize = engine.virtualizer.getTotalSize();
+  const measuredEnd = Math.max(0, totalSize - viewportHeight);
+  assert.ok(
+    Math.abs(measuredEnd - estimatedEnd) > 50_000,
+    `varied heights must diverge from the 96px estimate; estimated ${String(estimatedEnd)} measured ${String(measuredEnd)}`,
+  );
+  assert.equal(engine.element.scrollTop, measuredEnd);
+  assert.equal(
+    isConversationAtLatest(engine.element.scrollHeight, engine.element.scrollTop, viewportHeight),
+    true,
+  );
+  assert.equal(engine.element.scrollTop + viewportHeight, totalSize);
+
+  const lastIndex = items.length - 1;
+  const last = engine.virtualizer.measurementsCache[lastIndex];
+  assert.ok(last);
+  assert.equal(last.size, variedRowHeight(lastIndex));
+  assert.equal(last.start + last.size, last.end);
+  const viewportTop = engine.element.scrollTop;
+  const viewportBottom = viewportTop + viewportHeight;
+  assert.ok(last.end <= viewportBottom + 0.5);
+  assert.ok(last.start < viewportBottom);
+  assert.ok(last.end > viewportTop);
+  assert.ok(
+    engine.virtualizer.getVirtualItems().some((row) => row.index === lastIndex),
+    'the latest row must be in the mounted window',
+  );
+});
+
+test('restored unpinned offset lands on the same captured row after varied measure', () => {
+  const items = history(3_000);
+  const engine = createListEngine({ items, scrollTop: 0 });
+  engine.virtualizer.getVirtualItems();
+  const anchorIndex = 1_500;
+  const anchorItem = items[anchorIndex];
+  assert.ok(anchorItem);
+  const capturedStart = engine.virtualizer.measurementsCache[anchorIndex]?.start;
+  assert.ok(typeof capturedStart === 'number');
+  const rowOffsetTop = 40;
+  const captured = {
+    rowId: feedRowId(anchorItem),
+    rowOffsetTop,
+    scrollTop: capturedStart - rowOffsetTop,
+    scrollHeight: engine.element.scrollHeight,
+  };
+  engine.element.scrollTop = captured.scrollTop;
+  engine.notifyOffset();
+
+  measureVariedRows(engine.virtualizer, items.length);
+  engine.syncMeasuredHeight();
+  engine.virtualizer.getVirtualItems();
+  const nextStart = engine.virtualizer.measurementsCache[anchorIndex]?.start;
+  assert.ok(typeof nextStart === 'number');
+  assert.notEqual(nextStart, capturedStart);
+
+  const layout: ConversationViewportLayout = {
+    rowContentOffset: (rowId) => {
+      engine.virtualizer.getVirtualItems();
+      const index = findConversationRowIndex(buildConversationRowLookup(items), rowId);
+      return index === undefined ? undefined : engine.virtualizer.measurementsCache[index]?.start;
+    },
+  };
+  const restored = restoreViewportAnchor(engine.element, captured, true, layout);
+  assert.equal(restored.didFindRow, true);
+  assert.ok(Math.abs(nextStart - engine.element.scrollTop - rowOffsetTop) < 0.5);
+  assert.equal(restored.anchor.rowId, captured.rowId);
+});
+
+test('pinned follow stays at the latest row when the tail grows after a deferred measure', () => {
+  const items = history(80);
+  const engine = createListEngine({ items });
+  for (let index = 0; index < items.length - 1; index += 1) {
+    engine.virtualizer.resizeItem(index, 80);
+  }
+  engine.virtualizer.resizeItem(items.length - 1, 96);
+  pinFollowMeasuredEnd(engine);
+  assert.equal(
+    isConversationAtLatest(
+      engine.element.scrollHeight,
+      engine.element.scrollTop,
+      engine.element.clientHeight,
+    ),
+    true,
+  );
+
+  engine.virtualizer.resizeItem(items.length - 1, 400);
+  pinFollowMeasuredEnd(engine);
+  assert.equal(
+    isConversationAtLatest(
+      engine.element.scrollHeight,
+      engine.element.scrollTop,
+      engine.element.clientHeight,
+    ),
+    true,
+  );
+  const last = engine.virtualizer.measurementsCache[items.length - 1];
+  assert.ok(last);
+  assert.equal(last.size, 400);
+  assert.equal(
+    engine.element.scrollTop + engine.element.clientHeight,
+    engine.virtualizer.getTotalSize(),
+  );
+  assert.ok(last.end > engine.element.scrollTop);
+  assert.ok(last.end <= engine.element.scrollTop + engine.element.clientHeight + 0.5);
+});
+
+test('a single tall message is one virtual row and stays fully addressable', () => {
+  const items = history(5);
+  const engine = createListEngine({ items, scrollTop: 0 });
+  engine.virtualizer.resizeItem(2, 4_000);
+  engine.syncMeasuredHeight();
+  engine.element.scrollTop = engine.virtualizer.measurementsCache[2]?.start ?? 0;
+  engine.notifyOffset();
+  const mounted = engine.virtualizer.getVirtualItems();
+  const tall = mounted.find((row) => row.index === 2);
+  assert.ok(tall);
+  assert.equal(tall.size, 4_000);
+  assert.equal(mounted.filter((row) => row.index === 2).length, 1);
 });

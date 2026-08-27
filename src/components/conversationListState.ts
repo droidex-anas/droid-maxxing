@@ -5,6 +5,7 @@ export const CONVERSATION_LIST_OVERSCAN = 8;
 export const CONVERSATION_LIST_ESTIMATE_PX = 96;
 export const CONVERSATION_LIST_GAP_PX = 16;
 export const CONVERSATION_LIST_PIN_THRESHOLD_PX = 80;
+// Pre-measure guess so the first window exists before the scroller is observed; a wrong size only changes overscan until measure.
 export const CONVERSATION_LIST_INITIAL_RECT = { width: 720, height: 900 } as const;
 
 export interface ConversationVisibleRange {

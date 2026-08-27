@@ -96,8 +96,11 @@ export function ConversationList({
     initialRect: CONVERSATION_LIST_INITIAL_RECT,
     initialOffset: initialScrollOffset ?? estimatedListEndOffset(items.length),
     scrollEndThreshold: CONVERSATION_LIST_PIN_THRESHOLD_PX,
+    // Skip flushSync during scroll; write spacer height here so pin-follow sees the new total this frame.
     useFlushSync: false,
     onChange: (instance) => {
+      const list = listElRef.current;
+      if (list) list.style.height = `${String(instance.getTotalSize())}px`;
       const range = instance.range;
       const mounted = instance.getVirtualIndexes();
       onMountedRowsChangeRef.current?.(mounted.length);
@@ -177,6 +180,7 @@ export function ConversationList({
     (rowId: string): number | undefined => {
       const index = findConversationRowIndex(lookupRef.current, rowId);
       if (index === undefined) return undefined;
+      // getVirtualItems rebuilds measurementsCache; start is otherwise missing for never-measured rows.
       virtualizer.getVirtualItems();
       return virtualizer.measurementsCache[index]?.start;
     },
