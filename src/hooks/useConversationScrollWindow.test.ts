@@ -13,6 +13,7 @@ import {
   applyConversationContentResize,
   didCommitRequestedHistoryPrepend,
   shouldBindConversationContentResize,
+  shouldCompensateConversationContentResize,
   shouldLoadOlderHistoryAtTop,
   shouldReleaseConversationTranscript,
 } from './useConversationScrollWindow';
@@ -338,5 +339,40 @@ test('content resize binding follows the live first child even with an empty tra
       conversationKey: 'session-a',
     }),
     false,
+  );
+});
+
+test('content resize compensation stays off during an unpinned user scroll', () => {
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: false,
+      isSettlingHistoryPrepend: false,
+      isUserScrolling: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: true,
+      isSettlingHistoryPrepend: false,
+      isUserScrolling: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: false,
+      isSettlingHistoryPrepend: true,
+      isUserScrolling: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: false,
+      isSettlingHistoryPrepend: false,
+      isUserScrolling: false,
+    }),
+    true,
   );
 });
