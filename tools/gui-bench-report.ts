@@ -248,11 +248,17 @@ export function renderReport(results: RunResult[], trees: BenchTreeRef[]): strin
     lines.push(
       'receiveToPaint is the renderer’s cumulative histogram from page start, not a stream-only delta. Compare count before vs after: idle opens were ~5 samples; a successful replay turn lands two hundred-plus samples, so p50/p95 are dominated by the streamed answer.',
     );
-    const failed = [...streamB, ...streamC].filter((row) => !row.wired);
-    if (failed.length > 0) {
+    const failedReasons = [
+      ...new Set(
+        [...streamB, ...streamC]
+          .filter((row) => !row.wired)
+          .map((row) => row.reason ?? 'unknown'),
+      ),
+    ];
+    if (failedReasons.length > 0) {
       lines.push('');
       lines.push('Streaming wiring notes:');
-      for (const row of failed) lines.push(`- ${row.reason ?? 'unknown'}`);
+      for (const reason of failedReasons) lines.push(`- ${reason}`);
     }
   }
   lines.push('');
@@ -324,6 +330,6 @@ export function renderReport(results: RunResult[], trees: BenchTreeRef[]): strin
   lines.push('');
   lines.push('Raw per-run JSON: `/opt/cursor/artifacts/gui_bench_raw.json`.');
   lines.push('Seed manifest: `/opt/cursor/artifacts/gui_bench_seed_manifest.json`.');
-  lines.push('Screenshots: `/opt/cursor/artifacts/gui_bench_baseline_10k_run*.png` and `gui_bench_candidate_10k_run*.png`.');
+  lines.push('Screenshots: `/opt/cursor/artifacts/gui_bench_baseline_10k_seeded_chat.png`, `gui_bench_candidate_10k_seeded_chat.png`, `gui_bench_candidate_replay_stream.png`.');
   return `${lines.join('\n')}\n`;
 }
