@@ -21,6 +21,8 @@ import {
   findConversationRowIndex,
   isConversationAtLatest,
   measuredConversationRowSize,
+  shouldAdjustConversationRowOnSizeChange,
+  syncMeasureConversationList,
   takeFeedRowEntrance,
 } from './conversationListState';
 import { applyConversationContentResize } from '../hooks/useConversationScrollWindow';
@@ -110,6 +112,7 @@ function createListEngine(options: {
     },
   });
   virtualizer._willUpdate();
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = shouldAdjustConversationRowOnSizeChange;
   return {
     virtualizer,
     element,
@@ -144,6 +147,62 @@ function pinFollowMeasuredEnd(engine: ReturnType<typeof createListEngine>) {
 test('visible-hole threshold is twice the list gap, not an estimated row', () => {
   assert.equal(CONVERSATION_VISIBLE_HOLE_PX, CONVERSATION_LIST_GAP_PX * 2);
   assert.ok(CONVERSATION_VISIBLE_HOLE_PX < CONVERSATION_LIST_ESTIMATE_PX);
+});
+
+test('size-change compensation is off while the user is scrolling', () => {
+  const aboveFold = { start: 0, size: 96, key: 'row-0' };
+  const scrolling = {
+    isScrolling: true,
+    scrollDirection: 'backward' as const,
+    scrollAdjustments: 0,
+    itemSizeCache: new Map<string | number, number>(),
+    getScrollOffset: () => 2_000,
+  };
+  assert.equal(shouldAdjustConversationRowOnSizeChange(aboveFold, -77, scrolling), false);
+
+  const idle = { ...scrolling, isScrolling: false, scrollDirection: null };
+  assert.equal(shouldAdjustConversationRowOnSizeChange(aboveFold, -77, idle), true);
+
+  const growingInView = { start: 1_920, size: 96, key: 'live' };
+  const idleMeasured = {
+    ...idle,
+    itemSizeCache: new Map<string | number, number>([['live', 96]]),
+  };
+  assert.equal(shouldAdjustConversationRowOnSizeChange(growingInView, 24, idleMeasured), false);
+});
+
+test('first measure above the fold does not write scrollTop while scrolling', () => {
+  const { virtualizer, element } = createListEngine({ items: history(80), scrollTop: 2_000 });
+  virtualizer.getVirtualItems();
+  const before = element.scrollTop;
+  virtualizer.isScrolling = true;
+  virtualizer.resizeItem(0, 19);
+  assert.equal(element.scrollTop, before);
+  virtualizer.getVirtualItems();
+  assert.equal(virtualizer.measurementsCache[0]?.size, 19);
+});
+
+test('sync measure skips resize when the cached size already matches', () => {
+  const calls: Array<[number, number]> = [];
+  const list = {
+    firstElementChild: {
+      dataset: { index: '3' },
+      offsetHeight: 40,
+      nextElementSibling: null,
+    },
+  } as unknown as HTMLElement;
+  syncMeasureConversationList(
+    list,
+    (index, size) => calls.push([index, size]),
+    () => 40,
+  );
+  assert.deepEqual(calls, []);
+  syncMeasureConversationList(
+    list,
+    (index, size) => calls.push([index, size]),
+    () => 96,
+  );
+  assert.deepEqual(calls, [[3, 40]]);
 });
 
 test('row measure reads the index attribute and rounds layout height', () => {

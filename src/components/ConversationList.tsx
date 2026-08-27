@@ -24,6 +24,7 @@ import {
   isConversationAtLatest,
   nearestOverflowParent,
   scrollMarginBetween,
+  shouldAdjustConversationRowOnSizeChange,
   syncMeasureConversationList,
 } from './conversationListState';
 
@@ -62,6 +63,7 @@ export function ConversationList({
   const onMountedRowsChangeRef = useRef(onMountedRowsChange);
   onMountedRowsChangeRef.current = onMountedRowsChange;
   const [scrollMargin, setScrollMargin] = useState(0);
+  const measuringRef = useRef(false);
 
   const getScrollElement = useCallback((): HTMLElement | null => {
     if (scrollElementRef?.current) return scrollElementRef.current;
@@ -88,8 +90,26 @@ export function ConversationList({
     directDomUpdates: true,
     onChange: (instance) => {
       onMountedRowsChangeRef.current?.(instance.getVirtualIndexes().length);
+      const list = listElRef.current;
+      if (!list || measuringRef.current) return;
+      measuringRef.current = true;
+      try {
+        syncMeasureConversationList(list, instance.resizeItem, (index) => {
+          const key = itemsRef.current[index]?.key ?? index;
+          return instance.itemSizeCache.get(key);
+        });
+      } finally {
+        measuringRef.current = false;
+      }
     },
   });
+
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = shouldAdjustConversationRowOnSizeChange;
+
+  const cachedRowSize = (index: number) => {
+    const key = itemsRef.current[index]?.key ?? index;
+    return virtualizer.itemSizeCache.get(key);
+  };
 
   const setListNode = useCallback(
     (node: HTMLDivElement | null) => {
@@ -116,7 +136,7 @@ export function ConversationList({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- size-stable; re-run after every commit
   useLayoutEffect(() => {
     const list = listElRef.current;
-    if (list) syncMeasureConversationList(list, virtualizer.resizeItem);
+    if (list) syncMeasureConversationList(list, virtualizer.resizeItem, cachedRowSize);
     const scroll = getScrollElement();
     if (!list || !scroll) return;
     const next = scrollMarginBetween(list, scroll);

@@ -75,14 +75,43 @@ export function measuredConversationRowSize(
   return { index, size: Math.round(row.offsetHeight) };
 }
 
+export interface ConversationRowSizeChange {
+  start: number;
+  size: number;
+  key: string | number;
+}
+
+export interface ConversationRowSizeChangeHost {
+  isScrolling: boolean;
+  scrollDirection: 'forward' | 'backward' | null;
+  scrollAdjustments: number;
+  itemSizeCache: { has: (key: string | number) => boolean };
+  getScrollOffset: () => number;
+}
+
+// Mirrors TanStack's default, except user-driven scroll: estimate→actual must
+// not write scrollTop while the wheel already owns it.
+export function shouldAdjustConversationRowOnSizeChange(
+  item: ConversationRowSizeChange,
+  _delta: number,
+  instance: ConversationRowSizeChangeHost,
+): boolean {
+  if (instance.isScrolling) return false;
+  const scrollOffsetWithAdj = instance.getScrollOffset() + instance.scrollAdjustments;
+  const isFirstMeasure = !instance.itemSizeCache.has(item.key);
+  if (isFirstMeasure) return item.start < scrollOffsetWithAdj;
+  return item.start + item.size <= scrollOffsetWithAdj && instance.scrollDirection !== 'backward';
+}
+
 export function syncMeasureConversationList(
   list: HTMLElement,
   resizeItem: (index: number, size: number) => void,
+  cachedSize?: (index: number) => number | undefined,
 ): void {
   for (let node = list.firstElementChild; node; node = node.nextElementSibling) {
-    if (!(node instanceof HTMLElement)) continue;
-    const measured = measuredConversationRowSize(node);
+    const measured = measuredConversationRowSize(node as HTMLElement);
     if (!measured) continue;
+    if (cachedSize?.(measured.index) === measured.size) continue;
     resizeItem(measured.index, measured.size);
   }
 }
