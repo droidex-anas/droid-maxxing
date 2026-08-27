@@ -43,12 +43,19 @@ export function conversationRangeExtractor(range: {
   overscan: number;
   count: number;
 }): number[] {
-  const visible = Math.max(1, range.endIndex - range.startIndex + 1);
-  const needed = Math.max(0, CONVERSATION_LIST_MIN_WINDOW - visible);
-  const pad = Math.max(range.overscan, Math.ceil(needed / 2));
-  const start = Math.max(0, range.startIndex - pad);
-  const end = Math.min(range.count - 1, range.endIndex + pad);
-  const length = Math.max(0, end - start + 1);
+  const visible = Math.max(0, range.endIndex - range.startIndex + 1);
+  if (visible <= 0 || range.count <= 0) return [];
+  const target = Math.min(
+    range.count,
+    Math.max(visible + 2 * range.overscan, CONVERSATION_LIST_MIN_WINDOW),
+  );
+  let start = range.startIndex;
+  let end = range.endIndex;
+  const takeBack = Math.min(start, Math.max(0, target - (end - start + 1)));
+  start -= takeBack;
+  const takeForward = Math.min(range.count - 1 - end, Math.max(0, target - (end - start + 1)));
+  end += takeForward;
+  const length = end - start + 1;
   const indexes = new Array<number>(length);
   for (let i = 0; i < length; i += 1) indexes[i] = start + i;
   return indexes;
