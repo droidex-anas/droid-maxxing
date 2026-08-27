@@ -82,6 +82,7 @@ export async function runComparison(options: CompareOptions): Promise<Comparison
   }
 
   if (!options.skipBundle) ensureViteBuild(candidateRoot);
+  ensureSidecarBuild(candidateRoot);
   const candidateProbes = runProbes(candidateRoot, candidateRoot);
   const probeMetrics = diffProbes(baselineProbes, candidateProbes);
   const candidateReplays: ComparisonReport['candidateReplays'] = [];
@@ -146,6 +147,7 @@ function measureBaselineTree(
     linkModules(candidateRoot, worktree);
   }
   if (!skipBundle) ensureViteBuild(worktree);
+  ensureSidecarBuild(worktree);
   const probes = runProbes(candidateRoot, worktree);
   return { ...probes, treeRoot: `${baselineRef}@${baselineCommit}` };
 }
@@ -166,6 +168,16 @@ function ensureViteBuild(treeRoot: string): void {
     cwd: treeRoot,
     stdio: 'inherit',
     env: { ...process.env, NODE_ENV: 'production' },
+  });
+}
+
+function ensureSidecarBuild(treeRoot: string): void {
+  const entry = join(treeRoot, 'sidecar/dist/sidecar.mjs');
+  const worker = join(treeRoot, 'sidecar/dist/historyPersistenceWorker.mjs');
+  if (existsSync(entry) && existsSync(worker)) return;
+  execFileSync('npm', ['run', 'build', '--prefix', join(treeRoot, 'sidecar')], {
+    cwd: treeRoot,
+    stdio: 'inherit',
   });
 }
 
