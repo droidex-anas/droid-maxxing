@@ -113,6 +113,25 @@ function dormantTimer(): ReturnType<typeof setTimeout> {
   return timer;
 }
 
+test('write-behind flush timer stays unarmed until a row is queued', () => {
+  const delays: number[] = [];
+  const client = new FakeClient();
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: (_callback, delayMs) => {
+      delays.push(delayMs);
+      return dormantTimer();
+    },
+  });
+
+  assert.deepEqual(delays, []);
+  queue.enqueueEvent(event('one'));
+  assert.deepEqual(delays, [25]);
+  queue.flushSync();
+  assert.deepEqual(delays, [25]);
+});
+
 test('keeps transcript events lossless while summaries and children collapse latest-wins', () => {
   const client = new FakeClient();
   const queue = new HistoryPersistenceQueue({

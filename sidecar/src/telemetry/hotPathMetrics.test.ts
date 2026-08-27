@@ -16,7 +16,7 @@ test('snapshot before enable reports no event-loop monitor and no resources', ()
   assert.equal(snapshot.uptimeMs, 0);
 });
 
-test('stage records feed counters, histograms, and snapshot gauges', async () => {
+test('enable records counters without arming the event-loop sampler', () => {
   const metrics = freshMetrics();
   metrics.enable();
   metrics.recordNormalize(0.5);
@@ -30,13 +30,8 @@ test('stage records feed counters, histograms, and snapshot gauges', async () =>
   metrics.recordTransport(0.25, 1_000, 1);
   metrics.recordCoalesce(4);
 
-  let snapshot = metrics.snapshot();
-  const deadline = Date.now() + 500;
-  while (snapshot.eventLoop === null && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    snapshot = metrics.snapshot();
-  }
-
+  const snapshot = metrics.snapshot();
+  assert.equal(snapshot.eventLoop, null);
   assert.equal(snapshot.counters.normalized, 2);
   assert.equal(snapshot.counters.persisted, 1);
   assert.equal(snapshot.counters.persistenceFailures, 1);
@@ -51,10 +46,25 @@ test('stage records feed counters, histograms, and snapshot gauges', async () =>
   assert.equal(snapshot.histograms.coalesceMerged.maxMs, 4);
   assert.equal(snapshot.transport.bytesTotal, 1_000);
   assert.ok(snapshot.transport.bytesPerSecondAvg > 0);
-  assert.ok(snapshot.eventLoop !== null);
-  assert.ok(Number.isFinite(snapshot.eventLoop.meanMs));
   assert.ok(snapshot.process.rssBytes > 0);
   assert.ok(snapshot.process.cpuUserMs >= 0);
+});
+
+test('event-loop sampling is opt-in and disarms on disable', () => {
+  const metrics = freshMetrics();
+  metrics.enable();
+  assert.equal(metrics.snapshot().eventLoop, null);
+
+  metrics.enableEventLoop();
+  const armed = metrics.snapshot().eventLoop;
+  assert.ok(armed !== null);
+  assert.ok(Number.isFinite(armed.meanMs));
+
+  metrics.enableEventLoop();
+  assert.ok(metrics.snapshot().eventLoop !== null);
+
+  metrics.disable();
+  assert.equal(metrics.snapshot().eventLoop, null);
 });
 
 test('transport records explicit aggregate bytes and send operations', () => {

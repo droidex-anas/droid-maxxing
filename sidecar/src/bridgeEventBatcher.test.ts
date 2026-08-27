@@ -120,6 +120,19 @@ function context(appSessionId: string, sourceSessionId: string, used: number): S
   };
 }
 
+test('an empty batcher does not arm the coalescing timer', () => {
+  const harness = createHarness();
+  assert.equal(harness.timers.length, 0);
+  harness.batcher.flush();
+  assert.equal(harness.timers.length, 0);
+  harness.batcher.enqueue(appended('a', '1'));
+  assert.equal(harness.timers.filter((timer) => !timer.cancelled).length, 1);
+  assert.equal(harness.timers[0]?.delayMs, 16);
+  harness.fire();
+  assert.equal(harness.batcher.snapshot().pendingLogicalEvents, 0);
+  assert.equal(harness.batches.length, 1);
+});
+
 test('27 interleaved sources stay ordered in one frame batch', () => {
   const harness = createHarness();
   for (let index = 0; index < 27; index += 1) {
