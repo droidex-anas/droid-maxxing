@@ -8,6 +8,7 @@ import {
   CHILD_STREAM_PHASE_LABEL,
   CHILD_STREAM_PREVIEW_BOX_CLASS,
   CHILD_STREAM_PREVIEW_EXPANDED_BOX_CLASS,
+  childStreamPreviewBoxClass,
 } from '../lib/childSessionStream';
 import {
   areSubagentRowPropsEqual,
@@ -15,7 +16,6 @@ import {
   subagentRowTitle,
   type SubagentRowProps,
 } from './SubagentRow';
-import { childStreamPreviewBoxClass } from './SubagentStreamPreview';
 
 function snapshot(phase: ChildStreamSnapshot['phase'], preview = 'hello'): ChildStreamSnapshot {
   return {
