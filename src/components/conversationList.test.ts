@@ -14,6 +14,8 @@ import {
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
   CONVERSATION_VISIBLE_HOLE_PX,
+  conversationRowEstimateNear,
+  conversationRowEstimatePx,
   conversationRowMountKey,
   conversationRowViewportId,
   createConversationRowSizeEstimator,
@@ -22,6 +24,7 @@ import {
   findConversationRowIndex,
   isConversationAtLatest,
   measuredConversationRowSize,
+  nearestMeasuredRowSize,
   shouldAdjustConversationRowOnSizeChange,
   stampConversationRowEstimates,
   syncMeasureConversationList,
@@ -66,6 +69,7 @@ function createListEngine(options: {
   items: readonly FeedItem[];
   viewportHeight?: number;
   scrollTop?: number;
+  estimateSize?: (index: number) => number;
 }) {
   const itemsRef = { current: options.items };
   const viewportHeight = options.viewportHeight ?? CONVERSATION_LIST_INITIAL_RECT.height;
@@ -94,7 +98,7 @@ function createListEngine(options: {
   const virtualizer = new Virtualizer<HTMLDivElement, HTMLDivElement>({
     count: itemsRef.current.length,
     getScrollElement: () => element,
-    estimateSize: () => CONVERSATION_LIST_ESTIMATE_PX,
+    estimateSize: options.estimateSize ?? (() => CONVERSATION_LIST_ESTIMATE_PX),
     overscan: CONVERSATION_LIST_OVERSCAN,
     gap: CONVERSATION_LIST_GAP_PX,
     getItemKey: (index) => itemsRef.current[index]?.key ?? index,
@@ -239,7 +243,80 @@ test('row size guess is the median of recent measures and starts at the fallback
   assert.equal(estimator.guess(), 19);
 });
 
-test('stamping a measured median does not resize already-cached rows', () => {
+test('nearest measured neighbor wins over a mixed running median', () => {
+  const sizes = new Map<string | number | bigint, number>([
+    ['row-10', 19],
+    ['row-40', 800],
+  ]);
+  assert.equal(
+    nearestMeasuredRowSize(
+      12,
+      (index) => `row-${String(index)}`,
+      (key) => sizes.get(key),
+    ),
+    19,
+  );
+  assert.equal(
+    nearestMeasuredRowSize(
+      100,
+      (index) => `row-${String(index)}`,
+      (key) => sizes.get(key),
+    ),
+    undefined,
+  );
+});
+
+test('row estimates stay at 96 far from the window and follow a neighbor when near', () => {
+  const range = { startIndex: 80, endIndex: 100 };
+  assert.equal(conversationRowEstimateNear(0, range, CONVERSATION_LIST_OVERSCAN), false);
+  assert.equal(conversationRowEstimateNear(90, range, CONVERSATION_LIST_OVERSCAN), true);
+  assert.equal(
+    conversationRowEstimatePx({
+      index: 0,
+      range,
+      overscan: CONVERSATION_LIST_OVERSCAN,
+      fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+      guessPx: 19,
+      measuredNearPx: 19,
+    }),
+    CONVERSATION_LIST_ESTIMATE_PX,
+  );
+  assert.equal(
+    conversationRowEstimatePx({
+      index: 90,
+      range,
+      overscan: CONVERSATION_LIST_OVERSCAN,
+      fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+      guessPx: 48,
+      measuredNearPx: 19,
+    }),
+    19,
+  );
+  assert.equal(
+    conversationRowEstimatePx({
+      index: 90,
+      range,
+      overscan: CONVERSATION_LIST_OVERSCAN,
+      fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+      guessPx: 19,
+      measuredNearPx: undefined,
+    }),
+    19,
+  );
+  assert.equal(
+    conversationRowEstimatePx({
+      index: 90,
+      range: null,
+      overscan: CONVERSATION_LIST_OVERSCAN,
+      fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+      guessPx: 19,
+      measuredNearPx: 19,
+    }),
+    CONVERSATION_LIST_ESTIMATE_PX,
+  );
+});
+
+test('stamping writes only the first uncached row so the rebuild can estimate the rest', () => {
   const cache = new Map<string | number | bigint, number>([['row-1', 120]]);
   const resized: Array<[number, number]> = [];
   const keys = ['row-0', 'row-1', 'row-2'];
@@ -248,62 +325,115 @@ test('stamping a measured median does not resize already-cached rows', () => {
     (index) => keys[index] ?? index,
     cache,
     (index, size) => resized.push([index, size]),
-    19,
+    () => 19,
   );
-  assert.deepEqual(resized, [
-    [0, 19],
-    [2, 19],
-  ]);
+  assert.deepEqual(resized, [[0, 19]]);
 });
 
-test('a moving median does not collapse getTotalSize for far unmeasured rows', () => {
+test('stamping skips the fallback so a 96 px guess does not write the size cache', () => {
+  const cache = new Map<string | number | bigint, number>();
+  const resized: Array<[number, number]> = [];
+  stampConversationRowEstimates(
+    [0, 1],
+    (index) => `row-${String(index)}`,
+    cache,
+    (index, size) => resized.push([index, size]),
+    () => CONVERSATION_LIST_ESTIMATE_PX,
+  );
+  assert.deepEqual(resized, []);
+});
+
+test('a moving near-window estimate does not collapse getTotalSize for far unmeasured rows', () => {
   const items = history(400);
   const estimator = createConversationRowSizeEstimator();
+  for (let i = 0; i < 24; i += 1) estimator.observe(19);
+  const rangeRef: { current: { startIndex: number; endIndex: number } | null } = {
+    current: null,
+  };
   const { virtualizer } = createListEngine({
     items,
     scrollTop: estimatedListEndOffset(items.length),
+    estimateSize: (index) =>
+      conversationRowEstimatePx({
+        index,
+        range: rangeRef.current,
+        overscan: CONVERSATION_LIST_OVERSCAN,
+        fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+        guessPx: estimator.guess(),
+        measuredNearPx: undefined,
+      }),
   });
   virtualizer.getVirtualItems();
+  rangeRef.current = virtualizer.range;
   const totalBefore = virtualizer.getTotalSize();
-  for (let i = 0; i < 24; i += 1) estimator.observe(19);
-  virtualizer.getVirtualItems();
-  assert.equal(virtualizer.getTotalSize(), totalBefore);
   assert.equal(virtualizer.measurementsCache[0]?.size, CONVERSATION_LIST_ESTIMATE_PX);
 
-  const mounted = virtualizer.getVirtualIndexes();
   stampConversationRowEstimates(
-    mounted,
+    virtualizer.getVirtualIndexes(),
     (index) => items[index]?.key ?? index,
     virtualizer.itemSizeCache,
     virtualizer.resizeItem,
-    estimator.guess(),
+    (index) =>
+      conversationRowEstimatePx({
+        index,
+        range: rangeRef.current,
+        overscan: CONVERSATION_LIST_OVERSCAN,
+        fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+        guessPx: estimator.guess(),
+        measuredNearPx: undefined,
+      }),
   );
   virtualizer.getVirtualItems();
-  const stamped = mounted.filter(
-    (index) => virtualizer.itemSizeCache.get(items[index]?.key ?? index) === 19,
+  const shrink = totalBefore - virtualizer.getTotalSize();
+  assert.ok(shrink > 0, 'the visible window should pack to the short guess');
+  assert.ok(
+    shrink < 80 * (CONVERSATION_LIST_ESTIMATE_PX - 19),
+    `near-window shrink must not rewrite the list; shrink ${String(shrink)}`,
   );
-  assert.ok(stamped.length > 0);
-  const expectedShrink = stamped.length * (CONVERSATION_LIST_ESTIMATE_PX - 19);
-  assert.equal(virtualizer.getTotalSize(), totalBefore - expectedShrink);
   assert.equal(virtualizer.measurementsCache[0]?.size, CONVERSATION_LIST_ESTIMATE_PX);
+  const estimatedShort = virtualizer
+    .getVirtualIndexes()
+    .filter((index) => virtualizer.measurementsCache[index]?.size === 19);
+  assert.ok(estimatedShort.length > 0);
 });
 
 test('prepending after a stamped window keeps the captured row offset', () => {
   const visible = history(80);
   const estimator = createConversationRowSizeEstimator();
   for (let i = 0; i < 16; i += 1) estimator.observe(19);
+  const rangeRef: { current: { startIndex: number; endIndex: number } | null } = {
+    current: null,
+  };
   const { virtualizer, itemsRef } = createListEngine({
     items: visible,
     scrollTop: 200,
     viewportHeight: 900,
+    estimateSize: (index) =>
+      conversationRowEstimatePx({
+        index,
+        range: rangeRef.current,
+        overscan: CONVERSATION_LIST_OVERSCAN,
+        fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+        guessPx: estimator.guess(),
+        measuredNearPx: undefined,
+      }),
   });
   virtualizer.getVirtualItems();
+  rangeRef.current = virtualizer.range;
   stampConversationRowEstimates(
     virtualizer.getVirtualIndexes(),
     (index) => visible[index]?.key ?? index,
     virtualizer.itemSizeCache,
     virtualizer.resizeItem,
-    estimator.guess(),
+    (index) =>
+      conversationRowEstimatePx({
+        index,
+        range: rangeRef.current,
+        overscan: CONVERSATION_LIST_OVERSCAN,
+        fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+        guessPx: estimator.guess(),
+        measuredNearPx: undefined,
+      }),
   );
   virtualizer.getVirtualItems();
   const capturedStart = virtualizer.measurementsCache[2]?.start;

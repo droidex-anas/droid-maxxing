@@ -19,10 +19,13 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
+  conversationRowEstimateNear,
+  conversationRowEstimatePx,
   createConversationRowSizeEstimator,
   estimatedListEndOffset,
   findConversationRowIndex,
   isConversationAtLatest,
+  nearestMeasuredRowSize,
   nearestOverflowParent,
   scrollMarginBetween,
   shouldAdjustConversationRowOnSizeChange,
@@ -67,6 +70,8 @@ export function ConversationList({
   const [scrollMargin, setScrollMargin] = useState(0);
   const estimatorRef = useRef(createConversationRowSizeEstimator());
   const stampingRef = useRef(false);
+  const rangeRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
+  const sizeCacheRef = useRef<Map<string | number | bigint, number> | null>(null);
 
   const getScrollElement = useCallback((): HTMLElement | null => {
     if (scrollElementRef?.current) return scrollElementRef.current;
@@ -78,10 +83,31 @@ export function ConversationList({
     return itemsRef.current[index]?.key ?? index;
   }, []);
 
+  const estimateRowSize = useCallback(
+    (index: number) => {
+      const range = rangeRef.current;
+      if (!conversationRowEstimateNear(index, range, CONVERSATION_LIST_OVERSCAN)) {
+        return CONVERSATION_LIST_ESTIMATE_PX;
+      }
+      const cache = sizeCacheRef.current;
+      return conversationRowEstimatePx({
+        index,
+        range,
+        overscan: CONVERSATION_LIST_OVERSCAN,
+        fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
+        guessPx: estimatorRef.current.guess(),
+        measuredNearPx: cache
+          ? nearestMeasuredRowSize(index, getItemKey, (key) => cache.get(key))
+          : undefined,
+      });
+    },
+    [getItemKey],
+  );
+
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement,
-    estimateSize: () => CONVERSATION_LIST_ESTIMATE_PX,
+    estimateSize: estimateRowSize,
     overscan: CONVERSATION_LIST_OVERSCAN,
     gap: CONVERSATION_LIST_GAP_PX,
     getItemKey,
@@ -92,16 +118,17 @@ export function ConversationList({
     useFlushSync: false,
     directDomUpdates: true,
     onChange: (instance) => {
+      rangeRef.current = instance.range;
       onMountedRowsChangeRef.current?.(instance.getVirtualIndexes().length);
       if (stampingRef.current) return;
       stampingRef.current = true;
       try {
         stampConversationRowEstimates(
           instance.getVirtualIndexes(),
-          (index) => itemsRef.current[index]?.key ?? index,
+          getItemKey,
           instance.itemSizeCache,
           instance.resizeItem,
-          estimatorRef.current.guess(),
+          estimateRowSize,
         );
       } finally {
         stampingRef.current = false;
@@ -110,6 +137,7 @@ export function ConversationList({
   });
 
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = shouldAdjustConversationRowOnSizeChange;
+  sizeCacheRef.current = virtualizer.itemSizeCache;
 
   const cachedRowSize = (index: number) => {
     const key = itemsRef.current[index]?.key ?? index;

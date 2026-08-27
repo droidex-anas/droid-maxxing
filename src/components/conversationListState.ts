@@ -104,6 +104,7 @@ export function shouldAdjustConversationRowOnSizeChange(
 }
 
 const ESTIMATE_SAMPLE_LIMIT = 32;
+const ESTIMATE_NEIGHBOR_DISTANCE = 32;
 
 export function createConversationRowSizeEstimator(): {
   observe: (sizePx: number) => void;
@@ -127,19 +128,61 @@ export function createConversationRowSizeEstimator(): {
   };
 }
 
-// Stamp only the mounted window. Far unmeasured rows keep the 96 px fallback so
-// a moving median cannot collapse getTotalSize() for the rest of the list.
+export function nearestMeasuredRowSize(
+  index: number,
+  getKey: (index: number) => string | number | bigint,
+  measuredSize: (key: string | number | bigint) => number | undefined,
+  maxDistance: number = ESTIMATE_NEIGHBOR_DISTANCE,
+): number | undefined {
+  for (let distance = 1; distance <= maxDistance; distance += 1) {
+    const after = measuredSize(getKey(index + distance));
+    if (typeof after === 'number') return after;
+    if (index >= distance) {
+      const before = measuredSize(getKey(index - distance));
+      if (typeof before === 'number') return before;
+    }
+  }
+  return undefined;
+}
+
+export function conversationRowEstimateNear(
+  index: number,
+  range: { startIndex: number; endIndex: number } | null,
+  overscan: number,
+): boolean {
+  if (range == null) return false;
+  const pad = Math.max(overscan * 2, ESTIMATE_NEIGHBOR_DISTANCE);
+  return index >= range.startIndex - pad && index <= range.endIndex + pad;
+}
+
+export function conversationRowEstimatePx(options: {
+  index: number;
+  range: { startIndex: number; endIndex: number } | null;
+  overscan: number;
+  fallbackPx: number;
+  guessPx: number;
+  measuredNearPx: number | undefined;
+}): number {
+  if (!conversationRowEstimateNear(options.index, options.range, options.overscan)) {
+    return options.fallbackPx;
+  }
+  return options.measuredNearPx ?? options.guessPx;
+}
+
 export function stampConversationRowEstimates(
   indexes: readonly number[],
   getKey: (index: number) => string | number | bigint,
   itemSizeCache: { has: (key: string | number | bigint) => boolean },
   resizeItem: (index: number, size: number) => void,
-  guessPx: number,
+  guessForIndex: (index: number) => number,
 ): void {
   for (const index of indexes) {
     const key = getKey(index);
     if (itemSizeCache.has(key)) continue;
+    const guessPx = guessForIndex(index);
+    if (guessPx === CONVERSATION_LIST_ESTIMATE_PX) continue;
     resizeItem(index, guessPx);
+    return;
   }
 }
 
