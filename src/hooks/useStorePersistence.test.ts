@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadPersistedUiState, normalizeDiffStyle } from './useStore';
+import { loadPersistedUiState } from './persistedUiPreferences';
+import { normalizeDiffStyle } from './persistedThemePreferences';
 import { normalizeAppIconMode } from '../lib/appIcon';
 import {
   applyFactoryCompactionDefaults,
