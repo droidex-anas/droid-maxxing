@@ -688,3 +688,36 @@ test('persistence does not start the independent search worker until the first s
     restore();
   }
 });
+
+test('warmSearchWorker starts the search worker without searching or reconciling', async () => {
+  const { restore } = withTemporaryHome('droidex-warm-search-worker-');
+  let searchWorkersCreated = 0;
+  let searchCalls = 0;
+  let reconcileCalls = 0;
+  const searchClient = stubSearchClient();
+  const persistence = new HistoryPersistence({
+    createSearchClient: () => {
+      searchWorkersCreated += 1;
+      return {
+        ...searchClient,
+        async search(query: string) {
+          searchCalls += 1;
+          return searchClient.search(query);
+        },
+        async reconcileSessionFiles() {
+          reconcileCalls += 1;
+          return searchClient.reconcileSessionFiles();
+        },
+      };
+    },
+  });
+  try {
+    persistence.warmSearchWorker();
+    assert.equal(searchWorkersCreated, 1);
+    assert.equal(searchCalls, 0);
+    assert.equal(reconcileCalls, 0);
+  } finally {
+    persistence.close();
+    restore();
+  }
+});

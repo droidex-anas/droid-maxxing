@@ -47,6 +47,7 @@ import {
   resolveSessionChain,
 } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
+import { type HistorySearchClient } from './HistoryWorkerClient.js';
 import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
 import { SessionAdoption } from './sessionAdoption.js';
@@ -124,6 +125,7 @@ type SessionHistory = SessionHistoryBase & {
   setIndexingIdle(isIdle: boolean): Promise<void>;
   reconcileSessionFiles(): Promise<number>;
   reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number>;
+  warmSearchWorker?(): void;
 };
 
 type SessionBrowsers = Pick<
@@ -174,6 +176,7 @@ export interface SessionManagerOptions {
   assetUrlFor?: (path: string) => string;
   dependencies?: SessionManagerDependencies;
   initialModels?: ModelInfo[];
+  searchClient?: HistorySearchClient;
 }
 
 export interface AgentSettingPatch {
@@ -277,6 +280,7 @@ export class SessionManager {
     } else {
       this.runtime = new DroidRuntime();
       this.history = new HistoryPersistence({
+        ...(options.searchClient ? { searchClient: options.searchClient } : {}),
         onStatusChanged: (status) => {
           if (status.state === 'healthy') return;
           if (status.state === 'search_unavailable') {
@@ -543,6 +547,10 @@ export class SessionManager {
         this.timeline.appendStatus(appSessionId, text);
       },
     });
+  }
+
+  startSessionFileServing(): void {
+    this.history.warmSearchWorker?.();
   }
 
   connect(apiKey?: string): void {

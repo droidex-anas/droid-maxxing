@@ -260,6 +260,10 @@ export class HistoryPersistence {
     this.flushPendingSync();
   }
 
+  warmSearchWorker(): void {
+    this.getSearchClient();
+  }
+
   forgetSession(appSessionId: string): void {
     this.runtimeSummaries.delete(appSessionId);
     this.durability.forgetSession(appSessionId);
