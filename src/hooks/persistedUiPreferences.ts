@@ -126,7 +126,8 @@ interface PersistedUiState {
 
 export function loadCompactionModel(): string {
   try {
-    return getLocalStorage()?.getItem(COMPACTION_MODEL_STORAGE_KEY) ?? 'current-model';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string means use default model
+    return getLocalStorage()?.getItem(COMPACTION_MODEL_STORAGE_KEY) || 'current-model';
   } catch {
     return 'current-model';
   }
