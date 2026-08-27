@@ -1,20 +1,16 @@
-// Renderer hot-path measurement for perf phase 0 (#116): timestamps the
-// receive → store-commit → next-paint leg for bridge events, tracks long
-// tasks, and exposes the mounted feed-row count.
-//
-// The module must import safely outside a browser (node --test) — every DOM
-// API is resolved lazily and observers start only where they exist.
+// Safe in node --test: every DOM API is resolved lazily and observers start
+// only where they exist.
 
 import type { ServerEvent } from '../types/bridge';
 
-export type StartupPhase =
+type StartupPhase =
   | 'rendererHtmlLoaded'
   | 'firstMeaningfulShellPaint'
   | 'composerInteractive'
   | 'sidecarConnected'
   | 'sessionListReady';
 
-export interface StartupPhaseTimings {
+interface StartupPhaseTimings {
   rendererHtmlLoadedMs?: number;
   firstMeaningfulShellPaintMs?: number;
   composerInteractive:
@@ -132,8 +128,7 @@ export function startRendererPerfObservers(): void {
   }
 }
 
-/** Record a renderer startup phase once; timestamps are performance.now() marks. */
-export function noteStartupPhase(phase: StartupPhase): void {
+function noteStartupPhase(phase: StartupPhase): void {
   if (startupPhases[phase] !== undefined) return;
   startedAt ||= Date.now();
   startupPhases[phase] = performance.now();
@@ -160,7 +155,6 @@ export function noteComposerNotApplicable(): void {
   composerInteractiveStatus = { status: 'notApplicable' };
 }
 
-/** Stamp a bridge event at socket-read time; called from Bridge.onmessage. */
 export function noteBridgeEventReceived(event: ServerEvent): void {
   startedAt ||= Date.now();
   eventsReceived += 1;
@@ -201,13 +195,11 @@ export function noteStoreCommitted(): void {
   schedulePaintStamp(batch);
 }
 
-/** Report how many grouped feed rows the visible conversation currently mounts. */
 export function setMountedFeedRows(count: number): void {
   mountedFeedRows = count;
   mountedFeedRowsMax = Math.max(mountedFeedRowsMax, count);
 }
 
-/** Measure canonical full builds versus proven transcript/feed reuse. */
 export function noteFeedProjection(options: {
   mode: 'full' | 'incremental' | 'cache' | 'invisible';
   durationMs: number;

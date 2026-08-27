@@ -37,19 +37,11 @@ export interface HistoryPersistenceOptions {
   onDurabilityRecovered?: () => void;
 }
 
-export type HistoryPersistenceStatus =
+type HistoryPersistenceStatus =
   | { state: 'healthy' }
   | { state: 'degraded'; message: string }
   | { state: 'search_unavailable'; message: string };
 
-/**
- * Worker-backed write seam around the existing read/index implementation.
- *
- * HistoryIndex remains the schema and read owner. This class owns live
- * canonical overlays plus the bounded write-behind queue. Ordinary transcript
- * output remains live while SQLite work runs away from the orchestration event
- * loop; settlement and identity publication waits for confirmed durability.
- */
 export class HistoryPersistence {
   private readonly core: HistoryIndex;
   private readonly queue: HistoryPersistenceQueue;

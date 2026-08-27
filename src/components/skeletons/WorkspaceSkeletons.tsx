@@ -137,7 +137,3 @@ export function PullRequestsSkeleton() {
     </div>
   );
 }
-
-export function SpecWikiSkeleton() {
-  return null;
-}

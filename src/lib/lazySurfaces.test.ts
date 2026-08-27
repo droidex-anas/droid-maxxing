@@ -28,9 +28,9 @@ test('App keeps optional workspaces off the static import graph', () => {
 });
 
 test('lazy surfaces expose one loader map for React.lazy and preloading', () => {
-  assert.match(LAZY_SOURCE, /const lazySurfaceLoaders = \{/);
-  assert.match(LAZY_SOURCE, /export const LAZY_SURFACE_LOADERS[^=]+= lazySurfaceLoaders/);
-  assert.match(LAZY_SOURCE, /lazy\(lazySurfaceLoaders\.settings\)/);
+  assert.match(LAZY_SOURCE, /export const LAZY_SURFACE_LOADERS = \{/);
+  assert.match(LAZY_SOURCE, /lazy\(LAZY_SURFACE_LOADERS\.settings\)/);
+  assert.doesNotMatch(LAZY_SOURCE, /lazySurfaceLoaders/);
   assert.doesNotMatch(LAZY_SOURCE, /LAZY_SURFACE_LOADERS: Record[\s\S]*import\('\.\./);
 });
 

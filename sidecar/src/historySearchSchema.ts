@@ -16,7 +16,7 @@ export class HistorySearchUnavailableError extends Error {
   }
 }
 
-export function isMissingFts5Module(error: unknown): boolean {
+function isMissingFts5Module(error: unknown): boolean {
   return error instanceof Error && /no such module:\s*fts5/i.test(error.message);
 }
 
@@ -27,7 +27,7 @@ export function isHistorySearchUnavailableError(error: unknown): boolean {
   );
 }
 
-export const SQLITE_FTS5_UNAVAILABLE_REASON = 'SQLite FTS5 is unavailable on this host';
+const SQLITE_FTS5_UNAVAILABLE_REASON = 'SQLite FTS5 is unavailable on this host';
 
 export function sqliteSupportsFts5(): boolean {
   const db = new DatabaseSync(':memory:');

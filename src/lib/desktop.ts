@@ -63,7 +63,7 @@ export interface TerminalSessionInfo {
   exitCode?: number | null;
 }
 
-export type TerminalEvent =
+type TerminalEvent =
   | {
       kind: 'replay';
       data: string;
@@ -307,13 +307,12 @@ declare global {
   }
 }
 
-/** Perf phase 0 gauge from the Electron main process. */
-export interface DesktopPerformanceMetrics {
+interface DesktopPerformanceMetrics {
   timestamp: number;
   webContentsTotal: number;
   ptys: number;
   memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
-  /** Cumulative since app start, not per sample: difference polls for a rate. */
+  // Cumulative since app start, not per sample: difference polls for a rate.
   cpu: { userMs: number; systemMs: number };
 }
 

@@ -21,7 +21,6 @@ interface SessionFileServingDependencies {
 
 const ignoreError = (): undefined => undefined;
 
-/** Owns the worker-backed session-file cache, watcher, and authoritative list gate. */
 export class SessionFileServing {
   private bootstrapDone = false;
   private bootReconcile: Promise<void> | null = null;

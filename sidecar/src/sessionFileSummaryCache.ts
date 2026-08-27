@@ -7,7 +7,7 @@ interface PersistedSessionFileSummary {
   summary: SessionSummary;
 }
 
-export const SESSION_FILE_SUMMARY_CACHE_VERSION = 1;
+const SESSION_FILE_SUMMARY_CACHE_VERSION = 1;
 
 export const SESSION_FILE_REASONING_EFFORTS: Record<ReasoningEffort, true> = {
   off: true,

@@ -21,7 +21,6 @@ interface FilterInput {
   includes: (event: TranscriptEvent) => boolean;
 }
 
-/** Projects one transcript subset while reading only a proven changed suffix/page. */
 export function createIncrementalTranscriptFilter(): (input: FilterInput) => TranscriptEvent[] {
   let previous: FilterProjection | undefined;
 

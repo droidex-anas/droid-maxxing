@@ -1,10 +1,5 @@
-// Deterministic replay scenarios for the perf harness (#116 phase 0).
-//
-// A scenario fully determines the provider workload: how many sessions stream
-// concurrently, the event mix, inter-arrival schedule, payload sizes, and the
-// sidecar's streaming coalesce window. Given the same seed the generated plan
-// is byte-identical, so before/after comparisons across code changes measure
-// the code, not the workload.
+// Deterministic replay scenarios. Given the same seed the generated plan is
+// byte-identical, so before/after comparisons measure the code, not the workload.
 
 import type { DroidStreamEvent } from '@factory/droid-sdk';
 
@@ -15,20 +10,15 @@ export interface PerfScenarioSpec {
   sessions: number;
   turnsPerSession: number;
   deltasPerTurn: number;
-  // Scheduled provider events per second, per session.
   eventsPerSecond: number;
-  // Character range of each streamed text delta.
   deltaChars: { min: number; max: number };
-  // Insert a tool_call/tool_result marker pair every N deltas. Markers are
-  // never coalesced, so they yield exact provider-to-wire end-to-end samples.
+  // Markers are never coalesced, so they yield exact provider-to-wire samples.
   toolMarkerEvery: number;
-  // SessionTimeline streamingCoalesceMs forwarded into the sidecar wiring.
   coalesceMs: number;
-  // Wall-clock target derived from the schedule (informational).
   expectedDurationMs: number;
 }
 
-export interface ReplayStep {
+interface ReplayStep {
   atMs: number;
   event: DroidStreamEvent;
   marker: string | null;
@@ -73,7 +63,7 @@ function scenario(
   return spec;
 }
 
-export function expectedDurationMs(spec: PerfScenarioSpec): number {
+function expectedDurationMs(spec: PerfScenarioSpec): number {
   const eventsPerTurn = spec.deltasPerTurn + markerPairs(spec.deltasPerTurn, spec.toolMarkerEvery);
   const eventsPerSession = eventsPerTurn * spec.turnsPerSession;
   return Math.ceil((eventsPerSession / spec.eventsPerSecond) * 1_000) + spec.coalesceMs + 250;

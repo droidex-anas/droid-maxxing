@@ -12,7 +12,6 @@ interface TranscriptAction {
   event: TranscriptEvent;
 }
 
-/** Reduces ordered bridge actions while ingesting each contiguous transcript run once. */
 export function reduceStoreActionBatch<Action extends { type: string }>(
   state: AppState,
   actions: readonly Action[],

@@ -75,7 +75,6 @@ export function rowIntersectsViewport({
   return rowBottom > viewportTop + 1 && rowTop < viewportBottom - 1;
 }
 
-/** Return the first vertically ordered row whose bottom is below the viewport top. */
 export function firstRowNotAboveViewport(
   rowCount: number,
   rowBottomAt: (index: number) => number,

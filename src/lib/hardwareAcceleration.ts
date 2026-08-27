@@ -1,5 +1,3 @@
-import { relaunchApp } from './onboarding';
-
 interface HardwareAccelerationPreference {
   enabled: boolean;
 }
@@ -20,10 +18,6 @@ export async function setHardwareAcceleration(
   const bridge = requireHardwareAccelerationBridge();
   const value = await bridge.setHardwareAcceleration(enabled);
   return readHardwareAccelerationPreference(value);
-}
-
-export async function restartForHardwareAcceleration(): Promise<void> {
-  await relaunchApp();
 }
 
 function hardwareAccelerationBridge() {

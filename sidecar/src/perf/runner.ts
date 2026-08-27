@@ -1,11 +1,5 @@
-// Deterministic end-to-end replay runner (#116 phase 0): boots the REAL
-// sidecar pipeline (SessionManager + SessionEventFlow + SessionTimeline +
-// worker-backed history persistence + bridgeServer WebSocket transport) against a scripted
-// provider, then measures every stage and reports against budgets.
-//
-// Determinism contract: same scenario + seed → identical event stream, order,
-// and sizes. Wall-clock pacing and measured latencies are machine-dependent
-// by design (that is what a baseline measures).
+// Same scenario + seed → identical event stream, order, and sizes. Wall-clock
+// pacing and measured latencies are machine-dependent by design.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { cpus, tmpdir } from 'node:os';

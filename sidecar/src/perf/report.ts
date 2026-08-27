@@ -1,12 +1,11 @@
-// Report shape and Markdown rendering for perf replay runs. Kept as plain
-// data so JSON artifacts stay diffable between runs and code changes.
+// Plain-data report so JSON artifacts stay diffable between runs.
 
 import type { HistogramStats } from '../telemetry/histogram.js';
 import type { HotPathMetricsSnapshot } from '../telemetry/hotPathMetrics.js';
 import type { BudgetEvaluation } from './budgets.js';
 import type { PerfScenarioSpec } from './scenario.js';
 
-export interface ReplayClientStats {
+interface ReplayClientStats {
   appendedReceived: number;
   appendToReceiveMs: HistogramStats;
   providerToReceiveMs: HistogramStats;
@@ -14,7 +13,7 @@ export interface ReplayClientStats {
   bytesReceived: number;
 }
 
-export interface ReplayDrift {
+interface ReplayDrift {
   firstHalfToReceiveMs: HistogramStats;
   secondHalfToReceiveMs: HistogramStats;
 }
