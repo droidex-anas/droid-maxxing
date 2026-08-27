@@ -190,13 +190,13 @@ async function measureEcho(app: LaunchedApp, text: string): Promise<EchoMetrics 
   );
   await app.cdp.evaluate('window.__guiBench.pinFeedToBottom()');
   const fillStarted = Date.now();
-  if (text.length > 8_000) {
-    await app.cdp.evaluate(`(() => { const area = document.querySelector('textarea'); area && area.focus(); })()`);
-    await app.cdp.insertText(text);
-    await app.cdp.evaluate('window.__guiBench.notifyComposerInput()');
-  } else {
-    await app.cdp.evaluate(`window.__guiBench.fillPrompt(${JSON.stringify(text)})`);
-  }
+  const prefix = text.slice(0, 32);
+  const rest = text.length - prefix.length;
+  await app.cdp.evaluate(
+    rest > 0
+      ? `window.__guiBench.fillPrompt(${JSON.stringify(prefix)} + 'x'.repeat(${String(rest)}))`
+      : `window.__guiBench.fillPrompt(${JSON.stringify(text)})`,
+  );
   const fillMs = Date.now() - fillStarted;
   const fillWaitStarted = Date.now();
   while (Date.now() - fillWaitStarted < 3000) {
