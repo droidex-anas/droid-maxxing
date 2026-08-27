@@ -150,7 +150,9 @@ export function aggregateTranscriptMutationBatch(
 
   for (const [appSessionId, observed] of records) {
     if (!Object.hasOwn(final, appSessionId)) continue;
-    const batchStartRevision = batchStart[appSessionId]?.revision ?? 0;
+    const batchStartRevision = Object.hasOwn(batchStart, appSessionId)
+      ? batchStart[appSessionId].revision
+      : 0;
     const aggregate = aggregateTranscriptMutations(batchStartRevision, observed);
     if (aggregate === undefined) continue;
 
