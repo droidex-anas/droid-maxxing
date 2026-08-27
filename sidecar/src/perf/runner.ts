@@ -141,6 +141,7 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   const liveManager = manager;
   hotPathMetrics.reset();
   hotPathMetrics.enable();
+  hotPathMetrics.enableEventLoop();
   hotPathMetrics.setGaugeProvider(() => liveManager.resourceCounts());
 
   const client = new WebSocket(

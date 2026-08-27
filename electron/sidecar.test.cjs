@@ -198,6 +198,28 @@ test('unexpected sidecar exits are forwarded to diagnostics', async () => {
   assert.equal(supervisor.snapshot().lifecycle, 'restarting');
 });
 
+test('heartbeat arms one timeout at the interval and does not stack', async () => {
+  const child = fakeChild();
+  const { supervisor, scheduled } = harness([child]);
+  child.stdout.write('SIDECAR_READY 43001\n');
+  await supervisor.start();
+
+  const pending = scheduled.filter((item) => !item.cancelled);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0]?.delayMs, 2_000);
+  const first = pending[0];
+  if (!first) throw new Error('missing heartbeat timer');
+  first.cancelled = true;
+  first.callback();
+
+  const after = scheduled.filter((item) => !item.cancelled);
+  assert.equal(after.length, 1);
+  assert.equal(after[0]?.delayMs, 2_000);
+  const stopping = supervisor.stop();
+  child.emit('exit', 0, null);
+  await stopping;
+});
+
 test('a missed heartbeat degrades without declaring the process dead', async () => {
   const child = fakeChild();
   let shouldFail = false;

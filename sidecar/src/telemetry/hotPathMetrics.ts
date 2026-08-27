@@ -154,6 +154,7 @@ export class HotPathMetrics {
   private byteSampleCursor = 0;
   private byteSampleCount = 0;
   private readonly eventLoop = monitorEventLoopDelay({ resolution: 10 });
+  private eventLoopEnabled = false;
   private startedAt = 0;
   private cpuBaseline = { user: 0, system: 0 };
   private counters = emptyCounters();
@@ -168,12 +169,20 @@ export class HotPathMetrics {
     if (this.startedAt !== 0) return;
     this.startedAt = Date.now();
     this.cpuBaseline = process.cpuUsage();
+  }
+
+  enableEventLoop(): void {
+    if (this.startedAt === 0) this.enable();
+    if (this.eventLoopEnabled) return;
     this.eventLoop.reset();
     this.eventLoop.enable();
+    this.eventLoopEnabled = true;
   }
 
   disable(): void {
+    if (!this.eventLoopEnabled) return;
     this.eventLoop.disable();
+    this.eventLoopEnabled = false;
   }
 
   reset(): void {
@@ -364,15 +373,13 @@ export class HotPathMetrics {
   }
 
   private eventLoopStats(): HotPathMetricsSnapshot['eventLoop'] {
-    if (this.startedAt === 0) return null;
-    const mean = this.eventLoop.mean;
-    if (!Number.isFinite(mean)) return null;
+    if (!this.eventLoopEnabled) return null;
     return {
-      p50Ms: round(this.eventLoop.percentile(50) / 1e6),
-      p95Ms: round(this.eventLoop.percentile(95) / 1e6),
-      p99Ms: round(this.eventLoop.percentile(99) / 1e6),
-      meanMs: round(mean / 1e6),
-      maxMs: round(this.eventLoop.max / 1e6),
+      p50Ms: nanosToMs(this.eventLoop.percentile(50)),
+      p95Ms: nanosToMs(this.eventLoop.percentile(95)),
+      p99Ms: nanosToMs(this.eventLoop.percentile(99)),
+      meanMs: nanosToMs(this.eventLoop.mean),
+      maxMs: nanosToMs(this.eventLoop.max),
     };
   }
 
@@ -393,6 +400,10 @@ function reductionRatio(logicalEvents: number, deliveredEvents: number): number 
 
 function round(value: number): number {
   return Math.round(value * 1_000) / 1_000;
+}
+
+function nanosToMs(value: number): number {
+  return Number.isFinite(value) ? round(value / 1e6) : 0;
 }
 
 export const hotPathMetrics = new HotPathMetrics();

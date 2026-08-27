@@ -272,6 +272,7 @@ test('health endpoint requires the bridge token and reports generation', async (
     assert.equal(typeof body.generation, 'string');
     assert.equal(typeof body.lastSeq, 'number');
     assert.equal(typeof body.eventLoopDelayMs, 'number');
+    assert.equal(body.eventLoopDelayMs, 0);
   });
 });
 test('wrong token is rejected at the socket layer', async () => {

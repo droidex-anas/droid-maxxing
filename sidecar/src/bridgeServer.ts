@@ -6,7 +6,6 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 import { assertValidResponseFormat } from './appPrompt.js';
 import { BridgeEventBatcher, type BridgeEventBatchMetadata } from './bridgeEventBatcher.js';
@@ -47,8 +46,6 @@ export function startBridgeServer(options: {
 }): BridgeServer {
   const clients = new Set<WebSocket>();
   const replay = new BridgeReplayBuffer();
-  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
-  eventLoopDelay.enable();
   let boundPort = options.requestedPort;
   let closePromise: Promise<void> | null = null;
 
@@ -303,14 +300,13 @@ export function startBridgeServer(options: {
       return true;
     }
     const queue = batcher.snapshot();
-    const eventLoopDelayMs = eventLoopDelay.mean / 1e6;
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(
       JSON.stringify({
         ok: true,
         generation: queue.generation,
         lastSeq: queue.lastSeq,
-        eventLoopDelayMs: Number.isFinite(eventLoopDelayMs) ? eventLoopDelayMs : 0,
+        eventLoopDelayMs: hotPathMetrics.snapshot().eventLoop?.meanMs ?? 0,
       }),
     );
     return true;
@@ -378,7 +374,6 @@ export function startBridgeServer(options: {
 
   function close(): Promise<void> {
     if (closePromise) return closePromise;
-    eventLoopDelay.disable();
     batcher.close();
     closePromise = new Promise<void>((resolve) => {
       let pendingServers = 2;
