@@ -32,6 +32,7 @@ import { useDocumentVisible } from './hooks/useDocumentVisible';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
 import SetupBanner from './components/onboarding/SetupBanner';
+import RuntimeStatusBanner from './components/RuntimeStatusBanner';
 import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
@@ -52,6 +53,7 @@ import {
   cancelIdleLazyWarmup,
 } from './lib/chunkPreloader';
 import { OnboardingLazyHost } from './components/onboarding/OnboardingLazyHost';
+import { SettingsLazyHost } from './components/SettingsLazyHost';
 import {
   CommandPaletteSkeleton,
   MissionControlSkeleton,
@@ -64,7 +66,6 @@ import {
   LazyMissionControl,
   LazyPullRequestsView,
   LazyReviewPanel,
-  LazySettingsPanel,
   LazySpecWikiModal,
   LazyTerminalWorkspace,
   utilityToolFallback,
@@ -536,6 +537,7 @@ export default function App() {
           }}
         />
       )}
+      <RuntimeStatusBanner />
       <div className="flex-1 flex min-h-0 relative">
         {/* Sidebar with collapse animation */}
         <AnimatePresence initial={false}>
@@ -793,12 +795,11 @@ export default function App() {
         </Suspense>
       )}
       <Suspense fallback={null}>
-        <LazySettingsPanel />
-      </Suspense>
-      <Suspense fallback={null}>
         <LazySpecWikiModal />
       </Suspense>
       <Toaster />
+
+      <AnimatePresence>{state.settingsOpen && <SettingsLazyHost />}</AnimatePresence>
 
       <AnimatePresence>
         {showWizard && onboard.ready && (

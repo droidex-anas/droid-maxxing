@@ -1,5 +1,9 @@
 import type {
   BridgeResetMessage,
+  BridgeRuntimeSnapshot,
+  BridgeSnapshotMessage,
+  InterruptedSessionRecord,
+  PersistenceRecovery,
   ServerEvent,
   ServerEventBatch,
   ServerWireMessage,
@@ -9,6 +13,7 @@ export function serverWireMessage(value: unknown): ServerWireMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
   if (value.type === 'events.batch') return eventBatch(value);
   if (value.type === 'bridge.reset') return bridgeReset(value);
+  if (value.type === 'bridge.snapshot') return bridgeSnapshot(value);
   return directError(value);
 }
 
@@ -45,18 +50,57 @@ function hasOrderedBatchEntries(events: unknown[], firstSeq: number, lastSeq: nu
 }
 
 function bridgeReset(value: Record<string, unknown>): BridgeResetMessage | null {
-  const reason = value.reason;
   if (
     typeof value.generation !== 'string' ||
     value.generation.length === 0 ||
     !nonNegativeSafeInteger(value.lastSeq) ||
-    (reason !== 'generation_changed' &&
-      reason !== 'replay_unavailable' &&
-      reason !== 'invalid_resume')
+    value.reason !== 'invalid_resume'
   ) {
     return null;
   }
   return value as unknown as BridgeResetMessage;
+}
+
+function bridgeSnapshot(value: Record<string, unknown>): BridgeSnapshotMessage | null {
+  const snapshot = runtimeSnapshot(value.snapshot);
+  if (
+    typeof value.generation !== 'string' ||
+    value.generation.length === 0 ||
+    !nonNegativeSafeInteger(value.lastSeq) ||
+    (value.reason !== 'generation_changed' && value.reason !== 'replay_unavailable') ||
+    snapshot === null
+  ) {
+    return null;
+  }
+  return value as unknown as BridgeSnapshotMessage;
+}
+
+function runtimeSnapshot(value: unknown): BridgeRuntimeSnapshot | null {
+  if (!isRecord(value) || !isRuntimeStatus(value.runtime)) return null;
+  if (!Array.isArray(value.sessions) || !value.sessions.every(isSessionSummary)) return null;
+  if (!Array.isArray(value.children) || !value.children.every(isChildSessionSummary)) return null;
+  if (!persistenceRecovery(value.persistence)) return null;
+  if (!Array.isArray(value.interrupted) || !value.interrupted.every(interruptedRecord)) return null;
+  return value as unknown as BridgeRuntimeSnapshot;
+}
+
+function persistenceRecovery(value: unknown): value is PersistenceRecovery {
+  return (
+    isRecord(value) &&
+    typeof value.durable === 'boolean' &&
+    typeof value.hadUnflushedWork === 'boolean' &&
+    (value.message === undefined || typeof value.message === 'string')
+  );
+}
+
+function interruptedRecord(value: unknown): value is InterruptedSessionRecord {
+  return (
+    isRecord(value) &&
+    typeof value.appSessionId === 'string' &&
+    value.appSessionId.length > 0 &&
+    typeof value.reason === 'string' &&
+    (value.childSessionId === undefined || typeof value.childSessionId === 'string')
+  );
 }
 
 // The exhaustive discriminant stays centralized so every inbound event takes
@@ -201,7 +245,8 @@ function isSessionSummary(value: unknown): boolean {
     ]) &&
     Array.isArray(value.features) &&
     value.features.every(isBridgeFeature) &&
-    hasNumbers(value, ['tokensIn', 'tokensOut', 'contextTokens', 'createdAt', 'updatedAt'])
+    hasNumbers(value, ['tokensIn', 'tokensOut', 'contextTokens', 'createdAt', 'updatedAt']) &&
+    (value.interruptReason === undefined || typeof value.interruptReason === 'string')
   );
 }
 

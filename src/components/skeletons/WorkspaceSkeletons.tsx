@@ -44,25 +44,19 @@ export function UtilityPaneSkeleton() {
 
 export function SettingsPanelSkeleton() {
   return (
-    <div
-      role="status"
-      aria-label="Loading settings"
-      className="fixed inset-0 z-50 flex bg-droid-bg/80 backdrop-blur-sm"
-    >
-      <div className="flex h-full w-full max-w-5xl mx-auto border border-droid-border bg-droid-bg shadow-2xl">
-        <aside className="w-56 shrink-0 border-r border-droid-border p-4 space-y-3">
-          <SkeletonLine width="60%" />
-          <SkeletonLine width="80%" />
-          <SkeletonLine width="70%" />
-          <SkeletonLine width="75%" />
-        </aside>
-        <main className="flex-1 p-6 space-y-4">
-          <SkeletonLine width="40%" height="h-4" />
-          <SkeletonLine width="92%" />
-          <SkeletonLine width="86%" />
-          <SkeletonLine width="78%" />
-        </main>
-      </div>
+    <div role="status" aria-label="Loading settings" className="flex min-h-0 flex-1 bg-droid-bg">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-droid-border p-4 space-y-3">
+        <SkeletonLine width="60%" />
+        <SkeletonLine width="80%" />
+        <SkeletonLine width="70%" />
+        <SkeletonLine width="75%" />
+      </aside>
+      <main className="flex-1 space-y-4 p-6">
+        <SkeletonLine width="40%" height="h-4" />
+        <SkeletonLine width="92%" />
+        <SkeletonLine width="86%" />
+        <SkeletonLine width="78%" />
+      </main>
     </div>
   );
 }
@@ -136,8 +130,4 @@ export function PullRequestsSkeleton() {
       </div>
     </div>
   );
-}
-
-export function SpecWikiSkeleton() {
-  return null;
 }

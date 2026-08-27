@@ -6,6 +6,7 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 import { assertValidResponseFormat } from './appPrompt.js';
 import { BridgeEventBatcher, type BridgeEventBatchMetadata } from './bridgeEventBatcher.js';
@@ -14,11 +15,14 @@ import { resolveBrowserAssetPath } from './browser/browserPaths.js';
 import {
   BRIDGE_PROTOCOL_VERSION,
   type BridgeResetMessage,
+  type BridgeRuntimeSnapshot,
+  type BridgeSnapshotMessage,
   type ClientCommand,
   type ServerEvent,
   type ServerEventBatch,
   type ServerWireMessage,
 } from './protocol.js';
+import { emptyRuntimeSnapshot } from './runtimeSnapshot.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 const HOST = '127.0.0.1';
@@ -39,15 +43,19 @@ export function startBridgeServer(options: {
   token: string;
   assetToken: string;
   onCommand: (command: ClientCommand) => Promise<void>;
+  getSnapshot?: () => Promise<BridgeRuntimeSnapshot> | BridgeRuntimeSnapshot;
 }): BridgeServer {
   const clients = new Set<WebSocket>();
   const replay = new BridgeReplayBuffer();
+  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  eventLoopDelay.enable();
   let boundPort = options.requestedPort;
   let closePromise: Promise<void> | null = null;
 
   const server = createServer((req, res) => {
     if (serveBrowserAsset(req, res, options.assetToken)) return;
     if (serveHotPathMetrics(req, res, options.token)) return;
+    if (serveHealth(req, res, options.token)) return;
     res.writeHead(404).end('not found');
   });
 
@@ -123,15 +131,19 @@ export function startBridgeServer(options: {
       ws.close(1002, 'unsupported bridge protocol');
       return;
     }
-    if (!resumeClient(ws, url)) return;
-    clients.add(ws);
+    void admitClient(ws, url);
+  });
 
+  async function admitClient(ws: WebSocket, url: URL): Promise<void> {
+    const admitted = await resumeClient(ws, url);
+    if (!admitted || ws.readyState !== ws.OPEN) return;
+    clients.add(ws);
     ws.on('message', (raw) => void handleMessage(ws, raw));
     ws.on('close', () => clients.delete(ws));
     ws.on('error', () => clients.delete(ws));
-  });
+  }
 
-  function resumeClient(ws: WebSocket, url: URL): boolean {
+  async function resumeClient(ws: WebSocket, url: URL): Promise<boolean> {
     const resumeGeneration = url.searchParams.get('resumeGeneration');
     const resumeSeqValue = url.searchParams.get('resumeSeq');
     if (resumeGeneration === null && resumeSeqValue === null) return true;
@@ -149,8 +161,7 @@ export function startBridgeServer(options: {
     }
 
     if (resumeGeneration !== batcher.generation) {
-      sendReset(ws, current.lastSeq, 'generation_changed');
-      return true;
+      return sendSnapshotThenCatchUp(ws, current.lastSeq, 'generation_changed');
     }
     if (resumeSeq > current.lastSeq) {
       sendReset(ws, current.lastSeq, 'invalid_resume');
@@ -159,9 +170,21 @@ export function startBridgeServer(options: {
 
     const missed = replay.replayAfter(resumeSeq);
     if (missed === null) {
-      sendReset(ws, current.lastSeq, 'replay_unavailable');
-      return true;
+      return sendSnapshotThenCatchUp(ws, current.lastSeq, 'replay_unavailable');
     }
+    return replayBatches(ws, missed);
+  }
+
+  async function sendSnapshotThenCatchUp(
+    ws: WebSocket,
+    cursor: number,
+    reason: BridgeSnapshotMessage['reason'],
+  ): Promise<boolean> {
+    await sendSnapshot(ws, cursor, reason);
+    if (ws.readyState !== ws.OPEN) return false;
+    batcher.flush();
+    const missed = replay.replayAfter(cursor);
+    if (missed === null || missed.length === 0) return true;
     return replayBatches(ws, missed);
   }
 
@@ -190,6 +213,27 @@ export function startBridgeServer(options: {
       generation: batcher.generation,
       lastSeq,
       reason,
+    });
+  }
+
+  async function sendSnapshot(
+    ws: WebSocket,
+    lastSeq: number,
+    reason: BridgeSnapshotMessage['reason'],
+  ): Promise<void> {
+    let snapshot: BridgeRuntimeSnapshot;
+    try {
+      snapshot = (await options.getSnapshot?.()) ?? emptyRuntimeSnapshot();
+    } catch (error) {
+      console.error('Bridge snapshot failed:', error);
+      snapshot = emptyRuntimeSnapshot();
+    }
+    sendDirectWire(ws, {
+      type: 'bridge.snapshot',
+      generation: batcher.generation,
+      lastSeq,
+      reason,
+      snapshot,
     });
   }
 
@@ -245,6 +289,31 @@ export function startBridgeServer(options: {
     url.searchParams.set('path', filePath);
     url.searchParams.set('token', options.assetToken);
     return url.toString();
+  }
+
+  function serveHealth(req: IncomingMessage, res: ServerResponse, token: string): boolean {
+    const url = new URL(req.url ?? '/', `http://${HOST}:${String(boundPort)}`);
+    if (url.pathname !== '/health') return false;
+    if (req.method !== 'GET') {
+      res.writeHead(405).end('method not allowed');
+      return true;
+    }
+    if (url.searchParams.get('token') !== token) {
+      res.writeHead(401).end('unauthorized');
+      return true;
+    }
+    const queue = batcher.snapshot();
+    const eventLoopDelayMs = eventLoopDelay.mean / 1e6;
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        generation: queue.generation,
+        lastSeq: queue.lastSeq,
+        eventLoopDelayMs: Number.isFinite(eventLoopDelayMs) ? eventLoopDelayMs : 0,
+      }),
+    );
+    return true;
   }
 
   function serveHotPathMetrics(req: IncomingMessage, res: ServerResponse, token: string): boolean {
@@ -309,6 +378,7 @@ export function startBridgeServer(options: {
 
   function close(): Promise<void> {
     if (closePromise) return closePromise;
+    eventLoopDelay.disable();
     batcher.close();
     closePromise = new Promise<void>((resolve) => {
       let pendingServers = 2;

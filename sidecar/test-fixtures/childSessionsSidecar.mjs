@@ -9,7 +9,7 @@ const token = process.env.BRIDGE_TOKEN ?? '';
 const logPath = process.env.CHILD_SESSIONS_SMOKE_LOG;
 const allowAnyToken = process.env.CHILD_SESSIONS_SMOKE_ALLOW_ANY_TOKEN === '1';
 const streamEventCount = Number(process.env.CHILD_SESSIONS_SMOKE_STREAM_EVENTS ?? '0');
-const bridgeProtocolVersion = '2';
+const bridgeProtocolVersion = '3';
 const bridgeGeneration = `child-session-smoke-${String(process.pid)}`;
 let nextBridgeSequence = 1;
 

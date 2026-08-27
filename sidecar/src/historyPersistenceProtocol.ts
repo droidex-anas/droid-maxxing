@@ -1,6 +1,7 @@
 import type { MessagePort } from 'node:worker_threads';
 
 import type { PersistedChildSession } from './history.js';
+import { HistorySearchUnavailableError } from './historySearchSchema.js';
 import type {
   SessionFileChange,
   SessionFileReconciliation,
@@ -118,6 +119,9 @@ export function serializeHistoryWorkerError(error: unknown): SerializedHistoryWo
 }
 
 export function historyWorkerError(error: SerializedHistoryWorkerError): Error {
+  if (error.name === 'HistorySearchUnavailableError') {
+    return new HistorySearchUnavailableError();
+  }
   const resolved = new Error(error.message);
   resolved.name = error.name;
   if (error.stack) resolved.stack = error.stack;

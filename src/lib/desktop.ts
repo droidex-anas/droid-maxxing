@@ -52,6 +52,24 @@ interface BridgeInfo {
   token: string;
 }
 
+export type SidecarLifecycle =
+  | 'starting'
+  | 'healthy'
+  | 'degraded'
+  | 'restarting'
+  | 'recovery-required'
+  | 'stopped';
+
+export interface SidecarSupervisorSnapshot {
+  lifecycle: SidecarLifecycle;
+  processAlive: boolean;
+  bridgeResponsive: boolean;
+  lastHeartbeatAt: number | null;
+  restartCount: number;
+  reason?: string;
+  port?: number;
+}
+
 export interface TerminalSessionInfo {
   id: string;
   appSessionId: string;
@@ -63,7 +81,7 @@ export interface TerminalSessionInfo {
   exitCode?: number | null;
 }
 
-export type TerminalEvent =
+type TerminalEvent =
   | {
       kind: 'replay';
       data: string;
@@ -169,6 +187,8 @@ export type NotifyResult =
 
 interface DroidControlApi {
   bridgeInfo: () => Promise<BridgeInfo>;
+  sidecarStatus: () => Promise<SidecarSupervisorSnapshot>;
+  onSidecarStatus: (handler: (status: SidecarSupervisorSnapshot) => void) => () => void;
   pickDirectory: () => Promise<string | null>;
   pickFiles: () => Promise<string[]>;
   saveImage: (dataUrl: string) => Promise<string>;
@@ -310,8 +330,7 @@ declare global {
   }
 }
 
-/** Perf phase 0 gauge from the Electron main process. */
-export interface DesktopPerformanceMetrics {
+interface DesktopPerformanceMetrics {
   timestamp: number;
   webContentsTotal: number;
   ptys: number;
@@ -327,7 +346,7 @@ export interface DesktopPerformanceMetrics {
   terminals?: { live: number; retained: number; total: number };
   powerTier?: 'interactive' | 'hidden' | 'low-power';
   memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
-  /** Cumulative since app start, not per sample: difference polls for a rate. */
+  // Cumulative since app start, not per sample: difference polls for a rate.
   cpu: { userMs: number; systemMs: number };
 }
 
@@ -384,6 +403,18 @@ export async function getBridgeInfo(): Promise<BridgeInfo> {
   const api = desktopApi();
   if (!api) return { port: 8765, token: '' };
   return api.bridgeInfo();
+}
+
+export async function getSidecarStatus(): Promise<SidecarSupervisorSnapshot | null> {
+  const api = desktopApi();
+  if (!api?.sidecarStatus) return null;
+  return api.sidecarStatus();
+}
+
+export function onSidecarStatus(handler: (status: SidecarSupervisorSnapshot) => void): () => void {
+  const api = desktopApi();
+  if (!api?.onSidecarStatus) return () => undefined;
+  return api.onSidecarStatus(handler);
 }
 
 export async function pickDirectory(): Promise<string | null> {

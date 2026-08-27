@@ -36,8 +36,10 @@ import {
   reopenDiffDisclosure,
   revealNextDiffCards,
 } from '../lib/diff';
+import { createIncrementalTranscriptFilter } from '../lib/incrementalTranscriptFilter';
 import { hasTodoPayload, parseTruncatedTail } from '../lib/tools';
 import type { TranscriptEvent } from '../types/bridge';
+import { isRenderedTranscriptEvent } from './MissionControl';
 
 let seq = 0;
 function ev(extra: Partial<TranscriptEvent>): TranscriptEvent {
@@ -687,6 +689,41 @@ test('#20 a failed child session result batched after another tool call surfaces
 });
 
 // ── #18: final answer always top-level, even with trailing compaction ──
+
+test('Mission Control still renders a compaction divider after transcript pre-filtering', () => {
+  // Every TranscriptEvent.kind that buildFeed turns into a feed row must survive
+  // the Mission Control pre-filter; a missing kind is a silent dropped divider.
+  const renderedKinds: Record<TranscriptEvent['kind'], true> = {
+    text: true,
+    thinking: true,
+    tool_call: true,
+    tool_result: true,
+    error: true,
+    status: true,
+    compaction: true,
+  };
+  for (const kind of Object.keys(renderedKinds) as TranscriptEvent['kind'][]) {
+    assert.equal(
+      isRenderedTranscriptEvent(ev({ kind })),
+      true,
+      `${kind} must survive the Mission Control transcript filter`,
+    );
+  }
+  assert.equal(isRenderedTranscriptEvent(userMsg('keep user prompts')), true);
+
+  const events = [userMsg('q'), asst('the answer'), compaction()];
+  const filter = createIncrementalTranscriptFilter();
+  const filtered = filter({
+    conversationKey: 'mission',
+    source: events,
+    mutation: undefined,
+    includes: isRenderedTranscriptEvent,
+  });
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: filtered, pending: false }),
+  );
+  assert.match(html, /Context automatically compacted/);
+});
 
 test('#18 a final answer followed by compaction stays a top-level message', () => {
   const events = [userMsg('q'), grep(), asst('the answer'), compaction()];

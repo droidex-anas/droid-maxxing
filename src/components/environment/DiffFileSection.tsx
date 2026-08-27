@@ -2,7 +2,7 @@ import { memo, useCallback } from 'react';
 import { ChevronRight, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DiffBody } from './DiffBody';
-import type { DiffViewMode } from '../../hooks/useStore';
+import type { DiffViewMode } from '../../hooks/persistedUiPreferences';
 import type { FileDiffEntry } from '../../hooks/useReviewFileDiffs';
 import type { DiffFile } from '../../types/vcs';
 import { FileTypeIcon } from '../FileTypeIcon';

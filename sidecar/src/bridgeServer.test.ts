@@ -4,7 +4,12 @@ import test from 'node:test';
 import { WebSocket } from 'ws';
 
 import { startBridgeServer } from './bridgeServer.js';
-import { BRIDGE_PROTOCOL_VERSION, type ServerEvent, type ServerEventBatch } from './protocol.js';
+import {
+  BRIDGE_PROTOCOL_VERSION,
+  type BridgeRuntimeSnapshot,
+  type ServerEvent,
+  type ServerEventBatch,
+} from './protocol.js';
 
 interface Harness {
   port: number;
@@ -17,10 +22,17 @@ interface Harness {
 async function withServer(
   handler: (harness: Harness) => Promise<void>,
   onCommand: () => Promise<void> = async () => undefined,
+  getSnapshot?: () => Promise<BridgeRuntimeSnapshot> | BridgeRuntimeSnapshot,
 ): Promise<void> {
   const token = 'test-token';
   const assetToken = 'test-asset-token';
-  const server = startBridgeServer({ requestedPort: 0, token, assetToken, onCommand });
+  const server = startBridgeServer({
+    requestedPort: 0,
+    token,
+    assetToken,
+    onCommand,
+    ...(getSnapshot ? { getSnapshot } : {}),
+  });
   await server.ready;
   try {
     await handler({
@@ -166,17 +178,14 @@ test('an oversized batch resets a reconnect cursor instead of replaying the payl
     await secondOpened;
     await waitFor(() => resumed.length === 1);
 
-    const reset = JSON.parse(resumed[0] ?? '') as {
+    const snapshot = JSON.parse(resumed[0] ?? '') as {
       type: string;
       lastSeq: number;
       reason: string;
     };
-    assert.deepEqual(reset, {
-      type: 'bridge.reset',
-      generation: acknowledged.generation,
-      lastSeq: 2,
-      reason: 'replay_unavailable',
-    });
+    assert.equal(snapshot.type, 'bridge.snapshot');
+    assert.equal(snapshot.lastSeq, 2);
+    assert.equal(snapshot.reason, 'replay_unavailable');
 
     harness.broadcast({ type: 'connection', status: 'connected' });
     await waitFor(() => resumed.length === 2);
@@ -187,6 +196,84 @@ test('an oversized batch resets a reconnect cursor instead of replaying the payl
   });
 });
 
+test('a generation change sends a compact snapshot instead of a hard reset', async () => {
+  await withServer(async (harness) => {
+    harness.broadcast({ type: 'connection', status: 'connected' });
+    const received: string[] = [];
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}&resumeGeneration=old-generation&resumeSeq=1`,
+    );
+    const opened = new Promise<void>((resolve) => socket.once('open', resolve));
+    socket.on('message', (raw) => received.push(String(raw)));
+    await opened;
+    await waitFor(() => received.length === 1);
+    const snapshot = JSON.parse(received[0] ?? '') as {
+      type: string;
+      reason: string;
+      snapshot: { sessions: unknown[]; persistence: { hadUnflushedWork: boolean } };
+    };
+    assert.equal(snapshot.type, 'bridge.snapshot');
+    assert.equal(snapshot.reason, 'generation_changed');
+    assert.deepEqual(snapshot.snapshot.sessions, []);
+    assert.equal(snapshot.snapshot.persistence.hadUnflushedWork, false);
+    await closeSocket(socket);
+  });
+});
+
+test('a generation-changed snapshot is delivered before later broadcasts', async () => {
+  let releaseSnapshot: ((snapshot: BridgeRuntimeSnapshot) => void) | undefined;
+  const snapshot = {
+    runtime: { mode: 'cli_auth' as const, droidPath: '/bin/droid', apiKeyConfigured: false },
+    sessions: [],
+    children: [],
+    persistence: { durable: true, hadUnflushedWork: false },
+    interrupted: [],
+  };
+  await withServer(
+    async (harness) => {
+      const received: string[] = [];
+      const socket = new WebSocket(
+        `ws://127.0.0.1:${String(harness.port)}?token=${harness.token}&bridgeProtocol=${String(BRIDGE_PROTOCOL_VERSION)}&resumeGeneration=old-generation&resumeSeq=1`,
+      );
+      socket.on('message', (raw) => received.push(String(raw)));
+      await waitFor(() => releaseSnapshot !== undefined);
+      harness.broadcast({ type: 'connection', status: 'connected' });
+      releaseSnapshot?.(snapshot);
+      await waitFor(() => received.length >= 2);
+      assert.equal(JSON.parse(received[0] ?? '').type, 'bridge.snapshot');
+      const batch = JSON.parse(received[1] ?? '') as ServerEventBatch;
+      assert.equal(batch.type, 'events.batch');
+      assert.equal(batch.firstSeq, 1);
+      await closeSocket(socket);
+    },
+    async () => undefined,
+    () =>
+      new Promise<BridgeRuntimeSnapshot>((resolve) => {
+        releaseSnapshot = resolve;
+      }),
+  );
+});
+
+test('health endpoint requires the bridge token and reports generation', async () => {
+  await withServer(async (harness) => {
+    const denied = await fetch(`http://127.0.0.1:${String(harness.port)}/health`);
+    assert.equal(denied.status, 401);
+    const allowed = await fetch(
+      `http://127.0.0.1:${String(harness.port)}/health?token=${harness.token}`,
+    );
+    assert.equal(allowed.status, 200);
+    const body = (await allowed.json()) as {
+      ok: boolean;
+      generation: string;
+      lastSeq: number;
+      eventLoopDelayMs: number;
+    };
+    assert.equal(body.ok, true);
+    assert.equal(typeof body.generation, 'string');
+    assert.equal(typeof body.lastSeq, 'number');
+    assert.equal(typeof body.eventLoopDelayMs, 'number');
+  });
+});
 test('wrong token is rejected at the socket layer', async () => {
   await withServer(async (harness) => {
     const socket = new WebSocket(`ws://127.0.0.1:${String(harness.port)}?token=wrong`);

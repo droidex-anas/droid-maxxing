@@ -18,7 +18,6 @@ interface SpecPathInput {
 
 const SPEC_PATH = /(\/[^\s'"`)]*specs\/[^\s'"`)]+\.md)/;
 
-/** Finds the newest spec path without rescanning settled transcript history. */
 export function createTranscriptSpecPathProjector(): (input: SpecPathInput) => string | null {
   let previous: SpecPathProjection | undefined;
 

@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import {
   getHardwareAcceleration,
   isHardwareAccelerationSettingAvailable,
-  restartForHardwareAcceleration,
   setHardwareAcceleration,
 } from '../lib/hardwareAcceleration';
+import { relaunchApp } from '../lib/onboarding';
 import { GroupLabel } from './settingsKit';
 import { Switch } from './Switch';
 
@@ -76,7 +76,7 @@ function HardwareAccelerationSettingPanel() {
           {needsRestart && (
             <button
               type="button"
-              onClick={() => void restartForHardwareAcceleration()}
+              onClick={() => void relaunchApp()}
               className="px-2.5 h-7 rounded-md bg-droid-elevated border border-droid-border text-[12px] text-droid-text hover:border-droid-border-hover transition-colors"
             >
               Restart now

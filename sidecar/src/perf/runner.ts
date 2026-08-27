@@ -1,11 +1,5 @@
-// Deterministic end-to-end replay runner (#116 phase 0): boots the REAL
-// sidecar pipeline (SessionManager + SessionEventFlow + SessionTimeline +
-// worker-backed history persistence + bridgeServer WebSocket transport) against a scripted
-// provider, then measures every stage and reports against budgets.
-//
-// Determinism contract: same scenario + seed → identical event stream, order,
-// and sizes. Wall-clock pacing and measured latencies are machine-dependent
-// by design (that is what a baseline measures).
+// Same scenario + seed → identical event stream, order, and sizes. Wall-clock
+// pacing and measured latencies are machine-dependent by design.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { cpus, tmpdir } from 'node:os';
@@ -22,16 +16,23 @@ import { ReservoirHistogram } from '../telemetry/histogram.js';
 import { buildReplayPlan, type PerfScenarioSpec, type ReplayTurnPlan } from './scenario.js';
 import { ReplayFactoryRuntime, type ReplayYieldReport } from './replayRuntime.js';
 import { evaluateBudgets } from './budgets.js';
+import { evaluateReplayGates } from './gates.js';
 import type { ReplayReport } from './report.js';
+import { acceptReplayWireMessage, messageText, type ReplayWireCursor } from './replayWire.js';
 import {
   BRIDGE_PROTOCOL_VERSION,
-  type ServerEvent,
   type ServerWireMessage,
   type TranscriptEvent,
 } from '../protocol.js';
 
+export interface ReplayTickHelpers {
+  send: (command: Parameters<SessionManager['handle']>[0]) => void;
+  sessionIds: readonly (string | undefined)[];
+}
+
 export interface ReplayRunOptions {
   spec: PerfScenarioSpec;
+  onWaitTick?: (helpers: ReplayTickHelpers) => void;
 }
 
 interface AppendedSample {
@@ -45,7 +46,7 @@ const DRAIN_QUIET_MS = 350;
 const OVERHEAD_ALLOWANCE_MS = 15_000;
 
 export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport> {
-  const { spec } = options;
+  const { spec, onWaitTick } = options;
   const plan = buildReplayPlan(spec);
   const home = mkdtempSync(join(tmpdir(), 'droidex-perf-replay-'));
   const previousHome = process.env.HOME;
@@ -258,6 +259,14 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         },
         expectedWallClockMs(spec),
         `turn ${String(index)}:${String(turn.turn)} never settled`,
+        () => {
+          onWaitTick?.({
+            send: (command) => {
+              sendCommand(client, command);
+            },
+            sessionIds,
+          });
+        },
       );
     }
   }
@@ -300,6 +309,7 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
       drift,
       sidecar,
       budgets: evaluateBudgets(sidecar, client, spec.coalesceMs),
+      gates: evaluateReplayGates(spec, sidecar, client),
       environment: {
         node: process.version,
         platform: `${process.platform}/${process.arch}`,
@@ -349,58 +359,7 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   }
 }
 
-function messageText(raw: unknown): string {
-  if (typeof raw === 'string') return raw;
-  if (Array.isArray(raw)) return Buffer.concat(raw as Buffer[]).toString('utf8');
-  return Buffer.from(raw as Buffer).toString('utf8');
-}
-
-export interface ReplayWireCursor {
-  generation: string | null;
-  lastSeq: number;
-}
-
-export function acceptReplayWireMessage(
-  message: ServerWireMessage,
-  cursor: ReplayWireCursor,
-): ServerEvent[] {
-  if (message.type === 'bridge.reset') {
-    throw new Error(`Replay bridge reset: ${message.reason}.`);
-  }
-  if (message.type !== 'events.batch') {
-    throw new Error(`Replay bridge expected an event batch, received ${message.type}.`);
-  }
-  if (cursor.generation !== null && message.generation !== cursor.generation) {
-    throw new Error('Replay bridge generation changed during the run.');
-  }
-  if (
-    (cursor.generation !== null && message.firstSeq !== cursor.lastSeq + 1) ||
-    message.lastSeq < message.firstSeq
-  ) {
-    throw new Error('Replay bridge sequence gap or overlap.');
-  }
-  if (message.events.length === 0) throw new Error('Replay bridge delivered an empty batch.');
-
-  let previousSeq = message.firstSeq - 1;
-  for (const entry of message.events) {
-    if (
-      !Number.isSafeInteger(entry.seq) ||
-      entry.seq <= previousSeq ||
-      entry.seq < message.firstSeq ||
-      entry.seq > message.lastSeq
-    ) {
-      throw new Error('Replay bridge entry order is invalid.');
-    }
-    previousSeq = entry.seq;
-  }
-  if (previousSeq !== message.lastSeq) {
-    throw new Error('Replay bridge batch does not represent its final sequence.');
-  }
-
-  cursor.generation = message.generation;
-  cursor.lastSeq = message.lastSeq;
-  return message.events.map((entry) => entry.event);
-}
+export { acceptReplayWireMessage, type ReplayWireCursor } from './replayWire.js';
 
 function sendCommand(client: WebSocket, command: Parameters<SessionManager['handle']>[0]): void {
   client.send(JSON.stringify(command));
@@ -425,10 +384,12 @@ async function waitFor(
   predicate: () => boolean,
   timeoutMs: number,
   message: string,
+  onTick?: () => void,
 ): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   while (!predicate()) {
     if (performance.now() > deadline) throw new Error(message);
+    onTick?.();
     await sleep(25);
   }
 }

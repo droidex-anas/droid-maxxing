@@ -124,11 +124,18 @@ replaceable session/context telemetry can collapse, and never across a
 non-replaceable event. Approvals, questions, errors, lifecycle boundaries,
 history responses, and turn settlement flush immediately.
 
-Renderers must advertise bridge protocol 2, apply one wire batch as one
+Renderers must advertise bridge protocol 3, apply one wire batch as one
 ordered store transition, and reconnect with the last fully applied generation
-and sequence. The sidecar retains a bounded same-process replay window and
-terminates clients whose socket buffers cross the hard ceiling. Clients using
-another protocol version are rejected instead of entering a compatibility path.
+and sequence. Same-generation reconnects replay the retained buffer. A new
+process generation or a replay gap delivers a compact `bridge.snapshot` of
+live sessions and runtime state instead of a hard resync; `bridge.reset` is
+reserved for an invalid resume cursor. Electron owns sidecar health
+(`starting`, `healthy`, `degraded`, `restarting`, `recovery-required`,
+`stopped`) and bounded restart; `GET /health` is a cheap liveness probe, not a
+death signal while the process is still alive. Clients using another protocol
+version are rejected instead of entering a compatibility path. The sidecar
+retains a bounded same-process replay window and terminates clients whose
+socket buffers cross the hard ceiling.
 
 ### Renderer metrics
 
@@ -151,10 +158,21 @@ another protocol version are rejected instead of entering a compatibility path.
 `npm run perf:replay -- --scenario <name>` boots the real sidecar pipeline
 (SessionManager, SessionEventFlow, SessionTimeline, SQLite history, bridge
 WebSocket) against a scripted provider and writes JSON + Markdown artifacts
-to `reports/perf/`. Scenarios (`smoke`, `streaming`, `multi-agent`,
-`long-history`) are deterministic for a given seed; `long-history` compares
-early vs late latency drift. Budgets are phase 0 calibration values from the
-#115 performance contract; pass `--enforce-budgets` to fail a run on a breach.
+to `reports/perf/`. Headless scenarios: `smoke`, `idle`, `streaming`,
+`multi-agent`, `agents-4`, `agents-16`, `agents-27`, `long-history`,
+`long-tail`, `session-switch`, `soak`. Browser/design workspace, hidden-window
+CPU, and sidecar-restart are documented skips (restart belongs to the
+supervision phase).
+
+A/B probes (`npm run perf:compare` / `npm run perf:report`) measure the same
+self-contained metrics on a baseline git worktree and on this tree. Metrics
+that need phase-0/1/4 code are labelled **candidate-only** and never get a
+fabricated baseline. `npm run perf:gates` / `npm run quality:perf-gates` fail
+on bounded mounted rows, bounded queues, marker loss, soak leaks, terminal
+delivery amplification, and feed rebuild counts. Timing CPU/RSS is recorded
+and warned, not failed, on shared runners. Bundle bytes stay gated by
+`npm run quality:bundle-budgets`. Release numbers live in
+`docs/performance-budgets.md`.
 
 ## Build path
 

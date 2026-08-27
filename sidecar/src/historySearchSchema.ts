@@ -1,10 +1,55 @@
-import type { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 
 import { numberValue, stringValue } from './values.js';
 
 const SEARCH_INDEX_VERSION = 4;
 
+export class HistorySearchUnavailableError extends Error {
+  readonly code = 'history.search_unavailable' as const;
+
+  constructor() {
+    super(
+      'This host SQLite build does not include FTS5, so derived history search cannot start. ' +
+        'Canonical session history is stored and durable. Rebuild Node with SQLite FTS5 enabled to restore search.',
+    );
+    this.name = 'HistorySearchUnavailableError';
+  }
+}
+
+function isMissingFts5Module(error: unknown): boolean {
+  return error instanceof Error && /no such module:\s*fts5/i.test(error.message);
+}
+
+export function isHistorySearchUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof HistorySearchUnavailableError ||
+    (error instanceof Error && error.name === 'HistorySearchUnavailableError')
+  );
+}
+
+const SQLITE_FTS5_UNAVAILABLE_REASON = 'SQLite FTS5 is unavailable on this host';
+
+export function sqliteSupportsFts5(): boolean {
+  const db = new DatabaseSync(':memory:');
+  try {
+    probeFts5(db);
+    return true;
+  } catch (error) {
+    if (error instanceof HistorySearchUnavailableError) return false;
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
+export function sqliteFts5UnavailableSkipReason(): false | string {
+  return sqliteSupportsFts5() ? false : SQLITE_FTS5_UNAVAILABLE_REASON;
+}
+
 export function initializeHistorySearchSchema(db: DatabaseSync): void {
+  // Probe before dropping existing search tables so a missing FTS5 module cannot
+  // destroy a derived index that another SQLite build could still read.
+  probeFts5(db);
   const hasMetadata = hasExactColumns(db, 'history_search_metadata', ['key', 'value']);
   const version = hasMetadata
     ? (db.prepare("SELECT value FROM history_search_metadata WHERE key = 'version'").get() as
@@ -106,6 +151,16 @@ export function providerHistoryMatchesSql(): string {
     ORDER BY CAST(fts.ts AS REAL) DESC
     LIMIT ?
   `;
+}
+
+function probeFts5(db: DatabaseSync): void {
+  try {
+    db.exec('CREATE VIRTUAL TABLE IF NOT EXISTS droidex_fts5_probe USING fts5(x)');
+    db.exec('DROP TABLE IF EXISTS droidex_fts5_probe');
+  } catch (error) {
+    if (isMissingFts5Module(error)) throw new HistorySearchUnavailableError();
+    throw error;
+  }
 }
 
 function hasExactColumns(db: DatabaseSync, table: string, expected: string[]): boolean {

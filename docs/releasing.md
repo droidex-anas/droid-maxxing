@@ -49,7 +49,14 @@ npm run quality:deadcode
 npm run quality:duplicates
 npm run security:audit-report
 npm run build
+npm run quality:bundle-budgets
+npm run quality:perf-gates
 ```
+
+Attach `docs/perf/origin-main-vs-head.md` (from `npm run perf:report`) or the
+latest `reports/perf/compare.md` so the release has a labelled A/B vs
+candidate-only performance snapshot. Do not treat candidate-only sidecar
+numbers as improvements over `origin/main`.
 
 Commit the version and generated documentation, open a PR, and merge it into
 `main`. Build the release from a fresh, clean checkout of that exact `main`

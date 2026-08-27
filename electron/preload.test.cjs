@@ -224,6 +224,23 @@ test('power tier IPC carries no renderer-controlled payload', async () => {
   assert.deepEqual(calls[0], { channel: 'power-tier', payload: undefined });
 });
 
+test('sidecar status IPC is exposed to the trusted renderer', async () => {
+  const expected = {
+    lifecycle: 'healthy',
+    processAlive: true,
+    bridgeResponsive: true,
+    lastHeartbeatAt: 1,
+    restartCount: 0,
+  };
+  const { api, calls, listeners } = loadApi(expected);
+
+  assert.deepEqual(await api.sidecarStatus(), expected);
+  assert.equal(calls[0].channel, 'sidecar-status');
+  const stop = api.onSidecarStatus(() => undefined);
+  assert.equal(listeners[0].channel, 'sidecar-status');
+  stop();
+});
+
 test('terminal subscribe transfers one MessagePort and posts input without invoke', () => {
   const { api, calls, posts, channels } = loadApi();
   const channel = api.terminalSubscribe('pty-1');

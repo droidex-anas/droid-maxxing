@@ -11,9 +11,13 @@ function preferenceFilePath(userDataDir) {
 
 function parseHardwareAccelerationPreference(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') return null;
-  const parsed = JSON.parse(raw);
-  if (parsed?.version === PREFERENCE_VERSION && typeof parsed.enabled === 'boolean') {
-    return { enabled: parsed.enabled };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.version === PREFERENCE_VERSION && typeof parsed.enabled === 'boolean') {
+      return { enabled: parsed.enabled };
+    }
+  } catch {
+    // Corrupt JSON is the same as an unrecognized preference document.
   }
   return null;
 }
