@@ -200,6 +200,13 @@ export class SessionContext {
     this.pollers.reschedule();
   }
 
+  // The session the renderer reports as on screen. Owned here because poll
+  // cadence already keys off it; other policies read it rather than tracking
+  // their own copy.
+  focusedSession(): string | null {
+    return this.focusedAppSessionId;
+  }
+
   pollerCounts(): ContextPollerCounts {
     return this.pollers.counts();
   }

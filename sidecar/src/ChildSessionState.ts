@@ -329,3 +329,19 @@ export function forgetPendingChildObservation(
 export function childAcceptsWork(child: ChildSessionState): boolean {
   return child.status !== 'completed' && !child.closeWhenIdle;
 }
+
+// Work the parent must not close out from under: a running or queued child, a
+// turn in flight, or a mutation that has not settled.
+export function childHasWorkInFlight(child: ChildSessionState): boolean {
+  return (
+    child.status === 'running' ||
+    child.status === 'pending' ||
+    child.queued === true ||
+    child.turn.phase !== 'idle' ||
+    child.turn.autoCompacting ||
+    child.turn.pendingSends.length > 0 ||
+    child.turn.interrupting ||
+    child.turn.interruptingForSteer ||
+    child.mutationTail !== undefined
+  );
+}
