@@ -1357,6 +1357,9 @@ export class ChildSessions {
     if (parent.openAttempts.get(childSessionId) !== attempt) return;
     parent.openAttempts.delete(childSessionId);
     attempt.settle();
+    // A child publishes while its open attempt is still outstanding, so this is
+    // the first moment a freshly opened runtime can be seen as retirable.
+    this.armRetirement();
   }
 
   private async cancelOpenAttempts(parent: ParentChildSessions): Promise<void> {

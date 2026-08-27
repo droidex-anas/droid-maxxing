@@ -1781,3 +1781,34 @@ test('retirement stays disarmed once the owner has closed or shut down', async (
   await h2.owner.retireIdleRuntimes();
   assert.equal(h2.owner.counts().live, 0);
 });
+
+test('opening a child arms the retirement wakeup that later releases it', async () => {
+  const idleMs = 77_000;
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { childRuntimeIdleMs: idleMs });
+  const scheduled: (() => void)[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  Reflect.set(globalThis, 'setTimeout', (fn: () => void, ms: number) => {
+    if (ms === idleMs) scheduled.push(fn);
+    return { unref: () => undefined };
+  });
+  try {
+    await h.open(record);
+  } finally {
+    Reflect.set(globalThis, 'setTimeout', realSetTimeout);
+  }
+
+  assert.equal(scheduled.length, 1, 'an opened runtime must schedule its own retirement');
+
+  h.advanceClock(idleMs);
+  scheduled[0]?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(h.owner.counts().live, 0);
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.target === 'cleanup' && call.method === 'session.close')
+      .map((call) => call.args[0]),
+    ['provider'],
+  );
+});
