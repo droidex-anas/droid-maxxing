@@ -37,6 +37,7 @@ import {
   type ChildSpawnObservation,
   type ParentChildSessions,
 } from './ChildSessionState.js';
+import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
 import { childRuntimeAdmission } from './childRuntimeBudget.js';
 
 type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
