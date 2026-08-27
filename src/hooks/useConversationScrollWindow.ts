@@ -209,6 +209,14 @@ export function shouldBindConversationContentResize(options: {
   );
 }
 
+export function shouldCompensateConversationContentResize(options: {
+  isPinned: boolean;
+  isSettlingHistoryPrepend: boolean;
+  isUserScrolling: boolean;
+}): boolean {
+  return options.isPinned || options.isSettlingHistoryPrepend || !options.isUserScrolling;
+}
+
 export function useConversationScrollWindow({
   scrollRef,
   visibleConversationKey,
@@ -239,6 +247,8 @@ export function useConversationScrollWindow({
   const isPinned = useRef(true);
   const reportedPinned = useRef<{ conversationKey: string; pinned: boolean } | null>(null);
   const isOlderRequestPending = useRef(false);
+  const isUserScrolling = useRef(false);
+  const userScrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settledTopLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scrollSnapshots] = useState(() => new Map<string, ScrollSnapshot>());
 
@@ -248,7 +258,22 @@ export function useConversationScrollWindow({
     settledTopLoadTimer.current = null;
   }, []);
 
-  useEffect(() => cancelSettledTopLoad, [cancelSettledTopLoad, visibleConversationKey]);
+  const markUserScrolling = useCallback(() => {
+    isUserScrolling.current = true;
+    if (userScrollIdleTimer.current !== null) clearTimeout(userScrollIdleTimer.current);
+    userScrollIdleTimer.current = setTimeout(() => {
+      userScrollIdleTimer.current = null;
+      isUserScrolling.current = false;
+    }, SCROLL_SETTLE_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      cancelSettledTopLoad();
+      if (userScrollIdleTimer.current !== null) clearTimeout(userScrollIdleTimer.current);
+    },
+    [cancelSettledTopLoad, visibleConversationKey],
+  );
 
   useEffect(() => {
     if (isLoadingOlder) return;
@@ -394,6 +419,7 @@ export function useConversationScrollWindow({
     // Every scroll event pushes the load out until the viewport settles, so a
     // page never prepends mid-flick.
     cancelSettledTopLoad();
+    markUserScrolling();
     if (
       historyAppSessionId &&
       shouldLoadOlderHistoryAtTop({
@@ -412,6 +438,7 @@ export function useConversationScrollWindow({
   }, [
     activeAppSessionId,
     cancelSettledTopLoad,
+    markUserScrolling,
     dispatch,
     historyChildSessionId,
     historyAppSessionId,
@@ -541,6 +568,15 @@ export function useConversationScrollWindow({
       content,
       conversationKey: visibleConversationKey,
       observer: new ResizeObserver(() => {
+        if (
+          !shouldCompensateConversationContentResize({
+            isPinned: isPinned.current,
+            isSettlingHistoryPrepend: isSettlingHistoryPrepend.current,
+            isUserScrolling: isUserScrolling.current,
+          })
+        ) {
+          return;
+        }
         if (isPinned.current) {
           // Images, interactive Apps, and disclosures can grow without changing
           // transcript length. A bottom-pinned reader follows that growth just as

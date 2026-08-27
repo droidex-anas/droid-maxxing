@@ -32,6 +32,10 @@ export class SessionFileServing {
 
   constructor(private readonly dependencies: SessionFileServingDependencies) {}
 
+  start(): void {
+    this.bootstrap();
+  }
+
   async list(options: SessionListFilterOptions): Promise<void> {
     this.lastListOptions = options;
     this.bootstrap();

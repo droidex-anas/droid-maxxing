@@ -83,18 +83,22 @@ export function ConversationList({
     initialRect: CONVERSATION_LIST_INITIAL_RECT,
     initialOffset: initialScrollOffset ?? estimatedListEndOffset(items.length),
     scrollEndThreshold: CONVERSATION_LIST_PIN_THRESHOLD_PX,
-    // Skip flushSync during scroll; write spacer height here so pin-follow sees the new total this frame.
     useFlushSync: false,
+    directDomUpdates: true,
     onChange: (instance) => {
-      const list = listElRef.current;
-      // Height must be in the DOM this frame; React's style below lands next commit and would clip a pinned tail.
-      if (list) list.style.height = `${String(instance.getTotalSize())}px`;
       onMountedRowsChangeRef.current?.(instance.getVirtualIndexes().length);
     },
   });
 
+  const setListNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      listElRef.current = node;
+      virtualizer.containerRef(node);
+    },
+    [virtualizer],
+  );
+
   const virtualItems = virtualizer.getVirtualItems();
-  const totalSize = virtualizer.getTotalSize();
 
   useLayoutEffect(() => {
     onMountedRowsChangeRef.current?.(virtualItems.length);
@@ -113,7 +117,7 @@ export function ConversationList({
     if (!list || !scroll) return;
     const next = scrollMarginBetween(list, scroll);
     setScrollMargin((current) => (Math.abs(next - current) > 0.5 ? next : current));
-  }, [getScrollElement, items.length, totalSize]);
+  }, [getScrollElement, items.length]);
 
   useLayoutEffect(() => {
     const list = listElRef.current;
@@ -183,7 +187,7 @@ export function ConversationList({
 
   return (
     <div ref={hostRef}>
-      <div ref={listElRef} style={{ height: totalSize, width: '100%', position: 'relative' }}>
+      <div ref={setListNode} style={{ width: '100%', position: 'relative' }}>
         {virtualItems.map((virtualRow) => {
           const item = items.at(virtualRow.index);
           if (!item) return null;
@@ -197,7 +201,6 @@ export function ConversationList({
                 top: 0,
                 left: 0,
                 width: '100%',
-                transform: `translate3d(0, ${String(virtualRow.start - scrollMargin)}px, 0)`,
               }}
             >
               {children(item, virtualRow.index)}

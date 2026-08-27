@@ -252,6 +252,15 @@ test('user-action and domain error events bypass the normal frame window', () =>
   }
 });
 
+test('sessions.list bypasses the coalescing window', () => {
+  const harness = createHarness();
+  harness.batcher.enqueue({ type: 'sessions.list', sessions: [] });
+  assert.equal(harness.batches.length, 1);
+  assert.equal(harness.batches[0]?.metadata.immediate, true);
+  assert.equal(harness.batches[0]?.batch.events[0]?.event.type, 'sessions.list');
+  assert.equal(harness.timers.length, 0);
+});
+
 test('turn settlement is an immediate flush boundary', () => {
   const harness = createHarness();
   harness.batcher.enqueue(appended('app', 'tail'));
