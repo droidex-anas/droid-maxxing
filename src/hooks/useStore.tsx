@@ -14,10 +14,9 @@ import {
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
-import {
-  resolvePrWorkspaceNumber,
-  sanitizePersistedPrWorkspace,
-} from '../features/pull-requests/lib/prWorkspaceCwd';
+import { sanitizePersistedPrWorkspace } from '../features/pull-requests/lib/prWorkspaceCwd';
+import { sanitizePersistedPrBacklog } from '../features/pull-requests/lib/prBacklog';
+import { reducePrInbox, type PrInboxAction } from '../features/pull-requests/lib/prInboxState';
 import {
   DEFAULT_THEME_ID,
   detectPresetId,
@@ -294,6 +293,7 @@ export interface AppState {
   mainView: 'session' | 'pull-requests';
   prWorkspaceCwd: string | null;
   prWorkspaceNumber: number | null;
+  prBacklogIds: string[];
   specMode: boolean;
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
@@ -554,8 +554,7 @@ type Action =
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
-  | { type: 'OPEN_PULL_REQUESTS'; cwd?: string | null; number?: number | null }
-  | { type: 'CLOSE_PULL_REQUESTS' }
+  | PrInboxAction
   | {
       type: 'START_CHAT';
       cwd: string;
@@ -844,6 +843,7 @@ interface PersistedUiState {
   mainView?: 'session' | 'pull-requests';
   prWorkspaceCwd?: string | null;
   prWorkspaceNumber?: number | null;
+  prBacklogIds?: string[];
 }
 
 function loadCompactionModel(): string {
@@ -975,6 +975,7 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
     const parsed = JSON.parse(raw) as Partial<PersistedUiState>;
     return {
       ...sanitizePersistedPrWorkspace(parsed.prWorkspaceCwd, parsed.prWorkspaceNumber),
+      prBacklogIds: sanitizePersistedPrBacklog(parsed.prBacklogIds),
       activeAppSessionId:
         typeof parsed.activeAppSessionId === 'string' ? parsed.activeAppSessionId : null,
       rightPanelOpen:
@@ -1013,6 +1014,7 @@ function savePersistedUiState(state: AppState): void {
     mainView: state.mainView,
     prWorkspaceCwd: state.prWorkspaceCwd,
     prWorkspaceNumber: state.prWorkspaceNumber,
+    prBacklogIds: state.prBacklogIds,
   };
   try {
     getLocalStorage()?.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
@@ -1127,6 +1129,7 @@ export const initialState: AppState = {
   mainView: persistedUiState.mainView ?? 'session',
   prWorkspaceCwd: persistedUiState.prWorkspaceCwd ?? null,
   prWorkspaceNumber: persistedUiState.prWorkspaceNumber ?? null,
+  prBacklogIds: persistedUiState.prBacklogIds ?? [],
   specMode: persistedUiState.specMode ?? false,
   settingsOpen: false,
   commandPaletteOpen: false,
@@ -2584,19 +2587,10 @@ function baseReducer(state: AppState, action: Action): AppState {
       return { ...state, missionControlMode: !state.missionControlMode };
 
     case 'OPEN_PULL_REQUESTS':
-      return {
-        ...state,
-        mainView: 'pull-requests',
-        prWorkspaceCwd: action.cwd === undefined ? state.prWorkspaceCwd : action.cwd,
-        prWorkspaceNumber: resolvePrWorkspaceNumber(
-          state.prWorkspaceCwd,
-          state.prWorkspaceNumber,
-          action.cwd,
-          action.number,
-        ),
-      };
     case 'CLOSE_PULL_REQUESTS':
-      return state.mainView === 'session' ? state : { ...state, mainView: 'session' };
+    case 'MOVE_PR_TO_BACKLOG':
+    case 'RESTORE_PR_FROM_BACKLOG':
+      return reducePrInbox(state, action);
 
     case 'START_CHAT': {
       // Stamp the session being left so model output produced while it was
@@ -3328,6 +3322,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.mainView,
     state.prWorkspaceCwd,
     state.prWorkspaceNumber,
+    state.prBacklogIds,
     state.specMode,
   ]);
 

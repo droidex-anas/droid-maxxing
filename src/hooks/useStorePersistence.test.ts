@@ -109,6 +109,7 @@ test('loadPersistedUiState sanitizes persisted shell fields', () => {
         mainView: 'pull-requests',
         prWorkspaceCwd: '/repo',
         prWorkspaceNumber: 42,
+        prBacklogIds: [],
       });
     },
   );
@@ -137,6 +138,15 @@ test('loadPersistedUiState accepts only a positive integer pull request number',
   withLocalStorage(JSON.stringify({ prWorkspaceNumber: 3 }), () => {
     assert.equal(loadPersistedUiState().prWorkspaceNumber, undefined);
   });
+});
+
+test('loadPersistedUiState keeps unique pull request backlog ids', () => {
+  withLocalStorage(
+    JSON.stringify({ prWorkspaceCwd: '/repo', prBacklogIds: [' acme/app#1 ', 'acme/app#1', 4] }),
+    () => {
+      assert.deepEqual(loadPersistedUiState().prBacklogIds, ['acme/app#1']);
+    },
+  );
 });
 
 test('factory defaults do not restore a cleared per-model compaction override', () => {
