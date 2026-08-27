@@ -9,6 +9,9 @@ import {
   discardPendingBridgeEvent,
   noteFeedProjection,
   setMountedFeedRows,
+  noteRendererHtmlLoaded,
+  noteFirstMeaningfulShellPaint,
+  noteComposerInteractive,
 } from './rendererPerf';
 import type { ServerEvent } from '../types/bridge';
 
@@ -44,6 +47,32 @@ function appendedEvent(ts: number): Extract<ServerEvent, { type: 'event.appended
     },
   };
 }
+
+test('startup phases are recorded once in order', () => {
+  resetRendererPerfForTest();
+  noteRendererHtmlLoaded();
+  noteFirstMeaningfulShellPaint();
+  noteComposerInteractive();
+  noteBridgeEventReceived({ type: 'connection', status: 'connected' });
+  noteBridgeEventReceived({ type: 'sessions.list', sessions: [] });
+
+  noteRendererHtmlLoaded();
+  noteFirstMeaningfulShellPaint();
+  noteComposerInteractive();
+  noteBridgeEventReceived({ type: 'connection', status: 'connected' });
+  noteBridgeEventReceived({ type: 'sessions.list', sessions: [] });
+
+  const phases = getRendererPerfSnapshot().startupPhases;
+  assert.ok(phases.rendererHtmlLoadedMs !== undefined);
+  assert.ok(phases.firstMeaningfulShellPaintMs !== undefined);
+  assert.ok(phases.composerInteractiveMs !== undefined);
+  assert.ok(phases.sidecarConnectedMs !== undefined);
+  assert.ok(phases.sessionListReadyMs !== undefined);
+  assert.ok(phases.rendererHtmlLoadedMs <= phases.firstMeaningfulShellPaintMs!);
+  assert.ok(phases.firstMeaningfulShellPaintMs! <= phases.composerInteractiveMs!);
+  assert.ok(phases.composerInteractiveMs! <= phases.sidecarConnectedMs!);
+  assert.ok(phases.sidecarConnectedMs! <= phases.sessionListReadyMs!);
+});
 
 test('receive → commit → paint legs are measured per batch', () => {
   resetRendererPerfForTest();
