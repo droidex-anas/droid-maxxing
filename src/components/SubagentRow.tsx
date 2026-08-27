@@ -16,9 +16,8 @@ export function subagentRowTitle(
   name: string,
   child: Pick<ChildSessionSummary, 'childSessionId'>,
 ): string {
-  return isPendingChildPlaceholder(child)
-    ? `Open ${name} session`
-    : `Open ${name} session\nChild ID: ${child.childSessionId}`;
+  if (isPendingChildPlaceholder(child)) return `Open ${name} session`;
+  return `Open ${name} session\nChild ID: ${child.childSessionId}`;
 }
 
 const PHASE_PILL: Record<ChildStreamPhase, string> = {
@@ -56,6 +55,15 @@ export function areSubagentRowPropsEqual(
   );
 }
 
+function childModelLine(
+  child: Pick<ChildSessionSummary, 'modelId'>,
+  model: ModelInfo | undefined,
+): string {
+  if (!child.modelId) return '';
+  if (!model?.displayName) return child.modelId;
+  return `${model.displayName} (${child.modelId})`;
+}
+
 function PhasePill({ phase }: { phase: ChildStreamPhase }) {
   return (
     <span
@@ -79,11 +87,7 @@ export const SubagentRow = memo(function SubagentRow({
 }: SubagentRowProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const reduceMotion = useReducedMotion();
-  const modelLine = child.modelId
-    ? model?.displayName
-      ? `${model.displayName} (${child.modelId})`
-      : child.modelId
-    : '';
+  const modelLine = childModelLine(child, model);
   const canOpen = Boolean(target && onOpen && !isPendingChildPlaceholder(child));
   const showPreview = Boolean(snapshot.preview) || snapshot.live;
 
@@ -154,7 +158,8 @@ export const SubagentRow = memo(function SubagentRow({
               ) : null}
             </div>
           </div>
-        ) : canOpen ? (
+        ) : null}
+        {!showPreview && canOpen ? (
           <button
             type="button"
             onClick={() => target && onOpen?.(target)}

@@ -74,8 +74,8 @@ export function sameChildStreamSnapshot(
   previous: ChildStreamSnapshot | undefined,
   next: ChildStreamSnapshot,
 ): boolean {
+  if (previous === undefined) return false;
   return (
-    previous !== undefined &&
     previous.key === next.key &&
     previous.phase === next.phase &&
     previous.preview === next.preview &&
@@ -88,11 +88,16 @@ export function reuseChildStreamSnapshotMap(
   previous: ReadonlyMap<string, ChildStreamSnapshot> | undefined,
   next: ReadonlyMap<string, ChildStreamSnapshot>,
 ): ReadonlyMap<string, ChildStreamSnapshot> {
-  if (!previous || previous.size !== next.size) return next;
+  if (previous === undefined) return next;
+  if (previous.size !== next.size) return next;
   for (const [key, snapshot] of next) {
     if (previous.get(key) !== snapshot) return next;
   }
   return previous;
+}
+
+function isTextLikeKind(kind: TranscriptEvent['kind'] | undefined): boolean {
+  return kind === 'text' || kind === 'thinking' || kind === 'status';
 }
 
 export function childStreamSnapshot(
@@ -104,13 +109,13 @@ export function childStreamSnapshot(
   const latest = activity?.latest;
   const latestView = childSessionLatest(latest);
   const polled = child.activity;
-  const rawPreview =
-    latest?.kind === 'text' || latest?.kind === 'thinking' || latest?.kind === 'status'
-      ? (latest.text ?? '')
-      : (polled?.preview ?? '');
-  const hasOutput = Boolean(
-    rawPreview || latest?.toolName || latestView?.body || polled?.preview || polled?.phase,
-  );
+  const rawPreview = isTextLikeKind(latest?.kind) ? (latest?.text ?? '') : (polled?.preview ?? '');
+  const hasOutput =
+    rawPreview !== '' ||
+    latest?.toolName !== undefined ||
+    (latestView?.body ?? '') !== '' ||
+    (polled?.preview ?? '') !== '' ||
+    (polled?.phase ?? '') !== '';
   const phase = childStreamPhase({
     queued: child.queued,
     status,
@@ -119,12 +124,15 @@ export function childStreamSnapshot(
     hasOutput,
     ...(interruptReason !== undefined ? { interruptReason } : {}),
   });
-  const markdown =
-    phase === 'streaming' &&
-    (latest?.kind === 'text' || latest?.kind === 'thinking' || latest?.kind === 'status');
-  const previewSource = markdown
-    ? rawPreview
-    : (latestView?.body ?? polled?.preview ?? (phase === 'starting' ? (child.prompt ?? '') : ''));
+  const markdown = phase === 'streaming' && isTextLikeKind(latest?.kind);
+  const previewSource = childStreamPreviewSource({
+    markdown,
+    rawPreview,
+    latestBody: latestView?.body ?? '',
+    polledPreview: polled?.preview ?? '',
+    phase,
+    prompt: child.prompt ?? '',
+  });
   const live = phase === 'streaming' || phase === 'starting';
   return {
     key: childSessionKey(child),
@@ -133,6 +141,21 @@ export function childStreamSnapshot(
     previewKind: markdown ? 'markdown' : 'plain',
     live,
   };
+}
+
+function childStreamPreviewSource(input: {
+  markdown: boolean;
+  rawPreview: string;
+  latestBody: string;
+  polledPreview: string;
+  phase: ChildStreamPhase;
+  prompt: string;
+}): string {
+  if (input.markdown) return input.rawPreview;
+  if (input.latestBody !== '') return input.latestBody;
+  if (input.polledPreview !== '') return input.polledPreview;
+  if (input.phase === 'starting') return input.prompt;
+  return '';
 }
 
 export function projectChildStreamSnapshots(

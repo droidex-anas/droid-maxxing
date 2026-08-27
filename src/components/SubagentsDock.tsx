@@ -181,6 +181,43 @@ function StatusPill({
   );
 }
 
+function waveTimeMs(input: {
+  firstStartedAt: number | undefined;
+  lastSettledAt: number | undefined;
+  inFlight: boolean;
+  hasConfirmedRunning: boolean;
+  now: number;
+}): number | undefined {
+  if (input.firstStartedAt == null || (input.inFlight && !input.hasConfirmedRunning)) {
+    return undefined;
+  }
+  if (input.inFlight) return Math.max(0, input.now - input.firstStartedAt);
+  if (input.lastSettledAt == null) return undefined;
+  return Math.max(0, input.lastSettledAt - input.firstStartedAt);
+}
+
+function dockHeaderMeta(input: {
+  allDone: boolean;
+  inFlight: boolean;
+  running: number;
+  queuedCount: number;
+  pending: number;
+  completed: number;
+  total: number;
+  plural: string;
+}): string {
+  if (input.allDone) return `All ${String(input.total)} ${input.plural} finished`;
+  if (input.inFlight && input.running === 0 && input.queuedCount > 0) {
+    const queuedPlural = input.queuedCount === 1 ? 'subagent' : 'subagents';
+    return `${String(input.queuedCount)} ${queuedPlural} queued`;
+  }
+  if (input.inFlight && input.running === 0) {
+    const pendingPlural = input.pending === 1 ? 'subagent' : 'subagents';
+    return `Awaiting status for ${String(input.pending)} ${pendingPlural}`;
+  }
+  return `${String(input.completed)} of ${String(input.total)} ${input.plural} finished`;
+}
+
 export function SubagentsDock({
   sessions,
   models,
@@ -217,23 +254,25 @@ export function SubagentsDock({
     const settledAt = row.startedAt + ms;
     return last == null || settledAt > last ? settledAt : last;
   }, undefined);
-  const timeMs =
-    firstStartedAt == null || (inFlight && !hasConfirmedRunning)
-      ? undefined
-      : inFlight
-        ? Math.max(0, now - firstStartedAt)
-        : lastSettledAt != null
-          ? Math.max(0, lastSettledAt - firstStartedAt)
-          : undefined;
+  const timeMs = waveTimeMs({
+    firstStartedAt,
+    lastSettledAt,
+    inFlight,
+    hasConfirmedRunning,
+    now,
+  });
   const progress = counts.completed / rows.length;
   const plural = rows.length === 1 ? 'subagent' : 'subagents';
-  const headerMeta = allDone
-    ? `All ${String(rows.length)} ${plural} finished`
-    : inFlight && counts.running === 0 && queuedCount > 0
-      ? `${String(queuedCount)} ${queuedCount === 1 ? 'subagent' : 'subagents'} queued`
-      : inFlight && counts.running === 0
-        ? `Awaiting status for ${String(counts.pending)} ${counts.pending === 1 ? 'subagent' : 'subagents'}`
-        : `${String(counts.completed)} of ${String(rows.length)} ${plural} finished`;
+  const headerMeta = dockHeaderMeta({
+    allDone,
+    inFlight,
+    running: counts.running,
+    queuedCount,
+    pending: counts.pending,
+    completed: counts.completed,
+    total: rows.length,
+    plural,
+  });
 
   const bodyTransition = reduceMotion
     ? { duration: 0.15 }
