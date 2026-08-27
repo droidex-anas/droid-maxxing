@@ -25,6 +25,7 @@ import { McpServersSettings } from './McpServersSettings';
 import { NotificationsSettings } from './NotificationsSettings';
 import { WorktreesSettings } from './WorktreesSettings';
 import { Dropdown, GroupLabel, SectionTitle } from './settingsKit';
+import { HardwareAccelerationSetting } from './HardwareAccelerationSetting';
 import { ArchivedChatsSettings } from './ArchivedChatsSettings';
 import {
   bestTabForQuery,
@@ -491,7 +492,11 @@ function GeneralSection() {
         </SettingRow>
       </div>
 
-      {/* Compaction */}
+      <GroupLabel>Performance</GroupLabel>
+      <div className="mb-8">
+        <HardwareAccelerationSetting />
+      </div>
+
       <GroupLabel>Compaction</GroupLabel>
       <div className="rounded-xl border border-droid-border bg-droid-surface divide-y divide-droid-border mb-8">
         <SettingRow
