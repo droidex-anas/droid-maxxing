@@ -12,10 +12,15 @@ import {
   CONVERSATION_LIST_GAP_PX,
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
+  CONVERSATION_LIST_OVERSCAN_MAX,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
+  CONVERSATION_OVERSCAN_PX,
   CONVERSATION_VISIBLE_HOLE_PX,
+  conversationOverscanItems,
+  conversationRangeIndexes,
   conversationRowMountKey,
   conversationRowViewportId,
+  createConversationRowStride,
   estimatedListEndOffset,
   estimatedListSize,
   findConversationRowIndex,
@@ -64,6 +69,12 @@ function createListEngine(options: {
   items: readonly FeedItem[];
   viewportHeight?: number;
   scrollTop?: number;
+  rangeExtractor?: (range: {
+    startIndex: number;
+    endIndex: number;
+    overscan: number;
+    count: number;
+  }) => number[];
 }) {
   const itemsRef = { current: options.items };
   const viewportHeight = options.viewportHeight ?? CONVERSATION_LIST_INITIAL_RECT.height;
@@ -94,6 +105,7 @@ function createListEngine(options: {
     getScrollElement: () => element,
     estimateSize: () => CONVERSATION_LIST_ESTIMATE_PX,
     overscan: CONVERSATION_LIST_OVERSCAN,
+    ...(options.rangeExtractor ? { rangeExtractor: options.rangeExtractor } : {}),
     gap: CONVERSATION_LIST_GAP_PX,
     getItemKey: (index) => itemsRef.current[index]?.key ?? index,
     initialRect: { width: CONVERSATION_LIST_INITIAL_RECT.width, height: viewportHeight },
@@ -616,6 +628,70 @@ test('pinned follow stays at the latest row when the tail grows after a deferred
   );
   assert.ok(last.end > engine.element.scrollTop);
   assert.ok(last.end <= engine.element.scrollTop + engine.element.clientHeight + 0.5);
+});
+
+test('pixel overscan is one viewport of items, floored at 8 and capped at 24', () => {
+  const estimateStride = CONVERSATION_LIST_ESTIMATE_PX + CONVERSATION_LIST_GAP_PX;
+  assert.equal(conversationOverscanItems({ stridePx: estimateStride }), CONVERSATION_LIST_OVERSCAN);
+  assert.equal(Math.round(CONVERSATION_OVERSCAN_PX / estimateStride), CONVERSATION_LIST_OVERSCAN);
+
+  const shortStride = 19 + CONVERSATION_LIST_GAP_PX;
+  assert.equal(
+    conversationOverscanItems({ stridePx: shortStride }),
+    CONVERSATION_LIST_OVERSCAN_MAX,
+  );
+  assert.ok(Math.round(CONVERSATION_OVERSCAN_PX / shortStride) > CONVERSATION_LIST_OVERSCAN_MAX);
+
+  const tallStride = 800 + CONVERSATION_LIST_GAP_PX;
+  assert.equal(conversationOverscanItems({ stridePx: tallStride }), CONVERSATION_LIST_OVERSCAN);
+  assert.ok(Math.round(CONVERSATION_OVERSCAN_PX / tallStride) < CONVERSATION_LIST_OVERSCAN);
+});
+
+test('row stride falls back to the estimate until rows are observed', () => {
+  const stride = createConversationRowStride();
+  assert.equal(stride.stridePx(), CONVERSATION_LIST_ESTIMATE_PX + CONVERSATION_LIST_GAP_PX);
+  stride.observe(19);
+  stride.observe(21);
+  assert.equal(stride.stridePx(), 20 + CONVERSATION_LIST_GAP_PX);
+});
+
+test('pixel overscan keeps 3k and 10k windows under the mounted-row budget', () => {
+  const short = createConversationRowStride();
+  for (let sample = 0; sample < 32; sample += 1) short.observe(19);
+  const tall = createConversationRowStride();
+  for (let sample = 0; sample < 32; sample += 1) tall.observe(800);
+  const shortExtractor = (range: {
+    startIndex: number;
+    endIndex: number;
+    overscan: number;
+    count: number;
+  }) => conversationRangeIndexes(range, short.stridePx());
+  const tallExtractor = (range: {
+    startIndex: number;
+    endIndex: number;
+    overscan: number;
+    count: number;
+  }) => conversationRangeIndexes(range, tall.stridePx());
+
+  for (const count of [3_000, 10_000]) {
+    const shortMounted = createListEngine({
+      items: history(count),
+      rangeExtractor: shortExtractor,
+    }).virtualizer.getVirtualItems().length;
+    const tallMounted = createListEngine({
+      items: history(count),
+      rangeExtractor: tallExtractor,
+    }).virtualizer.getVirtualItems().length;
+    assert.ok(
+      shortMounted < 80,
+      `short-row window for ${String(count)} was ${String(shortMounted)}`,
+    );
+    assert.ok(tallMounted < 80, `tall-row window for ${String(count)} was ${String(tallMounted)}`);
+    assert.ok(
+      shortMounted > tallMounted,
+      `short rows should mount more overscan than 800px rows; short ${String(shortMounted)} tall ${String(tallMounted)}`,
+    );
+  }
 });
 
 test('a single tall message is one virtual row and stays fully addressable', () => {

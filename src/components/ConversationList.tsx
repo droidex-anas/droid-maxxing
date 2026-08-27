@@ -19,6 +19,9 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
+  CONVERSATION_OVERSCAN_PX,
+  conversationRangeIndexes,
+  createConversationRowStride,
   estimatedListEndOffset,
   findConversationRowIndex,
   isConversationAtLatest,
@@ -63,6 +66,7 @@ export function ConversationList({
   const onMountedRowsChangeRef = useRef(onMountedRowsChange);
   onMountedRowsChangeRef.current = onMountedRowsChange;
   const [scrollMargin, setScrollMargin] = useState(0);
+  const rowStride = useMemo(() => createConversationRowStride(), []);
 
   const getScrollElement = useCallback((): HTMLElement | null => {
     if (scrollElementRef?.current) return scrollElementRef.current;
@@ -74,11 +78,22 @@ export function ConversationList({
     return itemsRef.current[index]?.key ?? index;
   }, []);
 
+  const rangeExtractor = useCallback(
+    (range: { startIndex: number; endIndex: number; count: number }) =>
+      conversationRangeIndexes(
+        range,
+        rowStride.stridePx(),
+        getScrollElement()?.clientHeight ?? CONVERSATION_OVERSCAN_PX,
+      ),
+    [getScrollElement, rowStride],
+  );
+
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement,
     estimateSize: () => CONVERSATION_LIST_ESTIMATE_PX,
     overscan: CONVERSATION_LIST_OVERSCAN,
+    rangeExtractor,
     gap: CONVERSATION_LIST_GAP_PX,
     getItemKey,
     scrollMargin,
@@ -98,6 +113,17 @@ export function ConversationList({
     const key = itemsRef.current[index]?.key ?? index;
     return virtualizer.itemSizeCache.get(key);
   };
+
+  const measureElement = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node) {
+        const size = Math.round(node.offsetHeight);
+        if (size > 0) rowStride.observe(size);
+      }
+      virtualizer.measureElement(node);
+    },
+    [rowStride, virtualizer],
+  );
 
   const setListNode = useCallback(
     (node: HTMLDivElement | null) => {
@@ -124,7 +150,16 @@ export function ConversationList({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- size-stable; re-run after every commit
   useLayoutEffect(() => {
     const list = listElRef.current;
-    if (list) syncMeasureConversationList(list, virtualizer.resizeItem, cachedRowSize);
+    if (list) {
+      syncMeasureConversationList(
+        list,
+        (index, size) => {
+          rowStride.observe(size);
+          virtualizer.resizeItem(index, size);
+        },
+        cachedRowSize,
+      );
+    }
     const scroll = getScrollElement();
     if (!list || !scroll) return;
     const next = scrollMarginBetween(list, scroll);
@@ -207,7 +242,7 @@ export function ConversationList({
             <div
               key={virtualRow.key}
               data-index={virtualRow.index}
-              ref={virtualizer.measureElement}
+              ref={measureElement}
               style={{
                 position: 'absolute',
                 top: 0,

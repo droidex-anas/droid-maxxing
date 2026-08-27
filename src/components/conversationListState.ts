@@ -9,6 +9,13 @@ export const CONVERSATION_VISIBLE_HOLE_PX = CONVERSATION_LIST_GAP_PX * 2;
 export const CONVERSATION_LIST_PIN_THRESHOLD_PX = 80;
 // Pre-measure guess so the first window exists before the scroller is observed; a wrong size only changes overscan until measure.
 export const CONVERSATION_LIST_INITIAL_RECT = { width: 720, height: 900 } as const;
+// One viewport of already-mounted rows past the visible range. Today's 8-item
+// overscan is 8 × (96+16) = 896 px at the estimate; keep that span in pixels
+// so packing short rows cannot shrink coverage to a handful of 19 px slots.
+export const CONVERSATION_OVERSCAN_PX = CONVERSATION_LIST_INITIAL_RECT.height;
+// Visible short rows ≈ ceil(900/35) = 26. Cap overscan so 26 + 2×24 = 74 < 80.
+export const CONVERSATION_LIST_OVERSCAN_MAX = 24;
+const STRIDE_SAMPLE_LIMIT = 32;
 
 export interface ConversationRowLookup {
   byMountKey: ReadonlyMap<string, number>;
@@ -101,6 +108,55 @@ export function shouldAdjustConversationRowOnSizeChange(
   const isFirstMeasure = !instance.itemSizeCache.has(item.key);
   if (isFirstMeasure) return item.start < scrollOffsetWithAdj;
   return item.start + item.size <= scrollOffsetWithAdj && instance.scrollDirection !== 'backward';
+}
+
+export function conversationOverscanItems(options: {
+  stridePx: number;
+  overscanPx?: number;
+  minItems?: number;
+  maxItems?: number;
+}): number {
+  const overscanPx = options.overscanPx ?? CONVERSATION_OVERSCAN_PX;
+  const minItems = options.minItems ?? CONVERSATION_LIST_OVERSCAN;
+  const maxItems = options.maxItems ?? CONVERSATION_LIST_OVERSCAN_MAX;
+  const stridePx = Math.max(1, options.stridePx);
+  return Math.min(maxItems, Math.max(minItems, Math.round(overscanPx / stridePx)));
+}
+
+export function conversationRangeIndexes(
+  range: { startIndex: number; endIndex: number; count: number },
+  stridePx: number,
+  overscanPx: number = CONVERSATION_OVERSCAN_PX,
+): number[] {
+  const overscan = conversationOverscanItems({ stridePx, overscanPx });
+  const start = Math.max(range.startIndex - overscan, 0);
+  const end = Math.min(range.endIndex + overscan, range.count - 1);
+  const length = Math.max(0, end - start + 1);
+  const indexes = new Array<number>(length);
+  for (let index = 0; index < length; index += 1) indexes[index] = start + index;
+  return indexes;
+}
+
+export function createConversationRowStride(): {
+  observe: (sizePx: number) => void;
+  stridePx: () => number;
+} {
+  const recent: number[] = [];
+  const fallbackPx = CONVERSATION_LIST_ESTIMATE_PX + CONVERSATION_LIST_GAP_PX;
+  let sumPx = 0;
+  return {
+    observe(sizePx: number) {
+      if (sizePx <= 0) return;
+      recent.push(sizePx);
+      sumPx += sizePx;
+      if (recent.length > STRIDE_SAMPLE_LIMIT) {
+        sumPx -= recent.shift() ?? 0;
+      }
+    },
+    stridePx() {
+      return recent.length === 0 ? fallbackPx : sumPx / recent.length + CONVERSATION_LIST_GAP_PX;
+    },
+  };
 }
 
 export function syncMeasureConversationList(
