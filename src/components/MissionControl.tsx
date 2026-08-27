@@ -1,11 +1,6 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
-import {
-  shallowEqual,
-  useStoreDispatch,
-  useStoreSelector,
-  type ChildAccess,
-  type ChildRuntimeState,
-} from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import type { ChildAccess, ChildRuntimeState } from '../hooks/storeChildSession';
 import { useRepoStatus } from '../hooks/useRepoStatus';
 import { interruptVisibleSession, updateSessionSettings } from '../lib/commands';
 import { utilityPanelForSession } from '../lib/utilityPanel';

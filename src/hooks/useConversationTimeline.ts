@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { promptAnchorsFromItems, type ConversationAnchor, type FeedItem } from '../components/chat';
 import type { TranscriptEvent } from '../types/bridge';
-import type { SessionRestoreStatus } from './useStore';
+import type { SessionRestoreStatus } from './storeChildSession';
 
 const TIMELINE_TARGET_ANCHORS = 12;
 const TIMELINE_CAPACITY_BLOCK_LIMIT = 100;

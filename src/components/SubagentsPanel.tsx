@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check } from 'lucide-react';
-import type { ChildSessionInfo } from '../hooks/useStore';
+import type { ChildSessionInfo } from '../hooks/storeChildSession';
 import type { ChildStatus, ModelInfo } from '../types/bridge';
 import {
   childSessionMeta,
