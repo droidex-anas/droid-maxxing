@@ -86,7 +86,7 @@ test('native browser restore does not reopen a URL that already failed this run'
 
 test('main renderer reload closes renderer-owned terminals before navigation', () => {
   const closeRendererOwnedTerminals =
-    /function closeRendererOwnedTerminals\(\) \{\s*terminalSubscriptions\.clear\(\);\s*terminalManager\.closeAll\(\);\s*\}/;
+    /function closeRendererOwnedTerminals\(\) \{\s*terminalSubscriptions\(\)\.clear\(\);\s*terminalManager\(\)\.closeAll\(\);\s*\}/;
   const willFrameNavigateCleanup =
     /contents\.on\('will-frame-navigate', \(_event, _url, isInPlace, isMainFrame\) => \{\s*if \(isMainFrame && !isInPlace\) \{\s*rendererOomRecovery\.cancel\(\);\s*cleanupForRendererReplacement\(\);\s*\}\s*\}\);/;
   const didStartNavigationCleanup =
@@ -156,14 +156,17 @@ test('GitHub setup handlers require the trusted renderer and teardown their proc
   assert.match(authenticateHandler, /onDeviceCode/);
   assert.match(authenticateHandler, /event\.sender\.send\('github-auth-code', \{ code \}\)/);
 
-  assert.match(mainSource, /app\.on\('before-quit',[\s\S]*?githubVcs\.cancelSetup\(\)/);
+  assert.match(mainSource, /app\.on\('before-quit',[\s\S]*?githubVcs\(\)\.cancelSetup\(\)/);
   const windowClosedStart = mainSource.indexOf("mainWindow.on('closed'");
   const windowClosedEnd = mainSource.indexOf('\n  });', windowClosedStart);
   assert.notEqual(windowClosedStart, -1);
-  assert.match(mainSource.slice(windowClosedStart, windowClosedEnd), /githubVcs\.cancelSetup\(\)/);
+  assert.match(
+    mainSource.slice(windowClosedStart, windowClosedEnd),
+    /githubVcs\(\)\.cancelSetup\(\)/,
+  );
   assert.match(
     mainSource,
-    /const cleanupForRendererReplacement = \(\) => \{[\s\S]*?githubVcs\.cancelSetup\(\)/,
+    /const cleanupForRendererReplacement = \(\) => \{[\s\S]*?githubVcs\(\)\.cancelSetup\(\)/,
   );
 });
 
@@ -198,23 +201,23 @@ test('pull request workspace handlers validate IPC directories before PR operati
 
   const expectations = {
     'github-detect-pr':
-      /if \(!requestDir\) return \{ ok: false, pr: null \};[\s\S]*?githubVcs\.detectPr\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, pr: null \};[\s\S]*?githubVcs\(\)\.detectPr\(requestDir, options\)/,
     'github-list-prs':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', viewerLogin: null, prs: \[\] \};[\s\S]*?githubVcs\.listPrs\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', viewerLogin: null, prs: \[\] \};[\s\S]*?githubVcs\(\)\.listPrs\(requestDir, options\)/,
     'github-view-pr':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', pr: null \};[\s\S]*?githubVcs\.viewPr\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', pr: null \};[\s\S]*?githubVcs\(\)\.viewPr\(requestDir, options\)/,
     'github-pr-diff':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', diff: '' \};[\s\S]*?githubVcs\.prDiff\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', diff: '' \};[\s\S]*?githubVcs\(\)\.prDiff\(requestDir, options\)/,
     'github-pr-checks':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', checks: \[\] \};[\s\S]*?githubVcs\.prChecks\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', checks: \[\] \};[\s\S]*?githubVcs\(\)\.prChecks\(requestDir, options\)/,
     'github-pr-comments':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', comments: \[\] \};[\s\S]*?githubPrConversation\.prComments\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid', comments: \[\] \};[\s\S]*?githubPrConversation\(\)\.prComments\(requestDir, options\)/,
     'github-create-pr':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.createPr\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\(\)\.createPr\(requestDir, options\)/,
     'github-post-comment':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.postComment\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\(\)\.postComment\(requestDir, options\)/,
     'github-merge-pr':
-      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\.mergePr\(requestDir, options\)/,
+      /if \(!requestDir\) return \{ ok: false, reason: 'invalid' \};[\s\S]*?githubVcs\(\)\.mergePr\(requestDir, options\)/,
   };
 
   for (const [channel, pattern] of Object.entries(expectations)) {

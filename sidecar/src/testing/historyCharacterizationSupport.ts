@@ -178,6 +178,10 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
     return Promise.resolve(0);
   }
 
+  warmOptionalCaches(): void {
+    // no-op for test doubles
+  }
+
   upsertChildSession(child: PersistedChildSession): boolean | undefined {
     const children =
       this.childrenByParent.get(child.parentAppSessionId) ??

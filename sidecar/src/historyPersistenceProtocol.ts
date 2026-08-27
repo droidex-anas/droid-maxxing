@@ -54,6 +54,7 @@ export interface HistoryPersistenceQueueSnapshot {
 export type HistoryWorkerRequest =
   | { type: 'persist'; batch: HistoryPersistenceBatch }
   | { type: 'durability-barrier' }
+  | { type: 'warm' }
   | { type: 'reconcile-files' }
   | { type: 'session-file-snapshot' }
   | {

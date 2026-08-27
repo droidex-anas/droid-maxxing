@@ -269,6 +269,10 @@ export class HistoryPersistence {
     }
   }
 
+  warmOptionalCaches(): void {
+    this.queue.warm();
+  }
+
   close(): void {
     let persistenceError: Error | undefined;
     try {

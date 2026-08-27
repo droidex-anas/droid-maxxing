@@ -20,14 +20,6 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const gitVcs = require('./git.cjs');
-const githubVcs = require('./github.cjs');
-const githubPrConversation = require('./githubPrConversation.cjs');
-const { createTerminalManager } = require('./terminal.cjs');
-const { createTerminalSubscriptionRegistry } = require('./terminalPort.cjs');
-const { createPerformanceMetricsCollector } = require('./performanceMetrics.cjs');
-const files = require('./files.cjs');
-const attachments = require('./attachments.cjs');
 const localImages = require('./localImages.cjs');
 const {
   normalizeBrowserConsoleMessage,
@@ -38,9 +30,6 @@ const { attachChildView, detachChildView } = require('./nativeBrowserHost.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
-const { createRendererOomRecovery, isRendererMemoryExit } = require('./rendererOomRecovery.cjs');
-const { autoUpdater } = require('electron-updater');
-const { createAppUpdater } = require('./appUpdater.cjs');
 const Sentry = require('@sentry/electron/main');
 const { createDiagnostics } = require('./diagnostics.cjs');
 const {
@@ -52,19 +41,98 @@ const {
 const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 const APP_NAME = 'DROIDEX';
 const buildMetadata = readBuildMetadata();
-const terminalManager = createTerminalManager({
-  defaultCwd: async () => {
-    const chatCwd = path.join(app.getPath('userData'), 'chats');
-    await fsp.mkdir(chatCwd, { recursive: true });
-    return chatCwd;
-  },
-});
-const terminalSubscriptions = createTerminalSubscriptionRegistry(terminalManager);
-const performanceMetrics = createPerformanceMetricsCollector({
-  countPtys: () => terminalManager.count(),
-  listWebContents: () => webContents.getAllWebContents(),
-});
-const filesRootAccess = files.createRootAccessRegistry();
+
+let gitVcsModule;
+function gitVcs() {
+  gitVcsModule ??= require('./git.cjs');
+  return gitVcsModule;
+}
+
+let githubVcsModule;
+function githubVcs() {
+  githubVcsModule ??= require('./github.cjs');
+  return githubVcsModule;
+}
+
+let githubPrConversationModule;
+function githubPrConversation() {
+  githubPrConversationModule ??= require('./githubPrConversation.cjs');
+  return githubPrConversationModule;
+}
+
+let terminalManagerInstance;
+function terminalManager() {
+  if (!terminalManagerInstance) {
+    const { createTerminalManager } = require('./terminal.cjs');
+    terminalManagerInstance = createTerminalManager({
+      defaultCwd: async () => {
+        const chatCwd = path.join(app.getPath('userData'), 'chats');
+        await fsp.mkdir(chatCwd, { recursive: true });
+        return chatCwd;
+      },
+    });
+  }
+  return terminalManagerInstance;
+}
+
+let terminalSubscriptionsInstance;
+function terminalSubscriptions() {
+  if (!terminalSubscriptionsInstance) {
+    const { createTerminalSubscriptionRegistry } = require('./terminalPort.cjs');
+    terminalSubscriptionsInstance = createTerminalSubscriptionRegistry(terminalManager());
+  }
+  return terminalSubscriptionsInstance;
+}
+
+let performanceMetricsInstance;
+function performanceMetrics() {
+  performanceMetricsInstance ??=
+    require('./performanceMetrics.cjs').createPerformanceMetricsCollector({
+      countPtys: () => terminalManager().count(),
+      listWebContents: () => webContents.getAllWebContents(),
+    });
+  return performanceMetricsInstance;
+}
+
+let filesModule;
+function files() {
+  filesModule ??= require('./files.cjs');
+  return filesModule;
+}
+
+let filesRootAccessInstance;
+function filesRootAccess() {
+  filesRootAccessInstance ??= files().createRootAccessRegistry();
+  return filesRootAccessInstance;
+}
+
+let appUpdaterInstance;
+function appUpdater() {
+  if (!appUpdaterInstance) {
+    const { autoUpdater } = require('electron-updater');
+    const { createAppUpdater } = require('./appUpdater.cjs');
+    appUpdaterInstance = createAppUpdater({
+      app,
+      autoUpdater,
+      installMode: buildMetadata.updateInstallMode,
+      sparkleFeedUrl: buildMetadata.sparkleFeedUrl,
+      sparkleUpdater: () => require('@droidex/sparkle-updater'),
+      prepareToInstall: () => sidecarSupervisor.stop(),
+      logError: (message, error) => console.error('[update] %s:', message, error),
+    });
+  }
+  return appUpdaterInstance;
+}
+
+let rendererOomRecoveryInstance;
+function rendererOomRecovery() {
+  rendererOomRecoveryInstance ??= require('./rendererOomRecovery.cjs').createRendererOomRecovery();
+  return rendererOomRecoveryInstance;
+}
+
+function isRendererMemoryExit(details) {
+  return require('./rendererOomRecovery.cjs').isRendererMemoryExit(details);
+}
 const diagnostics = createDiagnostics({
   app,
   sentry: Sentry,
@@ -82,16 +150,6 @@ sidecarSupervisor.subscribe((status) => {
     mainWindow.webContents.send('sidecar-status', status);
   }
 });
-const appUpdater = createAppUpdater({
-  app,
-  autoUpdater,
-  installMode: buildMetadata.updateInstallMode,
-  sparkleFeedUrl: buildMetadata.sparkleFeedUrl,
-  sparkleUpdater: () => require('@droidex/sparkle-updater'),
-  prepareToInstall: () => sidecarSupervisor.stop(),
-  logError: (message, error) => console.error('[update] %s:', message, error),
-});
-const rendererOomRecovery = createRendererOomRecovery();
 
 let mainWindow = null;
 let hiddenNativeBrowserWindow = null;
@@ -146,7 +204,7 @@ app.whenReady().then(async () => {
     Menu,
     app,
     appName: APP_NAME,
-    appUpdater,
+    appUpdater: appUpdater(),
     reload: reloadShell,
     shell,
     logError: (message) => console.error('[menu] %s', message),
@@ -171,11 +229,11 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   sidecarSupervisor.stop();
-  githubVcs.cancelSetup();
+  githubVcs().cancelSetup();
   closeAllDesktopNotifications();
-  terminalManager.closeAll();
-  terminalSubscriptions.clear();
-  filesRootAccess.clear();
+  terminalManager().closeAll();
+  terminalSubscriptions().clear();
+  filesRootAccess().clear();
 });
 
 app.on('activate', () => {
@@ -238,12 +296,12 @@ function createMainWindow() {
   });
 
   mainWindow.on('closed', () => {
-    rendererOomRecovery.cancel();
-    githubVcs.cancelSetup();
+    rendererOomRecovery().cancel();
+    githubVcs().cancelSetup();
     closeAllNativeBrowsers();
-    terminalManager.closeAll();
-    terminalSubscriptions.clear();
-    filesRootAccess.clear();
+    terminalManager().closeAll();
+    terminalSubscriptions().clear();
+    filesRootAccess().clear();
     mainWindow = null;
   });
 }
@@ -291,7 +349,7 @@ function registerIpc() {
   ipcMain.handle('pick-directory', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     const selected = result.canceled ? null : (result.filePaths[0] ?? null);
-    if (selected) await filesRootAccess.authorize(selected);
+    if (selected) await filesRootAccess().authorize(selected);
     return selected;
   });
   ipcMain.handle('pick-files', async () => {
@@ -301,9 +359,11 @@ function registerIpc() {
   // Composer image pastes/drops land in a temp dir and travel to Droid as
   // ordinary @-mentioned paths; discard only ever unlinks inside that dir.
   const attachmentsDir = path.join(os.tmpdir(), 'droidex-attachments');
-  ipcMain.handle('save-image', (_event, { dataUrl }) => attachments.save(attachmentsDir, dataUrl));
+  ipcMain.handle('save-image', (_event, { dataUrl }) =>
+    require('./attachments.cjs').save(attachmentsDir, dataUrl),
+  );
   ipcMain.handle('discard-image', (_event, { path: target }) =>
-    attachments.discard(attachmentsDir, target),
+    require('./attachments.cjs').discard(attachmentsDir, target),
   );
   // OS finish/status banners. silent=false plays the system notification sound.
   // Foreground suppress is owned by the renderer; click opens the finished
@@ -353,7 +413,7 @@ function registerIpc() {
   ipcMain.handle('set-api-key', (_event, { key }) => setApiKey(key));
   ipcMain.handle('clear-api-key', clearApiKey);
   ipcMain.handle('list-files', (_event, { dir }) => listFiles(dir));
-  ipcMain.handle('get-performance-metrics', () => performanceMetrics.collect());
+  ipcMain.handle('get-performance-metrics', () => performanceMetrics().collect());
   ipcMain.handle('system-idle-time', (event) => {
     assertMainRenderer(event);
     return powerMonitor.getSystemIdleTime();
@@ -365,43 +425,43 @@ function registerIpc() {
     openProject(dir, editor, target),
   );
 
-  ipcMain.handle('git-environment', (_event, { dir }) => gitVcs.environment(dir));
-  ipcMain.handle('git-branches', (_event, { dir }) => gitVcs.branches(dir));
-  ipcMain.handle('git-worktrees', (_event, { dir }) => gitVcs.worktrees(dir));
-  ipcMain.handle('git-diff-stat', (_event, { dir, options }) => gitVcs.diffStat(dir, options));
-  ipcMain.handle('git-diff-files', (_event, { dir, options }) => gitVcs.diffFiles(dir, options));
-  ipcMain.handle('git-file-diff', (_event, { dir, options }) => gitVcs.fileDiff(dir, options));
+  ipcMain.handle('git-environment', (_event, { dir }) => gitVcs().environment(dir));
+  ipcMain.handle('git-branches', (_event, { dir }) => gitVcs().branches(dir));
+  ipcMain.handle('git-worktrees', (_event, { dir }) => gitVcs().worktrees(dir));
+  ipcMain.handle('git-diff-stat', (_event, { dir, options }) => gitVcs().diffStat(dir, options));
+  ipcMain.handle('git-diff-files', (_event, { dir, options }) => gitVcs().diffFiles(dir, options));
+  ipcMain.handle('git-file-diff', (_event, { dir, options }) => gitVcs().fileDiff(dir, options));
   ipcMain.handle('git-mark-turn-start', (_event, { dir, ownerId }) =>
-    gitVcs.markTurnStart(dir, ownerId),
+    gitVcs().markTurnStart(dir, ownerId),
   );
   ipcMain.handle('git-adopt-turn-baseline', (_event, { dir, clientRef, appSessionId }) =>
-    gitVcs.adoptTurnBaseline(dir, clientRef, appSessionId),
+    gitVcs().adoptTurnBaseline(dir, clientRef, appSessionId),
   );
   ipcMain.handle('git-create-branch', (_event, { dir, options }) =>
-    gitVcs.createBranch(dir, options),
+    gitVcs().createBranch(dir, options),
   );
-  ipcMain.handle('git-checkout', (_event, { dir, options }) => gitVcs.checkout(dir, options));
+  ipcMain.handle('git-checkout', (_event, { dir, options }) => gitVcs().checkout(dir, options));
   ipcMain.handle('git-create-worktree', (_event, { dir, options }) =>
-    gitVcs.createWorktree(dir, options),
+    gitVcs().createWorktree(dir, options),
   );
   ipcMain.handle('git-remove-worktree', (_event, { dir, options }) =>
-    gitVcs.removeWorktree(dir, options),
+    gitVcs().removeWorktree(dir, options),
   );
-  ipcMain.handle('git-commit', (_event, { dir, options }) => gitVcs.commit(dir, options));
-  ipcMain.handle('git-push', (_event, { dir, options }) => gitVcs.push(dir, options));
-  ipcMain.handle('git-fetch', (_event, { dir }) => gitVcs.fetchRemotes(dir));
+  ipcMain.handle('git-commit', (_event, { dir, options }) => gitVcs().commit(dir, options));
+  ipcMain.handle('git-push', (_event, { dir, options }) => gitVcs().push(dir, options));
+  ipcMain.handle('git-fetch', (_event, { dir }) => gitVcs().fetchRemotes(dir));
 
   ipcMain.handle('github-available', (event) => {
     assertMainRenderer(event);
-    return githubVcs.available();
+    return githubVcs().available();
   });
   ipcMain.handle('github-install', (event) => {
     assertMainRenderer(event);
-    return githubVcs.install();
+    return githubVcs().install();
   });
   ipcMain.handle('github-authenticate', (event) => {
     assertMainRenderer(event);
-    return githubVcs.authenticate({
+    return githubVcs().authenticate({
       onDeviceCode: (code) => {
         if (!event.sender.isDestroyed()) event.sender.send('github-auth-code', { code });
       },
@@ -409,7 +469,7 @@ function registerIpc() {
   });
   ipcMain.handle('github-cancel-setup', (event) => {
     assertMainRenderer(event);
-    githubVcs.cancelSetup();
+    githubVcs().cancelSetup();
     return { ok: true };
   });
   ipcMain.handle('github-detect-pr', (event, payload = {}) => {
@@ -417,63 +477,63 @@ function registerIpc() {
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, pr: null };
-    return githubVcs.detectPr(requestDir, options);
+    return githubVcs().detectPr(requestDir, options);
   });
   ipcMain.handle('github-list-prs', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid', viewerLogin: null, prs: [] };
-    return githubVcs.listPrs(requestDir, options);
+    return githubVcs().listPrs(requestDir, options);
   });
   ipcMain.handle('github-view-pr', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid', pr: null };
-    return githubVcs.viewPr(requestDir, options);
+    return githubVcs().viewPr(requestDir, options);
   });
   ipcMain.handle('github-pr-diff', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid', diff: '' };
-    return githubVcs.prDiff(requestDir, options);
+    return githubVcs().prDiff(requestDir, options);
   });
   ipcMain.handle('github-pr-checks', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid', checks: [] };
-    return githubVcs.prChecks(requestDir, options);
+    return githubVcs().prChecks(requestDir, options);
   });
   ipcMain.handle('github-pr-comments', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid', comments: [] };
-    return githubPrConversation.prComments(requestDir, options);
+    return githubPrConversation().prComments(requestDir, options);
   });
   ipcMain.handle('github-create-pr', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid' };
-    return githubVcs.createPr(requestDir, options);
+    return githubVcs().createPr(requestDir, options);
   });
   ipcMain.handle('github-post-comment', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid' };
-    return githubVcs.postComment(requestDir, options);
+    return githubVcs().postComment(requestDir, options);
   });
   ipcMain.handle('github-merge-pr', (event, payload = {}) => {
     assertMainRenderer(event);
     const { dir, options } = payload || {};
     const requestDir = prWorkspaceRequestDir(dir);
     if (!requestDir) return { ok: false, reason: 'invalid' };
-    return githubVcs.mergePr(requestDir, options);
+    return githubVcs().mergePr(requestDir, options);
   });
 
   ipcMain.handle('onboarding-get', getOnboarding);
@@ -481,11 +541,11 @@ function registerIpc() {
   ipcMain.handle('app-version', () => app.getVersion());
   ipcMain.handle('app-check-update', (event, options) => {
     assertMainRenderer(event);
-    return appUpdater.check(options);
+    return appUpdater().check(options);
   });
   ipcMain.handle('app-download-update', (event) => {
     assertMainRenderer(event);
-    return appUpdater.downloadAndInstall();
+    return appUpdater().downloadAndInstall();
   });
   ipcMain.handle('feedback-report', async (event, report) => {
     assertMainRenderer(event);
@@ -540,7 +600,7 @@ function registerIpc() {
 
   ipcMain.handle('terminal-create', (event, args) => {
     assertMainRenderer(event);
-    return terminalManager.create({
+    return terminalManager().create({
       appSessionId: args?.appSessionId,
       cwd: args?.cwd,
       cols: args?.cols,
@@ -549,16 +609,16 @@ function registerIpc() {
   });
   ipcMain.handle('terminal-resize', (event, { id, cols, rows }) => {
     assertMainRenderer(event);
-    terminalManager.resize(id, cols, rows);
+    terminalManager().resize(id, cols, rows);
   });
   ipcMain.handle('terminal-kill', (event, { id }) => {
     assertMainRenderer(event);
-    terminalSubscriptions.unsubscribe(event.sender, id);
-    terminalManager.kill(id);
+    terminalSubscriptions().unsubscribe(event.sender, id);
+    terminalManager().kill(id);
   });
   ipcMain.handle('terminal-list', (event, filter) => {
     assertMainRenderer(event);
-    return terminalManager.list({ appSessionId: filter?.appSessionId });
+    return terminalManager().list({ appSessionId: filter?.appSessionId });
   });
   ipcMain.on('terminal-subscribe', (event, payload) => {
     const port = event.ports?.[0];
@@ -569,7 +629,7 @@ function registerIpc() {
         throw new Error('terminal-subscribe requires an id');
       }
       if (!port) throw new Error('terminal-subscribe requires a MessagePort');
-      terminalSubscriptions.subscribe(event.sender, id, port);
+      terminalSubscriptions().subscribe(event.sender, id, port);
     } catch (error) {
       if (port) {
         try {
@@ -590,13 +650,13 @@ function registerIpc() {
   });
   ipcMain.handle('terminal-unsubscribe', (event, { id }) => {
     assertMainRenderer(event);
-    terminalSubscriptions.unsubscribe(event.sender, id);
+    terminalSubscriptions().unsubscribe(event.sender, id);
   });
   ipcMain.handle('files-authorize-root', async (event, { root }) => {
     assertMainRenderer(event);
-    const authorized = await filesRootAccess.tokenFor(root);
+    const authorized = await filesRootAccess().tokenFor(root);
     if (authorized) return authorized;
-    const expectedRoot = await files.canonicalDirectory(root);
+    const expectedRoot = await files().canonicalDirectory(root);
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Allow Files access to this workspace',
       buttonLabel: 'Allow Files Access',
@@ -606,27 +666,27 @@ function registerIpc() {
     if (result.canceled || !result.filePaths[0]) {
       throw new Error('Files access was not authorized.');
     }
-    const selectedRoot = await files.canonicalDirectory(result.filePaths[0]);
+    const selectedRoot = await files().canonicalDirectory(result.filePaths[0]);
     if (selectedRoot !== expectedRoot) {
       throw new Error('Select the current workspace folder to authorize Files access.');
     }
-    return filesRootAccess.authorize(selectedRoot);
+    return filesRootAccess().authorize(selectedRoot);
   });
   ipcMain.handle('files-list', (event, { accessToken, relative }) => {
     assertMainRenderer(event);
-    return files.listDirectory(filesRootAccess.resolve(accessToken), relative);
+    return files().listDirectory(filesRootAccess().resolve(accessToken), relative);
   });
   ipcMain.handle('files-preview', (event, { accessToken, relative }) => {
     assertMainRenderer(event);
-    return files.readPreview(filesRootAccess.resolve(accessToken), relative);
+    return files().readPreview(filesRootAccess().resolve(accessToken), relative);
   });
   ipcMain.handle('files-open', (event, { accessToken, relative }) => {
     assertMainRenderer(event);
-    return files.openDefault(filesRootAccess.resolve(accessToken), relative, shell);
+    return files().openDefault(filesRootAccess().resolve(accessToken), relative, shell);
   });
   ipcMain.handle('files-reveal', (event, { accessToken, relative }) => {
     assertMainRenderer(event);
-    return files.revealInFolder(filesRootAccess.resolve(accessToken), relative, shell);
+    return files().revealInFolder(filesRootAccess().resolve(accessToken), relative, shell);
   });
 
   ipcMain.handle('native-browser-open', (event, { browserSessionId, url, bounds, viewport }) => {
@@ -811,7 +871,7 @@ function installMainRendererLifecycle(contents) {
   const cleanupForRendererReplacement = () => {
     if (!hasLoadedMainFrame || cleanedForNavigation) return;
     cleanedForNavigation = true;
-    githubVcs.cancelSetup();
+    githubVcs().cancelSetup();
     closeRendererOwnedTerminals();
   };
 
@@ -821,19 +881,19 @@ function installMainRendererLifecycle(contents) {
   });
   contents.on('will-frame-navigate', (_event, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) {
-      rendererOomRecovery.cancel();
+      rendererOomRecovery().cancel();
       cleanupForRendererReplacement();
     }
   });
   contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) {
-      rendererOomRecovery.cancel();
+      rendererOomRecovery().cancel();
       cleanupForRendererReplacement();
     }
   });
   contents.on('render-process-gone', cleanupForRendererReplacement);
   contents.on('render-process-gone', (_event, details) => {
-    const scheduled = rendererOomRecovery.handle(details, () => {
+    const scheduled = rendererOomRecovery().handle(details, () => {
       if (!isWindowUsable(mainWindow) || mainWindow.webContents !== contents) return;
       console.error('[renderer] Reloading after renderer OOM');
       reloadShell(false);
@@ -845,8 +905,8 @@ function installMainRendererLifecycle(contents) {
 }
 
 function closeRendererOwnedTerminals() {
-  terminalSubscriptions.clear();
-  terminalManager.closeAll();
+  terminalSubscriptions().clear();
+  terminalManager().closeAll();
 }
 
 function appRoot() {

@@ -32,6 +32,7 @@ server.ready
     hotPathMetrics.setGaugeProvider(() => manager.resourceCounts());
     // Stdout line consumed by the desktop supervisor to confirm readiness.
     process.stdout.write(`SIDECAR_READY ${String(server.port)}\n`);
+    manager.warmOptionalCaches();
   })
   .catch((error: unknown) => {
     console.error(

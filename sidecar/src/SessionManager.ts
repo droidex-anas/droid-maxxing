@@ -124,6 +124,7 @@ type SessionHistory = SessionHistoryBase & {
   setIndexingIdle(isIdle: boolean): Promise<void>;
   reconcileSessionFiles(): Promise<number>;
   reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number>;
+  warmOptionalCaches(): void;
 };
 
 type SessionBrowsers = Pick<
@@ -572,6 +573,10 @@ export class SessionManager {
       childAgentsTotal: children.total,
       childAgentsActive: children.active,
     };
+  }
+
+  warmOptionalCaches(): void {
+    this.history.warmOptionalCaches();
   }
 
   // eslint-disable-next-line complexity -- Public command dispatch is intentionally unchanged in PR 3.

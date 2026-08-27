@@ -32,7 +32,8 @@ const DEFAULT_RETRY_DELAY_MS = 250;
 const MAX_RETRY_DELAY_MS = 5_000;
 const DEFAULT_SYNC_TIMEOUT_MS = 10_000;
 export class HistoryPersistenceQueue {
-  private readonly client: HistoryPersistenceClient;
+  private client: HistoryPersistenceClient | null;
+  private readonly createDefaultClient: () => HistoryPersistenceClient;
   private readonly flushDelayMs: number;
   private readonly retryDelayMs: number;
   private readonly syncTimeoutMs: number;
@@ -59,8 +60,8 @@ export class HistoryPersistenceQueue {
   private retries = 0;
   private consecutiveFailures = 0;
   constructor(options: HistoryPersistenceQueueOptions) {
-    this.client =
-      options.client ??
+    this.client = options.client ?? null;
+    this.createDefaultClient = () =>
       new HistoryWorkerClient({
         workerData: { dbPath: options.dbPath, lane: 'persistence' },
       });
@@ -149,6 +150,16 @@ export class HistoryPersistenceQueue {
     }
   }
 
+  warm(): void {
+    const warm = this.ensureClient().warm?.();
+    if (!warm) return;
+    void warm.promise.catch((error: unknown) => {
+      console.error(
+        `History persistence warm failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+
   close(): void {
     if (this.closed) return;
     this.clearTimers();
@@ -160,7 +171,7 @@ export class HistoryPersistenceQueue {
       firstError = asError(error);
     }
     try {
-      this.client.closeSync();
+      this.client?.closeSync();
     } catch (error) {
       firstError ??= asError(error);
     }
@@ -205,7 +216,7 @@ export class HistoryPersistenceQueue {
     const { batch, minimumSequence } = this.pending.takeBatch();
     let call: HistoryPersistenceCall<HistoryPersistenceResult>;
     try {
-      call = this.client.startPersist(batch);
+      call = this.ensureClient().startPersist(batch);
     } catch (error) {
       const resolved = asError(error);
       this.failures += 1;
@@ -344,7 +355,7 @@ export class HistoryPersistenceQueue {
     if (this.durabilityBarrierInFlight) return this.durabilityBarrierInFlight;
     let barrier: HistoryPersistenceCall<{ durable: true }>;
     try {
-      barrier = this.client.startDurabilityBarrier();
+      barrier = this.ensureClient().startDurabilityBarrier();
     } catch (error) {
       this.recordDurabilityBarrierFailure(asError(error));
       return null;
@@ -424,6 +435,11 @@ export class HistoryPersistenceQueue {
     } catch (reportError) {
       console.error('History persistence recovery reporting failed:', reportError);
     }
+  }
+
+  private ensureClient(): HistoryPersistenceClient {
+    if (!this.client) this.client = this.createDefaultClient();
+    return this.client;
   }
 
   private assertOpen(): void {

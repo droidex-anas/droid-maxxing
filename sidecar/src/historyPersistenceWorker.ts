@@ -41,10 +41,7 @@ let latestSearchEpoch = 0;
 let operationTail: Promise<void> = Promise.resolve();
 let closed = false;
 
-// The canonical writer starts warming as soon as its dedicated worker boots.
-// This keeps index construction and statement preparation off both the
-// orchestration thread and the first user-triggered durability boundary.
-if (workerLane === 'persistence') initializePersistenceDatabase();
+// Persistence DB warming is triggered after SIDECAR_READY so bridge listen stays fast.
 
 parentPort.on('message', (envelope: HistoryWorkerEnvelope) => {
   const searchEpoch = envelope.request.type === 'search' ? ++latestSearchEpoch : latestSearchEpoch;
@@ -76,6 +73,10 @@ async function handle(envelope: HistoryWorkerEnvelope, searchEpoch: number): Pro
       case 'durability-barrier':
         getPersistenceDatabase().durabilityBarrier(requiredWriterLease(envelope));
         reply(replyPort, { ok: true, value: { durable: true } });
+        return;
+      case 'warm':
+        getPersistenceDatabase();
+        reply(replyPort, { ok: true, value: { accepted: true } });
         return;
       case 'reconcile-files':
         reply(replyPort, {
@@ -136,7 +137,7 @@ function assertRequestMatchesLane(
   request: HistoryWorkerEnvelope['request'],
   lane: HistoryWorkerData['lane'],
 ): void {
-  if (request.type === 'close') return;
+  if (request.type === 'close' || request.type === 'warm') return;
   const isPersistenceRequest = request.type === 'persist' || request.type === 'durability-barrier';
   if ((lane === 'persistence') !== isPersistenceRequest) {
     throw new Error(`History ${lane} worker cannot handle ${request.type}.`);
