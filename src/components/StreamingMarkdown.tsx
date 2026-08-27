@@ -99,11 +99,9 @@ const FrozenMarkdownBlock = memo(function FrozenMarkdownBlock({
     [allowGeneratedContent, autoPlayAppBlocks, block.source, cutOffAppBlocks],
   );
   return (
-    <div data-stream-block={block.id} className="contents">
-      <MarkdownTree specMode={specMode} fenceOptions={fenceOptions}>
-        {block.source}
-      </MarkdownTree>
-    </div>
+    <MarkdownTree specMode={specMode} fenceOptions={fenceOptions}>
+      {block.source}
+    </MarkdownTree>
   );
 });
 
@@ -194,14 +192,16 @@ function SettledMarkdown({
 
 function LiveStreamingMarkdown({
   source,
+  live,
   specMode,
   flags,
 }: {
   source: string;
+  live: boolean;
   specMode: boolean;
   flags: MarkdownFenceFlags;
 }) {
-  const shown = useFrameThrottledValue(source, true);
+  const shown = useFrameThrottledValue(source, live);
   const document = useStreamingDocument(shown);
   return (
     <div className={markdownShellClass(specMode)}>
@@ -246,10 +246,14 @@ function StreamingMarkdownImpl({
     buildingAppBlocks,
     cutOffAppBlocks,
   };
-  if (!live) {
+  const streamedOnThisMount = useRef(live);
+  if (live) streamedOnThisMount.current = true;
+  // Historical rows use the settled LRU. A row that streamed on this mount keeps
+  // its frozen block instances so mermaid/images/apps do not remount on settle.
+  if (!live && !streamedOnThisMount.current) {
     return <SettledMarkdown source={source} cacheId={cacheId} specMode={specMode} flags={flags} />;
   }
-  return <LiveStreamingMarkdown source={source} specMode={specMode} flags={flags} />;
+  return <LiveStreamingMarkdown source={source} live={live} specMode={specMode} flags={flags} />;
 }
 
 export const StreamingMarkdown = memo(StreamingMarkdownImpl);

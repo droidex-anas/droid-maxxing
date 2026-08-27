@@ -30,11 +30,9 @@ function assertSettledMatchesCanonical(source: string, extra: Record<string, unk
 function assertCompletedBlocksStable(full: string): void {
   let previous: { source: string; document: StreamingDocument } | null = null;
   const seen = new Map<string, string>();
-  const checkpoints: Array<{ index: number; ids: string[] }> = [];
   for (let index = 1; index <= full.length; index += 1) {
     const source = full.slice(0, index);
     const { document } = ingestStreamingMarkdown(previous, source);
-    let frozenGrew = false;
     for (const block of document.completedBlocks) {
       const prior = seen.get(block.id);
       if (prior !== undefined) {
@@ -42,23 +40,16 @@ function assertCompletedBlocksStable(full: string): void {
           block.source.startsWith(prior) && /^\s*$/.test(block.source.slice(prior.length)),
           'frozen block source may only grow by trailing whitespace',
         );
-        seen.set(block.id, block.source);
-      } else {
-        seen.set(block.id, block.source);
-        frozenGrew = true;
       }
-    }
-    if (frozenGrew || index === full.length) {
-      checkpoints.push({ index, ids: [...seen.keys()] });
+      seen.set(block.id, block.source);
     }
     previous = { source, document };
   }
-  for (const checkpoint of checkpoints) {
-    const html = streaming(full.slice(0, checkpoint.index));
-    for (const id of checkpoint.ids) {
-      assert.match(html, new RegExp(`data-stream-block="${id}"`));
-    }
-  }
+  assert.ok(seen.size > 0);
+}
+
+function markupWithoutInterTagSpace(html: string): string {
+  return html.replace(/>\s+</g, '><');
 }
 
 const PARAGRAPHS = ['First paragraph.', '', 'Second paragraph.', '', 'Third stays open'].join('\n');
@@ -132,7 +123,6 @@ test('settled cut-off app fences match the canonical renderer', () => {
 test('malformed and incomplete mid-stream blocks stay pending without rewriting frozen prose', () => {
   const html = streaming(`${MALFORMED}\n`);
   assert.match(html, /Hello/);
-  assert.match(html, /data-stream-block="b:0"/);
   assert.match(html, /const incomplete = /);
   assert.doesNotMatch(html, /<iframe/i);
 });
@@ -149,7 +139,7 @@ test('streaming to settled keeps frozen prose and matches canonical output', () 
   const live = 'Intro paragraph.\n\n```js\nconst x = 1;\n';
   const liveHtml = streaming(live);
   assert.match(liveHtml, /Intro paragraph/);
-  assert.match(liveHtml, /data-stream-block="b:0"/);
+  assert.match(liveHtml, /const x = 1;/);
 
   const finalSource = `${live}\`\`\`\n\nDone.\n`;
   assertSettledMatchesCanonical(finalSource);
@@ -157,6 +147,37 @@ test('streaming to settled keeps frozen prose and matches canonical output', () 
   assert.match(settledHtml, /Intro paragraph/);
   assert.match(settledHtml, /const x = 1;/);
   assert.match(settledHtml, /Done/);
+});
+
+test('frozen block ids stay stable and a pending-empty live tree matches settled markup', () => {
+  const sources = [
+    `${PARAGRAPHS}\n\n`,
+    `${LISTS}\n\n`,
+    `${TABLE}\n\n`,
+    `${NESTED_FENCE}\n\n`,
+    `${HUGE_CODE}\n\n`,
+    `${MERMAID}\n\n`,
+  ];
+  for (const source of sources) {
+    const { document } = ingestStreamingMarkdown(null, source);
+    assert.equal(document.pendingSource, '');
+    assert.ok(document.completedBlocks.length > 0);
+    const ids = document.completedBlocks.map((block) => block.id);
+    assert.deepEqual(ids, [...new Set(ids)]);
+    assert.equal(
+      markupWithoutInterTagSpace(streaming(source)),
+      markupWithoutInterTagSpace(settled(source)),
+    );
+    assertSettledMatchesCanonical(source);
+  }
+
+  const trailingPending = PARAGRAPHS;
+  const trailing = ingestStreamingMarkdown(null, trailingPending);
+  assert.ok(trailing.document.pendingSource.length > 0);
+  assert.equal(
+    markupWithoutInterTagSpace(streaming(trailingPending)),
+    markupWithoutInterTagSpace(settled(trailingPending)),
+  );
 });
 
 test('an open code fence streams as preformatted text without mermaid or app runtime', () => {
