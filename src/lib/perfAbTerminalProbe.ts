@@ -14,13 +14,10 @@ export async function measureTerminalFlood(treeRoot: string): Promise<AbProbeMet
   const requireFromTree = createRequire(terminalPath);
   const terminal = requireFromTree(terminalPath) as TerminalModule;
   const portPath = join(dirname(terminalPath), 'terminalPort.cjs');
-  let registryMod: RegistryModule | null = null;
-  if (existsSync(portPath)) {
-    registryMod = requireFromTree(portPath) as RegistryModule;
-  } else if (terminal.createTerminalSubscriptionRegistry) {
-    registryMod = terminal;
-  }
-  if (!registryMod) {
+  const createRegistry = existsSync(portPath)
+    ? (requireFromTree(portPath) as RegistryModule).createTerminalSubscriptionRegistry
+    : terminal.createTerminalSubscriptionRegistry;
+  if (!createRegistry) {
     return metric(
       'terminal.deliveriesPerFlood',
       NaN,
@@ -31,7 +28,7 @@ export async function measureTerminalFlood(treeRoot: string): Promise<AbProbeMet
   const { manager, instances } = createTerminalFixture(terminal);
   const terminalId = (await manager.create({ appSessionId: 'session-1', cwd: '/tmp' })).id;
   const timers: { callback: () => void }[] = [];
-  const registry = registryMod.createTerminalSubscriptionRegistry(manager, {
+  const registry = createRegistry(manager, {
     setTimeout: (callback: () => void) => {
       const handle = { callback };
       timers.push(handle);
