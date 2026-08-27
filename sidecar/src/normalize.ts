@@ -1,11 +1,11 @@
 // Converts @factory/droid-sdk stream events into bridge protocol shapes.
 import type {
   DroidStreamEvent,
-  MissionFeature,
   ProgressLogEntry,
   RequestPermissionRequestParams,
 } from '@factory/droid-sdk';
 import { convertNotificationToStreamMessage } from '@factory/droid-sdk';
+import { bridgeFeature } from './missionFeatures.js';
 import type {
   SessionRole,
   BridgeFeature,
@@ -28,20 +28,6 @@ import { parseSkillActivation, type SkillActivation } from './skillSignals.js';
 
 let seq = 0;
 const nextId = () => `${Date.now().toString(36)}-${(seq++).toString(36)}`;
-
-export function mapFeature(f: MissionFeature): BridgeFeature {
-  return {
-    id: f.id,
-    description: f.description,
-    status: f.status as BridgeFeature['status'],
-    skillName: f.skillName,
-    preconditions: f.preconditions ?? [],
-    expectedBehavior: f.expectedBehavior ?? [],
-    verificationSteps: (f as { verificationSteps?: string[] }).verificationSteps ?? [],
-    fulfills: f.fulfills,
-    milestone: f.milestone,
-  };
-}
 
 export interface NormalizedProgressEntry extends ProgressEntry {
   workerProviderSessionId?: string;
@@ -254,7 +240,7 @@ export function normalizeStreamEvent(
         }),
       };
     case 'mission_features_changed':
-      return { features: ev.features.map(mapFeature) };
+      return { features: ev.features.map(bridgeFeature) };
     case 'mission_progress_entry':
       return { progress: mapProgress(ev.progressLog) };
     case 'mission_state_changed':

@@ -16,7 +16,6 @@ import type {
   SessionRole,
   Autonomy,
   BridgeFeature,
-  FeatureStatus,
   FactoryDefaultSettings,
   SessionHistoryEntry,
   SessionPhase,
@@ -25,7 +24,7 @@ import type {
   ReasoningEffort,
   TranscriptEvent,
 } from './protocol.js';
-import { mapFeature } from './normalize.js';
+import { bridgeFeature } from './missionFeatures.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
 import {
   SessionFileCache,
@@ -1342,26 +1341,7 @@ function publicProgressEntry(entry: StoredProgressEntry): ProgressEntry {
 function readFeatures(path: string): BridgeFeature[] {
   if (!existsSync(path)) return [];
   const file = readJson<StoredFeatureFile>(path);
-  return (file.features ?? []).map((feature) => mapStoredFeature(feature));
-}
-
-function mapStoredFeature(feature: unknown): BridgeFeature {
-  try {
-    return mapFeature(feature as never);
-  } catch {
-    const f = objectValue(feature) ?? {};
-    return {
-      id: stringValue(f.id) || 'feature',
-      description: stringValue(f.description) || stringValue(f.id) || 'Feature',
-      status: mapFeatureStatus(stringValue(f.status)),
-      skillName: stringValue(f.skillName) || '',
-      preconditions: stringArray(f.preconditions),
-      expectedBehavior: stringArray(f.expectedBehavior),
-      verificationSteps: stringArray(f.verificationSteps),
-      fulfills: stringArray(f.fulfills),
-      milestone: stringValue(f.milestone),
-    };
-  }
+  return (file.features ?? []).map((feature) => bridgeFeature(feature));
 }
 
 function missionDirs(): string[] {
@@ -1735,11 +1715,6 @@ function titleFromProgressType(type?: string): string | undefined {
   return type.replace(/_/g, ' ');
 }
 
-function mapFeatureStatus(status?: string): FeatureStatus {
-  if (status === 'in_progress' || status === 'completed' || status === 'cancelled') return status;
-  return 'pending';
-}
-
 function mapReasoning(value?: string): ReasoningEffort | undefined {
   if (
     value === 'off' ||
@@ -1793,12 +1768,6 @@ function roleFromSessionStart(start: StoredSessionStart): SessionRole {
   // folded into 'primary' (which would leave the opened child blank).
   if (start.callingSessionId || start.callingToolUseId) return 'worker';
   return 'primary';
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : [];
 }
 
 function lastPathSegment(path: string): string {
