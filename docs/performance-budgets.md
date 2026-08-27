@@ -86,6 +86,6 @@ that reference, not a 4K fullscreen session.
 
 ## Report shape
 
-`docs/perf/origin-main-vs-head.md` (and the JSON sibling) is the human- and
-machine-readable comparison a PR can paste. A/B rows have baseline, candidate,
-and delta. Candidate-only rows have an absolute and no delta.
+`npm run perf:report` writes a human- and machine-readable comparison to
+`reports/perf/compare.md` (and `compare.json`). A/B rows have baseline,
+candidate, and delta. Candidate-only rows have an absolute and no delta.

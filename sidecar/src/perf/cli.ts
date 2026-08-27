@@ -5,15 +5,13 @@
 //   npm run perf:compare -- --baseline origin/main
 //   npm run perf:gates
 //
-// Writes JSON + Markdown artifacts to reports/perf/ (gitignored). Comparison
-// summaries are also written to docs/perf/ when --commit-report is set.
+// Writes JSON + Markdown artifacts to reports/perf/ (gitignored).
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderComparisonMarkdown } from './abReport.js';
-import type { ComparisonReport } from './abCompare.js';
 import {
   DEFAULT_BASELINE_REF,
   DEFAULT_COMPARE_SCENARIOS,
@@ -36,7 +34,6 @@ interface CliOptions {
   skipBundle: boolean;
   baselineRef: string;
   outDir: string;
-  commitReport: boolean;
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -49,7 +46,6 @@ function parseArgs(argv: string[]): CliOptions {
     skipBundle: false,
     baselineRef: DEFAULT_BASELINE_REF,
     outDir: defaultOutDir(),
-    commitReport: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -73,8 +69,6 @@ function parseArgs(argv: string[]): CliOptions {
       options.refreshBaseline = true;
     } else if (arg === '--skip-bundle') {
       options.skipBundle = true;
-    } else if (arg === '--commit-report') {
-      options.commitReport = true;
     } else if (arg === '--scenario') {
       options.scenario = requiredValue(argv, ++index, arg);
     } else if (arg === '--baseline') {
@@ -86,7 +80,7 @@ function parseArgs(argv: string[]): CliOptions {
       options.outDir = requiredValue(argv, ++index, arg);
     } else if (arg === '--help' || arg === '-h') {
       console.log(
-        'Usage: tsx src/perf/cli.ts [--scenario name] [--seed n] [--out dir] [--enforce-budgets] [--enforce-gates] [--compare] [--gates] [--baseline ref] [--refresh-baseline] [--skip-bundle] [--commit-report] [--list]',
+        'Usage: tsx src/perf/cli.ts [--scenario name] [--seed n] [--out dir] [--enforce-budgets] [--enforce-gates] [--compare] [--gates] [--baseline ref] [--refresh-baseline] [--skip-bundle] [--list]',
       );
       process.exit(0);
     } else {
@@ -105,29 +99,6 @@ function requiredValue(argv: string[], index: number, flag: string): string {
 function defaultOutDir(): string {
   const sidecarDir = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   return resolve(sidecarDir, '..', 'reports', 'perf');
-}
-
-function docsPerfDir(): string {
-  const sidecarDir = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-  return resolve(sidecarDir, '..', 'docs', 'perf');
-}
-
-function slimComparison(report: ComparisonReport): unknown {
-  return {
-    ...report,
-    candidateReplays: report.candidateReplays.map((replay) => ({
-      scenario: replay.scenario.name,
-      kind: replay.scenario.kind,
-      durationMs: replay.durationMs,
-      providerEvents: replay.providerEvents,
-      appendedReceived: replay.client.appendedReceived,
-      eventReductionRatio: replay.sidecar.transport.eventReductionRatio,
-      pendingEventsMax: replay.sidecar.transport.queue.pendingEventsMax,
-      persistenceBoundaryP95Ms: replay.sidecar.histograms.persistenceBoundaryMs.p95Ms ?? null,
-      livePrimarySessions: replay.sidecar.resources?.livePrimarySessions ?? null,
-      gatesHardPassed: replay.gates.hardPassed,
-    })),
-  };
 }
 
 async function main(): Promise<void> {
@@ -150,15 +121,6 @@ async function main(): Promise<void> {
     writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
     writeFileSync(join(options.outDir, `${options.mode}.md`), markdown);
     writeFileSync(join(options.outDir, 'latest.md'), markdown);
-    if (options.commitReport) {
-      const docsDir = docsPerfDir();
-      mkdirSync(docsDir, { recursive: true });
-      writeFileSync(join(docsDir, 'origin-main-vs-head.md'), markdown);
-      writeFileSync(
-        join(docsDir, 'origin-main-vs-head.json'),
-        `${JSON.stringify(slimComparison(report), null, 2)}\n`,
-      );
-    }
     console.log(markdown);
     console.log(`Artifacts: ${jsonPath}`);
     if (!report.gates.hardPassed) {
