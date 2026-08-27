@@ -8,10 +8,11 @@ import type { LiveSession } from './SessionLifecycle.js';
 import type { SessionPhase } from './protocol.js';
 import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
 
-// Six times the child budget. A child reopens behind its own loading state with
-// its transcript already painted, while a session's reload lands on the first
-// prompt, before the user's own message appears — the most latency-sensitive
-// moment in the app. Only sessions plainly abandoned are worth that.
+// Six times the child budget, though a session reloads faster than a child
+// (measured 0.7s against 2.4-3.1s, with the transcript painting in under 10ms
+// either way). The budget is long because of where the cost lands, not how
+// large it is: a child pays behind its own loading state, a session pays after
+// the user has typed a prompt and pressed enter.
 export const SESSION_RUNTIME_IDLE_RETIREMENT_MS = 30 * 60_000;
 
 export const SESSION_RUNTIME_RETIRED_STATUS =
