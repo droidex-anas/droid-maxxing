@@ -39,7 +39,6 @@ import {
   safeJson,
   stripAnsi,
   formatDuration,
-  parseTruncatedTail,
   isChildSessionTool,
   isSubagentBookkeepingTool,
   childSessionInfo,
@@ -55,6 +54,10 @@ import {
   faviconUrl,
   toolArgStringArray,
 } from '../lib/tools';
+import {
+  copyTextForCommand,
+  copyTextForMessage,
+} from '../features/transcript-reach/transcriptCopy';
 import { classifyEvent } from '../lib/transcript';
 import {
   mergeChildSessionSpawn,
@@ -524,7 +527,7 @@ function CommandCard({
         <span className="min-w-0 flex-1 truncate text-[10.5px] font-medium uppercase tracking-wider text-droid-text-muted">
           {title || 'Terminal'}
         </span>
-        <CopyButton text={out ? `${command}\n\n${out}` : command} />
+        <CopyButton text={copyTextForCommand(command, output)} />
       </div>
       {body}
     </div>
@@ -2190,7 +2193,7 @@ const FeedItemView = memo(function FeedItemView({
             isFinalResponse &&
             text.trim() && (
               <div className="mt-1.5 -ml-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
-                <CopyButton text={parseTruncatedTail(text).body} />
+                <CopyButton text={copyTextForMessage(text)} />
               </div>
             )
           )}

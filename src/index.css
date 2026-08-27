@@ -560,4 +560,18 @@
     @apply text-droid-text placeholder-droid-text-muted focus:outline-none focus:border-droid-border-hover;
     @apply transition-colors duration-150;
   }
+
+  .transcript-find-hit {
+    border-radius: 0.75rem;
+    outline: 1px solid color-mix(in srgb, var(--droid-accent) 28%, transparent);
+  }
+
+  .transcript-find-hit-active {
+    outline: 2px solid color-mix(in srgb, var(--droid-accent) 70%, transparent);
+    background-color: color-mix(in srgb, var(--droid-accent) 8%, transparent);
+  }
+
+  .transcript-range-bound {
+    outline: 2px dashed color-mix(in srgb, var(--droid-accent) 55%, transparent);
+  }
 }
