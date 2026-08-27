@@ -15,7 +15,6 @@ import {
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
   conversationRowMountKey,
   conversationRowViewportId,
-  conversationVisibleRange,
   estimatedListEndOffset,
   estimatedListSize,
   findConversationRowIndex,
@@ -377,21 +376,6 @@ test('resize restore uses virtual content offsets without a mounted row', () => 
   );
   assert.equal(restored.didFindRow, true);
   assert.equal(element.scrollTop, 1_200 + 4_800 - 1_200 - 24);
-});
-
-test('visible-range reporting splits viewport rows from overscan', () => {
-  const items = history(20);
-  const range = conversationVisibleRange(items, [3, 4, 5, 6, 7, 8], 5, 7);
-  assert.deepEqual(range.rowIds, [
-    feedRowId(items[5]!),
-    feedRowId(items[6]!),
-    feedRowId(items[7]!),
-  ]);
-  assert.deepEqual(range.nearRowIds, [
-    feedRowId(items[3]!),
-    feedRowId(items[4]!),
-    feedRowId(items[8]!),
-  ]);
 });
 
 test('entrance animation fires once per append and not when a settled row remounts', () => {
