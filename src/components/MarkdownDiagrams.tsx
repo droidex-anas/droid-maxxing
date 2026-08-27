@@ -1,6 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { Mermaid } from 'mermaid';
-import { useHeavyRendererAllowed } from './conversationVisibility';
 
 /* Renderers for the fenced languages that draw a diagram instead of code. */
 
@@ -50,10 +49,8 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string>('');
   const idRef = useRef(`mmd-${String(++mermaidSeq)}`);
-  const allowed = useHeavyRendererAllowed();
 
   useEffect(() => {
-    if (!allowed) return;
     let cancelled = false;
     const raw = code.trim();
     loadMermaid()
@@ -77,7 +74,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
     return () => {
       cancelled = true;
     };
-  }, [allowed, code]);
+  }, [code]);
 
   if (error) {
     return (

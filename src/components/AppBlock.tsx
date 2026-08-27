@@ -12,7 +12,6 @@ import {
 import { AnimatePresence, motion, useReducedMotion, type Transition } from 'framer-motion';
 import { AppWindow, Play, Square } from 'lucide-react';
 import { AppBlockErrorFallback } from './AppBlockErrorFallback';
-import { useHeavyRendererAllowed } from './conversationVisibility';
 import {
   APP_BUILD_TIMEOUT_MS,
   DEFAULT_APP_HEIGHT,
@@ -273,8 +272,6 @@ export function AppBlock({
   const previousAutoPlay = useRef(autoPlay);
   const isRunning = !isBuilding && (state === 'running' || (autoPlay && !previousAutoPlay.current));
   const reduceMotion = useReducedMotion();
-  const allowHeavy = useHeavyRendererAllowed();
-  const runFrame = isRunning && allowHeavy;
   const transition: Transition = reduceMotion
     ? { duration: 0 }
     : { duration: 0.22, ease: [0.16, 1, 0.3, 1] };
@@ -314,7 +311,7 @@ export function AppBlock({
               }
             />
           </motion.div>
-        ) : runFrame ? (
+        ) : isRunning ? (
           <motion.div
             key="running"
             initial={reduceMotion ? false : { opacity: 0, y: 4 }}
@@ -347,20 +344,6 @@ export function AppBlock({
                 Stop
               </button>
             </div>
-          </motion.div>
-        ) : isRunning ? (
-          <motion.div
-            key="waiting"
-            initial={reduceMotion ? false : { opacity: 0, y: -3 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduceMotion ? undefined : { opacity: 0, y: -3 }}
-            transition={transition}
-            className="my-3"
-          >
-            <AppLoadingSurface
-              title="Interactive app"
-              subtitle="Waiting until this row is on screen"
-            />
           </motion.div>
         ) : (
           <motion.button

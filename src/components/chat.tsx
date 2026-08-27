@@ -1,4 +1,4 @@
-import { useMemo, useState, memo, useEffect, useRef, useCallback, type RefObject } from 'react';
+import { useMemo, useState, memo, useEffect, useRef, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
@@ -75,8 +75,7 @@ import {
   type ConversationListHandle,
   type ConversationVisibleRange,
 } from './ConversationList';
-import { takeFeedRowEntrance, EMPTY_CONVERSATION_VISIBLE_RANGE } from './conversationListState';
-import { ConversationVisibilityProvider } from './conversationVisibility';
+import { takeFeedRowEntrance } from './conversationListState';
 import { MessageBody } from './MessageBody';
 import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
@@ -2707,14 +2706,6 @@ export function MessageFeed({
     : -1;
 
   const lastIdx = items.length - 1;
-  const [visibleRange, setVisibleRange] = useState(EMPTY_CONVERSATION_VISIBLE_RANGE);
-  const handleVisibleRangeChange = useCallback(
-    (range: ConversationVisibleRange) => {
-      setVisibleRange(range);
-      onVisibleRangeChange?.(range);
-    },
-    [onVisibleRangeChange],
-  );
   // Empty feeds are real (a fresh session), so the tail is genuinely optional.
   const last: FeedItem | undefined = items.length > 0 ? items[lastIdx] : undefined;
   const showSpecCard = (specContent?.length ?? 0) > 0;
@@ -2803,47 +2794,45 @@ export function MessageFeed({
         </div>
       )}
 
-      <ConversationVisibilityProvider range={visibleRange}>
-        <ConversationList
-          items={items}
-          {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
-          {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
-          {...(listRef !== undefined ? { listRef } : {})}
-          {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
-          {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
-          onVisibleRangeChange={handleVisibleRangeChange}
-        >
-          {(item, index) => (
-            <>
-              <FeedRow
-                item={item}
-                itemView={FeedItemView}
-                areItemPropsEqual={feedItemPropsEqual}
-                animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
-                live={pending && index === lastIdx && !subagentPollActive}
-                autoPlayAppBlocks={
-                  item.type === 'message' &&
-                  item.event.author !== 'user' &&
-                  freshAppResponseTexts.has(item.event.text ?? '')
-                }
-                sessionLive={pending}
-                compacting={compacting && index === lastIdx}
-                {...optionalItemProps}
-                liveTiming={rowSharedProps.liveTiming}
-                isFinalResponse={
-                  finalResponseState.settledKeys.has(item.key) ||
-                  finalResponseState.liveKeys.has(item.key)
-                }
-              />
-              {index === worktreeInsertAfter && createdWorktreePath ? (
-                <div className="mx-auto min-w-0 max-w-2xl">
-                  <WorktreeCreatedCard path={createdWorktreePath} />
-                </div>
-              ) : null}
-            </>
-          )}
-        </ConversationList>
-      </ConversationVisibilityProvider>
+      <ConversationList
+        items={items}
+        {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
+        {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
+        {...(listRef !== undefined ? { listRef } : {})}
+        {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
+        {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
+        {...(onVisibleRangeChange !== undefined ? { onVisibleRangeChange } : {})}
+      >
+        {(item, index) => (
+          <>
+            <FeedRow
+              item={item}
+              itemView={FeedItemView}
+              areItemPropsEqual={feedItemPropsEqual}
+              animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
+              live={pending && index === lastIdx && !subagentPollActive}
+              autoPlayAppBlocks={
+                item.type === 'message' &&
+                item.event.author !== 'user' &&
+                freshAppResponseTexts.has(item.event.text ?? '')
+              }
+              sessionLive={pending}
+              compacting={compacting && index === lastIdx}
+              {...optionalItemProps}
+              liveTiming={rowSharedProps.liveTiming}
+              isFinalResponse={
+                finalResponseState.settledKeys.has(item.key) ||
+                finalResponseState.liveKeys.has(item.key)
+              }
+            />
+            {index === worktreeInsertAfter && createdWorktreePath ? (
+              <div className="mx-auto min-w-0 max-w-2xl">
+                <WorktreeCreatedCard path={createdWorktreePath} />
+              </div>
+            ) : null}
+          </>
+        )}
+      </ConversationList>
 
       {showWorking && (
         <div className="mx-auto min-w-0 max-w-2xl">
