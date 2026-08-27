@@ -239,6 +239,11 @@ test('diagnostics initialize before app readiness and preferences require the tr
     mainSource,
     /readHardwareAccelerationPreferenceSync\(\{ filePath: hardwareAccelerationPreferencePath \}\)\.enabled/,
   );
+  assert.match(
+    mainSource,
+    /hardwareAccelerationPreferenceFilePath\([\s\S]*?app\.getPath\('userData'\)[\s\S]*?\)/,
+  );
+  assert.doesNotMatch(mainSource, /resolveUserDataDir|resolveHardwareAccelerationUserDataDir/);
 
   for (const channel of [
     'diagnostics-preference-get',

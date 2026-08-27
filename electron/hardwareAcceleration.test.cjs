@@ -9,7 +9,6 @@ const {
   parseHardwareAccelerationPreference,
   preferenceFilePath,
   readHardwareAccelerationPreferenceSync,
-  resolveUserDataDir,
   saveHardwareAccelerationPreference,
 } = require('./hardwareAcceleration.cjs');
 
@@ -79,21 +78,24 @@ test('settings writes round-trip through the same reader main uses at startup', 
   assert.deepEqual(readHardwareAccelerationPreferenceSync({ filePath }), { enabled: true });
 });
 
-test('resolveUserDataDir honors DROIDEX_USER_DATA_DIR', () => {
+test('preference path is rooted in the resolved userData directory', () => {
+  const userData = '/var/custom/droidex-profile';
   assert.equal(
-    resolveUserDataDir({
-      app: { getPath: () => '/Users/me/Library/Application Support' },
-      env: { DROIDEX_USER_DATA_DIR: '/custom/profile' },
-    }),
-    '/custom/profile',
+    preferenceFilePath(userData),
+    path.join(userData, 'hardware-acceleration-preferences.json'),
   );
-  assert.equal(
-    resolveUserDataDir({
-      app: { getPath: () => '/Users/me/Library/Application Support' },
-      env: {},
-    }),
-    path.join('/Users/me/Library/Application Support', 'DROIDEX'),
+});
+
+test('main reads hardware acceleration preferences from app.getPath(userData)', () => {
+  const mainSource = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, 'main.cjs'),
+    'utf8',
   );
+  assert.match(
+    mainSource,
+    /hardwareAccelerationPreferenceFilePath\([\s\S]*?app\.getPath\('userData'\)[\s\S]*?\)/,
+  );
+  assert.doesNotMatch(mainSource, /resolveUserDataDir|resolveHardwareAccelerationUserDataDir/);
 });
 
 test('invalid async preference loads fail closed for settings IPC', async () => {

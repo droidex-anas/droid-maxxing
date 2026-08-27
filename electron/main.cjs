@@ -45,7 +45,6 @@ const { createDiagnostics } = require('./diagnostics.cjs');
 const {
   preferenceFilePath: hardwareAccelerationPreferenceFilePath,
   readHardwareAccelerationPreferenceSync,
-  resolveUserDataDir: resolveHardwareAccelerationUserDataDir,
   loadHardwareAccelerationPreference,
   saveHardwareAccelerationPreference,
 } = require('./hardwareAcceleration.cjs');
@@ -127,7 +126,7 @@ app.setPath(
   process.env.DROIDEX_USER_DATA_DIR || path.join(app.getPath('appData'), APP_NAME),
 );
 const hardwareAccelerationPreferencePath = hardwareAccelerationPreferenceFilePath(
-  resolveHardwareAccelerationUserDataDir({ app }),
+  app.getPath('userData'),
 );
 if (
   !readHardwareAccelerationPreferenceSync({ filePath: hardwareAccelerationPreferencePath }).enabled

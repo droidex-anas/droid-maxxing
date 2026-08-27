@@ -9,10 +9,6 @@ function preferenceFilePath(userDataDir) {
   return path.join(userDataDir, PREFERENCE_FILENAME);
 }
 
-function resolveUserDataDir({ app, env = process.env, appName = 'DROIDEX' }) {
-  return env.DROIDEX_USER_DATA_DIR || path.join(app.getPath('appData'), appName);
-}
-
 function parseHardwareAccelerationPreference(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') return null;
   const parsed = JSON.parse(raw);
@@ -78,6 +74,5 @@ module.exports = {
   parseHardwareAccelerationPreference,
   preferenceFilePath,
   readHardwareAccelerationPreferenceSync,
-  resolveUserDataDir,
   saveHardwareAccelerationPreference,
 };
