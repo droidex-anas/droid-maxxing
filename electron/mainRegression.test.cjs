@@ -337,3 +337,31 @@ test('power-tier IPC is trusted-renderer only and browser eviction is not crash 
   assert.match(mainSource, /partition: BROWSER_PARTITION/);
   assert.match(mainSource, /const BROWSER_PARTITION = 'persist:droidex-browser'/);
 });
+
+test('serialized browser restore only drops the snapshot after a successful load', () => {
+  assert.match(mainSource, /restoreSerialized\(entry,/);
+  assert.match(
+    mainSource,
+    /loadUrl: \(target, url\) => loadNativeBrowserUrl\(target, url, \{ force: true \}\)/,
+  );
+  assert.match(
+    mainSource,
+    /reportFailure: \(target, url, error\) => \{[\s\S]*?console\.error\(`failed to restore native browser URL: \$\{message\}`\);[\s\S]*?emitNativeBrowserLoadFailed\(target, url, message\);/,
+  );
+  assert.match(
+    mainSource,
+    /releaseFailedView: \(target\) => \{[\s\S]*?target\.viewCloseReason = 'restore-failed';[\s\S]*?closeNativeBrowserEntry\(target, false\);/,
+  );
+  assert.match(
+    mainSource,
+    /if \(entry\.targetUrl && !entry\.serialized\) await loadNativeBrowserUrl\(entry, entry\.targetUrl\);/,
+  );
+  assert.match(
+    mainSource,
+    /\.then\(\(\) => \{[\s\S]*?if \(!current \|\| isChromeErrorUrl\(current\.getURL\(\)\)\) return \{ ok: false \};[\s\S]*?return \{ ok: true \};/,
+  );
+  assert.doesNotMatch(
+    mainSource,
+    /await loadNativeBrowserUrl\(entry, url, \{ force: true \}\);\s*const contents = safeWebContents\(entry\.view\);[\s\S]*?entry\.serialized = null;/,
+  );
+});
