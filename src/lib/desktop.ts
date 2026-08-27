@@ -233,6 +233,8 @@ interface DroidControlApi {
   checkAppUpdate: (options: AppUpdateCheckOptions) => Promise<AppUpdateInfo>;
   downloadAppUpdate: () => Promise<AppUpdateResult>;
   submitFeedbackReport: (report: FeedbackReportRequest) => Promise<FeedbackReportReceipt>;
+  getHardwareAcceleration: () => Promise<{ enabled: boolean }>;
+  setHardwareAcceleration: (enabled: boolean) => Promise<{ enabled: boolean }>;
   relaunchApp: () => Promise<void>;
   setAppIcon: (mode: AppIconMode) => Promise<AppIconMode>;
   openExternal: (url: string) => Promise<void>;

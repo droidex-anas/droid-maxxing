@@ -227,14 +227,30 @@ test('pull request workspace handlers validate IPC directories before PR operati
 });
 
 test('diagnostics initialize before app readiness and preferences require the trusted renderer', () => {
+  const disableAt = mainSource.indexOf('app.disableHardwareAcceleration();');
   const initializeAt = mainSource.indexOf(
     'const diagnosticsInitialization = diagnostics.initialize();',
   );
   const readyAt = mainSource.indexOf('app.whenReady().then(async () =>');
+  assert.ok(disableAt > 0 && disableAt < initializeAt);
   assert.ok(initializeAt > 0 && initializeAt < readyAt);
   assert.match(mainSource, /await diagnosticsInitialization;\s*installApplicationMenu/);
+  assert.match(
+    mainSource,
+    /readHardwareAccelerationPreferenceSync\(\{ filePath: hardwareAccelerationPreferencePath \}\)\.enabled/,
+  );
+  assert.match(
+    mainSource,
+    /hardwareAccelerationPreferenceFilePath\([\s\S]*?app\.getPath\('userData'\)[\s\S]*?\)/,
+  );
+  assert.doesNotMatch(mainSource, /resolveUserDataDir|resolveHardwareAccelerationUserDataDir/);
 
-  for (const channel of ['diagnostics-preference-get', 'diagnostics-preference-set']) {
+  for (const channel of [
+    'diagnostics-preference-get',
+    'diagnostics-preference-set',
+    'hardware-acceleration-preference-get',
+    'hardware-acceleration-preference-set',
+  ]) {
     const handlerStart = mainSource.indexOf(`ipcMain.handle('${channel}'`);
     const handlerEnd = mainSource.indexOf('\n  ipcMain.handle(', handlerStart + 1);
     assert.notEqual(handlerStart, -1);
@@ -248,6 +264,14 @@ test('diagnostics initialize before app readiness and preferences require the tr
   const preferenceHandler = mainSource.slice(preferenceHandlerStart, preferenceHandlerEnd);
   assert.match(preferenceHandler, /return diagnostics\.setAutomaticDiagnosticsEnabled\(enabled\)/);
   assert.doesNotMatch(preferenceHandler, /relaunchApp/);
+
+  const hardwareHandlerStart = mainSource.indexOf(
+    "ipcMain.handle('hardware-acceleration-preference-set'",
+  );
+  const hardwareHandlerEnd = mainSource.indexOf('\n  ipcMain.handle(', hardwareHandlerStart + 1);
+  const hardwareHandler = mainSource.slice(hardwareHandlerStart, hardwareHandlerEnd);
+  assert.match(hardwareHandler, /saveHardwareAccelerationPreference/);
+  assert.doesNotMatch(hardwareHandler, /relaunchApp/);
 });
 
 test('embedded websites cannot request unused system permissions', () => {
