@@ -10,6 +10,7 @@ import {
   type ServerEvent,
   type ServerEventBatch,
 } from './protocol.js';
+import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 interface Harness {
   port: number;
@@ -255,6 +256,7 @@ test('a generation-changed snapshot is delivered before later broadcasts', async
 });
 
 test('health endpoint requires the bridge token and reports generation', async () => {
+  hotPathMetrics.disable();
   await withServer(async (harness) => {
     const denied = await fetch(`http://127.0.0.1:${String(harness.port)}/health`);
     assert.equal(denied.status, 401);
@@ -292,9 +294,43 @@ test('perf metrics endpoint requires the bridge token', async () => {
       `http://127.0.0.1:${String(harness.port)}/perf/metrics?token=${harness.token}`,
     );
     assert.equal(allowed.status, 200);
-    const body = (await allowed.json()) as { pid: number; counters: Record<string, number> };
+    const body = (await allowed.json()) as {
+      pid: number;
+      counters: Record<string, number>;
+      eventLoop: { meanMs: number } | null;
+    };
     assert.equal(typeof body.pid, 'number');
     assert.ok(body.counters);
+    assert.equal(body.eventLoop, null);
+  });
+});
+
+test('perf metrics can arm event-loop sampling on demand without changing /health liveness', async () => {
+  await withServer(async (harness) => {
+    try {
+      const idle = await fetch(
+        `http://127.0.0.1:${String(harness.port)}/perf/metrics?token=${harness.token}`,
+      );
+      const idleBody = (await idle.json()) as { eventLoop: { meanMs: number } | null };
+      assert.equal(idleBody.eventLoop, null);
+
+      const armed = await fetch(
+        `http://127.0.0.1:${String(harness.port)}/perf/metrics?token=${harness.token}&eventLoop=1`,
+      );
+      const armedBody = (await armed.json()) as { eventLoop: { meanMs: number } | null };
+      assert.ok(armedBody.eventLoop !== null);
+      assert.ok(Number.isFinite(armedBody.eventLoop.meanMs));
+
+      const health = await fetch(
+        `http://127.0.0.1:${String(harness.port)}/health?token=${harness.token}`,
+      );
+      assert.equal(health.status, 200);
+      const healthBody = (await health.json()) as { ok: boolean; eventLoopDelayMs: number };
+      assert.equal(healthBody.ok, true);
+      assert.equal(typeof healthBody.eventLoopDelayMs, 'number');
+    } finally {
+      hotPathMetrics.disable();
+    }
   });
 });
 

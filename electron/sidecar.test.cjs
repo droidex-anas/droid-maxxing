@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { createSidecarSupervisor } = require('./sidecar.cjs');
+const http = require('node:http');
+const { createSidecarSupervisor, defaultRequestHealth } = require('./sidecar.cjs');
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -242,6 +243,59 @@ test('a missed heartbeat degrades without declaring the process dead', async () 
   assert.equal(health.lifecycle, 'degraded');
   assert.equal(health.processAlive, true);
   assert.equal(health.bridgeResponsive, false);
+});
+
+test('a hung /health times out even when the sidecar never writes a response', async () => {
+  const server = http.createServer(() => {
+    // Intentionally never respond: a blocked event loop looks like this.
+  });
+  await new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  try {
+    await assert.rejects(
+      defaultRequestHealth({ port: address.port, token: 't', timeoutMs: 40 }),
+      (error) => error instanceof Error,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('a live sidecar whose /health is blocked is degraded and is not restarted', async () => {
+  const child = fakeChild();
+  let blocked = false;
+  const { supervisor, calls, flushScheduled, scheduled } = harness([child], {
+    requestHealth: async () => {
+      if (!blocked) return { ok: true };
+      throw new Error('This operation was aborted');
+    },
+  });
+  child.stdout.write('SIDECAR_READY 43001\n');
+  await supervisor.start();
+  assert.equal(calls.length, 1);
+  assert.equal(supervisor.snapshot().lifecycle, 'healthy');
+
+  blocked = true;
+  flushScheduled();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const health = supervisor.snapshot();
+  assert.equal(health.lifecycle, 'degraded');
+  assert.equal(health.processAlive, true);
+  assert.equal(health.bridgeResponsive, false);
+  assert.match(String(health.reason), /timed out while the sidecar process is still running/);
+  assert.equal(calls.length, 1);
+  const pending = scheduled.filter((item) => !item.cancelled);
+  assert.equal(pending.length > 0, true);
+  assert.equal(
+    pending.every((item) => item.delayMs === 2_000),
+    true,
+    'only the heartbeat remains armed; a blocked /health must not schedule a restart',
+  );
 });
 
 test('bridge-info waits for the supervisor restart and does not spawn a second sidecar', async () => {

@@ -171,6 +171,7 @@ export class HotPathMetrics {
     this.cpuBaseline = process.cpuUsage();
   }
 
+  /** Arm the 10 ms event-loop histogram. Production `enable()` leaves it off. */
   enableEventLoop(): void {
     if (this.startedAt === 0) this.enable();
     if (this.eventLoopEnabled) return;

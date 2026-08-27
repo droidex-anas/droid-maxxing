@@ -323,6 +323,11 @@ export function startBridgeServer(options: {
       res.writeHead(401).end('unauthorized');
       return true;
     }
+    // Production idle never arms the 10 ms sampler. Support can opt in for
+    // the rest of this process: GET /perf/metrics?token=…&eventLoop=1
+    if (url.searchParams.get('eventLoop') === '1') {
+      hotPathMetrics.enableEventLoop();
+    }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(hotPathMetrics.snapshot()));
     return true;
