@@ -223,9 +223,10 @@ test('a streaming response keeps the same element types across renders', () => {
     .type;
   const childOf = (element: ReactElement) => (element.props as { children: ReactElement }).children;
   const componentsFor = (props: MarkdownProps) => {
-    // Markdown wraps the react-markdown element in a layout div and the fence
-    // options provider.
-    const markdown = childOf(childOf(renderMarkdown(props)));
+    const shell = renderMarkdown(props);
+    const tree = childOf(shell);
+    const renderedTree = (tree.type as (treeProps: unknown) => ReactElement)(tree.props);
+    const markdown = childOf(renderedTree);
     return (markdown.props as { components: Record<string, unknown> }).components;
   };
 

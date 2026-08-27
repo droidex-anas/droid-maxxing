@@ -1,4 +1,4 @@
-import { useMemo, useState, memo, useEffect, useRef, type RefObject } from 'react';
+import { useMemo, useState, memo, useEffect, useRef, useCallback, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
@@ -15,9 +15,8 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
-import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlockRuntime';
+import { hasAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
-import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
   extractFileChange,
   MAX_DIFF_CARDS_PER_COMMIT,
@@ -76,7 +75,9 @@ import {
   type ConversationListHandle,
   type ConversationVisibleRange,
 } from './ConversationList';
-import { takeFeedRowEntrance } from './conversationListState';
+import { takeFeedRowEntrance, EMPTY_CONVERSATION_VISIBLE_RANGE } from './conversationListState';
+import { ConversationVisibilityProvider } from './conversationVisibility';
+import { MessageBody } from './MessageBody';
 import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import {
@@ -2031,58 +2032,6 @@ const InlineSpecCard = memo(function InlineSpecCard({
   );
 });
 
-/* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({
-  text,
-  live,
-  autoPlayAppBlocks,
-}: {
-  text: string;
-  live: boolean;
-  autoPlayAppBlocks: boolean;
-}) {
-  // Strip the history "[truncated N chars]" sentinel so the raw marker never
-  // shows; the cut itself is intentionally not surfaced.
-  const { body, truncatedChars } = parseTruncatedTail(text);
-  const hasCompleteApp = hasCompleteAppBlock(body);
-  const buildingAppBlocks = live && hasAppBlock(body);
-  // History caps message text. When that cut landed inside an App fence the
-  // source can never run, so the block says so instead of offering a Play
-  // control that would start an empty App. Only replayed text can be cut: a
-  // live answer whose tail merely looks like the sentinel is still streaming.
-  const cutOffAppBlocks = !live && truncatedChars !== null && hasIncompleteAppBlock(body);
-  const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
-  if (!hasJsonRender(body))
-    return (
-      <Markdown
-        autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-        buildingAppBlocks={buildingAppBlocks}
-        cutOffAppBlocks={cutOffAppBlocks}
-      >
-        {body}
-      </Markdown>
-    );
-  const segments = splitJsonRender(body);
-  return (
-    <>
-      {segments.map((seg, i) =>
-        seg.type === 'json-render' ? (
-          <JsonRender key={i} source={seg.value} />
-        ) : seg.value.trim() ? (
-          <Markdown
-            key={i}
-            autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-            buildingAppBlocks={buildingAppBlocks}
-            cutOffAppBlocks={cutOffAppBlocks}
-          >
-            {seg.value}
-          </Markdown>
-        ) : null,
-      )}
-    </>
-  );
-});
-
 export interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
@@ -2235,7 +2184,12 @@ const FeedItemView = memo(function FeedItemView({
       const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
-          <MessageBody text={text} live={live} autoPlayAppBlocks={autoPlayAppBlocks} />
+          <MessageBody
+            text={text}
+            live={live}
+            autoPlayAppBlocks={autoPlayAppBlocks}
+            cacheId={item.key}
+          />
           {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
@@ -2753,6 +2707,14 @@ export function MessageFeed({
     : -1;
 
   const lastIdx = items.length - 1;
+  const [visibleRange, setVisibleRange] = useState(EMPTY_CONVERSATION_VISIBLE_RANGE);
+  const handleVisibleRangeChange = useCallback(
+    (range: ConversationVisibleRange) => {
+      setVisibleRange(range);
+      onVisibleRangeChange?.(range);
+    },
+    [onVisibleRangeChange],
+  );
   // Empty feeds are real (a fresh session), so the tail is genuinely optional.
   const last: FeedItem | undefined = items.length > 0 ? items[lastIdx] : undefined;
   const showSpecCard = (specContent?.length ?? 0) > 0;
@@ -2841,45 +2803,47 @@ export function MessageFeed({
         </div>
       )}
 
-      <ConversationList
-        items={items}
-        {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
-        {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
-        {...(listRef !== undefined ? { listRef } : {})}
-        {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
-        {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
-        {...(onVisibleRangeChange !== undefined ? { onVisibleRangeChange } : {})}
-      >
-        {(item, index) => (
-          <>
-            <FeedRow
-              item={item}
-              itemView={FeedItemView}
-              areItemPropsEqual={feedItemPropsEqual}
-              animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
-              live={pending && index === lastIdx && !subagentPollActive}
-              autoPlayAppBlocks={
-                item.type === 'message' &&
-                item.event.author !== 'user' &&
-                freshAppResponseTexts.has(item.event.text ?? '')
-              }
-              sessionLive={pending}
-              compacting={compacting && index === lastIdx}
-              {...optionalItemProps}
-              liveTiming={rowSharedProps.liveTiming}
-              isFinalResponse={
-                finalResponseState.settledKeys.has(item.key) ||
-                finalResponseState.liveKeys.has(item.key)
-              }
-            />
-            {index === worktreeInsertAfter && createdWorktreePath ? (
-              <div className="mx-auto min-w-0 max-w-2xl">
-                <WorktreeCreatedCard path={createdWorktreePath} />
-              </div>
-            ) : null}
-          </>
-        )}
-      </ConversationList>
+      <ConversationVisibilityProvider range={visibleRange}>
+        <ConversationList
+          items={items}
+          {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
+          {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
+          {...(listRef !== undefined ? { listRef } : {})}
+          {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
+          {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
+          onVisibleRangeChange={handleVisibleRangeChange}
+        >
+          {(item, index) => (
+            <>
+              <FeedRow
+                item={item}
+                itemView={FeedItemView}
+                areItemPropsEqual={feedItemPropsEqual}
+                animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
+                live={pending && index === lastIdx && !subagentPollActive}
+                autoPlayAppBlocks={
+                  item.type === 'message' &&
+                  item.event.author !== 'user' &&
+                  freshAppResponseTexts.has(item.event.text ?? '')
+                }
+                sessionLive={pending}
+                compacting={compacting && index === lastIdx}
+                {...optionalItemProps}
+                liveTiming={rowSharedProps.liveTiming}
+                isFinalResponse={
+                  finalResponseState.settledKeys.has(item.key) ||
+                  finalResponseState.liveKeys.has(item.key)
+                }
+              />
+              {index === worktreeInsertAfter && createdWorktreePath ? (
+                <div className="mx-auto min-w-0 max-w-2xl">
+                  <WorktreeCreatedCard path={createdWorktreePath} />
+                </div>
+              ) : null}
+            </>
+          )}
+        </ConversationList>
+      </ConversationVisibilityProvider>
 
       {showWorking && (
         <div className="mx-auto min-w-0 max-w-2xl">

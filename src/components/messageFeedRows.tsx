@@ -5,6 +5,7 @@ import type { ChildSessionActivity, ChildSessionTarget } from '../lib/childSessi
 import type { FileChange } from '../lib/diff';
 import { hasAppBlock } from './appBlockRuntime';
 import type { FeedItemViewProps } from './chat';
+import { ConversationRowScope } from './conversationVisibility';
 import type { SubagentsDockData } from './SubagentsDock';
 
 export interface FeedRowProps extends FeedItemViewProps {
@@ -32,15 +33,17 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
     item.type === 'message' && item.event.author !== 'user' && hasAppBlock(item.event.text ?? '');
 
   return (
-    <div
-      data-feed-row-id={feedRowId(item)}
-      data-anchor-id={isPrompt ? item.key : undefined}
-      className={`mx-auto min-w-0 ${isWideAppResponse ? 'max-w-4xl' : 'max-w-2xl'} ${
-        animate ? 'feed-row-enter' : ''
-      }`}
-    >
-      <ItemView {...itemProps} />
-    </div>
+    <ConversationRowScope rowId={feedRowId(item)}>
+      <div
+        data-feed-row-id={feedRowId(item)}
+        data-anchor-id={isPrompt ? item.key : undefined}
+        className={`mx-auto min-w-0 ${isWideAppResponse ? 'max-w-4xl' : 'max-w-2xl'} ${
+          animate ? 'feed-row-enter' : ''
+        }`}
+      >
+        <ItemView {...itemProps} />
+      </div>
+    </ConversationRowScope>
   );
 }, areFeedRowPropsEqual);
 

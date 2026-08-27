@@ -1,5 +1,6 @@
 import { Fragment, memo, useMemo, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
+import { useHeavyRendererAllowed } from './conversationVisibility';
 
 /* ─────────────────────────────────────────────────────────────────────────
  * Rich <json-render> renderer.
@@ -548,14 +549,24 @@ function ErrorFallback({ raw }: { raw: string }) {
 }
 
 export const JsonRender = memo(function JsonRender({ source }: { source: string }) {
+  const allowed = useHeavyRendererAllowed();
   const parsed = useMemo<Spec | null>(() => {
+    if (!allowed) return null;
     try {
       const obj = JSON.parse(source.trim());
       return obj && typeof obj === 'object' ? (obj as Spec) : null;
     } catch {
       return null;
     }
-  }, [source]);
+  }, [allowed, source]);
+
+  if (!allowed) {
+    return (
+      <div className="my-2.5 rounded-xl border border-droid-border bg-droid-elevated/20 px-3 py-2 text-[12px] text-droid-text-muted">
+        Visualization
+      </div>
+    );
+  }
 
   if (!parsed || !parsed.elements || !parsed.root) {
     return <ErrorFallback raw={source.trim()} />;
