@@ -48,6 +48,7 @@ export interface ChildTurnState {
   phase: 'idle' | 'streaming';
   autoCompacting: boolean;
   pendingSends: string[];
+  pendingDrainEpoch: number;
   interruptingForSteer: boolean;
   interrupting: boolean;
 }
@@ -146,6 +147,7 @@ export function childStateFromRecord(record: PersistedChildSession): ChildSessio
       phase: 'idle',
       autoCompacting: false,
       pendingSends: [],
+      pendingDrainEpoch: 0,
       interruptingForSteer: false,
       interrupting: false,
     },
