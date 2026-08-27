@@ -70,6 +70,36 @@ export function isDueForRetirement(
   return isRetirableSession(facts) && now - facts.idleSince >= idleMs;
 }
 
+// A sidecar restart takes every provider process, browser, and pending edit
+// with it, so a journalled session reaches the next boot with those facts
+// settled by construction. Idleness, the phase it exited in, and its children's
+// last known status are the three that survive, and adoption can read all
+// three. Stating them here lets adoption ask these rules whether resurrecting a
+// session would only spawn a process the first sweep releases, instead of
+// holding a second opinion about what is worth resuming.
+export function adoptedSessionFacts(identity: {
+  appSessionId: string;
+  phase: SessionPhase;
+  streaming: boolean;
+  lastActiveAt: number;
+  hasUnsettledChildren: boolean;
+}): SessionRetirementFacts {
+  return {
+    appSessionId: identity.appSessionId,
+    idleSince: identity.lastActiveAt,
+    phase: identity.phase,
+    streaming: identity.streaming,
+    hasUnsettledChildren: identity.hasUnsettledChildren,
+    compacting: false,
+    queuedSends: 0,
+    interrupting: false,
+    closing: false,
+    focused: false,
+    hasOpenBrowser: false,
+    hasPendingSettings: false,
+  };
+}
+
 export function retirableSessions(
   facts: Iterable<SessionRetirementFacts>,
   now: number,

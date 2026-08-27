@@ -530,6 +530,8 @@ export class SessionManager {
       emitStatus: (appSessionId, text) => {
         this.timeline.appendStatus(appSessionId, text);
       },
+      sessionRuntimeIdleMs: limits.sessionRuntimeIdleMs,
+      now: Date.now,
     });
     this.sessionBrowser = new SessionBrowser({
       browsers: this.browsers,

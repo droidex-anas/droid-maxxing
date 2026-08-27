@@ -24,6 +24,11 @@ export interface LiveRuntimeIdentities {
   children: LiveChildIdentity[];
 }
 
+// Test-harness trap: a SessionManager built without an explicit user data
+// directory journals to `DROIDEX_USER_DATA_DIR`, so a stale `live-runtime.json`
+// left there by a manual run makes every later suite run adopt sessions the
+// test never created. It shows up as unrelated tests failing on phantom
+// sessions. Unset the variable, or point it at a fresh directory per run.
 export function liveRuntimeJournalPath(userDataDir: string): string {
   return join(userDataDir, JOURNAL_NAME);
 }
