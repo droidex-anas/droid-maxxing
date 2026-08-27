@@ -46,7 +46,7 @@ export interface SessionRetirementFacts {
 // a resource the user would notice must have settled. Retiring runs the same
 // close as an explicit session close, which takes the child subtree and the
 // embedded browser with it.
-export function isRetirableSession(facts: SessionRetirementFacts): boolean {
+function isRetirableSession(facts: SessionRetirementFacts): boolean {
   return (
     !facts.focused &&
     !UNANSWERED_PHASES.has(facts.phase) &&
@@ -61,6 +61,14 @@ export function isRetirableSession(facts: SessionRetirementFacts): boolean {
   );
 }
 
+export function isDueForRetirement(
+  facts: SessionRetirementFacts,
+  now: number,
+  idleMs: number,
+): boolean {
+  return isRetirableSession(facts) && now - facts.idleSince >= idleMs;
+}
+
 export function retirableSessions(
   facts: Iterable<SessionRetirementFacts>,
   now: number,
@@ -68,8 +76,7 @@ export function retirableSessions(
 ): string[] {
   const due: string[] = [];
   for (const session of facts) {
-    if (!isRetirableSession(session)) continue;
-    if (now - session.idleSince >= idleMs) due.push(session.appSessionId);
+    if (isDueForRetirement(session, now, idleMs)) due.push(session.appSessionId);
   }
   return due;
 }
@@ -149,18 +156,18 @@ export class SessionRuntimeRetirement {
   // past the idle budget. The transcript, history, and sidebar entry survive;
   // the next prompt reloads the provider session.
   async sweep(): Promise<void> {
-    for (const appSessionId of retirableSessions(
-      this.facts(),
-      this.dependencies.now(),
-      this.dependencies.idleMs,
-    )) {
+    const d = this.dependencies;
+    for (const appSessionId of retirableSessions(this.facts(), d.now(), d.idleMs)) {
       if (this.stopped) break;
-      this.dependencies.emitStatus(appSessionId, SESSION_RUNTIME_RETIRED_STATUS);
+      // Each release awaits, and a prompt can reach a session still waiting in
+      // this queue during that window, so the decision is taken again here.
+      const current = this.factsFor(appSessionId);
+      if (!current || !isDueForRetirement(current, d.now(), d.idleMs)) continue;
+      d.emitStatus(appSessionId, SESSION_RUNTIME_RETIRED_STATUS);
       try {
-        await this.dependencies.retire(appSessionId);
-        this.unfocusedAt.delete(appSessionId);
+        await d.retire(appSessionId);
       } catch (error) {
-        this.dependencies.emitError(
+        d.emitError(
           appSessionId,
           `Could not release this session's idle runtime: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -173,25 +180,44 @@ export class SessionRuntimeRetirement {
   // looking at: without that signal we cannot tell a background session from
   // the one on screen.
   private facts(): SessionRetirementFacts[] {
+    const live = this.dependencies.liveSessions();
+    this.forgetClosedSessions(live);
     if (!this.focusReported) return [];
+    return live.map((session) => this.describe(session));
+  }
+
+  private factsFor(appSessionId: string): SessionRetirementFacts | undefined {
+    if (!this.focusReported) return undefined;
+    const live = this.dependencies
+      .liveSessions()
+      .find((session) => session.summary.appSessionId === appSessionId);
+    return live ? this.describe(live) : undefined;
+  }
+
+  private describe(live: LiveSession): SessionRetirementFacts {
     const d = this.dependencies;
-    const focused = d.focusedAppSessionId();
-    return d.liveSessions().map((live) => {
-      const appSessionId = live.summary.appSessionId;
-      return {
-        appSessionId,
-        idleSince: Math.max(live.summary.updatedAt, this.unfocusedAt.get(appSessionId) ?? 0),
-        phase: live.summary.phase,
-        streaming: live.streaming || live.summary.streaming === true,
-        compacting: live.compacting === true || live.autoCompacting,
-        queuedSends: live.pendingSends.length,
-        interrupting: live.interrupting === true || live.interruptingForSteer === true,
-        closing: live.closeMode !== undefined,
-        focused: appSessionId === focused,
-        hasUnsettledChildren: d.hasUnsettledChildren(appSessionId),
-        hasOpenBrowser: d.hasOpenBrowser(appSessionId),
-        hasPendingSettings: d.hasPendingSettings(appSessionId),
-      };
-    });
+    const appSessionId = live.summary.appSessionId;
+    return {
+      appSessionId,
+      idleSince: Math.max(live.summary.updatedAt, this.unfocusedAt.get(appSessionId) ?? 0),
+      phase: live.summary.phase,
+      streaming: live.streaming || live.summary.streaming === true,
+      compacting: live.compacting === true || live.autoCompacting,
+      queuedSends: live.pendingSends.length,
+      interrupting: live.interrupting === true || live.interruptingForSteer === true,
+      closing: live.closeMode !== undefined,
+      focused: appSessionId === d.focusedAppSessionId(),
+      hasUnsettledChildren: d.hasUnsettledChildren(appSessionId),
+      hasOpenBrowser: d.hasOpenBrowser(appSessionId),
+      hasPendingSettings: d.hasPendingSettings(appSessionId),
+    };
+  }
+
+  private forgetClosedSessions(live: readonly LiveSession[]): void {
+    if (this.unfocusedAt.size === 0) return;
+    const open = new Set(live.map((session) => session.summary.appSessionId));
+    for (const appSessionId of this.unfocusedAt.keys()) {
+      if (!open.has(appSessionId)) this.unfocusedAt.delete(appSessionId);
+    }
   }
 }

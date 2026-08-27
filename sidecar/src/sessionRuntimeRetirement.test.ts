@@ -205,6 +205,57 @@ test('a session stays warm for a full budget after the user switches away from i
   assert.deepEqual(h.retired, ['read-for-a-while']);
 });
 
+test('a prompt that arrives during an earlier release saves the session behind it', async () => {
+  let releaseSecond = (): void => undefined;
+  const retired: string[] = [];
+  const h = ownerHarness({
+    retire: (appSessionId) => {
+      retired.push(appSessionId);
+      if (appSessionId !== 'first') return Promise.resolve();
+      // Standing in for the awaited close of the session ahead in the queue.
+      return new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+    },
+  });
+  h.add('first', 0);
+  const second = h.add('second', 0);
+  h.focus.current = 'elsewhere';
+  h.owner.noteFocus(null);
+  h.clock.now = IDLE_MS * 10;
+
+  const sweeping = h.owner.sweep();
+  second.streaming = true;
+  releaseSecond();
+  await sweeping;
+
+  assert.deepEqual(retired, ['first']);
+  assert.deepEqual(
+    h.statuses.map(({ appSessionId }) => appSessionId),
+    ['first'],
+    'a session that started a turn must not be told its runtime went away',
+  );
+});
+
+test('a closed session stops carrying the moment the user last looked at it', async () => {
+  const h = ownerHarness();
+  h.add('reopened', 0);
+  h.focus.current = 'reopened';
+  h.owner.noteFocus(null);
+  h.clock.now = IDLE_MS * 10;
+
+  h.focus.current = 'elsewhere';
+  h.owner.noteFocus('reopened');
+  h.live.delete('reopened');
+  h.owner.arm();
+
+  // Resumed with nothing newer than its last turn: the pre-close switch-away
+  // must not be what keeps it warm.
+  h.add('reopened', 0);
+  await h.owner.sweep();
+  assert.deepEqual(h.retired, ['reopened']);
+});
+
 test('a failed release is reported and does not stop the rest of the sweep', async () => {
   const h = ownerHarness({
     retire: (appSessionId) => {

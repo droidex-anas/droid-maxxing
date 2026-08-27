@@ -38,6 +38,8 @@ function historicalSummary(
   };
 }
 
+// A session file only becomes a sidebar row once it holds a real exchange, so
+// the prompt is as load-bearing as the answer the assertions read back.
 function writeHistorySession(home: string, id: string, text: string): SessionFileChange {
   const dir = path.join(home, '.factory', 'sessions', '2026', '08');
   mkdirSync(dir, { recursive: true });
@@ -51,6 +53,12 @@ function writeHistorySession(home: string, id: string, text: string): SessionFil
         cwd: home,
         sessionTitle: 'History',
         settings: { interactionMode: 'auto' },
+      }),
+      JSON.stringify({
+        type: 'message',
+        id: `${id}-user`,
+        timestamp: new Date(0).toISOString(),
+        message: { role: 'user', content: [{ type: 'text', text: 'the earlier question' }] },
       }),
       JSON.stringify({
         type: 'message',
@@ -365,6 +373,17 @@ test('a retired session reopens on the next prompt with its history intact', asy
       history.transcripts.some((event) => (event.text ?? '').includes('the earlier answer')),
       true,
       'the reopened transcript must still contain the earlier turn',
+    );
+
+    await h.handle({ type: 'sessions.list' });
+    const listed = h.events.findLast(
+      (event): event is Extract<Protocol.ServerEvent, { type: 'sessions.list' }> =>
+        event.type === 'sessions.list',
+    );
+    assert.equal(
+      listed?.sessions.some((entry) => entry.appSessionId === session.appSessionId),
+      true,
+      'a retired session must stay in the sidebar',
     );
 
     await h.handle({
