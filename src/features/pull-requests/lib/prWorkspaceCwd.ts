@@ -1,4 +1,5 @@
 import { comparablePath } from '../../../lib/pathComparison';
+import { repositoryRootCwd, uniqueRepositoryWorkspaceCwds } from '../../../lib/workspaces';
 
 export function sanitizePersistedPrWorkspace(
   cwdValue: unknown,
@@ -53,4 +54,47 @@ export function resolvePrWorkspaceCwd(input: {
     input.workspaceCwds.some((cwd) => comparablePath(cwd) === bound) ||
     (input.activeCwd != null && comparablePath(input.activeCwd) === bound);
   return stillKnown ? input.boundCwd : fallback;
+}
+
+function focusPullRequestCwd(input: {
+  active: { cwd?: string | null; workspaceKind?: 'folder' | 'none' } | null | undefined;
+  draftCwd?: string | null;
+}): string | null {
+  if (input.active) {
+    if (input.active.workspaceKind === 'folder' && input.active.cwd) return input.active.cwd;
+    return null;
+  }
+  const draft = input.draftCwd?.trim();
+  return draft || null;
+}
+
+export function resolvePrInboxContext(input: {
+  active: { cwd?: string | null; workspaceKind?: 'folder' | 'none' } | null | undefined;
+  draftCwd?: string | null;
+  workspaceCwds: readonly string[];
+  boundCwd: string | null;
+  boundNumber: number | null;
+}): {
+  listingCwds: string[];
+  currentCwd: string | null;
+  boundCwd: string | null;
+  selectedNumber: number | null;
+} {
+  const focusCwd = focusPullRequestCwd(input);
+  const listingCwds = uniqueRepositoryWorkspaceCwds([
+    ...(focusCwd ? [focusCwd] : []),
+    ...input.workspaceCwds,
+  ]);
+  const currentCwd = repositoryRootCwd(focusCwd) ?? listingCwds[0] ?? null;
+  const selectedRoot = repositoryRootCwd(input.boundCwd);
+  const boundCwd =
+    selectedRoot && listingCwds.some((cwd) => comparablePath(cwd) === comparablePath(selectedRoot))
+      ? selectedRoot
+      : currentCwd;
+  return {
+    listingCwds,
+    currentCwd,
+    boundCwd,
+    selectedNumber: selectionForPrWorkspace(selectedRoot, boundCwd, input.boundNumber),
+  };
 }

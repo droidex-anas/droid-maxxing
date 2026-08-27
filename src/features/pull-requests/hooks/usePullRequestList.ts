@@ -1,63 +1,61 @@
-import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react';
 
 import { listPullRequests } from '../../../lib/github';
-import { initialPrListState, reducePrList } from '../lib/prListState';
+import { initialPrListState, mergePullRequestLists, reducePrList } from '../lib/prListState';
 
 const POLL_MS = 20000;
 
-export function usePullRequestList(cwd: string | null, enabled: boolean) {
+export function usePullRequestList(cwds: string[], enabled: boolean) {
   const [state, dispatch] = useReducer(reducePrList, initialPrListState);
   const generationRef = useRef(state.generation);
-  // A poll and a manual refresh can be in flight together on one repository, so
-  // only the newest request may settle: the generation alone cannot tell them
-  // apart.
+  // A poll and a manual refresh can be in flight together, so only the newest
+  // request may settle: the generation alone cannot tell them apart.
   const requestRef = useRef(0);
+  const cwdsKey = cwds.join('\n');
+  const listedCwds = useMemo(() => cwds, [cwdsKey]);
 
   const load = useCallback(
     (userInitiated: boolean) => {
-      if (!cwd || !enabled) return;
+      if (!enabled || listedCwds.length === 0) return;
       const generation = generationRef.current;
       requestRef.current += 1;
       const request = requestRef.current;
       if (userInitiated) {
         dispatch({ type: 'load-start', generation });
       }
-      void listPullRequests(cwd).then((result) => {
+      void Promise.all(
+        listedCwds.map(async (cwd) => ({ cwd, result: await listPullRequests(cwd) })),
+      ).then((entries) => {
         if (generation !== generationRef.current || request !== requestRef.current) return;
-        if (result.ok) {
-          dispatch({
-            type: 'load-success',
-            generation,
-            prs: result.prs,
-            viewerLogin: result.viewerLogin,
-          });
-          return;
-        }
+        const merged = mergePullRequestLists(entries);
         dispatch({
-          type: 'load-failure',
+          type: 'load-success',
           generation,
-          message: result.message ?? 'Could not load pull requests',
+          prs: merged.prs,
+          viewerLogin: merged.viewerLogin,
+          repoErrors: merged.repoErrors,
+          error: merged.error,
         });
       });
     },
-    [cwd, enabled],
+    [enabled, listedCwds],
   );
 
-  // Losing the binding (the repository stops being listable) must invalidate any
-  // in-flight request too, or re-enabling the same repository renders its rows.
+  // Losing the binding (no listable repositories) must invalidate any in-flight
+  // request too, or re-enabling the same set renders its rows.
   useLayoutEffect(() => {
-    dispatch({ type: 'bind', cwd });
+    dispatch({ type: 'bind', cwds: listedCwds });
     generationRef.current += 1;
-  }, [cwd, enabled]);
+  }, [cwdsKey, enabled, listedCwds]);
 
   useLayoutEffect(() => {
-    if (!enabled || !cwd) return;
+    if (!enabled || listedCwds.length === 0) return;
     dispatch({ type: 'load-start', generation: generationRef.current });
     load(false);
-  }, [cwd, enabled, load]);
+  }, [enabled, listedCwds, load]);
 
   useEffect(() => {
-    if (!enabled || !cwd) return;
+    if (!enabled || listedCwds.length === 0) return;
     const tick = () => {
       if (!document.hidden) load(false);
     };
@@ -67,7 +65,7 @@ export function usePullRequestList(cwd: string | null, enabled: boolean) {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', tick);
     };
-  }, [cwd, enabled, load]);
+  }, [enabled, listedCwds, load]);
 
   const refresh = useCallback(() => {
     load(true);
@@ -79,6 +77,7 @@ export function usePullRequestList(cwd: string | null, enabled: boolean) {
     loading: state.loading,
     loaded: state.loaded,
     error: state.error,
+    repoErrors: state.repoErrors,
     refresh,
   };
 }

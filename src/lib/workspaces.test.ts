@@ -8,6 +8,8 @@ import {
   discoverWorkspaceScopes,
   resolveNewChatCwd,
   SIDEBAR_VISIBLE_SESSION_LIMIT,
+  uniqueRepositoryWorkspaceCwds,
+  repositoryRootCwd,
 } from './workspaces';
 
 const session = (appSessionId: string, cwd: string, updatedAt: number): SessionSummary => ({
@@ -37,6 +39,26 @@ test('addWorkspaceCwd keeps explicit workspaces unique and ordered newest first'
     '/repo/new',
   ]);
   assert.deepEqual(addWorkspaceCwd(['/repo/old'], ''), ['/repo/old']);
+});
+
+test('uniqueRepositoryWorkspaceCwds collapses worktrees of the same repository', () => {
+  assert.deepEqual(
+    uniqueRepositoryWorkspaceCwds([
+      '/repo/app/.worktrees/feature',
+      '/repo/app',
+      '/repo/site',
+      '/repo/app/.worktrees/other',
+      '',
+    ]),
+    ['/repo/app', '/repo/site'],
+  );
+});
+
+test('repositoryRootCwd collapses a worktree path and ignores empty values', () => {
+  assert.equal(repositoryRootCwd('/repo/app/.worktrees/feature'), '/repo/app');
+  assert.equal(repositoryRootCwd('/repo/app'), '/repo/app');
+  assert.equal(repositoryRootCwd(null), null);
+  assert.equal(repositoryRootCwd('  '), null);
 });
 
 test('resolveNewChatCwd inherits the active workspace session folder', () => {

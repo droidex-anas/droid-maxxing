@@ -858,6 +858,20 @@ test('listPrs failed gh keeps no invented rows', async () => {
   assert.equal(result.viewerLogin, null);
 });
 
+test('listPrs classifies an unresolved GitHub repository without raw GraphQL', async () => {
+  const runGh = async () =>
+    ghResult({
+      code: 1,
+      stderr:
+        "GraphQL: Could not resolve to a Repository with the name 'evilfps/dr-koshley-skin-clinic'. (repository)",
+    });
+  const result = await listPrs('/clinic', {}, runGh);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'unresolved_repository');
+  assert.equal(result.message, 'GitHub could not find evilfps/dr-koshley-skin-clinic.');
+  assert.deepEqual(result.prs, []);
+});
+
 test('viewPr rejects a non-integer selector before spawning gh', async () => {
   let spawned = false;
   const runGh = async () => {

@@ -94,6 +94,25 @@ function repositoryWorkspaceCwd(cwd: string): string {
   return marker ? cwd.slice(0, marker.index) : cwd;
 }
 
+export function uniqueRepositoryWorkspaceCwds(workspaceCwds: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const cwd of workspaceCwds) {
+    const root = repositoryWorkspaceCwd(cwd.trim());
+    if (!root) continue;
+    const key = comparablePath(root);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(root);
+  }
+  return out;
+}
+
+export function repositoryRootCwd(cwd: string | null | undefined): string | null {
+  if (!cwd || !cwd.trim()) return null;
+  return uniqueRepositoryWorkspaceCwds([cwd])[0] ?? null;
+}
+
 export function buildWorkspaceSections(
   workspaceCwds: string[],
   sessions: SessionSummary[],
