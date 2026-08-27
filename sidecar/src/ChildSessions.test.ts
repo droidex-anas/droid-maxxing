@@ -1666,7 +1666,11 @@ test('interrupt dequeues a waiting child without opening a runtime', async () =>
     'keep busy',
   );
   await new Promise<void>((resolve) => setImmediate(resolve));
-  await h.open(second);
+  const secondSession = await h.open(second);
+  await h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'cancelled while queued',
+  );
   await h.owner.interrupt({
     parentAppSessionId: h.parentId,
     childSessionId: second.childSessionId,
@@ -1678,4 +1682,118 @@ test('interrupt dequeues a waiting child without opening a runtime', async () =>
   );
   streamGate.resolve();
   await sending;
+  assert.deepEqual(secondSession.prompts, []);
+  assert.equal(
+    h.calls.some(
+      (call) =>
+        call.target === 'runtime' &&
+        call.method === 'loadSession' &&
+        call.args[0] === 'provider-second',
+    ),
+    false,
+  );
+});
+
+test('interrupt of a queued child drops buffered sends even after a later open', async () => {
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const h = createHarness([first, second], { maxOpenSessions: 4, maxLiveRuntimes: 1 });
+  const firstSession = new FakeFactorySession('provider-first', {}, h.calls);
+  const streamGate = firstSession.deferNextStream();
+  await h.open(first, firstSession);
+  const sending = h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: first.childSessionId },
+    'keep busy',
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const secondSession = await h.open(second);
+  await h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'cancelled while queued',
+  );
+  await h.owner.sendNow(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'cancelled first',
+  );
+  await h.owner.interrupt({
+    parentAppSessionId: h.parentId,
+    childSessionId: second.childSessionId,
+  });
+  const interrupted = h.owner.list(h.parentId).find((child) => child.childSessionId === 'second');
+  assert.equal(interrupted?.queued, undefined);
+  assert.notEqual(interrupted?.status, 'running');
+  streamGate.resolve();
+  await sending;
+  await h.open(second, secondSession);
+  assert.deepEqual(secondSession.prompts, []);
+  assert.equal(h.owner.counts().queued, 0);
+  assert.notEqual(
+    h.owner.list(h.parentId).find((child) => child.childSessionId === 'second')?.status,
+    'running',
+  );
+});
+
+test('interrupt during in-flight admission delivers nothing', async () => {
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const h = createHarness([first, second], { maxOpenSessions: 4, maxLiveRuntimes: 1 });
+  const firstSession = new FakeFactorySession('provider-first', {}, h.calls);
+  const streamGate = firstSession.deferNextStream();
+  await h.open(first, firstSession);
+  const sending = h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: first.childSessionId },
+    'keep busy',
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const secondSession = await h.open(second);
+  await h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'cancelled during admission',
+  );
+  const loadGate = h.runtime.deferNextLoad();
+  streamGate.resolve();
+  await sending;
+  await h.runtime.waitForLoad('provider-second');
+  await h.owner.interrupt({
+    parentAppSessionId: h.parentId,
+    childSessionId: second.childSessionId,
+  });
+  loadGate.resolve();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const reported = h.owner.list(h.parentId).find((child) => child.childSessionId === 'second');
+  assert.deepEqual(secondSession.prompts, []);
+  assert.equal(reported?.queued, undefined);
+  assert.notEqual(reported?.status, 'running');
+  assert.equal(h.owner.counts().queued, 0);
+});
+
+test('a queued child interrupted then re-prompted delivers only the new prompt', async () => {
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const h = createHarness([first, second], { maxOpenSessions: 4, maxLiveRuntimes: 1 });
+  const firstSession = new FakeFactorySession('provider-first', {}, h.calls);
+  const streamGate = firstSession.deferNextStream();
+  await h.open(first, firstSession);
+  const sending = h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: first.childSessionId },
+    'keep busy',
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const secondSession = await h.open(second);
+  await h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'cancelled while queued',
+  );
+  await h.owner.interrupt({
+    parentAppSessionId: h.parentId,
+    childSessionId: second.childSessionId,
+  });
+  streamGate.resolve();
+  await sending;
+  await h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: second.childSessionId },
+    'new prompt',
+  );
+  await secondSession.waitForPrompts(1);
+  assert.deepEqual(secondSession.prompts, ['new prompt']);
 });

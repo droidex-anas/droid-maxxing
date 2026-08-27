@@ -42,6 +42,11 @@ import {
 import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
 import { childRuntimeAdmission } from './childRuntimeBudget.js';
 import { childTokenStream } from './childStreamFidelity.js';
+import {
+  dequeueQueuedChild,
+  prepareChildInterrupt,
+  takeAdmittedSend,
+} from './childTurnCancellation.js';
 
 type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 type ChildSettingsCommand = Extract<ClientCommand, { type: 'child.updateSettings' }>;
@@ -381,17 +386,19 @@ export class ChildSessions {
   }
 
   async interrupt(identity: ChildIdentity): Promise<void> {
-    const queuedParent = this.parents.get(identity.parentAppSessionId);
-    const queuedChild = queuedParent?.children.get(identity.childSessionId);
-    if (queuedParent && queuedChild?.queued) {
-      this.dequeueRuntime(queuedParent, queuedChild);
-      this.publish(queuedChild);
+    const parent = this.parents.get(identity.parentAppSessionId);
+    const prepared = prepareChildInterrupt(parent, parent?.children.get(identity.childSessionId));
+    if (prepared.kind === 'missing') {
+      await this.requireRuntime(identity, 'interrupt');
       return;
     }
-    const target = await this.requireRuntime(identity, 'interrupt');
-    if (!target) return;
-    const { parent, child, runtime } = target;
-    child.turn.pendingSends = [];
+    if (prepared.kind === 'queued') {
+      this.publish(prepared.child);
+      const attempt = prepared.parent.openAttempts.get(identity.childSessionId);
+      if (attempt) await attempt.settled;
+      return;
+    }
+    const { parent: liveParent, child, runtime } = prepared;
     runtime.lastUsedAt = this.d.now();
     const wasAutoCompacting = child.turn.autoCompacting;
     const turnGeneration = child.turn.generation;
@@ -399,13 +406,13 @@ export class ChildSessions {
     try {
       await runtime.session.interrupt();
     } catch (error) {
-      if (!this.isCurrentTurnGeneration(parent, child, runtime, turnGeneration)) return;
+      if (!this.isCurrentTurnGeneration(liveParent, child, runtime, turnGeneration)) return;
       child.turn.interrupting = false;
       this.emitError(identity, 'interrupt', null, 'child.interrupt_failed', errMsg(error));
       return;
     }
-    if (!this.isCurrentTurnGeneration(parent, child, runtime, turnGeneration)) return;
-    if (wasAutoCompacting) this.d.compaction.cancel(this.automaticTarget(parent, child));
+    if (!this.isCurrentTurnGeneration(liveParent, child, runtime, turnGeneration)) return;
+    if (wasAutoCompacting) this.d.compaction.cancel(this.automaticTarget(liveParent, child));
     if (child.turn.phase === 'streaming') return;
     child.turn.interrupting = false;
     child.status = 'paused';
@@ -492,7 +499,7 @@ export class ChildSessions {
     const parent = this.parents.get(identity.parentAppSessionId);
     const child = parent?.children.get(identity.childSessionId);
     if (parent && child) {
-      this.dequeueRuntime(parent, child);
+      dequeueQueuedChild(parent, child);
       await this.closeRuntime(parent, child, true);
     }
   }
@@ -710,7 +717,7 @@ export class ChildSessions {
       // a provider-reported model window before the first turn settles.
       void this.d.context.refresh(this.contextTarget(parent, child, runtime));
       if (requestId) this.emitReady(runtime, child, requestId);
-      const queuedSend = child.turn.pendingSends.shift();
+      const queuedSend = takeAdmittedSend(child);
       if (queuedSend !== undefined) void this.drive(parent, child, queuedSend);
     } catch (error) {
       const runtimeInstalled = loaded !== undefined && child.runtime?.session === loaded;
@@ -1061,13 +1068,6 @@ export class ChildSessions {
     child.queuedRequestId = requestId;
     this.publish(child);
     return 'queued';
-  }
-
-  private dequeueRuntime(parent: ParentChildSessions, child: ChildSessionState): void {
-    parent.runtimeQueue = parent.runtimeQueue.filter((id) => id !== child.identity.childSessionId);
-    if (!child.queued) return;
-    child.queued = false;
-    child.queuedRequestId = undefined;
   }
 
   private admitNextQueued(parent: ParentChildSessions): void {
