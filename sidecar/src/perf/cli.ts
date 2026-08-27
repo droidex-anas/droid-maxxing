@@ -175,12 +175,14 @@ async function main(): Promise<void> {
     options.seed === undefined ? {} : { seed: options.seed },
   );
   console.log(`Running perf replay scenario "${spec.name}" (seed ${String(spec.seed)})...`);
-  const report =
-    spec.kind === 'soak'
-      ? await runSoak(spec)
-      : spec.kind === 'session-switch'
-        ? await runReplay({ spec, onWaitTick: sessionSwitchTick(spec) })
-        : await runReplay({ spec });
+  let report;
+  if (spec.kind === 'soak') {
+    report = await runSoak(spec);
+  } else if (spec.kind === 'session-switch') {
+    report = await runReplay({ spec, onWaitTick: sessionSwitchTick(spec) });
+  } else {
+    report = await runReplay({ spec });
+  }
   const jsonPath = join(options.outDir, `${spec.name}.json`);
   writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
   writeFileSync(join(options.outDir, `${spec.name}.md`), renderReportMarkdown(report));

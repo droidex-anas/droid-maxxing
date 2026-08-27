@@ -56,78 +56,80 @@ export function evaluateReplayGates(
   const markerLoss =
     expectedMarkers === 0 ? 0 : Math.max(0, expectedMarkers - client.markerSamples);
   const results: GateResult[] = [
-    hard(
-      'sidecar.markerLoss',
-      'tool-marker event loss',
-      'count',
-      markerLoss,
-      0,
-      `Markers are uncoalesced. Expected ${String(expectedMarkers)} samples, got ${String(client.markerSamples)}.`,
-    ),
-    hard(
-      'sidecar.orderErrors',
-      'bridge sequence/order errors',
-      'count',
-      0,
-      0,
-      'A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors.',
-    ),
-    hard(
-      'sidecar.pendingEventsMax',
-      'transport pending events high-water',
-      'events',
-      sidecar.transport.queue.pendingEventsMax,
-      TRANSPORT_PENDING_EVENTS_CAP,
-      `Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak).`,
-    ),
-    hard(
-      'sidecar.pendingEstimatedBytesMax',
-      'transport pending bytes high-water',
-      'bytes',
-      sidecar.transport.queue.pendingEstimatedBytesMax,
-      TRANSPORT_PENDING_BYTES_CAP,
-      'Replay buffer is 32 MiB. Queue bytes are gated at that product cap.',
-    ),
-    hard(
-      'sidecar.backpressureDisconnects',
-      'slow-client disconnects',
-      'count',
-      sidecar.counters.transportBackpressureDisconnects,
-      0,
-      'A correct client in this harness must not trip the hard slow-client ceiling.',
-    ),
-    hard(
-      'sidecar.livePrimarySessions',
-      'live primary sessions after replay',
-      'sessions',
-      sidecar.resources?.livePrimarySessions ?? null,
-      spec.sessions,
-      `Replay leaves sessions open. Count must equal the scenario’s ${String(spec.sessions)} sessions, not grow past them.`,
-    ),
-    hard(
-      'sidecar.persistenceFailures',
-      'history persistence overflow/degraded transitions',
-      'count',
-      sidecar.counters.persistenceFailures,
-      0,
-      `Write-behind is capped at ${String(MAX_PERSISTENCE_QUEUE_ROWS)} rows / ${String(MAX_PERSISTENCE_QUEUE_BYTES)} bytes. A normal replay must not overflow that bound.`,
-    ),
-    warn(
-      'sidecar.rssBytes',
-      'process RSS',
-      'bytes',
-      sidecar.process.rssBytes,
-      Number.POSITIVE_INFINITY,
-      'Recorded for comparison. Shared-runner RSS is too noisy for a hard gate.',
-    ),
-    warn(
-      'sidecar.cpuUserMs',
-      'process CPU user time',
-      'ms',
-      sidecar.process.cpuUserMs,
-      Number.POSITIVE_INFINITY,
-      'Recorded for comparison. Shared-runner CPU is too noisy for a hard gate.',
-    ),
+    hard({
+      id: 'sidecar.markerLoss',
+      name: 'tool-marker event loss',
+      unit: 'count',
+      actual: markerLoss,
+      budget: 0,
+      justification: `Markers are uncoalesced. Expected ${String(expectedMarkers)} samples, got ${String(client.markerSamples)}.`,
+    }),
+    hard({
+      id: 'sidecar.orderErrors',
+      name: 'bridge sequence/order errors',
+      unit: 'count',
+      actual: 0,
+      budget: 0,
+      justification:
+        'A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors.',
+    }),
+    hard({
+      id: 'sidecar.pendingEventsMax',
+      name: 'transport pending events high-water',
+      unit: 'events',
+      actual: sidecar.transport.queue.pendingEventsMax,
+      budget: TRANSPORT_PENDING_EVENTS_CAP,
+      justification:
+        'Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak).',
+    }),
+    hard({
+      id: 'sidecar.pendingEstimatedBytesMax',
+      name: 'transport pending bytes high-water',
+      unit: 'bytes',
+      actual: sidecar.transport.queue.pendingEstimatedBytesMax,
+      budget: TRANSPORT_PENDING_BYTES_CAP,
+      justification: 'Replay buffer is 32 MiB. Queue bytes are gated at that product cap.',
+    }),
+    hard({
+      id: 'sidecar.backpressureDisconnects',
+      name: 'slow-client disconnects',
+      unit: 'count',
+      actual: sidecar.counters.transportBackpressureDisconnects,
+      budget: 0,
+      justification: 'A correct client in this harness must not trip the hard slow-client ceiling.',
+    }),
+    hard({
+      id: 'sidecar.livePrimarySessions',
+      name: 'live primary sessions after replay',
+      unit: 'sessions',
+      actual: sidecar.resources?.livePrimarySessions ?? null,
+      budget: spec.sessions,
+      justification: `Replay leaves sessions open. Count must equal the scenario’s ${String(spec.sessions)} sessions, not grow past them.`,
+    }),
+    hard({
+      id: 'sidecar.persistenceFailures',
+      name: 'history persistence overflow/degraded transitions',
+      unit: 'count',
+      actual: sidecar.counters.persistenceFailures,
+      budget: 0,
+      justification: `Write-behind is capped at ${String(MAX_PERSISTENCE_QUEUE_ROWS)} rows / ${String(MAX_PERSISTENCE_QUEUE_BYTES)} bytes. A normal replay must not overflow that bound.`,
+    }),
+    warn({
+      id: 'sidecar.rssBytes',
+      name: 'process RSS',
+      unit: 'bytes',
+      actual: sidecar.process.rssBytes,
+      budget: Number.POSITIVE_INFINITY,
+      justification: 'Recorded for comparison. Shared-runner RSS is too noisy for a hard gate.',
+    }),
+    warn({
+      id: 'sidecar.cpuUserMs',
+      name: 'process CPU user time',
+      unit: 'ms',
+      actual: sidecar.process.cpuUserMs,
+      budget: Number.POSITIVE_INFINITY,
+      justification: 'Recorded for comparison. Shared-runner CPU is too noisy for a hard gate.',
+    }),
   ];
   return wrap(results);
 }
@@ -140,46 +142,51 @@ export function evaluateProbeGates(options: {
   livePrimarySessionsAfterSoak: number | null;
 }): GateEvaluation {
   const results: GateResult[] = [
-    hard(
-      'feed.mountedRowsAt10k',
-      'mounted conversation rows for 10k history',
-      'rows',
-      options.mountedRowsAt10k,
-      MOUNTED_ROWS_BUDGET,
-      'conversationList.test.ts keeps 3k and 10k histories under 80 mounted rows (viewport 900px, overscan 8).',
-    ),
-    hard(
-      'feed.rowVisitsPerTailDeltaAt10k',
-      'row visits per streamed tail token at 10k',
-      'rows',
-      options.rowVisitsPerTailDeltaAt10k,
-      MOUNTED_ROWS_BUDGET,
-      'A tail delta may only visit the mounted window, not retained history. Same 80-row bound as mounted rows.',
-    ),
-    hard(
-      'feed.eventsRebuiltPerDelta',
-      'visible events rebuilt per tail delta',
-      'events',
-      options.eventsRebuiltPerDelta,
-      FEED_REBUILT_EVENTS_PER_DELTA_BUDGET,
-      'Incremental projection should rebuild the live tail. 8 is 4× a two-event append after a measured O(1) rebuild.',
-    ),
-    hard(
-      'terminal.deliveriesPerFlood',
-      'renderer deliveries for 1000 PTY chunks',
-      'messages',
-      options.terminalDeliveriesPerFlood,
-      TERMINAL_DELIVERIES_BUDGET,
-      '1000×64-byte chunks are 64 KiB. 32 KiB MessagePort flushes imply a handful of posts; 16 is ~4× that plus replay.',
-    ),
-    hard(
-      'sidecar.livePrimarySessionsAfterSoak',
-      'live primary sessions after soak cleanup',
-      'sessions',
-      options.livePrimarySessionsAfterSoak,
-      0,
-      'Soak create/close must release every session. 0 live primaries is the leak invariant.',
-    ),
+    hard({
+      id: 'feed.mountedRowsAt10k',
+      name: 'mounted conversation rows for 10k history',
+      unit: 'rows',
+      actual: options.mountedRowsAt10k,
+      budget: MOUNTED_ROWS_BUDGET,
+      justification:
+        'conversationList.test.ts keeps 3k and 10k histories under 80 mounted rows (viewport 900px, overscan 8).',
+    }),
+    hard({
+      id: 'feed.rowVisitsPerTailDeltaAt10k',
+      name: 'row visits per streamed tail token at 10k',
+      unit: 'rows',
+      actual: options.rowVisitsPerTailDeltaAt10k,
+      budget: MOUNTED_ROWS_BUDGET,
+      justification:
+        'A tail delta may only visit the mounted window, not retained history. Same 80-row bound as mounted rows.',
+    }),
+    hard({
+      id: 'feed.eventsRebuiltPerDelta',
+      name: 'visible events rebuilt per tail delta',
+      unit: 'events',
+      actual: options.eventsRebuiltPerDelta,
+      budget: FEED_REBUILT_EVENTS_PER_DELTA_BUDGET,
+      justification:
+        'Incremental projection should rebuild the live tail. 8 is 4× a two-event append after a measured O(1) rebuild.',
+    }),
+    hard({
+      id: 'terminal.deliveriesPerFlood',
+      name: 'renderer deliveries for 1000 PTY chunks',
+      unit: 'messages',
+      actual: options.terminalDeliveriesPerFlood,
+      budget: TERMINAL_DELIVERIES_BUDGET,
+      justification:
+        '1000×64-byte chunks are 64 KiB. 32 KiB MessagePort flushes imply a handful of posts; 16 is ~4× that plus replay.',
+    }),
+    hard({
+      id: 'sidecar.livePrimarySessionsAfterSoak',
+      name: 'live primary sessions after soak cleanup',
+      unit: 'sessions',
+      actual: options.livePrimarySessionsAfterSoak,
+      budget: 0,
+      justification:
+        'Soak create/close must release every session. 0 live primaries is the leak invariant.',
+    }),
   ];
   return wrap(results);
 }
@@ -197,51 +204,23 @@ function wrap(results: GateResult[]): GateEvaluation {
   };
 }
 
-function hard(
-  id: string,
-  name: string,
-  unit: string,
-  actual: number | null,
-  budget: number,
-  justification: string,
-): GateResult {
-  return result(id, name, 'hard', unit, actual, budget, justification);
+function hard(fields: Omit<GateResult, 'status' | 'mode'>): GateResult {
+  return gateResult({ ...fields, mode: 'hard' });
 }
 
-function warn(
-  id: string,
-  name: string,
-  unit: string,
-  actual: number | null,
-  budget: number,
-  justification: string,
-): GateResult {
-  return result(id, name, 'warn', unit, actual, budget, justification);
+function warn(fields: Omit<GateResult, 'status' | 'mode'>): GateResult {
+  return gateResult({ ...fields, mode: 'warn' });
 }
 
-function result(
-  id: string,
-  name: string,
-  mode: 'hard' | 'warn',
-  unit: string,
-  actual: number | null,
-  budget: number,
-  justification: string,
-): GateResult {
-  if (actual === null) {
-    return { id, name, mode, unit, actual, budget, status: 'unmeasured', justification };
+function gateResult(fields: Omit<GateResult, 'status'>): GateResult {
+  if (fields.actual === null) {
+    return { ...fields, status: 'unmeasured' };
   }
-  if (mode === 'warn') {
-    return { id, name, mode, unit, actual, budget, status: 'warn', justification };
+  if (fields.mode === 'warn') {
+    return { ...fields, status: 'warn' };
   }
   return {
-    id,
-    name,
-    mode,
-    unit,
-    actual,
-    budget,
-    status: actual <= budget ? 'pass' : 'fail',
-    justification,
+    ...fields,
+    status: fields.actual <= fields.budget ? 'pass' : 'fail',
   };
 }

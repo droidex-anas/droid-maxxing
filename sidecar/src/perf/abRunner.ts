@@ -64,7 +64,7 @@ export async function runComparison(options: CompareOptions): Promise<Comparison
 
   let baselineProbes: AbProbeResult | null = cacheHit ? cache.probes : null;
   if (options.includeBaseline && !cacheHit) {
-    baselineProbes = await measureBaselineTree(
+    baselineProbes = measureBaselineTree(
       candidateRoot,
       options.baselineRef,
       baselineCommit,
@@ -81,7 +81,7 @@ export async function runComparison(options: CompareOptions): Promise<Comparison
     writeFileSync(cachePath, `${JSON.stringify(nextCache, null, 2)}\n`);
   }
 
-  if (!options.skipBundle) await ensureViteBuild(candidateRoot);
+  if (!options.skipBundle) ensureViteBuild(candidateRoot);
   const candidateProbes = runProbes(candidateRoot, candidateRoot);
   const probeMetrics = diffProbes(baselineProbes, candidateProbes);
   const candidateReplays: ComparisonReport['candidateReplays'] = [];
@@ -134,18 +134,18 @@ export async function runGateSuite(candidateRoot: string): Promise<ComparisonRep
   });
 }
 
-async function measureBaselineTree(
+function measureBaselineTree(
   candidateRoot: string,
   baselineRef: string,
   baselineCommit: string,
   skipBundle: boolean,
-): Promise<AbProbeResult> {
+): AbProbeResult {
   const worktree = join('/tmp', `droidex-perf-baseline-${baselineCommit.slice(0, 12)}`);
   if (!existsSync(worktree)) {
     git(candidateRoot, ['worktree', 'add', '--detach', worktree, baselineCommit]);
     linkModules(candidateRoot, worktree);
   }
-  if (!skipBundle) await ensureViteBuild(worktree);
+  if (!skipBundle) ensureViteBuild(worktree);
   const probes = runProbes(candidateRoot, worktree);
   return { ...probes, treeRoot: `${baselineRef}@${baselineCommit}` };
 }
@@ -160,7 +160,7 @@ function runProbes(candidateRoot: string, treeRoot: string): AbProbeResult {
   return JSON.parse(output) as AbProbeResult;
 }
 
-async function ensureViteBuild(treeRoot: string): Promise<void> {
+function ensureViteBuild(treeRoot: string): void {
   if (existsSync(join(treeRoot, 'dist/index.html'))) return;
   execFileSync(process.execPath, [join(treeRoot, 'node_modules/vite/bin/vite.js'), 'build'], {
     cwd: treeRoot,

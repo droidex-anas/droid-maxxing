@@ -265,7 +265,14 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         },
         expectedWallClockMs(spec),
         `turn ${String(index)}:${String(turn.turn)} never settled`,
-        () => onWaitTick?.({ send: (command) => sendCommand(client, command), sessionIds }),
+        () => {
+          onWaitTick?.({
+            send: (command) => {
+              sendCommand(client, command);
+            },
+            sessionIds,
+          });
+        },
       );
     }
   }

@@ -32,7 +32,7 @@ export async function runSoak(spec: PerfScenarioSpec): Promise<ReplayReport> {
   process.env.HOME = home;
   const startedAt = Date.now();
   const startedPerf = performance.now();
-  const events: Array<{ type: string; session?: { appSessionId: string } }> = [];
+  const events: { type: string; session?: { appSessionId: string } }[] = [];
   const runtime = new ReplayFactoryRuntime(new Map(), {
     onYield: () => undefined,
     onTurnSettled: () => undefined,

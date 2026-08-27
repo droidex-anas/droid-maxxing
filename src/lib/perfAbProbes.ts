@@ -1,11 +1,13 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { EventEmitter } from 'node:events';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import React, { createElement, type ComponentType } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Virtualizer } from '@tanstack/virtual-core';
+
+import { measureTerminalFlood } from './perfAbTerminalProbe';
+
+export { TERMINAL_CHUNK, TERMINAL_FLOOD_CHUNKS } from './perfAbTerminalProbe';
 
 export interface AbProbeMetric {
   id: string;
@@ -21,8 +23,6 @@ export interface AbProbeResult {
 }
 
 export const HISTORY_10K = 10_000;
-export const TERMINAL_FLOOD_CHUNKS = 1_000;
-export const TERMINAL_CHUNK = 'x'.repeat(64);
 export const STREAM_DELTAS = 40;
 export const STREAM_PREFIX_EVENTS = 200;
 
@@ -66,8 +66,10 @@ export function measureBundle(treeRoot: string): AbProbeMetric[] | null {
   const htmlPath = join(distDir, 'index.html');
   if (!existsSync(htmlPath) || !existsSync(assetsDir)) return null;
   const html = readFileSync(htmlPath, 'utf8');
-  const scriptMatch = html.match(/<script[^>]+src="\.\/assets\/([^"]+\.js)"/);
-  const cssMatch = html.match(/<link[^>]+href="\.\/assets\/([^"]+\.css)"/);
+  const scriptSrcRe = /<script[^>]+src="\.\/assets\/([^"]+\.js)"/;
+  const cssHrefRe = /<link[^>]+href="\.\/assets\/([^"]+\.css)"/;
+  const scriptMatch = scriptSrcRe.exec(html);
+  const cssMatch = cssHrefRe.exec(html);
   if (!scriptMatch || !cssMatch) return null;
   const entryJs = join(assetsDir, scriptMatch[1]);
   const entryCss = join(assetsDir, cssMatch[1]);
@@ -238,66 +240,6 @@ async function measureMarkdown(treeRoot: string): Promise<AbProbeMetric> {
   );
 }
 
-async function measureTerminalFlood(treeRoot: string): Promise<AbProbeMetric> {
-  const terminalPath = join(treeRoot, 'electron/terminal.cjs');
-  if (!existsSync(terminalPath)) {
-    return metric('terminal.deliveriesPerFlood', NaN, 'messages', 'electron/terminal.cjs missing');
-  }
-  const requireFromTree = createRequire(terminalPath);
-  const terminal = requireFromTree(terminalPath) as TerminalModule;
-  const portPath = join(dirname(terminalPath), 'terminalPort.cjs');
-  const registryMod = existsSync(portPath)
-    ? (requireFromTree(portPath) as RegistryModule)
-    : terminal.createTerminalSubscriptionRegistry
-      ? terminal
-      : null;
-  if (!registryMod?.createTerminalSubscriptionRegistry) {
-    return metric(
-      'terminal.deliveriesPerFlood',
-      NaN,
-      'messages',
-      'no subscription registry on this tree',
-    );
-  }
-  const { manager, instances } = createTerminalFixture(terminal);
-  const terminalId = (await manager.create({ appSessionId: 'session-1', cwd: '/tmp' })).id;
-  const timers: Array<{ callback: () => void }> = [];
-  const registry = registryMod.createTerminalSubscriptionRegistry(manager, {
-    setTimeout: (callback: () => void) => {
-      const handle = { callback };
-      timers.push(handle);
-      return handle;
-    },
-    clearTimeout: (handle: { callback: () => void }) => {
-      const index = timers.indexOf(handle);
-      if (index >= 0) timers.splice(index, 1);
-    },
-  });
-  const sender = fakeSender();
-  const port = fakePort();
-  try {
-    registry.subscribe(sender, terminalId, port);
-  } catch {
-    registry.subscribe(sender, terminalId);
-  }
-  for (let index = 0; index < TERMINAL_FLOOD_CHUNKS; index += 1) {
-    instances[0]?.emitData(TERMINAL_CHUNK);
-  }
-  for (const timer of timers.splice(0)) timer.callback();
-  const dataDeliveries = port.posted.filter((payload) => payload?.kind === 'data').length;
-  const ipcDeliveries = sender.sends.filter((send) => send.payload?.kind === 'data').length;
-  const deliveries = dataDeliveries + ipcDeliveries;
-  manager.kill(terminalId);
-  return metric(
-    'terminal.deliveriesPerFlood',
-    deliveries,
-    'messages',
-    existsSync(portPath)
-      ? 'MessagePort data posts after a 1000-chunk flood'
-      : 'ipc sender.send data events after a 1000-chunk flood',
-  );
-}
-
 function mountedWindow(state: ConversationListStateModule, count: number): number {
   const viewportHeight = state.CONVERSATION_LIST_INITIAL_RECT.height;
   let scrollTop = state.estimatedListEndOffset(count, viewportHeight);
@@ -331,79 +273,6 @@ function mountedWindow(state: ConversationListStateModule, count: number): numbe
   });
   virtualizer._willUpdate();
   return virtualizer.getVirtualItems().length;
-}
-
-function createTerminalFixture(terminal: TerminalModule) {
-  const instances: Array<{ emitData: (data: string) => void }> = [];
-  const manager = terminal.createTerminalManager({
-    platform: 'darwin',
-    randomId: (() => {
-      let id = 0;
-      return () => `probe-terminal-${String(++id)}`;
-    })(),
-    fsp: {
-      stat: async () => ({ isDirectory: () => true }),
-      realpath: async (cwd: string) => cwd,
-    },
-    resolveShell: () => ({ file: '/bin/sh', args: [] }),
-    buildEnv: () => ({ TERM: 'xterm-256color' }),
-    loadPty: () => ({
-      spawn() {
-        let dataHandler: (data: string) => void = () => undefined;
-        const instance = {
-          writes: [],
-          onData(handler: (data: string) => void) {
-            dataHandler = handler;
-          },
-          onExit() {},
-          write() {},
-          resize() {},
-          kill() {},
-          emitData(data: string) {
-            dataHandler(data);
-          },
-        };
-        instances.push(instance);
-        return instance;
-      },
-    }),
-  });
-  return { manager, instances };
-}
-
-function fakeSender() {
-  const sender = new EventEmitter() as EventEmitter & {
-    id: number;
-    destroyed: boolean;
-    isDestroyed: () => boolean;
-    send: (channel: string, payload: { kind?: string }) => void;
-    sends: Array<{ channel: string; payload: { kind?: string } }>;
-  };
-  sender.id = 1;
-  sender.destroyed = false;
-  sender.isDestroyed = () => sender.destroyed;
-  sender.sends = [];
-  sender.send = (channel, payload) => {
-    sender.sends.push({ channel, payload });
-  };
-  return sender;
-}
-
-function fakePort() {
-  const posted: Array<{ kind?: string }> = [];
-  return {
-    posted,
-    closed: false,
-    start() {},
-    postMessage(data: { kind?: string }) {
-      posted.push(data);
-    },
-    close() {
-      this.closed = true;
-    },
-    on() {},
-    removeListener() {},
-  };
 }
 
 function textEvent(id: string, ts: number, author: 'user' | 'assistant' = 'assistant') {
@@ -466,20 +335,3 @@ interface MutationModule {
 }
 
 type MarkdownComponent = ComponentType<{ children: string }>;
-
-interface TerminalModule {
-  createTerminalManager: (options: unknown) => {
-    create: (options: { appSessionId: string; cwd: string }) => Promise<{ id: string }>;
-    kill: (id: string) => void;
-  };
-  createTerminalSubscriptionRegistry?: RegistryModule['createTerminalSubscriptionRegistry'];
-}
-
-interface RegistryModule {
-  createTerminalSubscriptionRegistry: (
-    manager: unknown,
-    options?: unknown,
-  ) => {
-    subscribe: (sender: unknown, terminalId: string, port?: unknown) => void;
-  };
-}
