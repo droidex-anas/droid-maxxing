@@ -574,3 +574,110 @@ test(
     }
   },
 );
+
+test('indexing does not arm a slice timer when there is nothing to index', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'droidex-index-idle-empty-'));
+  const dbPath = join(directory, 'session-index.sqlite');
+  createCanonicalDatabase(dbPath);
+  const slices = scheduler();
+  const database = new HistoryIndexDatabase(dbPath, {
+    now: () => Date.UTC(2026, 7, 24),
+    schedule: slices.schedule,
+    cancel: slices.cancel,
+  });
+  try {
+    database.reconcileSessionFiles();
+    assert.equal(slices.nextDelay(), undefined);
+    database.setIdle(true);
+    assert.equal(slices.nextDelay(), undefined);
+    database.setIdle(false);
+    assert.equal(slices.nextDelay(), undefined);
+  } finally {
+    await database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  'os-idle pacing slows recent slices and restores the interactive delay when active',
+  { skip: FTS5_UNAVAILABLE_REASON },
+  async () => {
+    const home = mkdtempSync(join(tmpdir(), 'droidex-index-idle-pace-'));
+    const previousHome = process.env['HOME'];
+    process.env['HOME'] = home;
+    const databaseDirectory = join(home, '.factory', 'droidex');
+    const sessionsDirectory = join(home, '.factory', 'sessions');
+    mkdirSync(databaseDirectory, { recursive: true });
+    mkdirSync(sessionsDirectory, { recursive: true });
+    const dbPath = join(databaseDirectory, 'session-index.sqlite');
+    createCanonicalDatabase(dbPath);
+    const now = Date.UTC(2026, 7, 24);
+    writeSession(sessionsDirectory, 'recent-idle', 'idle narwhal', now - DAY_MS);
+    const slices = scheduler();
+    const database = new HistoryIndexDatabase(dbPath, {
+      now: () => now,
+      schedule: slices.schedule,
+      cancel: slices.cancel,
+    });
+    try {
+      database.reconcileSessionFiles();
+      assert.equal(slices.nextDelay(), 250);
+      database.setIdle(true);
+      assert.equal(slices.nextDelay(), 5_000);
+      database.setIdle(false);
+      assert.equal(slices.nextDelay(), 250);
+      await slices.runNext();
+      assert.equal(await waitForSearch(database, 'idle narwhal'), 'recent-idle');
+      assert.equal(slices.nextDelay(), undefined);
+    } finally {
+      await database.close();
+      if (previousHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = previousHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'archive backfill stays unarmed until idle and then uses the idle slice delay',
+  { skip: FTS5_UNAVAILABLE_REASON },
+  async () => {
+    const home = mkdtempSync(join(tmpdir(), 'droidex-index-archive-idle-'));
+    const previousHome = process.env['HOME'];
+    process.env['HOME'] = home;
+    const databaseDirectory = join(home, '.factory', 'droidex');
+    const sessionsDirectory = join(home, '.factory', 'sessions');
+    mkdirSync(databaseDirectory, { recursive: true });
+    mkdirSync(sessionsDirectory, { recursive: true });
+    const dbPath = join(databaseDirectory, 'session-index.sqlite');
+    createCanonicalDatabase(dbPath);
+    const now = Date.UTC(2026, 7, 24);
+    const oldPath = writeSession(
+      sessionsDirectory,
+      'archive-idle',
+      'archive albatross',
+      now - 30 * DAY_MS,
+    );
+    const oldDate = new Date(now - 30 * DAY_MS);
+    utimesSync(oldPath, oldDate, oldDate);
+    const slices = scheduler();
+    const database = new HistoryIndexDatabase(dbPath, {
+      now: () => now,
+      schedule: slices.schedule,
+      cancel: slices.cancel,
+    });
+    try {
+      database.reconcileSessionFiles();
+      assert.equal(slices.nextDelay(), undefined);
+      database.setIdle(true);
+      assert.equal(slices.nextDelay(), 5_000);
+      database.setIdle(false);
+      assert.equal(slices.nextDelay(), undefined);
+    } finally {
+      await database.close();
+      if (previousHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = previousHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  },
+);

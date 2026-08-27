@@ -146,11 +146,12 @@ export class HistoryIndexDatabase {
 
   setIdle(isIdle: boolean): void {
     this.assertOpen();
+    const changed = this.isIdle !== isIdle;
     this.isIdle = isIdle;
     if (this.searchUnavailable) return;
     if (isIdle) this.ensurePlannedAll();
     else this.pauseActiveBackfill();
-    if (this.indexingTimer && this.recentQueue.size === 0) this.cancelScheduledSlice();
+    if (changed) this.cancelScheduledSlice();
     this.scheduleNext();
   }
 
@@ -218,7 +219,7 @@ export class HistoryIndexDatabase {
   private scheduleNext(): void {
     if (this.closed || this.indexingTimer || this.activeSlice) return;
     const now = this.now();
-    const recentDueAt = this.queueDueAt(this.recentQueue, this.recentSliceDelayMs, now);
+    const recentDueAt = this.queueDueAt(this.recentQueue, this.recentLaneDelayMs(), now);
     const backfillDueAt = this.isIdle
       ? this.queueDueAt(this.backfillQueue, this.idleBackfillSliceDelayMs, now)
       : undefined;
@@ -313,6 +314,10 @@ export class HistoryIndexDatabase {
       this.retryNotBefore.set(entry.providerSessionId, this.now() + retryDelayMs);
       throw error;
     }
+  }
+
+  private recentLaneDelayMs(): number {
+    return this.isIdle ? this.idleBackfillSliceDelayMs : this.recentSliceDelayMs;
   }
 
   private queueDueAt(
