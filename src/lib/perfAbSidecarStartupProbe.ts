@@ -134,7 +134,10 @@ async function waitForSessionsList(
   });
 
   const listPromise = new Promise<{ type: string; sessions?: unknown[] }>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('sessions.list timeout')), SESSIONS_LIST_TIMEOUT_MS);
+    const timeout = setTimeout(
+      () => reject(new Error('sessions.list timeout')),
+      SESSIONS_LIST_TIMEOUT_MS,
+    );
     socket.on('message', (raw) => {
       try {
         const message = JSON.parse(String(raw)) as {
