@@ -426,7 +426,7 @@ export class SessionManager {
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       emit: (event) => {
         this.emit(event);
-        if (event.type === 'session.child') this.adoption?.persistLiveSet();
+        if (event.type === 'session.child') this.adoption.persistLiveSet();
       },
       nextChildSessionId: this.nextChildSessionId,
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
