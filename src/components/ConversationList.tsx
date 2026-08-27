@@ -19,24 +19,17 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
-  conversationVisibleRange,
-  EMPTY_CONVERSATION_VISIBLE_RANGE,
   estimatedListEndOffset,
   findConversationRowIndex,
   isConversationAtLatest,
   nearestOverflowParent,
   scrollMarginBetween,
-  visibleRangeSignature,
-  type ConversationVisibleRange,
 } from './conversationListState';
-
-export type { ConversationVisibleRange };
 
 export interface ConversationListHandle {
   scrollToRow: (rowId: string) => void;
   scrollToLatest: () => void;
   isAtLatest: () => boolean;
-  visibleRange: () => ConversationVisibleRange;
 }
 
 export interface ConversationListProps {
@@ -47,7 +40,6 @@ export interface ConversationListProps {
   listRef?: RefObject<ConversationListHandle | null>;
   initialScrollOffset?: number;
   onMountedRowsChange?: (count: number) => void;
-  onVisibleRangeChange?: (range: ConversationVisibleRange) => void;
 }
 
 export function ConversationList({
@@ -58,7 +50,6 @@ export function ConversationList({
   listRef,
   initialScrollOffset,
   onMountedRowsChange,
-  onVisibleRangeChange,
 }: ConversationListProps) {
   const listElRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -67,10 +58,6 @@ export function ConversationList({
   const lookup = useMemo(() => buildConversationRowLookup(items), [items]);
   const lookupRef = useRef(lookup);
   lookupRef.current = lookup;
-  const visibleRangeRef = useRef<ConversationVisibleRange>(EMPTY_CONVERSATION_VISIBLE_RANGE);
-  const visibleSignatureRef = useRef('');
-  const onVisibleRangeChangeRef = useRef(onVisibleRangeChange);
-  onVisibleRangeChangeRef.current = onVisibleRangeChange;
   const onMountedRowsChangeRef = useRef(onMountedRowsChange);
   onMountedRowsChangeRef.current = onMountedRowsChange;
   const [scrollMargin, setScrollMargin] = useState(0);
@@ -102,21 +89,7 @@ export function ConversationList({
       const list = listElRef.current;
       // Height must be in the DOM this frame; React's style below lands next commit and would clip a pinned tail.
       if (list) list.style.height = `${String(instance.getTotalSize())}px`;
-      const range = instance.range;
-      const mounted = instance.getVirtualIndexes();
-      onMountedRowsChangeRef.current?.(mounted.length);
-      if (!range) return;
-      const next = conversationVisibleRange(
-        itemsRef.current,
-        mounted,
-        range.startIndex,
-        range.endIndex,
-      );
-      const signature = visibleRangeSignature(next);
-      if (signature === visibleSignatureRef.current) return;
-      visibleSignatureRef.current = signature;
-      visibleRangeRef.current = next;
-      onVisibleRangeChangeRef.current?.(next);
+      onMountedRowsChangeRef.current?.(instance.getVirtualIndexes().length);
     },
   });
 
@@ -125,20 +98,7 @@ export function ConversationList({
 
   useLayoutEffect(() => {
     onMountedRowsChangeRef.current?.(virtualItems.length);
-    const range = virtualizer.range;
-    if (!range) return;
-    const next = conversationVisibleRange(
-      itemsRef.current,
-      virtualizer.getVirtualIndexes(),
-      range.startIndex,
-      range.endIndex,
-    );
-    const signature = visibleRangeSignature(next);
-    if (signature === visibleSignatureRef.current) return;
-    visibleSignatureRef.current = signature;
-    visibleRangeRef.current = next;
-    onVisibleRangeChangeRef.current?.(next);
-  }, [virtualItems.length, virtualizer]);
+  }, [virtualItems.length]);
 
   useLayoutEffect(
     () => () => {
@@ -216,9 +176,6 @@ export function ConversationList({
           element.scrollTop,
           element.clientHeight,
         );
-      },
-      visibleRange() {
-        return visibleRangeRef.current;
       },
     }),
     [getScrollElement, virtualizer],
