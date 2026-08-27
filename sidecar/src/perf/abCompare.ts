@@ -2,7 +2,7 @@ import type { GateEvaluation } from './gates.js';
 import { metricClass, METRIC_CATALOG } from './metricKind.js';
 import type { ReplayReport } from './report.js';
 
-export interface AbProbeMetric {
+interface AbProbeMetric {
   id: string;
   value: number;
   unit: string;

@@ -6,9 +6,9 @@ import type { HotPathMetricsSnapshot } from '../telemetry/hotPathMetrics.js';
 import type { ReplayClientStats } from './report.js';
 import type { PerfScenarioSpec } from './scenario.js';
 
-export type GateStatus = 'pass' | 'fail' | 'warn' | 'unmeasured';
+type GateStatus = 'pass' | 'fail' | 'warn' | 'unmeasured';
 
-export interface GateResult {
+interface GateResult {
   id: string;
   name: string;
   mode: 'hard' | 'warn';
@@ -30,16 +30,14 @@ const TRANSPORT_PENDING_BYTES_CAP = 32 * 1024 * 1024;
 
 // conversationList.test.ts mounted 3k/10k histories at <80 rows (viewport 900px,
 // estimate 96px, overscan 8). Budget 80 is that measured bound with no extra slack.
-export const MOUNTED_ROWS_BUDGET = 80;
-export const HISTORY_10K_ROWS = 10_000;
+const MOUNTED_ROWS_BUDGET = 80;
 
 // 1000×64-byte PTY chunks = 64 KiB. MessagePort flushes at 32 KiB, so a healthy
 // candidate delivers a handful of posts. 16 is ~4× a two-flush flood plus replay.
-export const TERMINAL_FLOOD_CHUNKS = 1_000;
-export const TERMINAL_DELIVERIES_BUDGET = 16;
+const TERMINAL_DELIVERIES_BUDGET = 16;
 
 // Incremental projection should touch the live tail, not the settled prefix.
-export const FEED_REBUILT_EVENTS_PER_DELTA_BUDGET = 8;
+const FEED_REBUILT_EVENTS_PER_DELTA_BUDGET = 8;
 
 export function expectedMarkerSamples(spec: PerfScenarioSpec): number {
   if (spec.toolMarkerEvery <= 0 || spec.deltasPerTurn <= 0) return 0;

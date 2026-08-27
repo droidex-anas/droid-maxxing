@@ -1,7 +1,3 @@
-// Live WebContents budget for native browser sessions. Ownership of the
-// views stays in main.cjs; this module only decides which hidden sessions
-// may keep a live view and what to restore after an eviction.
-//
 // Destroying a WebContents does not clear persist:droidex-browser. Cookies,
 // localStorage, and passkeys therefore survive eviction and come back on restore.
 
@@ -123,6 +119,4 @@ module.exports = {
   createNativeBrowserBudget,
   CAPTURE_SCROLL_SCRIPT,
   restoreScrollScript,
-  DEFAULT_MAX_LIVE,
-  DEFAULT_IDLE_MS,
 };

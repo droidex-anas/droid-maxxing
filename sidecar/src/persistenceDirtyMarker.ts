@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { mkdirSync } from 'node:fs';
 
 import type { PersistenceRecovery } from './protocol.js';
 
@@ -83,7 +82,7 @@ function readMarker(filePath: string): { processId: number } | null {
 
 function writeMarker(filePath: string, processId: number): void {
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify({ processId, updatedAt: Date.now() }));
+  writeFileSync(filePath, JSON.stringify({ processId }));
 }
 
 function removeMarker(filePath: string): void {
