@@ -174,10 +174,10 @@ export function startSessionFileWatcher(
       const inside = (file: string) => prefixes.some((prefix) => file.startsWith(prefix));
       return [...paths.values()].some(inside) || [...live].some(inside);
     };
+    for (const providerSessionId of paths.keys()) reportedSessionIds.add(providerSessionId);
     // Unexplained events (a removed tree, foreign files, a lost event stream)
     // fall back to a full reconcile; anything else reconciles exactly the
     // changed files.
-    for (const providerSessionId of paths.keys()) reportedSessionIds.add(providerSessionId);
     if (unexplainable || [...unknown].some((name) => !explains(name))) {
       options.onExternalChange(null);
     } else if (paths.size > 0) {
