@@ -31,6 +31,7 @@ interface Harness {
   runtime: FakeFactoryRuntime;
   owner: ChildSessions;
   parentId: string;
+  advanceClock(ms: number): void;
   replaceParent(): void;
   open(record: PersistedChildSession, session?: FakeFactorySession): Promise<FakeFactorySession>;
   target(childSessionId: string): ChildAutomaticCompactionTarget;
@@ -48,6 +49,7 @@ function createHarness(
     failSettleStreamingOnce?: boolean;
     missReplayChildOnce?: boolean;
     deferDurabilityForStatus?: PersistedChildSession['status'];
+    childRuntimeIdleMs?: number;
   } = {},
 ): Harness {
   const calls: RecordedCall[] = [];
@@ -61,6 +63,7 @@ function createHarness(
   let failFlushStreaming = options.failFlushStreamingOnce;
   let failSettleStreaming = options.failSettleStreamingOnce;
   let deferDurabilityForStatus = options.deferDurabilityForStatus;
+  let clock = 100;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
     if (failDriveSetup !== stage) return;
     failDriveSetup = undefined;
@@ -177,7 +180,8 @@ function createHarness(
     maxOpenSessions: options.maxOpenSessions ?? 4,
     maxLiveRuntimes: options.maxLiveRuntimes ?? options.maxOpenSessions ?? 4,
     maxQueuedRuntimes: options.maxQueuedRuntimes ?? 16,
-    now: () => 100,
+    childRuntimeIdleMs: options.childRuntimeIdleMs ?? 5 * 60_000,
+    now: () => clock,
   };
   const owner = new ChildSessions(dependencies);
   owner.attachParent(parentId);
@@ -189,6 +193,9 @@ function createHarness(
     runtime,
     owner,
     parentId,
+    advanceClock: (ms) => {
+      clock += ms;
+    },
     replaceParent: () => {
       parent = parentLease(parentId, calls);
       owner.attachParent(parentId);
@@ -1796,4 +1803,174 @@ test('a queued child interrupted then re-prompted delivers only the new prompt',
   );
   await secondSession.waitForPrompts(1);
   assert.deepEqual(secondSession.prompts, ['new prompt']);
+});
+
+test('a settled child idle past the budget releases its provider session', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  await h.open(record);
+  assert.equal(h.owner.counts().live, 1);
+
+  h.advanceClock(5 * 60_000 - 1);
+  await h.owner.retireIdleRuntimes();
+  assert.equal(h.owner.counts().live, 1, 'the budget must not expire early');
+
+  h.advanceClock(1);
+  await h.owner.retireIdleRuntimes();
+
+  assert.equal(h.owner.counts().live, 0);
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.target === 'cleanup' && call.method === 'session.close')
+      .map((call) => call.args[0]),
+    ['provider'],
+  );
+  assert.equal(
+    h.events.some((event) => event.type === 'session.child' && !event.runtimeAvailable),
+    true,
+    'the client must learn the runtime is gone',
+  );
+});
+
+test('retirement tells the user why the runtime went away', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { childRuntimeIdleMs: 0 });
+  await h.open(record);
+  await h.owner.retireIdleRuntimes();
+
+  const status = h.calls.find(
+    (call) => call.target === 'protocol' && call.method === 'timeline.status',
+  );
+  assert.ok(status, 'a retired child must leave a visible reason in its transcript');
+  assert.match(String(status.args[1]), /released after 5 minutes idle/);
+  assert.equal(status.args[3], 'child');
+});
+
+test('a child still working is never retired, however long its runtime sat unused', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { childRuntimeIdleMs: 0 });
+  const runtime = await h.open(record);
+  const gate = runtime.deferNextStream();
+  const sending = h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: record.childSessionId },
+    'still working',
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  await h.owner.retireIdleRuntimes();
+  assert.equal(h.owner.counts().live, 1);
+  assert.equal(
+    h.calls.some((call) => call.target === 'cleanup' && call.method === 'session.close'),
+    false,
+    'a streaming child must keep its provider session',
+  );
+
+  gate.resolve();
+  await sending;
+
+  // Once its output has settled and been persisted the same child is releasable.
+  await h.owner.retireIdleRuntimes();
+  assert.equal(h.owner.counts().live, 0);
+});
+
+test('a child whose result has not reached history is not retired until it does', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { childRuntimeIdleMs: 0 });
+  await h.open(record);
+  // Fail the settlement write once, so the turn's result exists but has not
+  // reached history yet.
+  const upsert = h.history.upsertChildSession.bind(h.history);
+  h.history.upsertChildSession = (child) => {
+    const durable = upsert(child);
+    if (child.status !== 'paused') return durable;
+    h.history.upsertChildSession = upsert;
+    return false;
+  };
+  await h.owner.send(
+    { parentAppSessionId: h.parentId, childSessionId: record.childSessionId },
+    'produce a result',
+  );
+
+  await h.owner.retireIdleRuntimes();
+  assert.equal(h.owner.counts().live, 1, 'an undelivered result must hold the runtime open');
+
+  h.owner.retryPendingDurability();
+  await h.owner.retireIdleRuntimes();
+  assert.equal(h.owner.counts().live, 0);
+});
+
+test('a retired child reopens with its transcript and a fresh runtime', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { childRuntimeIdleMs: 0 });
+  await h.open(record);
+  await h.owner.retireIdleRuntimes();
+  assert.equal(h.owner.counts().live, 0);
+
+  const before = h.calls.length;
+  h.runtime.loadQueue.set('provider', [new FakeFactorySession('provider', {}, h.calls)]);
+  await h.owner.open({
+    type: 'child.open',
+    parentAppSessionId: h.parentId,
+    childSessionId: record.childSessionId,
+    requestId: 'reopen',
+  });
+
+  const after = h.calls.slice(before);
+  const painted = after.findIndex(
+    (call) => call.target === 'protocol' && call.method === 'timeline.loadChildHistory',
+  );
+  const loaded = after.findIndex(
+    (call) => call.target === 'runtime' && call.method === 'loadSession',
+  );
+  assert.ok(painted >= 0, 'the persisted transcript must be restored');
+  assert.ok(loaded > painted, 'history paints before the provider session reloads');
+  assert.equal(h.owner.counts().live, 1);
+  assert.equal(h.owner.list(h.parentId)[0]?.transcriptAvailable, true);
+});
+
+test('retirement stays disarmed once the owner has closed or shut down', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { childRuntimeIdleMs: 0 });
+  await h.open(record);
+
+  await h.owner.closeParent(h.parentId);
+  await h.owner.retireIdleRuntimes();
+  assert.equal(h.owner.counts().live, 0);
+
+  const h2 = createHarness([childRecord('child', 'provider')], { childRuntimeIdleMs: 0 });
+  await h2.open(childRecord('child', 'provider'));
+  await h2.owner.shutdown();
+  await h2.owner.retireIdleRuntimes();
+  assert.equal(h2.owner.counts().live, 0);
+});
+
+test('opening a child arms the retirement wakeup that later releases it', async () => {
+  const idleMs = 77_000;
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record], { childRuntimeIdleMs: idleMs });
+  const scheduled: (() => void)[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  Reflect.set(globalThis, 'setTimeout', (fn: () => void, ms: number) => {
+    if (ms === idleMs) scheduled.push(fn);
+    return { unref: () => undefined };
+  });
+  try {
+    await h.open(record);
+  } finally {
+    Reflect.set(globalThis, 'setTimeout', realSetTimeout);
+  }
+
+  assert.equal(scheduled.length, 1, 'an opened runtime must schedule its own retirement');
+
+  h.advanceClock(idleMs);
+  scheduled[0]?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(h.owner.counts().live, 0);
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.target === 'cleanup' && call.method === 'session.close')
+      .map((call) => call.args[0]),
+    ['provider'],
+  );
 });

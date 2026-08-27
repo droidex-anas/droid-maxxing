@@ -53,5 +53,6 @@ export interface ChildSessionsDependencies {
   maxOpenSessions: number;
   maxLiveRuntimes: number;
   maxQueuedRuntimes: number;
+  childRuntimeIdleMs: number;
   now(): number;
 }
