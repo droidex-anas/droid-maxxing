@@ -31,7 +31,7 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
   }
   const requireFromTree = createRequire(entry);
   const wsPath = join(treeRoot, 'sidecar/node_modules/ws');
-  const { WebSocket } = requireFromTree(wsPath) as { WebSocket: typeof import('ws').WebSocket };
+  const { WebSocket } = requireFromTree(wsPath) as { WebSocket: WebSocketConstructor };
   const runs = startupRuns();
   const readySamples: number[] = [];
   const listSamples: number[] = [];
@@ -68,7 +68,7 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
 async function measureOnce(
   entry: string,
   home: string,
-  WebSocketCtor: typeof import('ws').WebSocket,
+  WebSocketCtor: WebSocketConstructor,
 ): Promise<{ readyMs: number; firstSessionsListMs: number }> {
   const token = randomBytes(32).toString('hex');
   const assetToken = randomBytes(32).toString('hex');
@@ -121,28 +121,30 @@ async function measureOnce(
 }
 
 async function waitForSessionsList(
-  WebSocketCtor: typeof import('ws').WebSocket,
+  WebSocketCtor: WebSocketConstructor,
   port: number,
   token: string,
-): Promise<{ type: string; sessions?: unknown[] }> {
+): Promise<SessionsListEvent> {
   const socket = new WebSocketCtor(
     `ws://127.0.0.1:${String(port)}/?token=${encodeURIComponent(token)}&bridgeProtocol=${String(BRIDGE_PROTOCOL)}`,
   );
   await new Promise<void>((resolve, reject) => {
     socket.once('open', () => resolve());
-    socket.once('error', reject);
+    socket.once('error', (error: unknown) => {
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
   });
 
-  const listPromise = new Promise<{ type: string; sessions?: unknown[] }>((resolve, reject) => {
+  const listPromise = new Promise<SessionsListEvent>((resolve, reject) => {
     const timeout = setTimeout(
       () => reject(new Error('sessions.list timeout')),
       SESSIONS_LIST_TIMEOUT_MS,
     );
-    socket.on('message', (raw) => {
+    socket.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
       try {
         const message = JSON.parse(String(raw)) as {
           type?: string;
-          events?: { event?: { type?: string; sessions?: unknown[] } }[];
+          events?: { event?: SessionsListEvent }[];
         };
         if (message.type !== 'events.batch' || !Array.isArray(message.events)) return;
         for (const entry of message.events) {
@@ -172,4 +174,20 @@ function median(values: number[]): number {
   if (values.length === 0) return NaN;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)] ?? NaN;
+}
+
+interface SessionsListEvent {
+  type: 'sessions.list';
+  sessions: unknown[];
+}
+
+interface WebSocketConstructor {
+  new (url: string): WebSocketLike;
+}
+
+interface WebSocketLike {
+  once(event: 'open' | 'error', listener: (...args: unknown[]) => void): void;
+  on(event: 'message', listener: (raw: Buffer | ArrayBuffer | Buffer[]) => void): void;
+  send(data: string): void;
+  close(): void;
 }
