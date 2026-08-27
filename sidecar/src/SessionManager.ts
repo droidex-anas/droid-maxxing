@@ -1699,6 +1699,7 @@ export class SessionManager {
   private emitError(error: {
     code?: string;
     clientRef?: string;
+    requestId?: string;
     providerSessionId?: string;
     appSessionId?: string;
     message: string;
