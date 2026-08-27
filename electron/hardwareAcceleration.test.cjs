@@ -108,3 +108,23 @@ test('invalid async preference loads fail closed for settings IPC', async () => 
     /invalid/i,
   );
 });
+
+test('startup falls back and settings fail closed on the same corrupt file', async () => {
+  const raw = '{broken';
+  const filePath = '/tmp/corrupt-hardware-acceleration.json';
+  assert.deepEqual(
+    readHardwareAccelerationPreferenceSync({
+      filePath,
+      fs: { readFileSync: () => raw },
+    }),
+    { enabled: HARDWARE_ACCELERATION_DEFAULT },
+  );
+  await assert.rejects(
+    () =>
+      loadHardwareAccelerationPreference({
+        filePath,
+        fs: { readFile: async () => raw },
+      }),
+    /Hardware acceleration preference is invalid\. Toggle it again in Settings\./,
+  );
+});
