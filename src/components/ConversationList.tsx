@@ -24,6 +24,7 @@ import {
   isConversationAtLatest,
   nearestOverflowParent,
   scrollMarginBetween,
+  syncMeasureConversationList,
 } from './conversationListState';
 
 export interface ConversationListHandle {
@@ -111,13 +112,16 @@ export function ConversationList({
     [],
   );
 
+  // History chrome above the list can appear without a range change; keep margin in this layout.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- size-stable; re-run after every commit
   useLayoutEffect(() => {
     const list = listElRef.current;
+    if (list) syncMeasureConversationList(list, virtualizer.resizeItem);
     const scroll = getScrollElement();
     if (!list || !scroll) return;
     const next = scrollMarginBetween(list, scroll);
     setScrollMargin((current) => (Math.abs(next - current) > 0.5 ? next : current));
-  }, [getScrollElement, items.length]);
+  });
 
   useLayoutEffect(() => {
     const list = listElRef.current;

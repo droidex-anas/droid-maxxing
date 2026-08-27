@@ -13,12 +13,14 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
+  CONVERSATION_VISIBLE_HOLE_PX,
   conversationRowMountKey,
   conversationRowViewportId,
   estimatedListEndOffset,
   estimatedListSize,
   findConversationRowIndex,
   isConversationAtLatest,
+  measuredConversationRowSize,
   takeFeedRowEntrance,
 } from './conversationListState';
 import { applyConversationContentResize } from '../hooks/useConversationScrollWindow';
@@ -138,6 +140,35 @@ function pinFollowMeasuredEnd(engine: ReturnType<typeof createListEngine>) {
   engine.element.scrollTop = Math.min(engine.element.scrollTop, maxTop);
   engine.notifyOffset();
 }
+
+test('visible-hole threshold is twice the list gap, not an estimated row', () => {
+  assert.equal(CONVERSATION_VISIBLE_HOLE_PX, CONVERSATION_LIST_GAP_PX * 2);
+  assert.ok(CONVERSATION_VISIBLE_HOLE_PX < CONVERSATION_LIST_ESTIMATE_PX);
+});
+
+test('row measure reads the index attribute and rounds layout height', () => {
+  const row = {
+    dataset: { index: '12' },
+    offsetHeight: 19.4,
+  } as unknown as HTMLElement;
+  assert.deepEqual(measuredConversationRowSize(row), { index: 12, size: 19 });
+  const missing = { dataset: {}, offsetHeight: 40 } as unknown as HTMLElement;
+  assert.equal(measuredConversationRowSize(missing), null);
+});
+
+test('measuring a short row packs the next row to the list gap', () => {
+  const { virtualizer } = createListEngine({ items: history(80), scrollTop: 0 });
+  virtualizer.getVirtualItems();
+  assert.equal(virtualizer.measurementsCache[0]?.size, CONVERSATION_LIST_ESTIMATE_PX);
+  virtualizer.resizeItem(0, 19);
+  virtualizer.getVirtualItems();
+  const measured = virtualizer.measurementsCache[0];
+  const next = virtualizer.measurementsCache[1];
+  assert.ok(measured);
+  assert.ok(next);
+  assert.equal(measured.size, 19);
+  assert.equal(next.start - measured.end, CONVERSATION_LIST_GAP_PX);
+});
 
 test('mounted row count stays bounded for 3k and 10k histories', () => {
   for (const count of [3_000, 10_000]) {

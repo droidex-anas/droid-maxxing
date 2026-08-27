@@ -4,6 +4,8 @@ import { feedRowId } from '../hooks/conversationViewportAnchor';
 export const CONVERSATION_LIST_OVERSCAN = 8;
 export const CONVERSATION_LIST_ESTIMATE_PX = 96;
 export const CONVERSATION_LIST_GAP_PX = 16;
+// Twice the designed row gap: larger holes are missing or still-estimated rows, not spacing.
+export const CONVERSATION_VISIBLE_HOLE_PX = CONVERSATION_LIST_GAP_PX * 2;
 export const CONVERSATION_LIST_PIN_THRESHOLD_PX = 80;
 // Pre-measure guess so the first window exists before the scroller is observed; a wrong size only changes overscan until measure.
 export const CONVERSATION_LIST_INITIAL_RECT = { width: 720, height: 900 } as const;
@@ -63,6 +65,26 @@ export function findConversationRowIndex(
 
 export function scrollMarginBetween(list: HTMLElement, scroll: HTMLElement): number {
   return list.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
+}
+
+export function measuredConversationRowSize(
+  row: HTMLElement,
+): { index: number; size: number } | null {
+  const index = Number(row.dataset.index);
+  if (!Number.isInteger(index) || index < 0) return null;
+  return { index, size: Math.round(row.offsetHeight) };
+}
+
+export function syncMeasureConversationList(
+  list: HTMLElement,
+  resizeItem: (index: number, size: number) => void,
+): void {
+  for (let node = list.firstElementChild; node; node = node.nextElementSibling) {
+    if (!(node instanceof HTMLElement)) continue;
+    const measured = measuredConversationRowSize(node);
+    if (!measured) continue;
+    resizeItem(measured.index, measured.size);
+  }
 }
 
 export function nearestOverflowParent(start: HTMLElement): HTMLElement | null {
