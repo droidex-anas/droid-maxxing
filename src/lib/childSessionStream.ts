@@ -1,4 +1,9 @@
-import type { ChildSessionSummary, ChildStatus, TranscriptEvent } from '../types/bridge';
+import type {
+  ChildSessionSummary,
+  ChildStatus,
+  StreamFidelity,
+  TranscriptEvent,
+} from '../types/bridge';
 import { childSessionKey, childSessionLatest, type ChildSessionActivity } from './childSessions';
 
 export const CHILD_STREAM_PREVIEW_MAX_LINES = 3;
@@ -16,6 +21,8 @@ export type ChildStreamPhase =
   | 'failed'
   | 'interrupted';
 
+export type ChildStreamPresentation = 'typewriter' | 'tool' | 'working' | 'idle';
+
 export const CHILD_STREAM_PHASE_LABEL: Record<ChildStreamPhase, string> = {
   queued: 'Queued',
   starting: 'Starting',
@@ -29,6 +36,8 @@ export const CHILD_STREAM_PHASE_LABEL: Record<ChildStreamPhase, string> = {
 export interface ChildStreamSnapshot {
   key: string;
   phase: ChildStreamPhase;
+  fidelity: StreamFidelity;
+  step: string;
   preview: string;
   previewKind: 'markdown' | 'plain';
   live: boolean;
@@ -70,6 +79,26 @@ export function childStreamPhase(input: {
   return 'starting';
 }
 
+export function childStreamPhaseLabel(phase: ChildStreamPhase, fidelity: StreamFidelity): string {
+  if (phase === 'streaming' && fidelity !== 'token') return 'Working';
+  return CHILD_STREAM_PHASE_LABEL[phase];
+}
+
+export function childStreamPresentation(
+  snapshot: Pick<ChildStreamSnapshot, 'live' | 'fidelity'>,
+): ChildStreamPresentation {
+  if (!snapshot.live) return 'idle';
+  if (snapshot.fidelity === 'token') return 'typewriter';
+  if (snapshot.fidelity === 'tool') return 'tool';
+  return 'working';
+}
+
+export function childStreamShowsCaret(
+  snapshot: Pick<ChildStreamSnapshot, 'live' | 'fidelity'>,
+): boolean {
+  return childStreamPresentation(snapshot) === 'typewriter';
+}
+
 export function sameChildStreamSnapshot(
   previous: ChildStreamSnapshot | undefined,
   next: ChildStreamSnapshot,
@@ -78,6 +107,8 @@ export function sameChildStreamSnapshot(
   return (
     previous.key === next.key &&
     previous.phase === next.phase &&
+    previous.fidelity === next.fidelity &&
+    previous.step === next.step &&
     previous.preview === next.preview &&
     previous.previewKind === next.previewKind &&
     previous.live === next.live
@@ -137,11 +168,26 @@ function childStreamHasOutput(
 }
 
 function childStreamPreviewKind(
+  fidelity: StreamFidelity,
   phase: ChildStreamPhase,
   kind: TranscriptEvent['kind'] | undefined,
 ): ChildStreamSnapshot['previewKind'] {
-  if (phase === 'streaming' && isTextLikeKind(kind)) return 'markdown';
+  if (fidelity === 'token' && phase === 'streaming' && isTextLikeKind(kind)) return 'markdown';
   return 'plain';
+}
+
+function childStreamStep(input: {
+  phase: ChildStreamPhase;
+  fidelity: StreamFidelity;
+  polledPhase: string;
+  latestHead: string;
+  toolName: string | undefined;
+}): string {
+  if (input.polledPhase !== '') return input.polledPhase;
+  if (input.latestHead !== '') return input.latestHead;
+  if (input.fidelity === 'tool' && input.toolName) return input.toolName;
+  if (input.phase === 'streaming') return 'Working';
+  return CHILD_STREAM_PHASE_LABEL[input.phase];
 }
 
 export function childStreamPreviewBoxClass(expanded: boolean): string {
@@ -155,9 +201,12 @@ export function childStreamSnapshot(
 ): ChildStreamSnapshot {
   const latest = activity?.latest;
   const polled = child.activity;
-  const latestBody = optionalText(childSessionLatest(latest)?.body);
+  const latestMeta = childSessionLatest(latest);
+  const latestBody = optionalText(latestMeta?.body);
   const polledPreview = optionalText(polled?.preview);
+  const polledPhase = optionalText(polled?.phase);
   const rawPreview = childStreamRawPreview(latest, polledPreview);
+  const fidelity = child.streamFidelity;
   const phase = childStreamPhase({
     queued: child.queued,
     status: childStreamStatus(child, activity),
@@ -168,16 +217,25 @@ export function childStreamSnapshot(
       latest?.toolName,
       latestBody,
       polledPreview,
-      optionalText(polled?.phase),
+      polledPhase,
     ),
     interruptReason,
   });
-  const previewKind = childStreamPreviewKind(phase, latest?.kind);
+  const previewKind = childStreamPreviewKind(fidelity, phase, latest?.kind);
   return {
     key: childSessionKey(child),
     phase,
+    fidelity,
+    step: childStreamStep({
+      phase,
+      fidelity,
+      polledPhase,
+      latestHead: optionalText(latestMeta?.head),
+      toolName: latest?.toolName,
+    }),
     preview: boundChildStreamPreview(
       childStreamPreviewSource({
+        fidelity,
         markdown: previewKind === 'markdown',
         rawPreview,
         latestBody,
@@ -192,6 +250,7 @@ export function childStreamSnapshot(
 }
 
 function childStreamPreviewSource(input: {
+  fidelity: StreamFidelity;
   markdown: boolean;
   rawPreview: string;
   latestBody: string;
@@ -199,7 +258,13 @@ function childStreamPreviewSource(input: {
   phase: ChildStreamPhase;
   prompt: string;
 }): string {
-  if (input.markdown) return input.rawPreview;
+  if (input.fidelity === 'token' && input.markdown) return input.rawPreview;
+  if (input.fidelity === 'state') {
+    if (input.polledPreview !== '') return input.polledPreview;
+    if (input.latestBody !== '') return input.latestBody;
+    if (input.phase === 'starting') return input.prompt;
+    return '';
+  }
   if (input.latestBody !== '') return input.latestBody;
   if (input.polledPreview !== '') return input.polledPreview;
   if (input.phase === 'starting') return input.prompt;

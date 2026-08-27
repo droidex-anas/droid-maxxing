@@ -114,6 +114,7 @@ function linkedWorker(
     modelId: 'model-default',
     spawnLink: { kind: 'tool-use', id: toolUseId },
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
 }
 

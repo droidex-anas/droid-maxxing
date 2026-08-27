@@ -41,6 +41,7 @@ function childSession(
     status,
     modelId: 'model',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
 }
 

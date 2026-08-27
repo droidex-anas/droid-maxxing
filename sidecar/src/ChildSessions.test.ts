@@ -448,6 +448,7 @@ test('result-only completion admits the exact pending spawn as historical', () =
       spawnLink: { kind: 'tool-use', id: 'tool-current' },
       transcriptAvailable: true,
       startedAt: 100,
+      streamFidelity: 'state',
     },
   ]);
   assert.equal(h.history.childSessions(h.parentId)[0]?.providerSessionId, 'provider-child-current');
@@ -501,6 +502,7 @@ test('missing Task settings defer exact admission and preserve provider-only com
       spawnLink: { kind: 'tool-use', id: 'tool-deferred' },
       transcriptAvailable: true,
       startedAt: 100,
+      streamFidelity: 'state',
     },
   ]);
 });
@@ -557,6 +559,48 @@ test('poll observations never rekey a child away from its spawn link', () => {
   assert.deepEqual(children[0]?.spawnLink, { kind: 'tool-use', id: 'tool-spawn' });
   assert.equal(children[0]?.label, 'worker');
   assert.equal(children[0]?.status, 'running');
+  assert.equal(children[0]?.streamFidelity, 'state');
+});
+
+test('polled Task children keep state fidelity even when a preview arrives', () => {
+  const h = createHarness([]);
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    providerSessionId: 'provider-polled',
+    role: 'worker',
+    modelId: 'model-default',
+    spawnLink: { kind: 'tool-use', id: 'tool-spawn' },
+    activity: { phase: 'Running', preview: 'poll-sized lump' },
+  });
+  const child = h.owner.list(h.parentId)[0];
+  assert.equal(child?.status, 'running');
+  assert.equal(child?.streamFidelity, 'state');
+  assert.equal(child?.activity?.preview, 'poll-sized lump');
+  const published = h.events.find((event) => event.type === 'session.child');
+  assert.equal(published?.type === 'session.child' && published.child.streamFidelity, 'state');
+});
+
+test('driving a child with partial messages publishes token fidelity', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  h.owner.admitChildObservation({
+    parentAppSessionId: h.parentId,
+    providerSessionId: record.providerSessionId,
+    role: 'worker',
+    spawnLink: record.spawnLink,
+  });
+  assert.equal(h.owner.list(h.parentId)[0]?.streamFidelity, 'state');
+
+  await h.open(record);
+  assert.equal(h.owner.list(h.parentId)[0]?.streamFidelity, 'state');
+
+  await h.owner.send(record, 'stream tokens');
+  const driven = h.owner.list(h.parentId)[0];
+  assert.equal(driven?.streamFidelity, 'token');
+  const upserted = h.events.filter(
+    (event) => event.type === 'session.child' && event.child.streamFidelity === 'token',
+  );
+  assert.ok(upserted.length > 0);
 });
 
 test('opening a child the harness is still driving keeps it running', async () => {

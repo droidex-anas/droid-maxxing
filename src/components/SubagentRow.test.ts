@@ -8,6 +8,7 @@ import {
   CHILD_STREAM_PHASE_LABEL,
   CHILD_STREAM_PREVIEW_BOX_CLASS,
   CHILD_STREAM_PREVIEW_EXPANDED_BOX_CLASS,
+  childStreamPhaseLabel,
   childStreamPreviewBoxClass,
 } from '../lib/childSessionStream';
 import {
@@ -17,12 +18,19 @@ import {
   type SubagentRowProps,
 } from './SubagentRow';
 
-function snapshot(phase: ChildStreamSnapshot['phase'], preview = 'hello'): ChildStreamSnapshot {
+function snapshot(
+  phase: ChildStreamSnapshot['phase'],
+  preview = 'hello',
+  fidelity: ChildStreamSnapshot['fidelity'] = 'token',
+): ChildStreamSnapshot {
   return {
     key: 'tool-a',
     phase,
+    fidelity,
+    step:
+      phase === 'streaming' && fidelity !== 'token' ? 'Working' : CHILD_STREAM_PHASE_LABEL[phase],
     preview,
-    previewKind: phase === 'streaming' ? 'markdown' : 'plain',
+    previewKind: phase === 'streaming' && fidelity === 'token' ? 'markdown' : 'plain',
     live: phase === 'streaming' || phase === 'starting',
   };
 }
@@ -37,6 +45,7 @@ function child(): ChildSessionSummary {
     transcriptAvailable: true,
     spawnLink: { kind: 'tool-use', id: 'tool-a' },
     startedAt: 1_000,
+    streamFidelity: 'token',
   };
 }
 
@@ -70,8 +79,30 @@ test('each child stream phase renders a distinct label', () => {
       createElement(SubagentRow, props({ snapshot: snapshot(phase, `${phase} body`) })),
     );
     assert.ok(html.includes(`data-phase="${phase}"`));
-    assert.ok(html.includes(CHILD_STREAM_PHASE_LABEL[phase]));
+    assert.ok(html.includes(childStreamPhaseLabel(phase, 'token')));
   }
+});
+
+test('token fidelity shows a caret; state and tool never do', () => {
+  const token = renderToStaticMarkup(
+    createElement(SubagentRow, props({ snapshot: snapshot('streaming', 'delta', 'token') })),
+  );
+  const state = renderToStaticMarkup(
+    createElement(SubagentRow, props({ snapshot: snapshot('streaming', 'poll lump', 'state') })),
+  );
+  const tool = renderToStaticMarkup(
+    createElement(SubagentRow, props({ snapshot: snapshot('streaming', 'ApplyPatch', 'tool') })),
+  );
+  assert.ok(token.includes('data-testid="subagent-stream-caret"'));
+  assert.ok(token.includes('caret-blink'));
+  assert.ok(token.includes('data-presentation="typewriter"'));
+  assert.equal(state.includes('caret-blink'), false);
+  assert.equal(state.includes('data-testid="subagent-stream-caret"'), false);
+  assert.ok(state.includes('data-presentation="working"'));
+  assert.ok(state.includes('data-testid="subagent-working-cue"'));
+  assert.ok(state.includes('Working'));
+  assert.equal(tool.includes('caret-blink'), false);
+  assert.ok(tool.includes('data-presentation="tool"'));
 });
 
 test('the live preview box keeps a fixed height class while tokens update', () => {

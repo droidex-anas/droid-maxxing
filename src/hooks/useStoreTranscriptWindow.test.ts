@@ -51,6 +51,7 @@ function childSession(
     status: 'completed',
     modelId: 'model',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
 }
 
