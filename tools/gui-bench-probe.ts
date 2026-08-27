@@ -207,6 +207,25 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
       if (!node) return null;
       return { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight };
     },
+    waitForShell(timeoutMs) {
+      const started = performance.now();
+      return new Promise((resolve, reject) => {
+        const poll = () => {
+          const button = document.querySelector('[data-testid="new-workspaceless-chat"]');
+          const area = document.querySelector('textarea');
+          if (button && area) {
+            resolve({ elapsedMs: performance.now() - started });
+            return;
+          }
+          if (performance.now() - started > timeoutMs) {
+            reject(new Error('Shell never became ready.'));
+            return;
+          }
+          requestAnimationFrame(poll);
+        };
+        poll();
+      });
+    },
     async clickNewChat() {
       const button = document.querySelector('[data-testid="new-workspaceless-chat"]');
       if (!button) throw new Error('new-workspaceless-chat not found');
@@ -219,13 +238,87 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
       }
       throw new Error('Composer did not become ready.');
     },
-    async sendPrompt(text) {
+    fillPrompt(text) {
       const area = document.querySelector('textarea');
       if (!area) throw new Error('composer textarea not found');
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
       setter.call(area, text);
       area.dispatchEvent(new Event('input', { bubbles: true }));
+      area.dispatchEvent(new Event('change', { bubbles: true }));
       area.focus();
+      return area.value;
+    },
+    waitForSendReady(timeoutMs) {
+      const started = performance.now();
+      return new Promise((resolve, reject) => {
+        const poll = () => {
+          const area = document.querySelector('textarea');
+          const shell = document.querySelector('[data-testid="chat-view"]') || document.body;
+          const send = Array.from(shell.querySelectorAll('button.rounded-full')).find((button) =>
+            button.querySelector('svg'),
+          );
+          const ready = Boolean(
+            area && send && !send.disabled && send.getAttribute('title') !== 'Agent runtime is unavailable',
+          );
+          if (ready) {
+            resolve({ elapsedMs: performance.now() - started, title: send ? send.getAttribute('title') : null });
+            return;
+          }
+          if (performance.now() - started > timeoutMs) {
+            reject(
+              new Error(
+                'Send never became ready (disabled=' +
+                  String(send && send.disabled) +
+                  ', title=' +
+                  (send && send.getAttribute('title')) +
+                  ')',
+              ),
+            );
+            return;
+          }
+          requestAnimationFrame(poll);
+        };
+        poll();
+      });
+    },
+    waitForStreamPaint(timeoutMs) {
+      const started = performance.now();
+      let lastLen = 0;
+      let lastPaints = 0;
+      let stableSince = started;
+      return new Promise((resolve) => {
+        const poll = () => {
+          const text = (document.querySelector('[data-testid="chat-view"]') || document.body).innerText || '';
+          const len = text.length;
+          const paints = window.__droidexPerf && window.__droidexPerf.getSnapshot
+            ? window.__droidexPerf.getSnapshot().receiveToPaintMs?.count || 0
+            : 0;
+          if (len > lastLen || paints > lastPaints) {
+            lastLen = Math.max(lastLen, len);
+            lastPaints = Math.max(lastPaints, paints);
+            stableSince = performance.now();
+          }
+          const grew = lastPaints >= 8 || lastLen > 800;
+          const settled = grew && performance.now() - stableSince > 900;
+          if (settled || performance.now() - started > timeoutMs) {
+            resolve({
+              elapsedMs: performance.now() - started,
+              textLen: lastLen,
+              paints: lastPaints,
+              timedOut: !settled,
+            });
+            return;
+          }
+          requestAnimationFrame(poll);
+        };
+        poll();
+      });
+    },
+    async sendPrompt(text) {
+      window.__guiBench.fillPrompt(text);
+      await window.__guiBench.waitForSendReady(20000);
+      const area = document.querySelector('textarea');
+      if (area) area.focus();
       area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
       return true;
     },

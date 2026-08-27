@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { sleep } from './gui-bench-cdp.ts';
@@ -15,6 +15,7 @@ import {
   type LaunchedApp,
 } from './gui-bench-launch.ts';
 import { GUI_BENCH_PROBE_SOURCE } from './gui-bench-probe.ts';
+import { renderReport, type RunResult, type ScrollMetrics, type StreamingMetrics } from './gui-bench-report.ts';
 import { GUI_BENCH_SESSION_IDS } from './gui-bench-seed.ts';
 
 interface ScrollSpeed {
@@ -22,60 +23,6 @@ interface ScrollSpeed {
   deltaY: number;
   ticks: number;
   intervalMs: number;
-}
-
-interface ScrollMetrics {
-  speed: string;
-  frameCount: number;
-  expectedFrames: number;
-  droppedFrames: number;
-  longestFrameMs: number;
-  longTasksOver50Ms: number;
-  longTaskMaxMs: number;
-  blankHitRatio: number;
-  blankDurationMs: number;
-  blankMaxRatio: number;
-  blankMaxHolePx?: number;
-  mountedRowsMax: number;
-  mountedRowsLast: number;
-  cpuPercent: number;
-  rssBytes: number;
-}
-
-interface RunResult {
-  tree: 'baseline' | 'candidate';
-  run: number;
-  sha: string;
-  coldOpen10kMs: number;
-  switchTo3kMs: number;
-  switchTo10kWarmMs: number;
-  idleCpuPercent: number;
-  idleRssBytes: number;
-  appMetricsIdle: unknown;
-  scroll3k: ScrollMetrics[];
-  scroll10k: ScrollMetrics[];
-  children: {
-    openMs: number;
-    mountedRows: number;
-    childRowCount: number;
-    scroll: ScrollMetrics | null;
-  };
-  streaming: StreamingMetrics | null;
-  screenshotPath?: string;
-}
-
-interface StreamingMetrics {
-  wired: boolean;
-  reason?: string;
-  durationMs: number;
-  droppedFrames: number;
-  longestFrameMs: number;
-  longTasksOver50Ms: number;
-  receiveToPaintP50Ms?: number;
-  receiveToPaintP95Ms?: number;
-  receiveToPaintMaxMs?: number;
-  cpuPercent: number;
-  rssBytes: number;
 }
 
 const SPEEDS: ScrollSpeed[] = [
@@ -86,14 +33,18 @@ const SPEEDS: ScrollSpeed[] = [
 
 const ARTIFACTS = '/opt/cursor/artifacts';
 const WORK = '/tmp/droidex-gui-bench';
+const CANDIDATE_ROOT = '/home/ubuntu/wt/gui-bench';
+const RAW_PATH = join(ARTIFACTS, 'gui_bench_raw.json');
 
 function parseArgs(argv: string[]): {
   runs: number;
   skipStreaming: boolean;
+  streamingOnly: boolean;
   trees: BenchTree[];
 } {
   let runs = 3;
   let skipStreaming = false;
+  let streamingOnly = false;
   const trees: BenchTree[] = [
     {
       name: 'baseline',
@@ -102,16 +53,17 @@ function parseArgs(argv: string[]): {
     },
     {
       name: 'candidate',
-      root: '/home/ubuntu/wt/gui-bench',
-      sha: gitSha('/home/ubuntu/wt/gui-bench'),
+      root: CANDIDATE_ROOT,
+      sha: gitSha(CANDIDATE_ROOT),
     },
   ];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--runs') runs = Number(requiredValue(argv, ++index, arg));
     if (arg === '--skip-streaming') skipStreaming = true;
+    if (arg === '--streaming-only') streamingOnly = true;
   }
-  return { runs, skipStreaming, trees };
+  return { runs, skipStreaming, streamingOnly, trees };
 }
 
 function requiredValue(argv: string[], index: number, flag: string): string {
@@ -154,7 +106,10 @@ async function openSession(
   return app.cdp.evaluate(`window.__guiBench.openSession(${JSON.stringify(sessionId)})`);
 }
 
-async function measureIdle(app: LaunchedApp, durationMs: number): Promise<{ cpu: number; rss: number; appMetrics: unknown }> {
+async function measureIdle(
+  app: LaunchedApp,
+  durationMs: number,
+): Promise<{ cpu: number; rss: number; appMetrics: unknown }> {
   const before = sampleProcessTree(app.pid);
   await sleep(durationMs);
   const after = sampleProcessTree(app.pid);
@@ -249,39 +204,43 @@ async function runHistoryPass(tree: BenchTree, run: number, templateHome: string
 }
 
 function bundleReplaySidecar(): string {
-  const outfile = join(WORK, 'gui-bench-replay-sidecar.mjs');
+  // Resolve native addons the same way production sidecar.mjs does: next to sidecar/dist.
+  const outfile = join(CANDIDATE_ROOT, 'sidecar/dist/gui-bench-replay-sidecar.mjs');
+  mkdirSync(join(CANDIDATE_ROOT, 'sidecar/dist'), { recursive: true });
   execFileSync(
-    join('/home/ubuntu/wt/gui-bench', 'sidecar/node_modules/.bin/esbuild'),
+    join(CANDIDATE_ROOT, 'sidecar/node_modules/.bin/esbuild'),
     [
-      join('/home/ubuntu/wt/gui-bench', 'tools/gui-bench-replay-sidecar.ts'),
+      join(CANDIDATE_ROOT, 'tools/gui-bench-replay-sidecar.ts'),
       '--bundle',
       '--platform=node',
       '--format=esm',
+      `--alias:@factory/droid-sdk=${join(CANDIDATE_ROOT, 'sidecar/node_modules/@factory/droid-sdk')}`,
       `--banner:js=import{createRequire as __cr}from'module';const require=__cr(import.meta.url);`,
       `--outfile=${outfile}`,
     ],
-    { stdio: 'inherit' },
+    { stdio: 'inherit', cwd: join(CANDIDATE_ROOT, 'sidecar') },
   );
   return outfile;
 }
 
-async function runStreamingPass(
-  tree: BenchTree,
-  run: number,
-  sidecarEntry: string,
-): Promise<StreamingMetrics> {
+function unwiredStreaming(reason: string): StreamingMetrics {
+  return {
+    wired: false,
+    reason,
+    durationMs: 0,
+    droppedFrames: 0,
+    longestFrameMs: 0,
+    longTasksOver50Ms: 0,
+    cpuPercent: 0,
+    rssBytes: 0,
+  };
+}
+
+async function runStreamingPass(tree: BenchTree, run: number, sidecarEntry: string): Promise<StreamingMetrics> {
   if (tree.name === 'baseline') {
-    return {
-      wired: false,
-      reason:
-        'origin/main has no sidecar/src/perf/replayRuntime.ts. Refusing to run the candidate replay sidecar under baseline Electron, which would mix trees.',
-      durationMs: 0,
-      droppedFrames: 0,
-      longestFrameMs: 0,
-      longTasksOver50Ms: 0,
-      cpuPercent: 0,
-      rssBytes: 0,
-    };
+    return unwiredStreaming(
+      'origin/main has no sidecar/src/perf/replayRuntime.ts. Refusing to run the candidate replay sidecar under baseline Electron, which would mix trees.',
+    );
   }
   const home = join(WORK, 'stream-homes', `${tree.name}-${String(run)}`);
   const userDataDir = join(WORK, 'stream-profiles', `${tree.name}-${String(run)}`);
@@ -296,226 +255,96 @@ async function runStreamingPass(
     extraEnv: { GUI_BENCH_REPLAY_SCENARIO: 'streaming' },
   });
   try {
-    await sleep(4_000);
     await installProbe(app);
+    await app.cdp.evaluate('window.__guiBench.waitForShell(25000)');
+    await app.cdp.evaluate('window.__guiBench.dismissOverlays()');
     await app.cdp.evaluate('window.__guiBench.clickNewChat()');
-    await sleep(1_200);
+    await app.cdp.evaluate('window.__guiBench.waitForSendReady(25000)');
     const before = sampleProcessTree(app.pid);
     await app.cdp.evaluate('window.__guiBench.start()');
     const started = Date.now();
-    await app.cdp.evaluate('window.__guiBench.sendPrompt("stream a long answer")');
-    await sleep(8_000);
+    await app.cdp.evaluate('window.__guiBench.fillPrompt("stream a long answer")');
+    await app.cdp.dispatchEnter();
+    const streamWait = await app.cdp.evaluate<{
+      elapsedMs: number;
+      textLen: number;
+      paints: number;
+      timedOut: boolean;
+    }>('window.__guiBench.waitForStreamPaint(14000)');
     const snapshot = await app.cdp.evaluate<{
       droppedFrames: number;
       longestFrameMs: number;
       longTasksOver50Ms: number;
       rendererPerf?: {
-        receiveToPaintMs?: { p50Ms?: number; p95Ms?: number; maxMs?: number };
+        eventsReceived?: number;
+        receiveToPaintMs?: { p50Ms?: number; p95Ms?: number; maxMs?: number; count?: number };
       };
     }>('window.__guiBench.stop()');
     const after = sampleProcessTree(app.pid);
+    await captureChat(app, `gui_bench_${tree.name}_streaming_run${String(run)}`);
+    const paint = snapshot.rendererPerf?.receiveToPaintMs;
+    const wired = (paint?.count ?? 0) >= 8 || streamWait.textLen > 800;
     return {
-      wired: true,
+      wired,
+      reason: wired
+        ? undefined
+        : `Replay sidecar launched but stream did not paint enough (paints=${String(paint?.count ?? 0)}, textLen=${String(streamWait.textLen)}, timedOut=${String(streamWait.timedOut)}).`,
       durationMs: Date.now() - started,
       droppedFrames: snapshot.droppedFrames,
       longestFrameMs: snapshot.longestFrameMs,
       longTasksOver50Ms: snapshot.longTasksOver50Ms,
-      receiveToPaintP50Ms: snapshot.rendererPerf?.receiveToPaintMs?.p50Ms,
-      receiveToPaintP95Ms: snapshot.rendererPerf?.receiveToPaintMs?.p95Ms,
-      receiveToPaintMaxMs: snapshot.rendererPerf?.receiveToPaintMs?.maxMs,
+      receiveToPaintP50Ms: paint?.p50Ms,
+      receiveToPaintP95Ms: paint?.p95Ms,
+      receiveToPaintMaxMs: paint?.maxMs,
+      receiveToPaintCount: paint?.count,
+      eventsReceived: snapshot.rendererPerf?.eventsReceived,
+      feedTextLen: streamWait.textLen,
+      timedOut: streamWait.timedOut,
       cpuPercent: cpuPercent(before, after),
       rssBytes: totalRssBytes(after),
     };
   } catch (error) {
-    return {
-      wired: false,
-      reason: error instanceof Error ? error.message : String(error),
-      durationMs: 0,
-      droppedFrames: 0,
-      longestFrameMs: 0,
-      longTasksOver50Ms: 0,
-      cpuPercent: 0,
-      rssBytes: 0,
-    };
+    return unwiredStreaming(error instanceof Error ? error.message : String(error));
   } finally {
     await stopApp(app);
     await sleep(800);
   }
 }
 
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const even = sorted.length % 2 === 0;
-  if (even) return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
-  return sorted[mid] ?? 0;
+function writeResults(results: RunResult[], trees: BenchTree[]): void {
+  writeFileSync(RAW_PATH, `${JSON.stringify(results, null, 2)}\n`);
+  const report = renderReport(results, trees);
+  writeFileSync(join(ARTIFACTS, 'gui_bench_desktop_comparison.md'), report);
+  writeFileSync(join(ARTIFACTS, 'gui_bench_report.md'), report);
+  process.stdout.write(report);
 }
 
-function spread(values: number[]): { median: number; min: number; max: number } {
-  if (values.length === 0) return { median: 0, min: 0, max: 0 };
-  return { median: median(values), min: Math.min(...values), max: Math.max(...values) };
-}
-
-function scrollSeries(results: RunResult[], tree: 'baseline' | 'candidate', chat: '3k' | '10k', speed: string) {
-  const rows = results
-    .filter((result) => result.tree === tree)
-    .map((result) => (chat === '3k' ? result.scroll3k : result.scroll10k).find((row) => row.speed === speed))
-    .filter((row): row is ScrollMetrics => Boolean(row));
-  return {
-    dropped: spread(rows.map((row) => row.droppedFrames)),
-    longest: spread(rows.map((row) => row.longestFrameMs)),
-    longTasks: spread(rows.map((row) => row.longTasksOver50Ms)),
-    blankHit: spread(rows.map((row) => row.blankHitRatio)),
-    blankMs: spread(rows.map((row) => row.blankDurationMs)),
-    blankMax: spread(rows.map((row) => row.blankMaxRatio)),
-    holePx: spread(rows.map((row) => row.blankMaxHolePx ?? 0)),
-    mounted: spread(rows.map((row) => row.mountedRowsLast)),
-    cpu: spread(rows.map((row) => row.cpuPercent)),
-    rss: spread(rows.map((row) => row.rssBytes)),
-    frames: spread(rows.map((row) => row.frameCount)),
-  };
-}
-
-function fmt(stat: { median: number; min: number; max: number }, digits = 1): string {
-  return `${stat.median.toFixed(digits)} [${stat.min.toFixed(digits)}–${stat.max.toFixed(digits)}]`;
-}
-
-function delta(a: number, b: number): string {
-  const d = b - a;
-  const sign = d > 0 ? '+' : '';
-  return `${sign}${d.toFixed(1)}`;
-}
-
-function renderReport(results: RunResult[], trees: BenchTree[]): string {
-  const baseline = results.filter((result) => result.tree === 'baseline');
-  const candidate = results.filter((result) => result.tree === 'candidate');
-  const lines: string[] = [];
-  lines.push('# DROIDEX GUI bench: origin/main vs cursor/perf-integration-e50f');
-  lines.push('');
-  lines.push('## Caveat');
-  lines.push('');
-  lines.push(
-    'This VM software-rasterizes (GPU process fails). Absolute FPS is not the owner’s machine. Relative CPU, main-thread long tasks, dropped rAF frames, RSS, and blank-during-scroll **are** the comparison.',
-  );
-  lines.push('');
-  lines.push('## Refs');
-  lines.push('');
-  for (const tree of trees) lines.push(`- **${tree.name}** \`${tree.sha}\` (${tree.root})`);
-  lines.push('');
-  lines.push('## Method');
-  lines.push('');
-  lines.push('- One app at a time, alternating baseline/candidate, 3 runs each.');
-  lines.push('- Seeded Factory JSONL history (~3k events, ~10k events, 24-child chat).');
-  lines.push('- Drive via CDP `Input.dispatchMouseEvent` `mouseWheel`.');
-  lines.push('- Frames: in-page `requestAnimationFrame` timestamps. A drop is a rAF gap > 1.5×16.67 ms.');
-  lines.push('- Long tasks: `PerformanceObserver({type:\'longtask\'})` > 50 ms.');
-  lines.push('- Blank: each rAF, largest contiguous viewport gap not covered by `[data-feed-row-id]`. A hit is a hole taller than 96px (one estimated row), not ordinary 16px list gaps.');
-  lines.push(
-    'Candidate launch required hoisting `let mainWindow = null` above `sidecarSupervisor.subscribe` in `electron/main.cjs`. As committed on `cursor/perf-integration-e50f` (`76bdea9`), Electron throws `Cannot access \'mainWindow\' before initialization` and never creates a window. Measurement used that hoist; it is not a renderer/virtualizer change.',
-  );
-  lines.push('');
-  const metric = (
-    name: string,
-    pick: (row: RunResult) => number,
-  ) => {
-    const b = spread(baseline.map(pick));
-    const c = spread(candidate.map(pick));
-    lines.push(`| ${name} | ${fmt(b)} | ${fmt(c)} | ${delta(b.median, c.median)} |`);
-  };
-  lines.push('## Open / switch / idle');
-  lines.push('');
-  lines.push('| metric | baseline | candidate | Δ (cand − base) |');
-  lines.push('| --- | --- | --- | --- |');
-  metric('cold open 10k (ms)', (row) => row.coldOpen10kMs);
-  metric('switch to 3k (ms)', (row) => row.switchTo3kMs);
-  metric('warm switch to 10k (ms)', (row) => row.switchTo10kWarmMs);
-  metric('idle CPU % (sum of tree, 4-core host)', (row) => row.idleCpuPercent);
-  metric('idle RSS (MiB)', (row) => row.idleRssBytes / (1024 * 1024));
-  metric('children chat open (ms)', (row) => row.children.openMs);
-  metric('children mounted rows', (row) => row.children.mountedRows);
-  metric('visible subagent rows', (row) => row.children.childRowCount);
-  lines.push('');
-  for (const chat of ['3k', '10k'] as const) {
-    lines.push(`## Scroll quality (${chat})`);
-    lines.push('');
-    lines.push('| speed | metric | baseline | candidate | Δ |');
-    lines.push('| --- | --- | --- | --- | --- |');
-    for (const speed of SPEEDS) {
-      const b = scrollSeries(results, 'baseline', chat, speed.name);
-      const c = scrollSeries(results, 'candidate', chat, speed.name);
-      const row = (label: string, left: { median: number }, right: { median: number }, l: typeof b.dropped, r: typeof c.dropped) => {
-        lines.push(
-          `| ${speed.name} | ${label} | ${fmt(l)} | ${fmt(r)} | ${delta(left.median, right.median)} |`,
-        );
-      };
-      row('dropped rAF frames', b.dropped, c.dropped, b.dropped, c.dropped);
-      row('longest frame (ms)', b.longest, c.longest, b.longest, c.longest);
-      row('long tasks >50ms', b.longTasks, c.longTasks, b.longTasks, c.longTasks);
-      row('blank hit ratio (hole>96px)', b.blankHit, c.blankHit, b.blankHit, c.blankHit);
-      row('blank duration (ms)', b.blankMs, c.blankMs, b.blankMs, c.blankMs);
-      row('blank max ratio', b.blankMax, c.blankMax, b.blankMax, c.blankMax);
-      row('largest hole (px)', b.holePx, c.holePx, b.holePx, c.holePx);
-      row('mounted rows', b.mounted, c.mounted, b.mounted, c.mounted);
-      row('CPU % during scroll', b.cpu, c.cpu, b.cpu, c.cpu);
-      row('RSS after (MiB)', { median: b.rss.median / (1024 * 1024) }, { median: c.rss.median / (1024 * 1024) }, { median: b.rss.median / (1024 * 1024), min: b.rss.min / (1024 * 1024), max: b.rss.max / (1024 * 1024) }, { median: c.rss.median / (1024 * 1024), min: c.rss.min / (1024 * 1024), max: c.rss.max / (1024 * 1024) });
-    }
-    lines.push('');
+function loadExistingResults(): RunResult[] {
+  const parsed = JSON.parse(readFileSync(RAW_PATH, 'utf8')) as RunResult[];
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error(`${RAW_PATH} is missing or empty; run history first.`);
   }
-  lines.push('## Streaming');
-  lines.push('');
-  const streamB = baseline.map((row) => row.streaming).filter((row): row is StreamingMetrics => Boolean(row));
-  const streamC = candidate.map((row) => row.streaming).filter((row): row is StreamingMetrics => Boolean(row));
-  if (streamB.length === 0 && streamC.length === 0) {
-    lines.push('Streaming pass did not run.');
-  } else {
-    lines.push('| metric | baseline | candidate | Δ |');
-    lines.push('| --- | --- | --- | --- |');
-    const s = (pick: (row: StreamingMetrics) => number) => {
-      const b = spread(streamB.map(pick));
-      const c = spread(streamC.map(pick));
-      return { b, c };
-    };
-    const add = (name: string, pick: (row: StreamingMetrics) => number) => {
-      const { b, c } = s(pick);
-      lines.push(`| ${name} | ${fmt(b)} | ${fmt(c)} | ${delta(b.median, c.median)} |`);
-    };
-    add('dropped rAF frames', (row) => row.droppedFrames);
-    add('longest frame (ms)', (row) => row.longestFrameMs);
-    add('long tasks >50ms', (row) => row.longTasksOver50Ms);
-    add('receiveToPaint p50 (ms)', (row) => row.receiveToPaintP50Ms ?? 0);
-    add('receiveToPaint p95 (ms)', (row) => row.receiveToPaintP95Ms ?? 0);
-    add('CPU %', (row) => row.cpuPercent);
-    const failed = [...streamB, ...streamC].filter((row) => !row.wired);
-    if (failed.length > 0) {
-      lines.push('');
-      lines.push('Streaming wiring failures:');
-      for (const row of failed) lines.push(`- ${row.reason ?? 'unknown'}`);
-    }
-  }
-  lines.push('');
-  lines.push('## Raw runs');
-  lines.push('');
-  lines.push('```json');
-  lines.push(JSON.stringify(results, null, 2));
-  lines.push('```');
-  return `${lines.join('\n')}\n`;
+  return parsed;
 }
 
 async function main(): Promise<void> {
   mkdirSync(ARTIFACTS, { recursive: true });
   mkdirSync(WORK, { recursive: true });
-  const { runs, skipStreaming, trees } = parseArgs(process.argv.slice(2));
-  const templateHome = join(WORK, 'template-home');
-  const manifest = seedTemplate(templateHome);
-  writeFileSync(join(ARTIFACTS, 'gui_bench_seed_manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  const results: RunResult[] = [];
-  for (let run = 1; run <= runs; run += 1) {
-    for (const tree of trees) {
-      process.stdout.write(`\n== history ${tree.name} run ${String(run)} ==\n`);
-      const result = await runHistoryPass(tree, run, templateHome);
-      results.push(result);
-      writeFileSync(join(ARTIFACTS, 'gui_bench_raw.json'), `${JSON.stringify(results, null, 2)}\n`);
+  const { runs, skipStreaming, streamingOnly, trees } = parseArgs(process.argv.slice(2));
+  let results: RunResult[] = [];
+  if (streamingOnly) {
+    results = loadExistingResults();
+  } else {
+    const templateHome = join(WORK, 'template-home');
+    const manifest = seedTemplate(templateHome);
+    writeFileSync(join(ARTIFACTS, 'gui_bench_seed_manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    for (let run = 1; run <= runs; run += 1) {
+      for (const tree of trees) {
+        process.stdout.write(`\n== history ${tree.name} run ${String(run)} ==\n`);
+        const result = await runHistoryPass(tree, run, templateHome);
+        results.push(result);
+        writeFileSync(RAW_PATH, `${JSON.stringify(results, null, 2)}\n`);
+      }
     }
   }
   if (!skipStreaming) {
@@ -526,13 +355,12 @@ async function main(): Promise<void> {
         const streaming = await runStreamingPass(tree, run, sidecarEntry);
         const row = results.find((result) => result.tree === tree.name && result.run === run);
         if (row) row.streaming = streaming;
-        writeFileSync(join(ARTIFACTS, 'gui_bench_raw.json'), `${JSON.stringify(results, null, 2)}\n`);
+        else process.stdout.write(`no history row for ${tree.name} run ${String(run)}; streaming kept only in log\n`);
+        writeFileSync(RAW_PATH, `${JSON.stringify(results, null, 2)}\n`);
       }
     }
   }
-  const report = renderReport(results, trees);
-  writeFileSync(join(ARTIFACTS, 'gui_bench_report.md'), report);
-  process.stdout.write(report);
+  writeResults(results, trees);
 }
 
 await main();

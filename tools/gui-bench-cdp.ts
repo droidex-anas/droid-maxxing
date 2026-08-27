@@ -96,6 +96,19 @@ export class CdpClient {
     });
   }
 
+  async dispatchEnter(): Promise<void> {
+    const key = {
+      key: 'Enter',
+      code: 'Enter',
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+      text: '\r',
+      unmodifiedText: '\r',
+    };
+    await this.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+  }
+
   close(): void {
     this.socket.close();
     for (const waiter of this.pending.values()) waiter.reject(new Error('CDP client closed.'));

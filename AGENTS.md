@@ -307,6 +307,8 @@ drives a real Electron window over CDP:
 ```bash
 npm run gui-bench:seed -- --home /tmp/droidex-gui-bench/template-home
 npm run gui-bench:run -- --runs 3
+# Reuse captured history runs and measure streaming only:
+npm run gui-bench:run -- --runs 3 --streaming-only
 ```
 
 ## Project map
