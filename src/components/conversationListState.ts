@@ -106,23 +106,44 @@ export function shouldAdjustConversationRowOnSizeChange(
 const ESTIMATE_SAMPLE_LIMIT = 32;
 const ESTIMATE_NEIGHBOR_DISTANCE = 32;
 
+export function conversationRowEstimateKind(item: FeedItem | undefined): string {
+  if (!item) return 'unknown';
+  if (item.type === 'message') return item.event.author === 'user' ? 'user' : 'assistant';
+  return item.type;
+}
+
 export function createConversationRowSizeEstimator(): {
-  observe: (sizePx: number) => void;
-  guess: () => number;
+  observe: (sizePx: number, kind?: string) => void;
+  guess: (kind?: string) => number;
 } {
   const recent: number[] = [];
+  const byKind = new Map<string, number[]>();
   let medianPx = CONVERSATION_LIST_ESTIMATE_PX;
   let samples = 0;
+
+  const medianOf = (values: readonly number[]): number => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)] ?? CONVERSATION_LIST_ESTIMATE_PX;
+  };
+
   return {
-    observe(sizePx: number) {
+    observe(sizePx: number, kind?: string) {
       if (sizePx <= 0) return;
       recent.push(sizePx);
       if (recent.length > ESTIMATE_SAMPLE_LIMIT) recent.shift();
       samples += 1;
-      const sorted = [...recent].sort((a, b) => a - b);
-      medianPx = sorted[Math.floor(sorted.length / 2)] ?? CONVERSATION_LIST_ESTIMATE_PX;
+      medianPx = medianOf(recent);
+      if (!kind) return;
+      const bucket = byKind.get(kind) ?? [];
+      bucket.push(sizePx);
+      if (bucket.length > ESTIMATE_SAMPLE_LIMIT) bucket.shift();
+      byKind.set(kind, bucket);
     },
-    guess() {
+    guess(kind?: string) {
+      if (kind) {
+        const bucket = byKind.get(kind);
+        if (bucket && bucket.length > 0) return medianOf(bucket);
+      }
       return samples === 0 ? CONVERSATION_LIST_ESTIMATE_PX : medianPx;
     },
   };
@@ -133,13 +154,20 @@ export function nearestMeasuredRowSize(
   getKey: (index: number) => string | number | bigint,
   measuredSize: (key: string | number | bigint) => number | undefined,
   maxDistance: number = ESTIMATE_NEIGHBOR_DISTANCE,
+  sameKind?: (index: number) => boolean,
 ): number | undefined {
   for (let distance = 1; distance <= maxDistance; distance += 1) {
-    const after = measuredSize(getKey(index + distance));
-    if (typeof after === 'number') return after;
+    const afterIndex = index + distance;
+    if (!sameKind || sameKind(afterIndex)) {
+      const after = measuredSize(getKey(afterIndex));
+      if (typeof after === 'number') return after;
+    }
     if (index >= distance) {
-      const before = measuredSize(getKey(index - distance));
-      if (typeof before === 'number') return before;
+      const beforeIndex = index - distance;
+      if (!sameKind || sameKind(beforeIndex)) {
+        const before = measuredSize(getKey(beforeIndex));
+        if (typeof before === 'number') return before;
+      }
     }
   }
   return undefined;

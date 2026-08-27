@@ -19,6 +19,7 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
+  conversationRowEstimateKind,
   conversationRowEstimateNear,
   conversationRowEstimatePx,
   createConversationRowSizeEstimator,
@@ -89,15 +90,23 @@ export function ConversationList({
       if (!conversationRowEstimateNear(index, range, CONVERSATION_LIST_OVERSCAN)) {
         return CONVERSATION_LIST_ESTIMATE_PX;
       }
+      const items = itemsRef.current;
+      const kind = conversationRowEstimateKind(items[index]);
       const cache = sizeCacheRef.current;
       return conversationRowEstimatePx({
         index,
         range,
         overscan: CONVERSATION_LIST_OVERSCAN,
         fallbackPx: CONVERSATION_LIST_ESTIMATE_PX,
-        guessPx: estimatorRef.current.guess(),
+        guessPx: estimatorRef.current.guess(kind),
         measuredNearPx: cache
-          ? nearestMeasuredRowSize(index, getItemKey, (key) => cache.get(key))
+          ? nearestMeasuredRowSize(
+              index,
+              getItemKey,
+              (key) => cache.get(key),
+              undefined,
+              (other) => conversationRowEstimateKind(items[other]) === kind,
+            )
           : undefined,
       });
     },
@@ -173,7 +182,7 @@ export function ConversationList({
       syncMeasureConversationList(
         list,
         (index, size) => {
-          estimatorRef.current.observe(size);
+          estimatorRef.current.observe(size, conversationRowEstimateKind(itemsRef.current[index]));
           virtualizer.resizeItem(index, size);
         },
         cachedRowSize,

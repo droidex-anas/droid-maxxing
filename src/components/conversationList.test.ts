@@ -14,6 +14,7 @@ import {
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
   CONVERSATION_VISIBLE_HOLE_PX,
+  conversationRowEstimateKind,
   conversationRowEstimateNear,
   conversationRowEstimatePx,
   conversationRowMountKey,
@@ -243,26 +244,52 @@ test('row size guess is the median of recent measures and starts at the fallback
   assert.equal(estimator.guess(), 19);
 });
 
-test('nearest measured neighbor wins over a mixed running median', () => {
+test('row estimate kind follows feed type and message author', () => {
+  assert.equal(conversationRowEstimateKind(messageItem('u', 'user')), 'user');
+  assert.equal(conversationRowEstimateKind(messageItem('a', 'assistant')), 'assistant');
+  const status: FeedItem = {
+    type: 'status',
+    key: 's',
+    event: {
+      id: 's',
+      appSessionId: 'm',
+      sourceSessionId: 'primary',
+      role: 'primary',
+      ts: 1,
+      kind: 'status',
+      text: 'ok',
+    },
+  };
+  assert.equal(conversationRowEstimateKind(status), 'status');
+});
+
+test('per-kind medians keep a short status line off a tall assistant measure', () => {
+  const estimator = createConversationRowSizeEstimator();
+  for (let i = 0; i < 8; i += 1) estimator.observe(800, 'assistant');
+  for (let i = 0; i < 8; i += 1) estimator.observe(19, 'status');
+  assert.equal(estimator.guess('status'), 19);
+  assert.equal(estimator.guess('assistant'), 800);
+});
+
+test('nearest measured neighbor of the same kind wins over a mixed neighbor', () => {
   const sizes = new Map<string | number | bigint, number>([
-    ['row-10', 19],
-    ['row-40', 800],
+    ['row-11', 800],
+    ['row-14', 19],
+  ]);
+  const kinds = new Map<number, string>([
+    [10, 'status'],
+    [11, 'assistant'],
+    [14, 'status'],
   ]);
   assert.equal(
     nearestMeasuredRowSize(
-      12,
+      10,
       (index) => `row-${String(index)}`,
       (key) => sizes.get(key),
+      32,
+      (index) => kinds.get(index) === 'status',
     ),
     19,
-  );
-  assert.equal(
-    nearestMeasuredRowSize(
-      100,
-      (index) => `row-${String(index)}`,
-      (key) => sizes.get(key),
-    ),
-    undefined,
   );
 });
 
