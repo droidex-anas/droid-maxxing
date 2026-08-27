@@ -71,16 +71,22 @@ const EMPTY_CHILD_SESSIONS: Record<string, ChildSessionSummary> = {};
 const EMPTY_CHILD_ACCESS: Record<string, ChildAccess> = {};
 const EMPTY_CHILD_RUNTIME: Record<string, ChildRuntimeState> = {};
 
+const RENDERED_TRANSCRIPT_KIND: Record<TranscriptEvent['kind'], true> = {
+  text: true,
+  thinking: true,
+  tool_call: true,
+  tool_result: true,
+  error: true,
+  status: true,
+  compaction: true,
+};
+const RENDERED_TRANSCRIPT_KINDS = new Set(
+  Object.keys(RENDERED_TRANSCRIPT_KIND) as TranscriptEvent['kind'][],
+);
+
 /** The event kinds the mission transcript renders as feed rows. */
-const isRenderedTranscriptEvent = (t: TranscriptEvent) =>
-  t.author === 'user' ||
-  t.kind === 'text' ||
-  t.kind === 'thinking' ||
-  t.kind === 'tool_call' ||
-  t.kind === 'tool_result' ||
-  t.kind === 'status' ||
-  t.kind === 'error' ||
-  Boolean(t.isError);
+export const isRenderedTranscriptEvent = (t: TranscriptEvent) =>
+  t.author === 'user' || RENDERED_TRANSCRIPT_KINDS.has(t.kind) || Boolean(t.isError);
 
 /* ════════════════════════ chat ════════════════════════ */
 
