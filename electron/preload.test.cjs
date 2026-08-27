@@ -175,3 +175,20 @@ test('system idle time IPC carries no renderer-controlled payload', async () => 
   assert.equal(await api.systemIdleTime(), 75);
   assert.deepEqual(calls[0], { channel: 'system-idle-time', payload: undefined });
 });
+
+test('sidecar status IPC is exposed to the trusted renderer', async () => {
+  const expected = {
+    lifecycle: 'healthy',
+    processAlive: true,
+    bridgeResponsive: true,
+    lastHeartbeatAt: 1,
+    restartCount: 0,
+  };
+  const { api, calls, listeners } = loadApi(expected);
+
+  assert.deepEqual(await api.sidecarStatus(), expected);
+  assert.equal(calls[0].channel, 'sidecar-status');
+  const stop = api.onSidecarStatus(() => undefined);
+  assert.equal(listeners[0].channel, 'sidecar-status');
+  stop();
+});

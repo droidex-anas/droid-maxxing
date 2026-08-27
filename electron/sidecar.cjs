@@ -4,6 +4,12 @@ const { spawn } = require('node:child_process');
 const READY_PATTERN = /(?:^|\n)SIDECAR_READY (\d+)(?:\n|$)/;
 const DEFAULT_READY_TIMEOUT_MS = 15_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 6_000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 2_000;
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 1_500;
+const DEFAULT_MAX_RESTARTS = 5;
+const DEFAULT_RESTART_WINDOW_MS = 60_000;
+const DEFAULT_RESTART_BACKOFF_MS = 250;
+const DEFAULT_MAX_RESTART_BACKOFF_MS = 5_000;
 
 function createSidecarSupervisor(options) {
   const spawnProcess = options.spawnProcess || spawn;
@@ -11,17 +17,118 @@ function createSidecarSupervisor(options) {
   const errorOutput = options.stderr || process.stderr;
   const readyTimeoutMs = options.readyTimeoutMs || DEFAULT_READY_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs || DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  const heartbeatIntervalMs = options.heartbeatIntervalMs || DEFAULT_HEARTBEAT_INTERVAL_MS;
+  const heartbeatTimeoutMs = options.heartbeatTimeoutMs || DEFAULT_HEARTBEAT_TIMEOUT_MS;
+  const maxRestarts = options.maxRestarts || DEFAULT_MAX_RESTARTS;
+  const restartWindowMs = options.restartWindowMs || DEFAULT_RESTART_WINDOW_MS;
+  const restartBackoffMs = options.restartBackoffMs || DEFAULT_RESTART_BACKOFF_MS;
+  const maxRestartBackoffMs = options.maxRestartBackoffMs || DEFAULT_MAX_RESTART_BACKOFF_MS;
+  const now = options.now || Date.now;
+  const random = options.random || Math.random;
+  const requestHealth = options.requestHealth || defaultRequestHealth;
+  const schedule =
+    options.schedule ||
+    ((callback, delayMs) => {
+      const timer = setTimeout(callback, delayMs);
+      timer.unref?.();
+      return () => clearTimeout(timer);
+    });
+
   let child = null;
   let bridgeInfo = null;
   let pendingStart = null;
   let activeRun = null;
+  let lifecycle = 'stopped';
+  let processAlive = false;
+  let bridgeResponsive = false;
+  let lastHeartbeatAt = null;
+  let lastReason = null;
+  let restartAt = [];
+  let readyWaiters = [];
+  let cancelHeartbeat = null;
+  let cancelRestart = null;
+  const listeners = new Set();
+
+  function snapshot() {
+    return {
+      lifecycle,
+      processAlive,
+      bridgeResponsive,
+      lastHeartbeatAt,
+      restartCount: restartsInWindow().length,
+      ...(lastReason ? { reason: lastReason } : {}),
+      ...(bridgeInfo ? { port: bridgeInfo.port } : {}),
+    };
+  }
+
+  function setLifecycle(next, reason) {
+    if (lifecycle === next && reason === lastReason) return;
+    lifecycle = next;
+    lastReason = reason ?? null;
+    const current = snapshot();
+    for (const listener of listeners) listener(current);
+  }
+
+  function subscribe(listener) {
+    listeners.add(listener);
+    listener(snapshot());
+    return () => listeners.delete(listener);
+  }
+
+  function restartsInWindow() {
+    const cutoff = now() - restartWindowMs;
+    restartAt = restartAt.filter((at) => at > cutoff);
+    return restartAt;
+  }
+
+  function isLiveChild(candidate) {
+    return (
+      candidate && candidate.exitCode === null && candidate.signalCode === null && !candidate.killed
+    );
+  }
 
   function start() {
-    if (child && child.exitCode === null && child.signalCode === null && bridgeInfo) {
-      return Promise.resolve(bridgeInfo);
+    if (lifecycle === 'recovery-required') {
+      return Promise.reject(new Error('Sidecar recovery is required.'));
     }
     if (pendingStart) return pendingStart;
+    if (bridgeInfo && isLiveChild(child)) return Promise.resolve(bridgeInfo);
+    cancelRestart?.();
+    cancelRestart = null;
+    return spawnSidecar();
+  }
 
+  function getBridgeInfo() {
+    if (bridgeInfo && isLiveChild(child)) return Promise.resolve(bridgeInfo);
+    if (pendingStart) return pendingStart;
+    if (lifecycle === 'stopped') return Promise.reject(new Error('Sidecar is stopped.'));
+    if (lifecycle === 'recovery-required') {
+      return Promise.reject(new Error('Sidecar recovery is required.'));
+    }
+    return new Promise((resolve, reject) => {
+      readyWaiters.push({ resolve, reject });
+    });
+  }
+
+  function resolveWaiters(info) {
+    const waiters = readyWaiters;
+    readyWaiters = [];
+    for (const waiter of waiters) waiter.resolve(info);
+  }
+
+  function rejectWaiters(error) {
+    const waiters = readyWaiters;
+    readyWaiters = [];
+    for (const waiter of waiters) waiter.reject(error);
+  }
+
+  function spawnSidecar() {
+    if (pendingStart) return pendingStart;
+    if (isLiveChild(child) && bridgeInfo) return Promise.resolve(bridgeInfo);
+
+    setLifecycle('starting');
+    processAlive = true;
+    bridgeResponsive = false;
     const token = crypto.randomBytes(32).toString('hex');
     const assetToken = crypto.randomBytes(32).toString('hex');
     const nextChild = spawnProcess(process.execPath, [options.entryPath()], {
@@ -70,18 +177,21 @@ function createSidecarSupervisor(options) {
       nextChild.once('error', fail);
       nextChild.once('exit', (code, signal) => {
         run.resolveExit?.();
-        if (activeRun === run) {
+        const current = activeRun === run;
+        if (current) {
           activeRun = null;
           child = null;
           bridgeInfo = null;
+          processAlive = false;
+          bridgeResponsive = false;
+          stopHeartbeat();
         }
         if (!settled) {
           fail(new Error(`Sidecar exited before ready (${code ?? signal ?? 'unknown'}).`));
-        } else if (!run.intentionalStop && (code || signal)) {
-          const error = new Error(`Sidecar exited unexpectedly (${code ?? signal}).`);
-          errorOutput.write(`${error.message}\n`);
-          options.onUnexpectedExit?.(error);
+          if (current) handleUnexpectedExit(run, code, signal);
+          return;
         }
+        if (current) handleUnexpectedExit(run, code, signal);
       });
       nextChild.stdout.on('data', (chunk) => {
         const text = String(chunk);
@@ -99,7 +209,11 @@ function createSidecarSupervisor(options) {
         settled = true;
         clearTimeout(timeout);
         bridgeInfo = { port, token };
+        bridgeResponsive = true;
+        setLifecycle('healthy');
+        startHeartbeat();
         resolve(bridgeInfo);
+        resolveWaiters(bridgeInfo);
       });
       nextChild.stderr.on('data', (chunk) => {
         const text = String(chunk);
@@ -110,11 +224,94 @@ function createSidecarSupervisor(options) {
       if (pendingStart === wrappedStart) pendingStart = null;
     });
     pendingStart = wrappedStart;
-
     return pendingStart;
   }
 
+  function handleUnexpectedExit(run, code, signal) {
+    if (run.intentionalStop || lifecycle === 'stopped') return;
+    const diagnostic = `Sidecar exited unexpectedly (${code ?? signal}).`;
+    const error = new Error(diagnostic);
+    errorOutput.write(`${error.message}\n`);
+    options.onUnexpectedExit?.(error);
+    scheduleRestart(diagnostic);
+  }
+
+  function scheduleRestart(reason) {
+    const attempts = restartsInWindow();
+    if (attempts.length >= maxRestarts) {
+      setLifecycle('recovery-required', reason);
+      rejectWaiters(new Error('Sidecar recovery is required.'));
+      return;
+    }
+    restartAt.push(now());
+    setLifecycle('restarting', reason);
+    const delay = restartDelayMs(attempts.length);
+    cancelRestart?.();
+    cancelRestart = schedule(() => {
+      cancelRestart = null;
+      if (lifecycle !== 'restarting') return;
+      void start().catch((error) => {
+        errorOutput.write(`${error.message}\n`);
+        if (lifecycle === 'restarting' || lifecycle === 'starting') {
+          scheduleRestart(error.message);
+        }
+      });
+    }, delay);
+  }
+
+  function restartDelayMs(attempt) {
+    const exponential = Math.min(restartBackoffMs * 2 ** attempt, maxRestartBackoffMs);
+    return exponential + random() * restartBackoffMs;
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    const poll = () => {
+      const info = bridgeInfo;
+      const run = activeRun;
+      if (!info || !run || lifecycle === 'stopped' || lifecycle === 'recovery-required') return;
+      void requestHealth({
+        port: info.port,
+        token: info.token,
+        timeoutMs: heartbeatTimeoutMs,
+      }).then(
+        () => {
+          if (activeRun !== run) return;
+          lastHeartbeatAt = now();
+          bridgeResponsive = true;
+          if (lifecycle === 'degraded' || lifecycle === 'starting') setLifecycle('healthy');
+        },
+        () => {
+          if (activeRun !== run || !processAlive) return;
+          bridgeResponsive = false;
+          if (lifecycle === 'healthy' || lifecycle === 'starting') {
+            setLifecycle(
+              'degraded',
+              'Bridge heartbeat timed out while the sidecar process is still running.',
+            );
+          }
+        },
+      );
+    };
+    poll();
+    const arm = () => {
+      cancelHeartbeat = schedule(() => {
+        poll();
+        arm();
+      }, heartbeatIntervalMs);
+    };
+    arm();
+  }
+
+  function stopHeartbeat() {
+    cancelHeartbeat?.();
+    cancelHeartbeat = null;
+  }
+
   function stop() {
+    cancelRestart?.();
+    cancelRestart = null;
+    stopHeartbeat();
     const current = child;
     const run = activeRun;
     if (run && run.child === current) {
@@ -125,6 +322,10 @@ function createSidecarSupervisor(options) {
     child = null;
     bridgeInfo = null;
     pendingStart = null;
+    processAlive = false;
+    bridgeResponsive = false;
+    setLifecycle('stopped');
+    rejectWaiters(new Error('Sidecar is stopped.'));
     if (!current || current.killed) return Promise.resolve();
     current.stdin?.end();
     current.kill('SIGTERM');
@@ -141,7 +342,22 @@ function createSidecarSupervisor(options) {
     });
   }
 
-  return { start, getBridgeInfo: start, stop };
+  return { start, getBridgeInfo, stop, snapshot, subscribe };
+}
+
+async function defaultRequestHealth({ port, token, timeoutMs }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref?.();
+  try {
+    const response = await fetch(`http://127.0.0.1:${String(port)}/health?token=${token}`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Sidecar health returned ${String(response.status)}.`);
+    return response.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 module.exports = { createSidecarSupervisor };

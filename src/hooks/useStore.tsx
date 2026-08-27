@@ -3134,7 +3134,10 @@ function finiteNumber(value: unknown): number | undefined {
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
   if (
     ev.type === 'error' &&
-    (ev.code === 'bridge.unsupported_command' || ev.code === 'bridge.resync_required')
+    (ev.code === 'bridge.unsupported_command' ||
+      ev.code === 'bridge.resync_required' ||
+      ev.code === 'history.unflushed_work' ||
+      ev.code === 'session.interrupted')
   ) {
     return ev.message;
   }

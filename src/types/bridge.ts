@@ -122,6 +122,8 @@ export interface SessionSummary {
   autonomy: Autonomy;
   phase: SessionPhase;
   streaming?: boolean; // true while a turn is actively generating
+  // Set when a runtime restart could not continue this session's in-flight turn.
+  interruptReason?: string;
   queuedSends?: number;
   proposal?: string; // markdown plan from propose_mission
   features: BridgeFeature[];
@@ -883,7 +885,7 @@ export type ServerEvent =
   | { type: 'browser.closed'; appSessionId: string }
   | { type: 'browser.error'; appSessionId?: string; message: string };
 
-export const BRIDGE_PROTOCOL_VERSION = 2 as const;
+export const BRIDGE_PROTOCOL_VERSION = 3 as const;
 
 export interface SequencedServerEvent {
   seq: number;
@@ -898,14 +900,43 @@ export interface ServerEventBatch {
   events: SequencedServerEvent[];
 }
 
+export interface PersistenceRecovery {
+  durable: boolean;
+  hadUnflushedWork: boolean;
+  message?: string;
+}
+
+export interface InterruptedSessionRecord {
+  appSessionId: string;
+  childSessionId?: string;
+  reason: string;
+}
+
+export interface BridgeRuntimeSnapshot {
+  runtime: { mode: 'cli_auth'; droidPath: string; apiKeyConfigured: boolean };
+  sessions: SessionSummary[];
+  children: ChildSessionSummary[];
+  persistence: PersistenceRecovery;
+  interrupted: InterruptedSessionRecord[];
+}
+
 export interface BridgeResetMessage {
   type: 'bridge.reset';
   generation: string;
   lastSeq: number;
-  reason: 'generation_changed' | 'replay_unavailable' | 'invalid_resume';
+  reason: 'invalid_resume';
+}
+
+export interface BridgeSnapshotMessage {
+  type: 'bridge.snapshot';
+  generation: string;
+  lastSeq: number;
+  reason: 'generation_changed' | 'replay_unavailable';
+  snapshot: BridgeRuntimeSnapshot;
 }
 
 export type ServerWireMessage =
   | Extract<ServerEvent, { type: 'error' }>
   | ServerEventBatch
-  | BridgeResetMessage;
+  | BridgeResetMessage
+  | BridgeSnapshotMessage;

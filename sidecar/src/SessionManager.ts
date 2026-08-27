@@ -3,12 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import type {
   Autonomy,
+  BridgeRuntimeSnapshot,
   BrowserNativeRequest,
   BrowserNativeResult,
   ClientCommand,
   ConfigurableSessionRole,
   FactoryDefaultSettings,
   InstallChannel,
+  PersistenceRecovery,
   SessionSearchResult,
   SessionSummary,
   ModelInfo,
@@ -45,6 +47,10 @@ import {
   resolveSessionChain,
 } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
+import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
+import { SessionAdoption } from './sessionAdoption.js';
+import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
+import { droidexUserDataDir } from './droidexPaths.js';
 import type { SessionFileChange } from './sessionFileCache.js';
 import { transcriptToMarkdown } from './sessionMarkdown.js';
 import {
@@ -109,6 +115,7 @@ type SessionHistoryBase = Pick<
   syncSummaries(summaries: SessionSummary[]): boolean | undefined;
   upsertChildSession(child: PersistedChildSession): boolean | undefined;
   recordEvent(event: TranscriptEvent): void;
+  persistenceRecovery?(): PersistenceRecovery;
 };
 
 type SessionHistory = SessionHistoryBase & {
@@ -216,6 +223,7 @@ export class SessionManager {
   private readonly childSessions: ChildSessions;
   private readonly missionControlPolicy: MissionControlPolicy;
   private readonly lifecycle: SessionLifecycle;
+  private readonly adoption: SessionAdoption;
   private readonly sessionFiles: SessionFileServing;
   private readonly pendingAgentSettings = new Map<
     string,
@@ -321,6 +329,9 @@ export class SessionManager {
       onLiveProviderReplaced: (providerSessionId) => {
         this.sessionFiles.finalizeReplacedProvider(providerSessionId);
       },
+      onLiveSetChanged: () => {
+        this.adoption.persistLiveSet();
+      },
       now: Date.now,
     });
     this.context = new SessionContext({
@@ -415,6 +426,7 @@ export class SessionManager {
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       emit: (event) => {
         this.emit(event);
+        if (event.type === 'session.child') this.adoption?.persistLiveSet();
       },
       nextChildSessionId: this.nextChildSessionId,
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
@@ -485,13 +497,58 @@ export class SessionManager {
         await this.sessionFiles.finalizeClosedProvider(closedProviderSessionId);
       },
     });
+    this.adoption = new SessionAdoption({
+      journal: new LiveRuntimeJournal(liveRuntimeJournalPath(droidexUserDataDir())),
+      registry: this.registry,
+      lifecycle: this.lifecycle,
+      liveChildren: () =>
+        this.childSessions.liveChildSummaries().map((child) => ({
+          parentAppSessionId: child.parentAppSessionId,
+          childSessionId: child.childSessionId,
+          status: child.status,
+        })),
+      persistSummaries: (summaries) => {
+        this.history.syncSummaries(summaries);
+        for (const session of summaries) this.emit({ type: 'session.updated', session });
+      },
+      emitStatus: (appSessionId, text) => {
+        this.timeline.appendStatus(appSessionId, text);
+      },
+    });
   }
 
   connect(apiKey?: string): void {
     this.runtime.connect(apiKey);
     this.ready = true;
+    void this.adoption.adopt();
     this.emit({ type: 'connection', status: 'connected' });
     this.emit({ type: 'runtime.updated', status: this.runtime.status() });
+    const recovery = this.history.persistenceRecovery?.();
+    if (recovery?.hadUnflushedWork) {
+      this.emit({
+        type: 'error',
+        code: 'history.unflushed_work',
+        message:
+          recovery.message ??
+          'The previous agent runtime exited with unflushed history. Restored sessions use the last durable snapshot.',
+        recoverable: true,
+      });
+    }
+  }
+
+  async runtimeSnapshot(): Promise<BridgeRuntimeSnapshot> {
+    await this.adoption.adopt();
+    const persistence = this.history.persistenceRecovery?.() ?? {
+      durable: true,
+      hadUnflushedWork: false,
+    };
+    return buildRuntimeSnapshot({
+      runtime: this.runtime.status(),
+      sessions: this.registry.liveSessionsSnapshot().map((live) => ({ ...live.summary })),
+      children: this.childSessions.liveChildSummaries(),
+      persistence,
+      interrupted: [...this.adoption.records()],
+    });
   }
 
   // Resource gauge sampled by the hot-path metrics endpoint. Composed here so

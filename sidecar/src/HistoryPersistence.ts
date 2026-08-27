@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   HistoryIndex,
@@ -24,7 +24,13 @@ import {
   persistenceChildKey,
   persistenceChildKeyPrefix,
 } from './historyPersistenceQueueValues.js';
-import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './protocol.js';
+import { PersistenceDirtyMarker, persistenceDirtyMarkerPath } from './persistenceDirtyMarker.js';
+import type {
+  PersistenceRecovery,
+  SessionSearchResult,
+  SessionSummary,
+  TranscriptEvent,
+} from './protocol.js';
 import type { SessionFileChange } from './sessionFileCache.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
@@ -56,6 +62,7 @@ export class HistoryPersistence {
   private readonly runtimeSummaries = new Map<string, SessionSummary>();
   private readonly runtimeChildren = new Map<string, PersistedChildSession>();
   private readonly durability = new HistoryDurabilityPolicy();
+  private readonly dirtyMarker: PersistenceDirtyMarker;
   private historyRevision = 0;
   private lastFailureLogAt = 0;
   private indexingIdle = false;
@@ -70,8 +77,10 @@ export class HistoryPersistence {
     this.createSearchClient =
       options.createSearchClient ??
       (() => new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } }));
+    this.dirtyMarker = new PersistenceDirtyMarker(persistenceDirtyMarkerPath(dirname(dbPath)));
     this.queue = new HistoryPersistenceQueue({
       dbPath,
+      dirtyMarker: this.dirtyMarker,
       ...(options.persistenceClient ? { client: options.persistenceClient } : {}),
       onCommitted: (batch, result) => {
         try {
@@ -121,6 +130,10 @@ export class HistoryPersistence {
 
   get revision(): number {
     return this.historyRevision;
+  }
+
+  persistenceRecovery(): PersistenceRecovery {
+    return this.dirtyMarker.recovery();
   }
 
   sessionLaunchSettings(

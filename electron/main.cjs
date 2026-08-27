@@ -76,6 +76,11 @@ const sidecarSupervisor = createSidecarSupervisor({
   userData: () => app.getPath('userData'),
   onUnexpectedExit: (error) => diagnostics.captureException(error, { process: 'sidecar' }),
 });
+sidecarSupervisor.subscribe((status) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('sidecar-status', status);
+  }
+});
 const appUpdater = createAppUpdater({
   app,
   autoUpdater,
@@ -175,6 +180,7 @@ app.on('before-quit', () => {
 app.on('activate', () => {
   if (!mainWindow) createMainWindow();
   else focusMainWindow();
+  void sidecarSupervisor.start().catch((error) => console.error(error));
   deliverPendingNotificationOpen();
 });
 
@@ -276,6 +282,10 @@ function registerIpc() {
   ipcMain.handle('bridge-info', (event) => {
     assertMainRenderer(event);
     return sidecarSupervisor.getBridgeInfo();
+  });
+  ipcMain.handle('sidecar-status', (event) => {
+    assertMainRenderer(event);
+    return sidecarSupervisor.snapshot();
   });
   ipcMain.handle('pick-directory', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });

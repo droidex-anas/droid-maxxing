@@ -1,8 +1,10 @@
 import { getBridgeInfo } from './desktop';
 import { noteBridgeEventReceived } from './rendererPerf';
+import { setTransportHealth } from './runtimeHealth';
 import {
   BRIDGE_PROTOCOL_VERSION,
   type BridgeResetMessage,
+  type BridgeSnapshotMessage,
   type ClientCommand,
   type ServerEvent,
   type ServerEventBatch,
@@ -70,6 +72,7 @@ export class Bridge {
     ws.onopen = () => {
       if (this.ws !== ws) return;
       this.backoff = 500;
+      setTransportHealth('connected');
       const pending = this.queue;
       this.queue = [];
       pending.forEach((command) => {
@@ -99,11 +102,16 @@ export class Bridge {
         this.receiveReset(wireMessage);
         return;
       }
+      if (wireMessage.type === 'bridge.snapshot') {
+        this.receiveSnapshot(wireMessage);
+        return;
+      }
       this.publishEvents([wireMessage]);
     };
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
+      setTransportHealth('disconnected');
       this.scheduleReconnect();
     };
     ws.onerror = () => {
@@ -142,10 +150,16 @@ export class Bridge {
       {
         type: 'error',
         code: 'bridge.resync_required',
-        message: resetMessage(message.reason),
+        message: 'The renderer sent an invalid event resume cursor and started a fresh stream.',
         recoverable: false,
       },
     ]);
+  }
+
+  private receiveSnapshot(message: BridgeSnapshotMessage): void {
+    this.lastGeneration = message.generation;
+    this.lastSeq = message.lastSeq;
+    this.publishEvents(eventsFromSnapshot(message));
   }
 
   private handleMalformedBatch(ws: WebSocket): void {
@@ -221,15 +235,45 @@ export class Bridge {
   }
 }
 
-function resetMessage(reason: BridgeResetMessage['reason']): string {
-  switch (reason) {
-    case 'generation_changed':
-      return 'The agent runtime restarted. Reopen the active session if its live state does not refresh.';
-    case 'replay_unavailable':
-      return 'The renderer fell behind the retained event window. Reopen the active session to refresh it.';
-    case 'invalid_resume':
-      return 'The renderer sent an invalid event resume cursor and started a fresh stream.';
+function eventsFromSnapshot(message: BridgeSnapshotMessage): ServerEvent[] {
+  const events: ServerEvent[] = [
+    {
+      type: 'runtime.updated',
+      status: message.snapshot.runtime,
+    },
+  ];
+  for (const session of message.snapshot.sessions) {
+    events.push({ type: 'session.updated', session });
   }
+  for (const child of message.snapshot.children) {
+    events.push({
+      type: 'session.child',
+      event: 'upserted',
+      child,
+      runtimeAvailable: false,
+      runtimeGeneration: 0,
+    });
+  }
+  for (const interrupted of message.snapshot.interrupted) {
+    events.push({
+      type: 'error',
+      code: 'session.interrupted',
+      appSessionId: interrupted.appSessionId,
+      message: interrupted.reason,
+      recoverable: true,
+    });
+  }
+  if (message.snapshot.persistence.hadUnflushedWork) {
+    events.push({
+      type: 'error',
+      code: 'history.unflushed_work',
+      message:
+        message.snapshot.persistence.message ??
+        'The previous agent runtime exited with unflushed history. Restored sessions use the last durable snapshot.',
+      recoverable: true,
+    });
+  }
+  return events;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

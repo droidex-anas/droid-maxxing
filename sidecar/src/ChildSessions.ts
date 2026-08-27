@@ -115,6 +115,14 @@ export class ChildSessions {
     return { total, active };
   }
 
+  liveChildSummaries(): ChildSessionSummary[] {
+    const summaries: ChildSessionSummary[] = [];
+    for (const parent of this.parents.values()) {
+      for (const child of parent.children.values()) summaries.push(childSummary(child));
+    }
+    return summaries;
+  }
+
   admitChildObservation(observation: ChildSpawnObservation): ChildIdentity | undefined {
     const parent = this.parents.get(observation.parentAppSessionId);
     if (!parent || !this.isCurrentParent(parent)) return undefined;

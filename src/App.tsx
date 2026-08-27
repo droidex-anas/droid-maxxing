@@ -32,6 +32,7 @@ import { useDocumentVisible } from './hooks/useDocumentVisible';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
 import SetupBanner from './components/onboarding/SetupBanner';
+import RuntimeStatusBanner from './components/RuntimeStatusBanner';
 import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
@@ -534,6 +535,7 @@ export default function App() {
           }}
         />
       )}
+      <RuntimeStatusBanner />
       <div className="flex-1 flex min-h-0 relative">
         {/* Sidebar with collapse animation */}
         <AnimatePresence initial={false}>
