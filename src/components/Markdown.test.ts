@@ -253,3 +253,19 @@ test('copy gracefully declines when the Clipboard API is unavailable', async () 
   };
   assert.equal(await markdown.copyMarkdownCode?.(undefined, 'sample'), false);
 });
+
+test('small JSON fences keep token highlighting and large ones stay plain', async () => {
+  const { JSON_HIGHLIGHT_MAX_CHARS } = await import('./Markdown');
+  const small = '```json\n{"accent": true, "count": 3}\n```';
+  const largeObject = Object.fromEntries(
+    Array.from({ length: 1200 }, (_, index) => [`k${String(index)}`, index]),
+  );
+  const large = `\`\`\`json\n${JSON.stringify(largeObject)}\n\`\`\``;
+  assert.ok(JSON.stringify(largeObject).length > JSON_HIGHLIGHT_MAX_CHARS);
+
+  const smallHtml = renderToStaticMarkup(createElement(Markdown, null, small));
+  const largeHtml = renderToStaticMarkup(createElement(Markdown, null, large));
+  assert.match(smallHtml, /--droid-green/);
+  assert.doesNotMatch(largeHtml, /--droid-green/);
+  assert.match(largeHtml, /k1199/);
+});
