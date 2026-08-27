@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createElement, type ComponentType } from 'react';
+import React, { createElement, type ComponentType } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Virtualizer } from '@tanstack/virtual-core';
 
@@ -26,6 +26,10 @@ export const TERMINAL_CHUNK = 'x'.repeat(64);
 export const STREAM_DELTAS = 40;
 export const STREAM_PREFIX_EVENTS = 200;
 
+// Files loaded from another git worktree sit outside this package's
+// tsconfig jsx setting; classic JSX in those graphs needs React in scope.
+(globalThis as { React?: typeof React }).React = React;
+
 export async function runAbProbes(treeRoot: string): Promise<AbProbeResult> {
   const notes: string[] = [];
   const metrics: AbProbeMetric[] = [];
@@ -34,12 +38,26 @@ export async function runAbProbes(treeRoot: string): Promise<AbProbeResult> {
   if (bundle) metrics.push(...bundle);
   else notes.push('dist/ missing or unreadable; bundle metrics unmeasured.');
 
-  metrics.push(await measureMountedRows(treeRoot, HISTORY_10K));
-  metrics.push(...(await measureFeedProjection(treeRoot)));
-  metrics.push(await measureMarkdown(treeRoot));
-  metrics.push(await measureTerminalFlood(treeRoot));
+  await capture(notes, metrics, 'mounted rows', () => measureMountedRows(treeRoot, HISTORY_10K));
+  await capture(notes, metrics, 'feed projection', async () => measureFeedProjection(treeRoot));
+  await capture(notes, metrics, 'markdown', () => measureMarkdown(treeRoot));
+  await capture(notes, metrics, 'terminal flood', () => measureTerminalFlood(treeRoot));
 
   return { treeRoot, metrics, notes };
+}
+
+async function capture(
+  notes: string[],
+  metrics: AbProbeMetric[],
+  label: string,
+  work: () => Promise<AbProbeMetric | AbProbeMetric[]>,
+): Promise<void> {
+  try {
+    const result = await work();
+    metrics.push(...(Array.isArray(result) ? result : [result]));
+  } catch (error) {
+    notes.push(`${label} unmeasured: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export function measureBundle(treeRoot: string): AbProbeMetric[] | null {
