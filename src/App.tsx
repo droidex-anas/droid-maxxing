@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { shallowEqual, useStoreApi, useStoreDispatch, useStoreSelector } from './hooks/useStore';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PanelLeft, PanelRight } from 'lucide-react';
@@ -23,29 +23,19 @@ import { shouldOpenSelectedChild } from './lib/childSessions';
 import type { ChildAccess } from './hooks/useStore';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
-import MissionControl from './components/MissionControl';
-import { PullRequestsView } from './features/pull-requests/PullRequestsView';
 import PromptInput from './components/PromptInput';
 import RightPanel from './components/RightPanel';
-import { ReviewPanel } from './components/environment/ReviewPanel';
 import EditorOpenMenu from './components/EditorOpenMenu';
 import Toaster from './components/Toaster';
 import { useRepoStatus } from './hooks/useRepoStatus';
 import { useDocumentVisible } from './hooks/useDocumentVisible';
-import CommandPalette from './components/CommandPalette';
-import SettingsPanel from './components/SettingsPanel';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
-import SpecWikiModal from './components/SpecWikiModal';
-import { BrowserFocusWorkspace } from './components/browser/BrowserFocusWorkspace';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
-import OnboardingWizard from './components/onboarding/OnboardingWizard';
 import SetupBanner from './components/onboarding/SetupBanner';
 import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
-import { TerminalWorkspace } from './components/terminal/TerminalWorkspace';
-import { FilesWorkspace } from './components/files/FilesWorkspace';
 import { closeTerminalForTab } from './lib/terminal';
 import { utilityPanelForSession, type UtilityTool } from './lib/utilityPanel';
 import { isTerminalInputTarget, isTerminalTabShortcut } from './lib/keyboardShortcuts';
@@ -55,6 +45,30 @@ import { useFinishNotifications } from './hooks/useFinishNotifications';
 import { useWorkspaceScopes } from './hooks/useWorkspaceScopes';
 import { useHistoryIndexingIdle } from './hooks/useHistoryIndexingIdle';
 import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
+import {
+  bindLazySurfaceIntent,
+  scheduleIdleLazyWarmup,
+  cancelIdleLazyWarmup,
+} from './lib/chunkPreloader';
+import {
+  LazyBrowserFocusWorkspace,
+  LazyCommandPalette,
+  LazyFilesWorkspace,
+  LazyMissionControl,
+  LazyOnboardingWizard,
+  LazyPullRequestsView,
+  LazyReviewPanel,
+  LazySettingsPanel,
+  LazySpecWikiModal,
+  LazyTerminalWorkspace,
+  commandPaletteFallback,
+  missionControlFallback,
+  onboardingFallback,
+  pullRequestsFallback,
+  settingsPanelFallback,
+  utilityToolFallback,
+} from './lib/lazySurfaces';
+import { noteComposerInteractive, noteFirstMeaningfulShellPaint } from './lib/rendererPerf';
 
 function ContextListIcon({ className }: { className?: string }) {
   return (
@@ -186,6 +200,40 @@ export default function App() {
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
   const contentRowRef = useRef<HTMLDivElement>(null);
   const [contentRowWidth, setContentRowWidth] = useState(0);
+  const utilityPaneToggleRef = useRef<HTMLButtonElement>(null);
+  const shellPaintMarked = useRef(false);
+
+  useEffect(() => {
+    if (shellPaintMarked.current) return;
+    shellPaintMarked.current = true;
+    const raf = requestAnimationFrame;
+    raf(() => {
+      noteFirstMeaningfulShellPaint();
+      scheduleIdleLazyWarmup();
+    });
+    return () => {
+      cancelIdleLazyWarmup();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMissionControlView && !prWorkspaceView) return;
+    noteComposerInteractive();
+  }, [isMissionControlView, prWorkspaceView]);
+
+  useEffect(() => {
+    const toggle = utilityPaneToggleRef.current;
+    if (!toggle || showUtilityPane) return;
+    const cleanups = [
+      bindLazySurfaceIntent('browser', toggle),
+      bindLazySurfaceIntent('files', toggle),
+      bindLazySurfaceIntent('terminal', toggle),
+      bindLazySurfaceIntent('review', toggle),
+    ];
+    return () => {
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, [showUtilityPane]);
 
   const toggleRightPanel = useCallback(() => {
     const open = !state.rightPanelOpen;
@@ -510,7 +558,9 @@ export default function App() {
               }`}
             >
               {!embedded && state.mainView === 'pull-requests' ? (
-                <PullRequestsView />
+                <Suspense fallback={pullRequestsFallback()}>
+                  <LazyPullRequestsView />
+                </Suspense>
               ) : isMissionControlView ? (
                 <motion.div
                   key="mission-control"
@@ -519,7 +569,9 @@ export default function App() {
                   animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
                   transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                 >
-                  <MissionControl />
+                  <Suspense fallback={missionControlFallback()}>
+                    <LazyMissionControl />
+                  </Suspense>
                 </motion.div>
               ) : (
                 <>
@@ -591,53 +643,63 @@ export default function App() {
                     }}
                     renderTab={(tab, { overlayOpen }) => {
                       if (tab.tool === 'review') {
-                        return <ReviewPanel cwd={workingDirectory} />;
+                        return (
+                          <Suspense fallback={utilityToolFallback('review')}>
+                            <LazyReviewPanel cwd={workingDirectory} />
+                          </Suspense>
+                        );
                       }
                       if (tab.tool === 'browser') {
                         return (
-                          <BrowserFocusWorkspace
-                            expanded={browserExpanded}
-                            externalObscured={overlayOpen}
-                            onToggleExpanded={() => {
-                              setExpandedBrowserAppSessionId(
-                                browserExpanded ? null : activeSession.appSessionId,
-                              );
-                            }}
-                          />
+                          <Suspense fallback={utilityToolFallback('browser')}>
+                            <LazyBrowserFocusWorkspace
+                              expanded={browserExpanded}
+                              externalObscured={overlayOpen}
+                              onToggleExpanded={() => {
+                                setExpandedBrowserAppSessionId(
+                                  browserExpanded ? null : activeSession.appSessionId,
+                                );
+                              }}
+                            />
+                          </Suspense>
                         );
                       }
                       if (tab.tool === 'terminal') {
                         return (
-                          <TerminalWorkspace
-                            tabId={tab.id}
-                            terminalId={tab.terminalId}
-                            appSessionId={activeSession.appSessionId}
-                            cwd={tab.cwd ?? workingDirectory}
-                            onCreated={(terminalId, label) => {
+                          <Suspense fallback={utilityToolFallback('terminal')}>
+                            <LazyTerminalWorkspace
+                              tabId={tab.id}
+                              terminalId={tab.terminalId}
+                              appSessionId={activeSession.appSessionId}
+                              cwd={tab.cwd ?? workingDirectory}
+                              onCreated={(terminalId, label) => {
+                                dispatch({
+                                  type: 'UPDATE_UTILITY_TAB',
+                                  tabId: tab.id,
+                                  appSessionId: activeSession.appSessionId,
+                                  terminalId,
+                                  label,
+                                });
+                              }}
+                            />
+                          </Suspense>
+                        );
+                      }
+                      return (
+                        <Suspense fallback={utilityToolFallback('files')}>
+                          <LazyFilesWorkspace
+                            root={workingDirectory}
+                            selectedPath={tab.filePath}
+                            onSelectPath={(filePath) => {
                               dispatch({
                                 type: 'UPDATE_UTILITY_TAB',
                                 tabId: tab.id,
                                 appSessionId: activeSession.appSessionId,
-                                terminalId,
-                                label,
+                                filePath,
                               });
                             }}
                           />
-                        );
-                      }
-                      return (
-                        <FilesWorkspace
-                          root={workingDirectory}
-                          selectedPath={tab.filePath}
-                          onSelectPath={(filePath) => {
-                            dispatch({
-                              type: 'UPDATE_UTILITY_TAB',
-                              tabId: tab.id,
-                              appSessionId: activeSession.appSessionId,
-                              filePath,
-                            });
-                          }}
-                        />
+                        </Suspense>
                       );
                     }}
                   />
@@ -709,6 +771,7 @@ export default function App() {
           )}
           {!!activeSession && (
             <button
+              ref={utilityPaneToggleRef}
               onClick={toggleUtilityPane}
               className="rounded-md p-1.5 text-droid-text-muted/70 transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
               title="Toggle utility pane (Cmd+\\)"
@@ -719,20 +782,32 @@ export default function App() {
         </div>
       )}
 
-      {state.commandPaletteOpen && <CommandPalette />}
-      {state.settingsOpen && <SettingsPanel />}
-      <SpecWikiModal />
+      {state.commandPaletteOpen && (
+        <Suspense fallback={commandPaletteFallback()}>
+          <LazyCommandPalette />
+        </Suspense>
+      )}
+      {state.settingsOpen && (
+        <Suspense fallback={settingsPanelFallback()}>
+          <LazySettingsPanel />
+        </Suspense>
+      )}
+      <Suspense fallback={null}>
+        <LazySpecWikiModal />
+      </Suspense>
       <Toaster />
 
       <AnimatePresence>
-        {showWizard && (
-          <OnboardingWizard
-            controller={onboard}
-            onComplete={() => {
-              setForceWizard(false);
-              setBannerDismissed(false);
-            }}
-          />
+        {showWizard && onboard.ready && (
+          <Suspense fallback={onboardingFallback()}>
+            <LazyOnboardingWizard
+              controller={onboard}
+              onComplete={() => {
+                setForceWizard(false);
+                setBannerDismissed(false);
+              }}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
     </div>
