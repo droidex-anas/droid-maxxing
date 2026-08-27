@@ -260,10 +260,12 @@ async function runStreamingPass(tree: BenchTree, run: number, sidecarEntry: stri
     await app.cdp.evaluate('window.__guiBench.dismissOverlays()');
     await app.cdp.evaluate('window.__guiBench.clickNewChat()');
     await app.cdp.evaluate('window.__guiBench.waitForSendReady(25000)');
+    await app.cdp.evaluate(`(() => { const area = document.querySelector('textarea'); if (area) area.focus(); })()`);
+    await app.cdp.insertText('stream a long answer');
     const before = sampleProcessTree(app.pid);
     await app.cdp.evaluate('window.__guiBench.start()');
     const started = Date.now();
-    await app.cdp.evaluate('window.__guiBench.fillPrompt("stream a long answer")');
+    await app.cdp.evaluate('window.__guiBench.clickSend()');
     await app.cdp.dispatchEnter();
     const streamWait = await app.cdp.evaluate<{
       elapsedMs: number;
@@ -304,6 +306,11 @@ async function runStreamingPass(tree: BenchTree, run: number, sidecarEntry: stri
       rssBytes: totalRssBytes(after),
     };
   } catch (error) {
+    try {
+      await captureChat(app, `gui_bench_${tree.name}_streaming_fail_run${String(run)}`);
+    } catch {
+      // Window may already be gone.
+    }
     return unwiredStreaming(error instanceof Error ? error.message : String(error));
   } finally {
     await stopApp(app);

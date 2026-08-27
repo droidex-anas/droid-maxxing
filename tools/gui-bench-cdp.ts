@@ -109,6 +109,10 @@ export class CdpClient {
     await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
   }
 
+  async insertText(text: string): Promise<void> {
+    await this.send('Input.insertText', { text });
+  }
+
   close(): void {
     this.socket.close();
     for (const waiter of this.pending.values()) waiter.reject(new Error('CDP client closed.'));

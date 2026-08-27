@@ -248,29 +248,37 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
       area.focus();
       return area.value;
     },
+    sendButton() {
+      const area = document.querySelector('textarea');
+      const root = (area && area.closest('section')) || document.body;
+      return Array.from(root.querySelectorAll('button.rounded-full')).find((button) =>
+        button.querySelector('svg'),
+      );
+    },
     waitForSendReady(timeoutMs) {
       const started = performance.now();
       return new Promise((resolve, reject) => {
         const poll = () => {
           const area = document.querySelector('textarea');
-          const shell = document.querySelector('[data-testid="chat-view"]') || document.body;
-          const send = Array.from(shell.querySelectorAll('button.rounded-full')).find((button) =>
-            button.querySelector('svg'),
-          );
-          const ready = Boolean(
-            area && send && !send.disabled && send.getAttribute('title') !== 'Agent runtime is unavailable',
-          );
+          const send = window.__guiBench.sendButton();
+          const title = send ? send.getAttribute('title') : null;
+          // Empty composer disables send; runtime readiness is the title, not disabled.
+          const ready = Boolean(area && send && title !== 'Agent runtime is unavailable');
           if (ready) {
-            resolve({ elapsedMs: performance.now() - started, title: send ? send.getAttribute('title') : null });
+            resolve({ elapsedMs: performance.now() - started, title, disabled: Boolean(send && send.disabled) });
             return;
           }
           if (performance.now() - started > timeoutMs) {
             reject(
               new Error(
-                'Send never became ready (disabled=' +
+                'Send never became ready (found=' +
+                  String(Boolean(send)) +
+                  ', disabled=' +
                   String(send && send.disabled) +
                   ', title=' +
-                  (send && send.getAttribute('title')) +
+                  title +
+                  ', rounded=' +
+                  String(document.querySelectorAll('button.rounded-full').length) +
                   ')',
               ),
             );
@@ -314,13 +322,11 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
         poll();
       });
     },
-    async sendPrompt(text) {
-      window.__guiBench.fillPrompt(text);
-      await window.__guiBench.waitForSendReady(20000);
-      const area = document.querySelector('textarea');
-      if (area) area.focus();
-      area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-      return true;
+    clickSend() {
+      const send = window.__guiBench.sendButton();
+      if (!send) throw new Error('send button not found');
+      send.click();
+      return { disabled: Boolean(send.disabled), title: send.getAttribute('title') };
     },
     childRows() {
       return Array.from(document.querySelectorAll('[data-testid="subagent-row"]')).map((node) => node.getAttribute('data-child-session-id') || node.textContent || '');
