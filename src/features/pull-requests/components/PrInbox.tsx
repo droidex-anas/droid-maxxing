@@ -186,6 +186,7 @@ function InboxList({
   loading,
   error,
   emptyCopy,
+  currentEmptyCopy,
   groups,
   currentCwd,
   searching,
@@ -201,6 +202,7 @@ function InboxList({
   loading: boolean;
   error: string | null;
   emptyCopy: string;
+  currentEmptyCopy: string;
   groups: InboxRepoGroup[];
   currentCwd: string | null;
   searching: boolean;
@@ -249,9 +251,7 @@ function InboxList({
                 <p className="px-1 pb-2 text-[12px] text-droid-text-muted">{repoError.message}</p>
               ) : null}
               {group.prs.length === 0 && !repoError ? (
-                <p className="px-1 py-4 text-[13px] text-droid-text-muted">
-                  No open pull requests in this repo.
-                </p>
+                <p className="px-1 py-4 text-[13px] text-droid-text-muted">{currentEmptyCopy}</p>
               ) : (
                 rows
               )}
@@ -417,6 +417,7 @@ export function PrInbox({
           loading={showSkeleton}
           error={error}
           emptyCopy={prInboxEmptyCopy(tab, query, multiRepo)}
+          currentEmptyCopy={prInboxEmptyCopy(tab, query)}
           groups={groups}
           currentCwd={currentCwd}
           searching={query.trim().length > 0}

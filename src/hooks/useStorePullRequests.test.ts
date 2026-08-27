@@ -76,6 +76,14 @@ test('backlog ids move and restore without duplicating', () => {
   assert.deepEqual(restored.prBacklogIds, []);
 });
 
+test('backlog additions that cannot persist are ignored', () => {
+  const oversized = reducer(initialState, {
+    type: 'MOVE_PR_TO_BACKLOG',
+    id: `/${'a'.repeat(200)}#1`,
+  });
+  assert.equal(oversized, initialState);
+});
+
 test('selecting a session or starting a chat leaves the workspace', () => {
   const open = reducer(
     { ...initialState, sessions: { a: session('a') }, sessionOrder: ['a'] },

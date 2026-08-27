@@ -115,18 +115,22 @@ test('login matching folds ASCII case only, not collation equivalences', () => {
 });
 
 test('backlog rows leave All, Reviewing, and Authored', () => {
-  const ids = new Set([prBacklogId(rows[2])]);
+  const ids = new Set([prBacklogId(rows[0])]);
   assert.deepEqual(
     filterPullRequests(rows, 'all', 'octocat', ids).map((item) => item.number),
-    [1, 2],
+    [2, 3],
   );
   assert.deepEqual(
     filterPullRequests(rows, 'reviewing', 'octocat', ids).map((item) => item.number),
-    [1, 2],
+    [2],
+  );
+  assert.deepEqual(
+    filterPullRequests(rows, 'authored', 'ana', ids).map((item) => item.number),
+    [],
   );
   assert.deepEqual(
     filterPullRequests(rows, 'backlog', 'octocat', ids).map((item) => item.number),
-    [3],
+    [1],
   );
 });
 

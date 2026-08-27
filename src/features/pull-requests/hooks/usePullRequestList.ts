@@ -11,7 +11,7 @@ export function usePullRequestList(cwds: string[], enabled: boolean) {
   // A poll and a manual refresh can be in flight together, so only the newest
   // request may settle: the generation alone cannot tell them apart.
   const requestRef = useRef(0);
-  const cwdsKey = cwds.join('\n');
+  const cwdsKey = JSON.stringify(cwds);
   const listedCwds = useMemo(() => cwds, [cwdsKey]);
 
   const load = useCallback(

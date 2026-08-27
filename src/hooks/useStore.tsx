@@ -14,11 +14,9 @@ import {
 import { bridge } from '../lib/bridge';
 import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
-import {
-  resolvePrWorkspaceNumber,
-  sanitizePersistedPrWorkspace,
-} from '../features/pull-requests/lib/prWorkspaceCwd';
+import { sanitizePersistedPrWorkspace } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { sanitizePersistedPrBacklog } from '../features/pull-requests/lib/prBacklog';
+import { reducePrInbox, type PrInboxAction } from '../features/pull-requests/lib/prInboxState';
 import {
   DEFAULT_THEME_ID,
   detectPresetId,
@@ -556,10 +554,7 @@ type Action =
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
-  | { type: 'OPEN_PULL_REQUESTS'; cwd?: string | null; number?: number | null }
-  | { type: 'CLOSE_PULL_REQUESTS' }
-  | { type: 'MOVE_PR_TO_BACKLOG'; id: string }
-  | { type: 'RESTORE_PR_FROM_BACKLOG'; id: string }
+  | PrInboxAction
   | {
       type: 'START_CHAT';
       cwd: string;
@@ -2592,32 +2587,10 @@ function baseReducer(state: AppState, action: Action): AppState {
       return { ...state, missionControlMode: !state.missionControlMode };
 
     case 'OPEN_PULL_REQUESTS':
-      return {
-        ...state,
-        mainView: 'pull-requests',
-        prWorkspaceCwd: action.cwd === undefined ? state.prWorkspaceCwd : action.cwd,
-        prWorkspaceNumber: resolvePrWorkspaceNumber(
-          state.prWorkspaceCwd,
-          state.prWorkspaceNumber,
-          action.cwd,
-          action.number,
-        ),
-      };
     case 'CLOSE_PULL_REQUESTS':
-      return state.mainView === 'session' ? state : { ...state, mainView: 'session' };
-
-    case 'MOVE_PR_TO_BACKLOG': {
-      const id = action.id.trim();
-      if (!id || state.prBacklogIds.includes(id)) return state;
-      return { ...state, prBacklogIds: [...state.prBacklogIds, id] };
-    }
-    case 'RESTORE_PR_FROM_BACKLOG': {
-      if (!state.prBacklogIds.includes(action.id)) return state;
-      return {
-        ...state,
-        prBacklogIds: state.prBacklogIds.filter((id) => id !== action.id),
-      };
-    }
+    case 'MOVE_PR_TO_BACKLOG':
+    case 'RESTORE_PR_FROM_BACKLOG':
+      return reducePrInbox(state, action);
 
     case 'START_CHAT': {
       // Stamp the session being left so model output produced while it was
