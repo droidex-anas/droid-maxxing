@@ -54,7 +54,7 @@
     "perf:long-session": "npm --prefix sidecar run perf:replay -- --scenario long-tail",
     "perf:soak": "npm --prefix sidecar run perf:replay -- --scenario soak",
     "perf:compare": "npm --prefix sidecar run perf:replay -- --compare",
-    "perf:report": "npm --prefix sidecar run perf:replay -- --compare --commit-report --enforce-gates",
+    "perf:report": "npm --prefix sidecar run perf:replay -- --compare --enforce-gates",
     "perf:gates": "npm --prefix sidecar run perf:replay -- --gates --enforce-gates",
     "perf:ab-probes": "tsx tools/perf-ab-probes.ts",
     "precommit": "lint-staged && npm run quality:file-size && npm run quality:tech-debt && npm run typecheck && npm run sidecar:typecheck && npm run electron:check",
