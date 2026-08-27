@@ -186,6 +186,37 @@ export function newChildState(input: {
   });
 }
 
+export function applyObservedChild(
+  child: ChildSessionState,
+  observed: ChildSpawnObservation,
+  spawnLink: PersistedChildSpawnLink | undefined,
+  providerSessionId: string,
+  now: number,
+): { previousPrompt: string | undefined } {
+  if (child.providerSessionId && child.providerSessionId !== providerSessionId)
+    child.retiredProviderSessionIds.add(child.providerSessionId);
+  const previousPrompt = child.prompt;
+  if (child.role !== observed.role) {
+    child.role = observed.role;
+    child.configurationGeneration += 1;
+  }
+  child.providerSessionId = providerSessionId;
+  child.status = 'running';
+  applyChildLaunchSettings(child, {
+    modelId: observed.modelId,
+    reasoningEffort: observed.reasoningEffort,
+  });
+  // First label wins: the spawn call's label is set at admission, and
+  // later poll observations echo the same metadata with different casing.
+  child.label ??= observed.label;
+  child.prompt = observed.prompt ?? child.prompt;
+  child.spawnLink = spawnLink ?? child.spawnLink;
+  child.activity = observed.activity ?? child.activity;
+  child.transcriptAvailable = true;
+  child.startedAt ??= now;
+  return { previousPrompt };
+}
+
 export function applyChildLaunchSettings(child: ChildSessionState, settings: ChildSettings): void {
   if (!settings.modelId) return;
   if (child.modelId === settings.modelId && child.reasoningEffort === settings.reasoningEffort)

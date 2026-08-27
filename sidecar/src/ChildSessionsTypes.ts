@@ -10,6 +10,8 @@ import type { SessionCompaction } from './SessionCompaction.js';
 import type { SessionInitResult } from './sessionHelpers.js';
 import type { ChildParentLease, ChildRuntimeTarget, ChildSettings } from './ChildSessionState.js';
 
+export type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+
 export type ChildSettingsTarget = ChildRuntimeTarget & {
   parentGeneration: number;
   runtimeGeneration: number;

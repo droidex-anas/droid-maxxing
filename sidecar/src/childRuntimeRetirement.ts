@@ -3,10 +3,11 @@
 // child the user has finished with stays resident for the rest of the app
 // session. These rules decide when one may be released instead; reopening it
 // reloads the provider session from persisted state.
-import type {
-  ChildRuntimeTarget,
-  ChildSessionState,
-  ParentChildSessions,
+import {
+  childHasWorkInFlight,
+  type ChildRuntimeTarget,
+  type ChildSessionState,
+  type ParentChildSessions,
 } from './ChildSessionState.js';
 
 // Long enough that switching between subagent views keeps them warm, short
@@ -16,6 +17,23 @@ export const CHILD_RUNTIME_IDLE_RETIREMENT_MS = 5 * 60_000;
 
 export const CHILD_RUNTIME_RETIRED_STATUS =
   'Task runtime released after 5 minutes idle to free memory. Opening this Task again restores it.';
+
+// Retiring a parent closes its whole child subtree, so it must wait for every
+// child to settle. Scoped to one parent and allocation-free: the session
+// retirement sweep re-evaluates this whenever a summary changes.
+export function parentHasUnsettledChildren(
+  parent: ParentChildSessions | undefined,
+  isAwaitingDurability: (child: ChildSessionState) => boolean,
+): boolean {
+  if (!parent) return false;
+  if (parent.pendingSpawns.size > 0 || parent.openAttempts.size > 0) return true;
+  if (parent.reservedOpenSlots.size > 0 || parent.runtimeQueue.length > 0) return true;
+  for (const child of parent.children.values()) {
+    if (childHasWorkInFlight(child)) return true;
+    if (isAwaitingDurability(child)) return true;
+  }
+  return false;
+}
 
 // Every path that could still produce output, deliver it, or persist it must
 // have settled. `status` is the parent's view of the child: a child the parent
