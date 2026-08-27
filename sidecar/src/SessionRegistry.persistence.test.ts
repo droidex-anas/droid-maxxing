@@ -205,7 +205,7 @@ test('a removed Mission row is not retained by a direct historical mutation', ()
   missions = [];
   revision += 1;
 
-  assert.deepEqual(registry.listSummaries(), []);
+  assert.deepEqual(registry.listSummaries().sessions, []);
 });
 
 test('unregister flushes persistence before exposing the session as closed', () => {

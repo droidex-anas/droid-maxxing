@@ -1484,15 +1484,17 @@ function summarizeSessionFile(
   providerSessionId: string,
   file: SessionFileStat,
 ): SessionFileSummary {
-  const head = readSessionFileHead(file.path, file.sizeBytes);
-  const classification = classifyStoredSession(head.start);
+  const { start, hasCompletedConversation } = readSessionFileHead(file.path, file.sizeBytes);
+  const settings = readSessionModelSettings(start, file.path);
+  // Resuming a session needs its model even when the session never earns a
+  // sidebar row, so launch settings are cached independently of admission.
+  const launch = launchSettings(settings);
+  const cachedLaunch = launch ? { launchSettings: launch } : {};
+  const classification = classifyStoredSession(start);
   // Live sessions are registered separately, so refusing an unfinished
   // exchange here cannot hide a first turn while it is running.
-  if (!classification || !head.hasCompletedConversation) return { summary: null };
-  const start = head.start;
+  if (!classification || !hasCompletedConversation) return { summary: null, ...cachedLaunch };
   const title = start.sessionTitle || start.title || `Session ${providerSessionId.slice(0, 8)}`;
-  const settings = readSessionModelSettings(start, file.path);
-  const launch = launchSettings(settings);
   return {
     summary: {
       appSessionId: providerSessionId,
@@ -1517,7 +1519,7 @@ function summarizeSessionFile(
       createdAt: file.birthtimeMs,
       updatedAt: file.mtimeMs,
     },
-    ...(launch ? { launchSettings: launch } : {}),
+    ...cachedLaunch,
   };
 }
 
