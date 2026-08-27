@@ -55,7 +55,7 @@ test('a turn opens at tick speed and then coalesces for the full window', async 
   const { coalescer, delivered } = createCoalescer();
 
   coalescer.accept(childDelta('a1', 'child-1', { text: 'He' }));
-  assert.deepEqual(delivered, []);
+  assert.equal(delivered.length, 0, 'nothing is published synchronously');
   await waitTicks();
   assert.deepEqual(
     delivered.map((event) => event.text),
