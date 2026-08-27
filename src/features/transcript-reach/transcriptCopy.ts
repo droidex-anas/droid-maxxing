@@ -1,4 +1,4 @@
-import type { FeedItem } from '../../components/chat';
+import type { FeedItem } from '../../components/chatFeed';
 import type { FileChange } from '../../lib/diff';
 import { childSessionInfo } from '../../lib/childSessionEvents';
 import { parseTruncatedTail, stripAnsi, toolMeta } from '../../lib/tools';

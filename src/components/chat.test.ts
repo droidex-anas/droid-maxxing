@@ -5,21 +5,17 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  buildFeed,
   childSessionLineIsRunning,
-  collectTurnFiles,
-  conversationAnchors,
   correlateResults,
   fetchSizeBadge,
-  groupTurns,
-  isResultFor,
   sameFeedEvents,
   MessageFeed,
   StreamingCaret,
   UserBubble,
   WebFetchBody,
-  type FeedItem,
 } from './chat';
+import { buildFeed, collectTurnFiles, isResultFor, type FeedItem } from './chatFeed';
+import { conversationAnchors, groupTurns } from './chatFeedTurns';
 import {
   appendedFeedItemKeys,
   appendedFeedItemKeysFromProjection,

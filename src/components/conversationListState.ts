@@ -1,4 +1,4 @@
-import type { FeedItem } from './chat';
+import type { FeedItem } from './chatFeed';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 
 export const CONVERSATION_LIST_OVERSCAN = 8;

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { promptAnchorsFromItems, type ConversationAnchor, type FeedItem } from '../components/chat';
+import type { FeedItem } from '../components/chatFeed';
+import { promptAnchorsFromItems, type ConversationAnchor } from '../components/chatFeedTurns';
 import type { TranscriptEvent } from '../types/bridge';
 import type { SessionRestoreStatus } from './useStore';
 

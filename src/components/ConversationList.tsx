@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
-import type { FeedItem } from './chat';
+import type { FeedItem } from './chatFeed';
 import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
 import {
   buildConversationRowLookup,

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ComponentType } from 'react';
 
-import type { FeedItem, FeedItemViewProps } from './chat';
+import type { FeedItemViewProps } from './chat';
+import type { FeedItem } from './chatFeed';
 import { areFeedRowPropsEqual } from './messageFeedRows';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import type { TranscriptEvent } from '../types/bridge';

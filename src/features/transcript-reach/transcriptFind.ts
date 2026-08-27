@@ -1,4 +1,4 @@
-import type { FeedItem } from '../../components/chat';
+import type { FeedItem } from '../../components/chatFeed';
 import { feedRowId } from '../../hooks/conversationViewportAnchor';
 import { copyTextForFeedItem } from './transcriptCopy';
 

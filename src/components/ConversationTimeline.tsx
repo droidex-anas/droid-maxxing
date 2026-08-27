@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RefObject } from 'react';
-import type { ConversationAnchor } from './chat';
+import type { ConversationAnchor } from './chatFeedTurns';
 
 /**
  * A quiet navigation rail in the chat's left gutter: one dot per user prompt.

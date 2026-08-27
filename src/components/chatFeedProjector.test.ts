@@ -5,7 +5,7 @@ import { transcriptForVisibleSession } from '../lib/childSessions';
 import { getRendererPerfSnapshot, resetRendererPerfForTest } from '../lib/rendererPerf';
 import type { TranscriptEvent } from '../types/bridge';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
-import { buildGroupedFeed, type GroupedFeedOptions } from './chat';
+import { buildGroupedFeed, type GroupedFeedOptions } from './chatFeedTurns';
 import {
   CHAT_FEED_WARM_CACHE_MAX_RETAINED_COST,
   CHAT_FEED_WARM_CACHE_MAX_VISIBLE_EVENTS,

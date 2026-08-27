@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { FeedItem } from '../../components/chat';
+import type { FeedItem } from '../../components/chatFeed';
 import { parseTruncatedTail, stripAnsi } from '../../lib/tools';
 import type { TranscriptEvent } from '../../types/bridge';
 import {

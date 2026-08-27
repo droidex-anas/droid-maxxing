@@ -4,8 +4,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Virtualizer } from '@tanstack/virtual-core';
 
-import type { FeedItem } from './chat';
 import { MessageFeed } from './chat';
+import type { FeedItem } from './chatFeed';
 import {
   buildConversationRowLookup,
   CONVERSATION_LIST_ESTIMATE_PX,

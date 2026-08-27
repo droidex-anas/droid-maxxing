@@ -6,7 +6,7 @@ import {
   restoreStatusForConversationTimeline,
   shouldPrimeConversationTimeline,
 } from '../hooks/useConversationTimeline';
-import type { FeedItem } from './chat';
+import type { FeedItem } from './chatFeed';
 import type { TranscriptEvent } from '../types/bridge';
 
 function message(

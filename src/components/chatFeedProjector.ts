@@ -4,7 +4,8 @@ import { noteFeedProjection } from '../lib/rendererPerf';
 import type { TranscriptMutation } from '../lib/transcriptMutation';
 import { INACTIVE_TRANSCRIPT_POLICY } from '../lib/transcriptWindow';
 import type { TranscriptEvent } from '../types/bridge';
-import { buildGroupedFeed, type FeedItem, type GroupedFeedOptions } from './chat';
+import type { FeedItem } from './chatFeed';
+import { buildGroupedFeed, type GroupedFeedOptions } from './chatFeedTurns';
 import { projectPrependedFeed } from './chatFeedPrependProjector';
 
 export interface ChatFeedProjectorInput {

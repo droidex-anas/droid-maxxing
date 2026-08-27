@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 
-import type { FeedItem } from '../../components/chat';
+import type { FeedItem } from '../../components/chatFeed';
 import {
   isTranscriptFindNextShortcut,
   isTranscriptFindPreviousShortcut,

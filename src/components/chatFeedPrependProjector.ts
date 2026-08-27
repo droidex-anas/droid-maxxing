@@ -2,7 +2,8 @@ import { transcriptEventIsVisible } from '../lib/childSessions';
 import { insertChunkedSequence, replaceChunkedSequencePrefix } from '../lib/chunkedSequence';
 import type { TranscriptMutation } from '../lib/transcriptMutation';
 import type { TranscriptEvent } from '../types/bridge';
-import { buildGroupedFeed, type FeedItem, type GroupedFeedOptions } from './chat';
+import type { FeedItem } from './chatFeed';
+import { buildGroupedFeed, type GroupedFeedOptions } from './chatFeedTurns';
 
 interface PreviousFeedProjection {
   allTranscript: TranscriptEvent[];
