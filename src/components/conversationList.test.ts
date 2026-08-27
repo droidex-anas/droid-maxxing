@@ -29,7 +29,6 @@ import {
   scrollTopForPreservedAnchor,
   type ConversationViewportLayout,
 } from '../hooks/conversationViewportAnchor';
-import { applyConversationContentResize } from '../hooks/useConversationScrollWindow';
 import type { TranscriptEvent } from '../types/bridge';
 
 function messageItem(id: string, author: 'user' | 'assistant' = 'assistant'): FeedItem {
@@ -300,7 +299,7 @@ test('mermaid growth above an unpinned reader is compensated by the virtual row 
       rowId: feedRowId(anchorItem),
       rowOffsetTop: capturedOffset,
       scrollTop,
-      scrollHeight: estimatedListSizeFor(items.length),
+      scrollHeight: estimatedListSize(items.length),
     },
     false,
     true,
@@ -350,7 +349,7 @@ test('mermaid growth below an unpinned reader does not move the reading position
       rowId: feedRowId(anchorItem),
       rowOffsetTop: capturedOffset,
       scrollTop,
-      scrollHeight: estimatedListSizeFor(items.length),
+      scrollHeight: estimatedListSize(items.length),
     },
     false,
     true,
