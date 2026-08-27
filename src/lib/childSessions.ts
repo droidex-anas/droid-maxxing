@@ -361,6 +361,7 @@ function pendingChildSession(spawn: ChildSessionSpawnRef): ChildSessionInfo {
     spawnLink: { kind: 'tool-use', id: toolUseId },
     transcriptAvailable: false,
     startedAt: spawn.ts,
+    streamFidelity: 'state',
   };
 }
 

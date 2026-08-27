@@ -119,6 +119,7 @@ function child(
     status,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
 }
 

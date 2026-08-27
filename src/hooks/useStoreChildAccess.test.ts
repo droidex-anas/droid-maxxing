@@ -11,6 +11,7 @@ const child = (parentAppSessionId: string, childSessionId: string): ChildSession
   status: 'paused',
   modelId: 'model-default',
   transcriptAvailable: true,
+  streamFidelity: 'state',
 });
 
 const session = (appSessionId: string): SessionSummary => ({

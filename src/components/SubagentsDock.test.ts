@@ -51,6 +51,7 @@ function childSession(
     spawnLink: { kind: 'tool-use', id: toolUseId },
     transcriptAvailable: true,
     startedAt: 1_000,
+    streamFidelity: 'state',
   };
 }
 
@@ -624,10 +625,10 @@ test('queued children render as Queued, not Awaiting status', () => {
   assert.ok(!text.includes('1 Awaiting status'));
 });
 
-test('a live streaming child shows a bounded preview on the in-flight card', () => {
+test('a live token child shows a bounded typewriter preview on the in-flight card', () => {
   const html = renderToStaticMarkup(
     createElement(SubagentsDock, {
-      sessions: [childSession('explorer', 't1', 'running')],
+      sessions: [{ ...childSession('explorer', 't1', 'running'), streamFidelity: 'token' }],
       models: [],
       live: true,
       activity: () => ({
@@ -641,6 +642,32 @@ test('a live streaming child shows a bounded preview on the in-flight card', () 
   assert.ok(text.includes('Streaming'));
   assert.ok(text.includes('visible tail'));
   assert.ok(html.includes('data-testid="subagent-stream-preview"'));
+  assert.ok(html.includes('data-presentation="typewriter"'));
+  assert.ok(html.includes('caret-blink'));
   assert.ok(html.includes('min-h-[3.75rem] max-h-[3.75rem]'));
   assert.equal(text.includes('line\nline\nline\nline\nline'), false);
+});
+
+test('a polled child shows a working cue and never a typewriter caret', () => {
+  const html = renderToStaticMarkup(
+    createElement(SubagentsDock, {
+      sessions: [
+        {
+          ...childSession('explorer', 't1', 'running'),
+          activity: { phase: 'Running', preview: 'last observed lump' },
+        },
+      ],
+      models: [],
+      live: true,
+    }),
+  );
+  const text = textOf(html);
+  assert.ok(text.includes('Working'));
+  assert.ok(text.includes('last observed lump'));
+  assert.ok(text.includes('Running…'));
+  assert.ok(html.includes('data-presentation="working"'));
+  assert.ok(html.includes('data-testid="subagent-working-cue"'));
+  assert.equal(html.includes('caret-blink'), false);
+  assert.equal(html.includes('data-presentation="typewriter"'), false);
+  assert.equal(text.includes('Streaming'), false);
 });

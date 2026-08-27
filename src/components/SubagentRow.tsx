@@ -4,7 +4,7 @@ import { ChevronRight } from 'lucide-react';
 import type { ChildSessionSummary, ModelInfo } from '../types/bridge';
 import { isPendingChildPlaceholder, type ChildSessionTarget } from '../lib/childSessions';
 import {
-  CHILD_STREAM_PHASE_LABEL,
+  childStreamPhaseLabel,
   type ChildStreamPhase,
   type ChildStreamSnapshot,
 } from '../lib/childSessionStream';
@@ -64,14 +64,21 @@ function childModelLine(
   return `${model.displayName} (${child.modelId})`;
 }
 
-function PhasePill({ phase }: { phase: ChildStreamPhase }) {
+function PhasePill({
+  phase,
+  fidelity,
+}: {
+  phase: ChildStreamPhase;
+  fidelity: ChildStreamSnapshot['fidelity'];
+}) {
   return (
     <span
       data-testid="subagent-phase"
       data-phase={phase}
+      data-stream-fidelity={fidelity}
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium ${PHASE_PILL[phase]}`}
     >
-      {CHILD_STREAM_PHASE_LABEL[phase]}
+      {childStreamPhaseLabel(phase, fidelity)}
     </span>
   );
 }
@@ -95,6 +102,7 @@ export const SubagentRow = memo(function SubagentRow({
     <motion.li
       data-testid="subagent-row"
       data-child-key={snapshot.key}
+      data-stream-fidelity={snapshot.fidelity}
       variants={
         reduceMotion ? undefined : { hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }
       }
@@ -120,9 +128,9 @@ export const SubagentRow = memo(function SubagentRow({
             ) : null}
           </span>
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
-            {CHILD_STREAM_PHASE_LABEL[snapshot.phase]}
+            {childStreamPhaseLabel(snapshot.phase, snapshot.fidelity)}
           </span>
-          <PhasePill phase={snapshot.phase} />
+          <PhasePill phase={snapshot.phase} fidelity={snapshot.fidelity} />
           <span className="w-12 shrink-0 text-right text-[12px] tabular-nums text-droid-text-muted">
             {durationMs != null ? formatDuration(durationMs) : ''}
           </span>

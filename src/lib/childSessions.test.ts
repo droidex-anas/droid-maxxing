@@ -113,6 +113,7 @@ test('selected child targeting is parent-scoped and independent of session mode'
     status: 'paused' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const children = { 'mission-parent': { 'worker-logical': child } };
 
@@ -142,6 +143,7 @@ test('switching to a feature without an exact child clears the previous prompt t
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const progress = [
     {
@@ -188,6 +190,7 @@ test('child ordering gives unlabeled siblings one stable label across surfaces',
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
     startedAt: 20,
   };
   const earlier = {
@@ -230,6 +233,7 @@ test('spawned sessions cover a spawn the store has not registered yet', () => {
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
     spawnLink: { kind: 'tool-use' as const, id: 'tool-a' },
     startedAt: 50,
   };
@@ -239,6 +243,7 @@ test('spawned sessions cover a spawn the store has not registered yet', () => {
   assert.equal(pending[0].label, 'explorer');
   assert.equal(pending[0].prompt, 'read the code');
   assert.equal(pending[0].status, 'pending');
+  assert.equal(pending[0].streamFidelity, 'state');
   assert.ok(isPendingChildPlaceholder(pending[0]));
 
   // Once the session registers, the same spawn resolves to it — same row key, so
@@ -261,6 +266,7 @@ test('spawned sessions keep a child whose spawn is outside the loaded transcript
     status: 'completed' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
     spawnLink: { kind: 'tool-use' as const, id: 'tool-old' },
     startedAt: 5,
   };
@@ -276,6 +282,7 @@ test('the panel order pins working agents on top, then newest first, without ren
     role: 'worker' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const rows = workingFirstChildSessions([
     { ...base, childSessionId: 'c1', status: 'completed', startedAt: 10 },
@@ -332,6 +339,7 @@ test('older spawns revealed by history paging sort behind the existing rows', ()
     role: 'worker' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const recent = [
     { ...base, childSessionId: 'new-1', status: 'completed' as const, startedAt: 100 },
@@ -356,6 +364,7 @@ test('running child activity stays running even without an open runtime', () => 
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
     spawnLink: { kind: 'tool-use' as const, id: 'tool-a' },
   };
 
@@ -380,6 +389,7 @@ test('visible child actionability is exact and readiness-gated', () => {
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const children = {
     'parent-a': { 'child-a': running },
@@ -419,6 +429,7 @@ test('completed and historical children stay selected while actions are disabled
     status: 'completed' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const selection = { parentAppSessionId: 'parent-a', childSessionId: 'child-a' };
   const children = { 'parent-a': { 'child-a': completed } };
@@ -452,6 +463,7 @@ test('visible pending state never inherits liveness across the parent-child boun
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const selection = { parentAppSessionId: 'parent-a', childSessionId: 'child-a' };
   const children = { 'parent-a': { 'child-a': running } };
@@ -481,6 +493,7 @@ test('child prompt commit suppresses every effect when the runtime closes during
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const selection = { parentAppSessionId: 'parent-a', childSessionId: 'child-a' };
   const children = { 'parent-a': { 'child-a': child } };
@@ -537,6 +550,7 @@ test('child prompt commit rejects a replacement runtime with the same logical ch
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const selection = { parentAppSessionId: 'parent-a', childSessionId: 'child-a' };
   const children = { 'parent-a': { 'child-a': child } };
@@ -586,6 +600,7 @@ test('child prompt commit preserves a composer revised during git baseline', asy
     status: 'running' as const,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const selection = { parentAppSessionId: 'parent-a', childSessionId: 'child-a' };
   const target = visibleSessionTarget(
@@ -841,6 +856,7 @@ test('child display preserves same-role sibling identity and required metadata',
     modelId: 'model-a',
     reasoningEffort: 'high' as const,
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const second = {
     ...first,
@@ -878,6 +894,7 @@ test('spawn navigation resolves only an exact tool-use link', () => {
       modelId: 'model-a',
       spawnLink: { kind: 'tool-use' as const, id: 'tool-a' },
       transcriptAvailable: true,
+      streamFidelity: 'state',
     },
     {
       parentAppSessionId: 'parent-a',
@@ -888,6 +905,7 @@ test('spawn navigation resolves only an exact tool-use link', () => {
       modelId: 'model-a',
       spawnLink: { kind: 'tool-use' as const, id: 'tool-b' },
       transcriptAvailable: true,
+      streamFidelity: 'state',
     },
   ];
 

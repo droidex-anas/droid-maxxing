@@ -15,6 +15,8 @@ import { isReportedStreamingTranscriptError } from './SessionTimeline.js';
 import {
   applyChildLaunchSettings,
   childAcceptsWork,
+  childDurabilityKey,
+  childHistoryProviderSessionIds,
   childIdentity,
   childSettingsFromInit,
   childStateFromRecord,
@@ -45,6 +47,7 @@ import {
   nextChildRuntimeRetirementAt,
   retirableChildRuntimes,
 } from './childRuntimeRetirement.js';
+import { childTokenStream } from './childStreamFidelity.js';
 
 type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 type ChildSettingsCommand = Extract<ClientCommand, { type: 'child.updateSettings' }>;
@@ -54,16 +57,6 @@ const CHILD_OPEN_CANCELLED = Symbol('child-open-cancelled');
 const ignoreError = (): undefined => undefined;
 const runCleanup = (operation: () => void | Promise<void>) =>
   Promise.resolve().then(operation).catch(ignoreError);
-
-function childHistoryProviderSessionIds(
-  child: ChildSessionState | PersistedChildSession,
-): string[] {
-  const previous =
-    'identity' in child
-      ? [...child.retiredProviderSessionIds]
-      : (child.previousProviderSessionIds ?? []);
-  return [...previous, ...(child.providerSessionId ? [child.providerSessionId] : [])];
-}
 
 export class ChildSessions {
   private readonly parents = new Map<string, ParentChildSessions>();
@@ -846,9 +839,11 @@ export class ChildSessions {
     child.status = 'running';
     try {
       this.d.eventFlow.beginTurn(parent.parentAppSessionId, runtime.session.sessionId);
+      const tokenStream = childTokenStream();
+      child.streamFidelity = tokenStream.fidelity;
       this.commit(child);
       this.d.context.startPolling(this.contextTarget(parent, child, runtime));
-      for await (const event of runtime.session.stream(text, { includePartialMessages: true })) {
+      for await (const event of runtime.session.stream(text, tokenStream.options)) {
         if (!this.isCurrentTurn(parent, child, runtime, turnGeneration)) break;
         this.d.eventFlow.applyStreamEvent(
           parent.parentAppSessionId,
@@ -1461,8 +1456,4 @@ export class ChildSessions {
       runtimeGeneration: child.runtime?.generation ?? child.runtimeGeneration,
     });
   }
-}
-
-function childDurabilityKey(identity: ChildIdentity): string {
-  return `${identity.parentAppSessionId}\u0000${identity.childSessionId}`;
 }

@@ -4,6 +4,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const mainSource = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
+const nativeBrowserSource = [
+  'nativeBrowser.cjs',
+  'nativeBrowserView.cjs',
+  'nativeBrowserUrls.cjs',
+  'nativeBrowserPage.cjs',
+  'nativeBrowserCredentials.cjs',
+  'nativeBrowserHost.cjs',
+]
+  .map((file) => fs.readFileSync(path.join(__dirname, file), 'utf8'))
+  .join('\n');
 
 test('native browser invoke handlers authorize the main renderer', () => {
   const channels = [
@@ -39,47 +49,47 @@ test('native browser invoke handlers authorize the main renderer', () => {
 });
 
 test('native browser restore does not reopen a URL that already failed this run', () => {
-  assert.match(mainSource, /targetUrl: null,\s*failedRestoreUrl: null,/);
+  assert.match(nativeBrowserSource, /targetUrl: null,\s*failedRestoreUrl: null,/);
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /function rememberFailedRestoreUrl\(entry, url\) \{\s*if \(entry\.failedRestoreUrl\) return;[\s\S]*?entry\.failedRestoreUrl = restoreUrl;/,
   );
   assert.match(
-    mainSource,
-    /if \(fallback\) \{\s*rememberFailedRestoreUrl\(entry, entry\.targetUrl \|\| failedUrl\);\s*void loadNativeBrowserUrl\(entry, fallback, \{ force: true \}\);/,
+    nativeBrowserSource,
+    /if \(fallback\) \{\s*urls\.rememberFailedRestoreUrl\(entry, entry\.targetUrl \|\| failedUrl\);\s*void loadUrl\(entry, fallback, \{ force: true \}\);/,
   );
   assert.match(
-    mainSource,
-    /}\s*rememberFailedRestoreUrl\(entry, entry\.targetUrl \|\| failedUrl\);\s*emitNativeBrowserLoadFailed/,
+    nativeBrowserSource,
+    /}\s*urls\.rememberFailedRestoreUrl\(entry, entry\.targetUrl \|\| failedUrl\);\s*emitLoadFailed/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /contents\.on\('did-navigate', \(_event, loadedUrl\) => \{[\s\S]*?entry\.failedRestoreUrl = null;[\s\S]*?entry\.targetUrl = loadedUrl;/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /contents\.on\('will-navigate', \(_event, requestedUrl\) => \{[\s\S]*?entry\.failedRestoreUrl = null;[\s\S]*?entry\.targetUrl = requestedUrl;/,
   );
-  const nativeDidNavigateStart = mainSource.indexOf("contents.on('did-navigate'");
-  const didFinishStart = mainSource.indexOf(
+  const nativeDidNavigateStart = nativeBrowserSource.indexOf("contents.on('did-navigate'");
+  const didFinishStart = nativeBrowserSource.indexOf(
     "contents.on('did-finish-load'",
     nativeDidNavigateStart,
   );
-  const didFailStart = mainSource.indexOf("contents.on('did-fail-load'", didFinishStart);
+  const didFailStart = nativeBrowserSource.indexOf("contents.on('did-fail-load'", didFinishStart);
   assert.doesNotMatch(
-    mainSource.slice(didFinishStart, didFailStart),
+    nativeBrowserSource.slice(didFinishStart, didFailStart),
     /entry\.failedRestoreUrl = null/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /function nativeBrowserUrlsMatch\(left, right\) \{[\s\S]*?new URL\(left\)\.href === new URL\(right\)\.href/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /function restorableUrlForEntry\(entry, url\) \{[\s\S]*?nativeBrowserUrlsMatch\(entry\.failedRestoreUrl, value\)[\s\S]*?\? undefined/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /if \(entry\.failedRestoreUrl\) \{\s*const retryUrl = entry\.failedRestoreUrl;\s*entry\.failedRestoreUrl = null;\s*return loadNativeBrowserUrl\(entry, retryUrl, \{ force: true \}\);/,
   );
 });
@@ -92,7 +102,7 @@ test('main renderer reload closes renderer-owned terminals before navigation', (
   const didStartNavigationCleanup =
     /contents\.on\('did-start-navigation', \(_event, _url, isInPlace, isMainFrame\) => \{\s*if \(isMainFrame && !isInPlace\) \{\s*rendererOomRecovery\.cancel\(\);\s*cleanupForRendererReplacement\(\);\s*\}\s*\}\);/;
   const explicitReloadCleanup =
-    /function reloadShell\(ignoreCache\) \{\s*detachNativeBrowser\(\);\s*if \(!isWindowUsable\(mainWindow\)\) return;\s*closeRendererOwnedTerminals\(\);/;
+    /function reloadShell\(ignoreCache\) \{\s*nativeBrowserManager\.detach\(\);\s*if \(!isWindowUsable\(mainWindow\)\) return;\s*closeRendererOwnedTerminals\(\);/;
 
   assert.match(mainSource, /installMainRendererLifecycle\(mainWindow\.webContents\)/);
   assert.match(mainSource, closeRendererOwnedTerminals);
@@ -275,10 +285,10 @@ test('diagnostics initialize before app readiness and preferences require the tr
 });
 
 test('embedded websites cannot request unused system permissions', () => {
-  assert.match(mainSource, /ses\.setDevicePermissionHandler\(\(\) => false\)/);
-  assert.match(mainSource, /ses\.setPermissionCheckHandler\(\(\) => false\)/);
+  assert.match(nativeBrowserSource, /ses\.setDevicePermissionHandler\(\(\) => false\)/);
+  assert.match(nativeBrowserSource, /ses\.setPermissionCheckHandler\(\(\) => false\)/);
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /ses\.setPermissionRequestHandler\(\(_webContents, _permission, callback\) => callback\(false\)\)/,
   );
 });
@@ -333,35 +343,35 @@ test('power-tier IPC is trusted-renderer only and browser eviction is not crash 
   const handler = mainSource.slice(handlerStart, handlerEnd);
   assert.notEqual(handlerStart, -1);
   assert.match(handler, /assertMainRenderer\(event\)/);
-  assert.match(mainSource, /nativeBrowserBudget\.isEvictionClose\(entry\.viewCloseReason\)/);
-  assert.match(mainSource, /partition: BROWSER_PARTITION/);
-  assert.match(mainSource, /const BROWSER_PARTITION = 'persist:droidex-browser'/);
+  assert.match(nativeBrowserSource, /budget\.isEvictionClose\(entry\.viewCloseReason\)/);
+  assert.match(nativeBrowserSource, /partition: BROWSER_PARTITION/);
+  assert.match(nativeBrowserSource, /const BROWSER_PARTITION = 'persist:droidex-browser'/);
 });
 
 test('serialized browser restore only drops the snapshot after a successful load', () => {
-  assert.match(mainSource, /restoreSerialized\(entry,/);
+  assert.match(nativeBrowserSource, /restoreSerialized\(entry,/);
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /loadUrl: \(target, url\) => loadNativeBrowserUrl\(target, url, \{ force: true \}\)/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /reportFailure: \(target, url, error\) => \{[\s\S]*?console\.error\(`failed to restore native browser URL: \$\{message\}`\);[\s\S]*?emitNativeBrowserLoadFailed\(target, url, message\);/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /releaseFailedView: \(target\) => \{[\s\S]*?target\.viewCloseReason = 'restore-failed';[\s\S]*?closeNativeBrowserEntry\(target, false\);/,
   );
   assert.match(
-    mainSource,
+    nativeBrowserSource,
     /if \(entry\.targetUrl && !entry\.serialized\) await loadNativeBrowserUrl\(entry, entry\.targetUrl\);/,
   );
   assert.match(
-    mainSource,
-    /\.then\(\(\) => \{[\s\S]*?if \(!current \|\| isChromeErrorUrl\(current\.getURL\(\)\)\) return \{ ok: false \};[\s\S]*?return \{ ok: true \};/,
+    nativeBrowserSource,
+    /\.then\(\(\) => \{[\s\S]*?if \(!current \|\| urls\.isChromeErrorUrl\(current\.getURL\(\)\)\) return \{ ok: false \};[\s\S]*?return \{ ok: true \};/,
   );
   assert.doesNotMatch(
-    mainSource,
+    nativeBrowserSource,
     /await loadNativeBrowserUrl\(entry, url, \{ force: true \}\);\s*const contents = safeWebContents\(entry\.view\);[\s\S]*?entry\.serialized = null;/,
   );
 });

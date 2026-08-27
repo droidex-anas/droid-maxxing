@@ -65,6 +65,7 @@ export interface ProgressEntry {
 
 export type ChildRole = 'worker' | 'validator';
 export type ChildStatus = 'pending' | 'running' | 'paused' | 'completed';
+export type StreamFidelity = 'token' | 'tool' | 'state';
 
 export interface ChildSpawnLink {
   kind: 'tool-use' | 'spawn';
@@ -95,6 +96,8 @@ export interface ChildSessionSummary {
   spawnLink?: ChildSpawnLink;
   transcriptAvailable: boolean;
   startedAt?: number;
+  // Provider-declared: how live output actually arrives. Orthogonal to phase.
+  streamFidelity: StreamFidelity;
   // Live-only (never persisted) and absent unless the parent actually polled the
   // child; autonomous children stream nothing to the parent themselves.
   activity?: ChildActivity;

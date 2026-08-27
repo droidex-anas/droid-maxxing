@@ -1,7 +1,14 @@
 import type { McpServerConfig } from '@factory/droid-sdk';
 import type { FactorySession } from './DroidRuntime.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
-import type { Autonomy, ChildActivity, ReasoningEffort, SessionSummary } from './protocol.js';
+import { publishedStreamFidelity } from './childStreamFidelity.js';
+import type {
+  Autonomy,
+  ChildActivity,
+  ReasoningEffort,
+  SessionSummary,
+  StreamFidelity,
+} from './protocol.js';
 import { normalizeAutonomy, reasoningValue, type SessionInitResult } from './sessionHelpers.js';
 /* eslint-disable @typescript-eslint/no-unused-vars -- persisted-only fields are intentionally omitted. */
 export interface ChildIdentity {
@@ -70,6 +77,8 @@ export interface ChildSessionState {
   // See ChildSpawnObservation.activity: live-only, so it is absent after a
   // restart even though the child itself is restored from history.
   activity?: ChildActivity;
+  // Live-only. Absent until a token/tool stream is opened; summaries publish `state`.
+  streamFidelity?: StreamFidelity;
   runtimeGeneration: number;
   configurationGeneration: number;
   retiredProviderSessionIds: Set<string>;
@@ -221,7 +230,22 @@ export function childSummary(child: ChildSessionState | PersistedChildSession) {
     ...(live?.runtime && live.autonomy ? { autonomy: live.autonomy } : {}),
     ...(live?.activity ? { activity: live.activity } : {}),
     ...(live?.queued ? { queued: true } : {}),
+    streamFidelity: publishedStreamFidelity(live?.streamFidelity),
   };
+}
+
+export function childHistoryProviderSessionIds(
+  child: ChildSessionState | PersistedChildSession,
+): string[] {
+  const previous =
+    'identity' in child
+      ? [...child.retiredProviderSessionIds]
+      : (child.previousProviderSessionIds ?? []);
+  return [...previous, ...(child.providerSessionId ? [child.providerSessionId] : [])];
+}
+
+export function childDurabilityKey(identity: ChildIdentity): string {
+  return `${identity.parentAppSessionId}\u0000${identity.childSessionId}`;
 }
 
 export function findChildByProvider(

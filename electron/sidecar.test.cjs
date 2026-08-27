@@ -350,3 +350,90 @@ test('intentional shutdown never restarts', async () => {
   assert.equal(scheduled.filter((item) => !item.cancelled).length, 0);
   assert.equal(calls.length, 1);
 });
+
+test('spawn error without exit leaves starting and schedules a bounded restart', async () => {
+  const kids = [fakeChild(), fakeChild()];
+  const { supervisor, calls, flushScheduled } = harness([...kids]);
+  const started = supervisor.start();
+  const waiting = supervisor.getBridgeInfo();
+  kids[0].emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+
+  await assert.rejects(started, /failed to start/);
+  await assert.rejects(waiting, /failed to start/);
+  const failed = supervisor.snapshot();
+  assert.equal(failed.lifecycle, 'restarting');
+  assert.equal(failed.processAlive, false);
+  assert.match(String(failed.reason), /failed to start \(spawn ENOENT\)/);
+  assert.equal(calls.length, 1);
+
+  const restarted = supervisor.getBridgeInfo();
+  flushScheduled();
+  kids[1].stdout.write('SIDECAR_READY 43002\n');
+  assert.equal((await restarted).port, 43002);
+  assert.equal(calls.length, 2);
+  assert.equal(supervisor.snapshot().lifecycle, 'healthy');
+});
+
+test('spawn error then a late exit restarts exactly once', async () => {
+  const kids = [fakeChild(), fakeChild()];
+  const crashes = [];
+  const { supervisor, calls, flushScheduled } = harness([...kids], {
+    onUnexpectedExit: (error) => crashes.push(error.message),
+  });
+  const started = supervisor.start();
+  kids[0].emit('error', Object.assign(new Error('spawn EACCES'), { code: 'EACCES' }));
+  await assert.rejects(started, /failed to start/);
+
+  const waiting = supervisor.getBridgeInfo();
+  kids[0].emit('exit', 1, null);
+  assert.equal(calls.length, 1);
+  assert.equal(crashes.length, 1);
+  assert.match(crashes[0], /failed to start \(spawn EACCES\)/);
+
+  flushScheduled();
+  kids[1].stdout.write('SIDECAR_READY 43002\n');
+  assert.equal((await waiting).port, 43002);
+  assert.equal(calls.length, 2);
+  assert.equal(crashes.length, 1);
+  assert.equal(supervisor.snapshot().lifecycle, 'healthy');
+});
+
+test('repeated spawn failures exhaust the rolling window without looping', async () => {
+  const kids = Array.from({ length: 8 }, () => fakeChild());
+  const { supervisor, calls, flushScheduled, scheduled } = harness([...kids], { maxRestarts: 5 });
+  const started = supervisor.start();
+  kids[0].emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+  await assert.rejects(started, /failed to start/);
+
+  for (let index = 0; index < 5; index += 1) {
+    flushScheduled();
+    const pending = supervisor.start();
+    kids[index + 1].emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+    await assert.rejects(pending, /failed to start/);
+  }
+
+  const failed = supervisor.snapshot();
+  assert.equal(failed.lifecycle, 'recovery-required');
+  assert.equal(failed.processAlive, false);
+  assert.match(String(failed.reason), /failed to start \(spawn ENOENT\)/);
+  assert.equal(calls.length, 6);
+  await assert.rejects(supervisor.getBridgeInfo(), /recovery is required/);
+  await assert.rejects(supervisor.start(), /recovery is required/);
+  const spawned = calls.length;
+  flushScheduled();
+  assert.equal(calls.length, spawned);
+  assert.equal(scheduled.filter((item) => !item.cancelled).length, 0);
+});
+
+test('an error during an intentional stop does not restart', async () => {
+  const child = fakeChild();
+  const { supervisor, calls, scheduled } = harness([child, fakeChild()]);
+  const started = supervisor.start();
+  const stopping = supervisor.stop();
+  child.emit('error', Object.assign(new Error('spawn EACCES'), { code: 'EACCES' }));
+  await stopping;
+  await assert.rejects(started);
+  assert.equal(supervisor.snapshot().lifecycle, 'stopped');
+  assert.equal(scheduled.filter((item) => !item.cancelled).length, 0);
+  assert.equal(calls.length, 1);
+});

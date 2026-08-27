@@ -160,6 +160,15 @@ socket buffers cross the hard ceiling.
 - The snapshot is available in the console via
   `window.__droidexPerf.getSnapshot()`.
 
+### Conversation find and range copy
+
+Virtualized conversation rows are not a searchable or selectable document.
+In-conversation find (Cmd/Ctrl+F) and range copy read retained feed state, then
+scroll with `ConversationListHandle.scrollToRow`. Match counts say "in loaded
+history" when older pages remain on disk, and find offers to load them instead
+of reporting a silent miss. Find does not raise overscan or remount the
+transcript.
+
 ### Electron main gauges
 
 - `electron/performanceMetrics.cjs` collects live WebContents, live PTYs, and
