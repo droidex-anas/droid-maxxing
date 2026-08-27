@@ -44,7 +44,6 @@ import {
 } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
 import { serverEventForHistoryStatus } from './historyStatusEvents.js';
-import { type HistorySearchClient } from './HistoryWorkerClient.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
 import { SessionAdoption } from './sessionAdoption.js';
 import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
@@ -126,7 +125,6 @@ type SessionHistory = SessionHistoryBase & {
   setIndexingIdle(isIdle: boolean): Promise<void>;
   reconcileSessionFiles(): Promise<number>;
   reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number>;
-  warmSearchWorker?(): void;
 };
 
 export interface StartableLocalMcpResource {
@@ -161,7 +159,6 @@ export interface SessionManagerOptions {
   assetUrlFor?: (path: string) => string;
   dependencies?: SessionManagerDependencies;
   initialModels?: ModelInfo[];
-  searchClient?: HistorySearchClient;
 }
 
 export interface AgentSettingPatch {
@@ -261,7 +258,6 @@ export class SessionManager {
     } else {
       this.runtime = new DroidRuntime();
       this.history = new HistoryPersistence({
-        ...(options.searchClient ? { searchClient: options.searchClient } : {}),
         onStatusChanged: (status) => {
           this.emit(serverEventForHistoryStatus(status));
         },
@@ -543,7 +539,7 @@ export class SessionManager {
   }
 
   startSessionFileServing(): void {
-    this.history.warmSearchWorker?.();
+    this.sessionFiles.start();
   }
 
   connect(apiKey?: string): void {

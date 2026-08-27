@@ -1,8 +1,3 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-
-import { SESSION_INDEX_FILENAME } from './history.js';
-import { HistoryWorkerClient } from './HistoryWorkerClient.js';
 import { SessionManager } from './SessionManager.js';
 import { startBridgeServer } from './bridgeServer.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
@@ -11,13 +6,6 @@ const REQUESTED_PORT = bridgePort(process.env.BRIDGE_PORT ?? '0');
 const TOKEN = requiredSecret('BRIDGE_TOKEN');
 const ASSET_TOKEN = requiredSecret('BROWSER_ASSET_TOKEN');
 const EXIT_ON_STDIN_CLOSE = process.env.BRIDGE_EXIT_ON_STDIN_CLOSE !== '0';
-
-const searchClient = new HistoryWorkerClient({
-  workerData: {
-    dbPath: join(homedir(), '.factory', 'droidex', SESSION_INDEX_FILENAME),
-    lane: 'search',
-  },
-});
 
 const server = startBridgeServer({
   requestedPort: REQUESTED_PORT,
@@ -35,10 +23,10 @@ const manager = new SessionManager(
   },
   {
     assetUrlFor: (filePath) => server.browserAssetUrl(filePath),
-    searchClient,
   },
 );
-manager.startSessionFileServing();
+
+let shuttingDown = false;
 
 server.ready
   .then(() => {
@@ -46,6 +34,11 @@ server.ready
     hotPathMetrics.setGaugeProvider(() => manager.resourceCounts());
     // Stdout line consumed by the desktop supervisor to confirm readiness.
     process.stdout.write(`SIDECAR_READY ${String(server.port)}\n`);
+    // Yield so the supervisor observes ready before the search isolate starts.
+    setImmediate(() => {
+      if (shuttingDown) return;
+      manager.startSessionFileServing();
+    });
   })
   .catch((error: unknown) => {
     console.error(
@@ -53,8 +46,6 @@ server.ready
     );
     process.exit(1);
   });
-
-let shuttingDown = false;
 
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
