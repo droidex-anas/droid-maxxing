@@ -163,14 +163,14 @@ test(
     try {
       const reconciliation = database.reconcileSessionFiles();
       assert.equal(reconciliation.upserts.length, 2);
-      assert.equal(slices.nextDelay(), 250, 'recent history is paced while the user is active');
+      assert.equal(slices.nextDelay(), 2_000, 'recent history is paced while the user is active');
       assert.deepEqual(await database.search('old albatross'), []);
       assert.deepEqual(
         await database.search('recent narwhal'),
         [],
         'interactive search returns the committed index without doing file work',
       );
-      assert.equal(slices.nextDelay(), 250);
+      assert.equal(slices.nextDelay(), 2_000);
 
       await slices.runNext();
       assert.equal(await waitForSearch(database, 'recent narwhal'), 'recent-provider');
@@ -304,7 +304,7 @@ test(
       renameSync(unreadablePath, unavailablePath);
       await slices.runNext();
       await waitFor(() => slices.nextDelay() !== undefined);
-      assert.equal(slices.nextDelay(), 250, 'the healthy recent provider keeps normal pacing');
+      assert.equal(slices.nextDelay(), 2_000, 'the healthy recent provider keeps normal pacing');
 
       await slices.runNext();
       assert.equal(await waitForSearch(database, 'healthy kiwi'), 'b-healthy');
@@ -354,7 +354,7 @@ test(
       database.reconcileSessionFilePaths([
         { providerSessionId: 'priority-recent', path: recentPath },
       ]);
-      assert.equal(slices.nextDelay(), 250);
+      assert.equal(slices.nextDelay(), 5_000);
     } finally {
       await database.close();
       if (previousHome === undefined) delete process.env['HOME'];
@@ -492,7 +492,7 @@ test(
       await waitFor(() => slices.nextDelay() !== undefined);
       assert.equal(
         slices.nextDelay(),
-        250,
+        2_000,
         'a real file change makes the parked tail eligible again',
       );
     } finally {
@@ -621,11 +621,11 @@ test(
     });
     try {
       database.reconcileSessionFiles();
-      assert.equal(slices.nextDelay(), 250);
+      assert.equal(slices.nextDelay(), 2_000);
       database.setIdle(true);
       assert.equal(slices.nextDelay(), 5_000);
       database.setIdle(false);
-      assert.equal(slices.nextDelay(), 250);
+      assert.equal(slices.nextDelay(), 2_000);
       await slices.runNext();
       assert.equal(await waitForSearch(database, 'idle narwhal'), 'recent-idle');
       assert.equal(slices.nextDelay(), undefined);

@@ -18,7 +18,7 @@ import type {
 import type { SessionSearchResult } from './protocol.js';
 
 const RECENT_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
-const RECENT_SLICE_DELAY_MS = 250;
+const RECENT_SLICE_DELAY_MS = 2_000;
 const IDLE_BACKFILL_SLICE_DELAY_MS = 5_000;
 const INDEX_RETRY_DELAY_MS = 1_000;
 const MAX_INDEX_RETRY_DELAY_MS = 60_000;
