@@ -1,0 +1,1869 @@
+{
+  "baselineRef": "origin/main",
+  "baselineCommit": "99f5ca882147a1641298072e5b64deeaa3d52062",
+  "candidateCommit": "cbde0a990c43b6cb1bcca3b671966658046561ab",
+  "candidateTree": "/home/ubuntu/wt/perf-gates",
+  "baselineStale": false,
+  "measuredAt": "2026-08-27T13:17:54.604Z",
+  "environment": {
+    "node": "v22.14.0",
+    "platform": "linux/x64"
+  },
+  "probes": {
+    "baseline": {
+      "treeRoot": "origin/main@99f5ca882147a1641298072e5b64deeaa3d52062",
+      "metrics": [
+        {
+          "id": "bundle.initialJsBytes",
+          "value": 1554577,
+          "unit": "bytes",
+          "method": "dist/index.html entry script"
+        },
+        {
+          "id": "bundle.initialCssBytes",
+          "value": 91089,
+          "unit": "bytes",
+          "method": "dist/index.html entry css"
+        },
+        {
+          "id": "bundle.totalJsBytes",
+          "value": 6965105,
+          "unit": "bytes",
+          "method": "sum of dist/assets/*.js"
+        },
+        {
+          "id": "feed.mountedRowsAt10k",
+          "value": 10000,
+          "unit": "rows",
+          "method": "no virtualizer on this tree; mounted rows equal retained rows by construction"
+        },
+        {
+          "id": "feed.projectionMsPerDelta",
+          "value": 0.21370899999999438,
+          "unit": "ms",
+          "method": "buildGroupedFeed full rebuild per delta"
+        },
+        {
+          "id": "feed.eventsRebuiltPerDelta",
+          "value": 202,
+          "unit": "events",
+          "method": "full grouped-feed item count per rebuild"
+        },
+        {
+          "id": "feed.rowVisitsPerTailDeltaAt10k",
+          "value": 10000,
+          "unit": "rows",
+          "method": "rows participating in a tail update equal the mounted window on this tree"
+        },
+        {
+          "id": "markdown.perDeltaRenderMs",
+          "value": 1.000554999999963,
+          "unit": "ms",
+          "method": "renderToStaticMarkup of this tree’s Markdown on a growing stream"
+        },
+        {
+          "id": "terminal.deliveriesPerFlood",
+          "value": 1000,
+          "unit": "messages",
+          "method": "ipc sender.send data events after a 1000-chunk flood"
+        }
+      ],
+      "notes": []
+    },
+    "candidate": {
+      "treeRoot": "/home/ubuntu/wt/perf-gates",
+      "metrics": [
+        {
+          "id": "bundle.initialJsBytes",
+          "value": 1203751,
+          "unit": "bytes",
+          "method": "dist/index.html entry script"
+        },
+        {
+          "id": "bundle.initialCssBytes",
+          "value": 85745,
+          "unit": "bytes",
+          "method": "dist/index.html entry css"
+        },
+        {
+          "id": "bundle.totalJsBytes",
+          "value": 7050164,
+          "unit": "bytes",
+          "method": "sum of dist/assets/*.js"
+        },
+        {
+          "id": "feed.mountedRowsAt10k",
+          "value": 17,
+          "unit": "rows",
+          "method": "tanstack Virtualizer with this tree’s conversationListState constants"
+        },
+        {
+          "id": "feed.projectionMsPerDelta",
+          "value": 0.013962999999989734,
+          "unit": "ms",
+          "method": "createChatFeedProjector incremental tail appends"
+        },
+        {
+          "id": "feed.eventsRebuiltPerDelta",
+          "value": 2,
+          "unit": "events",
+          "method": "feed items from rebuiltFromFeedItemIndex to end after an incremental tail append"
+        },
+        {
+          "id": "feed.rowVisitsPerTailDeltaAt10k",
+          "value": 17,
+          "unit": "rows",
+          "method": "rows participating in a tail update equal the mounted window on this tree"
+        },
+        {
+          "id": "markdown.perDeltaRenderMs",
+          "value": 0.6341539999999668,
+          "unit": "ms",
+          "method": "renderToStaticMarkup of this tree’s Markdown on a growing stream"
+        },
+        {
+          "id": "terminal.deliveriesPerFlood",
+          "value": 2,
+          "unit": "messages",
+          "method": "MessagePort data posts after a 1000-chunk flood"
+        }
+      ],
+      "notes": []
+    }
+  },
+  "metrics": [
+    {
+      "id": "bundle.initialCssBytes",
+      "class": "ab",
+      "unit": "bytes",
+      "baseline": 91089,
+      "candidate": 85745,
+      "delta": -5344,
+      "deltaPercent": -5.8667896233354195,
+      "method": "dist/index.html entry css",
+      "availability": "Both refs emit an entry CSS asset after vite build."
+    },
+    {
+      "id": "bundle.initialJsBytes",
+      "class": "ab",
+      "unit": "bytes",
+      "baseline": 1554577,
+      "candidate": 1203751,
+      "delta": -350826,
+      "deltaPercent": -22.567296441411393,
+      "method": "dist/index.html entry script",
+      "availability": "Both refs emit dist/index.html + assets after vite build."
+    },
+    {
+      "id": "bundle.totalJsBytes",
+      "class": "ab",
+      "unit": "bytes",
+      "baseline": 6965105,
+      "candidate": 7050164,
+      "delta": 85059,
+      "deltaPercent": 1.2212163348578378,
+      "method": "sum of dist/assets/*.js",
+      "availability": "Both refs emit JS chunks under dist/assets."
+    },
+    {
+      "id": "feed.eventsRebuiltPerDelta",
+      "class": "ab",
+      "unit": "events",
+      "baseline": 202,
+      "candidate": 2,
+      "delta": -200,
+      "deltaPercent": -99.00990099009901,
+      "method": "feed items from rebuiltFromFeedItemIndex to end after an incremental tail append",
+      "availability": "Incremental projector reports rebuilt visible events; full rebuilds report the whole transcript."
+    },
+    {
+      "id": "feed.mountedRowsAt10k",
+      "class": "ab",
+      "unit": "rows",
+      "baseline": 10000,
+      "candidate": 17,
+      "delta": -9983,
+      "deltaPercent": -99.83,
+      "method": "tanstack Virtualizer with this tree’s conversationListState constants",
+      "availability": "Counts the production mounted window. Trees without a virtualizer are 1:1 with retained rows."
+    },
+    {
+      "id": "feed.projectionMsPerDelta",
+      "class": "ab",
+      "unit": "ms",
+      "baseline": 0.21370899999999438,
+      "candidate": 0.013962999999989734,
+      "delta": -0.19974600000000464,
+      "deltaPercent": -93.4663491008848,
+      "method": "createChatFeedProjector incremental tail appends",
+      "availability": "Uses the tree’s production projector when present, otherwise buildGroupedFeed on both refs."
+    },
+    {
+      "id": "feed.rowVisitsPerTailDeltaAt10k",
+      "class": "ab",
+      "unit": "rows",
+      "baseline": 10000,
+      "candidate": 17,
+      "delta": -9983,
+      "deltaPercent": -99.83,
+      "method": "rows participating in a tail update equal the mounted window on this tree",
+      "availability": "Same mounted-window rule: visits equal mounted rows on each tree."
+    },
+    {
+      "id": "markdown.perDeltaRenderMs",
+      "class": "ab",
+      "unit": "ms",
+      "baseline": 1.000554999999963,
+      "candidate": 0.6341539999999668,
+      "delta": -0.3664009999999962,
+      "deltaPercent": -36.619776024307484,
+      "method": "renderToStaticMarkup of this tree’s Markdown on a growing stream",
+      "availability": "Both refs export src/components/Markdown.tsx and render with react-markdown."
+    },
+    {
+      "id": "terminal.deliveriesPerFlood",
+      "class": "ab",
+      "unit": "messages",
+      "baseline": 1000,
+      "candidate": 2,
+      "delta": -998,
+      "deltaPercent": -99.8,
+      "method": "MessagePort data posts after a 1000-chunk flood",
+      "availability": "Uses each tree’s own output path: sender.send on main, MessagePort batches when terminalPort exists."
+    },
+    {
+      "id": "replay.smoke.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.026,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.smoke.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 4,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.smoke.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 1747,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.smoke.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 15.864,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.smoke.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 223813632,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.idle.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.087,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.idle.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 5,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.idle.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 2071,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.idle.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 10.588,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.idle.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 219148288,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.streaming.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.006,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.streaming.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 5,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.streaming.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 2282,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.streaming.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 15.6,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.streaming.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 200024064,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.agents-4.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.005,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.agents-4.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 9,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.agents-4.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 4557,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.agents-4.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 19.377,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.agents-4.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 226521088,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.agents-16.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.013,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.agents-16.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 36,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.agents-16.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 17622,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.agents-16.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 14.139,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.agents-16.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 226770944,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.agents-27.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.019,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.agents-27.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 57,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.agents-27.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 28646,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.agents-27.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 10.542,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.agents-27.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 242368512,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.multi-agent.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.002,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.multi-agent.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 17,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.multi-agent.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 8579,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.multi-agent.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 14.339,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.multi-agent.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 217604096,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.long-tail.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.002,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.long-tail.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 7,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.long-tail.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 3658,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.long-tail.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 25.747,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.long-tail.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 257851392,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.session-switch.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0.009,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.session-switch.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 9,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.session-switch.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 4332,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.session-switch.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 16.083,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.session-switch.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 255229952,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    },
+    {
+      "id": "replay.soak.eventReductionRatio",
+      "class": "candidate",
+      "unit": "ratio",
+      "baseline": null,
+      "candidate": 0,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "sidecar transport logical→delivered reduction",
+      "availability": "Requires the phase-1 ordered batcher; origin/main has no batch coalescing pipeline."
+    },
+    {
+      "id": "replay.soak.pendingEventsMax",
+      "class": "candidate",
+      "unit": "events",
+      "baseline": null,
+      "candidate": 0,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queue high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.soak.pendingEstimatedBytesMax",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 0,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "transport queued bytes high-water during this replay",
+      "availability": "Transport queue accounting exists only on the ordered pipeline."
+    },
+    {
+      "id": "replay.soak.persistenceBoundaryP95Ms",
+      "class": "candidate",
+      "unit": "ms",
+      "baseline": null,
+      "candidate": 15.648,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "write-behind durability boundary p95",
+      "availability": "Write-behind durability histograms exist only on this branch."
+    },
+    {
+      "id": "replay.soak.rssBytes",
+      "class": "candidate",
+      "unit": "bytes",
+      "baseline": null,
+      "candidate": 331530240,
+      "delta": null,
+      "deltaPercent": null,
+      "method": "process RSS after this replay; warn-only",
+      "availability": "Recorded on this branch only; noisy on shared runners so it is never a hard gate."
+    }
+  ],
+  "candidateReplays": [
+    {
+      "scenario": "smoke",
+      "kind": "replay",
+      "durationMs": 3419,
+      "providerEvents": 67,
+      "appendedReceived": 65,
+      "eventReductionRatio": 0.026,
+      "pendingEventsMax": 4,
+      "persistenceBoundaryP95Ms": 15.864,
+      "livePrimarySessions": 1,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "idle",
+      "kind": "replay",
+      "durationMs": 809,
+      "providerEvents": 11,
+      "appendedReceived": 10,
+      "eventReductionRatio": 0.087,
+      "pendingEventsMax": 5,
+      "persistenceBoundaryP95Ms": 10.588,
+      "livePrimarySessions": 1,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "streaming",
+      "kind": "replay",
+      "durationMs": 12440,
+      "providerEvents": 1323,
+      "appendedReceived": 622,
+      "eventReductionRatio": 0.006,
+      "pendingEventsMax": 5,
+      "persistenceBoundaryP95Ms": 15.6,
+      "livePrimarySessions": 1,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "agents-4",
+      "kind": "replay",
+      "durationMs": 4495,
+      "providerEvents": 712,
+      "appendedReceived": 703,
+      "eventReductionRatio": 0.005,
+      "pendingEventsMax": 9,
+      "persistenceBoundaryP95Ms": 19.377,
+      "livePrimarySessions": 4,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "agents-16",
+      "kind": "replay",
+      "durationMs": 2243,
+      "providerEvents": 1072,
+      "appendedReceived": 1030,
+      "eventReductionRatio": 0.013,
+      "pendingEventsMax": 36,
+      "persistenceBoundaryP95Ms": 14.139,
+      "livePrimarySessions": 16,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "agents-27",
+      "kind": "replay",
+      "durationMs": 1969,
+      "providerEvents": 1215,
+      "appendedReceived": 1105,
+      "eventReductionRatio": 0.019,
+      "pendingEventsMax": 57,
+      "persistenceBoundaryP95Ms": 10.542,
+      "livePrimarySessions": 27,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "multi-agent",
+      "kind": "replay",
+      "durationMs": 16571,
+      "providerEvents": 3536,
+      "appendedReceived": 3518,
+      "eventReductionRatio": 0.002,
+      "pendingEventsMax": 17,
+      "persistenceBoundaryP95Ms": 14.339,
+      "livePrimarySessions": 8,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "long-tail",
+      "kind": "replay",
+      "durationMs": 7435,
+      "providerEvents": 2913,
+      "appendedReceived": 932,
+      "eventReductionRatio": 0.002,
+      "pendingEventsMax": 7,
+      "persistenceBoundaryP95Ms": 25.747,
+      "livePrimarySessions": 1,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "session-switch",
+      "kind": "session-switch",
+      "durationMs": 2494,
+      "providerEvents": 356,
+      "appendedReceived": 352,
+      "eventReductionRatio": 0.009,
+      "pendingEventsMax": 9,
+      "persistenceBoundaryP95Ms": 16.083,
+      "livePrimarySessions": 4,
+      "gatesHardPassed": true
+    },
+    {
+      "scenario": "soak",
+      "kind": "soak",
+      "durationMs": 1390,
+      "providerEvents": 0,
+      "appendedReceived": 0,
+      "eventReductionRatio": 0,
+      "pendingEventsMax": 0,
+      "persistenceBoundaryP95Ms": 15.648,
+      "livePrimarySessions": 0,
+      "gatesHardPassed": true
+    }
+  ],
+  "gates": {
+    "results": [
+      {
+        "id": "feed.mountedRowsAt10k",
+        "name": "mounted conversation rows for 10k history",
+        "mode": "hard",
+        "unit": "rows",
+        "actual": 17,
+        "budget": 80,
+        "status": "pass",
+        "justification": "conversationList.test.ts keeps 3k and 10k histories under 80 mounted rows (viewport 900px, overscan 8)."
+      },
+      {
+        "id": "feed.rowVisitsPerTailDeltaAt10k",
+        "name": "row visits per streamed tail token at 10k",
+        "mode": "hard",
+        "unit": "rows",
+        "actual": 17,
+        "budget": 80,
+        "status": "pass",
+        "justification": "A tail delta may only visit the mounted window, not retained history. Same 80-row bound as mounted rows."
+      },
+      {
+        "id": "feed.eventsRebuiltPerDelta",
+        "name": "visible events rebuilt per tail delta",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 2,
+        "budget": 8,
+        "status": "pass",
+        "justification": "Incremental projection should rebuild the live tail. 8 is 4× a two-event append after a measured O(1) rebuild."
+      },
+      {
+        "id": "terminal.deliveriesPerFlood",
+        "name": "renderer deliveries for 1000 PTY chunks",
+        "mode": "hard",
+        "unit": "messages",
+        "actual": 2,
+        "budget": 16,
+        "status": "pass",
+        "justification": "1000×64-byte chunks are 64 KiB. 32 KiB MessagePort flushes imply a handful of posts; 16 is ~4× that plus replay."
+      },
+      {
+        "id": "sidecar.livePrimarySessionsAfterSoak",
+        "name": "live primary sessions after soak cleanup",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Soak create/close must release every session. 0 live primaries is the leak invariant."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 6 samples, got 6."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 4,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 1747,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 1,
+        "budget": 1,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 1 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 223813632,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 203.468,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 2 samples, got 2."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 5,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 2071,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 1,
+        "budget": 1,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 1 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 219148288,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 24.633,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 120 samples, got 120."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 5,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 2282,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 1,
+        "budget": 1,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 1 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 200024064,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 546.425,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 64 samples, got 64."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 9,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 4557,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 4,
+        "budget": 4,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 4 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 226521088,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 198.624,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 96 samples, got 96."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 36,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 17622,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 16,
+        "budget": 16,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 16 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 226770944,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 226.353,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 108 samples, got 108."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 57,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 28646,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 27,
+        "budget": 27,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 27 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 242368512,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 206.787,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 320 samples, got 320."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 17,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 8579,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 8,
+        "budget": 8,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 8 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 217604096,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 917.316,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 112 samples, got 112."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 7,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 3658,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 1,
+        "budget": 1,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 1 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 257851392,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 289.364,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 32 samples, got 32."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 9,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 4332,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 4,
+        "budget": 4,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 4 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 255229952,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 104.114,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.markerLoss",
+        "name": "tool-marker event loss",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Markers are uncoalesced. Expected 0 samples, got 0."
+      },
+      {
+        "id": "sidecar.orderErrors",
+        "name": "bridge sequence/order errors",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A completed replay already rejected generation changes and sequence gaps; a finished report is 0 errors."
+      },
+      {
+        "id": "sidecar.pendingEventsMax",
+        "name": "transport pending events high-water",
+        "mode": "hard",
+        "unit": "events",
+        "actual": 0,
+        "budget": 4096,
+        "status": "pass",
+        "justification": "Replay buffer is 4096 batches. Measured high-water must stay inside that cap (headroom is the cap minus the run’s peak)."
+      },
+      {
+        "id": "sidecar.pendingEstimatedBytesMax",
+        "name": "transport pending bytes high-water",
+        "mode": "hard",
+        "unit": "bytes",
+        "actual": 0,
+        "budget": 33554432,
+        "status": "pass",
+        "justification": "Replay buffer is 32 MiB. Queue bytes are gated at that product cap."
+      },
+      {
+        "id": "sidecar.backpressureDisconnects",
+        "name": "slow-client disconnects",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "A correct client in this harness must not trip the hard slow-client ceiling."
+      },
+      {
+        "id": "sidecar.livePrimarySessions",
+        "name": "live primary sessions after replay",
+        "mode": "hard",
+        "unit": "sessions",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Replay leaves sessions open. Count must equal the scenario’s 0 sessions, not grow past them."
+      },
+      {
+        "id": "sidecar.persistenceFailures",
+        "name": "history persistence overflow/degraded transitions",
+        "mode": "hard",
+        "unit": "count",
+        "actual": 0,
+        "budget": 0,
+        "status": "pass",
+        "justification": "Write-behind is capped at 50000 rows / 67108864 bytes. A normal replay must not overflow that bound."
+      },
+      {
+        "id": "sidecar.rssBytes",
+        "name": "process RSS",
+        "mode": "warn",
+        "unit": "bytes",
+        "actual": 331530240,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner RSS is too noisy for a hard gate."
+      },
+      {
+        "id": "sidecar.cpuUserMs",
+        "name": "process CPU user time",
+        "mode": "warn",
+        "unit": "ms",
+        "actual": 496.608,
+        "budget": null,
+        "status": "warn",
+        "justification": "Recorded for comparison. Shared-runner CPU is too noisy for a hard gate."
+      }
+    ],
+    "hardPassed": true
+  },
+  "skippedScenarios": {
+    "history-10k": "Renderer probe, not a sidecar replay: synthetic 10k-row mounted-window measurement.",
+    "terminal-flood": "Electron probe, not a sidecar replay: PTY flood through the tree’s own output delivery.",
+    "browser-workspace": "Needs a GUI browser/design workspace; not headless-feasible.",
+    "hidden-window": "Needs a real Electron window and visibility signals; not headless-feasible.",
+    "sidecar-restart": "Owned by the concurrent supervision phase; this suite records the gap and does not build it."
+  }
+}

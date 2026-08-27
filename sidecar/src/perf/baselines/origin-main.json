@@ -1,0 +1,65 @@
+{
+  "baselineRef": "origin/main",
+  "baselineCommit": "99f5ca882147a1641298072e5b64deeaa3d52062",
+  "measuredAt": "2026-08-27T13:16:42.163Z",
+  "probes": {
+    "treeRoot": "origin/main@99f5ca882147a1641298072e5b64deeaa3d52062",
+    "metrics": [
+      {
+        "id": "bundle.initialJsBytes",
+        "value": 1554577,
+        "unit": "bytes",
+        "method": "dist/index.html entry script"
+      },
+      {
+        "id": "bundle.initialCssBytes",
+        "value": 91089,
+        "unit": "bytes",
+        "method": "dist/index.html entry css"
+      },
+      {
+        "id": "bundle.totalJsBytes",
+        "value": 6965105,
+        "unit": "bytes",
+        "method": "sum of dist/assets/*.js"
+      },
+      {
+        "id": "feed.mountedRowsAt10k",
+        "value": 10000,
+        "unit": "rows",
+        "method": "no virtualizer on this tree; mounted rows equal retained rows by construction"
+      },
+      {
+        "id": "feed.projectionMsPerDelta",
+        "value": 0.21370899999999438,
+        "unit": "ms",
+        "method": "buildGroupedFeed full rebuild per delta"
+      },
+      {
+        "id": "feed.eventsRebuiltPerDelta",
+        "value": 202,
+        "unit": "events",
+        "method": "full grouped-feed item count per rebuild"
+      },
+      {
+        "id": "feed.rowVisitsPerTailDeltaAt10k",
+        "value": 10000,
+        "unit": "rows",
+        "method": "rows participating in a tail update equal the mounted window on this tree"
+      },
+      {
+        "id": "markdown.perDeltaRenderMs",
+        "value": 1.000554999999963,
+        "unit": "ms",
+        "method": "renderToStaticMarkup of this tree’s Markdown on a growing stream"
+      },
+      {
+        "id": "terminal.deliveriesPerFlood",
+        "value": 1000,
+        "unit": "messages",
+        "method": "ipc sender.send data events after a 1000-chunk flood"
+      }
+    ],
+    "notes": []
+  }
+}
