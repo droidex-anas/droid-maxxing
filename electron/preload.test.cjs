@@ -4,10 +4,36 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+function createDomPort() {
+  const messageListeners = [];
+  return {
+    started: false,
+    closed: false,
+    posted: [],
+    start() {
+      this.started = true;
+    },
+    addEventListener(type, listener) {
+      if (type === 'message') messageListeners.push(listener);
+    },
+    postMessage(data) {
+      this.posted.push(data);
+    },
+    close() {
+      this.closed = true;
+    },
+    deliver(data) {
+      for (const listener of messageListeners) listener({ data });
+    },
+  };
+}
+
 function loadApi(invokeResult) {
   const calls = [];
   const listeners = [];
   const removedListeners = [];
+  const posts = [];
+  const channels = [];
   let api;
   const ipcRenderer = {
     invoke(channel, payload) {
@@ -20,9 +46,20 @@ function loadApi(invokeResult) {
     removeListener(channel, listener) {
       removedListeners.push({ channel, listener });
     },
+    postMessage(channel, payload, ports) {
+      posts.push({ channel, payload, ports });
+    },
   };
   const source = readFileSync(path.join(__dirname, 'preload.cjs'), 'utf8');
   vm.runInNewContext(source, {
+    Buffer,
+    MessageChannel: class MessageChannel {
+      constructor() {
+        this.port1 = createDomPort();
+        this.port2 = createDomPort();
+        channels.push(this);
+      }
+    },
     require(name) {
       if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
       return {
@@ -35,7 +72,7 @@ function loadApi(invokeResult) {
       };
     },
   });
-  return { api, calls, listeners, removedListeners };
+  return { api, calls, listeners, removedListeners, posts, channels };
 }
 
 test('notification IPC returns the main-process delivery result unchanged', async () => {
@@ -160,4 +197,41 @@ test('system idle time IPC carries no renderer-controlled payload', async () => 
 
   assert.equal(await api.systemIdleTime(), 75);
   assert.deepEqual(calls[0], { channel: 'system-idle-time', payload: undefined });
+});
+
+test('terminal subscribe transfers one MessagePort and posts input without invoke', () => {
+  const { api, calls, posts, channels } = loadApi();
+  const channel = api.terminalSubscribe('pty-1');
+  const rendererPort = channels[0].port2;
+
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].channel, 'terminal-subscribe');
+  assert.equal(posts[0].payload.id, 'pty-1');
+  assert.equal(posts[0].ports[0], channels[0].port1);
+  assert.equal(
+    calls.some(
+      (call) => call.channel === 'terminal-write' || call.channel === 'terminal-subscribe',
+    ),
+    false,
+  );
+
+  const received = [];
+  channel.onEvent((event) => received.push(event));
+  rendererPort.deliver({
+    kind: 'data',
+    data: 'hi',
+    sequence: 1,
+    byteOffset: 2,
+  });
+  assert.equal(received.length, 1);
+  assert.equal(received[0].kind, 'data');
+  assert.equal(received[0].data, 'hi');
+  assert.equal(received[0].sequence, 1);
+  assert.equal(received[0].byteOffset, 2);
+  assert.equal(rendererPort.posted[0].type, 'ack');
+  assert.equal(rendererPort.posted[0].bytes, 2);
+
+  channel.postInput('x');
+  assert.equal(rendererPort.posted[1].type, 'input');
+  assert.equal(rendererPort.posted[1].data, 'x');
 });

@@ -6,6 +6,65 @@ function on(channel, handler) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+function payloadBytes(payload) {
+  if (!payload || typeof payload.data !== 'string') return 0;
+  return Buffer.byteLength(payload.data, 'utf8');
+}
+
+function wrapTerminalPort(port) {
+  const queued = [];
+  let handler = null;
+  port.addEventListener('message', (event) => {
+    const payload = event.data;
+    if (payload && (payload.kind === 'data' || payload.kind === 'replay')) {
+      port.postMessage({
+        type: 'ack',
+        bytes: payloadBytes(payload),
+        byteOffset: payload.byteOffset ?? payload.totalEmittedBytes ?? 0,
+      });
+    }
+    if (handler) handler(payload);
+    else queued.push(payload);
+  });
+  port.start();
+  return {
+    postInput(data) {
+      if (typeof data !== 'string' || data.length === 0) return;
+      try {
+        port.postMessage({ type: 'input', data });
+      } catch {
+        // port already closed
+      }
+    },
+    onEvent(next) {
+      handler = next;
+      if (queued.length > 0) {
+        const pending = queued.splice(0);
+        for (const payload of pending) next(payload);
+      }
+      return () => {
+        if (handler === next) handler = null;
+      };
+    },
+    close() {
+      handler = null;
+      queued.length = 0;
+      try {
+        port.close();
+      } catch {
+        // already closed
+      }
+    },
+  };
+}
+
+function subscribeTerminalPort(id) {
+  const { port1, port2 } = new MessageChannel();
+  const channel = wrapTerminalPort(port2);
+  ipcRenderer.postMessage('terminal-subscribe', { id }, [port1]);
+  return channel;
+}
+
 contextBridge.exposeInMainWorld('droidControl', {
   bridgeInfo: () => ipcRenderer.invoke('bridge-info'),
   pickDirectory: () => ipcRenderer.invoke('pick-directory'),
@@ -80,13 +139,11 @@ contextBridge.exposeInMainWorld('droidControl', {
   openExternal: (url) => ipcRenderer.invoke('open-external', { url }),
 
   terminalCreate: (options) => ipcRenderer.invoke('terminal-create', options),
-  terminalWrite: (id, data) => ipcRenderer.invoke('terminal-write', { id, data }),
   terminalResize: (id, cols, rows) => ipcRenderer.invoke('terminal-resize', { id, cols, rows }),
   terminalKill: (id) => ipcRenderer.invoke('terminal-kill', { id }),
   terminalList: (appSessionId) => ipcRenderer.invoke('terminal-list', { appSessionId }),
-  terminalSubscribe: (id) => ipcRenderer.invoke('terminal-subscribe', { id }),
+  terminalSubscribe: (id) => subscribeTerminalPort(id),
   terminalUnsubscribe: (id) => ipcRenderer.invoke('terminal-unsubscribe', { id }),
-  onTerminalEvent: (handler) => on('terminal-event', handler),
   filesAuthorizeRoot: (root) => ipcRenderer.invoke('files-authorize-root', { root }),
   filesList: (accessToken, relative) => ipcRenderer.invoke('files-list', { accessToken, relative }),
   filesPreview: (accessToken, relative) =>

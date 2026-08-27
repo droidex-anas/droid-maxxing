@@ -4,12 +4,12 @@ import type { FitAddon } from '@xterm/addon-fit';
 import { Copy, RotateCcw, Trash2 } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import {
-  onTerminalEvent,
   resizeTerminal,
   subscribeTerminal,
   unsubscribeTerminal,
-  writeTerminal,
+  type TerminalDataChannel,
 } from '../../lib/desktop';
+import { createTerminalOutputPump } from '../../lib/terminalOutputPump';
 import { closeTerminalForTab, ensureTerminalForTab } from '../../lib/terminal';
 import { useStoreSelector, type ThemeConfig } from '../../hooks/useStore';
 import { isTerminalTabShortcut } from '../../lib/keyboardShortcuts';
@@ -39,6 +39,7 @@ export function TerminalWorkspace({
     terminalId ? 'running' : 'starting',
   );
   const [error, setError] = useState('');
+  const [truncated, setTruncated] = useState(false);
 
   useEffect(() => {
     terminalIdRef.current = terminalId;
@@ -56,6 +57,9 @@ export function TerminalWorkspace({
       /* no-op */
     };
     let observer: ResizeObserver | null = null;
+    let visibility: (() => void) | null = null;
+    let channel: TerminalDataChannel | null = null;
+    let pump: ReturnType<typeof createTerminalOutputPump> | null = null;
 
     void Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')])
       .then(async ([xterm, fit]) => {
@@ -84,10 +88,35 @@ export function TerminalWorkspace({
         terminalRef.current = instance;
         fitRef.current = fitAddon;
 
+        const hostIsHidden = () => {
+          if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true;
+          const host = hostRef.current;
+          if (!host) return true;
+          return host.clientWidth < 8 || host.clientHeight < 8;
+        };
+        pump = createTerminalOutputPump({
+          write: (data) => {
+            instance.write(data);
+          },
+          isHidden: hostIsHidden,
+          scheduleFrame: (callback) => requestAnimationFrame(callback),
+          cancelFrame: (id) => {
+            cancelAnimationFrame(id);
+          },
+        });
+        const onVisibility = () => {
+          pump?.reveal();
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        visibility = () => {
+          document.removeEventListener('visibilitychange', onVisibility);
+        };
+
         const applyFit = () => {
           resizeFrame = 0;
           if (isDisposed() || !hostRef.current || hostRef.current.clientWidth < 8) return;
           fitAddon.fit();
+          pump?.reveal();
           const next = { cols: instance.cols, rows: instance.rows };
           if (
             terminalIdRef.current &&
@@ -122,10 +151,21 @@ export function TerminalWorkspace({
         const shellName = info.shell.split(/[\\/]/).pop() ?? 'Terminal';
         onCreatedRef.current(info.id, shellName);
 
-        unlisten = onTerminalEvent((event) => {
-          if (event.terminalId !== info.id) return;
+        channel = subscribeTerminal(info.id);
+        if (!channel) {
+          setStatus('error');
+          setError('Terminal is only available in the desktop app.');
+          return;
+        }
+        unlisten = channel.onEvent((event) => {
           if (event.kind === 'data' || event.kind === 'replay') {
-            instance.write(event.data);
+            if (event.truncated) setTruncated(true);
+            pump?.push(event.data);
+            return;
+          }
+          if (event.kind === 'error') {
+            setStatus('error');
+            setError(event.message);
             return;
           }
           setStatus(event.exitCode === 0 ? 'exited' : 'error');
@@ -133,13 +173,13 @@ export function TerminalWorkspace({
             setError(`Shell exited with code ${String(event.exitCode ?? 'unknown')}.`);
           }
         });
-        await subscribeTerminal(info.id);
         if (isDisposed()) {
+          channel.close();
           await unsubscribeTerminal(info.id);
           return;
         }
         instance.onData((data) => {
-          void writeTerminal(info.id, data).catch(() => undefined);
+          channel?.postInput(data);
         });
         instance.focus();
       })
@@ -153,7 +193,10 @@ export function TerminalWorkspace({
       cancelled = true;
       if (resizeFrame) cancelAnimationFrame(resizeFrame);
       observer?.disconnect();
+      visibility?.();
       unlisten();
+      pump?.dispose();
+      channel?.close();
       if (terminalIdRef.current) void unsubscribeTerminal(terminalIdRef.current);
       terminalRef.current?.dispose();
       terminalRef.current = null;
@@ -188,7 +231,7 @@ export function TerminalWorkspace({
           <RotateCcw className="h-3.5 w-3.5" />
         </TerminalButton>
       </div>
-      {status !== 'running' && (
+      {(status !== 'running' || truncated) && (
         <div
           className={`shrink-0 border-b border-droid-border px-3 py-2 text-[11.5px] ${
             status === 'error'
@@ -196,14 +239,22 @@ export function TerminalWorkspace({
               : 'bg-droid-surface text-droid-text-muted'
           }`}
         >
-          {status === 'starting'
-            ? `Starting shell in ${cwd}…`
-            : error || 'Terminal process exited.'}
+          {terminalStatusCopy(status, cwd, error)}
         </div>
       )}
       <div ref={hostRef} data-terminal-input className="min-h-0 flex-1 overflow-hidden p-2" />
     </div>
   );
+}
+
+function terminalStatusCopy(
+  status: 'starting' | 'running' | 'exited' | 'error',
+  cwd: string,
+  error: string,
+): string {
+  if (status === 'starting') return `Starting shell in ${cwd}…`;
+  if (status === 'running') return 'Earlier output was truncated.';
+  return error || 'Terminal process exited.';
 }
 
 function TerminalButton({

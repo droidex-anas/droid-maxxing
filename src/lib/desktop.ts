@@ -65,27 +65,39 @@ export interface TerminalSessionInfo {
 
 export type TerminalEvent =
   | {
-      terminalId: string;
       kind: 'replay';
       data: string;
       sequence: number;
       truncated: boolean;
       droppedBytes: number;
+      byteOffset: number;
+      totalEmittedBytes: number;
     }
   | {
-      terminalId: string;
       kind: 'data';
       data: string;
       sequence: number;
       byteOffset: number;
+      truncated?: boolean;
+      droppedBytes?: number;
+      totalEmittedBytes?: number;
     }
   | {
-      terminalId: string;
       kind: 'exit';
       sequence: number;
       exitCode: number | null;
       signal: number | null;
+    }
+  | {
+      kind: 'error';
+      message: string;
     };
+
+export interface TerminalDataChannel {
+  postInput: (data: string) => void;
+  onEvent: (handler: (event: TerminalEvent) => void) => () => void;
+  close: () => void;
+}
 
 export interface FilesEntry {
   name: string;
@@ -242,13 +254,11 @@ interface DroidControlApi {
     cols: number;
     rows: number;
   }) => Promise<TerminalSessionInfo>;
-  terminalWrite: (id: string, data: string) => Promise<void>;
   terminalResize: (id: string, cols: number, rows: number) => Promise<void>;
   terminalKill: (id: string) => Promise<void>;
   terminalList: (appSessionId: string) => Promise<TerminalSessionInfo[]>;
-  terminalSubscribe: (id: string) => Promise<void>;
+  terminalSubscribe: (id: string) => TerminalDataChannel;
   terminalUnsubscribe: (id: string) => Promise<void>;
-  onTerminalEvent: (handler: (event: TerminalEvent) => void) => () => void;
   filesAuthorizeRoot: (root: string) => Promise<string>;
   filesList: (accessToken: string, relative: string) => Promise<FilesListing>;
   filesPreview: (accessToken: string, relative: string) => Promise<FilePreviewPayload>;
@@ -439,12 +449,6 @@ export async function createTerminal(options: {
   );
 }
 
-export async function writeTerminal(id: string, data: string): Promise<void> {
-  const api = desktopApi();
-  if (!api) return;
-  await api.terminalWrite(id, data);
-}
-
 export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
   const api = desktopApi();
   if (!api) return;
@@ -463,22 +467,16 @@ export async function listTerminals(appSessionId: string): Promise<TerminalSessi
   return api.terminalList(appSessionId);
 }
 
-export async function subscribeTerminal(id: string): Promise<void> {
+export function subscribeTerminal(id: string): TerminalDataChannel | null {
   const api = desktopApi();
-  if (!api) return;
-  await api.terminalSubscribe(id);
+  if (!api) return null;
+  return api.terminalSubscribe(id);
 }
 
 export async function unsubscribeTerminal(id: string): Promise<void> {
   const api = desktopApi();
   if (!api) return;
   await api.terminalUnsubscribe(id);
-}
-
-export function onTerminalEvent(handler: (event: TerminalEvent) => void): () => void {
-  const api = desktopApi();
-  if (!api) return () => undefined;
-  return api.onTerminalEvent(handler);
 }
 
 export async function authorizeFilesRoot(root: string): Promise<string> {

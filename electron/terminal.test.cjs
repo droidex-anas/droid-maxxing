@@ -1,13 +1,6 @@
 const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const {
-  createTerminalManager,
-  createTerminalSubscriptionRegistry,
-  MAX_COLS,
-  MAX_REPLAY_BYTES,
-  MAX_ROWS,
-} = require('./terminal.cjs');
+const { createTerminalManager, MAX_COLS, MAX_REPLAY_BYTES, MAX_ROWS } = require('./terminal.cjs');
 
 function fixture(options = {}) {
   const instances = [];
@@ -67,34 +60,6 @@ function fixture(options = {}) {
   });
   return { manager, instances };
 }
-
-test('terminal subscription cycles retain one sender cleanup listener', () => {
-  let unsubscribed = 0;
-  const manager = {
-    subscribe: () => () => {
-      unsubscribed += 1;
-    },
-  };
-  const registry = createTerminalSubscriptionRegistry(manager);
-  const sender = new EventEmitter();
-  sender.id = 1;
-  sender.isDestroyed = () => false;
-  sender.send = () => {};
-
-  for (let index = 0; index < 20; index += 1) {
-    registry.subscribe(sender, `terminal-${index}`);
-    registry.unsubscribe(sender, `terminal-${index}`);
-  }
-
-  assert.equal(sender.listenerCount('destroyed'), 1);
-  assert.equal(unsubscribed, 20);
-
-  registry.subscribe(sender, 'terminal-active');
-  sender.emit('destroyed');
-
-  assert.equal(sender.listenerCount('destroyed'), 0);
-  assert.equal(unsubscribed, 21);
-});
 
 test('terminal manager keeps a PTY alive until explicit kill', async () => {
   const { manager, instances } = fixture();
