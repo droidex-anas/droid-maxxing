@@ -29,6 +29,7 @@ import {
   scrollTopForPreservedAnchor,
   type ConversationViewportLayout,
 } from '../hooks/conversationViewportAnchor';
+import { applyConversationContentResize } from '../hooks/useConversationScrollWindow';
 import type { TranscriptEvent } from '../types/bridge';
 
 function messageItem(id: string, author: 'user' | 'assistant' = 'assistant'): FeedItem {
@@ -263,6 +264,105 @@ test('bottom-follow is a cheap end-threshold, not full geometry', () => {
   assert.equal(isConversationAtLatest(2_000, 1_100, 900), true);
   assert.equal(isConversationAtLatest(2_000, 1_000, 900), false);
   assert.equal(isConversationAtLatest(2_000, 1_921, 900), true);
+});
+
+test('mermaid growth above an unpinned reader is compensated by the virtual row offset', () => {
+  const items = history(60);
+  const viewportHeight = 900;
+  const scrollTop = 2_400;
+  const { virtualizer, element } = createListEngine({ items, scrollTop, viewportHeight });
+  virtualizer.getVirtualItems();
+
+  const anchorIndex = 25;
+  const mermaidIndex = 8;
+  const mermaidGrowthPx = 280;
+  const anchorItem = items[anchorIndex];
+  assert.ok(anchorItem);
+  const capturedStart = virtualizer.measurementsCache[anchorIndex]?.start;
+  const mermaidBefore = virtualizer.measurementsCache[mermaidIndex]?.size;
+  assert.ok(typeof capturedStart === 'number');
+  assert.ok(typeof mermaidBefore === 'number');
+  const capturedOffset = capturedStart - element.scrollTop;
+
+  virtualizer.resizeItem(mermaidIndex, mermaidBefore + mermaidGrowthPx);
+  virtualizer.getVirtualItems();
+
+  const layout: ConversationViewportLayout = {
+    rowContentOffset: (rowId) => {
+      const index = items.findIndex((item) => feedRowId(item) === rowId);
+      if (index < 0) return undefined;
+      return virtualizer.measurementsCache[index]?.start;
+    },
+  };
+  const restored = applyConversationContentResize(
+    element,
+    {
+      rowId: feedRowId(anchorItem),
+      rowOffsetTop: capturedOffset,
+      scrollTop,
+      scrollHeight: estimatedListSizeFor(items.length),
+    },
+    false,
+    true,
+    layout,
+  );
+
+  const nextStart = virtualizer.measurementsCache[anchorIndex]?.start;
+  assert.ok(typeof nextStart === 'number');
+  assert.equal(restored.mode, 'preserve-anchor');
+  assert.equal(restored.didFindRow, true);
+  assert.equal(nextStart, capturedStart + mermaidGrowthPx);
+  assert.equal(element.scrollTop, scrollTop + mermaidGrowthPx);
+  assert.equal(nextStart - element.scrollTop, capturedOffset);
+});
+
+test('mermaid growth below an unpinned reader does not move the reading position', () => {
+  const items = history(60);
+  const viewportHeight = 900;
+  const scrollTop = 2_400;
+  const { virtualizer, element } = createListEngine({ items, scrollTop, viewportHeight });
+  virtualizer.getVirtualItems();
+
+  const anchorIndex = 25;
+  const mermaidIndex = 40;
+  const mermaidGrowthPx = 280;
+  const anchorItem = items[anchorIndex];
+  assert.ok(anchorItem);
+  const capturedStart = virtualizer.measurementsCache[anchorIndex]?.start;
+  const mermaidBefore = virtualizer.measurementsCache[mermaidIndex]?.size;
+  assert.ok(typeof capturedStart === 'number');
+  assert.ok(typeof mermaidBefore === 'number');
+  const capturedOffset = capturedStart - element.scrollTop;
+
+  virtualizer.resizeItem(mermaidIndex, mermaidBefore + mermaidGrowthPx);
+  virtualizer.getVirtualItems();
+
+  const layout: ConversationViewportLayout = {
+    rowContentOffset: (rowId) => {
+      const index = items.findIndex((item) => feedRowId(item) === rowId);
+      if (index < 0) return undefined;
+      return virtualizer.measurementsCache[index]?.start;
+    },
+  };
+  const restored = applyConversationContentResize(
+    element,
+    {
+      rowId: feedRowId(anchorItem),
+      rowOffsetTop: capturedOffset,
+      scrollTop,
+      scrollHeight: estimatedListSizeFor(items.length),
+    },
+    false,
+    true,
+    layout,
+  );
+
+  const nextStart = virtualizer.measurementsCache[anchorIndex]?.start;
+  assert.ok(typeof nextStart === 'number');
+  assert.equal(restored.mode, 'preserve-anchor');
+  assert.equal(nextStart, capturedStart);
+  assert.equal(element.scrollTop, scrollTop);
+  assert.equal(nextStart - element.scrollTop, capturedOffset);
 });
 
 test('resize restore uses virtual content offsets without a mounted row', () => {

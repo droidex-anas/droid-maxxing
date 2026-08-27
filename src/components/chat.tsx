@@ -15,9 +15,8 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
-import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlockRuntime';
+import { hasAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
-import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
   extractFileChange,
   MAX_DIFF_CARDS_PER_COMMIT,
@@ -77,6 +76,7 @@ import {
   type ConversationVisibleRange,
 } from './ConversationList';
 import { takeFeedRowEntrance } from './conversationListState';
+import { MessageBody } from './MessageBody';
 import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import {
@@ -2031,58 +2031,6 @@ const InlineSpecCard = memo(function InlineSpecCard({
   );
 });
 
-/* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({
-  text,
-  live,
-  autoPlayAppBlocks,
-}: {
-  text: string;
-  live: boolean;
-  autoPlayAppBlocks: boolean;
-}) {
-  // Strip the history "[truncated N chars]" sentinel so the raw marker never
-  // shows; the cut itself is intentionally not surfaced.
-  const { body, truncatedChars } = parseTruncatedTail(text);
-  const hasCompleteApp = hasCompleteAppBlock(body);
-  const buildingAppBlocks = live && hasAppBlock(body);
-  // History caps message text. When that cut landed inside an App fence the
-  // source can never run, so the block says so instead of offering a Play
-  // control that would start an empty App. Only replayed text can be cut: a
-  // live answer whose tail merely looks like the sentinel is still streaming.
-  const cutOffAppBlocks = !live && truncatedChars !== null && hasIncompleteAppBlock(body);
-  const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
-  if (!hasJsonRender(body))
-    return (
-      <Markdown
-        autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-        buildingAppBlocks={buildingAppBlocks}
-        cutOffAppBlocks={cutOffAppBlocks}
-      >
-        {body}
-      </Markdown>
-    );
-  const segments = splitJsonRender(body);
-  return (
-    <>
-      {segments.map((seg, i) =>
-        seg.type === 'json-render' ? (
-          <JsonRender key={i} source={seg.value} />
-        ) : seg.value.trim() ? (
-          <Markdown
-            key={i}
-            autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-            buildingAppBlocks={buildingAppBlocks}
-            cutOffAppBlocks={cutOffAppBlocks}
-          >
-            {seg.value}
-          </Markdown>
-        ) : null,
-      )}
-    </>
-  );
-});
-
 export interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
@@ -2235,7 +2183,12 @@ const FeedItemView = memo(function FeedItemView({
       const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
-          <MessageBody text={text} live={live} autoPlayAppBlocks={autoPlayAppBlocks} />
+          <MessageBody
+            text={text}
+            live={live}
+            autoPlayAppBlocks={autoPlayAppBlocks}
+            cacheId={item.key}
+          />
           {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
