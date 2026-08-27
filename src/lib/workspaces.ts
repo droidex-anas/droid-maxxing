@@ -89,6 +89,14 @@ export function addWorkspaceCwd(existing: string[], cwd: string): string[] {
   return [next, ...existing.filter((item) => item !== next)];
 }
 
+export function removeWorkspaceCwd(existing: string[], cwd: string): string[] {
+  const root = repositoryWorkspaceCwd(cwd.trim());
+  if (!root) return existing;
+  const key = comparablePath(root);
+  const next = existing.filter((item) => comparablePath(repositoryWorkspaceCwd(item)) !== key);
+  return next.length === existing.length ? existing : next;
+}
+
 function repositoryWorkspaceCwd(cwd: string): string {
   const marker = /[\\/]\.worktrees[\\/]/.exec(cwd);
   return marker ? cwd.slice(0, marker.index) : cwd;

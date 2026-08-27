@@ -6,6 +6,7 @@ import {
   buildWorkspaceScopes,
   buildWorkspaceSections,
   discoverWorkspaceScopes,
+  removeWorkspaceCwd,
   resolveNewChatCwd,
   SIDEBAR_VISIBLE_SESSION_LIMIT,
   uniqueRepositoryWorkspaceCwds,
@@ -39,6 +40,13 @@ test('addWorkspaceCwd keeps explicit workspaces unique and ordered newest first'
     '/repo/new',
   ]);
   assert.deepEqual(addWorkspaceCwd(['/repo/old'], ''), ['/repo/old']);
+});
+
+test('removeWorkspaceCwd drops a repository and its worktrees', () => {
+  const listed = ['/repo/app', '/repo/app/.worktrees/feat', '/repo/site'];
+  assert.deepEqual(removeWorkspaceCwd(listed, '/repo/app/.worktrees/other'), ['/repo/site']);
+  assert.equal(removeWorkspaceCwd(listed, '/repo/missing'), listed);
+  assert.equal(removeWorkspaceCwd(listed, ''), listed);
 });
 
 test('uniqueRepositoryWorkspaceCwds collapses worktrees of the same repository', () => {
