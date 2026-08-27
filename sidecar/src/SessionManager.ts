@@ -4,8 +4,6 @@ import { homedir, tmpdir } from 'node:os';
 import type {
   Autonomy,
   BridgeRuntimeSnapshot,
-  BrowserNativeRequest,
-  BrowserNativeResult,
   ClientCommand,
   ConfigurableSessionRole,
   FactoryDefaultSettings,
@@ -42,20 +40,18 @@ import {
   type HistoryIndex,
   type PersistedChildSession,
   loadMissionControlSessions,
-  loadSessionTranscriptWindow,
   readFactoryDefaults,
-  resolveSessionChain,
 } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
 import { serverEventForHistoryStatus } from './historyStatusEvents.js';
 import { type HistorySearchClient } from './HistoryWorkerClient.js';
-import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
 import { SessionAdoption } from './sessionAdoption.js';
 import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
 import { droidexUserDataDir } from './droidexPaths.js';
 import type { SessionFileChange } from './sessionFileCache.js';
-import { transcriptToMarkdown } from './sessionMarkdown.js';
+import { SessionBrowser, type SessionBrowsers } from './SessionBrowser.js';
+import { SessionHistoryQueries } from './SessionHistoryQueries.js';
 import {
   startSessionFileWatcher,
   type SessionFileWatcher,
@@ -67,7 +63,6 @@ import { readDroidCliModelCatalog, readDroidCliModelCatalogCache } from './Droid
 import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
 import { createBrowserMcpServer } from './browser/browserMcpServer.js';
 import { isDesignPrompt } from './browser/designPromptPacks.js';
-import { NativeBrowserRuntime } from './browser/NativeBrowserRuntime.js';
 import { SessionRegistry } from './SessionRegistry.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
@@ -130,24 +125,6 @@ type SessionHistory = SessionHistoryBase & {
   warmSearchWorker?(): void;
 };
 
-type SessionBrowsers = Pick<
-  BrowserSessionManager,
-  | 'open'
-  | 'close'
-  | 'closeAll'
-  | 'reload'
-  | 'refresh'
-  | 'resizeViewport'
-  | 'click'
-  | 'type'
-  | 'keypress'
-  | 'scroll'
-  | 'screenshot'
-  | 'inspectPoint'
-  | 'addReference'
-  | 'designPrompt'
->;
-
 export interface StartableLocalMcpResource {
   start(): Promise<McpServerConfig>;
   close(): Promise<void>;
@@ -205,32 +182,14 @@ const MAX_QUEUED_CHILD_RUNTIMES = boundedInt(
   0,
   64,
 );
-const BROWSER_NATIVE_TIMEOUT_MS = boundedInt(
-  process.env.DROID_CONTROL_BROWSER_NATIVE_TIMEOUT_MS,
-  12_000,
-  1_000,
-  60_000,
-);
 const ignoreError = (): undefined => undefined;
 
-let nativeBrowserSeq = 0;
-const nextNativeBrowserRequestId = () =>
-  `browser-native-${Date.now().toString(36)}-${(nativeBrowserSeq++).toString(36)}`;
 const nextChildSessionId = () => `child-${randomUUID()}`;
-
-interface PendingNativeBrowserRequest {
-  resolve: (result: BrowserNativeResult) => void;
-  reject: (err: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}
 
 export class SessionManager {
   private ready = false;
   private cachedModels: ModelInfo[] | null = null;
   private modelRefresh: Promise<ModelInfo[] | null> | null = null;
-  // Newest sessions.search requestId; older in-flight scans check staleness
-  // against this and stop early instead of finishing a discarded scan.
-  private latestSearchRequestId: string | null = null;
   // Context windows observed from provider stats for catalog-missing models.
   private readonly learnedModelContextWindows = new Map<string, number>();
   private readonly runtime: FactoryRuntime;
@@ -246,6 +205,8 @@ export class SessionManager {
   private readonly lifecycle: SessionLifecycle;
   private readonly adoption: SessionAdoption;
   private readonly sessionFiles: SessionFileServing;
+  private readonly sessionBrowser: SessionBrowser;
+  private readonly historyQueries: SessionHistoryQueries;
   private readonly pendingAgentSettings = new Map<
     string,
     Partial<Record<ConfigurableSessionRole, AgentSettingPatch>>
@@ -254,7 +215,6 @@ export class SessionManager {
   // Per-session autonomy mutation queue: rapid changes settle against the
   // provider in the order they were requested.
   private readonly autonomyMutationTails = new Map<string, Promise<void>>();
-  private readonly pendingNativeBrowserRequests = new Map<string, PendingNativeBrowserRequest>();
   private readonly browsers: SessionBrowsers;
   private readonly createLocalMcpResource: SessionManagerDependencies['createLocalMcpResource'];
   private readonly mcpConfiguration: McpConfiguration;
@@ -299,13 +259,7 @@ export class SessionManager {
           this.emit(event);
         },
         runtimeFactory: (browserSessionId, viewport, appSessionId) =>
-          new NativeBrowserRuntime({
-            browserSessionId,
-            appSessionId,
-            viewport,
-            request: (request) => this.requestNativeBrowser(request),
-            nextRequestId: nextNativeBrowserRequestId,
-          }),
+          this.sessionBrowser.createRuntime(browserSessionId, viewport, appSessionId),
       });
       this.browsers = browsers;
       this.createLocalMcpResource = (appSessionId) =>
@@ -347,6 +301,13 @@ export class SessionManager {
         this.adoption.persistLiveSet();
       },
       now: Date.now,
+    });
+    this.historyQueries = new SessionHistoryQueries({
+      searchSessions: (query, isStale) => this.history.searchSessions(query, isStale),
+      resolveSummary: (id) => this.registry.resolveSummary(id),
+      emit: (event) => {
+        this.emit(event);
+      },
     });
     this.context = new SessionContext({
       registry: this.registry,
@@ -533,6 +494,13 @@ export class SessionManager {
         this.timeline.appendStatus(appSessionId, text);
       },
     });
+    this.sessionBrowser = new SessionBrowser({
+      browsers: this.browsers,
+      emit: (event) => {
+        this.emit(event);
+      },
+      sendPrompt: (appSessionId, prompt) => this.lifecycle.send(appSessionId, prompt),
+    });
   }
 
   startSessionFileServing(): void {
@@ -702,7 +670,7 @@ export class SessionManager {
         await this.renameSession(cmd.appSessionId, cmd.title);
         return;
       case 'session.exportMarkdown':
-        this.exportSessionMarkdown(cmd);
+        this.historyQueries.exportMarkdown(cmd);
         return;
       case 'sessions.reanchorCwd':
         try {
@@ -749,34 +717,9 @@ export class SessionManager {
       case 'session.loadHistory':
         this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
-      case 'sessions.search': {
-        // Track the newest query so a superseded FTS query stops before
-        // publishing results the renderer would discard by requestId anyway.
-        this.latestSearchRequestId = cmd.requestId;
-        const isStale = (): boolean => this.latestSearchRequestId !== cmd.requestId;
-        try {
-          const reply = await this.history.searchSessions(cmd.query, isStale);
-          if (!isStale()) {
-            this.emit({
-              type: 'sessions.searchResults',
-              requestId: cmd.requestId,
-              results: reply.results,
-              indexingIncomplete: reply.indexingIncomplete,
-            });
-          }
-        } catch (error) {
-          if (!isHistorySearchUnavailableError(error)) throw error;
-          if (!isStale()) {
-            this.emitError({
-              code: 'history.search_unavailable',
-              requestId: cmd.requestId,
-              message: errMsg(error),
-              recoverable: false,
-            });
-          }
-        }
+      case 'sessions.search':
+        await this.historyQueries.search(cmd);
         return;
-      }
       case 'history.indexingIdle':
         await this.history.setIndexingIdle(cmd.isIdle);
         return;
@@ -790,107 +733,46 @@ export class SessionManager {
         await this.compaction.updateLimits(cmd, this.compactionRetuneTargets());
         return;
       case 'browser.open':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.open({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
+        await this.sessionBrowser.open(cmd);
         return;
       case 'browser.close':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-          await this.browsers.close(appSessionId);
-          this.emit({ type: 'browser.closed', appSessionId });
-        });
+        await this.sessionBrowser.close(cmd);
         return;
       case 'browser.reload':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.reload(this.requireBrowserAppSessionId(cmd.appSessionId)),
-        );
+        await this.sessionBrowser.reload(cmd);
         return;
       case 'browser.refresh':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.refresh(this.requireBrowserAppSessionId(cmd.appSessionId)),
-        );
+        await this.sessionBrowser.refresh(cmd);
         return;
       case 'browser.resizeViewport':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.resizeViewport({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
+        await this.sessionBrowser.resizeViewport(cmd);
         return;
       case 'browser.click':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.click({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
+        await this.sessionBrowser.click(cmd);
         return;
       case 'browser.type':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.type(this.requireBrowserAppSessionId(cmd.appSessionId), cmd.text),
-        );
+        await this.sessionBrowser.type(cmd);
         return;
       case 'browser.keypress':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.keypress(this.requireBrowserAppSessionId(cmd.appSessionId), cmd.key),
-        );
+        await this.sessionBrowser.keypress(cmd);
         return;
       case 'browser.scroll':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.scroll(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            cmd.direction,
-            cmd.pixels,
-            cmd.source,
-            cmd.ref,
-          ),
-        );
+        await this.sessionBrowser.scroll(cmd);
         return;
       case 'browser.screenshot':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          await this.browsers.screenshot(this.requireBrowserAppSessionId(cmd.appSessionId), {
-            fullPage: cmd.fullPage,
-            deviceScaleFactor: cmd.deviceScaleFactor,
-          });
-        });
+        await this.sessionBrowser.screenshot(cmd);
         return;
       case 'browser.inspectPoint':
-        await this.handleBrowser(cmd.appSessionId, () => {
-          const element = this.browsers.inspectPoint(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            cmd.x,
-            cmd.y,
-          );
-          if (!element) throw new Error('No browser element found at that point.');
-        });
+        await this.sessionBrowser.inspectPoint(cmd);
         return;
       case 'browser.design.addReference':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          await this.browsers.addReference(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            {
-              anchor: cmd.reference.anchor,
-              detail: cmd.reference.detail,
-              id: cmd.reference.id,
-            },
-            cmd.reference.screenshot,
-          );
-        });
+        await this.sessionBrowser.addReference(cmd);
         return;
       case 'browser.design.sendPrompt':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-          const { prompt } = await this.browsers.designPrompt({ ...cmd, appSessionId });
-          await this.lifecycle.send(appSessionId, prompt);
-        });
+        await this.sessionBrowser.sendDesignPrompt(cmd);
         return;
       case 'browser.native.result':
-        this.resolveNativeBrowserRequest(cmd.result);
+        this.sessionBrowser.resolveNativeBrowserRequest(cmd.result);
         return;
       default: {
         // Wire commands are JSON-parsed without runtime validation, so a
@@ -1668,56 +1550,6 @@ export class SessionManager {
     if (appSessionId) this.registry.updateSummary(appSessionId, { title: safeTitle });
   }
 
-  // Reads the stored .jsonl files straight from disk, so the export is
-  // complete even for a chat the renderer never opened (its transcript is not
-  // in memory). Compaction rekeys the backing session, so the full chain must
-  // be replayed like the chat scrollback — otherwise pre-compaction messages
-  // silently vanish from the export.
-  private exportSessionMarkdown(cmd: {
-    appSessionId: string;
-    requestId: string;
-    title?: string;
-  }): void {
-    try {
-      const summary = this.registry.resolveSummary(cmd.appSessionId);
-      const providerSessionId = summary?.providerSessionId ?? cmd.appSessionId;
-      const appSessionId = summary?.appSessionId ?? cmd.appSessionId;
-      const chain = resolveSessionChain(appSessionId, providerSessionId);
-      const { events, olderCursor } = loadSessionTranscriptWindow(appSessionId, chain, {
-        limit: 100_000,
-      });
-      if (events.length === 0) throw new Error('No stored transcript for this chat.');
-      const markdown = transcriptToMarkdown(events, {
-        title: cmd.title ?? summary?.title ?? 'Chat export',
-        providerSessionId,
-        cwd: summary?.cwd,
-        // The window caps at 100k events; an export missing older turns must
-        // say so rather than read as the complete chat.
-        ...(olderCursor !== undefined
-          ? {
-              note: 'This chat exceeds the 100,000-event export limit; only the most recent events are included.',
-            }
-          : {}),
-      });
-      this.emit({
-        type: 'session.markdownExported',
-        requestId: cmd.requestId,
-        ok: true,
-        markdown,
-      });
-    } catch (error) {
-      // The raw error can carry internal paths; the renderer shows a generic
-      // failure toast while the detail stays in the sidecar log.
-      console.error(`Markdown export failed: ${errMsg(error)}`);
-      this.emit({
-        type: 'session.markdownExported',
-        requestId: cmd.requestId,
-        ok: false,
-        message: 'Could not export this chat.',
-      });
-    }
-  }
-
   private async withSession<T>(
     appSessionId: string,
     fn: (session: FactorySession) => Promise<T>,
@@ -1788,59 +1620,13 @@ export class SessionManager {
     this.emit({ type: 'error', ...error });
   }
 
-  private async handleBrowser(
-    appSessionId: string | undefined,
-    action: () => unknown,
-  ): Promise<void> {
-    try {
-      await action();
-    } catch (err) {
-      const message = errMsg(err);
-      this.emit({ type: 'browser.error', appSessionId, message });
-      this.emitError({ code: 'browser.error', appSessionId, message });
-    }
-  }
-
-  private requestNativeBrowser(request: BrowserNativeRequest): Promise<BrowserNativeResult> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingNativeBrowserRequests.delete(request.requestId);
-        reject(
-          new Error(
-            `DROIDEX browser did not respond to ${request.action} within ${String(BROWSER_NATIVE_TIMEOUT_MS)}ms.`,
-          ),
-        );
-      }, BROWSER_NATIVE_TIMEOUT_MS);
-      this.pendingNativeBrowserRequests.set(request.requestId, { resolve, reject, timeout });
-      this.emit({ type: 'browser.native.request', request });
-    });
-  }
-
-  private resolveNativeBrowserRequest(result: BrowserNativeResult): void {
-    const pending = this.pendingNativeBrowserRequests.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingNativeBrowserRequests.delete(result.requestId);
-    if (result.ok) pending.resolve(result);
-    else pending.reject(new Error(result.error ?? 'DROIDEX browser action failed.'));
-  }
-
-  private requireBrowserAppSessionId(appSessionId?: string): string {
-    if (!appSessionId) {
-      throw new Error(
-        'Browser sessions are scoped to a Droid chat. Select or create a chat before opening the browser.',
-      );
-    }
-    return appSessionId;
-  }
-
   shutdown(): Promise<void> {
     this.shutdownPromise ??= Promise.resolve().then(() => this.performShutdown());
     return this.shutdownPromise;
   }
 
   private async performShutdown(): Promise<void> {
-    this.latestSearchRequestId = null;
+    this.historyQueries.forget();
     let firstError: unknown;
     const run = async (action: () => void | Promise<void>): Promise<void> => {
       try {
