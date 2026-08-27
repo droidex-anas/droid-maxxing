@@ -5,7 +5,7 @@ import test from 'node:test';
 const APP_SOURCE = readFileSync('src/App.tsx', 'utf8');
 const LAZY_SOURCE = readFileSync('src/lib/lazySurfaces.tsx', 'utf8');
 const HOST_SOURCE = readFileSync('src/components/onboarding/OnboardingLazyHost.tsx', 'utf8');
-const SETTINGS_SOURCE = readFileSync('src/components/SettingsPanel.tsx', 'utf8');
+const SETTINGS_HOST_SOURCE = readFileSync('src/components/SettingsLazyHost.tsx', 'utf8');
 
 const OPTIONAL_SURFACE_IMPORTS = [
   './components/SettingsPanel',
@@ -35,9 +35,12 @@ test('lazy surfaces expose one loader map for React.lazy and preloading', () => 
 });
 
 test('animation boundaries keep motion outside Suspense where exit must run', () => {
-  // Settings owns AnimatePresence internally; App keeps the lazy panel mounted.
-  assert.match(APP_SOURCE, /<Suspense fallback=\{null\}>\s*<LazySettingsPanel \/>/);
-  assert.match(SETTINGS_SOURCE, /<AnimatePresence>/);
+  // Settings exit runs on a sync motion host that is the direct AnimatePresence child.
+  assert.match(APP_SOURCE, /<AnimatePresence>[\s\S]*<SettingsLazyHost/);
+  assert.match(
+    SETTINGS_HOST_SOURCE,
+    /<motion\.div[\s\S]*exit=\{\{ opacity: 0 \}\}[\s\S]*<Suspense fallback=\{<SettingsPanelSkeleton \/>}>/,
+  );
 
   // Mission Control clipPath transition wraps Suspense, not the other way around.
   assert.match(

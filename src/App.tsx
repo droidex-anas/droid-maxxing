@@ -51,6 +51,7 @@ import {
   cancelIdleLazyWarmup,
 } from './lib/chunkPreloader';
 import { OnboardingLazyHost } from './components/onboarding/OnboardingLazyHost';
+import { SettingsLazyHost } from './components/SettingsLazyHost';
 import {
   CommandPaletteSkeleton,
   MissionControlSkeleton,
@@ -63,7 +64,6 @@ import {
   LazyMissionControl,
   LazyPullRequestsView,
   LazyReviewPanel,
-  LazySettingsPanel,
   LazySpecWikiModal,
   LazyTerminalWorkspace,
   utilityToolFallback,
@@ -791,12 +791,11 @@ export default function App() {
         </Suspense>
       )}
       <Suspense fallback={null}>
-        <LazySettingsPanel />
-      </Suspense>
-      <Suspense fallback={null}>
         <LazySpecWikiModal />
       </Suspense>
       <Toaster />
+
+      <AnimatePresence>{state.settingsOpen && <SettingsLazyHost />}</AnimatePresence>
 
       <AnimatePresence>
         {showWizard && onboard.ready && (
