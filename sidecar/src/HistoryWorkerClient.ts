@@ -37,7 +37,6 @@ export interface HistoryPersistenceCall<T> {
 export interface HistoryPersistenceClient {
   startPersist(batch: HistoryPersistenceBatch): HistoryPersistenceCall<HistoryPersistenceResult>;
   startDurabilityBarrier(): HistoryPersistenceCall<{ durable: true }>;
-  warm?(): HistoryPersistenceCall<{ accepted: true }>;
   closeSync(): void;
 }
 
@@ -93,10 +92,6 @@ export class HistoryWorkerClient implements HistoryPersistenceClient, HistorySea
 
   startDurabilityBarrier(): HistoryPersistenceCall<{ durable: true }> {
     return this.call<{ durable: true }>({ type: 'durability-barrier' });
-  }
-
-  warm(): HistoryPersistenceCall<{ accepted: true }> {
-    return this.call<{ accepted: true }>({ type: 'warm' });
   }
 
   async reconcileSessionFiles(): Promise<SessionFileReconciliation> {

@@ -54,14 +54,6 @@ class FakeClient implements HistoryPersistenceClient {
     };
   }
 
-  warm(): HistoryPersistenceCall<{ accepted: true }> {
-    const result = { accepted: true } as const;
-    return {
-      promise: Promise.resolve(result),
-      waitSync: () => result,
-    };
-  }
-
   search(): Promise<SessionSearchResult[]> {
     return Promise.resolve([]);
   }
