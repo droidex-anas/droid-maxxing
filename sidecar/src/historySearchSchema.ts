@@ -27,6 +27,8 @@ export function isHistorySearchUnavailableError(error: unknown): boolean {
   );
 }
 
+export const SQLITE_FTS5_UNAVAILABLE_REASON = 'SQLite FTS5 is unavailable on this host';
+
 export function sqliteSupportsFts5(): boolean {
   const db = new DatabaseSync(':memory:');
   try {
@@ -38,6 +40,10 @@ export function sqliteSupportsFts5(): boolean {
   } finally {
     db.close();
   }
+}
+
+export function sqliteFts5UnavailableSkipReason(): false | string {
+  return sqliteSupportsFts5() ? false : SQLITE_FTS5_UNAVAILABLE_REASON;
 }
 
 export function initializeHistorySearchSchema(db: DatabaseSync): void {

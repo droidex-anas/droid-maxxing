@@ -15,15 +15,13 @@ import type { SessionSummary } from './protocol.js';
 import {
   HistorySearchUnavailableError,
   isHistorySearchUnavailableError,
-  sqliteSupportsFts5,
+  sqliteFts5UnavailableSkipReason,
 } from './historySearchSchema.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 
 // Leave cold-worker headroom while staying below the search DB's 5s lock wait.
 const LOCKED_DERIVED_DB_PROBE_TIMEOUT_MS = 3_000;
-const FTS5_UNAVAILABLE_REASON = sqliteSupportsFts5()
-  ? false
-  : 'SQLite FTS5 is unavailable on this host';
+const FTS5_UNAVAILABLE_REASON = sqliteFts5UnavailableSkipReason();
 
 function createSchema(path: string): void {
   const db = new DatabaseSync(path);
