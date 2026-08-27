@@ -35,6 +35,7 @@ interface ScrollMetrics {
   blankHitRatio: number;
   blankDurationMs: number;
   blankMaxRatio: number;
+  blankMaxHolePx?: number;
   mountedRowsMax: number;
   mountedRowsLast: number;
   cpuPercent: number;
@@ -203,6 +204,11 @@ async function runHistoryPass(tree: BenchTree, run: number, templateHome: string
   });
   try {
     await waitForSessions(app);
+    await app.cdp.evaluate('window.__guiBench.dismissOverlays()');
+    const active = await app.cdp.evaluate<string | null>('window.__guiBench.activeSessionId()');
+    if (active === GUI_BENCH_SESSION_IDS.chat10k) {
+      await openSession(app, GUI_BENCH_SESSION_IDS.chat3k);
+    }
     const cold = await openSession(app, GUI_BENCH_SESSION_IDS.chat10k);
     const idle = await measureIdle(app, 2_500);
     const scroll10k: ScrollMetrics[] = [];
@@ -264,6 +270,19 @@ async function runStreamingPass(
   run: number,
   sidecarEntry: string,
 ): Promise<StreamingMetrics> {
+  if (tree.name === 'baseline') {
+    return {
+      wired: false,
+      reason:
+        'origin/main has no sidecar/src/perf/replayRuntime.ts. Refusing to run the candidate replay sidecar under baseline Electron, which would mix trees.',
+      durationMs: 0,
+      droppedFrames: 0,
+      longestFrameMs: 0,
+      longTasksOver50Ms: 0,
+      cpuPercent: 0,
+      rssBytes: 0,
+    };
+  }
   const home = join(WORK, 'stream-homes', `${tree.name}-${String(run)}`);
   const userDataDir = join(WORK, 'stream-profiles', `${tree.name}-${String(run)}`);
   mkdirSync(home, { recursive: true });
@@ -350,6 +369,7 @@ function scrollSeries(results: RunResult[], tree: 'baseline' | 'candidate', chat
     blankHit: spread(rows.map((row) => row.blankHitRatio)),
     blankMs: spread(rows.map((row) => row.blankDurationMs)),
     blankMax: spread(rows.map((row) => row.blankMaxRatio)),
+    holePx: spread(rows.map((row) => row.blankMaxHolePx ?? 0)),
     mounted: spread(rows.map((row) => row.mountedRowsLast)),
     cpu: spread(rows.map((row) => row.cpuPercent)),
     rss: spread(rows.map((row) => row.rssBytes)),
@@ -390,8 +410,10 @@ function renderReport(results: RunResult[], trees: BenchTree[]): string {
   lines.push('- Drive via CDP `Input.dispatchMouseEvent` `mouseWheel`.');
   lines.push('- Frames: in-page `requestAnimationFrame` timestamps. A drop is a rAF gap > 1.5×16.67 ms.');
   lines.push('- Long tasks: `PerformanceObserver({type:\'longtask\'})` > 50 ms.');
-  lines.push('- Blank: each rAF, viewport minus union of `[data-feed-row-id]` boxes. Hit if uncovered > 8% of viewport.');
-  lines.push('- CPU/RSS: `/proc` tree of the Electron PID; cross-check `droidControl.getPerformanceMetrics()`.');
+  lines.push('- Blank: each rAF, largest contiguous viewport gap not covered by `[data-feed-row-id]`. A hit is a hole taller than 96px (one estimated row), not ordinary 16px list gaps.');
+  lines.push(
+    'Candidate launch required hoisting `let mainWindow = null` above `sidecarSupervisor.subscribe` in `electron/main.cjs`. As committed on `cursor/perf-integration-e50f` (`76bdea9`), Electron throws `Cannot access \'mainWindow\' before initialization` and never creates a window. Measurement used that hoist; it is not a renderer/virtualizer change.',
+  );
   lines.push('');
   const metric = (
     name: string,
@@ -430,9 +452,10 @@ function renderReport(results: RunResult[], trees: BenchTree[]): string {
       row('dropped rAF frames', b.dropped, c.dropped, b.dropped, c.dropped);
       row('longest frame (ms)', b.longest, c.longest, b.longest, c.longest);
       row('long tasks >50ms', b.longTasks, c.longTasks, b.longTasks, c.longTasks);
-      row('blank hit ratio', b.blankHit, c.blankHit, b.blankHit, c.blankHit);
+      row('blank hit ratio (hole>96px)', b.blankHit, c.blankHit, b.blankHit, c.blankHit);
       row('blank duration (ms)', b.blankMs, c.blankMs, b.blankMs, c.blankMs);
       row('blank max ratio', b.blankMax, c.blankMax, b.blankMax, c.blankMax);
+      row('largest hole (px)', b.holePx, c.holePx, b.holePx, c.holePx);
       row('mounted rows', b.mounted, c.mounted, b.mounted, c.mounted);
       row('CPU % during scroll', b.cpu, c.cpu, b.cpu, c.cpu);
       row('RSS after (MiB)', { median: b.rss.median / (1024 * 1024) }, { median: c.rss.median / (1024 * 1024) }, { median: b.rss.median / (1024 * 1024), min: b.rss.min / (1024 * 1024), max: b.rss.max / (1024 * 1024) }, { median: c.rss.median / (1024 * 1024), min: c.rss.min / (1024 * 1024), max: c.rss.max / (1024 * 1024) });

@@ -82,6 +82,7 @@ export async function launchApp(options: {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     DISPLAY: process.env.DISPLAY || ':1',
+    XAUTHORITY: process.env.XAUTHORITY || '/home/ubuntu/.Xauthority',
     HOME: options.home,
     USERPROFILE: options.home,
     DROIDEX_USER_DATA_DIR: options.userDataDir,
@@ -95,7 +96,7 @@ export async function launchApp(options: {
 
   const child = spawn(
     electronBin,
-    [main, '--no-sandbox', `--remote-debugging-port=${String(options.cdpPort)}`],
+    [main, '--no-sandbox', `--remote-debugging-port=${String(options.cdpPort)}`, '--remote-allow-origins=*'],
     {
       cwd: options.tree.root,
       env,

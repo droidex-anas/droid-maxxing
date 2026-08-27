@@ -6,9 +6,15 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
   let sampling = false;
   let rafId = 0;
   let longObserver = null;
+  let phaseStartedAt = 0;
 
   function scroller() {
-    return document.querySelector('[data-testid="chat-view"] .overflow-y-auto');
+    const chat = document.querySelector('[data-testid="chat-view"]');
+    if (!chat) return null;
+    const withRows = Array.from(chat.querySelectorAll('.overflow-y-auto')).find((node) =>
+      node.querySelector('[data-feed-row-id]'),
+    );
+    return withRows || chat.querySelector('.overflow-y-auto');
   }
 
   function unionCoverage(viewport, rows) {
@@ -22,14 +28,19 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
     segments.sort((a, b) => a[0] - b[0]);
     let covered = 0;
     let cursor = viewport.top;
+    let largestHolePx = 0;
     for (const [top, bottom] of segments) {
+      if (top > cursor) largestHolePx = Math.max(largestHolePx, top - cursor);
       const start = Math.max(top, cursor);
       if (bottom > start) {
         covered += bottom - start;
         cursor = bottom;
+      } else {
+        cursor = Math.max(cursor, bottom);
       }
     }
-    return covered;
+    if (viewport.bottom > cursor) largestHolePx = Math.max(largestHolePx, viewport.bottom - cursor);
+    return { covered, largestHolePx };
   }
 
   function sampleBlank(at) {
@@ -39,16 +50,17 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
     }
     const viewport = node.getBoundingClientRect();
     const rows = node.querySelectorAll('[data-feed-row-id]');
-    const coveredPx = unionCoverage(viewport, rows);
+    const coverage = unionCoverage(viewport, rows);
     const viewportPx = Math.max(0, viewport.height);
-    const blankPx = Math.max(0, viewportPx - coveredPx);
+    const blankPx = Math.max(0, viewportPx - coverage.covered);
     return {
       at,
       blankRatio: viewportPx === 0 ? 0 : blankPx / viewportPx,
       blankPx,
       viewportPx,
       mountedRows: rows.length,
-      coveredPx,
+      coveredPx: coverage.covered,
+      largestHolePx: coverage.largestHolePx,
     };
   }
 
@@ -68,6 +80,7 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
   window.__guiBench = {
     start() {
       sampling = true;
+      phaseStartedAt = performance.now();
       frames.length = 0;
       blanks.length = 0;
       longTasks.length = 0;
@@ -79,7 +92,7 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
               longTasks.push({ name: entry.name, duration: entry.duration, startTime: entry.startTime });
             }
           });
-          longObserver.observe({ type: 'longtask', buffered: true });
+          longObserver.observe({ type: 'longtask', buffered: false });
         } catch {}
       }
       rafId = requestAnimationFrame(onFrame);
@@ -102,12 +115,14 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
         longest = Math.max(longest, dt);
         if (dt > expectedFrameMs * 1.5) dropped += 1;
       }
-      const over50 = longTasks.filter((task) => task.duration > 50);
-      const blankHits = blanks.filter((sample) => sample.blankRatio > 0.08);
+      const phaseTasks = longTasks.filter((task) => task.startTime >= phaseStartedAt);
+      const over50 = phaseTasks.filter((task) => task.duration > 50);
+      const holeHits = blanks.filter((sample) => sample.largestHolePx > 96);
       let blankDurationMs = 0;
       for (let i = 1; i < blanks.length; i += 1) {
-        if (blanks[i].blankRatio > 0.08) blankDurationMs += blanks[i].at - blanks[i - 1].at;
+        if (blanks[i].largestHolePx > 96) blankDurationMs += blanks[i].at - blanks[i - 1].at;
       }
+      const maxHole = blanks.reduce((max, sample) => Math.max(max, sample.largestHolePx || 0), 0);
       return {
         frameCount: frames.length,
         droppedFrames: dropped,
@@ -117,10 +132,11 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
         longTaskMaxMs: over50.reduce((max, task) => Math.max(max, task.duration), 0),
         longTaskTotalMs: over50.reduce((sum, task) => sum + task.duration, 0),
         blankSampleCount: blanks.length,
-        blankHitCount: blankHits.length,
-        blankHitRatio: blanks.length === 0 ? 0 : blankHits.length / blanks.length,
+        blankHitCount: holeHits.length,
+        blankHitRatio: blanks.length === 0 ? 0 : holeHits.length / blanks.length,
         blankDurationMs,
-        blankMaxRatio: blanks.reduce((max, sample) => Math.max(max, sample.blankRatio), 0),
+        blankMaxRatio: blanks.reduce((max, sample) => Math.max(max, sample.blankRatio || 0), 0),
+        blankMaxHolePx: maxHole,
         mountedRowsMax: blanks.reduce((max, sample) => Math.max(max, sample.mountedRows), 0),
         mountedRowsLast: blanks.length ? blanks[blanks.length - 1].mountedRows : 0,
         rendererPerf: perfSnapshot(),
@@ -129,27 +145,28 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
     sampleBlankNow() {
       return sampleBlank(performance.now());
     },
-    waitForChat(sessionId, timeoutMs) {
+    waitForChat(sessionId, timeoutMs, previousRowId) {
       const started = performance.now();
       return new Promise((resolve, reject) => {
         const poll = () => {
           const row = document.querySelector('[data-app-session-id="' + sessionId + '"]');
-          const feed = document.querySelector('[data-testid="chat-view"] [data-feed-row-id]');
-          const skeleton = document.querySelector('[data-testid="chat-view"] .absolute.inset-0');
-          const selected = row && row.getAttribute('aria-current') === 'true';
-          const hasFeed = Boolean(feed);
-          const restoring = Boolean(skeleton);
-          if ((selected || hasFeed) && hasFeed && !restoring) {
+          const selected = Boolean(row && row.getAttribute('aria-current') === 'true');
+          const first = document.querySelector('[data-testid="chat-view"] [data-feed-row-id]');
+          const firstId = first ? first.getAttribute('data-feed-row-id') : null;
+          const feedCount = document.querySelectorAll('[data-testid="chat-view"] [data-feed-row-id]').length;
+          const restoring = Boolean(document.querySelector('[data-testid="chat-view"] .z-10.overflow-hidden'));
+          const feedChanged = !previousRowId || firstId !== previousRowId;
+          if (selected && feedCount > 0 && !restoring && feedChanged) {
             resolve({
               ok: true,
               elapsedMs: performance.now() - started,
-              mountedRows: document.querySelectorAll('[data-testid="chat-view"] [data-feed-row-id]').length,
+              mountedRows: feedCount,
               title: (row && row.textContent) || '',
             });
             return;
           }
           if (performance.now() - started > timeoutMs) {
-            reject(new Error('Timed out waiting for chat ' + sessionId + ' (feed=' + hasFeed + ', restoring=' + restoring + ')'));
+            reject(new Error('Timed out waiting for chat ' + sessionId + ' (selected=' + selected + ', feed=' + feedCount + ', restoring=' + restoring + ', changed=' + feedChanged + ')'));
             return;
           }
           requestAnimationFrame(poll);
@@ -157,14 +174,27 @@ export const GUI_BENCH_PROBE_SOURCE = `(function installGuiBenchProbe() {
         poll();
       });
     },
+    dismissOverlays() {
+      const dismiss = document.querySelector('button[aria-label="Dismiss"]');
+      if (dismiss) dismiss.click();
+      try { localStorage.setItem('droid-notes-intro-seen', '1'); } catch {}
+      return Boolean(dismiss);
+    },
     openSession(sessionId) {
       const row = document.querySelector('[data-app-session-id="' + sessionId + '"]');
       if (!row) throw new Error('Session row not found: ' + sessionId);
-      row.click();
-      return window.__guiBench.waitForChat(sessionId, 45000);
+      const already = row.getAttribute('aria-current') === 'true';
+      const previous = document.querySelector('[data-testid="chat-view"] [data-feed-row-id]');
+      const previousRowId = already ? null : previous ? previous.getAttribute('data-feed-row-id') : null;
+      if (!already) row.click();
+      return window.__guiBench.waitForChat(sessionId, 45000, previousRowId);
     },
     sessionIds() {
       return Array.from(document.querySelectorAll('[data-app-session-id]')).map((node) => node.getAttribute('data-app-session-id'));
+    },
+    activeSessionId() {
+      const row = document.querySelector('[data-app-session-id][aria-current="true"]');
+      return row ? row.getAttribute('data-app-session-id') : null;
     },
     scrollerBox() {
       const node = scroller();
