@@ -37,7 +37,7 @@ import {
   type ChildSpawnObservation,
   type ParentChildSessions,
 } from './ChildSessionState.js';
-import type { ChildSessionsDependencies, ChildSettingsTarget } from './ChildSessionsTypes.js';
+import { childRuntimeAdmission } from './childRuntimeBudget.js';
 
 type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 type ChildSettingsCommand = Extract<ClientCommand, { type: 'child.updateSettings' }>;
@@ -85,6 +85,7 @@ export class ChildSessions {
       pendingSpawns: new Map(),
       openAttempts: new Map(),
       reservedOpenSlots: new Set(),
+      runtimeQueue: [],
       closing: false,
     };
     for (const record of this.d.history.childSessions(parentAppSessionId))
@@ -103,16 +104,20 @@ export class ChildSessions {
   // Resource gauge for hot-path metrics: how many child agents are held
   // across attached parents, and how many can still be offered work (same
   // predicate the runtime itself uses when admitting work).
-  counts(): { total: number; active: number } {
+  counts(): { total: number; active: number; live: number; queued: number } {
     let total = 0;
     let active = 0;
+    let live = 0;
+    let queued = 0;
     for (const parent of this.parents.values()) {
       for (const child of parent.children.values()) {
         total += 1;
         if (childAcceptsWork(child)) active += 1;
+        if (child.runtime) live += 1;
+        if (child.queued) queued += 1;
       }
     }
-    return { total, active };
+    return { total, active, live, queued };
   }
 
   admitChildObservation(observation: ChildSpawnObservation): ChildIdentity | undefined {
@@ -318,6 +323,12 @@ export class ChildSessions {
   }
 
   async send(identity: ChildIdentity, text: string): Promise<void> {
+    const queuedParent = this.parents.get(identity.parentAppSessionId);
+    const queuedChild = queuedParent?.children.get(identity.childSessionId);
+    if (queuedParent && queuedChild?.queued) {
+      queuedChild.turn.pendingSends.push(text);
+      return;
+    }
     const target = await this.requireRuntime(identity, 'send');
     if (!target) return;
     const { parent, child, runtime } = target;
@@ -330,6 +341,12 @@ export class ChildSessions {
   }
 
   async sendNow(identity: ChildIdentity, text: string): Promise<void> {
+    const queuedParent = this.parents.get(identity.parentAppSessionId);
+    const queuedChild = queuedParent?.children.get(identity.childSessionId);
+    if (queuedParent && queuedChild?.queued) {
+      queuedChild.turn.pendingSends.unshift(text);
+      return;
+    }
     const target = await this.requireRuntime(identity, 'sendNow');
     if (!target) return;
     const { parent, child, runtime } = target;
@@ -365,6 +382,13 @@ export class ChildSessions {
   }
 
   async interrupt(identity: ChildIdentity): Promise<void> {
+    const queuedParent = this.parents.get(identity.parentAppSessionId);
+    const queuedChild = queuedParent?.children.get(identity.childSessionId);
+    if (queuedParent && queuedChild?.queued) {
+      this.dequeueRuntime(queuedParent, queuedChild);
+      this.publish(queuedChild);
+      return;
+    }
     const target = await this.requireRuntime(identity, 'interrupt');
     if (!target) return;
     const { parent, child, runtime } = target;
@@ -462,12 +486,16 @@ export class ChildSessions {
     }
     child.status = 'paused';
     this.commit(child);
+    if (parent.runtimeQueue.length > 0) void this.closeRuntime(parent, child, true);
   }
 
   async close(identity: ChildIdentity): Promise<void> {
     const parent = this.parents.get(identity.parentAppSessionId);
     const child = parent?.children.get(identity.childSessionId);
-    if (parent && child) await this.closeRuntime(parent, child, true);
+    if (parent && child) {
+      this.dequeueRuntime(parent, child);
+      await this.closeRuntime(parent, child, true);
+    }
   }
 
   async closeWhenIdle(identity: ChildIdentity): Promise<void> {
@@ -491,6 +519,7 @@ export class ChildSessions {
     for (const child of parent.children.values()) await this.closeRuntime(parent, child, false);
     parent.pendingSpawns.clear();
     parent.reservedOpenSlots.clear();
+    parent.runtimeQueue = [];
     const durabilityPrefix = `${parentAppSessionId}\u0000`;
     for (const key of this.childrenAwaitingDurability.keys()) {
       if (key.startsWith(durabilityPrefix)) this.childrenAwaitingDurability.delete(key);
@@ -543,6 +572,11 @@ export class ChildSessions {
       if (requestId) this.emitReady(child.runtime, child, requestId);
       return;
     }
+    if (child.queued) {
+      if (requestId) child.queuedRequestId = requestId;
+      this.publish(child);
+      return;
+    }
     const existing = parent.openAttempts.get(childSessionId);
     if (existing) {
       await existing.settled;
@@ -586,7 +620,7 @@ export class ChildSessions {
         attempt,
         this.reserveCapacity(parent, child, operation, requestId),
       );
-      if (admitted === CHILD_OPEN_CANCELLED || !admitted) return;
+      if (admitted === CHILD_OPEN_CANCELLED || admitted === 'queued' || !admitted) return;
       if (!this.isCurrentOpenAttempt(parent, child, attempt)) return;
       const ref = { id: parentAppSessionId };
       const load = this.d.runtime.loadSession(child.providerSessionId, {
@@ -642,6 +676,8 @@ export class ChildSessions {
       };
       child.runtime = runtime;
       attempt.provisionalSession = undefined;
+      child.queued = false;
+      child.queuedRequestId = undefined;
       child.modelId = settings.modelId;
       child.reasoningEffort = settings.reasoningEffort;
       child.autonomy = actual.autonomy;
@@ -675,6 +711,8 @@ export class ChildSessions {
       // a provider-reported model window before the first turn settles.
       void this.d.context.refresh(this.contextTarget(parent, child, runtime));
       if (requestId) this.emitReady(runtime, child, requestId);
+      const queuedSend = child.turn.pendingSends.shift();
+      if (queuedSend !== undefined) void this.drive(parent, child, queuedSend);
     } catch (error) {
       const runtimeInstalled = loaded !== undefined && child.runtime?.session === loaded;
       const reportFailure = runtimeInstalled || this.isCurrentOpenAttempt(parent, child, attempt);
@@ -685,6 +723,7 @@ export class ChildSessions {
       this.finishOpenAttempt(parent, childSessionId, attempt);
       parent.reservedOpenSlots.delete(childSessionId);
       if (loaded) await this.closeProvisional(attempt);
+      this.admitNextQueued(parent);
     }
   }
 
@@ -819,6 +858,7 @@ export class ChildSessions {
     }
     child.status = 'paused';
     this.commit(child);
+    if (parent.runtimeQueue.length > 0) await this.closeRuntime(parent, child, true);
   }
 
   private flushStreaming(identity: ChildIdentity): void {
@@ -960,12 +1000,7 @@ export class ChildSessions {
     requested: ChildSessionState,
     operation: Exclude<ChildOperation, 'settings'>,
     requestId: string | null,
-  ): Promise<boolean> {
-    const openCount = [...parent.children.values()].filter((child) => child.runtime).length;
-    if (openCount + parent.reservedOpenSlots.size < this.d.maxOpenSessions) {
-      parent.reservedOpenSlots.add(requested.identity.childSessionId);
-      return true;
-    }
+  ): Promise<boolean | 'queued'> {
     const idle = [...parent.children.values()]
       .filter(
         (child): child is ChildSessionState & { runtime: ChildRuntimeState } =>
@@ -975,13 +1010,35 @@ export class ChildSessions {
           !child.turn.autoCompacting &&
           child.turn.pendingSends.length === 0,
       )
-      .sort((left, right) => left.runtime.lastUsedAt - right.runtime.lastUsedAt)
-      .at(0);
-    if (idle) {
+      .sort((left, right) => left.runtime.lastUsedAt - right.runtime.lastUsedAt);
+    const occupancy = {
+      live: [...parent.children.values()].filter((child) => child.runtime).length,
+      reserved: parent.reservedOpenSlots.size,
+      queued: parent.runtimeQueue.length,
+      idleLive: idle.length,
+    };
+    const admission = childRuntimeAdmission(
+      {
+        maxLive: Math.min(this.d.maxLiveRuntimes, this.d.maxOpenSessions),
+        maxQueued: this.d.maxQueuedRuntimes,
+      },
+      occupancy,
+    );
+    if (admission === 'admit') {
+      if (
+        occupancy.live + occupancy.reserved >=
+        Math.min(this.d.maxLiveRuntimes, this.d.maxOpenSessions)
+      ) {
+        const victim = idle.at(0);
+        if (!victim) return this.enqueueRuntime(parent, requested, requestId);
+        parent.reservedOpenSlots.add(requested.identity.childSessionId);
+        await this.closeRuntime(parent, victim, true);
+        return true;
+      }
       parent.reservedOpenSlots.add(requested.identity.childSessionId);
-      await this.closeRuntime(parent, idle, true);
       return true;
     }
+    if (admission === 'queue') return this.enqueueRuntime(parent, requested, requestId);
     this.emitError(
       requested.identity,
       operation,
@@ -990,6 +1047,47 @@ export class ChildSessions {
       `Open child-session limit reached (${String(this.d.maxOpenSessions)}). Wait for one running child view to finish before opening another.`,
     );
     return false;
+  }
+
+  private enqueueRuntime(
+    parent: ParentChildSessions,
+    child: ChildSessionState,
+    requestId: string | null,
+  ): 'queued' {
+    const id = child.identity.childSessionId;
+    if (!parent.runtimeQueue.includes(id)) parent.runtimeQueue.push(id);
+    child.queued = true;
+    child.queuedRequestId = requestId;
+    this.publish(child);
+    return 'queued';
+  }
+
+  private dequeueRuntime(parent: ParentChildSessions, child: ChildSessionState): void {
+    parent.runtimeQueue = parent.runtimeQueue.filter((id) => id !== child.identity.childSessionId);
+    if (!child.queued) return;
+    child.queued = false;
+    child.queuedRequestId = undefined;
+  }
+
+  private admitNextQueued(parent: ParentChildSessions): void {
+    if (!this.isCurrentParent(parent) || parent.closing) return;
+    const maxLive = Math.min(this.d.maxLiveRuntimes, this.d.maxOpenSessions);
+    while (parent.runtimeQueue.length > 0) {
+      const live =
+        [...parent.children.values()].filter((child) => child.runtime).length +
+        parent.reservedOpenSlots.size;
+      if (live >= maxLive) return;
+      const childSessionId = parent.runtimeQueue.shift();
+      if (!childSessionId) return;
+      const child = parent.children.get(childSessionId);
+      if (!child || child.runtime) continue;
+      const requestId = child.queuedRequestId ?? null;
+      child.queued = false;
+      child.queuedRequestId = undefined;
+      this.publish(child);
+      void this.openFor(parent.parentAppSessionId, childSessionId, requestId, 'open');
+      return;
+    }
   }
 
   private async closeRuntime(
@@ -1038,6 +1136,7 @@ export class ChildSessions {
       !this.childrenAwaitingDurability.has(childDurabilityKey(child.identity))
     )
       this.publish(child);
+    this.admitNextQueued(parent);
   }
 
   private contextTarget(

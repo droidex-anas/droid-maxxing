@@ -10,6 +10,12 @@ export interface HotPathResourceCounts {
   livePrimarySessions: number;
   childAgentsTotal: number;
   childAgentsActive: number;
+  childAgentsLive: number;
+  childAgentsQueued: number;
+  contextPollers: number;
+  contextPollersActive: number;
+  autoCompactionWatchdogs: number;
+  sessionFileWatchers: number;
 }
 
 export type HotPathGaugeProvider = () => HotPathResourceCounts;

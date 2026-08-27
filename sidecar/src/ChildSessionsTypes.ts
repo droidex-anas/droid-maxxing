@@ -51,5 +51,7 @@ export interface ChildSessionsDependencies {
   emit(event: ServerEvent): void;
   nextChildSessionId(): string;
   maxOpenSessions: number;
+  maxLiveRuntimes: number;
+  maxQueuedRuntimes: number;
   now(): number;
 }
