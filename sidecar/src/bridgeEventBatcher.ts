@@ -64,14 +64,8 @@ export interface BridgeEventBatcherOptions<Timer = ReturnType<typeof setTimeout>
   onQueueChanged?: (snapshot: BridgeEventQueueSnapshot) => void;
 }
 
-/**
- * Owns the sidecar's ordered event-to-wire batching policy.
- *
- * Logical broadcast events receive sequence numbers before any coalescing. A batch's
- * firstSeq/lastSeq therefore covers every input event, while each delivered
- * event carries the sequence of its latest represented state. Gaps inside a
- * batch are intentional and mean replaceable telemetry was collapsed.
- */
+// Sequence numbers are assigned before coalescing. Gaps inside a batch are
+// intentional: replaceable telemetry was collapsed onto a later seq.
 export class BridgeEventBatcher<Timer = ReturnType<typeof setTimeout>> {
   readonly generation: string;
 

@@ -6,7 +6,6 @@ import {
 } from '../hooks/useStore';
 import type { DiffStyle } from '../hooks/persistedThemePreferences';
 import type { DiffViewMode, LiveEnterBehavior } from '../hooks/persistedUiPreferences';
-import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronDown, Search, Check, X, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import AutonomySelector from './AutonomySelector';
@@ -832,12 +831,11 @@ function SettingsSearchResults({
 /* ── main full-page settings ── */
 export default function SettingsPanel() {
   const dispatch = useStoreDispatch();
-  const { settingsOpen, mcpCwd } = useStoreSelector((state) => {
+  const { mcpCwd } = useStoreSelector((state) => {
     const activeSession = state.activeAppSessionId
       ? state.sessions[state.activeAppSessionId]
       : undefined;
     return {
-      settingsOpen: state.settingsOpen,
       mcpCwd: activeSession?.cwd ?? state.workspaceCwds[0],
     };
   }, shallowEqual);
@@ -904,99 +902,89 @@ export default function SettingsPanel() {
   };
 
   return (
-    <AnimatePresence>
-      {settingsOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.16 }}
-          className="fixed inset-0 z-50 bg-droid-bg flex"
+    <>
+      {/* Left nav */}
+      <aside className="w-60 shrink-0 border-r border-droid-border flex flex-col bg-droid-surface/40">
+        {/* Traffic-light clearance */}
+        <div data-electron-drag-region className="h-9 shrink-0" />
+        <button
+          onClick={close}
+          className="flex items-center gap-1.5 px-4 h-10 text-[12px] text-droid-text-secondary hover:text-droid-text transition-colors shrink-0"
         >
-          {/* Left nav */}
-          <aside className="w-60 shrink-0 border-r border-droid-border flex flex-col bg-droid-surface/40">
-            {/* Traffic-light clearance */}
-            <div data-electron-drag-region className="h-9 shrink-0" />
-            <button
-              onClick={close}
-              className="flex items-center gap-1.5 px-4 h-10 text-[12px] text-droid-text-secondary hover:text-droid-text transition-colors shrink-0"
-            >
-              <ChevronLeft className="w-4 h-4" /> Back to app
-            </button>
-            <div className="px-3 pb-3">
-              <div className="flex h-9 items-center gap-2 rounded-2xl bg-droid-elevated/70 px-3 ring-1 ring-inset ring-droid-border/70 transition-[box-shadow,background-color] focus-within:bg-droid-elevated focus-within:ring-droid-border-hover">
-                <Search className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-                <input
-                  value={query}
-                  onChange={(e) => {
-                    setQuery(e.target.value);
-                  }}
-                  placeholder="Search settings…"
-                  className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/80 focus:outline-none"
-                />
-                {q ? (
-                  <button
-                    type="button"
-                    aria-label="Clear search"
-                    onClick={() => {
-                      setQuery('');
-                    }}
-                    className="rounded-full p-0.5 text-droid-text-muted transition-colors hover:text-droid-text"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 pb-3">
-              {NAV.map(({ group, items }) => {
-                const filtered = items.filter((it) => tabMatchesQuery(it.label, q));
-                if (filtered.length === 0) return null;
-                return (
-                  <div key={group}>
-                    <div className="mb-1 px-2.5 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted/80">
-                      {group}
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      {filtered.map(({ label }) => (
-                        <button
-                          key={label}
-                          onClick={() => {
-                            setActive(label);
-                          }}
-                          className={`flex h-8 w-full items-center rounded-xl px-2.5 text-left text-[12.5px] transition-colors ${
-                            active === label
-                              ? 'bg-droid-active text-droid-text'
-                              : 'text-droid-text-secondary hover:bg-droid-elevated/40 hover:text-droid-text'
-                          }`}
-                        >
-                          <span className="truncate">{label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-              {q && hits.length === 0 && (
-                <div className="px-2.5 py-4 text-[12px] leading-relaxed text-droid-text-muted">
-                  No matching settings.
-                </div>
-              )}
-            </nav>
-          </aside>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="px-10 py-8">
-              {q && hits.length > 0 && (
-                <SettingsSearchResults hits={hits} activeTab={active} onOpen={openHit} />
-              )}
-              {content}
-            </div>
+          <ChevronLeft className="w-4 h-4" /> Back to app
+        </button>
+        <div className="px-3 pb-3">
+          <div className="flex h-9 items-center gap-2 rounded-2xl bg-droid-elevated/70 px-3 ring-1 ring-inset ring-droid-border/70 transition-[box-shadow,background-color] focus-within:bg-droid-elevated focus-within:ring-droid-border-hover">
+            <Search className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+              }}
+              placeholder="Search settings…"
+              className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/80 focus:outline-none"
+            />
+            {q ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery('');
+                }}
+                className="rounded-full p-0.5 text-droid-text-muted transition-colors hover:text-droid-text"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        </div>
+        <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 pb-3">
+          {NAV.map(({ group, items }) => {
+            const filtered = items.filter((it) => tabMatchesQuery(it.label, q));
+            if (filtered.length === 0) return null;
+            return (
+              <div key={group}>
+                <div className="mb-1 px-2.5 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted/80">
+                  {group}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {filtered.map(({ label }) => (
+                    <button
+                      key={label}
+                      onClick={() => {
+                        setActive(label);
+                      }}
+                      className={`flex h-8 w-full items-center rounded-xl px-2.5 text-left text-[12.5px] transition-colors ${
+                        active === label
+                          ? 'bg-droid-active text-droid-text'
+                          : 'text-droid-text-secondary hover:bg-droid-elevated/40 hover:text-droid-text'
+                      }`}
+                    >
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {q && hits.length === 0 && (
+            <div className="px-2.5 py-4 text-[12px] leading-relaxed text-droid-text-muted">
+              No matching settings.
+            </div>
+          )}
+        </nav>
+      </aside>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="px-10 py-8">
+          {q && hits.length > 0 && (
+            <SettingsSearchResults hits={hits} activeTab={active} onOpen={openHit} />
+          )}
+          {content}
+        </div>
+      </div>
+    </>
   );
 }
 

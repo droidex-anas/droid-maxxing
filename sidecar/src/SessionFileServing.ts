@@ -21,7 +21,6 @@ interface SessionFileServingDependencies {
 
 const ignoreError = (): undefined => undefined;
 
-/** Owns the worker-backed session-file cache, watcher, and authoritative list gate. */
 export class SessionFileServing {
   private bootstrapDone = false;
   private bootReconcile: Promise<void> | null = null;
@@ -133,6 +132,8 @@ export class SessionFileServing {
 
   private queueReconcile(operation: () => Promise<void>): Promise<void> {
     const result = this.reconcileTail.then(operation, operation);
+    // Settled tail: callers still observe `result`; close() must not inherit an
+    // unhandled rejection from a reconcile that raced a removed session file.
     this.reconcileTail = result.catch(ignoreError);
     return result;
   }

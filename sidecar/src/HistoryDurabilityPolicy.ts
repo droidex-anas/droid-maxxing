@@ -20,7 +20,6 @@ interface DurabilityDecision {
   holdWhileBlocked: boolean;
 }
 
-/** Owns which accepted history state requires a durable publication boundary. */
 export class HistoryDurabilityPolicy {
   private readonly summaries = new Map<string, SummaryState>();
   private readonly children = new Map<string, ChildState>();

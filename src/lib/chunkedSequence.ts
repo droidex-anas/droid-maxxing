@@ -21,11 +21,6 @@ const mutatingMethods = new Set([
   'unshift',
 ]);
 
-/**
- * Presents immutable chunks through the existing Array contract. Array-shaped
- * consumers can migrate independently while suffix updates retain every
- * settled chunk instead of copying the complete sequence.
- */
 export function asChunkedSequence<T>(values: readonly T[], chunkSize = DEFAULT_CHUNK_SIZE): T[] {
   validateChunkSize(chunkSize);
   const existing = getSequenceState(values);
@@ -53,7 +48,6 @@ function resolveChunkedSequence<T>(values: readonly T[]): T[] {
   return getSequenceState(values) ? (values as T[]) : asChunkedSequence(values);
 }
 
-/** Replaces one suffix while retaining settled chunks by reference. */
 export function replaceChunkedSequenceSuffix<T>(
   values: readonly T[],
   start: number,
@@ -75,7 +69,6 @@ export function replaceChunkedSequenceSuffix<T>(
   return createSequence(stateFromChunks([...prefixChunks, ...replacementChunks], state.chunkSize));
 }
 
-/** Inserts a page without copying the retained prefix or live suffix events. */
 export function insertChunkedSequence<T>(
   values: readonly T[],
   index: number,
@@ -93,7 +86,6 @@ export function insertChunkedSequence<T>(
   return createSequence(stateFromChunks(chunks, state.chunkSize));
 }
 
-/** Replaces one prefix while retaining the unaffected suffix chunks. */
 export function replaceChunkedSequencePrefix<T>(
   values: readonly T[],
   end: number,
@@ -137,7 +129,6 @@ export function chunkedSequenceDiagnostics(values: readonly unknown[]): {
   };
 }
 
-/** Returns stable chunk references for coarse-grained render memoization. */
 export function chunkedSequenceChunks<T>(values: readonly T[]): readonly (readonly T[])[] {
   const sequence = resolveChunkedSequence(values);
   const state = requiredSequenceState(sequence);

@@ -37,12 +37,8 @@ interface EventIdIndex {
 const EVENT_ID_BUCKET_COUNT = 256;
 const transcriptRuntimes = new WeakMap<readonly TranscriptEvent[], TranscriptRuntime>();
 
-/**
- * Applies one ordered run to immutable settled chunks and a bounded live
- * chunk. Incoming streaming delta IDs intentionally do not enter the retained
- * index because coalescing does not retain those events; this mirrors the
- * sidecar's literal delta semantics.
- */
+// Streaming delta IDs stay out of the retained index; coalescing does not keep
+// those events (sidecar SessionTimeline mergeStreamingDelta semantics).
 export function ingestTranscriptEvents(
   previous: TranscriptEvent[],
   previousCost: number,
@@ -130,8 +126,7 @@ export function ingestTranscriptEvents(
 }
 
 /**
- * Adapts reducer replacements to the canonical runtime. Proven appends and
- * prepends retain chunk identity; resets build a fresh authoritative index.
+ * Proven appends/prepends retain chunk identity; resets rebuild the index.
  */
 export function normalizeTranscriptUpdate(
   previous: TranscriptEvent[],

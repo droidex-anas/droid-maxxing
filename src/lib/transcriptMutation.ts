@@ -12,7 +12,6 @@ export type TranscriptMutation = TranscriptMutationChange & {
   baseRevision: number;
 };
 
-/** Detect one exact insertion that retains every previous event by reference. */
 export function detectPureTranscriptPrepend<T>(
   previous: readonly T[],
   next: readonly T[],
@@ -42,7 +41,6 @@ export function detectPureTranscriptPrepend<T>(
   };
 }
 
-/** Creates the next mutation record in the canonical transcript revision chain. */
 export function nextTranscriptMutation(
   previous: TranscriptMutation | undefined,
   change: TranscriptMutationChange,
@@ -61,10 +59,6 @@ export function nextTranscriptMutation(
   };
 }
 
-/**
- * Collapses the mutation records observed during one batch into one invalidation.
- * A reset or missing revision link requires a conservative full reset.
- */
 export function aggregateTranscriptMutations(
   batchStartRevision: number,
   records: readonly TranscriptMutation[],
@@ -132,7 +126,6 @@ function mutationBreaksBatchLineage(
   );
 }
 
-/** Records new mutation objects published by one immutable state transition. */
 export function observeTranscriptMutationChanges(
   records: Map<string, TranscriptMutation[]>,
   before: Readonly<Record<string, TranscriptMutation>>,
@@ -148,7 +141,6 @@ export function observeTranscriptMutationChanges(
   }
 }
 
-/** Replaces final per-action mutations with one mutation per changed batch key. */
 export function aggregateTranscriptMutationBatch(
   batchStart: Readonly<Record<string, TranscriptMutation>>,
   final: Record<string, TranscriptMutation>,
@@ -158,7 +150,9 @@ export function aggregateTranscriptMutationBatch(
 
   for (const [appSessionId, observed] of records) {
     if (!Object.hasOwn(final, appSessionId)) continue;
-    const batchStartRevision = transcriptMutationAt(batchStart, appSessionId)?.revision ?? 0;
+    const batchStartRevision = Object.hasOwn(batchStart, appSessionId)
+      ? batchStart[appSessionId].revision
+      : 0;
     const aggregate = aggregateTranscriptMutations(batchStartRevision, observed);
     if (aggregate === undefined) continue;
 
@@ -167,13 +161,6 @@ export function aggregateTranscriptMutationBatch(
   }
 
   return result ?? final;
-}
-
-function transcriptMutationAt(
-  mutations: Readonly<Record<string, TranscriptMutation>>,
-  appSessionId: string,
-): TranscriptMutation | undefined {
-  return mutations[appSessionId];
 }
 
 function validateMutation(mutation: TranscriptMutation): void {

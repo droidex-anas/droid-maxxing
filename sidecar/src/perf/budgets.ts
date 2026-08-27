@@ -1,13 +1,10 @@
-// Provisional sidecar budgets for perf phase 0. The #115 performance contract
-// targets the *renderer* experience (typing stays responsive, event-to-paint
-// p95 within one to three frames); these translate the sidecar-measurable
-// legs of that contract. Numbers are Phase 0 calibration defaults, not
-// release gates — the baseline reports decide the final budgets.
+// Sidecar-measurable legs of the renderer contract. Numbers are calibration
+// defaults, not release gates; baseline reports decide the final budgets.
 
 import type { HotPathMetricsSnapshot } from '../telemetry/hotPathMetrics.js';
 import type { ReplayReport } from './report.js';
 
-export interface BudgetResult {
+interface BudgetResult {
   name: string;
   budgetMs: number;
   actualMs: number | null;
