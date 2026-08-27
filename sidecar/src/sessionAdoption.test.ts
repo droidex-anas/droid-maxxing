@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -49,6 +49,7 @@ test('failed provider adoption marks the session interrupted instead of running'
           providerSessionId: 'provider-app-1',
           phase: 'running',
           streaming: true,
+          lastActiveAt: 1,
         },
       ],
       children: [],
@@ -99,6 +100,7 @@ test('a resumed in-flight session is paused with an interrupt reason', async () 
           providerSessionId: 'provider-app-2',
           phase: 'running',
           streaming: true,
+          lastActiveAt: 1,
         },
       ],
       children: [],
@@ -192,8 +194,6 @@ test('running children are marked interrupted and written out of the live journa
 interface BootCase {
   identity?: Partial<LiveSessionIdentity>;
   children?: LiveChildIdentity[];
-  // `null` is a session with no persisted summary, so no record of idleness.
-  historical?: SessionSummary | null;
 }
 
 function bootAdoption(dir: string, options: BootCase = {}) {
@@ -202,20 +202,17 @@ function bootAdoption(dir: string, options: BootCase = {}) {
     providerSessionId: 'provider-app-boot',
     phase: 'completed',
     streaming: false,
+    lastActiveAt: NOW - SESSION_RUNTIME_IDLE_RETIREMENT_MS - 1,
     ...options.identity,
   };
   const journal = new LiveRuntimeJournal(liveRuntimeJournalPath(dir));
   journal.write({ sessions: [identity], children: options.children ?? [] });
-  const historical =
-    options.historical === undefined
-      ? { ...summary(identity.appSessionId, 'completed'), updatedAt: 1 }
-      : options.historical;
   const resumed: string[] = [];
   const adoption = new SessionAdoption({
     journal,
     registry: {
       liveSessionsSnapshot: () => [],
-      getCanonicalSummary: () => historical ?? undefined,
+      getCanonicalSummary: () => summary(identity.appSessionId, 'completed'),
       getLive: () => undefined,
     },
     lifecycle: {
@@ -261,11 +258,12 @@ test('a settled session idle past the budget is not given a provider process at 
 });
 
 test('a settled session inside the budget still gets its runtime back', async () => {
-  const historical = {
-    ...summary('app-boot', 'completed'),
-    updatedAt: NOW - SESSION_RUNTIME_IDLE_RETIREMENT_MS + 60_000,
-  };
-  assert.equal(await bootResumes('adoption-fresh', { historical }), true);
+  assert.equal(
+    await bootResumes('adoption-fresh', {
+      identity: { lastActiveAt: NOW - SESSION_RUNTIME_IDLE_RETIREMENT_MS + 60_000 },
+    }),
+    true,
+  );
 });
 
 test('a session interrupted mid-turn is resurrected however long it has been idle', async () => {
@@ -295,6 +293,47 @@ test('a session whose children were still running is resurrected', async () => {
   );
 });
 
-test('a session with no persisted summary is resurrected because its idleness is unknown', async () => {
-  assert.equal(await bootResumes('adoption-unknown', { historical: null }), true);
+test('the journal carries when each live session was last active', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'adoption-journal-'));
+  try {
+    const journal = new LiveRuntimeJournal(liveRuntimeJournalPath(dir));
+    const live = { summary: { ...summary('app-journal', 'completed'), updatedAt: 12_345 } };
+    const adoption = new SessionAdoption({
+      journal,
+      registry: {
+        liveSessionsSnapshot: () => [live],
+        getCanonicalSummary: () => live.summary,
+        getLive: () => live,
+      },
+      lifecycle: { resume: async () => true },
+      liveChildren: () => [],
+      persistSummaries: () => undefined,
+      emitStatus: () => undefined,
+      sessionRuntimeIdleMs: SESSION_RUNTIME_IDLE_RETIREMENT_MS,
+      now: () => NOW,
+    });
+
+    adoption.persistLiveSet();
+    assert.equal(journal.read().sessions[0]?.lastActiveAt, 12_345);
+
+    // A journal entry without it cannot be judged against the budget, so it is
+    // not a journal entry. Only DROIDEX writes this file.
+    writeFileSync(
+      liveRuntimeJournalPath(dir),
+      JSON.stringify({
+        sessions: [
+          {
+            appSessionId: 'app-journal',
+            providerSessionId: 'provider-app-journal',
+            phase: 'completed',
+            streaming: false,
+          },
+        ],
+        children: [],
+      }),
+    );
+    assert.deepEqual(journal.read().sessions, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

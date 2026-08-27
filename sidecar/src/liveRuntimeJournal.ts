@@ -10,6 +10,11 @@ export interface LiveSessionIdentity {
   providerSessionId: string;
   phase: SessionPhase;
   streaming: boolean;
+  // When the session last did anything. Adoption needs it to tell a session
+  // worth a provider process from one the first retirement sweep would
+  // release, and a session that never produced a transcript has no persisted
+  // summary to read it from.
+  lastActiveAt: number;
 }
 
 export interface LiveChildIdentity {
@@ -79,11 +84,13 @@ function sessionIdentity(value: unknown): LiveSessionIdentity | null {
     return null;
   }
   if (typeof record.phase !== 'string') return null;
+  if (typeof record.lastActiveAt !== 'number' || !Number.isFinite(record.lastActiveAt)) return null;
   return {
     appSessionId: record.appSessionId,
     providerSessionId: record.providerSessionId,
     phase: record.phase,
     streaming: record.streaming === true,
+    lastActiveAt: record.lastActiveAt,
   };
 }
 

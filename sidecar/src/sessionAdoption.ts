@@ -67,6 +67,7 @@ export class SessionAdoption {
             providerSessionId,
             phase: live.summary.phase,
             streaming: live.summary.streaming === true,
+            lastActiveAt: live.summary.updatedAt,
           },
         ];
       });
@@ -98,15 +99,11 @@ export class SessionAdoption {
     identity: LiveSessionIdentity,
     children: readonly LiveChildIdentity[],
   ): boolean {
-    // Without a persisted summary there is no record of when the session was
-    // last touched, so idleness is unknown and adoption keeps its old behavior.
-    const historical = this.dependencies.registry.getCanonicalSummary(identity.appSessionId);
-    if (!historical) return true;
     const facts = adoptedSessionFacts({
       appSessionId: identity.appSessionId,
       phase: identity.phase,
       streaming: identity.streaming,
-      lastActiveAt: historical.updatedAt,
+      lastActiveAt: identity.lastActiveAt,
       hasUnsettledChildren: children.some(
         (child) =>
           child.parentAppSessionId === identity.appSessionId &&
