@@ -90,7 +90,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   let shutdownStarted = false;
   let closeChildren: (appSessionId: string) => Promise<void> = () => Promise.resolve();
   let emitSessionList: (closedProviderSessionId: string) => void | Promise<void> = () =>
-    recordEvent({ type: 'sessions.list', sessions: registry.listSummaries() });
+    recordEvent({ type: 'sessions.list', ...registry.listSummaries() });
   let nextEmitFailure: { type: ServerEvent['type']; error: Error } | undefined;
   let now = 10_000;
   let mcpId = 0;
@@ -1150,7 +1150,7 @@ test('pending settings stay projected until successful first-send application', 
   await harness.lifecycle.resume('app-pending');
   assert.equal(harness.registry.getCanonicalSummary('app-pending')?.modelId, 'model-saved');
   assert.equal(harness.registry.resolveSummary('app-pending')?.modelId, 'model-pending');
-  assert.equal(harness.registry.listSummaries()[0]?.reasoningEffort, ReasoningEffort.High);
+  assert.equal(harness.registry.listSummaries().sessions[0]?.reasoningEffort, ReasoningEffort.High);
   assert.equal(harness.history.persisted.at(-1)?.modelId, 'model-saved');
   assert.equal(
     harness.events.find((event) => event.type === 'session.created')?.session.modelId,

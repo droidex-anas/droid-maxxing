@@ -171,6 +171,24 @@ test('buildWorkspaceSections groups registered external worktrees under their re
   );
 });
 
+test('buildWorkspaceSections totals withheld earlier sessions across a repository worktrees', () => {
+  const worktree = '/repo/app/.worktrees/feature-a';
+  const sections = buildWorkspaceSections(['/repo/app'], [session('main', '/repo/app', 1)], {
+    executionCwds: new Map([['/repo/app', ['/repo/app', worktree]]]),
+    earlierSessionsByCwd: { '/repo/app': 900, [worktree]: 43, '/repo/other': 7 },
+  });
+
+  assert.deepEqual(sections[0].executionCwds, ['/repo/app', worktree]);
+  assert.equal(sections[0].earlierSessionCount, 943);
+});
+
+test('buildWorkspaceSections reports nothing to reveal when the sidecar withheld nothing', () => {
+  const sections = buildWorkspaceSections(['/repo/app'], [session('main', '/repo/app', 1)]);
+
+  assert.deepEqual(sections[0].executionCwds, ['/repo/app']);
+  assert.equal(sections[0].earlierSessionCount, 0);
+});
+
 test('buildWorkspaceSections matches Windows worktree paths without case sensitivity', () => {
   const sections = buildWorkspaceSections(
     ['C:\\Users\\Dev\\Droid-Control'],

@@ -1,6 +1,5 @@
-import type { SessionSummary } from './protocol.js';
 import type { SessionFileChange } from './sessionFileCache.js';
-import type { SessionListFilterOptions } from './sessionListFilter.js';
+import type { SessionListFilterOptions, SessionListPage } from './sessionListFilter.js';
 import type { SessionFileWatcher, SessionFileWatcherOptions } from './sessionFileWatcher.js';
 import { errMsg } from './sessionHelpers.js';
 
@@ -15,8 +14,8 @@ interface SessionFileServingDependencies {
   isLiveSession: (providerSessionId: string) => boolean;
   isShutdownStarted: () => boolean;
   retryPendingLaunchSettings: (providerSessionIds?: string[]) => void;
-  listSummaries: (options?: SessionListFilterOptions) => SessionSummary[];
-  emitList: (sessions: SessionSummary[]) => void;
+  listSummaries: (options?: SessionListFilterOptions) => SessionListPage;
+  emitList: (page: SessionListPage) => void;
 }
 
 const ignoreError = (): undefined => undefined;

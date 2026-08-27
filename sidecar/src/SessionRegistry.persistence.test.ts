@@ -163,15 +163,15 @@ test('Mission Control history is cached until the history revision changes', () 
     now: () => 2,
   });
 
-  assert.equal(registry.listSummaries()[0]?.appSessionId, 'mission-one');
+  assert.equal(registry.listSummaries().sessions[0]?.appSessionId, 'mission-one');
   mission = summary('mission-two', 'mission-provider-two', {
     sessionPurpose: 'mission-control',
   });
 
-  assert.equal(registry.listSummaries()[0]?.appSessionId, 'mission-one');
+  assert.equal(registry.listSummaries().sessions[0]?.appSessionId, 'mission-one');
   assert.equal(missionLoads, 1);
   revision += 1;
-  assert.equal(registry.listSummaries()[0]?.appSessionId, 'mission-two');
+  assert.equal(registry.listSummaries().sessions[0]?.appSessionId, 'mission-two');
   assert.equal(missionLoads, 2);
 });
 

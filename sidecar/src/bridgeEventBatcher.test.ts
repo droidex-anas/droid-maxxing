@@ -267,7 +267,7 @@ test('user-action and domain error events bypass the normal frame window', () =>
 
 test('sessions.list bypasses the coalescing window', () => {
   const harness = createHarness();
-  harness.batcher.enqueue({ type: 'sessions.list', sessions: [] });
+  harness.batcher.enqueue({ type: 'sessions.list', sessions: [], earlierSessionsByCwd: {} });
   assert.equal(harness.batches.length, 1);
   assert.equal(harness.batches[0]?.metadata.immediate, true);
   assert.equal(harness.batches[0]?.batch.events[0]?.event.type, 'sessions.list');

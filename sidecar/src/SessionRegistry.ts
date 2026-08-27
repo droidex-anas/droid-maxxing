@@ -1,7 +1,11 @@
 import { applyCachedSummary, type HistoricalSession, type HistoryIndex } from './history.js';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { BridgeFeature, SessionSummary } from './protocol.js';
-import { filterSessionListSummaries, type SessionListFilterOptions } from './sessionListFilter.js';
+import {
+  filterSessionListSummaries,
+  type SessionListFilterOptions,
+  type SessionListPage,
+} from './sessionListFilter.js';
 import { uniqueStrings } from './sessionHelpers.js';
 
 export interface RegisteredSession {
@@ -100,12 +104,24 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     return summary ? this.project(summary) : undefined;
   }
 
-  listSummaries(options?: SessionListFilterOptions): SessionSummary[] {
+  listSummaries(options: SessionListFilterOptions = {}): SessionListPage {
     const projected = [...this.mergeCanonicalSummaries().values()]
       .map((summary) => this.project(summary))
       .sort((left, right) => right.updatedAt - left.updatedAt);
 
-    return filterSessionListSummaries(projected, options);
+    return filterSessionListSummaries(projected, options, (summary) => this.isAppOwned(summary));
+  }
+
+  // A session DROIDEX ran has a persisted app-session row (or is live right
+  // now); the patch overlay carries exactly those rows keyed by both
+  // identities. Anything else is a session file another Droid client wrote.
+  private isAppOwned(summary: SessionSummary): boolean {
+    return (
+      this.sessions.has(summary.appSessionId) ||
+      this.historicalPatches.has(summary.appSessionId) ||
+      (summary.providerSessionId !== undefined &&
+        this.historicalPatches.has(summary.providerSessionId))
+    );
   }
 
   updateSummary(

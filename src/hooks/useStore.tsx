@@ -208,6 +208,9 @@ export interface AppState {
   // Rows added locally this run (SESSION_CREATED/SESSION_UPDATED) are not in
   // the set and survive lists that do not mention them yet.
   listConfirmedSessionIds: string[] | null;
+  // Pre-existing sessions the sidecar withheld per workspace cwd, so the
+  // sidebar can offer to load a folder's older Droid sessions on demand.
+  earlierSessionsByCwd: Record<string, number>;
   activeAppSessionId: string | null;
   // appSessionId -> last time the user viewed it. A session reads as "unread" when
   // its updatedAt (latest model activity) is newer than this. Internal only:
@@ -464,7 +467,11 @@ type Action =
       message: string;
     }
   | { type: 'SESSION_CREATE_FAILED'; clientRef: string; message: string }
-  | { type: 'SESSION_LIST'; sessions: SessionSummary[] }
+  | {
+      type: 'SESSION_LIST';
+      sessions: SessionSummary[];
+      earlierSessionsByCwd: Record<string, number>;
+    }
   | {
       type: 'SESSION_HISTORY';
       appSessionId: string;
@@ -630,6 +637,7 @@ export const initialState: AppState = {
   sessions: sessionSnapshot?.sessions ?? {},
   sessionOrder: sessionSnapshot?.sessionOrder ?? [],
   listConfirmedSessionIds: sessionSnapshot?.sessionOrder ?? null,
+  earlierSessionsByCwd: {},
   activeAppSessionId: persistedUiState.activeAppSessionId ?? null,
   sessionLastSeen: loadSessionLastSeen(),
   chatMetadata: loadChatMetadata(),
@@ -1652,6 +1660,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         sessionLastSeen: seededLastSeen,
         chatMetadata,
         listConfirmedSessionIds: action.sessions.map((m) => m.appSessionId),
+        earlierSessionsByCwd: action.earlierSessionsByCwd,
         activeAppSessionId,
       };
     }
@@ -2677,7 +2686,11 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       }
       return { type: 'SESSION_ERROR', message: ev.message };
     case 'sessions.list':
-      return { type: 'SESSION_LIST', sessions: ev.sessions };
+      return {
+        type: 'SESSION_LIST',
+        sessions: ev.sessions,
+        earlierSessionsByCwd: ev.earlierSessionsByCwd,
+      };
     case 'session.history':
       return {
         type: 'SESSION_HISTORY',

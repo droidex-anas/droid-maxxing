@@ -37,6 +37,7 @@ import {
   SIDEBAR_VISIBLE_SESSION_LIMIT,
   type WorkspaceScope,
 } from '../lib/workspaces';
+import { SidebarSessionList } from './SidebarSessionList';
 import { chatDisplayTitle, isChatHidden, isChatPinned, pinnedChats } from '../lib/chatMetadata';
 import { exportSessionMarkdown, renameSession } from '../lib/commands';
 import { toast } from '../lib/toast';
@@ -104,13 +105,20 @@ function Expand({ open, children }: { open: boolean; children: ReactNode }) {
   );
 }
 
-export default function Sidebar({ workspaceScopes }: { workspaceScopes: WorkspaceScope[] }) {
+export default function Sidebar({
+  workspaceScopes,
+  onShowEarlierSessions,
+}: {
+  workspaceScopes: WorkspaceScope[];
+  onShowEarlierSessions: (executionCwds: readonly string[]) => void;
+}) {
   const dispatch = useStoreDispatch();
   const state = useStoreSelector(
     (current) => ({
       activeAppSessionId: current.activeAppSessionId,
       chatMetadata: current.chatMetadata,
       draftChat: current.draftChat,
+      earlierSessionsByCwd: current.earlierSessionsByCwd,
       mainView: current.mainView,
       pendingPermissions: current.pendingPermissions,
       pendingQuestions: current.pendingQuestions,
@@ -273,14 +281,22 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
     const sections = buildWorkspaceSections(
       workspaceScopes.map((scope) => scope.cwd),
       sessions,
-      { executionCwds },
+      { executionCwds, earlierSessionsByCwd: state.earlierSessionsByCwd },
     );
     // In unread-only mode, drop read sessions and workspaces left empty.
     if (!unreadOnly) return sections;
     return sections
       .map((ws) => ({ ...ws, sessions: ws.sessions.filter(isUnread) }))
       .filter((ws) => ws.sessions.length > 0);
-  }, [state.sessionOrder, state.sessions, workspaceScopes, unreadOnly, isUnread, isListedNormally]);
+  }, [
+    state.sessionOrder,
+    state.sessions,
+    state.earlierSessionsByCwd,
+    workspaceScopes,
+    unreadOnly,
+    isUnread,
+    isListedNormally,
+  ]);
 
   const handleSelectSession = useCallback(
     (appSessionId: string) => {
@@ -367,54 +383,26 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
     />
   );
 
-  // Show the latest sessions and tuck the rest behind a "Show more" toggle. The
-  // active session is always kept visible so selecting an older one never hides
-  // it on the next render.
-  const renderSessionList = (sectionKey: string, sessions: SessionSummary[]) => {
-    const total = sessions.length;
-    const count = Math.min(visibleCountFor(sectionKey), total);
-    let visible = sessions.slice(0, count);
-    // Keep the active session visible even if it sits below the paged window so
-    // selecting an older chat never hides it on the next render.
-    if (
-      activeSession &&
-      sessions.some((m) => m.appSessionId === activeSession.appSessionId) &&
-      !visible.some((m) => m.appSessionId === activeSession.appSessionId)
-    ) {
-      visible = [...visible, state.sessions[activeSession.appSessionId]];
-    }
-    const remaining = total - count;
-    const isExpanded = count > SIDEBAR_VISIBLE_SESSION_LIMIT;
-    return (
-      <div className="mt-0.5 space-y-0.5">
-        {visible.map(renderRow)}
-        {(remaining > 0 || isExpanded) && (
-          <div className="flex items-center gap-3 pl-3 pr-2 pt-0.5">
-            {remaining > 0 && (
-              <button
-                onClick={() => {
-                  showMore(sectionKey);
-                }}
-                className="text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
-              >
-                Show more
-              </button>
-            )}
-            {isExpanded && (
-              <button
-                onClick={() => {
-                  showLess(sectionKey);
-                }}
-                className="text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
-              >
-                Show less
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
+  const renderSessionList = (
+    sectionKey: string,
+    sessions: SessionSummary[],
+    earlier?: { count: number; onShow: () => void },
+  ) => (
+    <SidebarSessionList
+      sessions={sessions}
+      visibleCount={visibleCountFor(sectionKey)}
+      activeAppSessionId={state.activeAppSessionId}
+      renderRow={renderRow}
+      onShowMore={() => {
+        showMore(sectionKey);
+      }}
+      onShowLess={() => {
+        showLess(sectionKey);
+      }}
+      earlierSessionCount={earlier?.count}
+      onShowEarlier={earlier?.onShow}
+    />
+  );
 
   return (
     <aside
@@ -599,7 +587,14 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
                           dispatch({ type: 'REMOVE_WORKSPACE', cwd: ws.cwd });
                         }}
                       >
-                        <Expand open={wsOpen}>{renderSessionList(ws.cwd, ws.sessions)}</Expand>
+                        <Expand open={wsOpen}>
+                          {renderSessionList(ws.cwd, ws.sessions, {
+                            count: ws.earlierSessionCount,
+                            onShow: () => {
+                              onShowEarlierSessions(ws.executionCwds);
+                            },
+                          })}
+                        </Expand>
                       </SidebarWorkspaceRow>
                     );
                   })}

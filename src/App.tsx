@@ -6,7 +6,6 @@ import { bridge } from './lib/bridge';
 import {
   connect,
   listFactoryDefaults,
-  listSessions,
   loadSessionHistory,
   sendNativeBrowserResult,
   openChild,
@@ -44,6 +43,7 @@ import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
 import { useWorkspaceScopes } from './hooks/useWorkspaceScopes';
+import { useWorkspaceSessionList } from './hooks/useWorkspaceSessionList';
 import { useHistoryIndexingIdle } from './hooks/useHistoryIndexingIdle';
 import { useBackgroundWorkTier } from './hooks/useBackgroundWorkTier';
 import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
@@ -165,6 +165,10 @@ export default function App() {
     state.workspaceCwds,
     !embedded && documentVisible,
     setCanonicalWorkspaceCwds,
+  );
+  const showEarlierSessions = useWorkspaceSessionList(
+    workspaceScopes,
+    !embedded && workspaceScopesReady,
   );
   // Mission Control is active only for a session explicitly created for it,
   // not merely because the compose preview is open.
@@ -337,14 +341,6 @@ export default function App() {
       listFactoryDefaults();
     })();
   }, [embedded]);
-
-  useEffect(() => {
-    if (embedded || !workspaceScopesReady) return;
-    // Load every known session for the chosen workspaces; the sidebar shows the
-    // latest few and reveals the rest behind "Show more" rather than capping.
-    const workspaceCwds = [...new Set(workspaceScopes.flatMap((scope) => scope.executionCwds))];
-    listSessions({ workspaceCwds, includePlainChats: true });
-  }, [embedded, workspaceScopes, workspaceScopesReady]);
 
   // App update discovery must never wait on CLI/env probing: that work can be
   // slow or unavailable, while the verified appcast is independent.
@@ -550,7 +546,10 @@ export default function App() {
               transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
               className="shrink-0 overflow-hidden h-full"
             >
-              <Sidebar workspaceScopes={workspaceScopes} />
+              <Sidebar
+                workspaceScopes={workspaceScopes}
+                onShowEarlierSessions={showEarlierSessions}
+              />
             </motion.div>
           )}
         </AnimatePresence>

@@ -455,8 +455,8 @@ export class SessionManager {
         this.childSessions.retryPendingLaunchSettings(providerSessionIds);
       },
       listSummaries: (listOptions) => this.registry.listSummaries(listOptions),
-      emitList: (sessions) => {
-        this.emit({ type: 'sessions.list', sessions });
+      emitList: ({ sessions, earlierSessionsByCwd }) => {
+        this.emit({ type: 'sessions.list', sessions, earlierSessionsByCwd });
       },
     });
     this.missionControlPolicy = new MissionControlPolicy({

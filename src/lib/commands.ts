@@ -306,7 +306,7 @@ export const reanchorSessionsForWorktreeRemoval = (
 export const listSessions = (options?: {
   workspaceCwds?: string[];
   includePlainChats?: boolean;
-  limitPerWorkspace?: number;
+  revealEarlierCwds?: string[];
 }) => {
   bridge.send({ type: 'sessions.list', ...options });
 };
