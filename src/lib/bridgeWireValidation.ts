@@ -206,7 +206,13 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'session.history.error':
       return hasStrings(value, ['appSessionId', 'message']);
     case 'sessions.searchResults':
-      return typeof value.requestId === 'string' && recordArray(value.results);
+      return (
+        typeof value.requestId === 'string' &&
+        recordArray(value.results) &&
+        typeof value.indexingIncomplete === 'boolean'
+      );
+    case 'history.persistenceRecovered':
+      return true;
     case 'history.list':
       return Array.isArray(value.sessions) && value.sessions.every(isSessionHistoryEntry);
     case 'browser.updated':

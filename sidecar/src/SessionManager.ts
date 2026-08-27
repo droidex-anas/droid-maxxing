@@ -10,8 +10,8 @@ import type {
   ConfigurableSessionRole,
   FactoryDefaultSettings,
   InstallChannel,
+  HistorySearchReply,
   PersistenceRecovery,
-  SessionSearchResult,
   SessionSummary,
   ModelInfo,
   ReasoningEffort,
@@ -47,6 +47,7 @@ import {
   resolveSessionChain,
 } from './history.js';
 import { HistoryPersistence } from './HistoryPersistence.js';
+import { serverEventForHistoryStatus } from './historyStatusEvents.js';
 import { type HistorySearchClient } from './HistoryWorkerClient.js';
 import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
@@ -121,7 +122,7 @@ type SessionHistoryBase = Pick<
 };
 
 type SessionHistory = SessionHistoryBase & {
-  searchSessions(query: string, isStale?: () => boolean): Promise<SessionSearchResult[]>;
+  searchSessions(query: string, isStale?: () => boolean): Promise<HistorySearchReply>;
   setIndexingIdle(isIdle: boolean): Promise<void>;
   reconcileSessionFiles(): Promise<number>;
   reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number>;
@@ -282,26 +283,7 @@ export class SessionManager {
       this.history = new HistoryPersistence({
         ...(options.searchClient ? { searchClient: options.searchClient } : {}),
         onStatusChanged: (status) => {
-          if (status.state === 'healthy') return;
-          if (status.state === 'search_unavailable') {
-            this.emit({
-              type: 'error',
-              code: 'history.search_unavailable',
-              message:
-                `History search is unavailable: ${status.message} ` +
-                'Canonical session history is unaffected.',
-              recoverable: false,
-            });
-            return;
-          }
-          this.emit({
-            type: 'error',
-            code: 'history.persistence_degraded',
-            message:
-              `History durability is temporarily degraded: ${status.message} ` +
-              'Live work will continue while buffered capacity remains; settlement will retry.',
-            recoverable: true,
-          });
+          this.emit(serverEventForHistoryStatus(status));
         },
         onDurabilityRecovered: () => {
           if (this.shutdownPromise) return;
@@ -769,9 +751,14 @@ export class SessionManager {
         this.latestSearchRequestId = cmd.requestId;
         const isStale = (): boolean => this.latestSearchRequestId !== cmd.requestId;
         try {
-          const results = await this.history.searchSessions(cmd.query, isStale);
+          const reply = await this.history.searchSessions(cmd.query, isStale);
           if (!isStale()) {
-            this.emit({ type: 'sessions.searchResults', requestId: cmd.requestId, results });
+            this.emit({
+              type: 'sessions.searchResults',
+              requestId: cmd.requestId,
+              results: reply.results,
+              indexingIncomplete: reply.indexingIncomplete,
+            });
           }
         } catch (error) {
           if (!isHistorySearchUnavailableError(error)) throw error;

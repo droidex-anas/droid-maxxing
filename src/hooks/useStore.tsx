@@ -71,6 +71,7 @@ import type {
 } from '../types/bridge';
 import { addWorkspaceCwd, removeWorkspaceCwd } from '../lib/workspaces';
 import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
+import { isHistoryStatusError, applyHistoryServerEvent } from '../lib/historyHealth';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
 import {
   applyFactoryCompactionDefaults,
@@ -2573,6 +2574,7 @@ function baseReducer(state: AppState, action: Action): AppState {
 
 /* ── Bridge event adapter ── */
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
+  if (isHistoryStatusError(ev)) return undefined;
   if (
     ev.type === 'error' &&
     (ev.code === 'bridge.unsupported_command' ||
@@ -2645,6 +2647,7 @@ export function adaptEvent(ev: ServerEvent): Action | null {
     case 'question.requested':
       return { type: 'SESSION_QUESTION', question: ev.question };
     case 'error':
+      if (isHistoryStatusError(ev)) return null;
       if (ev.code === 'bridge.resync_required' && !ev.recoverable) {
         return { type: 'SET_CONNECTION', status: 'error', message: ev.message };
       }
@@ -2867,6 +2870,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // deep-clones + redacts the whole event, so keep it to dev builds only;
         // production strips this branch entirely.
         if (import.meta.env.DEV) console.log('[bridge]', ev.type, sanitizeForLog(ev));
+        applyHistoryServerEvent(ev);
         const toastMessage = toastMessageForEvent(ev);
         if (toastMessage !== undefined) toast.error(toastMessage);
         const action = adaptEvent(ev);

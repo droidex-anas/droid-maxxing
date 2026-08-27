@@ -232,18 +232,22 @@ test(
       const reconciliation = await client.reconcileSessionFiles();
       assert.equal(reconciliation.changed, 1);
       assert.equal(reconciliation.upserts[0]?.providerSessionId, providerSessionId);
+      const firstSearch = await client.search('hello');
       assert.deepEqual(
-        await client.search('hello'),
+        firstSearch.results,
         [],
         'search does not block on an uncommitted indexing slice',
       );
+      assert.equal(firstSearch.indexingIncomplete, true);
 
       unlinkSync(sessionPath);
       const removal = await client.reconcileSessionFilePaths([
         { providerSessionId, path: sessionPath },
       ]);
       assert.deepEqual(removal.removedProviderSessionIds, [providerSessionId]);
-      assert.deepEqual(await client.search('hello'), []);
+      const afterRemoval = await client.search('hello');
+      assert.deepEqual(afterRemoval.results, []);
+      assert.equal(afterRemoval.indexingIncomplete, false);
       client.closeSync();
     } finally {
       if (previousHome === undefined) delete process.env['HOME'];

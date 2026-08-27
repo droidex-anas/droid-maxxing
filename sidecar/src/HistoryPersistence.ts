@@ -27,6 +27,7 @@ import {
 import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import { PersistenceDirtyMarker, persistenceDirtyMarkerPath } from './persistenceDirtyMarker.js';
 import type {
+  HistorySearchReply,
   PersistenceRecovery,
   SessionSearchResult,
   SessionSummary,
@@ -43,7 +44,7 @@ export interface HistoryPersistenceOptions {
   onDurabilityRecovered?: () => void;
 }
 
-type HistoryPersistenceStatus =
+export type HistoryPersistenceStatus =
   | { state: 'healthy' }
   | { state: 'degraded'; message: string }
   | { state: 'search_unavailable'; message: string };
@@ -157,16 +158,19 @@ export class HistoryPersistence {
       });
   }
 
-  async searchSessions(query: string, isStale?: () => boolean): Promise<SessionSearchResult[]> {
+  async searchSessions(query: string, isStale?: () => boolean): Promise<HistorySearchReply> {
     this.pauseBackgroundIndexing();
-    if (isStale?.()) return [];
+    if (isStale?.()) return { results: [], indexingIncomplete: false };
     const runtimeAliases = searchAliases(this.runtimeSummaries.values());
-    const results = await this.withSearchClient((client) => client.search(query));
-    if (isStale?.()) return [];
+    const reply = await this.withSearchClient((client) => client.search(query));
+    if (isStale?.()) return { results: [], indexingIncomplete: reply.indexingIncomplete };
     for (const [providerSessionId, appSessionId] of searchAliases(this.runtimeSummaries.values())) {
       runtimeAliases.set(providerSessionId, appSessionId);
     }
-    return applySearchAliases(results, runtimeAliases);
+    return {
+      results: applySearchAliases(reply.results, runtimeAliases),
+      indexingIncomplete: reply.indexingIncomplete,
+    };
   }
 
   async setIndexingIdle(isIdle: boolean): Promise<void> {

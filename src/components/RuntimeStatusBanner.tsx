@@ -1,33 +1,66 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { createElement, useEffect, useState, type ComponentType } from 'react';
 
+import { useHistoryHealth } from '../hooks/useHistoryHealth';
 import { useRuntimeHealth } from '../hooks/useRuntimeHealth';
+import { HISTORY_PERSISTENCE_DEGRADED_MESSAGE } from '../lib/historyStatusCopy';
 import { hasConnectedAgentTransport } from '../lib/runtimeHealth';
 
 export default function RuntimeStatusBanner() {
   const health = useRuntimeHealth();
+  const history = useHistoryHealth();
   const [seenHealthy, setSeenHealthy] = useState(false);
   useEffect(() => {
     if (health.lifecycle === 'healthy') setSeenHealthy(true);
   }, [health.lifecycle]);
-  const message = statusMessage(
+  const runtimeMessage = statusMessage(
     health.lifecycle,
     health.transport,
     seenHealthy,
     hasConnectedAgentTransport(),
     health.reason,
   );
-  if (!message) return null;
-  const Icon = health.lifecycle === 'recovery-required' ? AlertTriangle : RefreshCw;
-  const accent =
+  const persistenceDegraded = history.persistence === 'degraded';
+  if (!runtimeMessage && !persistenceDegraded) return null;
+  const runtimeIcon = health.lifecycle === 'recovery-required' ? AlertTriangle : RefreshCw;
+  const runtimeAccent =
     health.lifecycle === 'recovery-required' ? 'text-droid-orange' : 'text-droid-accent';
 
   return (
+    <>
+      {runtimeMessage ? (
+        <StatusBannerRow icon={runtimeIcon} accent={runtimeAccent} message={runtimeMessage} />
+      ) : null}
+      {persistenceDegraded ? (
+        <StatusBannerRow
+          icon={AlertTriangle}
+          accent="text-droid-orange"
+          message={HISTORY_PERSISTENCE_DEGRADED_MESSAGE}
+          testId="history-persistence-banner"
+        />
+      ) : null}
+    </>
+  );
+}
+
+function StatusBannerRow({
+  icon,
+  accent,
+  message,
+  testId,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  accent: string;
+  message: string;
+  testId?: string;
+}) {
+  return (
     <div
       role="status"
+      data-testid={testId}
       className="shrink-0 flex items-center gap-2 px-4 h-8 border-b border-droid-border bg-droid-elevated/60 text-[12px]"
     >
-      <Icon className={`w-3.5 h-3.5 ${accent}`} />
+      {createElement(icon, { className: `w-3.5 h-3.5 ${accent}` })}
       <span className="text-droid-text">{message}</span>
     </div>
   );

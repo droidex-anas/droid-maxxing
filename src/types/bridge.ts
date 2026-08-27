@@ -334,6 +334,11 @@ export interface SessionSearchResult {
   matches: SessionSearchMatch[];
 }
 
+export interface HistorySearchReply {
+  results: SessionSearchResult[];
+  indexingIncomplete: boolean;
+}
+
 export interface BrowserViewport {
   width: number;
   height: number;
@@ -885,7 +890,9 @@ export type ServerEvent =
       type: 'sessions.searchResults';
       requestId: string;
       results: SessionSearchResult[];
+      indexingIncomplete: boolean;
     }
+  | { type: 'history.persistenceRecovered' }
   | { type: 'history.list'; sessions: SessionHistoryEntry[] }
   | { type: 'browser.updated'; state: BrowserState }
   | { type: 'browser.native.request'; request: BrowserNativeRequest }

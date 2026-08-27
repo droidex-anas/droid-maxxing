@@ -133,13 +133,17 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
   // The fake does not scan transcripts; tests that exercise the
   // sessions.search command seed the results they expect back.
   nextSearchResults: Protocol.SessionSearchResult[] = [];
+  nextIndexingIncomplete = false;
   lastSearchQuery: string | null = null;
 
   // Mirrors the production contract: records the query for assertions and
   // returns nothing once the scan has been superseded.
-  searchSessions(query?: string, isStale?: () => boolean): Promise<Protocol.SessionSearchResult[]> {
+  searchSessions(query?: string, isStale?: () => boolean): Promise<Protocol.HistorySearchReply> {
     this.lastSearchQuery = query ?? null;
-    return Promise.resolve(isStale?.() ? [] : this.nextSearchResults);
+    return Promise.resolve({
+      results: isStale?.() ? [] : this.nextSearchResults,
+      indexingIncomplete: this.nextIndexingIncomplete,
+    });
   }
 
   readonly indexingIdleStates: boolean[] = [];

@@ -22,6 +22,7 @@ const IMMEDIATE_EVENT_TYPES = new Set<ServerEvent['type']>([
   'session.history.error',
   'sessions.list',
   'sessions.searchResults',
+  'history.persistenceRecovered',
   'browser.native.request',
   'browser.closed',
   'browser.error',
