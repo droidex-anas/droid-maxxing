@@ -13,9 +13,7 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
-  CONVERSATION_LIST_MIN_WINDOW,
   CONVERSATION_VISIBLE_HOLE_PX,
-  conversationRangeExtractor,
   conversationRowMountKey,
   conversationRowViewportId,
   estimatedListEndOffset,
@@ -96,7 +94,6 @@ function createListEngine(options: {
     overscan: CONVERSATION_LIST_OVERSCAN,
     gap: CONVERSATION_LIST_GAP_PX,
     getItemKey: (index) => itemsRef.current[index]?.key ?? index,
-    rangeExtractor: conversationRangeExtractor,
     initialRect: { width: CONVERSATION_LIST_INITIAL_RECT.width, height: viewportHeight },
     initialOffset: scrollTop,
     scrollEndThreshold: CONVERSATION_LIST_PIN_THRESHOLD_PX,
@@ -143,26 +140,6 @@ function pinFollowMeasuredEnd(engine: ReturnType<typeof createListEngine>) {
   engine.element.scrollTop = Math.min(engine.element.scrollTop, maxTop);
   engine.notifyOffset();
 }
-
-test('range extractor keeps a minimum window without exceeding the list', () => {
-  const mid = conversationRangeExtractor({
-    startIndex: 100,
-    endIndex: 115,
-    overscan: CONVERSATION_LIST_OVERSCAN,
-    count: 3_000,
-  });
-  assert.equal(mid[0], 100 - Math.ceil((CONVERSATION_LIST_MIN_WINDOW - 16) / 2));
-  assert.equal(mid.length, CONVERSATION_LIST_MIN_WINDOW);
-  const tail = conversationRangeExtractor({
-    startIndex: 2_985,
-    endIndex: 2_999,
-    overscan: CONVERSATION_LIST_OVERSCAN,
-    count: 3_000,
-  });
-  assert.equal(tail[tail.length - 1], 2_999);
-  assert.ok(tail.length <= CONVERSATION_LIST_MIN_WINDOW);
-  assert.ok(tail.length > CONVERSATION_LIST_OVERSCAN);
-});
 
 test('visible-hole threshold is twice the list gap, not an estimated row', () => {
   assert.equal(CONVERSATION_VISIBLE_HOLE_PX, CONVERSATION_LIST_GAP_PX * 2);

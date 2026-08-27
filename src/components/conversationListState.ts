@@ -7,8 +7,6 @@ export const CONVERSATION_LIST_GAP_PX = 16;
 // Twice the designed row gap: larger holes are missing or still-estimated rows, not spacing.
 export const CONVERSATION_VISIBLE_HOLE_PX = CONVERSATION_LIST_GAP_PX * 2;
 export const CONVERSATION_LIST_PIN_THRESHOLD_PX = 80;
-// Count-based overscan of 8 is only ~160px of short rows; keep this many mounted so a 1600px gentle burst stays premeasured.
-export const CONVERSATION_LIST_MIN_WINDOW = 48;
 // Pre-measure guess so the first window exists before the scroller is observed; a wrong size only changes overscan until measure.
 export const CONVERSATION_LIST_INITIAL_RECT = { width: 720, height: 900 } as const;
 
@@ -35,23 +33,6 @@ export function estimatedListEndOffset(
   viewportHeight: number = CONVERSATION_LIST_INITIAL_RECT.height,
 ): number {
   return Math.max(0, estimatedListSize(count) - viewportHeight);
-}
-
-export function conversationRangeExtractor(range: {
-  startIndex: number;
-  endIndex: number;
-  overscan: number;
-  count: number;
-}): number[] {
-  const visible = Math.max(1, range.endIndex - range.startIndex + 1);
-  const needed = Math.max(0, CONVERSATION_LIST_MIN_WINDOW - visible);
-  const pad = Math.max(range.overscan, Math.ceil(needed / 2));
-  const start = Math.max(0, range.startIndex - pad);
-  const end = Math.min(range.count - 1, range.endIndex + pad);
-  const length = Math.max(0, end - start + 1);
-  const indexes = new Array<number>(length);
-  for (let i = 0; i < length; i += 1) indexes[i] = start + i;
-  return indexes;
 }
 
 export function isConversationAtLatest(
