@@ -365,8 +365,8 @@ function pendingChildSession(spawn: ChildSessionSpawnRef): ChildSessionInfo {
 }
 
 export function childSessionActivityForTarget(
-  childSessions: ChildSessionInfo[],
-  allTx: TranscriptEvent[],
+  childSessions: readonly ChildSessionInfo[],
+  allTx: readonly TranscriptEvent[],
   target: ChildSessionTarget,
 ): ChildSessionActivity | undefined {
   const childSession = findChildSessionForTarget(childSessions, target);

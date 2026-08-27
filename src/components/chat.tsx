@@ -74,6 +74,7 @@ import { ConversationList, type ConversationListHandle } from './ConversationLis
 import { takeFeedRowEntrance } from './conversationListState';
 import { MessageBody } from './MessageBody';
 import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
+import { StreamingCaret } from './StreamingCaret';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import {
   appendedFeedItemKeysFromProjection,
@@ -82,6 +83,8 @@ import {
   type FinalResponseKeyState,
   type FreshAppResponseState,
 } from './messageFeedState';
+
+export { StreamingCaret } from './StreamingCaret';
 
 // Open a link in the OS default browser rather than inside the Electron window.
 function openLink(e: React.MouseEvent, url: string) {
@@ -114,16 +117,6 @@ function useElapsed(startTs: number | undefined, active: boolean): number {
     };
   }, [active, visible]);
   return startTs != null ? Math.max(0, now - startTs) : 0;
-}
-
-/* ── Streaming caret (text being written) ── */
-export function StreamingCaret() {
-  return (
-    <span
-      className="caret-blink inline-block w-[2px] h-[1.05em] -mb-[0.15em] ml-0.5 rounded-sm align-baseline"
-      style={{ background: ACCENT }}
-    />
-  );
 }
 
 /* ── Working indicator — minimal shimmer label, no icons/dots/bars ── */
@@ -2081,16 +2074,21 @@ export function sameFeedEvents(a: FeedItem, b: FeedItem): boolean {
 
 // Lets memo skip the many static items while a response streams, re-rendering
 // only the growing tail.
-function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): boolean {
-  // Live-updating items (spawn lines, dock wave cards, worked groups with
-  // ticking timers) always re-render. The static types never read
-  // subagentsDock, so it is intentionally absent from the comparison below.
-  if (
-    next.item.type === 'child_session' ||
-    next.item.type === 'child_sessions' ||
-    next.item.type === 'worked'
-  )
-    return false;
+export function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): boolean {
+  // Live-updating spawn lines and worked groups still re-render; a child_sessions
+  // wave skips unless this card's events, dock (including throttled snapshots),
+  // or liveness changed. Sibling feed rows compare as usual below.
+  if (next.item.type === 'child_sessions') {
+    return (
+      prev.live === next.live &&
+      prev.sessionLive === next.sessionLive &&
+      prev.subagentsDock === next.subagentsDock &&
+      prev.onOpenChildSession === next.onOpenChildSession &&
+      prev.childSessionActivity === next.childSessionActivity &&
+      sameFeedEvents(prev.item, next.item)
+    );
+  }
+  if (next.item.type === 'child_session' || next.item.type === 'worked') return false;
   return (
     prev.live === next.live &&
     prev.autoPlayAppBlocks === next.autoPlayAppBlocks &&

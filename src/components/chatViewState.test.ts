@@ -137,3 +137,19 @@ test('chat selector observes visible session title updates', () => {
     false,
   );
 });
+
+test('chat selector observes interruptReason on the visible session', () => {
+  const previous = activeState();
+  const next: AppState = {
+    ...previous,
+    sessions: {
+      ...previous.sessions,
+      active: session('active', { interruptReason: 'could not reconnect' }),
+    },
+  };
+
+  assert.equal(
+    equalVisibleChatState(selectChatViewState(previous), selectChatViewState(next)),
+    false,
+  );
+});

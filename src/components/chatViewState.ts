@@ -43,7 +43,8 @@ function equalActiveChatSession(
       previous?.createdAt === next?.createdAt &&
       previous?.cwd === next?.cwd &&
       previous?.interactionMode === next?.interactionMode &&
-      previous?.title === next?.title)
+      previous?.title === next?.title &&
+      previous?.interruptReason === next?.interruptReason)
   );
 }
 

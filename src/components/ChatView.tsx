@@ -28,6 +28,7 @@ import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
 import { isEmbedded } from '../lib/embed';
 import { useConversationScrollWindow } from '../hooks/useConversationScrollWindow';
+import { useChildStreamSnapshots } from '../hooks/useChildStreamSnapshots';
 import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
 import {
   restoreStatusForConversationTimeline,
@@ -312,10 +313,15 @@ export default function ChatView({
 
   // Sessions may legitimately be empty right as a wave spawns; the feed renders
   // pending placeholders from the spawn events until they register.
+  const streamSnapshots = useChildStreamSnapshots(
+    childSessions,
+    allTranscript,
+    activeSession?.interruptReason,
+  );
   const subagentsDock = useMemo(() => {
     if (viewingChildSession) return undefined;
-    return { sessions: childSessions, models: state.models };
-  }, [viewingChildSession, childSessions, state.models]);
+    return { sessions: childSessions, models: state.models, snapshots: streamSnapshots };
+  }, [viewingChildSession, childSessions, state.models, streamSnapshots]);
 
   // Primary and logical-child transcripts each own their persisted cursor even
   // though live child events share the parent's in-memory event array.
