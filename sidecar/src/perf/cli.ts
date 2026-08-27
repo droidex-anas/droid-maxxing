@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderComparisonMarkdown } from './abReport.js';
+import type { ComparisonReport } from './abCompare.js';
 import {
   DEFAULT_BASELINE_REF,
   DEFAULT_COMPARE_SCENARIOS,
@@ -111,6 +112,24 @@ function docsPerfDir(): string {
   return resolve(sidecarDir, '..', 'docs', 'perf');
 }
 
+function slimComparison(report: ComparisonReport): unknown {
+  return {
+    ...report,
+    candidateReplays: report.candidateReplays.map((replay) => ({
+      scenario: replay.scenario.name,
+      kind: replay.scenario.kind,
+      durationMs: replay.durationMs,
+      providerEvents: replay.providerEvents,
+      appendedReceived: replay.client.appendedReceived,
+      eventReductionRatio: replay.sidecar.transport.eventReductionRatio,
+      pendingEventsMax: replay.sidecar.transport.queue.pendingEventsMax,
+      persistenceBoundaryP95Ms: replay.sidecar.histograms.persistenceBoundaryMs.p95Ms ?? null,
+      livePrimarySessions: replay.sidecar.resources?.livePrimarySessions ?? null,
+      gatesHardPassed: replay.gates.hardPassed,
+    })),
+  };
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   mkdirSync(options.outDir, { recursive: true });
@@ -131,13 +150,13 @@ async function main(): Promise<void> {
     writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
     writeFileSync(join(options.outDir, `${options.mode}.md`), markdown);
     writeFileSync(join(options.outDir, 'latest.md'), markdown);
-    if (options.commitReport || options.mode === 'compare') {
+    if (options.commitReport) {
       const docsDir = docsPerfDir();
       mkdirSync(docsDir, { recursive: true });
       writeFileSync(join(docsDir, 'origin-main-vs-head.md'), markdown);
       writeFileSync(
         join(docsDir, 'origin-main-vs-head.json'),
-        `${JSON.stringify(report, null, 2)}\n`,
+        `${JSON.stringify(slimComparison(report), null, 2)}\n`,
       );
     }
     console.log(markdown);
