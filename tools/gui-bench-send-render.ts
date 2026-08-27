@@ -134,8 +134,8 @@ export async function runSendRenderPass(
       'window.__guiBench.measureTyping(24, 0)',
     );
 
-    const echoOnHeavyMs = await measureEcho(app, `echo-marker-${String(run)}-${String(Date.now())}`);
     const echo100kbMs = await measureEcho(app, `SENDRENDER100KB-${'x'.repeat(100_000)}`);
+    const echoOnHeavyMs = await measureEcho(app, `echo-marker-${String(run)}-${String(Date.now())}`);
 
     const screenshotPath = join(ARTIFACTS, `gui_bench_send_echo_run${String(run)}.png`);
     writeFileSync(screenshotPath, await app.cdp.capturePng());
