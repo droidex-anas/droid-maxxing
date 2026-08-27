@@ -217,6 +217,17 @@ const BROWSER_NATIVE_TIMEOUT_MS = boundedInt(
   1_000,
   60_000,
 );
+// Production runtime limits. The overrides exist so tests can drive admission,
+// queueing, and retirement without waiting on a clock.
+function runtimeLimits(dependencies: SessionManagerDependencies | undefined) {
+  return {
+    maxLiveRuntimes: dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
+    maxQueuedRuntimes: dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
+    childRuntimeIdleMs: dependencies?.childRuntimeIdleMs ?? CHILD_RUNTIME_IDLE_RETIREMENT_MS,
+    sessionRuntimeIdleMs: dependencies?.sessionRuntimeIdleMs ?? SESSION_RUNTIME_IDLE_RETIREMENT_MS,
+  };
+}
+
 const ignoreError = (): undefined => undefined;
 
 let nativeBrowserSeq = 0;
@@ -274,6 +285,7 @@ export class SessionManager {
     private readonly emit: Emit,
     options: SessionManagerOptions = {},
   ) {
+    const limits = runtimeLimits(options.dependencies);
     let startWatcher: (
       options: SessionFileWatcherOptions,
     ) => ReturnType<typeof startSessionFileWatcher>;
@@ -455,10 +467,9 @@ export class SessionManager {
       },
       nextChildSessionId: this.nextChildSessionId,
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
-      maxLiveRuntimes: options.dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
-      maxQueuedRuntimes: options.dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
-      childRuntimeIdleMs:
-        options.dependencies?.childRuntimeIdleMs ?? CHILD_RUNTIME_IDLE_RETIREMENT_MS,
+      maxLiveRuntimes: limits.maxLiveRuntimes,
+      maxQueuedRuntimes: limits.maxQueuedRuntimes,
+      childRuntimeIdleMs: limits.childRuntimeIdleMs,
       now: Date.now,
     });
     this.sessionFiles = new SessionFileServing({
@@ -539,7 +550,7 @@ export class SessionManager {
       emitError: (appSessionId, message) => {
         this.emitError({ appSessionId, message });
       },
-      idleMs: options.dependencies?.sessionRuntimeIdleMs ?? SESSION_RUNTIME_IDLE_RETIREMENT_MS,
+      idleMs: limits.sessionRuntimeIdleMs,
       now: Date.now,
     });
     this.adoption = new SessionAdoption({
