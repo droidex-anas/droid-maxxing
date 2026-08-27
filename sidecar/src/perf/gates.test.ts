@@ -161,6 +161,12 @@ function emptySidecar(resources: { livePrimarySessions: number }) {
       livePrimarySessions: resources.livePrimarySessions,
       childAgentsTotal: 0,
       childAgentsActive: 0,
+      childAgentsLive: 0,
+      childAgentsQueued: 0,
+      contextPollers: 0,
+      contextPollersActive: 0,
+      autoCompactionWatchdogs: 0,
+      sessionFileWatchers: 0,
     },
     process: { rssBytes: 1, heapUsedBytes: 1, heapTotalBytes: 1, cpuUserMs: 1, cpuSystemMs: 0 },
   };

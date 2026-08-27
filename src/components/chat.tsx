@@ -70,11 +70,7 @@ import {
   type ConversationViewportLayout,
 } from '../hooks/conversationViewportAnchor';
 import { asChunkedSequence } from '../lib/chunkedSequence';
-import {
-  ConversationList,
-  type ConversationListHandle,
-  type ConversationVisibleRange,
-} from './ConversationList';
+import { ConversationList, type ConversationListHandle } from './ConversationList';
 import { takeFeedRowEntrance } from './conversationListState';
 import { MessageBody } from './MessageBody';
 import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
@@ -2569,7 +2565,6 @@ export function MessageFeed({
   onOpenSpecWiki,
   createdWorktreePath,
   onMountedRowsChange,
-  onVisibleRangeChange,
   scrollElementRef,
   viewportLayoutRef,
   listRef,
@@ -2592,7 +2587,6 @@ export function MessageFeed({
   onOpenSpecWiki?: () => void;
   createdWorktreePath?: string;
   onMountedRowsChange?: (count: number) => void;
-  onVisibleRangeChange?: (range: ConversationVisibleRange) => void;
   scrollElementRef?: RefObject<HTMLElement | null>;
   viewportLayoutRef?: RefObject<ConversationViewportLayout | null>;
   listRef?: RefObject<ConversationListHandle | null>;
@@ -2801,7 +2795,6 @@ export function MessageFeed({
         {...(listRef !== undefined ? { listRef } : {})}
         {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
         {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
-        {...(onVisibleRangeChange !== undefined ? { onVisibleRangeChange } : {})}
       >
         {(item, index) => (
           <>

@@ -650,3 +650,28 @@ test('authoritative session removal releases orphaned per-session state', () => 
   assert.equal(next.browserOpenKeys.gone, undefined);
   assert.equal(next.sessionSettingOverrides.gone, undefined);
 });
+
+test('memory pressure releases inactive transcripts and never drops a live turn', () => {
+  const settled = events('settled', 2_000);
+  const live = events('live', 2_000);
+  const state = {
+    ...initialState,
+    sessions: {
+      settled: session('settled', false),
+      live: session('live', true),
+    },
+    sessionOrder: ['settled', 'live'],
+    activeAppSessionId: 'live',
+    transcripts: { settled, live },
+    transcriptRetainedCost: {
+      settled: estimateTranscriptCost(settled),
+      live: estimateTranscriptCost(live),
+    },
+    transcriptViewportPinned: { settled: true, live: true },
+  };
+
+  const next = reducer(state, { type: 'MEMORY_PRESSURE' });
+  assert.ok(next.transcripts.settled.length < settled.length);
+  assert.equal(next.transcripts.live.length, live.length);
+  assert.equal(next.transcripts.live.at(-1)?.id, live.at(-1)?.id);
+});

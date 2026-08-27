@@ -121,7 +121,17 @@ test('phase 1 metrics expose reduction, queue peaks, replay and backpressure', (
 test('gauge provider supplies resource counts and failures degrade to null', () => {
   const metrics = freshMetrics();
   metrics.enable();
-  const counts = { livePrimarySessions: 2, childAgentsTotal: 7, childAgentsActive: 3 };
+  const counts = {
+    livePrimarySessions: 2,
+    childAgentsTotal: 7,
+    childAgentsActive: 3,
+    childAgentsLive: 2,
+    childAgentsQueued: 1,
+    contextPollers: 4,
+    contextPollersActive: 1,
+    autoCompactionWatchdogs: 1,
+    sessionFileWatchers: 1,
+  };
   metrics.setGaugeProvider(() => counts);
   assert.deepEqual(metrics.snapshot().resources, counts);
 

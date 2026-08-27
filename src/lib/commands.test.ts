@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bridge } from './bridge';
-import { exportSessionMarkdown, setHistoryIndexingIdle } from './commands';
+import { exportSessionMarkdown, setBackgroundWork, setHistoryIndexingIdle } from './commands';
 import type { ClientCommand, ServerEvent } from '../types/bridge';
 
 // Drives the bridge singleton with an in-memory double; exportSessionMarkdown
@@ -48,6 +48,18 @@ test('history indexing idle samples are ephemeral and use the connected-only lan
   try {
     assert.equal(setHistoryIndexingIdle(true), true);
     assert.deepEqual(fake.sent, [{ type: 'history.indexingIdle', isIdle: true }]);
+  } finally {
+    fake.restore();
+  }
+});
+
+test('background work tier samples are ephemeral and use the connected-only lane', () => {
+  const fake = fakeBridge();
+  try {
+    assert.equal(setBackgroundWork('hidden', 'app-1'), true);
+    assert.deepEqual(fake.sent, [
+      { type: 'app.backgroundWork', tier: 'hidden', focusedAppSessionId: 'app-1' },
+    ]);
   } finally {
     fake.restore();
   }

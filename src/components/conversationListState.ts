@@ -8,16 +8,6 @@ export const CONVERSATION_LIST_PIN_THRESHOLD_PX = 80;
 // Pre-measure guess so the first window exists before the scroller is observed; a wrong size only changes overscan until measure.
 export const CONVERSATION_LIST_INITIAL_RECT = { width: 720, height: 900 } as const;
 
-export interface ConversationVisibleRange {
-  rowIds: readonly string[];
-  nearRowIds: readonly string[];
-}
-
-export const EMPTY_CONVERSATION_VISIBLE_RANGE: ConversationVisibleRange = {
-  rowIds: [],
-  nearRowIds: [],
-};
-
 export interface ConversationRowLookup {
   byMountKey: ReadonlyMap<string, number>;
   byViewportId: ReadonlyMap<string, number>;
@@ -69,28 +59,6 @@ export function findConversationRowIndex(
   rowId: string,
 ): number | undefined {
   return lookup.byViewportId.get(rowId) ?? lookup.byMountKey.get(rowId);
-}
-
-export function conversationVisibleRange(
-  items: readonly FeedItem[],
-  mountedIndexes: readonly number[],
-  visibleStart: number,
-  visibleEnd: number,
-): ConversationVisibleRange {
-  const rowIds: string[] = [];
-  const nearRowIds: string[] = [];
-  for (const index of mountedIndexes) {
-    const item = items.at(index);
-    if (!item) continue;
-    const rowId = feedRowId(item);
-    if (index >= visibleStart && index <= visibleEnd) rowIds.push(rowId);
-    else nearRowIds.push(rowId);
-  }
-  return { rowIds, nearRowIds };
-}
-
-export function visibleRangeSignature(range: ConversationVisibleRange): string {
-  return `${range.rowIds.join('\n')}\n--\n${range.nearRowIds.join('\n')}`;
 }
 
 export function scrollMarginBetween(list: HTMLElement, scroll: HTMLElement): number {

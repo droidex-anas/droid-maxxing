@@ -117,6 +117,10 @@ export function createSessionManagerTestContext(
       },
     },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
+    // Pin live runtimes at the hard-open maximum so eviction races stay valid
+    // even if a host lowers DROID_CONTROL_MAX_LIVE_CHILD_RUNTIMES.
+    maxLiveRuntimes: 4,
+    maxQueuedRuntimes: 16,
     // Integration assertions read appended events synchronously; the timer
     // coalescing behavior is covered by SessionTimeline unit tests.
     streamingCoalesceMs: options.streamingCoalesceMs ?? 0,

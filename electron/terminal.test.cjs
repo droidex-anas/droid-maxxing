@@ -282,3 +282,41 @@ test('terminal manager releases capacity when node-pty fails to load', async () 
   }
   assert.equal(manager.list().length, 0);
 });
+
+test('an exited terminal drops its PTY immediately and keeps bounded replay for late subscribers', async () => {
+  const cleanups = [];
+  const { manager, instances } = fixture({
+    setTimeout: (callback) => {
+      cleanups.push(callback);
+      return { unref() {} };
+    },
+    clearTimeout: () => {},
+    exitRetentionMs: 30_000,
+  });
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  instances[0].emitData('kept-for-replay');
+  instances[0].emitExit(0, 0);
+
+  assert.equal(instances[0].killed, true);
+  assert.equal(manager.count(), 0);
+  assert.equal(manager.countRetained(), 1);
+  assert.equal(manager.summary(terminal.id).lastActivityAt > 0, true);
+
+  const events = [];
+  manager.subscribe(terminal.id, (event) => events.push(event));
+  assert.equal(events[0].kind, 'replay');
+  assert.equal(events[0].data, 'kept-for-replay');
+  assert.equal(events[1].kind, 'exit');
+  assert.equal(cleanups.length, 1);
+});
+
+test('memory pressure trims live replay without dropping the terminal', async () => {
+  const { manager, instances } = fixture();
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  instances[0].emitData('abcdefghijklmnopqrstuvwxyz');
+  assert.equal(manager.trimReplay(8), 1);
+  const replay = manager.replaySince(terminal.id, 0);
+  assert.ok(Buffer.byteLength(replay.data) <= 8);
+  assert.equal(manager.list().length, 1);
+  assert.equal(manager.resourceCounts().live, 1);
+});

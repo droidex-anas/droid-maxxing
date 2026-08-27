@@ -65,6 +65,10 @@ export class SessionFileServing {
     await this.reconcileTail;
   }
 
+  watcherCount(): number {
+    return this.watcher ? 1 : 0;
+  }
+
   private emit(options?: SessionListFilterOptions): void {
     this.dependencies.emitList(this.dependencies.listSummaries(options));
   }
