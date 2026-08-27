@@ -438,7 +438,7 @@ export class HistoryPersistenceQueue {
   }
 
   private ensureClient(): HistoryPersistenceClient {
-    if (!this.client) this.client = this.createDefaultClient();
+    this.client ??= this.createDefaultClient();
     return this.client;
   }
 
