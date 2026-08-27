@@ -213,6 +213,17 @@ test('system idle time IPC carries no renderer-controlled payload', async () => 
   assert.deepEqual(calls[0], { channel: 'system-idle-time', payload: undefined });
 });
 
+test('power tier IPC carries no renderer-controlled payload', async () => {
+  const { api, calls } = loadApi({ tier: 'interactive', windowVisible: true, onBattery: false });
+
+  assert.deepEqual(await api.powerTier(), {
+    tier: 'interactive',
+    windowVisible: true,
+    onBattery: false,
+  });
+  assert.deepEqual(calls[0], { channel: 'power-tier', payload: undefined });
+});
+
 test('terminal subscribe transfers one MessagePort and posts input without invoke', () => {
   const { api, calls, posts, channels } = loadApi();
   const channel = api.terminalSubscribe('pty-1');

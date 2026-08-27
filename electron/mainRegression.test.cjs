@@ -326,3 +326,14 @@ test('system app icon tracks the OS appearance and repaints on change', () => {
     /nativeTheme\.on\('updated', \(\) => \{\s*if \(appIconMode === 'system'\) applyAppIcon\(\);\s*\}\);/,
   );
 });
+
+test('power-tier IPC is trusted-renderer only and browser eviction is not crash recovery', () => {
+  const handlerStart = mainSource.indexOf("ipcMain.handle('power-tier'");
+  const handlerEnd = mainSource.indexOf('\n  ipcMain.handle(', handlerStart + 1);
+  const handler = mainSource.slice(handlerStart, handlerEnd);
+  assert.notEqual(handlerStart, -1);
+  assert.match(handler, /assertMainRenderer\(event\)/);
+  assert.match(mainSource, /nativeBrowserBudget\.isEvictionClose\(entry\.viewCloseReason\)/);
+  assert.match(mainSource, /partition: BROWSER_PARTITION/);
+  assert.match(mainSource, /const BROWSER_PARTITION = 'persist:droidex-browser'/);
+});

@@ -26,6 +26,12 @@ const githubPrConversation = require('./githubPrConversation.cjs');
 const { createTerminalManager } = require('./terminal.cjs');
 const { createTerminalSubscriptionRegistry } = require('./terminalPort.cjs');
 const { createPerformanceMetricsCollector } = require('./performanceMetrics.cjs');
+const {
+  createNativeBrowserBudget,
+  CAPTURE_SCROLL_SCRIPT,
+  restoreScrollScript,
+} = require('./nativeBrowserBudget.cjs');
+const { createPowerTier } = require('./powerTier.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
 const localImages = require('./localImages.cjs');
@@ -63,6 +69,10 @@ const terminalSubscriptions = createTerminalSubscriptionRegistry(terminalManager
 const performanceMetrics = createPerformanceMetricsCollector({
   countPtys: () => terminalManager.count(),
   listWebContents: () => webContents.getAllWebContents(),
+  nativeBrowserCounts: () => nativeBrowserBudget.counts(nativeBrowserBudgetEntries()),
+  terminalCounts: () => terminalManager.resourceCounts(),
+  powerTier: () => powerTier.current(),
+  onSample: (metrics) => powerTier.noteRss(metrics.memory.rssBytes),
 });
 const filesRootAccess = files.createRootAccessRegistry();
 const diagnostics = createDiagnostics({
@@ -104,6 +114,17 @@ const nativeBrowsers = new Map();
 // Keep hidden browser sessions warm by default so authenticated pages and
 // compositor state survive while the Browser pane is closed.
 const HIDDEN_BROWSER_IDLE_MS = Number(process.env.DROID_NATIVE_BROWSER_IDLE_MS ?? 0);
+const nativeBrowserBudget = createNativeBrowserBudget({
+  maxLive: process.env.DROID_NATIVE_BROWSER_MAX_LIVE,
+  idleMs: HIDDEN_BROWSER_IDLE_MS,
+});
+const MEMORY_PRESSURE_RSS_BYTES = Number(
+  process.env.DROID_MEMORY_PRESSURE_RSS_BYTES ?? 1.5 * 1024 * 1024 * 1024,
+);
+const powerTier = createPowerTier({
+  powerMonitor,
+  rssPressureBytes: MEMORY_PRESSURE_RSS_BYTES,
+});
 // A single persistent partition keeps cookies, localStorage, and registered
 // passkeys alive across reloads, dev-server restarts, and app restarts so the
 // user does not have to sign in again every time.
@@ -149,6 +170,21 @@ app.whenReady().then(async () => {
   registerIpc();
   registerLocalImageProtocol();
   createMainWindow();
+  powerTier.start();
+  const metricsTimer = setInterval(() => performanceMetrics.collect(), 30_000);
+  metricsTimer.unref?.();
+  powerTier.onChange((tier) => {
+    if (isWindowUsable(mainWindow))
+      mainWindow.webContents.send('power-tier', { ...powerTier.snapshot(), tier });
+  });
+  powerTier.onMemoryPressure(() => {
+    for (const entry of nativeBrowsers.values()) {
+      if (!entry.attached) void evictNativeBrowserView(entry);
+    }
+    terminalManager.trimReplay();
+    if (isWindowUsable(mainWindow))
+      mainWindow.webContents.send('memory-pressure', { at: Date.now() });
+  });
   // Pin the DROIDEX mark on the dock/taskbar up front so OS notifications
   // inherit it instead of the bare Electron atom in dev builds.
   applyAppIcon();
@@ -240,6 +276,7 @@ function createMainWindow() {
     filesRootAccess.clear();
     mainWindow = null;
   });
+  powerTier.attachWindow(mainWindow);
 }
 
 // Serves local image files to the renderer (see localImages.cjs). Registered on
@@ -347,6 +384,10 @@ function registerIpc() {
   ipcMain.handle('system-idle-time', (event) => {
     assertMainRenderer(event);
     return powerMonitor.getSystemIdleTime();
+  });
+  ipcMain.handle('power-tier', (event) => {
+    assertMainRenderer(event);
+    return powerTier.snapshot();
   });
   ipcMain.handle('read-file', (_event, { path: filePath }) => readFile(filePath));
   ipcMain.handle('repo-status', (_event, { dir }) => repoStatus(dir));
@@ -1078,6 +1119,9 @@ function createNativeBrowserEntry(browserSessionId) {
     networkEvents: [],
     consoleEvents: [],
     rendererCrashes: [],
+    lastUsedAt: Date.now(),
+    viewCloseReason: null,
+    serialized: null,
   };
 }
 
@@ -1097,6 +1141,7 @@ function ensureNativeBrowserView(browserSessionId) {
     },
   });
   entry.view = view;
+  entry.viewCloseReason = null;
   const contents = view.webContents;
   contents.setWindowOpenHandler(({ url: nextUrl }) => {
     if (entry.view === view) loadNativeBrowserUrl(entry, nextUrl);
@@ -1133,7 +1178,9 @@ function ensureNativeBrowserView(browserSessionId) {
         emitNativeBrowserLoaded(entry, entry.targetUrl);
       return;
     }
-    if (entry.state.designMode) applyNativeBrowserDesignState(entry);
+    if (entry.state.designMode && entry.attached && entry.visible) {
+      applyNativeBrowserDesignState(entry);
+    }
     void autofillSavedCredential(entry);
   });
   contents.on('did-fail-load', (_event, errorCode, errorDescription, failedUrl, isMainFrame) => {
@@ -1148,7 +1195,9 @@ function ensureNativeBrowserView(browserSessionId) {
     emitNativeBrowserLoadFailed(entry, failedUrl, errorDescription || `net error ${errorCode}`);
   });
   contents.on('dom-ready', () => {
-    if (entry.view === view && entry.state.designMode) applyNativeBrowserDesignState(entry);
+    if (entry.view === view && entry.state.designMode && entry.attached && entry.visible) {
+      applyNativeBrowserDesignState(entry);
+    }
   });
   contents.on('destroyed', () => {
     if (entry.view === view) {
@@ -1166,13 +1215,17 @@ function ensureNativeBrowserView(browserSessionId) {
     if (entry.view !== view) return;
     entry.targetUrl = nextUrl;
     emitNativeBrowserLoaded(entry, nextUrl);
-    if (entry.state.designMode) applyNativeBrowserDesignState(entry);
+    if (entry.state.designMode && entry.attached && entry.visible) {
+      applyNativeBrowserDesignState(entry);
+    }
   });
   return entry;
 }
 
 async function openNativeBrowser(browserSessionId, url, bounds, viewport) {
   const entry = ensureNativeBrowserView(browserSessionId);
+  entry.serialized = null;
+  entry.lastUsedAt = Date.now();
   if (viewport) entry.viewport = normalizeBrowserViewport(viewport);
   rejectHostAppUrl(url);
   url = normalizeNativeBrowserUrl(entry, url);
@@ -1189,6 +1242,8 @@ async function openNativeBrowser(browserSessionId, url, bounds, viewport) {
 
 async function attachNativeBrowser(browserSessionId, bounds, options = {}) {
   const entry = ensureNativeBrowserView(browserSessionId);
+  entry.lastUsedAt = Date.now();
+  if (entry.serialized) await restoreNativeBrowserSerialized(entry);
   if (!isWindowUsable(mainWindow)) throw new Error(`${APP_NAME} window is not available.`);
   if (attachedBrowserSessionId && attachedBrowserSessionId !== entry.browserSessionId) {
     detachNativeBrowser(attachedBrowserSessionId);
@@ -1706,6 +1761,7 @@ function normalizeCaptureRect(entry, box) {
 }
 
 function applyNativeBrowserDesignState(entry) {
+  if (!entry?.attached || !entry.visible) return undefined;
   const contents = safeWebContents(entry?.view);
   if (!contents) return undefined;
   return contents
@@ -1795,6 +1851,7 @@ async function loadNativeBrowserUrl(entry, url, options = {}) {
 
 async function restoreNativeBrowserForAction(browserSessionId) {
   const entry = ensureNativeBrowserView(browserSessionId);
+  if (entry.serialized) await restoreNativeBrowserSerialized(entry);
   if (!entry.attached) {
     setHiddenNativeBrowserBounds(entry, entry.viewport);
     addHiddenNativeBrowserViewToWindow(entry);
@@ -1864,11 +1921,83 @@ function normalizeBrowserViewport(viewport) {
 }
 
 function scheduleNativeBrowserIdleClose(entry) {
-  if (!entry || entry.attached || HIDDEN_BROWSER_IDLE_MS <= 0) return;
+  if (!entry || entry.attached) return;
+  entry.lastUsedAt = Date.now();
   clearNativeBrowserIdleTimer(entry);
-  entry.idleTimer = setTimeout(() => {
-    if (!entry.attached) closeNativeBrowserEntry(entry, false);
-  }, HIDDEN_BROWSER_IDLE_MS);
+  if (nativeBrowserBudget.idleMs > 0) {
+    entry.idleTimer = setTimeout(() => {
+      if (!entry.attached) void evictNativeBrowserView(entry);
+    }, nativeBrowserBudget.idleMs);
+  }
+  void enforceNativeBrowserBudget();
+}
+
+function nativeBrowserBudgetEntries() {
+  return [...nativeBrowsers.values()].map((entry) => ({
+    browserSessionId: entry.browserSessionId,
+    attached: entry.attached,
+    hasView: isBrowserViewUsable(entry.view),
+    lastUsedAt: entry.lastUsedAt,
+    targetUrl: entry.targetUrl,
+    viewport: entry.viewport,
+    state: entry.state,
+    serialized: entry.serialized,
+  }));
+}
+
+async function enforceNativeBrowserBudget() {
+  const ids = nativeBrowserBudget.idsToEvict(nativeBrowserBudgetEntries());
+  for (const id of ids) {
+    const entry = nativeBrowsers.get(id);
+    if (entry) await evictNativeBrowserView(entry);
+  }
+}
+
+async function captureNativeBrowserSnapshot(entry) {
+  const contents = safeWebContents(entry.view);
+  let scroll = entry.serialized?.scroll || { x: 0, y: 0 };
+  let screenshot = null;
+  if (contents) {
+    const captured = await contents
+      .executeJavaScript(CAPTURE_SCROLL_SCRIPT, true)
+      .catch(() => null);
+    if (captured && Number.isFinite(captured.x) && Number.isFinite(captured.y)) scroll = captured;
+    const image = await contents.capturePage().catch(() => null);
+    if (image && !image.isEmpty?.()) screenshot = image.toPNG().toString('base64');
+  }
+  return nativeBrowserBudget.snapshotFrom(entry, {
+    url: restorableUrlForEntry(entry, entry.targetUrl) || contents?.getURL() || entry.targetUrl,
+    scroll,
+    screenshot,
+    viewport: entry.viewport,
+    state: entry.state,
+  });
+}
+
+async function evictNativeBrowserView(entry) {
+  if (!entry || entry.attached || !isBrowserViewUsable(entry.view)) return;
+  entry.viewCloseReason = 'evict';
+  entry.serialized = await captureNativeBrowserSnapshot(entry);
+  closeNativeBrowserEntry(entry, false);
+}
+
+async function restoreNativeBrowserSerialized(entry) {
+  const snapshot = entry.serialized;
+  if (!snapshot) return;
+  if (snapshot.viewport) entry.viewport = snapshot.viewport;
+  if (snapshot.state) entry.state = snapshot.state;
+  const url = snapshot.url || entry.targetUrl;
+  if (url) {
+    entry.targetUrl = url;
+    await loadNativeBrowserUrl(entry, url, { force: true });
+  }
+  const contents = safeWebContents(entry.view);
+  if (contents && snapshot.scroll) {
+    await contents
+      .executeJavaScript(restoreScrollScript(snapshot.scroll), true)
+      .catch(() => undefined);
+  }
+  entry.serialized = null;
 }
 
 function clearNativeBrowserIdleTimer(entry) {
@@ -1896,6 +2025,7 @@ function closeNativeBrowserEntry(entry, forget) {
 }
 
 function recoverNativeBrowserRenderer(entry, view, details) {
+  if (nativeBrowserBudget.isEvictionClose(entry.viewCloseReason)) return;
   const reason = String(details?.reason || 'unknown');
   const targetUrl = restorableUrlForEntry(entry, entry.targetUrl);
   const wasAttached = entry.attached;

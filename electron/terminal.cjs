@@ -152,6 +152,7 @@ function createTerminalManager(opts) {
       signal: null,
       disposed: false,
       createdAt: Date.now(),
+      lastActivityAt: Date.now(),
       cleanupTimer: null,
     };
   }
@@ -213,6 +214,7 @@ function createTerminalManager(opts) {
 
     ptyInstance.onData((data) => {
       const buf = Buffer.from(data, 'utf8');
+      entry.lastActivityAt = Date.now();
       entry.buffer = Buffer.concat([entry.buffer, buf]);
       entry.totalEmittedBytes += buf.length;
       if (entry.buffer.length > MAX_REPLAY_BYTES) {
@@ -244,7 +246,16 @@ function createTerminalManager(opts) {
       entry.exited = true;
       entry.exitCode = typeof exitCode === 'number' ? exitCode : null;
       entry.signal = typeof signal === 'undefined' ? null : signal;
+      entry.lastActivityAt = Date.now();
       entry.sequence += 1;
+      if (entry.pty) {
+        try {
+          entry.pty.kill();
+        } catch {
+          // The process has already exited; drop the handle so the slot can reuse.
+        }
+        entry.pty = null;
+      }
       const payload = {
         kind: 'exit',
         exitCode: entry.exitCode,
@@ -297,6 +308,7 @@ function createTerminalManager(opts) {
     if (typeof data !== 'string') {
       throw new Error('write() data must be a string');
     }
+    e.lastActivityAt = Date.now();
     e.pty.write(data);
   }
 
@@ -431,6 +443,7 @@ function createTerminalManager(opts) {
       exitCode: e.exitCode,
       signal: e.signal,
       createdAt: e.createdAt,
+      lastActivityAt: e.lastActivityAt,
       bufferedBytes: e.buffer.length,
       droppedBytes: e.droppedBytes,
       totalEmittedBytes: e.totalEmittedBytes,
@@ -477,6 +490,38 @@ function createTerminalManager(opts) {
     return n;
   }
 
+  function countRetained() {
+    let n = 0;
+    for (const e of terminals.values()) {
+      if (e.exited) n += 1;
+    }
+    return n;
+  }
+
+  function trimReplay(maxBytes = MAX_REPLAY_BYTES) {
+    const cap = Math.max(0, Math.floor(Number(maxBytes) || 0));
+    let trimmed = 0;
+    for (const e of terminals.values()) {
+      if (e.buffer.length <= cap) continue;
+      let droppedBytes = e.buffer.length - cap;
+      while (droppedBytes < e.buffer.length && (e.buffer[droppedBytes] & 0xc0) === 0x80) {
+        droppedBytes += 1;
+      }
+      e.buffer = e.buffer.subarray(droppedBytes);
+      e.droppedBytes += droppedBytes;
+      trimmed += 1;
+    }
+    return trimmed;
+  }
+
+  function resourceCounts() {
+    return {
+      live: count(),
+      retained: countRetained(),
+      total: terminals.size,
+    };
+  }
+
   return {
     create,
     write,
@@ -490,6 +535,9 @@ function createTerminalManager(opts) {
     closeAll,
     limits,
     count,
+    countRetained,
+    trimReplay,
+    resourceCounts,
   };
 }
 
