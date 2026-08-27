@@ -14,6 +14,7 @@ const server = startBridgeServer({
   onCommand: async (command) => {
     await manager.handle(command);
   },
+  getSnapshot: () => manager.runtimeSnapshot(),
 });
 
 const manager = new SessionManager(

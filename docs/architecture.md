@@ -124,11 +124,18 @@ replaceable session/context telemetry can collapse, and never across a
 non-replaceable event. Approvals, questions, errors, lifecycle boundaries,
 history responses, and turn settlement flush immediately.
 
-Renderers must advertise bridge protocol 2, apply one wire batch as one
+Renderers must advertise bridge protocol 3, apply one wire batch as one
 ordered store transition, and reconnect with the last fully applied generation
-and sequence. The sidecar retains a bounded same-process replay window and
-terminates clients whose socket buffers cross the hard ceiling. Clients using
-another protocol version are rejected instead of entering a compatibility path.
+and sequence. Same-generation reconnects replay the retained buffer. A new
+process generation or a replay gap delivers a compact `bridge.snapshot` of
+live sessions and runtime state instead of a hard resync; `bridge.reset` is
+reserved for an invalid resume cursor. Electron owns sidecar health
+(`starting`, `healthy`, `degraded`, `restarting`, `recovery-required`,
+`stopped`) and bounded restart; `GET /health` is a cheap liveness probe, not a
+death signal while the process is still alive. Clients using another protocol
+version are rejected instead of entering a compatibility path. The sidecar
+retains a bounded same-process replay window and terminates clients whose
+socket buffers cross the hard ceiling.
 
 ### Renderer metrics
 

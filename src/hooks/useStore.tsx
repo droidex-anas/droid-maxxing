@@ -2570,13 +2570,12 @@ function baseReducer(state: AppState, action: Action): AppState {
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
   if (
     ev.type === 'error' &&
-    (ev.code === 'bridge.unsupported_command' || ev.code === 'bridge.resync_required')
-  ) {
-    return ev.message;
-  }
-  if (
-    ev.type === 'error' &&
-    (ev.code === 'session.autonomy_update_failed' || ev.code === 'session.create_failed')
+    (ev.code === 'bridge.unsupported_command' ||
+      ev.code === 'bridge.resync_required' ||
+      ev.code === 'history.unflushed_work' ||
+      ev.code === 'session.interrupted' ||
+      ev.code === 'session.autonomy_update_failed' ||
+      ev.code === 'session.create_failed')
   ) {
     return ev.message;
   }

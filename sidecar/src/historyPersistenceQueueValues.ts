@@ -27,6 +27,11 @@ export interface InFlightPersistenceBatch {
   minimumSequence: number;
 }
 
+export interface PersistenceDirtyMarkerPort {
+  markDirty(): void;
+  markClean(): void;
+}
+
 export interface HistoryPersistenceQueueOptions {
   dbPath: string;
   client?: HistoryPersistenceClient;
@@ -38,6 +43,7 @@ export interface HistoryPersistenceQueueOptions {
   onCommitted?: (batch: HistoryPersistenceBatch, result: HistoryPersistenceResult) => void;
   onFailure?: (error: Error) => void;
   onRecovered?: () => void;
+  dirtyMarker?: PersistenceDirtyMarkerPort;
 }
 
 export function persistenceChildKey(parentAppSessionId: string, childSessionId: string): string {

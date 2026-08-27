@@ -32,6 +32,7 @@ export interface SessionRegistryDependencies {
   projectSummary: (summary: Readonly<SessionSummary>) => SessionSummary;
   onSummaryUpdated: (summary: SessionSummary) => void;
   onLiveProviderReplaced?: (providerSessionId: string) => void;
+  onLiveSetChanged?: () => void;
   now: () => number;
 }
 
@@ -69,6 +70,7 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     this.publishedLiveSummaries.set(liveSession.summary.appSessionId, liveSession.summary);
     this.summariesAwaitingDurability.delete(liveSession.summary.appSessionId);
     this.indexAliases(liveSession.summary);
+    this.dependencies.onLiveSetChanged?.();
   }
 
   getLive(id: string): TLive | undefined {
@@ -219,6 +221,7 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     this.publishedLiveSummaries.delete(liveSession.summary.appSessionId);
     this.summariesAwaitingDurability.delete(liveSession.summary.appSessionId);
     this.removeAliases(liveSession.summary);
+    this.dependencies.onLiveSetChanged?.();
     return liveSession;
   }
 

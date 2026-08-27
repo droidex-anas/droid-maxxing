@@ -41,6 +41,7 @@ export class HistoryPersistenceQueue {
   private readonly onCommitted: NonNullable<HistoryPersistenceQueueOptions['onCommitted']>;
   private readonly onFailure: NonNullable<HistoryPersistenceQueueOptions['onFailure']>;
   private readonly onRecovered: NonNullable<HistoryPersistenceQueueOptions['onRecovered']>;
+  private readonly dirtyMarker: HistoryPersistenceQueueOptions['dirtyMarker'];
   private readonly pending: HistoryPersistencePending;
   private inFlight: InFlightPersistenceBatch | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,6 +78,7 @@ export class HistoryPersistenceQueue {
     this.onCommitted = options.onCommitted ?? (() => undefined);
     this.onFailure = options.onFailure ?? (() => undefined);
     this.onRecovered = options.onRecovered ?? (() => undefined);
+    this.dirtyMarker = options.dirtyMarker;
     this.pending = new HistoryPersistencePending((additionalRows, additionalBytes) => {
       this.assertCapacity(additionalRows, additionalBytes);
     });
@@ -153,6 +155,7 @@ export class HistoryPersistenceQueue {
     let firstError: Error | undefined;
     try {
       this.flushSync();
+      this.dirtyMarker?.markClean();
     } catch (error) {
       firstError = asError(error);
     }
@@ -184,6 +187,7 @@ export class HistoryPersistenceQueue {
   }
 
   private afterEnqueue(): void {
+    this.dirtyMarker?.markDirty();
     this.notePeak();
     const thresholdReached =
       this.pending.rowCount >= MAX_PERSISTENCE_BATCH_ROWS ||
@@ -248,6 +252,7 @@ export class HistoryPersistenceQueue {
     }
     if (this.pending.rowCount > 0) this.startNext();
     else if (this.durabilityBarrierPending) this.startDurabilityBarrier();
+    else this.dirtyMarker?.markClean();
   }
 
   private finishFailure(current: InFlightPersistenceBatch, error: Error): void {
@@ -375,6 +380,7 @@ export class HistoryPersistenceQueue {
     this.consecutiveFailures = 0;
     this.durabilityBarrierPending = false;
     this.reportRecovery();
+    if (this.isDrained()) this.dirtyMarker?.markClean();
   }
 
   private finishDurabilityBarrierFailure(

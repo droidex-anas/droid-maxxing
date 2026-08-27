@@ -211,3 +211,23 @@ test('an unsupported-command error toasts its restart guidance', () => {
   };
   assert.equal(toastMessageForEvent(skew), skew.message);
 });
+
+test('unflushed history and interrupted sessions toast instead of looking durable', () => {
+  const unflushed = {
+    type: 'error' as const,
+    code: 'history.unflushed_work',
+    message: 'The previous agent runtime exited with unflushed history.',
+    recoverable: true,
+  };
+  const interrupted = {
+    type: 'error' as const,
+    code: 'session.interrupted',
+    appSessionId: 'app-1',
+    message: 'The agent runtime restarted and this turn did not continue.',
+    recoverable: true,
+  };
+  assert.equal(toastMessageForEvent(unflushed), unflushed.message);
+  assert.equal(adaptEvent(unflushed), null);
+  assert.equal(toastMessageForEvent(interrupted), interrupted.message);
+  assert.equal(adaptEvent(interrupted), null);
+});

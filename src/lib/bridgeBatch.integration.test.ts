@@ -166,7 +166,7 @@ test(
       await Promise.resolve();
       const second = required(FakeWebSocket.instances.at(-1));
       const url = new URL(second.url);
-      assert.equal(url.searchParams.get('bridgeProtocol'), '2');
+      assert.equal(url.searchParams.get('bridgeProtocol'), '3');
       assert.equal(url.searchParams.get('resumeGeneration'), 'generation-1');
       assert.equal(url.searchParams.get('resumeSeq'), '1');
     } finally {
@@ -216,7 +216,7 @@ test(
 );
 
 test(
-  'bridge reset advances the resume cursor and emits one non-recoverable diagnostic',
+  'a generation-changed snapshot restores the cursor without a hard resync error',
   { concurrency: false },
   async () => {
     const runtime = installFakeRuntime();
@@ -232,21 +232,23 @@ test(
       const first = required(FakeWebSocket.instances.at(-1));
       first.open();
       first.message({
-        type: 'bridge.reset',
+        type: 'bridge.snapshot',
         generation: 'generation-2',
         lastSeq: 42,
         reason: 'generation_changed',
+        snapshot: {
+          runtime: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
+          sessions: [],
+          children: [],
+          persistence: { durable: true, hadUnflushedWork: false },
+          interrupted: [],
+        },
       });
 
-      assert.deepEqual(seen, [
-        {
-          type: 'error',
-          code: 'bridge.resync_required',
-          message:
-            'The agent runtime restarted. Reopen the active session if its live state does not refresh.',
-          recoverable: false,
-        },
-      ]);
+      assert.deepEqual(
+        seen.map((event) => event.type),
+        ['runtime.updated'],
+      );
 
       first.close();
       reconnects.shift()?.();
@@ -426,7 +428,7 @@ test(
         type: 'bridge.reset',
         generation: '',
         lastSeq: 1,
-        reason: 'replay_unavailable',
+        reason: 'invalid_resume',
       });
 
       first.close();
@@ -438,6 +440,55 @@ test(
       assert.equal(url.searchParams.get('resumeGeneration'), 'generation-1');
       assert.equal(url.searchParams.get('resumeSeq'), '1');
       assert.deepEqual(seen, ['connection']);
+    } finally {
+      restoreFakeRuntime(runtime);
+    }
+  },
+);
+
+test(
+  'unflushed persistence in a snapshot is reported rather than treated as durable',
+  { concurrency: false },
+  async () => {
+    const runtime = installFakeRuntime();
+    try {
+      const bridge = new Bridge(
+        async () => ({ port: 43131, token: 'unflushed-token' }),
+        () => undefined,
+      );
+      const seen: ServerEvent[] = [];
+      bridge.subscribe((event) => seen.push(event));
+      await bridge.start();
+      const socket = required(FakeWebSocket.instances.at(-1));
+      socket.open();
+      socket.message({
+        type: 'bridge.snapshot',
+        generation: 'generation-9',
+        lastSeq: 8,
+        reason: 'generation_changed',
+        snapshot: {
+          runtime: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
+          sessions: [],
+          children: [],
+          persistence: {
+            durable: false,
+            hadUnflushedWork: true,
+            message: 'Previous process had unflushed history.',
+          },
+          interrupted: [],
+        },
+      });
+      socket.message(batch('generation-9', 8, 8, [{ type: 'connection', status: 'connected' }]));
+      socket.message(batch('generation-9', 9, 9, [{ type: 'connection', status: 'connected' }]));
+
+      assert.deepEqual(
+        seen.map((event) => event.type),
+        ['runtime.updated', 'error', 'connection'],
+      );
+      const unflushed = seen.find(
+        (event): event is Extract<ServerEvent, { type: 'error' }> => event.type === 'error',
+      );
+      assert.equal(unflushed?.code, 'history.unflushed_work');
     } finally {
       restoreFakeRuntime(runtime);
     }

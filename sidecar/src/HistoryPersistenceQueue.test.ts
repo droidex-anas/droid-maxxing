@@ -592,3 +592,25 @@ test('a failed close cancels the retry it scheduled before closing the client', 
   callbacks.at(-1)?.();
   assert.equal(client.durabilityBarriers, barriersBeforeStaleCallback);
 });
+
+test('unflushed work is marked dirty until a successful drain, then reported rather than assumed durable', () => {
+  const client = new FakeClient();
+  const marks: string[] = [];
+  const queue = new HistoryPersistenceQueue({
+    dbPath: '/unused',
+    client,
+    schedule: () => dormantTimer(),
+    cancel: (timer) => {
+      clearTimeout(timer);
+    },
+    dirtyMarker: {
+      markDirty: () => marks.push('dirty'),
+      markClean: () => marks.push('clean'),
+    },
+  });
+  queue.enqueueEvent(event('one'));
+  assert.deepEqual(marks, ['dirty']);
+  queue.flushSync();
+  assert.ok(marks.includes('clean'));
+  queue.close();
+});

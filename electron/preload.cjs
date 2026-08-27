@@ -113,6 +113,8 @@ function subscribeTerminalPort(id) {
 
 contextBridge.exposeInMainWorld('droidControl', {
   bridgeInfo: () => ipcRenderer.invoke('bridge-info'),
+  sidecarStatus: () => ipcRenderer.invoke('sidecar-status'),
+  onSidecarStatus: (handler) => on('sidecar-status', handler),
   pickDirectory: () => ipcRenderer.invoke('pick-directory'),
   pickFiles: () => ipcRenderer.invoke('pick-files'),
   saveImage: (dataUrl) => ipcRenderer.invoke('save-image', { dataUrl }),
