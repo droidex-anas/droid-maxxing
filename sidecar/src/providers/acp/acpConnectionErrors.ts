@@ -11,13 +11,15 @@ export class AcpConnectionError extends Error implements ProviderError {
   readonly code: ProviderErrorCode;
   readonly providerInstanceId: ProviderInstanceId;
   readonly recoveryAction: ProviderRecoveryAction;
+  readonly rpcCode: number | undefined;
 
-  constructor(error: ProviderError) {
+  constructor(error: ProviderError, rpcCode?: number) {
     super(error.message);
     this.name = 'AcpConnectionError';
     this.code = error.code;
     this.providerInstanceId = error.providerInstanceId;
     this.recoveryAction = error.recoveryAction;
+    this.rpcCode = rpcCode;
   }
 
   toProviderError(): ProviderError {
@@ -34,6 +36,7 @@ export function createAcpConnectionError(
   providerInstanceId: ProviderInstanceId,
   code: ProviderErrorCode,
   message: string,
+  rpcCode?: number,
 ): AcpConnectionError {
   return new AcpConnectionError(
     parseProviderError({
@@ -42,6 +45,7 @@ export function createAcpConnectionError(
       message,
       recoveryAction: recoveryActionFor(code, providerInstanceId),
     }),
+    rpcCode,
   );
 }
 

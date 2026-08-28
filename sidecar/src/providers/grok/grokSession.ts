@@ -1,4 +1,4 @@
-// @derived-from t3code@4c51b4c9b6a85d96a22e0df41d5cfd2d8fc9901d apps/server/src/provider/Layers/CursorAdapter.ts
+// @derived-from t3code@4c51b4c9b6a85d96a22e0df41d5cfd2d8fc9901d apps/server/src/provider/Layers/GrokAdapter.ts
 // Portions derived from T3 Code, MIT License, Copyright (c) 2026 T3 Tools Inc.
 // See THIRD_PARTY_NOTICES.md.
 
@@ -8,7 +8,7 @@ import type { AcpNotification, AcpServerRequest } from '../acp/AcpConnection.js'
 import { AcpConnectionError } from '../acp/acpConnectionErrors.js';
 import { AcpPreActivationBuffer } from '../acp/acpPreActivation.js';
 import { followAcpPrompt } from '../acp/acpPromptFollow.js';
-import { toolNameForAcpKind, type AcpToolCallCoalesceState } from '../acp/acpSessionUpdate.js';
+import { parseAssistantTextDelta, sessionUpdateIsReplay } from '../acp/acpSessionUpdate.js';
 import { admitProviderRuntimeEvent, type ProviderRuntimeEvent } from '../providerEvents.js';
 import type { ProviderError } from '../providerErrors.js';
 import {
@@ -21,21 +21,24 @@ import {
   type ProviderTurnSettlement,
 } from '../providerTypes.js';
 import { ShutdownDeadline } from '../shutdownDeadline.js';
-import type { Autonomy } from '../../protocol.js';
 import {
-  CURSOR_DEFINITION,
-  encodeCursorResumeState,
-  parseAdvertisedModes,
-  resolveCursorAcpBaseModelId,
-  resolveCursorSessionModeId,
-  type CursorAdvertisedMode,
-  type CursorResumeState,
-} from './cursorHandshake.js';
-import { interpretCursorNotification } from './cursorNotifications.js';
-import { CursorPendingRegistry } from './cursorPending.js';
-import { handleCursorAcpServerRequest } from './cursorServerRequests.js';
+  isXaiAskUserQuestionMethod,
+  isXaiExitPlanModeMethod,
+  isXaiPromptCompleteMethod,
+  XAI_RATE_LIMITED_RPC_CODE,
+} from './grokExtensions.js';
+import {
+  encodeGrokResumeState,
+  GROK_DEFINITION,
+  isValidGrokModelToken,
+  resolveGrokAcpBaseModelId,
+  type GrokResumeState,
+} from './grokHandshake.js';
+import { GrokPendingInteractions } from './grokPending.js';
+import { GrokSessionAcp } from './grokSessionAcp.js';
+import { createRealGrokTimer, GrokTurnWatchdog, type GrokTimer } from './grokWatchdog.js';
 
-export interface CursorAcpClient {
+export interface GrokAcpClient {
   readonly sessionId: string;
   readonly sessionSetupResult: unknown;
   request(method: string, params?: unknown): Promise<unknown>;
@@ -57,41 +60,66 @@ type ActiveTurn = {
   settled: boolean;
 };
 
-export class CursorProviderSession implements ProviderSession {
+export interface GrokSessionOptions {
+  providerSessionId: string;
+  resumeState?: GrokResumeState;
+  timer?: GrokTimer;
+  inactivityMs?: number;
+  activeToolInactivityMs?: number;
+}
+
+export class GrokProviderSession implements ProviderSession {
   readonly providerSessionId: string;
   discardedCount = 0;
   nativeCallbacksSettled = false;
   receivedCloseDeadline: ShutdownDeadline | undefined;
   readonly openError = createProviderContractError(
-    'cursor',
+    'grok',
     'native_session_start_failed',
     'pre-activation buffer overflow',
     'retry_session',
   );
 
   #phase: SessionPhase = { kind: 'pending', buffer: new AcpPreActivationBuffer() };
-  #connection: CursorAcpClient | undefined;
-  #advertisedModes: readonly CursorAdvertisedMode[] = [];
+  #connection: GrokAcpClient | undefined;
   #activeTurn: ActiveTurn | undefined;
   #storedResumeState: unknown;
-  #autonomy: Autonomy;
-  #lastTodoFingerprint: string | undefined;
-  #acpSessionId: string | undefined;
-  readonly #toolCalls = new Map<string, AcpToolCallCoalesceState>();
-  readonly #pending = new CursorPendingRegistry();
   readonly #settledTurns = new Set<string>();
+  readonly #approvedOperations = new Set<string>();
+  readonly #pending = new GrokPendingInteractions();
+  readonly #watchdog: GrokTurnWatchdog;
+  readonly #acp: GrokSessionAcp;
   readonly #input: ProviderSessionCreateInput;
   readonly #runtimeGeneration: number;
+  readonly #timer: GrokTimer;
 
-  constructor(
-    input: ProviderSessionCreateInput,
-    options: { providerSessionId: string; resumeState?: CursorResumeState },
-  ) {
+  constructor(input: ProviderSessionCreateInput, options: GrokSessionOptions) {
     this.#input = input;
     this.#runtimeGeneration = input.expectedGeneration;
-    this.#autonomy = input.configuration.autonomy;
     this.providerSessionId = options.providerSessionId;
     this.#storedResumeState = options.resumeState;
+    this.#timer = options.timer ?? createRealGrokTimer();
+    this.#watchdog = new GrokTurnWatchdog({
+      timer: this.#timer,
+      inactivityMs: options.inactivityMs,
+      activeToolInactivityMs: options.activeToolInactivityMs,
+      remainingMs: () => this.receivedCloseDeadline?.remainingMs(this.#timer.now()) ?? Infinity,
+      onStall: (turnId) => this.#stallTurn(turnId),
+    });
+    this.#acp = new GrokSessionAcp({
+      input: this.#input,
+      runtimeGeneration: this.#runtimeGeneration,
+      pending: this.#pending,
+      watchdog: this.#watchdog,
+      approvedOperations: this.#approvedOperations,
+      activeTurn: () => this.#activeTurn,
+      emit: (event) => this.#emit(event),
+      baseEvent: (turnId) => this.#baseEvent(turnId),
+      settleTurn: (turnId, generation, settlement) =>
+        this.#settleTurn(turnId, generation, settlement),
+      settleFromPrompt: (turnId, generation, result) =>
+        this.#settleFromPrompt(turnId, generation, result),
+    });
   }
 
   get initialResumeState(): unknown {
@@ -114,19 +142,9 @@ export class CursorProviderSession implements ProviderSession {
     return this.#phase.kind === 'pending' ? this.#phase.buffer.size : 0;
   }
 
-  get pendingInteractionCount(): number {
-    return this.#pending.pendingCount;
-  }
-
-  get settledInteractionCount(): number {
-    return this.#pending.settledCount;
-  }
-
-  bindConnection(connection: CursorAcpClient): void {
+  bindConnection(connection: GrokAcpClient): void {
     this.#connection = connection;
-    this.#acpSessionId = connection.sessionId;
-    this.#advertisedModes = parseAdvertisedModes(connection.sessionSetupResult);
-    const resumeState = encodeCursorResumeState(connection.sessionId);
+    const resumeState = encodeGrokResumeState(connection.sessionId);
     this.#storedResumeState = resumeState;
     this.#emit({
       ...this.#baseEvent(),
@@ -136,34 +154,47 @@ export class CursorProviderSession implements ProviderSession {
   }
 
   onAcpNotification(notification: AcpNotification): void {
-    this.#emitInterpreted(notification);
+    if (isXaiPromptCompleteMethod(notification.method)) {
+      this.#acp.onPromptComplete(notification.params);
+      return;
+    }
+    if (notification.method !== 'session/update' || sessionUpdateIsReplay(notification.params)) {
+      return;
+    }
+    const delta = parseAssistantTextDelta(notification.params);
+    if (delta) {
+      this.#watchdog.recordActivity();
+      this.#emit({
+        ...this.#baseEvent(this.#activeTurn?.turnId),
+        type: 'transcript',
+        event: { role: 'primary', kind: 'text', text: delta.text },
+      });
+      return;
+    }
+    this.#acp.onToolCallParams(notification.params);
   }
 
-  onAcpServerRequest(request: AcpServerRequest): Promise<unknown> {
-    return handleCursorAcpServerRequest(request, {
-      runtimeGeneration: this.#runtimeGeneration,
-      autonomy: this.#autonomy,
-      isLive: () => this.#phase.kind !== 'closed',
-      interactionSink: this.#input.interactionSink,
-      ids: this.#input.ids,
-      target: this.#input.target,
-      pending: this.#pending,
-      onUpdateTodos: (parsed) =>
-        this.#emitInterpreted({
-          method: 'cursor/update_todos',
-          params: { toolCallId: parsed.toolCallId, todos: parsed.todos, merge: parsed.merge },
-        }),
-    });
+  async onAcpServerRequest(request: AcpServerRequest): Promise<unknown> {
+    if (request.method === 'session/request_permission') {
+      return this.#acp.onPermission(request.params);
+    }
+    if (isXaiAskUserQuestionMethod(request.method)) {
+      return this.#acp.onQuestion(request.params);
+    }
+    if (isXaiExitPlanModeMethod(request.method)) {
+      return this.#acp.onExitPlanMode(request.params);
+    }
+    throw grokError('unsupported_capability', 'Unknown ACP method.', 'refresh');
   }
 
   activate(): void {
     if (this.#phase.kind === 'closed') {
       throw this.#phase.reason === 'overflow'
         ? this.openError
-        : cursorError('stale_provider_operation', 'activate is one-shot', 'close_session');
+        : grokError('stale_provider_operation', 'activate is one-shot', 'close_session');
     }
     if (this.#phase.kind === 'active') {
-      throw cursorError('stale_provider_operation', 'activate is one-shot', 'close_session');
+      throw grokError('stale_provider_operation', 'activate is one-shot', 'close_session');
     }
     const buffered = this.#phase.buffer.drain();
     this.#phase = { kind: 'active' };
@@ -177,25 +208,22 @@ export class CursorProviderSession implements ProviderSession {
     const turnId = input.turnId;
     const connection = this.#requireConnection();
     this.#assertActive();
-    this.#autonomy = input.configuration.autonomy;
-    const modelId = resolveCursorAcpBaseModelId(input.configuration.providerSelection.modelId);
-    const modeId = resolveCursorSessionModeId(
-      input.configuration.interactionMode,
-      this.#advertisedModes,
-    );
-    if (modeId === undefined) {
-      throw cursorError(
-        'unsupported_capability',
-        `Cursor session mode ${input.configuration.interactionMode} is not advertised by the peer.`,
-        'refresh',
-      );
+    const modelId = resolveGrokAcpBaseModelId(input.configuration.providerSelection.modelId);
+    if (!isValidGrokModelToken(modelId)) {
+      throw grokError('invalid_provider_configuration', 'Grok model id is invalid.', 'refresh');
     }
-    await connection.request('session/set_model', { sessionId: connection.sessionId, modelId });
+    const effortRaw = input.configuration.providerSelection.options.reasoningEffort;
+    const reasoningEffort =
+      typeof effortRaw === 'string' && isValidGrokModelToken(effortRaw) ? effortRaw : undefined;
+    await connection.request('session/set_model', {
+      sessionId: connection.sessionId,
+      modelId,
+      ...(reasoningEffort ? { _meta: { reasoningEffort } } : {}),
+    });
     this.#revalidate(runtimeGeneration);
-    await connection.request('session/set_mode', { sessionId: connection.sessionId, modeId });
-    this.#revalidate(runtimeGeneration);
+    this.#acp.resetTurn();
     this.#activeTurn = { turnId, runtimeGeneration, interrupting: false, settled: false };
-    this.#lastTodoFingerprint = undefined;
+    this.#watchdog.start(turnId);
     const promptPromise = connection.prompt([{ type: 'text', text: input.prompt.text }]);
     followAcpPrompt(promptPromise, {
       onResult: (result) => this.#settleFromPrompt(turnId, runtimeGeneration, result),
@@ -204,14 +232,14 @@ export class CursorProviderSession implements ProviderSession {
   }
 
   async steer(_input: ProviderSteerInput): Promise<void> {
-    throw cursorError('unsupported_capability', 'Cursor steer is not implemented.', 'refresh');
+    throw grokError('unsupported_capability', 'Grok steer is not implemented.', 'refresh');
   }
 
   async interrupt(input: { turnId: string; runtimeGeneration: number }): Promise<void> {
     const runtimeGeneration = this.#runtimeGeneration;
     this.#assertActive();
     if (input.runtimeGeneration !== runtimeGeneration) {
-      throw cursorError(
+      throw grokError(
         'stale_provider_operation',
         'interrupt generation does not match the live session',
         'retry_session',
@@ -219,77 +247,36 @@ export class CursorProviderSession implements ProviderSession {
     }
     const active = this.#activeTurn;
     if (!active || active.turnId !== input.turnId || active.settled) {
-      throw cursorError(
+      throw grokError(
         'stale_provider_operation',
         'interrupt does not match the in-flight turn',
         'retry_session',
       );
     }
     active.interrupting = true;
-    this.#settlePendingInteractions();
+    this.#pending.settleAllCancelled();
     this.#connection?.cancel();
+    this.#watchdog.stop();
     this.#settleTurn(active.turnId, runtimeGeneration, { status: 'interrupted' });
   }
 
   async close(deadline: ShutdownDeadline): Promise<void> {
     this.receivedCloseDeadline = deadline;
     if (this.#phase.kind === 'closed') {
-      this.#settlePendingInteractions();
       this.nativeCallbacksSettled = true;
       return;
     }
     if (this.#phase.kind === 'pending') {
       this.discardedCount = this.#phase.buffer.size;
     }
-    this.#settlePendingInteractions();
+    this.#pending.settleAllCancelled();
+    this.#watchdog.stop();
     const active = this.#activeTurn;
     if (active && !active.settled && this.#phase.kind === 'active') {
       this.#settleTurn(active.turnId, this.#runtimeGeneration, { status: 'cancelled' });
     }
     this.#phase = { kind: 'closed', reason: 'close' };
     await this.#closeConnection(deadline);
-  }
-
-  async failOpenOverflow(deadline: ShutdownDeadline): Promise<void> {
-    if (this.#phase.kind === 'pending') {
-      this.discardedCount = this.#phase.buffer.size;
-    }
-    this.#settlePendingInteractions();
-    this.#phase = { kind: 'closed', reason: 'overflow' };
-    await this.#closeConnection(deadline);
-  }
-
-  #emitInterpreted(notification: AcpNotification): void {
-    const interpreted = interpretCursorNotification(notification, {
-      toolCalls: this.#toolCalls,
-      lastTodoFingerprint: this.#lastTodoFingerprint,
-    });
-    this.#lastTodoFingerprint = interpreted.lastTodoFingerprint;
-    for (const transcript of interpreted.transcripts) {
-      this.#emit({
-        ...this.#baseEvent(this.#activeTurn?.turnId),
-        ...(transcript.toolCall
-          ? { nativeCorrelation: { itemId: transcript.toolCall.toolCallId } }
-          : {}),
-        type: 'transcript',
-        event: {
-          role: 'primary',
-          kind: transcript.kind,
-          text: transcript.text,
-          ...(transcript.toolCall
-            ? {
-                toolName: toolNameForAcpKind(transcript.toolCall.kind),
-                toolUseId: transcript.toolCall.toolCallId,
-                ...(transcript.toolCall.status === 'failed' ? { isError: true } : {}),
-              }
-            : {}),
-        },
-      });
-    }
-  }
-
-  #settlePendingInteractions(): void {
-    this.#pending.settleAll();
   }
 
   #settleFromPrompt(turnId: string, runtimeGeneration: number, result: unknown): void {
@@ -313,7 +300,6 @@ export class CursorProviderSession implements ProviderSession {
   }
 
   #settleFromPromptFailure(turnId: string, runtimeGeneration: number, error: unknown): void {
-    this.#settlePendingInteractions();
     const active = this.#activeTurn;
     if (!active || active.turnId !== turnId || active.settled) {
       return;
@@ -325,22 +311,41 @@ export class CursorProviderSession implements ProviderSession {
       this.#settleTurn(turnId, runtimeGeneration, { status: 'interrupted' });
       return;
     }
+    this.#pending.settleAllCancelled();
+    this.#watchdog.stop();
     this.#settleTurn(turnId, runtimeGeneration, {
       status: 'failed',
-      error: mapSessionError(error, 'Cursor turn failed.'),
+      error: mapSessionError(error),
+    });
+  }
+
+  #stallTurn(turnId: string): void {
+    const active = this.#activeTurn;
+    if (!active || active.turnId !== turnId || active.settled) {
+      return;
+    }
+    this.#pending.settleAllCancelled();
+    this.#connection?.cancel();
+    this.#watchdog.stop();
+    this.#settleTurn(turnId, this.#runtimeGeneration, {
+      status: 'failed',
+      error: grokError(
+        'unavailable_provider_instance',
+        'Grok ACP turn stalled without content or tool progress.',
+        'retry_session',
+      ).toProviderError(),
     });
   }
 
   #settleTurn(turnId: string, runtimeGeneration: number, settlement: ProviderTurnSettlement): void {
-    if (this.#settledTurns.has(turnId)) {
+    // session/prompt and the xAI prompt-complete notification both call here; first arrival wins.
+    if (this.#settledTurns.has(turnId) || runtimeGeneration !== this.#runtimeGeneration) {
       return;
     }
-    if (runtimeGeneration !== this.#runtimeGeneration) {
-      return;
-    }
+    this.#watchdog.stop();
     const emitted = this.#emit({
       ...this.#baseEvent(turnId),
-      nativeCorrelation: { sessionId: this.#acpSessionId, turnId },
+      nativeCorrelation: { sessionId: this.#connection?.sessionId, turnId },
       type: 'turn.settled',
       settlement,
     });
@@ -389,19 +394,18 @@ export class CursorProviderSession implements ProviderSession {
   async #closeConnection(deadline: ShutdownDeadline | undefined): Promise<void> {
     const connection = this.#connection;
     this.#connection = undefined;
-    this.#settlePendingInteractions();
     if (connection) {
       await connection.close(deadline ?? ShutdownDeadline.fromDurationMs(0));
     }
     this.nativeCallbacksSettled = true;
   }
 
-  #requireConnection(): CursorAcpClient {
+  #requireConnection(): GrokAcpClient {
     const connection = this.#connection;
     if (!connection) {
-      throw cursorError(
+      throw grokError(
         'stale_provider_operation',
-        'Cursor session has no ACP connection',
+        'Grok session has no ACP connection',
         'close_session',
       );
     }
@@ -410,7 +414,7 @@ export class CursorProviderSession implements ProviderSession {
 
   #assertActive(): void {
     if (this.#phase.kind !== 'active') {
-      throw cursorError(
+      throw grokError(
         'stale_provider_operation',
         'provider session is not active',
         'close_session',
@@ -421,9 +425,9 @@ export class CursorProviderSession implements ProviderSession {
   #revalidate(runtimeGeneration: number): void {
     this.#assertActive();
     if (runtimeGeneration !== this.#runtimeGeneration) {
-      throw cursorError(
+      throw grokError(
         'stale_provider_operation',
-        'Cursor session generation changed during the operation',
+        'Grok session generation changed during the operation',
         'retry_session',
       );
     }
@@ -433,8 +437,8 @@ export class CursorProviderSession implements ProviderSession {
   #live() {
     return {
       target: this.#input.target,
-      providerDriverKind: CURSOR_DEFINITION.providerDriverKind,
-      providerInstanceId: CURSOR_DEFINITION.providerInstanceId,
+      providerDriverKind: GROK_DEFINITION.providerDriverKind,
+      providerInstanceId: GROK_DEFINITION.providerInstanceId,
       runtimeGeneration: this.#runtimeGeneration,
       settledTurnIds: this.#settledTurns,
     };
@@ -444,8 +448,8 @@ export class CursorProviderSession implements ProviderSession {
     return {
       eventId: this.#input.ids.nextEventId(),
       target: this.#input.target,
-      providerDriverKind: CURSOR_DEFINITION.providerDriverKind,
-      providerInstanceId: CURSOR_DEFINITION.providerInstanceId,
+      providerDriverKind: GROK_DEFINITION.providerDriverKind,
+      providerInstanceId: GROK_DEFINITION.providerInstanceId,
       runtimeGeneration: this.#runtimeGeneration,
       createdAt: this.#input.clock.now(),
       ...(turnId === undefined ? {} : { turnId }),
@@ -453,22 +457,33 @@ export class CursorProviderSession implements ProviderSession {
   }
 }
 
-function cursorError(
+function grokError(
   code: ProviderError['code'],
   message: string,
   recoveryAction: ProviderError['recoveryAction'],
 ): ProviderContractError {
-  return createProviderContractError('cursor', code, message, recoveryAction);
+  return createProviderContractError('grok', code, message, recoveryAction);
 }
 
-function mapSessionError(error: unknown, fallback: string): ProviderError {
+function mapSessionError(error: unknown): ProviderError {
   if (error instanceof ProviderContractError) {
     return error.toProviderError();
   }
   if (error instanceof AcpConnectionError) {
+    if (error.rpcCode === XAI_RATE_LIMITED_RPC_CODE) {
+      return grokError(
+        'unavailable_provider_instance',
+        'Grok usage limit reached. Try again later.',
+        'refresh',
+      ).toProviderError();
+    }
     return error.toProviderError();
   }
-  return cursorError('incompatible_provider_protocol', fallback, 'retry_session').toProviderError();
+  return grokError(
+    'incompatible_provider_protocol',
+    'Grok turn failed.',
+    'retry_session',
+  ).toProviderError();
 }
 
 function readStopReason(result: unknown): string | undefined {

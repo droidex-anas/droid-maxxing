@@ -318,10 +318,17 @@ export class AcpConnection {
           return;
         }
         const pending = this.#pending.get(jsonRpcIdKey(message.id));
+        const rpcCode = message.error.code;
         const error =
           pending?.method === 'authenticate'
             ? this.#error('unauthenticated_provider', 'ACP authentication failed')
-            : this.#protocolError('ACP request failed');
+            : rpcCode === -32003
+              ? this.#error(
+                  'unavailable_provider_instance',
+                  'ACP request was rate limited',
+                  rpcCode,
+                )
+              : this.#protocolError('ACP request failed');
         this.#settleOne(message.id, { ok: false, error });
         return;
       }
@@ -489,8 +496,8 @@ export class AcpConnection {
     return this.#error('incompatible_provider_protocol', message);
   }
 
-  #error(code: ProviderErrorCode, message: string): AcpConnectionError {
-    return createAcpConnectionError(this.#providerInstanceId, code, message);
+  #error(code: ProviderErrorCode, message: string, rpcCode?: number): AcpConnectionError {
+    return createAcpConnectionError(this.#providerInstanceId, code, message, rpcCode);
   }
 }
 
