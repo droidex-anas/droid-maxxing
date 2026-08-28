@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 
-import type { AcpNotification } from '../acp/AcpConnection.js';
+import type { AcpNotification, AcpServerRequest } from '../acp/AcpConnection.js';
 import { AcpConnectionError } from '../acp/acpConnectionErrors.js';
 import {
   admitProviderRuntimeEvent,
@@ -24,6 +24,7 @@ import {
   type ProviderTurnSettlement,
 } from '../providerTypes.js';
 import { ShutdownDeadline } from '../shutdownDeadline.js';
+import type { Autonomy } from '../../protocol.js';
 import {
   CURSOR_DEFINITION,
   encodeCursorResumeState,
@@ -33,7 +34,10 @@ import {
   type CursorAdvertisedMode,
   type CursorResumeState,
 } from './cursorHandshake.js';
-import { parseCursorAssistantTextDelta, sessionUpdateIsReplay } from './cursorSessionUpdate.js';
+import { interpretCursorNotification } from './cursorNotifications.js';
+import { CursorPendingRegistry } from './cursorPending.js';
+import { handleCursorAcpServerRequest } from './cursorServerRequests.js';
+import { toolNameForAcpKind, type CursorToolCallCoalesceState } from './cursorSessionUpdate.js';
 
 export interface CursorAcpClient {
   readonly sessionId: string;
@@ -74,6 +78,11 @@ export class CursorProviderSession implements ProviderSession {
   #advertisedModes: readonly CursorAdvertisedMode[] = [];
   #activeTurn: ActiveTurn | undefined;
   #storedResumeState: unknown;
+  #autonomy: Autonomy;
+  #lastTodoFingerprint: string | undefined;
+  #acpSessionId: string | undefined;
+  readonly #toolCalls = new Map<string, CursorToolCallCoalesceState>();
+  readonly #pending = new CursorPendingRegistry();
   readonly #settledTurns = new Set<string>();
   readonly #input: ProviderSessionCreateInput;
   readonly #runtimeGeneration: number;
@@ -84,6 +93,7 @@ export class CursorProviderSession implements ProviderSession {
   ) {
     this.#input = input;
     this.#runtimeGeneration = input.expectedGeneration;
+    this.#autonomy = input.configuration.autonomy;
     this.providerSessionId = options.providerSessionId;
     this.#storedResumeState = options.resumeState;
   }
@@ -108,8 +118,17 @@ export class CursorProviderSession implements ProviderSession {
     return this.#phase.kind === 'pending' ? this.#phase.buffer.length : 0;
   }
 
+  get pendingInteractionCount(): number {
+    return this.#pending.pendingCount;
+  }
+
+  get settledInteractionCount(): number {
+    return this.#pending.settledCount;
+  }
+
   bindConnection(connection: CursorAcpClient): void {
     this.#connection = connection;
+    this.#acpSessionId = connection.sessionId;
     this.#advertisedModes = parseAdvertisedModes(connection.sessionSetupResult);
     const resumeState = encodeCursorResumeState(connection.sessionId);
     this.#storedResumeState = resumeState;
@@ -121,22 +140,23 @@ export class CursorProviderSession implements ProviderSession {
   }
 
   onAcpNotification(notification: AcpNotification): void {
-    if (notification.method !== 'session/update') {
-      return;
-    }
-    // session/load replays history with `_meta.isReplay === true`; those chunks
-    // reconstruct peer state and must not appear as live transcript.
-    if (sessionUpdateIsReplay(notification.params)) {
-      return;
-    }
-    const delta = parseCursorAssistantTextDelta(notification.params);
-    if (!delta) {
-      return;
-    }
-    this.#emit({
-      ...this.#baseEvent(this.#activeTurn?.turnId),
-      type: 'transcript',
-      event: { role: 'primary', kind: 'text', text: delta.text },
+    this.#emitInterpreted(notification);
+  }
+
+  onAcpServerRequest(request: AcpServerRequest): Promise<unknown> {
+    return handleCursorAcpServerRequest(request, {
+      runtimeGeneration: this.#runtimeGeneration,
+      autonomy: this.#autonomy,
+      isLive: () => this.#phase.kind !== 'closed',
+      interactionSink: this.#input.interactionSink,
+      ids: this.#input.ids,
+      target: this.#input.target,
+      pending: this.#pending,
+      onUpdateTodos: (parsed) =>
+        this.#emitInterpreted({
+          method: 'cursor/update_todos',
+          params: { toolCallId: parsed.toolCallId, todos: parsed.todos, merge: parsed.merge },
+        }),
     });
   }
 
@@ -161,6 +181,7 @@ export class CursorProviderSession implements ProviderSession {
     const turnId = input.turnId;
     const connection = this.#requireConnection();
     this.#assertActive();
+    this.#autonomy = input.configuration.autonomy;
     const modelId = resolveCursorAcpBaseModelId(input.configuration.providerSelection.modelId);
     const modeId = resolveCursorSessionModeId(
       input.configuration.interactionMode,
@@ -178,10 +199,8 @@ export class CursorProviderSession implements ProviderSession {
     await connection.request('session/set_mode', { sessionId: connection.sessionId, modeId });
     this.#revalidate(runtimeGeneration);
     this.#activeTurn = { turnId, runtimeGeneration, interrupting: false, settled: false };
+    this.#lastTodoFingerprint = undefined;
     const promptPromise = connection.prompt([{ type: 'text', text: input.prompt.text }]);
-    // Prompt RPC completion is settlement, not acceptance. Defer the follower
-    // so a synchronously resolved prompt cannot emit turn.settled before this
-    // function's promise resolves.
     queueMicrotask(() => {
       void promptPromise.then(
         (result) => this.#settleFromPrompt(turnId, runtimeGeneration, result),
@@ -213,6 +232,7 @@ export class CursorProviderSession implements ProviderSession {
       );
     }
     active.interrupting = true;
+    this.#settlePendingInteractions();
     this.#connection?.cancel();
     this.#settleTurn(active.turnId, runtimeGeneration, { status: 'interrupted' });
   }
@@ -220,12 +240,14 @@ export class CursorProviderSession implements ProviderSession {
   async close(deadline: ShutdownDeadline): Promise<void> {
     this.receivedCloseDeadline = deadline;
     if (this.#phase.kind === 'closed') {
+      this.#settlePendingInteractions();
       this.nativeCallbacksSettled = true;
       return;
     }
     if (this.#phase.kind === 'pending') {
       this.discardedCount = this.#phase.buffer.length;
     }
+    this.#settlePendingInteractions();
     const active = this.#activeTurn;
     if (active && !active.settled && this.#phase.kind === 'active') {
       this.#settleTurn(active.turnId, this.#runtimeGeneration, { status: 'cancelled' });
@@ -238,8 +260,42 @@ export class CursorProviderSession implements ProviderSession {
     if (this.#phase.kind === 'pending') {
       this.discardedCount = this.#phase.buffer.length;
     }
+    this.#settlePendingInteractions();
     this.#phase = { kind: 'closed', reason: 'overflow' };
     await this.#closeConnection(deadline);
+  }
+
+  #emitInterpreted(notification: AcpNotification): void {
+    const interpreted = interpretCursorNotification(notification, {
+      toolCalls: this.#toolCalls,
+      lastTodoFingerprint: this.#lastTodoFingerprint,
+    });
+    this.#lastTodoFingerprint = interpreted.lastTodoFingerprint;
+    for (const transcript of interpreted.transcripts) {
+      this.#emit({
+        ...this.#baseEvent(this.#activeTurn?.turnId),
+        ...(transcript.toolCall
+          ? { nativeCorrelation: { itemId: transcript.toolCall.toolCallId } }
+          : {}),
+        type: 'transcript',
+        event: {
+          role: 'primary',
+          kind: transcript.kind,
+          text: transcript.text,
+          ...(transcript.toolCall
+            ? {
+                toolName: toolNameForAcpKind(transcript.toolCall.kind),
+                toolUseId: transcript.toolCall.toolCallId,
+                ...(transcript.toolCall.status === 'failed' ? { isError: true } : {}),
+              }
+            : {}),
+        },
+      });
+    }
+  }
+
+  #settlePendingInteractions(): void {
+    this.#pending.settleAll();
   }
 
   #settleFromPrompt(turnId: string, runtimeGeneration: number, result: unknown): void {
@@ -263,6 +319,7 @@ export class CursorProviderSession implements ProviderSession {
   }
 
   #settleFromPromptFailure(turnId: string, runtimeGeneration: number, error: unknown): void {
+    this.#settlePendingInteractions();
     const active = this.#activeTurn;
     if (!active || active.turnId !== turnId || active.settled) {
       return;
@@ -289,7 +346,7 @@ export class CursorProviderSession implements ProviderSession {
     }
     const emitted = this.#emit({
       ...this.#baseEvent(turnId),
-      nativeCorrelation: { sessionId: this.#connection?.sessionId, turnId },
+      nativeCorrelation: { sessionId: this.#acpSessionId, turnId },
       type: 'turn.settled',
       settlement,
     });
@@ -344,6 +401,7 @@ export class CursorProviderSession implements ProviderSession {
   async #closeConnection(deadline: ShutdownDeadline | undefined): Promise<void> {
     const connection = this.#connection;
     this.#connection = undefined;
+    this.#settlePendingInteractions();
     if (connection) {
       await connection.close(deadline ?? ShutdownDeadline.fromDurationMs(0));
     }

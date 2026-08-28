@@ -192,14 +192,14 @@ export function supportedCursorInteractionModes(
 export function cursorCapabilities(modes: readonly SessionInteractionMode[]): ProviderCapabilities {
   return defineProviderCapabilities({
     modes: [...modes],
-    autonomyLevels: [],
+    autonomyLevels: ['off', 'low', 'medium', 'high'],
     modelChange: 'before_turn',
     resume: true,
     steer: false,
     interrupt: true,
-    approvals: false,
-    questions: false,
-    planReview: false,
+    approvals: true,
+    questions: true,
+    planReview: true,
     context: false,
     compaction: false,
     skills: false,

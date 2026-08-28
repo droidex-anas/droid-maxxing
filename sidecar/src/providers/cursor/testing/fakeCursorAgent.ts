@@ -5,7 +5,10 @@ import {
   decodeJsonRpcLine,
   encodeJsonRpcError,
   encodeJsonRpcNotification,
+  encodeJsonRpcRequest,
   encodeJsonRpcResult,
+  isJsonRpcId,
+  jsonRpcIdKey,
   type JsonRpcId,
 } from '../../acp/acpJsonRpc.js';
 
@@ -18,6 +21,7 @@ export const CURSOR_FAKE_REPLAY_ENV = 'DROIDEX_CURSOR_FAKE_REPLAY';
 export const CURSOR_FAKE_FLOOD_ENV = 'DROIDEX_CURSOR_FAKE_FLOOD';
 export const CURSOR_FAKE_SESSION_ID_ENV = 'DROIDEX_CURSOR_FAKE_SESSION_ID';
 export const CURSOR_FAKE_EXTRA_UPDATES_ENV = 'DROIDEX_CURSOR_FAKE_EXTRA_UPDATES';
+export const CURSOR_FAKE_SCRIPT_ENV = 'DROIDEX_CURSOR_FAKE_SCRIPT';
 
 export type CursorFakeAbout =
   | 'json'
@@ -131,12 +135,15 @@ function handleAbout(args: string[]): void {
 async function runAcpPeer(): Promise<void> {
   const sessionId = process.env[CURSOR_FAKE_SESSION_ID_ENV] || 'mock-session-1';
   const promptBehavior = parsePromptBehavior(process.env[CURSOR_FAKE_PROMPT_ENV]);
+  const script = parseFakeScript(process.env[CURSOR_FAKE_SCRIPT_ENV]);
   const receivedMethods: string[] = [];
   const setModelCalls: unknown[] = [];
   const setModeCalls: unknown[] = [];
+  const lastInteractions: unknown[] = [];
   let initializeParams: unknown;
   let cancelled = false;
   let promptRequestId: JsonRpcId | undefined;
+  const pendingServerRequests = new Map<string, (message: unknown) => void>();
 
   const write = (line: string): void => {
     process.stdout.write(line);
@@ -147,6 +154,10 @@ async function runAcpPeer(): Promise<void> {
   const fail = (id: JsonRpcId, message: string): void => {
     write(encodeJsonRpcError(id, -32000, message));
   };
+  const waitForClientResponse = (id: JsonRpcId): Promise<unknown> =>
+    new Promise((resolve) => {
+      pendingServerRequests.set(jsonRpcIdKey(id), resolve);
+    });
 
   const modes = advertisedModes();
   const lines = createInterface({ input: process.stdin });
@@ -155,6 +166,14 @@ async function runAcpPeer(): Promise<void> {
     const decoded = decodeJsonRpcLine(line);
     if (!decoded.ok) continue;
     const message = decoded.message;
+    if ((message.kind === 'success' || message.kind === 'error') && isJsonRpcId(message.id)) {
+      const waiter = pendingServerRequests.get(jsonRpcIdKey(message.id));
+      if (waiter) {
+        pendingServerRequests.delete(jsonRpcIdKey(message.id));
+        waiter(message);
+      }
+      continue;
+    }
     if (message.kind === 'notification') {
       if (message.method === 'session/cancel') {
         cancelled = true;
@@ -244,16 +263,36 @@ async function runAcpPeer(): Promise<void> {
       respond(message.id, { initializeParams, setModelCalls, setModeCalls });
       continue;
     }
+    if (message.method === 'x/last-interactions') {
+      respond(message.id, { lastInteractions: [...lastInteractions] });
+      continue;
+    }
+    if (message.method === 'x/crash') {
+      process.exit(7);
+    }
     if (message.method === 'session/prompt') {
-      if (promptBehavior === 'hang') {
+      if (promptBehavior === 'hang' && script.length === 0) {
         continue;
       }
       if (promptBehavior === 'reject') {
         queueMicrotask(() => fail(message.id, 'prompt rejected'));
         continue;
       }
-      if (promptBehavior === 'wait-cancel') {
+      if (promptBehavior === 'wait-cancel' && script.length === 0) {
         promptRequestId = message.id;
+        continue;
+      }
+      if (script.length > 0) {
+        void runPromptScript({
+          script,
+          sessionId,
+          promptId: message.id,
+          write,
+          respond,
+          waitForClientResponse,
+          lastInteractions,
+          wasCancelled: () => cancelled,
+        });
         continue;
       }
       emitLiveUpdates(write, sessionId);
@@ -360,6 +399,134 @@ function emitLiveUpdates(write: (line: string) => void, sessionId: string): void
       }),
     );
   }
+}
+
+function parseFakeScript(raw: string | undefined): FakeScriptStep[] {
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (entry): entry is FakeScriptStep => isPlainObject(entry) && typeof entry.type === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+type FakeScriptStep = {
+  type: string;
+  id?: JsonRpcId;
+  kind?: string;
+  title?: string;
+  toolCallId?: string;
+  options?: unknown;
+  payload?: unknown;
+  text?: string;
+  method?: string;
+  crashAfterSend?: boolean;
+};
+
+const DEFAULT_PERMISSION_OPTIONS = [
+  { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
+  { optionId: 'allow_always', name: 'Allow always', kind: 'allow_always' },
+  { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
+];
+
+async function runPromptScript(input: {
+  script: FakeScriptStep[];
+  sessionId: string;
+  promptId: JsonRpcId;
+  write: (line: string) => void;
+  respond: (id: JsonRpcId, result: unknown) => void;
+  waitForClientResponse: (id: JsonRpcId) => Promise<unknown>;
+  lastInteractions: unknown[];
+  wasCancelled: () => boolean;
+}): Promise<void> {
+  let nextId = 10_000;
+  for (const step of input.script) {
+    if (step.type === 'text') {
+      input.write(
+        encodeJsonRpcNotification('session/update', {
+          sessionId: input.sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: step.text ?? '' },
+          },
+        }),
+      );
+      continue;
+    }
+    if (step.type === 'tool_call' || step.type === 'tool_call_update') {
+      const payload = isPlainObject(step.payload) ? step.payload : {};
+      input.write(
+        encodeJsonRpcNotification('session/update', {
+          sessionId: input.sessionId,
+          update: {
+            sessionUpdate: step.type,
+            toolCallId: step.toolCallId ?? 'tool-1',
+            ...payload,
+          },
+        }),
+      );
+      continue;
+    }
+    if (step.type === 'update_todos') {
+      input.write(encodeJsonRpcNotification('cursor/update_todos', step.payload ?? {}));
+      continue;
+    }
+    if (step.type === 'crash') {
+      process.exit(7);
+    }
+    if (
+      step.type === 'permission' ||
+      step.type === 'ask_question' ||
+      step.type === 'create_plan' ||
+      step.type === 'malformed_request'
+    ) {
+      const id = step.id ?? nextId;
+      nextId += 1;
+      const method =
+        step.type === 'permission'
+          ? 'session/request_permission'
+          : step.type === 'ask_question'
+            ? 'cursor/ask_question'
+            : step.type === 'create_plan'
+              ? 'cursor/create_plan'
+              : (step.method ?? 'cursor/ask_question');
+      const params =
+        step.type === 'permission'
+          ? {
+              sessionId: input.sessionId,
+              toolCall: {
+                toolCallId: step.toolCallId ?? 'tool-1',
+                kind: step.kind ?? 'execute',
+                title: step.title ?? 'Allow mock action',
+              },
+              options: Array.isArray(step.options) ? step.options : DEFAULT_PERMISSION_OPTIONS,
+            }
+          : (step.payload ?? {});
+      input.write(encodeJsonRpcRequest(id, method, params));
+      if (step.crashAfterSend === true) {
+        process.exit(7);
+      }
+      const reply = await input.waitForClientResponse(id);
+      input.lastInteractions.push({
+        method,
+        id,
+        idType: typeof id,
+        reply,
+      });
+      continue;
+    }
+  }
+  input.respond(input.promptId, {
+    stopReason: input.wasCancelled() ? 'cancelled' : 'end_turn',
+  });
 }
 
 function readRequestedSessionId(params: unknown): string | undefined {

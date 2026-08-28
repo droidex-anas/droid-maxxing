@@ -100,6 +100,8 @@ test('capability record is complete and truthful for this slice', () => {
   assert.equal(capabilities.steer, false);
   assert.equal(capabilities.usageReporting, false);
   assert.equal(capabilities.reasoningStream, false);
-  assert.equal(capabilities.approvals, false);
-  assert.deepEqual(capabilities.autonomyLevels, []);
+  assert.equal(capabilities.approvals, true);
+  assert.equal(capabilities.questions, true);
+  assert.equal(capabilities.planReview, true);
+  assert.deepEqual(capabilities.autonomyLevels, ['off', 'low', 'medium', 'high']);
 });

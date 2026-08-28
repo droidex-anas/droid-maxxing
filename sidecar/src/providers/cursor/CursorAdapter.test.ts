@@ -236,6 +236,10 @@ test('probe JSON path, unauthenticated markers, missing executable, and 8s budge
   assert.equal(snapshot.capabilities.reasoningStream, false);
   assert.equal(snapshot.capabilities.steer, false);
   assert.equal(snapshot.capabilities.interrupt, true);
+  assert.equal(snapshot.capabilities.approvals, true);
+  assert.equal(snapshot.capabilities.questions, true);
+  assert.equal(snapshot.capabilities.planReview, true);
+  assert.deepEqual(snapshot.capabilities.autonomyLevels, ['off', 'low', 'medium', 'high']);
   assert.deepEqual(aboutCalls[0], {
     args: ['about', '--format', 'json'],
     timeoutMs: CURSOR_ABOUT_TIMEOUT_MS,
@@ -383,7 +387,7 @@ test('startTurn resolves on acceptance; assistant text streams; other updates ar
     await waitForTurnSettlement(recorded.events, 'turn-1');
     assertExactlyOneTurnSettlement(recorded.events, 'turn-1', { status: 'completed' });
     const texts = recorded.events
-      .filter((event) => event.type === 'transcript')
+      .filter((event) => event.type === 'transcript' && event.event.kind === 'text')
       .map((event) => (event.type === 'transcript' ? event.event.text : undefined));
     assert.deepEqual(texts, ['hello from cursor']);
     assert.equal(texts.includes('secret thought'), false);
