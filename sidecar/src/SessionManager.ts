@@ -71,6 +71,7 @@ import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
 import { createBrowserMcpServer } from './browser/browserMcpServer.js';
 import { isDesignPrompt } from './browser/designPromptPacks.js';
 import { SessionRegistry } from './SessionRegistry.js';
+import { projectWireSessionSummary } from './sessionRegistryProjection.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
 import { isReportedStreamingTranscriptError, SessionTimeline } from './SessionTimeline.js';
@@ -526,7 +527,14 @@ export class SessionManager {
         })),
       persistSummaries: (summaries) => {
         this.history.syncSummaries(summaries);
-        for (const session of summaries) this.emit({ type: 'session.updated', session });
+        for (const session of summaries) {
+          this.emit({
+            type: 'session.updated',
+            session: projectWireSessionSummary(session, (item) =>
+              this.applyPendingSettingsToSummary({ ...item }),
+            ),
+          });
+        }
       },
       emitStatus: (appSessionId, text) => {
         this.timeline.appendStatus(appSessionId, text);

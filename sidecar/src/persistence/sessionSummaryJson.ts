@@ -10,7 +10,7 @@ import {
   type ProviderInstanceId,
 } from '../providers/providerIdentity.js';
 import { numberValue, stringValue } from '../values.js';
-import { sessionWebUrlFor } from './sessionWebUrl.js';
+import { attachSessionPublicDisplay } from './sessionWebUrl.js';
 
 export const SUMMARY_JSON_KEYS = [
   'missionId',
@@ -217,8 +217,7 @@ export function projectPublicSummary(input: {
   }
   if (input.json.autoCompactions !== undefined)
     summary.autoCompactions = input.json.autoCompactions;
-  const sessionWebUrl = sessionWebUrlFor(input.binding);
-  if (sessionWebUrl !== undefined) summary.sessionWebUrl = sessionWebUrl;
+  attachSessionPublicDisplay(summary, input.binding);
   return summary;
 }
 

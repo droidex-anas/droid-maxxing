@@ -699,6 +699,7 @@ export default function Sidebar({
           pinned={isChatPinned(chatMetadata[rowMenu.appSessionId])}
           cwd={rowMenuSession?.cwd}
           sessionWebUrl={rowMenuSession?.sessionWebUrl}
+          sessionRef={rowMenuSession?.sessionRef}
           onRename={() => {
             setRenamingId(rowMenu.appSessionId);
           }}

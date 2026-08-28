@@ -768,17 +768,18 @@ test('listSummaries reads patches and hidden ids through a single history call',
   assert.equal(history.summaryReadCount, 1);
 });
 
-test('published summaries include a Droid web URL and omit native ids', () => {
+test('published summaries include a Droid web URL and sessionRef and omit native-id keys', () => {
   const { published, registry } = createHarness();
   registry.register(live(summary('app-droid', { providerSessionId: 'native-1' })));
   registry.updateSummary('app-droid', { title: 'Named' });
   const wire = published.at(-1);
   assert.equal(wire?.sessionWebUrl, 'https://app.factory.ai/sessions/native-1');
+  assert.deepEqual(wire?.sessionRef, { id: 'native-1', resumeCommand: "droid -r 'native-1'" });
   assert.equal(wire && 'providerSessionId' in wire, false);
-  assert.equal(JSON.stringify(wire).includes('"native-1"'), false);
+  assert.equal(wire && 'compactedFromProviderSessionIds' in wire, false);
 });
 
-test('published summaries omit sessionWebUrl for non-Droid providers', () => {
+test('published summaries omit sessionWebUrl and sessionRef for non-Droid providers', () => {
   const { published, registry } = createHarness();
   registry.register(
     live(
@@ -798,6 +799,7 @@ test('published summaries omit sessionWebUrl for non-Droid providers', () => {
   registry.updateSummary('app-cursor', { title: 'Cursor' });
   const wire = published.at(-1);
   assert.equal(wire?.sessionWebUrl, undefined);
+  assert.equal(wire?.sessionRef, undefined);
   assert.equal(wire && 'providerSessionId' in wire, false);
   assert.equal(JSON.stringify(wire).includes('native-1'), false);
 });

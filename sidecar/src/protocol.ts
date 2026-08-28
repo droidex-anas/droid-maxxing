@@ -118,6 +118,13 @@ export interface ChildSessionSummary {
   queued?: boolean;
 }
 
+export interface ProviderSessionRef {
+  /** Display and copy only. Never a routing key; commands still target appSessionId. */
+  id: string;
+  /** Provider-built CLI recipe, e.g. `droid -r 'abc'`. Absent when the provider has none. */
+  resumeCommand?: string;
+}
+
 export interface SessionSummary {
   appSessionId: string;
   providerSessionId?: string;
@@ -157,6 +164,7 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   sessionWebUrl?: string;
+  sessionRef?: ProviderSessionRef;
 }
 
 export interface TranscriptEvent {

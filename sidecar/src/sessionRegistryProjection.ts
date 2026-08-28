@@ -1,6 +1,6 @@
 import type { BridgeFeature, SessionSummary } from './protocol.js';
 import type { ProviderBinding } from './persistence/SessionStore.js';
-import { sessionWebUrlFor } from './persistence/sessionWebUrl.js';
+import { attachSessionPublicDisplay } from './persistence/sessionWebUrl.js';
 import {
   providerDriverKindForInstance,
   type ProviderDriverKind,
@@ -12,7 +12,8 @@ type IdentityField =
   | 'providerSessionId'
   | 'compactedFromProviderSessionIds'
   | 'missionId'
-  | 'sessionWebUrl';
+  | 'sessionWebUrl'
+  | 'sessionRef';
 
 export type SessionSummaryPatch = Omit<Partial<SessionSummary>, IdentityField>;
 
@@ -52,9 +53,7 @@ export function projectWireSessionSummary(
   delete merged.compactedFromProviderSessionIds;
   const nativeId = binding?.providerSessionId ?? summary.providerSessionId;
   const driver = binding?.providerDriverKind ?? driverForSummary(summary);
-  const url = sessionWebUrlFor({ providerDriverKind: driver, providerSessionId: nativeId });
-  if (url) merged.sessionWebUrl = url;
-  else delete merged.sessionWebUrl;
+  attachSessionPublicDisplay(merged, { providerDriverKind: driver, providerSessionId: nativeId });
   return merged;
 }
 
@@ -65,6 +64,7 @@ export function withoutIdentityFields(patch: Partial<SessionSummary>): SessionSu
   delete safePatch.compactedFromProviderSessionIds;
   delete safePatch.missionId;
   delete safePatch.sessionWebUrl;
+  delete safePatch.sessionRef;
   return safePatch;
 }
 
@@ -74,6 +74,7 @@ export function copySummary(summary: SessionSummary): SessionSummary {
     ...(summary.compactedFromProviderSessionIds
       ? { compactedFromProviderSessionIds: [...summary.compactedFromProviderSessionIds] }
       : {}),
+    ...(summary.sessionRef ? { sessionRef: { ...summary.sessionRef } } : {}),
     features: summary.features.map(copyFeature),
   };
 }

@@ -350,6 +350,7 @@ test('serialized SessionSummary omits native ids and projects sessionWebUrl for 
     create(store, 'droid-app');
     const unbound = store.get('droid-app');
     assert.equal(unbound?.summary.sessionWebUrl, undefined);
+    assert.equal(unbound?.summary.sessionRef, undefined);
     store.bindInitialProviderRuntime('droid-app', 0, 'native-1');
     const droid = store.get('droid-app')?.summary;
     assert.ok(droid);
@@ -357,6 +358,7 @@ test('serialized SessionSummary omits native ids and projects sessionWebUrl for 
     assert.equal('providerSessionId' in wire, false);
     assert.equal('compactedFromProviderSessionIds' in wire, false);
     assert.equal(wire.sessionWebUrl, 'https://app.factory.ai/sessions/native-1');
+    assert.deepEqual(wire.sessionRef, { id: 'native-1', resumeCommand: "droid -r 'native-1'" });
     assert.equal(wire.appSessionId, 'droid-app');
     assert.equal(JSON.stringify(wire).includes('"providerSessionId"'), false);
 
@@ -373,6 +375,7 @@ test('serialized SessionSummary omits native ids and projects sessionWebUrl for 
     const cursor = store.get('cursor-app')?.summary;
     assert.ok(cursor);
     assert.equal(cursor.sessionWebUrl, undefined);
+    assert.equal(cursor.sessionRef, undefined);
     assert.equal('providerSessionId' in cursor, false);
     assert.equal(JSON.stringify(cursor).includes('native-1'), false);
   });

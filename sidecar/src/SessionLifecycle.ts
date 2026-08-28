@@ -194,7 +194,11 @@ export class SessionLifecycle {
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
       d.childSessions.attachParent(appSessionId);
-      d.emit({ type: 'session.created', clientRef: command.clientRef, session: summary });
+      d.emit({
+        type: 'session.created',
+        clientRef: command.clientRef,
+        session: publishedSummary(d.registry, appSessionId),
+      });
       this.driveInBackground(appSessionId, command.goal);
     } catch (error) {
       await this.cleanupFailedOpen(pendingMcpServers, pendingSession, pendingLiveSession);
@@ -231,13 +235,10 @@ export class SessionLifecycle {
     const providerSessionId = historical?.providerSessionId ?? requestedAppSessionId;
     const existing = d.registry.getLive(appSessionId);
     if (existing) {
-      const projectedSummary =
-        d.registry.resolveSummary(appSessionId) ??
-        d.applyPendingSettingsToSummary({ ...existing.summary });
       d.emit({
         type: 'session.created',
         clientRef: `resume:${appSessionId}`,
-        session: projectedSummary,
+        session: publishedSummary(d.registry, appSessionId),
       });
       void d.context.refresh(this.primaryContextTarget(existing));
       return true;
@@ -288,30 +289,25 @@ export class SessionLifecycle {
         summary.compactionTokenLimit = limit;
       }
       this.requireOpenAdmission();
-      const projectedSummary = d.applyPendingSettingsToSummary({ ...summary });
       const liveSession = createLiveSession(summary, session, mcp);
       liveSession.appliedNativeConfiguration = summary.configuration;
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
       d.childSessions.attachParent(appSessionId);
+      const published = publishedSummary(d.registry, appSessionId);
       d.emit({
         type: 'session.created',
         clientRef: `resume:${appSessionId}`,
-        session: projectedSummary,
+        session: published,
       });
-      d.emit({ type: 'session.updated', session: projectedSummary });
-      if (
-        projectedSummary.sessionPurpose === 'mission-control' &&
-        projectedSummary.features.length > 0
-      ) {
+      d.emit({ type: 'session.updated', session: published });
+      if (published.sessionPurpose === 'mission-control' && published.features.length > 0) {
         d.emit({
           type: 'mission.features',
           appSessionId,
-          ...(projectedSummary.missionId !== undefined
-            ? { missionId: projectedSummary.missionId }
-            : {}),
-          features: projectedSummary.features,
+          ...(published.missionId !== undefined ? { missionId: published.missionId } : {}),
+          features: published.features,
         });
       }
       void d.context.refresh(this.primaryContextTarget(liveSession));
@@ -752,4 +748,13 @@ function isOpenAdmissionClosed(error: unknown): boolean {
 
 function errorFromUnknown(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function publishedSummary(
+  registry: SessionRegistry<LiveSession>,
+  appSessionId: string,
+): SessionSummary {
+  const summary = registry.resolveSummary(appSessionId);
+  if (!summary) throw new Error(`Session ${appSessionId} has no published summary.`);
+  return summary;
 }

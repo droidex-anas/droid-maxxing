@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Archive, Copy, FileText, Folder, Link2, Pencil, Pin, PinOff } from 'lucide-react';
 import { pushEscapeLayer } from './environment/usePopover';
 import { toast } from '../lib/toast';
+import type { ProviderSessionRef } from '../types/bridge';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 export const SESSION_MENU_WIDTH = 220;
@@ -13,18 +14,11 @@ const MENU_MARGIN = 8;
 // estimate is computed per-open instead of using a worst-case constant.
 const MENU_CHROME_PX = 18;
 const MENU_ROW_PX = 30;
-const DROID_SESSION_WEB_PREFIX = 'https://app.factory.ai/sessions/';
 
 // POSIX single-quote: wrap in '...', escaping embedded quotes as '\''. The
 // resume recipe is pasted into a shell, so an unquoted path with spaces (or
 // shell metacharacters) would break or execute unintended text.
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
-
-function droidSessionIdFromWebUrl(url: string): string | undefined {
-  if (!url.startsWith(DROID_SESSION_WEB_PREFIX)) return undefined;
-  const id = url.slice(DROID_SESSION_WEB_PREFIX.length);
-  return id.length > 0 && !id.includes('/') ? id : undefined;
-}
 
 const itemClass =
   'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:bg-droid-elevated/60 focus-visible:text-droid-text focus-visible:outline-none';
@@ -44,8 +38,10 @@ export interface SessionContextMenuProps {
   pinned: boolean;
   // Absent for workspace-less sessions; the Copy Working Directory row hides.
   cwd?: string;
-  // Sidecar-computed web URL. Present for Droid once a native session exists.
+  // Sidecar-computed web URL. Present when the owning provider has a web surface.
   sessionWebUrl?: string;
+  // Sidecar-computed copyable reference. Present when the owning provider has one.
+  sessionRef?: ProviderSessionRef;
   onRename: () => void;
   onTogglePin: () => void;
   onArchive: () => void;
@@ -55,10 +51,10 @@ export interface SessionContextMenuProps {
 
 // Action menu for a sidebar chat row (right-click or the hover "..." button).
 // Organization actions (pin/rename/archive) are app-level; the copy actions
-// expose the real Droid session so the user can continue it in the official
-// CLI (`droid -r <id>`) or the Factory web app. The portal + click-away
-// backdrop live here; the panel is separate so tests can render it without a
-// DOM (portals reject fake containers even in SSR).
+// expose sidecar-computed provider display values when the owning provider
+// supplies them. The portal + click-away backdrop live here; the panel is
+// separate so tests can render it without a DOM (portals reject fake
+// containers even in SSR).
 export function SessionContextMenu(props: SessionContextMenuProps) {
   return createPortal(
     <>
@@ -85,6 +81,7 @@ export function SessionContextMenuPanel({
   pinned,
   cwd,
   sessionWebUrl,
+  sessionRef,
   onRename,
   onTogglePin,
   onArchive,
@@ -151,8 +148,7 @@ export function SessionContextMenuPanel({
   // unclamped; the clamp applies on the client where a window exists.
   const viewportWidth = typeof window === 'undefined' ? undefined : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? undefined : window.innerHeight;
-  const sessionCopyId = sessionWebUrl ? droidSessionIdFromWebUrl(sessionWebUrl) : undefined;
-  const rowCount = 4 + (cwd ? 1 : 0) + (sessionCopyId ? 1 : 0) + (sessionWebUrl ? 1 : 0);
+  const rowCount = 4 + (cwd ? 1 : 0) + (sessionRef ? 1 : 0) + (sessionWebUrl ? 1 : 0);
   const estimatedMenuHeight = MENU_CHROME_PX + rowCount * MENU_ROW_PX;
   const left =
     viewportWidth === undefined
@@ -243,20 +239,24 @@ export function SessionContextMenuPanel({
           Copy Working Directory
         </button>
       )}
-      {sessionCopyId && (
+      {sessionRef && (
         <button
           type="button"
           role="menuitem"
           // Sessions are filed per working directory, so the reliable resume
-          // recipe is cd + resume; the toast spells out both, shell-quoted so
-          // a path with spaces pastes back intact.
+          // recipe is cd + the provider command; the toast spells out both,
+          // shell-quoted so a path with spaces pastes back intact.
           onClick={() => {
-            const resume = cwd
-              ? `cd ${shellQuote(cwd)} && droid -r ${shellQuote(sessionCopyId)}`
-              : `droid -r ${shellQuote(sessionCopyId)}`;
+            const resume = sessionRef.resumeCommand
+              ? cwd
+                ? `cd ${shellQuote(cwd)} && ${sessionRef.resumeCommand}`
+                : sessionRef.resumeCommand
+              : undefined;
             copyAndClose(
-              sessionCopyId,
-              `Droid session ID copied. Continue in the official CLI: ${resume}`,
+              sessionRef.id,
+              resume
+                ? `Droid session ID copied. Continue in the official CLI: ${resume}`
+                : 'Droid session ID copied.',
             );
           }}
           className={itemClass}
