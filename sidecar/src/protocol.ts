@@ -554,6 +554,126 @@ export type PermissionOutcome =
   | 'proceed_edit'
   | 'cancel';
 
+type AssertClosedEnum<TUnion, TListed extends TUnion> =
+  Exclude<TUnion, TListed> extends never
+    ? true
+    : ['missing enum members', Exclude<TUnion, TListed>];
+
+export const INSTALL_CHANNELS = [
+  'script',
+  'brew',
+  'npm',
+] as const satisfies readonly InstallChannel[];
+export const SESSION_PURPOSES = [
+  'chat',
+  'design',
+  'mission-control',
+] as const satisfies readonly SessionPurpose[];
+export const RESPONSE_FORMATS = [
+  'app-create',
+  'app-followup',
+] as const satisfies readonly ResponseFormat[];
+export const PERMISSION_OUTCOMES = [
+  'proceed_once',
+  'proceed_always',
+  'proceed_auto_run',
+  'proceed_auto_run_low',
+  'proceed_auto_run_medium',
+  'proceed_auto_run_high',
+  'proceed_new_session',
+  'proceed_new_session_low',
+  'proceed_new_session_medium',
+  'proceed_new_session_high',
+  'proceed_edit',
+  'cancel',
+] as const satisfies readonly PermissionOutcome[];
+export const CONFIGURABLE_SESSION_ROLES = [
+  'primary',
+  'worker',
+  'validator',
+] as const satisfies readonly ConfigurableSessionRole[];
+export const BROWSER_VIEWPORT_MODES = [
+  'fit',
+  'desktop',
+  'laptop',
+  'tablet',
+  'mobile',
+  'custom',
+] as const satisfies readonly BrowserViewportMode[];
+export const BROWSER_SCROLL_DIRECTIONS = [
+  'up',
+  'down',
+  'left',
+  'right',
+] as const satisfies readonly BrowserScrollDirection[];
+export const BACKGROUND_WORK_TIERS = [
+  'interactive',
+  'hidden',
+  'low-power',
+] as const satisfies readonly ('interactive' | 'hidden' | 'low-power')[];
+export const BROWSER_INPUT_SOURCES = ['agent', 'user'] as const satisfies readonly (
+  | 'agent'
+  | 'user'
+)[];
+export const DESIGN_ANCHOR_KINDS = [
+  'element',
+  'region',
+  'text',
+] as const satisfies readonly DesignAnchor['kind'][];
+export const ELEMENT_SOURCE_FRAMEWORKS = [
+  'react',
+  'vue',
+  'svelte',
+  'unknown',
+] as const satisfies readonly NonNullable<ElementSource['framework']>[];
+export const ELEMENT_SOURCE_CONFIDENCES = [
+  'exact',
+  'attribute',
+  'heuristic',
+  'none',
+] as const satisfies readonly ElementSource['confidence'][];
+
+const _installChannelsComplete = true satisfies AssertClosedEnum<
+  InstallChannel,
+  (typeof INSTALL_CHANNELS)[number]
+>;
+const _sessionPurposesComplete = true satisfies AssertClosedEnum<
+  SessionPurpose,
+  (typeof SESSION_PURPOSES)[number]
+>;
+const _responseFormatsComplete = true satisfies AssertClosedEnum<
+  ResponseFormat,
+  (typeof RESPONSE_FORMATS)[number]
+>;
+const _permissionOutcomesComplete = true satisfies AssertClosedEnum<
+  PermissionOutcome,
+  (typeof PERMISSION_OUTCOMES)[number]
+>;
+const _configurableSessionRolesComplete = true satisfies AssertClosedEnum<
+  ConfigurableSessionRole,
+  (typeof CONFIGURABLE_SESSION_ROLES)[number]
+>;
+const _browserViewportModesComplete = true satisfies AssertClosedEnum<
+  BrowserViewportMode,
+  (typeof BROWSER_VIEWPORT_MODES)[number]
+>;
+const _browserScrollDirectionsComplete = true satisfies AssertClosedEnum<
+  BrowserScrollDirection,
+  (typeof BROWSER_SCROLL_DIRECTIONS)[number]
+>;
+const _designAnchorKindsComplete = true satisfies AssertClosedEnum<
+  DesignAnchor['kind'],
+  (typeof DESIGN_ANCHOR_KINDS)[number]
+>;
+const _elementSourceFrameworksComplete = true satisfies AssertClosedEnum<
+  NonNullable<ElementSource['framework']>,
+  (typeof ELEMENT_SOURCE_FRAMEWORKS)[number]
+>;
+const _elementSourceConfidencesComplete = true satisfies AssertClosedEnum<
+  ElementSource['confidence'],
+  (typeof ELEMENT_SOURCE_CONFIDENCES)[number]
+>;
+
 // ── Frontend -> Sidecar ──────────────────────────────────────────────
 export type ClientCommand =
   | McpClientCommand

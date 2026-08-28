@@ -8,7 +8,8 @@ import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream/promises';
 
-import { assertValidResponseFormat } from './appPrompt.js';
+import { parseBridgeCommand } from './bridgeCommandParser.js';
+import { MAX_BRIDGE_FRAME_BYTES } from './bridgeSchemas/commandBounds.js';
 import { BridgeEventBatcher, type BridgeEventBatchMetadata } from './bridgeEventBatcher.js';
 import { BridgeReplayBuffer, type SerializedEventBatch } from './bridgeReplayBuffer.js';
 import { resolveBrowserAssetPath } from './browser/browserPaths.js';
@@ -58,7 +59,12 @@ export function startBridgeServer(options: {
     res.writeHead(404).end('not found');
   });
 
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: MAX_BRIDGE_FRAME_BYTES,
+    // The parser owns UTF-8 so invalid sequences close with 1003, not 1007.
+    skipUTF8Validation: true,
+  });
   const batcher = new BridgeEventBatcher({
     isUnderPressure: () => maxBufferedAmount(clients) >= SOFT_CLIENT_BUFFER_BYTES,
     sendBatch,
@@ -138,7 +144,7 @@ export function startBridgeServer(options: {
     const admitted = await resumeClient(ws, url);
     if (!admitted || ws.readyState !== ws.OPEN) return;
     clients.add(ws);
-    ws.on('message', (raw) => void handleMessage(ws, raw));
+    ws.on('message', (raw, isBinary) => void handleMessage(ws, raw, isBinary));
     ws.on('close', () => clients.delete(ws));
     ws.on('error', () => clients.delete(ws));
   }
@@ -237,19 +243,18 @@ export function startBridgeServer(options: {
     });
   }
 
-  async function handleMessage(ws: WebSocket, raw: RawData): Promise<void> {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(messageText(raw));
-    } catch {
-      sendDirectWire(ws, { type: 'error', message: 'Invalid JSON command' });
+  async function handleMessage(ws: WebSocket, raw: RawData, isBinary: boolean): Promise<void> {
+    const parsed = parseBridgeCommand(raw, isBinary);
+    if (!parsed.ok) {
+      if (parsed.closeCode !== undefined) {
+        ws.close(parsed.closeCode);
+        return;
+      }
+      sendDirectWire(ws, { type: 'error', code: parsed.code, message: parsed.message });
       return;
     }
     try {
-      if (typeof parsed === 'object' && parsed !== null && 'responseFormat' in parsed) {
-        assertValidResponseFormat(parsed.responseFormat);
-      }
-      await options.onCommand(parsed as ClientCommand);
+      await options.onCommand(parsed.command);
     } catch (err) {
       sendDirectWire(ws, {
         type: 'error',
@@ -276,12 +281,6 @@ export function startBridgeServer(options: {
     hotPathMetrics.recordBackpressureDisconnect(projectedBufferedBytes);
     ws.terminate();
     return true;
-  }
-
-  function messageText(raw: RawData): string {
-    if (Buffer.isBuffer(raw)) return raw.toString('utf8');
-    if (raw instanceof ArrayBuffer) return Buffer.from(raw).toString('utf8');
-    return Buffer.concat(raw).toString('utf8');
   }
 
   function browserAssetUrl(filePath: string): string {
