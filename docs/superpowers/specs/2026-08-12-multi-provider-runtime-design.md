@@ -9,6 +9,18 @@ The integration branch is integration/multi-provider-v1, created in the
 isolated worktree .worktrees/integration-multi-provider-v1 from origin/main at
 6890d1f1698a7944c23c8c31abb4fd612583d33d.
 
+## Scope revision
+
+**2026-08-28.** The v1 provider set is now five: `droid`, `codex`, `claude`,
+`cursor`, and `grok`. Droid remains the default. Cursor drives the
+`cursor-agent` CLI and Grok drives the `grok` CLI using the user's own local
+authentication. The closed union was widened before the cross-cutting
+`SessionSummary` configuration cut so the union is cut through protocol,
+renderer, and persistence once rather than twice. Until their adapter slices
+land, `cursor` and `grok` register as unavailable provider instances that
+report a truthful missing/setup snapshot and expose no functional session
+controls, exactly as Codex and Claude do before their adapters land.
+
 ## Verified baselines
 
 The design was prepared from:
@@ -33,7 +45,7 @@ moving upstream branch during development or at runtime.
 ## Outcome
 
 DROIDEX will provide one provider-neutral desktop interface that can run Droid,
-Codex, and Claude sessions simultaneously.
+Codex, Claude, Cursor, and Grok sessions simultaneously.
 
 - Droid remains the default provider.
 - A provider is selected before creating a session.
@@ -41,9 +53,11 @@ Codex, and Claude sessions simultaneously.
 - Codex runs through Codex app-server.
 - Claude runs through the official Claude Agent SDK and the user's local Claude
   harness.
+- Cursor runs through the `cursor-agent` CLI.
+- Grok runs through the `grok` CLI.
 - Existing Droid behavior remains available.
-- Codex and Claude expose the common DROIDEX experience plus truthful
-  provider-specific capabilities.
+- Codex, Claude, Cursor, and Grok expose the common DROIDEX experience plus
+  truthful provider-specific capabilities.
 - Settings provide provider setup, discovery, defaults, status, diagnostics,
   and capability visibility.
 
@@ -121,7 +135,9 @@ SessionLifecycle / SessionRegistry / SessionStore
 ProviderRegistry
     |-- DroidProviderAdapter   -> Droid provider sessions
     |-- CodexProviderAdapter   -> Codex app-server sessions
-    '-- ClaudeProviderAdapter  -> Claude Agent SDK sessions
+    |-- ClaudeProviderAdapter  -> Claude Agent SDK sessions
+    |-- CursorProviderAdapter  -> cursor-agent CLI sessions
+    '-- GrokProviderAdapter    -> grok CLI sessions
           |
 canonical ProviderEvent values
           |
@@ -178,9 +194,9 @@ interface ProviderAdapter {
 canonical `turn.settled` event completes a turn. A returned terminal result is
 forbidden because it creates a second settlement path.
 
-The first release has static instance IDs droid, codex, and claude. The
-providerInstanceId contract remains explicit even though multiple instances per
-driver are deferred.
+The first release has static instance IDs droid, codex, claude, cursor, and
+grok. The providerInstanceId contract remains explicit even though multiple
+instances per driver are deferred.
 
 There is no ProviderService, ProviderAdapterRegistry facade, provider session
 directory, provider event bus, hot-reload reconciler, or unknown-driver shadow
@@ -193,7 +209,7 @@ Factory MCP management do not become required ProviderSession methods.
 
 | Identity | Owner | Invariant |
 | --- | --- | --- |
-| providerDriverKind | provider definition | Closed v1 union: droid, codex, claude |
+| providerDriverKind | provider definition | Closed v1 union: droid, codex, claude, cursor, grok |
 | providerInstanceId | runtime | Exact routing identity |
 | appSessionId | DROIDEX | Generated before provider work and permanent |
 | turnId | DROIDEX | Generated for every accepted turn |
@@ -390,11 +406,11 @@ turn; no hidden eager mutation occurs.
 
 DROIDEX retains auto, spec, and agi.
 
-| DROIDEX mode | Droid | Codex | Claude |
-| --- | --- | --- | --- |
-| auto | native auto | default collaboration | normal query |
-| spec | native spec | plan collaboration | plan mode |
-| agi | native AGI | unsupported | unsupported |
+| DROIDEX mode | Droid | Codex | Claude | Cursor | Grok |
+| --- | --- | --- | --- | --- | --- |
+| auto | native auto | default collaboration | normal query | defined by Cursor adapter slice; not yet determined | defined by Grok adapter slice; not yet determined |
+| spec | native spec | plan collaboration | plan mode | defined by Cursor adapter slice; not yet determined | defined by Grok adapter slice; not yet determined |
+| agi | native AGI | unsupported | unsupported | defined by Cursor adapter slice; not yet determined | defined by Grok adapter slice; not yet determined |
 
 Mission Control stays Droid-only. Invalid agi creation fails before provider
 startup.
@@ -417,6 +433,9 @@ Claude translation requires behavior rather than an enum rename:
 - medium uses Claude's native automatic profile and visibly describes its
   effective semantics; and
 - high uses bypassPermissions only with the SDK danger opt-in.
+
+Cursor and Grok autonomy translation is defined by each provider's adapter slice
+and is not yet determined.
 
 The adapter publishes the effective profile and provider or organization
 restrictions. No level silently falls back. Unsupported levels stay disabled
@@ -589,6 +608,29 @@ platform binaries unless separately approved. Claude setup remains a release-
 policy verification gate. DROIDEX does not implement custom Claude login or
 token handling.
 
+### Cursor
+
+Cursor uses the installed `cursor-agent` CLI and the user's local Cursor
+authentication.
+
+Until the Cursor adapter slice lands, `cursor` registers as an unavailable
+provider instance that reports a truthful missing/setup snapshot and exposes no
+functional session controls.
+
+Mode, autonomy, and capability mappings are defined by the Cursor adapter slice
+and are not yet determined.
+
+### Grok
+
+Grok uses the installed `grok` CLI and the user's local Grok authentication.
+
+Until the Grok adapter slice lands, `grok` registers as an unavailable provider
+instance that reports a truthful missing/setup snapshot and exposes no
+functional session controls.
+
+Mode, autonomy, and capability mappings are defined by the Grok adapter slice
+and are not yet determined.
+
 ## Decision 9: settings and discoverability
 
 Settings are a first-class part of the integration.
@@ -596,7 +638,7 @@ Settings are a first-class part of the integration.
 They include:
 
 - default provider, initially Droid;
-- separate Droid, Codex, and Claude cards;
+- separate Droid, Codex, Claude, Cursor, and Grok cards;
 - installed executable and version;
 - readiness and sanitized authentication or account state;
 - API-provider or billing-route description when safely available;
@@ -796,7 +838,8 @@ Each adapter lands a small end-to-end slice before expanding capabilities.
 - Add provider badges and locked live bindings.
 - Remove ambiguous provider wording and commands.
 - Gate every control from the provider snapshot.
-- Preserve Droid-first onboarding and add Codex and Claude setup.
+- Preserve Droid-first onboarding and add Codex, Claude, Cursor, and Grok
+  setup.
 
 ### Phase 5: convergence and release
 
@@ -805,7 +848,8 @@ Each adapter lands a small end-to-end slice before expanding capabilities.
 - Complete attribution, dependency inventory, architecture, setup, recovery,
   and release documentation.
 - Run deterministic and authenticated packaged smokes.
-- Demonstrate Droid default and explicit Codex or Claude selection.
+- Demonstrate Droid default and explicit Codex, Claude, Cursor, or Grok
+  selection.
 
 ## Error and recovery model
 
@@ -833,6 +877,8 @@ interface ProviderError {
     | "open_droid_setup"
     | "open_codex_setup"
     | "open_claude_setup"
+    | "open_cursor_setup"
+    | "open_grok_setup"
     | "reset_canonical_state"
     | "retry_session"
     | "close_session";
@@ -844,7 +890,8 @@ pre-registry database-open failure uses a separate app-startup diagnostic;
 every session-scoped error identifies `providerInstanceId`. Messages are
 sanitized and bounded.
 
-There are no fallback providers. Missing Codex or Claude never routes to Droid.
+There are no fallback providers. Missing Codex, Claude, Cursor, or Grok never
+routes to Droid.
 Unsupported modes never degrade to auto. Failed resume never starts a new native
 conversation under the same app session.
 
@@ -921,12 +968,12 @@ task-stop timeout, close-resume races, and shutdown.
 ### Integration and smoke tests
 
 - real bridge commands against deterministic adapters;
-- three simultaneous fake-provider sessions;
+- five simultaneous fake-provider sessions;
 - one provider crash while the others continue;
 - sidecar restart and exact-provider lazy resume;
 - packaged external executable discovery;
 - packaged Claude SDK assets;
-- authenticated Droid, Codex, and Claude smokes; and
+- authenticated Droid, Codex, Claude, Cursor, and Grok smokes; and
 - one authenticated simultaneous-provider desktop smoke.
 
 ## File and complexity budgets
@@ -957,8 +1004,8 @@ upstream source map.
 
 The product message is:
 
-> One DROIDEX interface. Droid by default. Choose Droid, Codex, or Claude for
-> each new session and run them together.
+> One DROIDEX interface. Droid by default. Choose Droid, Codex, Claude,
+> Cursor, or Grok for each new session and run them together.
 
 Every provider shown in Settings either works or explains exactly how to make it
 work. No control looks functional before its backend exists.
@@ -1027,9 +1074,10 @@ gates when CI cannot run them.
 The integration is complete only when:
 
 - Droid remains default and existing Droid behavior passes;
-- Codex and Claude are discoverable and configurable from Settings;
+- Codex, Claude, Cursor, and Grok are discoverable and configurable from
+  Settings;
 - supported create, resume, send, steer, interrupt, interaction, and close
-  behavior works for all three;
+  behavior works for all five;
 - simultaneous sessions remain isolated;
 - bindings and app identities survive restart;
 - normalized transcripts restore from the canonical database;
