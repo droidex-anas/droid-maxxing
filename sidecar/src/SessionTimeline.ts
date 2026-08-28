@@ -14,7 +14,13 @@ import type {
   TranscriptEvent,
 } from './protocol.js';
 import type { CompactType } from './compaction.js';
+import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import { errMsg } from './sessionHelpers.js';
+import {
+  liftRendererTranscriptEvent,
+  projectTranscriptEvent,
+  type CanonicalIdentity,
+} from './sessionEvents.js';
 import { StreamingDeltaCoalescer, streamingEventOwner } from './streamingDeltaCoalescer.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
@@ -44,6 +50,8 @@ export interface SessionTimelineDependencies {
   emitError: (error: TimelineError) => void;
   now?: () => number;
   loaders?: SessionTimelineLoaders;
+  transcriptStore?: Pick<TranscriptStore, 'append'>;
+  canonicalIdentity?: CanonicalIdentity;
   // Streaming deltas buffered longer than this are flushed as one event.
   // 0 disables coalescing (every delta records and emits immediately).
   streamingCoalesceMs?: number;
@@ -370,6 +378,18 @@ export class SessionTimeline {
   }
 
   private recordAndEmit(event: TranscriptEvent): void {
+    const store = this.dependencies.transcriptStore;
+    if (store) {
+      const identity = this.dependencies.canonicalIdentity;
+      if (!identity) {
+        throw new Error('canonicalIdentity is required when transcriptStore is set.');
+      }
+      const persisted = store.append(liftRendererTranscriptEvent(event, identity));
+      const projected = projectTranscriptEvent(persisted);
+      if (!projected) return;
+      this.emitRecordedEvent(projected);
+      return;
+    }
     this.dependencies.history.recordEvent(event);
     this.emitRecordedEvent(event);
   }

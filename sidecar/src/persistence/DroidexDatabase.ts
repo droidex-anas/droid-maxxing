@@ -62,6 +62,17 @@ export class DroidexDatabase {
     }
   }
 
+  /**
+   * Runs `operation` in a new transaction, or inline when a caller already
+   * owns one. SessionStore and TranscriptStore must use this so they can share
+   * the connection without nesting BEGIN IMMEDIATE.
+   */
+  atomic<T>(operation: () => T): T {
+    this.assertOpen();
+    if (this.inTransaction) return operation();
+    return this.transaction(operation);
+  }
+
   prepare(sql: string): StatementSync {
     this.assertOpen();
     return this.db.prepare(sql);
