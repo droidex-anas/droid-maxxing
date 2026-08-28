@@ -101,6 +101,9 @@ import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfigur
 import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 import { assertValidResponseFormat, formatAppPrompt } from './appPrompt.js';
+import { SIDECAR_SHUTDOWN_BUDGET_MS, ShutdownDeadline } from './providers/shutdownDeadline.js';
+import type { ProviderRegistry } from './providers/ProviderRegistry.js';
+import type { DroidexDatabase } from './persistence/DroidexDatabase.js';
 
 type Emit = (event: ServerEvent) => void;
 
@@ -159,6 +162,8 @@ export interface SessionManagerDependencies {
   maxQueuedRuntimes?: number;
   childRuntimeIdleMs?: number;
   sessionRuntimeIdleMs?: number;
+  providerRegistry?: ProviderRegistry;
+  database?: Pick<DroidexDatabase, 'close'>;
 }
 
 export interface SessionManagerOptions {
@@ -239,6 +244,8 @@ export class SessionManager {
   private readonly mcpSettings: McpSettings;
   private readonly factoryDefaultsOverride: SessionManagerDependencies['getFactoryDefaults'];
   private readonly nextChildSessionId: () => string;
+  private readonly providerRegistry?: ProviderRegistry;
+  private readonly database?: Pick<DroidexDatabase, 'close'>;
 
   constructor(
     private readonly emit: Emit,
@@ -258,6 +265,8 @@ export class SessionManager {
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
       this.nextChildSessionId = options.dependencies.nextChildSessionId ?? nextChildSessionId;
       startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
+      this.providerRegistry = options.dependencies.providerRegistry;
+      this.database = options.dependencies.database;
     } else {
       this.runtime = new DroidRuntime();
       this.history = new HistoryPersistence({
@@ -1625,26 +1634,48 @@ export class SessionManager {
     this.emit({ type: 'error', ...error });
   }
 
-  shutdown(): Promise<void> {
-    this.shutdownPromise ??= Promise.resolve().then(() => this.performShutdown());
+  shutdown(deadline?: ShutdownDeadline): Promise<void> {
+    if (!this.shutdownPromise) {
+      const shutdownDeadline =
+        deadline ?? ShutdownDeadline.fromDurationMs(SIDECAR_SHUTDOWN_BUDGET_MS);
+      // Admission stops as soon as this promise exists. Abort discovery in the
+      // same turn so a late probe cannot adopt after the first trigger.
+      this.shutdownPromise = Promise.resolve().then(() => this.performShutdown(shutdownDeadline));
+      this.providerRegistry?.abortDiscovery();
+    }
     return this.shutdownPromise;
   }
 
-  private async performShutdown(): Promise<void> {
+  private async performShutdown(deadline: ShutdownDeadline): Promise<void> {
     this.historyQueries.forget();
     this.runtimeRetirement.stop();
     let firstError: unknown;
     const run = async (action: () => void | Promise<void>): Promise<void> => {
       try {
-        await action();
+        await deadline.awaitSettled(Promise.resolve().then(action));
       } catch (error) {
         firstError ??= error;
       }
     };
 
+    // 1. Command admission already stopped: shutdownPromise is set.
+    // 2. Discovery abort already ran synchronously in shutdown(); repeat is
+    //    idempotent so a late in-flight probe still cannot adopt.
+    await run(() => {
+      this.providerRegistry?.abortDiscovery();
+    });
     await run(() => this.sessionFiles.close());
-    await run(() => this.lifecycle.closeAll());
-    await run(() => this.childSessions.shutdown());
+    // 3. Invalidate live generations and unregister before provider awaits.
+    await run(() => {
+      this.lifecycle.invalidateLiveSessions();
+    });
+    // 4. Settle native interaction callbacks before discarding resources.
+    await run(() => {
+      this.interactions.cancelAllPending();
+    });
+    // 5. Close children, then parent provider sessions.
+    await run(() => this.childSessions.shutdown(deadline));
+    await run(() => this.lifecycle.closeAll(deadline));
     await run(() => {
       this.missionControlPolicy.clear();
     });
@@ -1655,11 +1686,21 @@ export class SessionManager {
       this.compaction.clearAll();
     });
     await run(() => this.browsers.closeAll());
+    // 7. Close constructed adapters in reverse construction order.
     await run(() => {
-      this.timeline.flushStreaming();
+      if (this.providerRegistry) return this.providerRegistry.close(deadline);
+      return undefined;
+    });
+    // 8. Flush timeline and persistence queues.
+    await run(() => {
+      this.timeline.flushStreaming(deadline);
     });
     await run(() => {
       this.history.close();
+    });
+    // 9. Close SQLite last.
+    await run(() => {
+      this.database?.close(deadline);
     });
     if (firstError !== undefined)
       throw firstError instanceof Error ? firstError : new Error(errMsg(firstError));

@@ -1,6 +1,7 @@
 import { SessionManager } from './SessionManager.js';
 import { startBridgeServer } from './bridgeServer.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
+import { createSharedShutdown, SIDECAR_SHUTDOWN_BUDGET_MS } from './providers/shutdownDeadline.js';
 
 const REQUESTED_PORT = bridgePort(process.env.BRIDGE_PORT ?? '0');
 const TOKEN = requiredSecret('BRIDGE_TOKEN');
@@ -26,8 +27,6 @@ const manager = new SessionManager(
   },
 );
 
-let shuttingDown = false;
-
 server.ready
   .then(() => {
     hotPathMetrics.enable();
@@ -47,23 +46,31 @@ server.ready
     process.exit(1);
   });
 
-async function shutdown(): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  const forceExit = setTimeout(() => process.exit(1), 5_000);
-  forceExit.unref();
-  try {
-    // Keep the bridge available while manager cleanup emits final state.
-    // Bridge close is bounded and flushes its ordered queue after shutdown.
-    await manager.shutdown();
-    hotPathMetrics.disable();
-    await server.close();
-  } catch (error) {
-    console.error(error);
-    process.exitCode = 1;
-  }
-  clearTimeout(forceExit);
-  process.exit();
+let shuttingDown = false;
+
+const triggerShutdown = createSharedShutdown(
+  async (deadline) => {
+    shuttingDown = true;
+    const forceExit = setTimeout(() => process.exit(1), deadline.remainingMs());
+    forceExit.unref();
+    try {
+      // Keep the bridge available while manager cleanup emits final state.
+      // Bridge close is bounded by the shared deadline, not a fresh relative wait.
+      await manager.shutdown(deadline);
+      hotPathMetrics.disable();
+      await server.close(deadline);
+    } catch (error) {
+      console.error(error);
+      process.exitCode = 1;
+    }
+    clearTimeout(forceExit);
+    process.exit();
+  },
+  { durationMs: SIDECAR_SHUTDOWN_BUDGET_MS },
+);
+
+function shutdown(): Promise<void> {
+  return triggerShutdown();
 }
 
 function requiredSecret(name: 'BRIDGE_TOKEN' | 'BROWSER_ASSET_TOKEN'): string {

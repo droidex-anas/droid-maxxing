@@ -120,6 +120,11 @@ test('sidecar lifecycle is delegated to the packaged-runtime supervisor', () => 
   assert.match(mainSource, /entryPath: sidecarEntry/);
   assert.match(mainSource, /sidecarSupervisor\.getBridgeInfo\(\)/);
   assert.doesNotMatch(mainSource, /NODE_BIN|function nodeBin/);
+  assert.match(mainSource, /function stopSidecar\(\)/);
+  assert.match(mainSource, /sidecarStopPromise \?\?= sidecarSupervisor\.stop\(\)/);
+  assert.match(mainSource, /app\.on\('before-quit', \(\) => \{\s*stopSidecar\(\)/);
+  assert.match(mainSource, /app\.on\('window-all-closed', \(\) => \{\s*stopSidecar\(\)/);
+  assert.match(mainSource, /prepareToInstall: \(\) => stopSidecar\(\)/);
 });
 
 test('bridge credentials require the top-level trusted renderer', () => {

@@ -23,6 +23,7 @@ import {
 } from './testing/fakeFactoryRuntime.js';
 import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 
 interface Harness {
   calls: RecordedCall[];
@@ -1976,4 +1977,17 @@ test('opening a child arms the retirement wakeup that later releases it', async 
       .map((call) => call.args[0]),
     ['provider'],
   );
+});
+
+test('shutdown passes the shared deadline to child provider close', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  await h.open(record);
+  const deadline = ShutdownDeadline.fromDurationMs(2_000, 9);
+  await h.owner.shutdown(deadline);
+  const closeCall = h.calls.find(
+    (call) => call.target === 'cleanup' && call.method === 'session.close',
+  );
+  assert.equal(closeCall?.args[0], 'provider');
+  assert.equal(closeCall?.args[1], deadline);
 });

@@ -21,6 +21,7 @@ import type {
 } from '../providers/droid/DroidModeMapping.js';
 import type { FactoryRuntime, RuntimeStatus } from '../providers/droid/DroidProviderAdapter.js';
 import type { FactorySession } from '../providers/droid/DroidProviderSession.js';
+import type { ShutdownDeadline } from '../providers/shutdownDeadline.js';
 
 export interface RecordedCall {
   target: 'runtime' | 'provider' | 'history' | 'browser' | 'cleanup' | 'protocol';
@@ -282,8 +283,12 @@ export class FakeFactorySession implements FactorySession {
     );
   }
 
-  async close(): Promise<void> {
-    this.calls.push({ target: 'cleanup', method: 'session.close', args: [this.sessionId] });
+  async close(deadline?: ShutdownDeadline): Promise<void> {
+    this.calls.push({
+      target: 'cleanup',
+      method: 'session.close',
+      args: [this.sessionId, deadline],
+    });
     const gate = this.nextCloseGate;
     delete this.nextCloseGate;
     const error = this.nextCloseError;

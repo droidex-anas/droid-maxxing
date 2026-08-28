@@ -22,6 +22,7 @@ import {
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
 import { droidSessionConfiguration, withProviderSelection } from './providers/providerIdentity.js';
+import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 
 class TestHistory {
   readonly persisted: SessionSummary[] = [];
@@ -1037,13 +1038,15 @@ test('closeAll marks its full snapshot before sequential cleanup', async () => {
   await second.waitForPrompts(1);
   await new Promise<void>((resolve) => setImmediate(resolve));
 
+  const firstLive = requireLive(harness, 'first-marked');
+  const secondLive = requireLive(harness, 'second-marked');
   const closingAll = harness.lifecycle.closeAll();
   await new Promise<void>((resolve) => setImmediate(resolve));
-  const firstLive = harness.registry.getLive('first-marked');
-  const secondLive = harness.registry.getLive('second-marked');
-  assert.equal(firstLive?.closeMode, 'discard-pending');
-  assert.equal(secondLive?.closeMode, 'discard-pending');
-  assert.ok(secondLive?.closePromise);
+  assert.equal(harness.registry.getLive('first-marked'), undefined);
+  assert.equal(harness.registry.getLive('second-marked'), undefined);
+  assert.equal(firstLive.closeMode, 'discard-pending');
+  assert.equal(secondLive.closeMode, 'discard-pending');
+  assert.ok(secondLive.closePromise);
 
   let directSecondSettled = false;
   const directSecond = harness.lifecycle.close('second-marked').then(() => {
@@ -1234,4 +1237,38 @@ test('pending settings stay projected until successful first-send application', 
     failed.registry.resolveSummary('app-pending')?.configuration.providerSelection.modelId,
     'model-pending',
   );
+});
+
+test('invalidateLiveSessions bumps generations and unregisters before native close', async () => {
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'invalidate-me');
+  await harness.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+  const live = requireLive(harness, 'invalidate-me');
+  const generation = live.binding.runtimeGeneration;
+  const snapshot = harness.lifecycle.invalidateLiveSessions();
+  assert.equal(snapshot.length, 1);
+  assert.equal(harness.registry.getLive('invalidate-me'), undefined);
+  assert.equal(live.binding.runtimeGeneration, generation + 1);
+  assert.equal(live.closeMode, 'discard-pending');
+  await harness.lifecycle.closeAll();
+  assert.equal(
+    harness.calls.some(
+      (call) => call.method === 'session.close' && call.args[0] === 'invalidate-me',
+    ),
+    true,
+  );
+});
+
+test('closeAll passes the same deadline object to native session close', async () => {
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'deadline-owner');
+  await harness.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+  const deadline = ShutdownDeadline.fromDurationMs(1_000, 40);
+  await harness.lifecycle.closeAll(deadline);
+  const closeCall = harness.calls.find(
+    (call) => call.method === 'session.close' && call.args[0] === 'deadline-owner',
+  );
+  assert.equal(closeCall?.args[1], deadline);
 });

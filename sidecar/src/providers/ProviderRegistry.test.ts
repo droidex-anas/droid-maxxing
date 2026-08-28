@@ -292,6 +292,24 @@ test('a probe that completes after shutdown began is discarded', async () => {
   assert.equal(registry.isClosed, true);
 });
 
+test('abortDiscovery discards late refresh before adapters close with the same deadline', async () => {
+  const adapter = fakeAdapter('droid');
+  adapter.gates.block('probe');
+  const registry = new ProviderRegistry([registration(adapter)]);
+  registry.resolve('droid');
+  const pending = registry.refresh('droid');
+  await adapter.gates.waitUntilBlocked('probe');
+  registry.abortDiscovery();
+  adapter.snapshot = { ...adapter.snapshot, readiness: 'error' };
+  adapter.gates.release('probe');
+  await assert.rejects(pending, (error: unknown) =>
+    isContractError(error, 'stale_provider_operation'),
+  );
+  const deadline = ShutdownDeadline.fromDurationMs(2_000, 30);
+  await registry.close(deadline);
+  assert.equal(adapter.receivedCloseDeadline, deadline);
+});
+
 test('reverse close order follows construction order and passes the same deadline through unchanged', async () => {
   const closeOrder: string[] = [];
   const droid = fakeAdapter('droid');
