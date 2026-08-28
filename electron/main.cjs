@@ -389,7 +389,10 @@ function registerIpc() {
   ipcMain.handle('set-api-key', (_event, { key }) => setApiKey(key));
   ipcMain.handle('clear-api-key', clearApiKey);
   ipcMain.handle('list-files', (_event, { dir }) => listFiles(dir));
-  ipcMain.handle('get-performance-metrics', () => performanceMetrics.collect());
+  ipcMain.handle('get-performance-metrics', (event) => {
+    assertMainRenderer(event);
+    return performanceMetrics.collect();
+  });
   ipcMain.handle('system-idle-time', (event) => {
     assertMainRenderer(event);
     return powerMonitor.getSystemIdleTime();
