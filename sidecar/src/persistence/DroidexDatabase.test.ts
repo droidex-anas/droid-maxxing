@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { droidexDatabasePath } from '../droidexPaths.js';
+import { ShutdownDeadline } from '../providers/shutdownDeadline.js';
 import {
   providerErrorCodeSchema,
   providerRecoveryActionSchema,
@@ -619,6 +620,14 @@ test('close is idempotent', () => {
     const db = new DroidexDatabase(join(dir, 'droidex.sqlite'));
     db.close();
     db.close();
+  });
+});
+
+test('close still terminates when given an already-expired deadline', () => {
+  withTempDir((dir) => {
+    const db = new DroidexDatabase(join(dir, 'droidex.sqlite'));
+    db.close(ShutdownDeadline.fromDurationMs(0, 1));
+    db.close(ShutdownDeadline.fromDurationMs(0, 1));
   });
 });
 

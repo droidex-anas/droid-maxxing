@@ -25,6 +25,7 @@ import {
 } from './protocol.js';
 import { emptyRuntimeSnapshot } from './runtimeSnapshot.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
+import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
 
 const HOST = '127.0.0.1';
 const SOFT_CLIENT_BUFFER_BYTES = 512 * 1024;
@@ -36,7 +37,7 @@ export interface BridgeServer {
   readonly ready: Promise<void>;
   broadcast(event: ServerEvent): void;
   browserAssetUrl(filePath: string): string;
-  close(): Promise<void>;
+  close(deadline?: ShutdownDeadline): Promise<void>;
 }
 
 export function startBridgeServer(options: {
@@ -385,7 +386,7 @@ export function startBridgeServer(options: {
     return 'application/octet-stream';
   }
 
-  function close(): Promise<void> {
+  function close(deadline?: ShutdownDeadline): Promise<void> {
     if (closePromise) return closePromise;
     closed = true;
     batcher.close();
@@ -395,10 +396,14 @@ export function startBridgeServer(options: {
         pendingServers -= 1;
         if (pendingServers === 0) resolve();
       };
+      const drainMs =
+        deadline !== undefined
+          ? Math.min(CLIENT_CLOSE_DRAIN_MS, deadline.remainingMs())
+          : CLIENT_CLOSE_DRAIN_MS;
       const forceClose = setTimeout(() => {
         for (const ws of clients.keys()) ws.terminate();
         clients.clear();
-      }, CLIENT_CLOSE_DRAIN_MS);
+      }, drainMs);
       forceClose.unref();
 
       for (const ws of clients.keys()) {

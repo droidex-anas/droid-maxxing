@@ -206,11 +206,21 @@ export class ProviderRegistry {
     return snapshot;
   }
 
+  abortDiscovery(): void {
+    this.#closed = true;
+    for (const slot of this.#slots.values()) {
+      if (slot.refresh.kind === 'refreshing') {
+        slot.probeGeneration += 1;
+        slot.refresh.controller.abort();
+      }
+    }
+  }
+
   close(deadline: ShutdownDeadline): Promise<void> {
+    this.abortDiscovery();
     if (this.#closePromise) {
       return this.#closePromise;
     }
-    this.#closed = true;
     this.#closePromise = this.#closeConstructedAdapters(deadline);
     return this.#closePromise;
   }
@@ -403,17 +413,12 @@ export class ProviderRegistry {
   }
 
   async #closeConstructedAdapters(deadline: ShutdownDeadline): Promise<void> {
-    for (const slot of this.#slots.values()) {
-      if (slot.refresh.kind === 'refreshing') {
-        slot.probeGeneration += 1;
-        slot.refresh.controller.abort();
-      }
-    }
+    this.abortDiscovery();
     const errors: unknown[] = [];
     // Reverse construction order so later adapters cannot depend on already-closed earlier ones.
     for (const adapter of [...this.#constructed].reverse()) {
       try {
-        await adapter.close(deadline);
+        await deadline.awaitSettled(adapter.close(deadline));
       } catch (error) {
         errors.push(error);
       }

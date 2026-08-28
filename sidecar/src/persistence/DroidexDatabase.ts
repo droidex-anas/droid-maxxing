@@ -4,6 +4,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 
 import { droidexDatabasePath } from '../droidexPaths.js';
 import { numberValue, stringValue } from '../values.js';
+import type { ShutdownDeadline } from '../providers/shutdownDeadline.js';
 import {
   DROIDEX_SCHEMA_SQL,
   DROIDEX_SCHEMA_VERSION,
@@ -82,7 +83,7 @@ export class DroidexDatabase {
     return this.db.prepare(sql);
   }
 
-  close(): void {
+  close(_deadline?: ShutdownDeadline): void {
     if (this.closed) return;
     this.closed = true;
     this.db.close();

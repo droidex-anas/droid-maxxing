@@ -252,6 +252,26 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     return liveSession;
   }
 
+  /**
+   * Bump every live binding generation, then unregister. Callers must snapshot
+   * first: shutdown still closes the returned sessions after they leave the
+   * live map so native awaits cannot resurrect them.
+   */
+  invalidateAndUnregisterLive(): readonly TLive[] {
+    const snapshot = this.liveSessionsSnapshot();
+    for (const liveSession of snapshot) {
+      const binding = liveSession.binding;
+      if (binding) {
+        liveSession.binding = {
+          ...binding,
+          runtimeGeneration: binding.runtimeGeneration + 1,
+        };
+      }
+      this.unregister(liveSession.summary.appSessionId);
+    }
+    return snapshot;
+  }
+
   retryPendingDurability(): void {
     for (const [appSessionId, pending] of this.summariesAwaitingDurability) {
       if (this.sessions.get(appSessionId) !== pending.liveSession) {

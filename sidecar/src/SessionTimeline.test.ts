@@ -13,6 +13,7 @@ import {
   type SessionTimelineRegistry,
 } from './SessionTimeline.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 import {
   CanonicalEventCollisionError,
   type TranscriptStore,
@@ -956,4 +957,11 @@ test('a colliding canonical append emits no undurable event', () => {
     CanonicalEventCollisionError,
   );
   assert.deepEqual(emitted, []);
+});
+
+test('flushStreaming accepts the shared shutdown deadline without replacing it', () => {
+  const harness = createHarness();
+  const deadline = ShutdownDeadline.fromDurationMs(1_000, 5);
+  harness.timeline.flushStreaming(deadline);
+  harness.timeline.flushStreaming(deadline);
 });

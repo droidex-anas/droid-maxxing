@@ -358,6 +358,20 @@ test('question answers, cancellation, duplicate, late, and wrong-session respons
   assert.equal(settlements, 1);
 });
 
+test('cancelAllPending settles native callbacks as cancelled without deleting scopes', async () => {
+  const harness = createHarness();
+  harness.addLiveSession('app-1');
+  const permission = harness.interactions.makePermissionHandler({ id: 'app-1' });
+  const question = harness.interactions.makeAskUserHandler({ id: 'app-1' });
+  const pendingPermission = Promise.resolve(permission(permissionInput('shutdown')));
+  const pendingQuestion = Promise.resolve(question({ toolCallId: 'shutdown-q', questions: [] }));
+  await Promise.resolve();
+  harness.interactions.cancelAllPending();
+  assert.equal(await pendingPermission, ToolConfirmationOutcome.Cancel);
+  assert.deepEqual(await pendingQuestion, { cancelled: true, answers: [] });
+  harness.interactions.cancelAllPending();
+});
+
 test('forgetSession is protocol-silent, resolves nothing, and discards owned state', async () => {
   const harness = createHarness();
   harness.addLiveSession('app-1');

@@ -12,6 +12,7 @@ import {
 } from './SessionCompaction.js';
 import { errMsg, isUserCancellation } from './sessionHelpers.js';
 import { isReportedStreamingTranscriptError } from './SessionTimeline.js';
+import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
 import {
   applyObservedChild,
   childAcceptsWork,
@@ -526,12 +527,14 @@ export class ChildSessions {
       await this.close(identity);
   }
 
-  async closeParent(parentAppSessionId: string): Promise<void> {
+  async closeParent(parentAppSessionId: string, deadline?: ShutdownDeadline): Promise<void> {
     const parent = this.parents.get(parentAppSessionId);
     if (!parent) return;
     parent.closing = true;
+    parent.generation += 1;
     await cancelOpenAttempts(parent);
-    for (const child of parent.children.values()) await this.closeRuntime(parent, child, false);
+    for (const child of parent.children.values())
+      await this.closeRuntime(parent, child, false, deadline);
     parent.pendingSpawns.clear();
     parent.reservedOpenSlots.clear();
     parent.runtimeQueue = [];
@@ -542,10 +545,12 @@ export class ChildSessions {
     if (this.parents.get(parentAppSessionId) === parent) this.parents.delete(parentAppSessionId);
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(deadline?: ShutdownDeadline): Promise<void> {
     this.shuttingDown = true;
     this.retirementTimer.cancel();
-    for (const parent of this.parents.values()) await this.closeParent(parent.parentAppSessionId);
+    const parents = [...this.parents.values()];
+    for (const parent of parents) parent.closing = true;
+    for (const parent of parents) await this.closeParent(parent.parentAppSessionId, deadline);
   }
 
   // Release the provider process behind every child that has been settled and
@@ -990,6 +995,7 @@ export class ChildSessions {
     parent: ParentChildSessions,
     child: ChildSessionState,
     publish: boolean,
+    deadline?: ShutdownDeadline,
   ): Promise<void> {
     const runtime = child.runtime;
     if (!runtime) return child.mutationTail;
@@ -1014,16 +1020,15 @@ export class ChildSessions {
     const cleanupTarget = this.contextTarget(parent, child, runtime);
     void runCleanup(this.d.context.forgetChild.bind(this.d.context, child.identity));
     void runCleanup(this.d.context.stopPolling.bind(this.d.context, cleanupTarget));
-    const cleanupTasks = [
-      runtime.unsubscribe ?? ignoreError,
-      runtime.session.close.bind(runtime.session),
-    ];
+    const closeSession = () =>
+      (runtime.session.close as (closeDeadline?: ShutdownDeadline) => Promise<void>)(deadline);
+    const cleanupTasks = [runtime.unsubscribe ?? ignoreError, closeSession];
     const cleanup = (child.mutationTail ?? Promise.resolve())
       .catch(ignoreError)
       .then(() => Promise.allSettled(cleanupTasks.map(runCleanup)))
       .then(ignoreError);
     child.mutationTail = cleanup;
-    await cleanup;
+    await (deadline ? deadline.awaitSettled(cleanup) : cleanup);
     this.clearMutation(child, cleanup);
     if (
       publish &&

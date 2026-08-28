@@ -158,6 +158,25 @@ export class SessionInteractions {
     this.scopes.delete(appSessionId);
   }
 
+  /**
+   * Settle every pending native callback as cancelled. Shutdown calls this
+   * before discarding provider resources so no Factory/native waiter is left
+   * hanging. Per-session close still uses `forgetSession`, which discards
+   * without settling.
+   */
+  cancelAllPending(): void {
+    for (const scope of this.scopes.values()) {
+      for (const pending of scope.pendingPermissions.values()) {
+        pending.resolve(normalizePermissionOutcome('cancel'));
+      }
+      for (const resolve of scope.pendingQuestions.values()) {
+        resolve({ cancelled: true, answers: [] });
+      }
+      scope.pendingPermissions.clear();
+      scope.pendingQuestions.clear();
+    }
+  }
+
   private scope(appSessionId: string): InteractionScope {
     const existing = this.scopes.get(appSessionId);
     if (existing) return existing;

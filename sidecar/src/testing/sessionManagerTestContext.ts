@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { McpServerConfigSchema, type McpServerConfig } from '@factory/droid-sdk';
 
+import type { ShutdownDeadline } from '../providers/shutdownDeadline.js';
 import {
   SessionManager,
   type SessionManagerDependencies,
@@ -71,7 +72,7 @@ export interface SessionManagerTestContext {
     command: Omit<Extract<Protocol.ClientCommand, { type: 'session.create' }>, 'type'>,
   ): Promise<void>;
   retireIdleSessionRuntimes(): Promise<void>;
-  shutdown(): Promise<void>;
+  shutdown(deadline?: ShutdownDeadline): Promise<void>;
   waitForIdle(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -90,6 +91,8 @@ export function createSessionManagerTestContext(
     streamingCoalesceMs?: number;
     childRuntimeIdleMs?: number;
     sessionRuntimeIdleMs?: number;
+    providerRegistry?: SessionManagerDependencies['providerRegistry'];
+    database?: SessionManagerDependencies['database'];
   } = {},
 ): SessionManagerTestContext {
   const calls: RecordedCall[] = [];
@@ -139,6 +142,8 @@ export function createSessionManagerTestContext(
     ...(options.startSessionFileWatcher
       ? { startSessionFileWatcher: options.startSessionFileWatcher }
       : {}),
+    ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
+    ...(options.database ? { database: options.database } : {}),
   };
 
   try {
@@ -247,13 +252,16 @@ export function createSessionManagerTestContext(
     handle,
     create: (command) => handle({ type: 'session.create', ...command }),
     retireIdleSessionRuntimes: () => manager.retireIdleSessionRuntimes(),
-    shutdown: () => manager.shutdown(),
+    shutdown: (deadline) => manager.shutdown(deadline),
     waitForIdle: () => new Promise((resolve) => setImmediate(resolve)),
     dispose: async () => {
       if (disposed) return;
       disposed = true;
       try {
         await manager.shutdown();
+      } catch {
+        // A prior failed shutdown already reported to the caller. Dispose must
+        // still unpin HOME and must not rethrow the shared rejected promise.
       } finally {
         sessionFileMirror.close();
         unpinTestHome();
@@ -302,6 +310,8 @@ export function createNativeBrowserTestContext(): NativeBrowserTestContext {
       disposed = true;
       try {
         await manager.shutdown();
+      } catch {
+        // A prior failed shutdown already reported to the caller.
       } finally {
         unpinTestHome();
         rmSync(home, { recursive: true, force: true });

@@ -29,6 +29,7 @@ import {
   requireCreateConfiguration,
 } from './sessionHelpers.js';
 import { droidReasoningEffortFromSelection } from './providers/providerIdentity.js';
+import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
 
 export type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
 
@@ -111,7 +112,9 @@ export interface SessionLifecycleDependencies {
 }
 export class SessionLifecycle {
   private readonly deferredCloses = new WeakMap<LiveSession, DeferredClose>();
+  private readonly closesById = new Map<string, LiveSession>();
   private readonly resumeOperations = new Map<string, Promise<boolean>>();
+  private pendingShutdownCloses?: Array<{ liveSession: LiveSession; close: CloseOperation }>;
 
   constructor(private readonly dependencies: SessionLifecycleDependencies) {}
   async create(command: SessionCreateCommand): Promise<void> {
@@ -417,11 +420,29 @@ export class SessionLifecycle {
   }
 
   async close(appSessionId: string, mode: SessionCloseMode = 'discard-pending'): Promise<void> {
-    const liveSession = this.dependencies.registry.getLive(appSessionId);
+    const liveSession =
+      this.dependencies.registry.getLive(appSessionId) ?? this.closesById.get(appSessionId);
     if (!liveSession) return;
     const operation = this.beginClose(liveSession, mode);
     if (operation.created) await this.finishClose(liveSession);
     await operation.deferred.promise;
+  }
+
+  /**
+   * Invalidate generations, mark every live session closing, and unregister
+   * them before any provider await. `closeAll` finishes the captured batch.
+   */
+  invalidateLiveSessions(): readonly LiveSession[] {
+    if (this.pendingShutdownCloses) {
+      return this.pendingShutdownCloses.map((entry) => entry.liveSession);
+    }
+    const snapshot = this.dependencies.registry.liveSessionsSnapshot();
+    this.pendingShutdownCloses = snapshot.map((liveSession) => ({
+      liveSession,
+      close: this.beginClose(liveSession, 'discard-pending'),
+    }));
+    this.dependencies.registry.invalidateAndUnregisterLive();
+    return snapshot;
   }
 
   private beginClose(liveSession: LiveSession, mode: SessionCloseMode): CloseOperation {
@@ -444,37 +465,45 @@ export class SessionLifecycle {
     });
     const deferred = { promise, resolve, reject, started: false };
     this.deferredCloses.set(liveSession, deferred);
+    this.closesById.set(liveSession.summary.appSessionId, liveSession);
     liveSession.closePromise = promise;
     return { deferred, created: true };
   }
 
-  private async finishClose(liveSession: LiveSession): Promise<void> {
+  private async finishClose(liveSession: LiveSession, deadline?: ShutdownDeadline): Promise<void> {
     const deferred = this.deferredCloses.get(liveSession);
     if (!deferred || deferred.started) return;
     deferred.started = true;
     try {
-      await this.closeSessionResources(liveSession);
+      await this.closeSessionResources(liveSession, deadline);
       deferred.resolve();
     } catch (error) {
       deferred.reject(error);
     } finally {
       this.deferredCloses.delete(liveSession);
+      if (this.closesById.get(liveSession.summary.appSessionId) === liveSession) {
+        this.closesById.delete(liveSession.summary.appSessionId);
+      }
     }
   }
 
-  private async closeSessionResources(liveSession: LiveSession): Promise<void> {
+  private async closeSessionResources(
+    liveSession: LiveSession,
+    deadline?: ShutdownDeadline,
+  ): Promise<void> {
     const d = this.dependencies;
     const closedProviderSessionId = liveSession.session.sessionId;
     let firstError: unknown;
     const run = async (action: () => void | Promise<void>): Promise<void> => {
       try {
-        await action();
+        const work = Promise.resolve().then(action);
+        await (deadline ? deadline.awaitSettled(work) : work);
       } catch (error) {
         firstError ??= error;
       }
     };
 
-    await run(() => d.childSessions.closeParent(liveSession.summary.appSessionId));
+    await run(() => d.childSessions.closeParent(liveSession.summary.appSessionId, deadline));
     await run(() => {
       d.context.stopSession(liveSession);
     });
@@ -490,16 +519,24 @@ export class SessionLifecycle {
     for (const server of liveSession.mcpServers) {
       await run(() => server.close());
     }
-    await run(() => liveSession.session.close());
+    // Shutdown already unregistered via invalidateLiveSessions. Individual
+    // close keeps the live mapping until after the native await so in-flight
+    // interaction callbacks can still settle against the same session.
+    const stillRegistered = d.registry.getLive(liveSession.summary.appSessionId) === liveSession;
+    await run(() => closeNativeSession(liveSession.session, deadline));
     await run(() => d.closeBrowserSession(liveSession.summary.appSessionId));
     await run(() => {
       d.context.forgetSession(liveSession);
     });
     let unregistered: LiveSession | undefined;
-    try {
-      unregistered = d.registry.unregister(liveSession.summary.appSessionId);
-    } catch (error) {
-      firstError ??= error;
+    if (stillRegistered) {
+      try {
+        unregistered = d.registry.unregister(liveSession.summary.appSessionId);
+      } catch (error) {
+        firstError ??= error;
+      }
+    } else {
+      unregistered = liveSession;
     }
     if (unregistered) {
       await run(() => {
@@ -520,16 +557,16 @@ export class SessionLifecycle {
     if (firstError !== undefined) throw errorFromUnknown(firstError);
   }
 
-  async closeAll(): Promise<void> {
-    const scheduled = this.dependencies.registry.liveSessionsSnapshot().map((liveSession) => ({
-      liveSession,
-      close: this.beginClose(liveSession, 'discard-pending'),
-    }));
+  async closeAll(deadline?: ShutdownDeadline): Promise<void> {
+    this.invalidateLiveSessions();
+    const scheduled = this.pendingShutdownCloses ?? [];
+    this.pendingShutdownCloses = undefined;
     let firstError: unknown;
     for (const { liveSession, close } of scheduled) {
-      if (close.created) await this.finishClose(liveSession);
+      if (close.created) await this.finishClose(liveSession, deadline);
       try {
-        await close.deferred.promise;
+        const work = close.deferred.promise;
+        await (deadline ? deadline.awaitSettled(work) : work);
       } catch (error) {
         firstError ??= error;
       }
@@ -711,6 +748,15 @@ export class SessionLifecycle {
     }
   }
 }
+function closeNativeSession(
+  session: { close: (...args: never[]) => Promise<void> },
+  deadline?: ShutdownDeadline,
+): Promise<void> {
+  // ProviderSession.close takes the shared deadline; FactorySession.close
+  // ignores the extra argument. Keep the call site one path.
+  return (session.close as (deadline?: ShutdownDeadline) => Promise<void>)(deadline);
+}
+
 function createLiveSession(
   summary: SessionSummary,
   session: FactorySession,

@@ -860,3 +860,22 @@ test('registry dual-writes summary updates through SessionStore when a row exist
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('invalidateAndUnregisterLive bumps generations and removes live sessions before awaits', () => {
+  const { registry } = createHarness();
+  const first = live(summary('first'));
+  const second = live(summary('second'));
+  const firstGeneration = first.binding.runtimeGeneration;
+  registry.register(first);
+  registry.register(second);
+  const snapshot = registry.invalidateAndUnregisterLive();
+  assert.equal(snapshot.length, 2);
+  assert.equal(registry.getLive('first'), undefined);
+  assert.equal(registry.getLive('second'), undefined);
+  assert.equal(first.binding.runtimeGeneration, firstGeneration + 1);
+  assert.equal(second.binding.runtimeGeneration, first.binding.runtimeGeneration);
+  assert.deepEqual(snapshot.map((session) => session.summary.appSessionId).sort(), [
+    'first',
+    'second',
+  ]);
+});

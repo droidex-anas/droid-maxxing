@@ -15,6 +15,7 @@ import type {
 import type { CompactType } from './compaction.js';
 import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import { errMsg } from './sessionHelpers.js';
+import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
 import {
   liftRendererTranscriptEvent,
   projectTranscriptEvent,
@@ -274,7 +275,7 @@ export class SessionTimeline {
 
   // Emits every buffered delta run immediately. Shutdown only: turn settlement
   // and mid-turn side effects flush the one source that owns the run.
-  flushStreaming(): void {
+  flushStreaming(_deadline?: ShutdownDeadline): void {
     this.streaming.flushAll();
   }
 
