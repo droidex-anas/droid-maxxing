@@ -10,6 +10,8 @@ import type { SessionCompaction } from './SessionCompaction.js';
 import type { SessionInitResult } from './sessionHelpers.js';
 import type { ChildParentLease, ChildRuntimeTarget, ChildSettings } from './ChildSessionState.js';
 
+export type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
+
 export type ChildSettingsTarget = ChildRuntimeTarget & {
   parentGeneration: number;
   runtimeGeneration: number;
@@ -19,10 +21,12 @@ export type ChildSettingsTarget = ChildRuntimeTarget & {
 export interface ChildSessionsDependencies {
   runtime: Pick<FactoryRuntime, 'loadSession'>;
   registry: Pick<SessionRegistry<ChildParentLease>, 'getLive'>;
-  history: Pick<
-    HistoryIndex,
-    'childSessions' | 'childSession' | 'sessionLaunchSettings' | 'upsertChildSession'
-  >;
+  history: Pick<HistoryIndex, 'childSessions' | 'childSession' | 'sessionLaunchSettings'> & {
+    // Mirrors HistoryIndex.upsertChildSession: false means the child update is
+    // queued behind durability and must not be published yet; true/undefined
+    // both mean the update is safe to publish immediately.
+    upsertChildSession(child: PersistedChildSession): boolean | undefined;
+  };
   timeline: Pick<
     SessionTimeline,
     'append' | 'appendStatus' | 'loadChildHistory' | 'flushStreamingFor' | 'settleStreaming'
@@ -49,5 +53,8 @@ export interface ChildSessionsDependencies {
   emit(event: ServerEvent): void;
   nextChildSessionId(): string;
   maxOpenSessions: number;
+  maxLiveRuntimes: number;
+  maxQueuedRuntimes: number;
+  childRuntimeIdleMs: number;
   now(): number;
 }

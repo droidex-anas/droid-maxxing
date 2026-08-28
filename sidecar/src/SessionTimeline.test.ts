@@ -20,7 +20,7 @@ interface HarnessOptions {
   childSessions?: ChildSessionSummary[];
   loaders?: Partial<SessionTimelineLoaders>;
   now?: () => number;
-  onRecordEvent?: (event: TranscriptEvent) => void;
+  onRecordEvent?: (event: TranscriptEvent) => boolean | void;
   streamingCoalesceMs?: number;
   streamingCoalesceMaxBytes?: number;
 }
@@ -55,8 +55,9 @@ function createHarness(options: HarnessOptions = {}) {
     history: {
       recordEvent: (event) => {
         trace.push(`record:${event.id}`);
-        options.onRecordEvent?.(event);
+        const durable = options.onRecordEvent?.(event);
         recorded.push(event);
+        return durable;
       },
     },
     getChildSessions: () => options.childSessions ?? [],
@@ -118,6 +119,7 @@ function child(
     status,
     modelId: 'model-default',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
 }
 
@@ -269,13 +271,17 @@ test('one child persistence failure does not abort another child append', () => 
       }),
     );
   });
+  // A sibling's delta must neither publish nor abort child A's buffered run.
+  assert.deepEqual(emitted, []);
   timeline.flushStreamingFor('parent-1', 'child-b');
 
   assert.deepEqual(
     recorded.map((event) => event.id),
     ['b'],
   );
-  assert.deepEqual(emitted, [
+  assert.deepEqual(emitted, [{ type: 'event.appended', event: recorded[0] }]);
+  assert.throws(() => timeline.settleStreaming('parent-1', 'child-a'), /child A disk failure/);
+  assert.deepEqual(emitted.slice(1), [
     {
       type: 'child.error',
       parentAppSessionId: 'parent-1',
@@ -286,9 +292,7 @@ test('one child persistence failure does not abort another child append', () => 
       message: 'Unable to persist buffered child output: child A disk failure',
       recoverable: true,
     },
-    { type: 'event.appended', event: recorded[0] },
   ]);
-  assert.throws(() => timeline.settleStreaming('parent-1', 'child-a'), /child A disk failure/);
   assert.doesNotThrow(() => timeline.settleStreaming('parent-1', 'child-b'));
 });
 
@@ -545,7 +549,11 @@ test('older restore prepends only transcripts and preserves page telemetry', () 
       resolveSummary: () => summary('app-1', 'provider-1'),
       getLive: () => undefined,
     },
-    history: { recordEvent: (recorded) => harness.recorded.push(recorded) },
+    history: {
+      recordEvent: (recorded) => {
+        harness.recorded.push(recorded);
+      },
+    },
     getChildSessions: () => {
       childLinkReads += 1;
       return [];

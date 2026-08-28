@@ -825,6 +825,54 @@ test('DroidRuntime reads public and private context breakdown seams best effort'
   assert.equal(await runtime.readContextBreakdown(session), undefined);
 });
 
+test('hidden background work pauses context pollers and still refreshes on demand', async (t) => {
+  const timers = new Map<number, { callback: () => void; ms: number }>();
+  let nextId = 1;
+  const h = createHarness();
+  const injected = new SessionContext({
+    registry: h.registry,
+    runtime: h.runtime,
+    emit: (event) => h.events.push(event),
+    maxContextTokensForSummary: (value) => value.maxContextTokens,
+    noteContextWindow: () => undefined,
+    setIntervalFn: ((callback: () => void, ms: number) => {
+      const id = nextId;
+      nextId += 1;
+      timers.set(id, { callback, ms });
+      return id as unknown as ReturnType<typeof setInterval>;
+    }) as typeof setInterval,
+    clearIntervalFn: ((id: ReturnType<typeof setInterval>) => {
+      timers.delete(id as unknown as number);
+    }) as typeof clearInterval,
+  });
+  const { live, session } = registerLive({ ...h, context: injected }, 'app-1');
+  t.after(() => injected.clearAll());
+  const target = primaryTarget({ ...h, context: injected }, live);
+
+  injected.startPolling(target);
+  await Promise.resolve();
+  assert.equal(session.contextStatsCalls, 1);
+  assert.equal(injected.pollerCounts().active, 1);
+  assert.equal([...timers.values()][0]?.ms, 2_500);
+
+  injected.setBackgroundWork('hidden', 'app-1');
+  assert.equal(injected.pollerCounts().active, 0);
+  assert.equal(timers.size, 0);
+
+  const usageBefore = live.summary.tokensIn;
+  injected.recordUsage('app-1', 'app-1', { tokensIn: usageBefore + 4, tokensOut: 1 });
+  assert.equal(live.summary.tokensIn, usageBefore + 4);
+
+  const before = session.contextStatsCalls;
+  await injected.refresh(target);
+  assert.equal(session.contextStatsCalls, before + 1);
+
+  injected.setBackgroundWork('interactive', 'app-1');
+  await Promise.resolve();
+  assert.equal(injected.pollerCounts().active, 1);
+  assert.ok(session.contextStatsCalls > before);
+});
+
 function summary(appSessionId: string, providerSessionId: string): SessionSummary {
   return {
     appSessionId,

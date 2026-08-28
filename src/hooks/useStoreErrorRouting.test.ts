@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { adaptEvent, initialState, reducer, toastMessageForEvent } from './useStore';
+import {
+  applyHistoryServerEvent,
+  getHistoryHealth,
+  resetHistoryHealthForTests,
+} from '../lib/historyHealth';
 import type { SessionSummary } from '../types/bridge';
 
 const session: SessionSummary = {
@@ -171,6 +176,34 @@ test('a recoverable parent error stays out of reducer state', () => {
   assert.equal(action, null);
 });
 
+test('a bridge resync requirement becomes an actionable connection error', () => {
+  const resync = {
+    type: 'error' as const,
+    code: 'bridge.resync_required',
+    message: 'The renderer fell behind. Reopen the active session to refresh it.',
+    recoverable: false,
+  };
+
+  assert.equal(toastMessageForEvent(resync), resync.message);
+  assert.deepEqual(adaptEvent(resync), {
+    type: 'SET_CONNECTION',
+    status: 'error',
+    message: resync.message,
+  });
+});
+
+test('a recoverable bridge resync keeps connection state available for reconnect', () => {
+  const resync = {
+    type: 'error' as const,
+    code: 'bridge.resync_required',
+    message: 'The runtime sent a malformed batch. Reconnecting with a fresh cursor.',
+    recoverable: true,
+  };
+
+  assert.equal(toastMessageForEvent(resync), resync.message);
+  assert.equal(adaptEvent(resync), null);
+});
+
 test('an unsupported-command error toasts its restart guidance', () => {
   // Bridge version skew (e.g. a dev app running across a sidecar rebuild)
   // surfaces as bridge.unsupported_command; the message must reach the user
@@ -182,4 +215,59 @@ test('an unsupported-command error toasts its restart guidance', () => {
       'This DROIDEX build does not support the "session.exportMarkdown" command. Restart the app to pick up the current sidecar.',
   };
   assert.equal(toastMessageForEvent(skew), skew.message);
+});
+
+test('unflushed history and interrupted sessions toast instead of looking durable', () => {
+  const unflushed = {
+    type: 'error' as const,
+    code: 'history.unflushed_work',
+    message: 'The previous agent runtime exited with unflushed history.',
+    recoverable: true,
+  };
+  const interrupted = {
+    type: 'error' as const,
+    code: 'session.interrupted',
+    appSessionId: 'app-1',
+    message: 'The agent runtime restarted and this turn did not continue.',
+    recoverable: true,
+  };
+  assert.equal(toastMessageForEvent(unflushed), unflushed.message);
+  assert.equal(adaptEvent(unflushed), null);
+  assert.equal(toastMessageForEvent(interrupted), interrupted.message);
+  assert.equal(adaptEvent(interrupted), null);
+});
+
+test('history persistence and search status stay out of toasts and session errors', () => {
+  const degraded = {
+    type: 'error' as const,
+    code: 'history.persistence_degraded',
+    message: 'History durability is temporarily degraded.',
+    recoverable: true,
+  };
+  const unavailable = {
+    type: 'error' as const,
+    code: 'history.search_unavailable',
+    message: 'History search is unavailable.',
+    recoverable: false,
+  };
+  const recovered = { type: 'history.persistenceRecovered' as const };
+
+  assert.equal(toastMessageForEvent(degraded), undefined);
+  assert.equal(adaptEvent(degraded), null);
+  assert.equal(toastMessageForEvent(unavailable), undefined);
+  assert.equal(adaptEvent(unavailable), null);
+  assert.equal(toastMessageForEvent(recovered), undefined);
+  assert.equal(adaptEvent(recovered), null);
+
+  try {
+    applyHistoryServerEvent(degraded);
+    applyHistoryServerEvent(degraded);
+    assert.deepEqual(getHistoryHealth(), { persistence: 'degraded', search: 'ok' });
+    applyHistoryServerEvent(recovered);
+    assert.deepEqual(getHistoryHealth(), { persistence: 'ok', search: 'ok' });
+    applyHistoryServerEvent(unavailable);
+    assert.deepEqual(getHistoryHealth(), { persistence: 'ok', search: 'unavailable' });
+  } finally {
+    resetHistoryHealthForTests();
+  }
 });

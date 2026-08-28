@@ -5,22 +5,24 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  buildFeed,
   childSessionLineIsRunning,
-  collectTurnFiles,
-  conversationAnchors,
   correlateResults,
   fetchSizeBadge,
-  groupTurns,
-  isResultFor,
   sameFeedEvents,
   MessageFeed,
   StreamingCaret,
   UserBubble,
   WebFetchBody,
-  appendedFeedItemKeys,
-  type FeedItem,
 } from './chat';
+import { buildFeed, collectTurnFiles, isResultFor, type FeedItem } from './chatFeed';
+import { conversationAnchors, groupTurns } from './chatFeedTurns';
+import {
+  appendedFeedItemKeys,
+  appendedFeedItemKeysFromProjection,
+  completeAppResponsesInLatestTurn,
+  projectFinalResponseKeys,
+  rememberFreshAppResponses,
+} from './messageFeedState';
 import { EarlierHistoryControl, isConversationOpeningSettling } from './ChatView';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
@@ -30,8 +32,10 @@ import {
   reopenDiffDisclosure,
   revealNextDiffCards,
 } from '../lib/diff';
+import { createIncrementalTranscriptFilter } from '../lib/incrementalTranscriptFilter';
 import { hasTodoPayload, parseTruncatedTail } from '../lib/tools';
 import type { TranscriptEvent } from '../types/bridge';
+import { isRenderedTranscriptEvent } from './MissionControl';
 
 let seq = 0;
 function ev(extra: Partial<TranscriptEvent>): TranscriptEvent {
@@ -682,6 +686,41 @@ test('#20 a failed child session result batched after another tool call surfaces
 
 // ── #18: final answer always top-level, even with trailing compaction ──
 
+test('Mission Control still renders a compaction divider after transcript pre-filtering', () => {
+  // Every TranscriptEvent.kind that buildFeed turns into a feed row must survive
+  // the Mission Control pre-filter; a missing kind is a silent dropped divider.
+  const renderedKinds: Record<TranscriptEvent['kind'], true> = {
+    text: true,
+    thinking: true,
+    tool_call: true,
+    tool_result: true,
+    error: true,
+    status: true,
+    compaction: true,
+  };
+  for (const kind of Object.keys(renderedKinds) as TranscriptEvent['kind'][]) {
+    assert.equal(
+      isRenderedTranscriptEvent(ev({ kind })),
+      true,
+      `${kind} must survive the Mission Control transcript filter`,
+    );
+  }
+  assert.equal(isRenderedTranscriptEvent(userMsg('keep user prompts')), true);
+
+  const events = [userMsg('q'), asst('the answer'), compaction()];
+  const filter = createIncrementalTranscriptFilter();
+  const filtered = filter({
+    conversationKey: 'mission',
+    source: events,
+    mutation: undefined,
+    includes: isRenderedTranscriptEvent,
+  });
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events: filtered, pending: false }),
+  );
+  assert.match(html, /Context automatically compacted/);
+});
+
 test('#18 a final answer followed by compaction stays a top-level message', () => {
   const events = [userMsg('q'), grep(), asst('the answer'), compaction()];
   const grouped = groupTurns(buildFeed(events), false);
@@ -833,29 +872,11 @@ test('ordinary live prose keeps the trailing streaming caret', () => {
   assert.match(html, /caret-blink/);
 });
 
-test('a freshly generated App stays eligible for autoplay when history replaces its event id', async () => {
-  type FreshAppState = {
-    identity: string;
-    wasPending: boolean;
-    texts: Set<string>;
-  };
-  type RememberFreshApps = (
-    previous: FreshAppState | null,
-    identity: string,
-    items: FeedItem[],
-    pending: boolean,
-  ) => FreshAppState;
-  const chatModule = (await import('./chat')) as unknown as {
-    rememberFreshAppResponses?: RememberFreshApps;
-  };
-  const remember = chatModule.rememberFreshAppResponses;
-  assert.equal(typeof remember, 'function');
-  if (!remember) return;
-
+test('a freshly generated App stays eligible for autoplay when history replaces its event id', () => {
   const prompt = userMsg('Visualize this');
   const incomplete = asst('```app\n<main><script>const points = [');
   const liveItems = groupTurns(buildFeed([prompt, incomplete]), true);
-  const liveState = remember(null, 'session-1', liveItems, true);
+  const liveState = rememberFreshAppResponses(null, 'session-1', liveItems, true);
   assert.deepEqual([...liveState.texts], []);
 
   const completeText = '```app\n<main>Complete App</main>\n```';
@@ -864,23 +885,16 @@ test('a freshly generated App stays eligible for autoplay when history replaces 
     id: 'authoritative-history-id',
   };
   const settledItems = groupTurns(buildFeed([prompt, authoritative]), false);
-  const settledState = remember(liveState, 'session-1', settledItems, false);
+  const settledState = rememberFreshAppResponses(liveState, 'session-1', settledItems, false);
   assert.deepEqual([...settledState.texts], [completeText]);
 
-  const reopenedState = remember(null, 'session-1', settledItems, false);
+  const reopenedState = rememberFreshAppResponses(null, 'session-1', settledItems, false);
   assert.deepEqual([...reopenedState.texts], []);
 });
 
-test('assistant Apps without a user prompt are never treated as fresh autoplay responses', async () => {
-  const chatModule = (await import('./chat')) as unknown as {
-    completeAppResponsesInLatestTurn?: (items: FeedItem[]) => string[];
-  };
-  const completeApps = chatModule.completeAppResponsesInLatestTurn;
-  assert.equal(typeof completeApps, 'function');
-  if (!completeApps) return;
-
+test('assistant Apps without a user prompt are never treated as fresh autoplay responses', () => {
   const historical = groupTurns(buildFeed([asst('```app\n<main>Historical</main>\n```')]), false);
-  assert.deepEqual(completeApps(historical), []);
+  assert.deepEqual(completeAppResponsesInLatestTurn(historical), []);
 });
 
 test('live thinking stays collapsed until the user opens it', () => {
@@ -1341,6 +1355,128 @@ test('appendedFeedItemKeys animates only genuinely appended tail items', () => {
   );
 });
 
+test('projected entrance keys inspect only the rebuilt feed suffix', () => {
+  const identity = 'm:primary';
+  const items = (keys: string[]) => keys.map((key) => ({ key }));
+  const previous = { identity, items: items(['old-1', 'old-2', 'turn', 'tail']) };
+
+  assert.deepEqual(
+    [
+      ...appendedFeedItemKeysFromProjection(
+        items(['old-1', 'old-2', 'turn', 'tail', 'new-1', 'new-2']),
+        previous,
+        identity,
+        'append',
+        2,
+      ),
+    ],
+    ['new-2', 'new-1'],
+  );
+  assert.deepEqual(
+    [
+      ...appendedFeedItemKeysFromProjection(
+        items(['older', 'old-1', 'old-2', 'turn', 'tail']),
+        previous,
+        identity,
+        'prepend',
+        0,
+      ),
+    ],
+    [],
+  );
+});
+
+test('final response projection retains settled turns while the live turn changes', () => {
+  const message = (id: string, author: 'user' | 'assistant'): FeedItem => ({
+    type: 'message',
+    key: id,
+    event: ev({ id, author, text: id }),
+  });
+  const initial = [
+    message('user-1', 'user'),
+    message('answer-1', 'assistant'),
+    message('user-2', 'user'),
+    message('answer-2', 'assistant'),
+  ];
+  const first = projectFinalResponseKeys(null, 'm:primary', initial, 'full');
+  assert.deepEqual([...first.settledKeys], ['answer-1']);
+  assert.deepEqual([...first.liveKeys], ['answer-2']);
+
+  const streamed = projectFinalResponseKeys(
+    first,
+    'm:primary',
+    [...initial, message('answer-3', 'assistant')],
+    'append',
+  );
+  assert.equal(streamed.settledKeys, first.settledKeys);
+  assert.deepEqual([...streamed.liveKeys], ['answer-3']);
+
+  const nextTurn = projectFinalResponseKeys(
+    streamed,
+    'm:primary',
+    [...initial, message('answer-3', 'assistant'), message('user-3', 'user')],
+    'append',
+  );
+  assert.equal(nextTurn.settledKeys.has('answer-1'), true);
+  assert.equal(nextTurn.settledKeys.has('answer-3'), true);
+  assert.deepEqual([...nextTurn.liveKeys], []);
+});
+
+test('appending two prompts in one batch still settles the skipped turn response', () => {
+  const message = (id: string, author: 'user' | 'assistant'): FeedItem => ({
+    type: 'message',
+    key: id,
+    event: ev({ id, author, text: id }),
+  });
+  const initial = [message('user-1', 'user'), message('answer-1', 'assistant')];
+  const first = projectFinalResponseKeys(null, 'm:primary', initial, 'full');
+  const batched = projectFinalResponseKeys(
+    first,
+    'm:primary',
+    [
+      ...initial,
+      message('user-2', 'user'),
+      message('answer-2', 'assistant'),
+      message('user-3', 'user'),
+    ],
+    'append',
+  );
+
+  assert.equal(batched.settledKeys.has('answer-1'), true);
+  assert.equal(batched.settledKeys.has('answer-2'), true);
+  assert.deepEqual([...batched.liveKeys], []);
+});
+
+test('live final-response keys keep their reference while the live key is unchanged', () => {
+  const message = (id: string, author: 'user' | 'assistant'): FeedItem => ({
+    type: 'message',
+    key: id,
+    event: ev({ id, author, text: id }),
+  });
+  const initial = [message('user-1', 'user'), message('answer-1', 'assistant')];
+  const first = projectFinalResponseKeys(null, 'm:primary', initial, 'full');
+
+  // A non-message tail append leaves the turn's final response key unchanged,
+  // so chunks whose final-response display is unchanged stay memoized.
+  const streamed = projectFinalResponseKeys(
+    first,
+    'm:primary',
+    [...initial, { type: 'thinking', key: 'thinking-1', event: ev({ id: 'thinking-1' }) }],
+    'append',
+  );
+  assert.equal(streamed.liveKeys, first.liveKeys);
+  assert.equal(streamed.settledKeys, first.settledKeys);
+
+  const answered = projectFinalResponseKeys(
+    streamed,
+    'm:primary',
+    [...initial, message('answer-2', 'assistant')],
+    'append',
+  );
+  assert.deepEqual([...answered.liveKeys], ['answer-2']);
+  assert.notEqual(answered.liveKeys, streamed.liveKeys);
+});
+
 // The infinite status indicators (caret blink, shimmer) must honor
 // prefers-reduced-motion so the UI stays usable for motion-sensitive users.
 test('caret-blink is neutralized under prefers-reduced-motion', () => {
@@ -1350,4 +1486,15 @@ test('caret-blink is neutralized under prefers-reduced-motion', () => {
     css.match(/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{[^}]*\}/g) ?? [];
   const coversCaretBlink = reducedMotionBlocks.some((block) => /\.caret-blink\b/.test(block));
   assert.ok(coversCaretBlink, 'a prefers-reduced-motion block must disable .caret-blink');
+});
+
+test('feed row entrance motion is CSS-only and honors reduced motion', () => {
+  const cssPath = fileURLToPath(new URL('../index.css', import.meta.url));
+  const css = readFileSync(cssPath, 'utf8');
+
+  assert.match(css, /\.feed-row-enter\s*\{[^}]*animation:[^;]*backwards;/s);
+  assert.match(
+    css,
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.feed-row-enter[^}]*animation:\s*none/s,
+  );
 });

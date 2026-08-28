@@ -223,9 +223,10 @@ test('a streaming response keeps the same element types across renders', () => {
     .type;
   const childOf = (element: ReactElement) => (element.props as { children: ReactElement }).children;
   const componentsFor = (props: MarkdownProps) => {
-    // Markdown wraps the react-markdown element in a layout div and the fence
-    // options provider.
-    const markdown = childOf(childOf(renderMarkdown(props)));
+    const shell = renderMarkdown(props);
+    const tree = childOf(shell);
+    const renderedTree = (tree.type as (treeProps: unknown) => ReactElement)(tree.props);
+    const markdown = childOf(renderedTree);
     return (markdown.props as { components: Record<string, unknown> }).components;
   };
 
@@ -251,4 +252,20 @@ test('copy gracefully declines when the Clipboard API is unavailable', async () 
     ) => Promise<boolean>;
   };
   assert.equal(await markdown.copyMarkdownCode?.(undefined, 'sample'), false);
+});
+
+test('small JSON fences keep token highlighting and large ones stay plain', async () => {
+  const { JSON_HIGHLIGHT_MAX_CHARS } = await import('./Markdown');
+  const small = '```json\n{"accent": true, "count": 3}\n```';
+  const largeObject = Object.fromEntries(
+    Array.from({ length: 1200 }, (_, index) => [`k${String(index)}`, index]),
+  );
+  const large = `\`\`\`json\n${JSON.stringify(largeObject)}\n\`\`\``;
+  assert.ok(JSON.stringify(largeObject).length > JSON_HIGHLIGHT_MAX_CHARS);
+
+  const smallHtml = renderToStaticMarkup(createElement(Markdown, null, small));
+  const largeHtml = renderToStaticMarkup(createElement(Markdown, null, large));
+  assert.match(smallHtml, /--droid-green/);
+  assert.doesNotMatch(largeHtml, /--droid-green/);
+  assert.match(largeHtml, /k1199/);
 });

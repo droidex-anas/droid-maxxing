@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildFeed, groupTurns, MessageFeed, trailingSubagentPoll } from './chat';
+import { MessageFeed } from './chat';
+import { buildFeed } from './chatFeed';
+import { groupTurns, trailingSubagentPoll } from './chatFeedTurns';
 import {
   DOCK_VISIBLE_ROW_LIMIT,
   foldedDockRows,
@@ -51,6 +53,7 @@ function childSession(
     spawnLink: { kind: 'tool-use', id: toolUseId },
     transcriptAvailable: true,
     startedAt: 1_000,
+    streamFidelity: 'state',
   };
 }
 
@@ -214,7 +217,7 @@ test('the card reads as status pills plus a completion summary', () => {
     ),
   );
   assert.ok(text.includes('2 Running'));
-  assert.ok(text.includes('1 Idle'));
+  assert.ok(text.includes('1 Awaiting approval'));
   assert.ok(text.includes('1 Done'));
   assert.ok(text.includes('1 of 4 subagents finished'));
   assert.ok(text.includes('25%'));
@@ -235,8 +238,8 @@ test('an unresolved live spawn reports unknown status and never infers lifecycle
   );
   assert.ok(text.includes('1 Awaiting status'));
   assert.ok(text.includes('Awaiting status for 1 subagent'));
-  assert.ok(!text.includes('Starting'));
-  assert.ok(!text.includes('1m'));
+  assert.ok(text.includes('Starting'));
+  assert.ok(!text.includes('1m</'));
   assert.ok(!text.includes('Done'));
 
   // Ending the parent turn still says nothing about the child's lifecycle.
@@ -607,4 +610,66 @@ test('a replayed spawn stays neutral until exact child status is known', () => {
   const finished = { ...spawn('t1', 'explorer'), endTs: 2_000 };
   const wave = resolveWaveSessions([finished], []);
   assert.equal(wave[0].status, 'pending');
+});
+
+test('queued children render as Queued, not Awaiting status', () => {
+  const text = textOf(
+    renderToStaticMarkup(
+      createElement(SubagentsDock, {
+        sessions: [{ ...childSession('queued-agent', 't1', 'pending'), queued: true }],
+        models: [],
+        live: true,
+      }),
+    ),
+  );
+  assert.ok(text.includes('1 Queued'));
+  assert.ok(text.includes('Queued'));
+  assert.ok(!text.includes('1 Awaiting status'));
+});
+
+test('a live token child shows a bounded typewriter preview on the in-flight card', () => {
+  const html = renderToStaticMarkup(
+    createElement(SubagentsDock, {
+      sessions: [{ ...childSession('explorer', 't1', 'running'), streamFidelity: 'token' }],
+      models: [],
+      live: true,
+      activity: () => ({
+        status: 'running',
+        startedAt: 1_000,
+        latest: { kind: 'text', text: `${'line\n'.repeat(12)}visible tail` },
+      }),
+    }),
+  );
+  const text = textOf(html);
+  assert.ok(text.includes('Streaming'));
+  assert.ok(text.includes('visible tail'));
+  assert.ok(html.includes('data-testid="subagent-stream-preview"'));
+  assert.ok(html.includes('data-presentation="typewriter"'));
+  assert.ok(html.includes('caret-blink'));
+  assert.ok(html.includes('min-h-[3.75rem] max-h-[3.75rem]'));
+  assert.equal(text.includes('line\nline\nline\nline\nline'), false);
+});
+
+test('a polled child shows a working cue and never a typewriter caret', () => {
+  const html = renderToStaticMarkup(
+    createElement(SubagentsDock, {
+      sessions: [
+        {
+          ...childSession('explorer', 't1', 'running'),
+          activity: { phase: 'Running', preview: 'last observed lump' },
+        },
+      ],
+      models: [],
+      live: true,
+    }),
+  );
+  const text = textOf(html);
+  assert.ok(text.includes('Working'));
+  assert.ok(text.includes('last observed lump'));
+  assert.ok(text.includes('Running…'));
+  assert.ok(html.includes('data-presentation="working"'));
+  assert.ok(html.includes('data-testid="subagent-working-cue"'));
+  assert.equal(html.includes('caret-blink'), false);
+  assert.equal(html.includes('data-presentation="typewriter"'), false);
+  assert.equal(text.includes('Streaming'), false);
 });

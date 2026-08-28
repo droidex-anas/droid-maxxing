@@ -47,6 +47,9 @@ const isSvgLang = (className?: string) => hasLanguage(className, 'svg');
 const isMermaidLang = (className?: string) => hasLanguage(className, 'mermaid');
 const isAppLang = (className?: string) => hasLanguage(className, 'app');
 
+// Per-token JSON spans are fine for a snippet and a long task for a dumped payload.
+export const JSON_HIGHLIGHT_MAX_CHARS = 8_192;
+
 function HighlightJson({ code }: { code: string }) {
   const nodes = useMemo(() => {
     const tokens = code.split(
@@ -192,7 +195,11 @@ function MarkdownFence({
       code={codeText}
       className={className}
       specMode={specMode}
-      highlighted={isJsonLang(className) ? <HighlightJson code={codeText} /> : undefined}
+      highlighted={
+        isJsonLang(className) && codeText.length <= JSON_HIGHLIGHT_MAX_CHARS ? (
+          <HighlightJson code={codeText} />
+        ) : undefined
+      }
     />
   );
 }
@@ -362,6 +369,40 @@ const REMARK_PLUGINS = [remarkGfm];
 const CHAT_COMPONENTS = createMarkdownComponents(false);
 const SPEC_COMPONENTS = createMarkdownComponents(true);
 
+export function markdownShellClass(specMode: boolean): string {
+  return `text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[13.5px] leading-[1.7] space-y-3'}`;
+}
+
+export type MarkdownFenceFlags = Omit<FenceRenderOptions, 'appFences'>;
+
+export function markdownFenceOptions(
+  source: string,
+  flags: MarkdownFenceFlags,
+): FenceRenderOptions {
+  return { ...flags, appFences: appFencesInMarkdown(source) };
+}
+
+export function MarkdownTree({
+  children,
+  specMode,
+  fenceOptions,
+}: {
+  children: string;
+  specMode: boolean;
+  fenceOptions: FenceRenderOptions;
+}) {
+  return (
+    <FenceOptionsContext.Provider value={fenceOptions}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        components={specMode ? SPEC_COMPONENTS : CHAT_COMPONENTS}
+      >
+        {children}
+      </ReactMarkdown>
+    </FenceOptionsContext.Provider>
+  );
+}
+
 function MarkdownImpl({
   children,
   specMode = false,
@@ -377,25 +418,17 @@ function MarkdownImpl({
   buildingAppBlocks?: boolean;
   cutOffAppBlocks?: boolean;
 }) {
-  const fenceOptions: FenceRenderOptions = {
+  const fenceOptions = markdownFenceOptions(children, {
     allowGeneratedContent,
     autoPlayAppBlocks,
     buildingAppBlocks,
     cutOffAppBlocks,
-    appFences: appFencesInMarkdown(children),
-  };
+  });
   return (
-    <div
-      className={`text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[13.5px] leading-[1.7] space-y-3'}`}
-    >
-      <FenceOptionsContext.Provider value={fenceOptions}>
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          components={specMode ? SPEC_COMPONENTS : CHAT_COMPONENTS}
-        >
-          {children}
-        </ReactMarkdown>
-      </FenceOptionsContext.Provider>
+    <div className={markdownShellClass(specMode)}>
+      <MarkdownTree specMode={specMode} fenceOptions={fenceOptions}>
+        {children}
+      </MarkdownTree>
     </div>
   );
 }

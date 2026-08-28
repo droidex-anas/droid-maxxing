@@ -11,6 +11,9 @@ export function selectChatViewState(current: AppState) {
     allTranscript: activeSession
       ? (current.transcripts[activeSession.appSessionId] ?? EMPTY_TRANSCRIPT)
       : EMPTY_TRANSCRIPT,
+    transcriptMutation: activeSession
+      ? current.transcriptMutations[activeSession.appSessionId]
+      : undefined,
     chatMetadata: current.chatMetadata,
     childAccess: current.childAccess,
     childHistory: current.childHistory,
@@ -40,7 +43,8 @@ function equalActiveChatSession(
       previous?.createdAt === next?.createdAt &&
       previous?.cwd === next?.cwd &&
       previous?.interactionMode === next?.interactionMode &&
-      previous?.title === next?.title)
+      previous?.title === next?.title &&
+      previous?.interruptReason === next?.interruptReason)
   );
 }
 
@@ -62,6 +66,7 @@ function latestPendingCompose(state: ChatViewState) {
 export function equalVisibleChatState(previous: ChatViewState, next: ChatViewState): boolean {
   if (!equalActiveChatSession(previous.activeSession, next.activeSession)) return false;
   if (!Object.is(previous.allTranscript, next.allTranscript)) return false;
+  if (!Object.is(previous.transcriptMutation, next.transcriptMutation)) return false;
   if (!Object.is(previous.models, next.models)) return false;
   if (!equalChildSelection(previous.selectedChild, next.selectedChild)) return false;
   if (previous.draftChat?.cwd !== next.draftChat?.cwd) return false;

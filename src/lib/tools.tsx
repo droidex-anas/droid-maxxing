@@ -10,6 +10,8 @@ import {
   Bot,
 } from 'lucide-react';
 import type { TranscriptEvent } from '../types/bridge';
+import { isChildSessionTool } from './childSessionEvents';
+export { childSessionInfo, isChildSessionTool } from './childSessionEvents';
 
 export type ToolCat =
   | 'read'
@@ -140,14 +142,6 @@ export function hasTodoPayload(args: unknown): boolean {
 }
 
 // Factory Task/subagent metadata identifies a child-session spawn.
-export function isChildSessionTool(name?: string, args?: unknown): boolean {
-  // Whole-word match so unrelated tools (e.g. `create_task`) aren't mistaken
-  // for a child spawn; the strong Factory signal is the `subagent_type` arg.
-  if (/\b(task|subagent|delegate)\b/i.test(name ?? '')) return true;
-  const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
-  return typeof a.subagent_type === 'string' || typeof a.subagentType === 'string';
-}
-
 // TaskOutput/TaskStop are the harness polling and stopping subagents it already
 // spawned, not work of their own. The Subagents card reports that status, so
 // these calls and their echoed poll bodies are noise wherever the card renders.
@@ -156,12 +150,6 @@ export function isSubagentBookkeepingTool(name?: string): boolean {
 }
 
 // The droid name and short description carried by a Task spawn's arguments.
-export function childSessionInfo(args: unknown): { label?: string; description?: string } {
-  const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
-  const s = (k: string) => (typeof a[k] === 'string' ? a[k].trim() || undefined : undefined);
-  return { label: s('subagent_type') ?? s('subagentType'), description: s('description') };
-}
-
 // Remove terminal ANSI/VT escape sequences from captured command output.
 const ANSI_PATTERN =
   // eslint-disable-next-line no-control-regex

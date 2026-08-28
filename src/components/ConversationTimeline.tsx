@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RefObject } from 'react';
-import type { ConversationAnchor } from './chat';
+import type { ConversationAnchor } from './chatFeedTurns';
 
 /**
  * A quiet navigation rail in the chat's left gutter: one dot per user prompt.
@@ -11,65 +11,58 @@ import type { ConversationAnchor } from './chat';
  * top. The preview is positioned with fixed coordinates measured from the dot so
  * it escapes the rail's scroll clipping instead of being cut off.
  */
-export function ConversationTimeline({
+export const ConversationTimeline = memo(function ConversationTimeline({
   scrollRef,
   anchors,
+  onJumpToAnchor,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   anchors: ConversationAnchor[];
+  onJumpToAnchor?: (id: string) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hover, setHover] = useState<{ label: string; top: number; left: number } | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
-  // Currently-intersecting anchors keyed by id -> their viewport-relative top.
-  // The observer only reports anchors whose intersection *changed*, so we keep
-  // the full visible set here and recompute the topmost one on every callback;
-  // otherwise the highlight sticks when the active anchor leaves the zone while
-  // another already-visible anchor stays put.
-  const visible = useRef<Map<string, number>>(new Map());
 
   // A stable identity for the anchor set. `anchors` is rebuilt on every
-  // transcript token, but the observer only needs to reset when the actual set
-  // of prompt ids changes, so key the effect off the joined ids to avoid tearing
-  // down and rebuilding the observer on every streamed token.
+  // transcript token, but the highlight reader only needs to reset when the
+  // actual set of prompt ids changes.
   const anchorKey = anchors.map((a) => a.id).join('\n');
 
   // Highlight the prompt nearest the top of the viewport as the user scrolls.
+  // Query currently mounted anchors on rAF so a virtual window can remount rows
+  // without rebuilding an IntersectionObserver.
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || anchors.length === 0) return undefined;
-    const seen = visible.current;
-    seen.clear();
-    const els = anchors
-      .map((a) => root.querySelector<HTMLElement>(`[data-anchor-id="${CSS.escape(a.id)}"]`))
-      .filter((el): el is HTMLElement => el !== null);
-    if (els.length === 0) return undefined;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          const id = (e.target as HTMLElement).dataset.anchorId;
-          if (!id) continue;
-          if (e.isIntersecting) seen.set(id, e.boundingClientRect.top);
-          else seen.delete(id);
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const rootRect = root.getBoundingClientRect();
+      const cutoff = rootRect.top + rootRect.height * 0.35;
+      let bestId: string | null = null;
+      let bestTop = Infinity;
+      for (const el of root.querySelectorAll<HTMLElement>('[data-anchor-id]')) {
+        const id = el.dataset.anchorId;
+        if (!id) continue;
+        const top = el.getBoundingClientRect().top;
+        if (top < rootRect.top + 1 || top > cutoff) continue;
+        if (top < bestTop) {
+          bestTop = top;
+          bestId = id;
         }
-        let bestId: string | null = null;
-        let bestTop = Infinity;
-        for (const [id, top] of seen) {
-          if (top < bestTop) {
-            bestTop = top;
-            bestId = id;
-          }
-        }
-        if (bestId) setActiveId(bestId);
-      },
-      { root, rootMargin: '0px 0px -65% 0px', threshold: 0 },
-    );
-    els.forEach((el) => {
-      observer.observe(el);
-    });
+      }
+      if (bestId) setActiveId(bestId);
+    };
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(update);
+    };
+    root.addEventListener('scroll', onScroll, { passive: true });
+    update();
     return () => {
-      observer.disconnect();
-      seen.clear();
+      root.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollRef, anchorKey]);
@@ -99,6 +92,10 @@ export function ConversationTimeline({
   if (anchors.length < 2) return null;
 
   const jump = (id: string) => {
+    if (onJumpToAnchor) {
+      onJumpToAnchor(id);
+      return;
+    }
     const el = scrollRef.current?.querySelector<HTMLElement>(
       `[data-anchor-id="${CSS.escape(id)}"]`,
     );
@@ -163,4 +160,4 @@ export function ConversationTimeline({
         )}
     </div>
   );
-}
+});

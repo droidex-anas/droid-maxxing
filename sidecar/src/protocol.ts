@@ -65,6 +65,7 @@ export interface ProgressEntry {
 
 export type ChildRole = 'worker' | 'validator';
 export type ChildStatus = 'pending' | 'running' | 'paused' | 'completed';
+export type StreamFidelity = 'token' | 'tool' | 'state';
 
 export interface ChildSpawnLink {
   kind: 'tool-use' | 'spawn';
@@ -95,9 +96,13 @@ export interface ChildSessionSummary {
   spawnLink?: ChildSpawnLink;
   transcriptAvailable: boolean;
   startedAt?: number;
+  // Provider-declared: how live output actually arrives. Orthogonal to phase.
+  streamFidelity: StreamFidelity;
   // Live-only (never persisted) and absent unless the parent actually polled the
   // child; autonomous children stream nothing to the parent themselves.
   activity?: ChildActivity;
+  // Live-only: waiting for a runtime slot. Never persisted; never means running.
+  queued?: boolean;
 }
 
 export interface SessionSummary {
@@ -122,6 +127,8 @@ export interface SessionSummary {
   autonomy: Autonomy;
   phase: SessionPhase;
   streaming?: boolean; // true while a turn is actively generating
+  // Set when a runtime restart could not continue this session's in-flight turn.
+  interruptReason?: string;
   queuedSends?: number;
   proposal?: string; // markdown plan from propose_mission
   features: BridgeFeature[];
@@ -316,6 +323,11 @@ export interface SessionSearchMatch {
 export interface SessionSearchResult {
   appSessionId: string;
   matches: SessionSearchMatch[];
+}
+
+export interface HistorySearchReply {
+  results: SessionSearchResult[];
+  indexingIncomplete: boolean;
 }
 
 export interface BrowserViewport {
@@ -601,10 +613,17 @@ export type ClientCommand =
       type: 'sessions.list';
       workspaceCwds?: string[];
       includePlainChats?: boolean;
-      limitPerWorkspace?: number;
+      // Workspaces whose pre-existing session bound the user lifted.
+      revealEarlierCwds?: string[];
     }
   | { type: 'session.loadHistory'; appSessionId: string; cursor?: string; limit?: number }
   | { type: 'sessions.search'; requestId: string; query: string }
+  | { type: 'history.indexingIdle'; isIdle: boolean }
+  | {
+      type: 'app.backgroundWork';
+      tier: 'interactive' | 'hidden' | 'low-power';
+      focusedAppSessionId?: string | null;
+    }
   | {
       type: 'child.open';
       parentAppSessionId: string;
@@ -837,7 +856,13 @@ export type ServerEvent =
   | { type: 'mission.progress'; appSessionId: string; missionId?: string; entries: ProgressEntry[] }
   | SessionChildEvent
   | { type: 'spec.content'; appSessionId: string; path: string; content: string }
-  | { type: 'sessions.list'; sessions: SessionSummary[] }
+  | {
+      type: 'sessions.list';
+      sessions: SessionSummary[];
+      // Pre-existing sessions withheld per requested cwd; a missing key means
+      // the folder has nothing more to reveal.
+      earlierSessionsByCwd: Record<string, number>;
+    }
   | {
       type: 'session.history';
       appSessionId: string;
@@ -863,9 +888,67 @@ export type ServerEvent =
       type: 'sessions.searchResults';
       requestId: string;
       results: SessionSearchResult[];
+      indexingIncomplete: boolean;
     }
+  | { type: 'history.persistenceRecovered' }
   | { type: 'history.list'; sessions: SessionHistoryEntry[] }
   | { type: 'browser.updated'; state: BrowserState }
   | { type: 'browser.native.request'; request: BrowserNativeRequest }
   | { type: 'browser.closed'; appSessionId: string }
   | { type: 'browser.error'; appSessionId?: string; message: string };
+
+export const BRIDGE_PROTOCOL_VERSION = 3 as const;
+
+export interface SequencedServerEvent {
+  seq: number;
+  event: ServerEvent;
+}
+
+export interface ServerEventBatch {
+  type: 'events.batch';
+  generation: string;
+  firstSeq: number;
+  lastSeq: number;
+  events: SequencedServerEvent[];
+}
+
+export interface PersistenceRecovery {
+  durable: boolean;
+  hadUnflushedWork: boolean;
+  message?: string;
+}
+
+export interface InterruptedSessionRecord {
+  appSessionId: string;
+  childSessionId?: string;
+  reason: string;
+}
+
+export interface BridgeRuntimeSnapshot {
+  runtime: { mode: 'cli_auth'; droidPath: string; apiKeyConfigured: boolean };
+  sessions: SessionSummary[];
+  children: ChildSessionSummary[];
+  persistence: PersistenceRecovery;
+  interrupted: InterruptedSessionRecord[];
+}
+
+export interface BridgeResetMessage {
+  type: 'bridge.reset';
+  generation: string;
+  lastSeq: number;
+  reason: 'invalid_resume';
+}
+
+export interface BridgeSnapshotMessage {
+  type: 'bridge.snapshot';
+  generation: string;
+  lastSeq: number;
+  reason: 'generation_changed' | 'replay_unavailable';
+  snapshot: BridgeRuntimeSnapshot;
+}
+
+export type ServerWireMessage =
+  | Extract<ServerEvent, { type: 'error' }>
+  | ServerEventBatch
+  | BridgeResetMessage
+  | BridgeSnapshotMessage;

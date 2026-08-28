@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initialState, persistCustomThemes, reducer } from './useStore';
+import { initialState, reducer } from './useStore';
+import { persistCustomThemes } from './persistedThemePreferences';
 import type { ThemePreset } from '../lib/theme';
 
 const PRESET: ThemePreset = {

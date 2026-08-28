@@ -58,6 +58,14 @@ test('SESSION_HISTORY prepend prepends older events ahead of the existing scroll
   );
   assert.equal(next.historyCursor.m1, '0:end');
   assert.equal(next.historyLoadingOlder.m1, false);
+  assert.deepEqual(next.transcriptMutations.m1, {
+    revision: 1,
+    baseRevision: 0,
+    kind: 'prepend',
+    previousLength: 2,
+    firstChangedIndex: 0,
+    insertedCount: 2,
+  });
 });
 
 test('SESSION_HISTORY prepend dedups events already present at the boundary', () => {
@@ -83,6 +91,8 @@ test('SESSION_HISTORY prepend dedups events already present at the boundary', ()
   );
   assert.equal(next.historyCursor.m1, undefined);
   assert.equal(next.historyLoadingOlder.m1, false);
+  assert.equal(next.transcriptMutations.m1.kind, 'prepend');
+  assert.equal(next.transcriptMutations.m1.insertedCount, 1);
 });
 
 test('SESSION_HISTORY prepend with a fully-duplicate page only clears the loading flag', () => {

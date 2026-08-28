@@ -416,6 +416,8 @@ export class FakeFactoryRuntime implements FactoryRuntime {
   readonly sessions = new Map<string, FakeFactorySession>();
   readonly contextBreakdowns = new Map<string, unknown>();
   readonly contextBreakdownErrors = new Map<string, Error>();
+  private readonly loadGates: DeferredStream[] = [];
+  private readonly loadWaiters: { sessionId: string; resolve(): void }[] = [];
   private apiKey = '';
 
   constructor(private readonly calls: RecordedCall[]) {}
@@ -463,15 +465,41 @@ export class FakeFactoryRuntime implements FactoryRuntime {
     return session.deferNextStream();
   }
 
-  loadSession(sessionId: string, handlers: RuntimeHandlers = {}): Promise<FakeFactorySession> {
+  deferNextLoad(): StreamGate {
+    let settle = (): void => undefined;
+    const promise = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const gate: DeferredStream = { promise, resolve: settle };
+    this.loadGates.push(gate);
+    return gate;
+  }
+
+  waitForLoad(sessionId: string): Promise<void> {
+    if (this.loadCalls.some((call) => call.sessionId === sessionId)) return Promise.resolve();
+    return new Promise((resolve) => this.loadWaiters.push({ sessionId, resolve }));
+  }
+
+  async loadSession(
+    sessionId: string,
+    handlers: RuntimeHandlers = {},
+  ): Promise<FakeFactorySession> {
     this.loadCalls.push({ sessionId, handlers });
     this.calls.push({ target: 'runtime', method: 'loadSession', args: [sessionId, handlers] });
+    for (let index = this.loadWaiters.length - 1; index >= 0; index -= 1) {
+      const waiter = this.loadWaiters.at(index);
+      if (waiter?.sessionId !== sessionId) continue;
+      this.loadWaiters.splice(index, 1);
+      waiter.resolve();
+    }
+    const gate = this.loadGates.shift();
+    if (gate) await gate.promise;
     const next =
       this.loadQueue.get(sessionId)?.shift() ??
       new FakeFactorySession(sessionId, handlers, this.calls);
-    if (next instanceof Error) return Promise.reject(next);
+    if (next instanceof Error) throw next;
     this.sessions.set(next.sessionId, next);
-    return Promise.resolve(next);
+    return next;
   }
 }
 

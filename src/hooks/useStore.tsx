@@ -12,20 +12,40 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { bridge } from '../lib/bridge';
-import { normalizeAppIconMode, type AppIconMode } from '../lib/appIcon';
 import { updateCompactionSettings } from '../lib/commands';
-import { sanitizePersistedPrWorkspace } from '../features/pull-requests/lib/prWorkspaceCwd';
-import { sanitizePersistedPrBacklog } from '../features/pull-requests/lib/prBacklog';
 import { reducePrInbox, type PrInboxAction } from '../features/pull-requests/lib/prInboxState';
+import { removeCustomTheme, upsertCustomTheme, type ThemePreset } from '../lib/theme';
 import {
-  DEFAULT_THEME_ID,
-  detectPresetId,
-  migrateLegacyLightPreset,
-  parseCustomThemes,
-  removeCustomTheme,
-  upsertCustomTheme,
-  type ThemePreset,
-} from '../lib/theme';
+  loadCustomThemes,
+  loadTheme,
+  persistTheme,
+  type ThemeConfig,
+} from './persistedThemePreferences';
+import {
+  loadAgentConfig,
+  loadCompactionModel,
+  loadDiffView,
+  loadImagePasteQuality,
+  loadLiveEnterBehavior,
+  loadPersistedUiState,
+  loadReviewScope,
+  loadSessionLastSeen,
+  loadWorkspaceCwds,
+  saveAgentConfig,
+  saveCompactionModel,
+  saveDiffView,
+  saveImagePasteQuality,
+  saveLiveEnterBehavior,
+  savePersistedUiState,
+  saveReviewScope,
+  saveSessionLastSeen,
+  saveWorkspaceCwds,
+  sanitizeAgentConfig,
+  type AgentConfig,
+  type AgentKind,
+  type DiffViewMode,
+  type LiveEnterBehavior,
+} from './persistedUiPreferences';
 import {
   clearDesignMode,
   setDesignMode,
@@ -47,11 +67,11 @@ import type {
   ReasoningEffort,
   ContextStatsSnapshot,
   BrowserState,
-  BrowserViewportMode,
   DesignReference,
 } from '../types/bridge';
 import { addWorkspaceCwd, removeWorkspaceCwd } from '../lib/workspaces';
 import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
+import { isHistoryStatusError, applyHistoryServerEvent } from '../lib/historyHealth';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
 import {
   applyFactoryCompactionDefaults,
@@ -64,6 +84,7 @@ import {
 } from '../lib/compactionSettings';
 import { sanitizeForLog } from '../lib/sensitiveLogRedaction';
 import { sessionIsLive } from '../lib/sessions';
+import { noteStoreCommitted, discardPendingBridgeEvent } from '../lib/rendererPerf';
 import {
   addSessionNote,
   loadSessionNotes,
@@ -86,14 +107,12 @@ import {
 import { createSnapshotScheduler, loadSessionSnapshot } from '../lib/sessionSnapshot';
 import { createComposerSeed } from '../lib/composerReset';
 import { toast } from '../lib/toast';
-import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
+import { type DiffScope } from '../types/vcs';
 import {
   activateUtilityTab,
   closeUtilityTab,
   openUtilityTool,
-  persistUtilityPanels,
   removeUtilityTool,
-  sanitizeUtilityPanels,
   setUtilityPanelOpen,
   updateUtilityTab,
   utilityPanelForSession,
@@ -108,41 +127,39 @@ import {
 } from '../lib/transcriptWindow';
 import {
   appendTranscriptEvent,
+  applyMemoryPressureRelease,
   pruneRemovedSessionState,
-  releaseSessionChildTranscriptWindow,
   releaseSessionTranscriptWindow,
   withUpdatedTranscript,
 } from '../lib/transcriptStoreMemory';
+import { type TranscriptMutation } from '../lib/transcriptMutation';
+import { reduceStoreActionBatch } from './storeActionBatch';
 import {
-  reconcilePrependedTranscript,
-  reconcileRestoredTranscript,
-  reconcileTranscriptSourcePage,
-} from '../lib/transcriptHistory';
+  invalidateSelectedChildOpening,
+  reduceChildError,
+  reduceChildHistoryLoading,
+  reduceChildHistoryLoadingOlder,
+  reduceChildTranscriptReleaseViewport,
+  reduceChildTranscriptViewport,
+  reduceChildUpdated,
+  reduceSelectChild,
+  reduceSessionChild,
+  releaseInactiveSelectedChild,
+  type ChildAccess,
+  type ChildHistoryState,
+  type ChildRuntimeState,
+  type ChildSelection,
+  type ChildSessionInfo,
+  type SessionRestore,
+} from './storeChildSession';
+import {
+  reduceSessionHistory,
+  reduceSessionHistoryFailed,
+  reduceSessionHistoryLoadingOlder,
+  reduceSessionRestoreStart,
+} from './storeSessionRestore';
 
-export type AgentKind = 'primary' | 'worker' | 'validator';
-export type ChildSettingsReadiness = 'opening' | 'ready' | 'failed';
-export type LiveEnterBehavior = 'queue' | 'interrupt';
-export type DiffViewMode = 'unified' | 'split';
 export type { ImagePasteQuality } from '../lib/images';
-
-export type ChildSessionInfo = ChildSessionSummary;
-
-export interface ChildSelection {
-  parentAppSessionId: string;
-  childSessionId: string;
-}
-
-export type ChildAccess =
-  | { state: 'opening'; requestId: string }
-  | { state: 'ready'; requestId: string; runtimeGeneration: number }
-  | { state: 'history'; requestId: string }
-  | { state: 'failed'; requestId: string | null }
-  | { state: 'closed'; requestId: null };
-
-export interface ChildRuntimeState {
-  available: boolean;
-  runtimeGeneration: number;
-}
 
 export interface QueuedDesignContext {
   browserKey: string;
@@ -156,50 +173,6 @@ export interface QueuedPrompt {
   skills: string[];
   files: string[];
   design?: QueuedDesignContext;
-}
-
-export interface AgentModelConfig {
-  modelId?: string;
-  reasoning: ReasoningEffort;
-}
-
-export type AgentConfig = Record<AgentKind, AgentModelConfig>;
-
-export type DiffStyle = 'soft' | 'focused';
-
-export interface ThemeConfig {
-  mode: 'dark' | 'light' | 'system';
-  appIconMode: AppIconMode;
-  // The preset the flattened colors came from: a built-in/custom theme id, or
-  // 'custom' when the colors were edited by hand and match no preset.
-  presetId: string;
-  accent: string;
-  bg: string;
-  fg: string;
-  surface: string;
-  border: string;
-  uiFont: string;
-  uiFontSize: number;
-  codeFontSize: number;
-  translucentSidebar: boolean;
-  diffStyle: DiffStyle;
-  contrast: number;
-}
-
-export type SessionRestoreStatus = 'loading' | 'paged' | 'loaded' | 'failed';
-
-export interface SessionRestore {
-  status: SessionRestoreStatus;
-  loadedCount: number;
-  hasMore: boolean;
-  error?: string;
-}
-
-export interface ChildHistoryState extends SessionRestore {
-  isLoaded: boolean;
-  isLoadingOlder: boolean;
-  olderCursor?: string;
-  isViewportPinned: boolean;
 }
 
 export interface AppState {
@@ -217,6 +190,9 @@ export interface AppState {
   // Rows added locally this run (SESSION_CREATED/SESSION_UPDATED) are not in
   // the set and survive lists that do not mention them yet.
   listConfirmedSessionIds: string[] | null;
+  // Pre-existing sessions the sidecar withheld per workspace cwd, so the
+  // sidebar can offer to load a folder's older Droid sessions on demand.
+  earlierSessionsByCwd: Record<string, number>;
   activeAppSessionId: string | null;
   // appSessionId -> last time the user viewed it. A session reads as "unread" when
   // its updatedAt (latest model activity) is newer than this. Internal only:
@@ -226,6 +202,9 @@ export interface AppState {
   // persisted in localStorage; the harness session data is never touched.
   chatMetadata: ChatMetadataMap;
   transcripts: Record<string, TranscriptEvent[]>;
+  // Exact provenance for the latest transcript change. Derived renderers use
+  // the revision chain to update a safe suffix or rebuild on any uncertainty.
+  transcriptMutations: Record<string, TranscriptMutation>;
   // Relative retained-payload estimate for each in-memory transcript window.
   // This is budgeting telemetry, not a claim about exact V8 heap bytes.
   transcriptRetainedCost: Record<string, number>;
@@ -454,6 +433,7 @@ type Action =
   | { type: 'SESSION_TRANSCRIPT'; event: TranscriptEvent }
   | { type: 'TRANSCRIPT_VIEWPORT'; appSessionId: string; pinned: boolean }
   | { type: 'TRANSCRIPT_RELEASE_VIEWPORT'; appSessionId: string }
+  | { type: 'MEMORY_PRESSURE' }
   | { type: 'QUEUE_PROMPT'; appSessionId: string; prompt: QueuedPrompt }
   | { type: 'REMOVE_QUEUED_PROMPT'; appSessionId: string; id: string }
   | { type: 'REORDER_QUEUE'; appSessionId: string; from: number; to: number }
@@ -469,7 +449,11 @@ type Action =
       message: string;
     }
   | { type: 'SESSION_CREATE_FAILED'; clientRef: string; message: string }
-  | { type: 'SESSION_LIST'; sessions: SessionSummary[] }
+  | {
+      type: 'SESSION_LIST';
+      sessions: SessionSummary[];
+      earlierSessionsByCwd: Record<string, number>;
+    }
   | {
       type: 'SESSION_HISTORY';
       appSessionId: string;
@@ -612,468 +596,6 @@ type Action =
   | { type: 'AUTONOMY_UPDATE_REQUESTED'; appSessionId: string; autonomy: Autonomy }
   | { type: 'AUTONOMY_UPDATE_SETTLED'; appSessionId: string };
 
-const defaultTheme: ThemeConfig = {
-  mode: 'dark',
-  appIconMode: 'system',
-  presetId: DEFAULT_THEME_ID,
-  accent: '#f2f2f2',
-  bg: '#0a0a0a',
-  fg: '#ededed',
-  surface: '#111111',
-  border: '#1f1f1f',
-  uiFont: 'system',
-  uiFontSize: 14,
-  codeFontSize: 12,
-  translucentSidebar: false,
-  diffStyle: 'soft',
-  contrast: 100,
-};
-
-const AGENT_CONFIG_STORAGE_KEY = 'droid-agent-config-v2';
-const defaultAgentConfig: AgentConfig = {
-  primary: { modelId: undefined, reasoning: 'high' },
-  worker: { modelId: undefined, reasoning: 'medium' },
-  validator: { modelId: undefined, reasoning: 'medium' },
-};
-
-function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return (
-    value === 'off' ||
-    value === 'none' ||
-    value === 'minimal' ||
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max' ||
-    value === 'dynamic'
-  );
-}
-
-function getLocalStorage(): Storage | undefined {
-  if (typeof window !== 'undefined') return window.localStorage;
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-  return descriptor && 'value' in descriptor ? (descriptor.value as Storage) : undefined;
-}
-
-// Accents that shipped as the old fixed-orange default. A saved theme still
-// carrying one of these was never deliberately colored by the user, so migrate
-// it to a theme-matched neutral and let the monochrome scale show through.
-const LEGACY_DEFAULT_ACCENTS = new Set(['#ee6018', '#ff5d2e']);
-const THEME_ACCENT_MIGRATED_KEY = 'droid-theme-accent-migrated';
-const THEME_LIGHT_PRESET_MIGRATED_KEY = 'droid-theme-light-preset-migrated';
-
-function neutralAccentFor(bg: string): string {
-  const r = parseInt(bg.slice(1, 3), 16);
-  const g = parseInt(bg.slice(3, 5), 16);
-  const b = parseInt(bg.slice(5, 7), 16);
-  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return Number.isFinite(lum) && lum >= 0.4 ? '#1a1a1a' : '#f2f2f2';
-}
-
-export function normalizeDiffStyle(value: unknown): DiffStyle {
-  if (value === 'focused' || value === 'symbol') return 'focused';
-  return 'soft';
-}
-
-const CUSTOM_THEMES_STORAGE_KEY = 'droid-theme-presets';
-
-function loadCustomThemes(): ThemePreset[] {
-  try {
-    const raw = getLocalStorage()?.getItem(CUSTOM_THEMES_STORAGE_KEY);
-    return raw ? parseCustomThemes(JSON.parse(raw)) : [];
-  } catch {
-    return [];
-  }
-}
-
-// Persistence lives OUTSIDE the reducer: reducers must stay pure, and a throw
-// from the root reducer would surface during render and unmount the app. The
-// dispatching handler (ThemePresetCard) calls this BEFORE dispatching, so a
-// write failure (quota, restricted storage) leaves live state untouched and
-// surfaces as a retryable UI error instead of faking success. It throws on
-// failure; callers must catch.
-export function persistCustomThemes(presets: ThemePreset[]): void {
-  getLocalStorage()?.setItem(CUSTOM_THEMES_STORAGE_KEY, JSON.stringify(presets));
-}
-
-// Loaded once at module scope so the theme loader can match saved colors
-// against custom presets when recovering a missing presetId.
-const initialCustomThemes = loadCustomThemes();
-
-// One-time migration: a saved accent still carrying an old fixed-orange
-// default was never deliberately chosen, so neutralize it once. Keying off a
-// persisted flag (not the accent value) lets a user later pick that same
-// orange from the preset palette and have the choice stick across reloads.
-function migrateLegacyAccent(storage: Storage, saved: string | null, theme: ThemeConfig): void {
-  if (storage.getItem(THEME_ACCENT_MIGRATED_KEY) === '1') return;
-  // Migration writes are isolated so a storage failure (quota/restricted)
-  // never discards the theme we already parsed successfully above.
-  try {
-    if (saved && LEGACY_DEFAULT_ACCENTS.has(theme.accent.toLowerCase())) {
-      theme.accent = neutralAccentFor(theme.bg);
-      storage.setItem('droid-theme', JSON.stringify(theme));
-    }
-    storage.setItem(THEME_ACCENT_MIGRATED_KEY, '1');
-  } catch {
-    /* migration write failed; retry on a later load */
-  }
-}
-
-// One-time migration: a saved theme still matching the old white-on-white
-// light preset exactly was never customized, so swap it to the readable
-// warm-grey palette. Same persisted-flag pattern as the accent migration.
-function migrateLegacyLight(storage: Storage, saved: string | null, theme: ThemeConfig): void {
-  if (storage.getItem(THEME_LIGHT_PRESET_MIGRATED_KEY) === '1') return;
-  try {
-    if (saved) {
-      const migrated = migrateLegacyLightPreset(theme);
-      if (migrated !== theme) {
-        theme.bg = migrated.bg;
-        theme.fg = migrated.fg;
-        theme.surface = migrated.surface;
-        theme.border = migrated.border;
-        theme.accent = migrated.accent;
-        storage.setItem('droid-theme', JSON.stringify(theme));
-      }
-    }
-    storage.setItem(THEME_LIGHT_PRESET_MIGRATED_KEY, '1');
-  } catch {
-    /* migration write failed; retry on a later load */
-  }
-}
-
-function loadTheme(customThemes: ThemePreset[]): ThemeConfig {
-  try {
-    const storage = getLocalStorage();
-    const saved = storage?.getItem('droid-theme') ?? null;
-    const parsed: unknown = saved ? JSON.parse(saved) : null;
-    const theme =
-      parsed && typeof parsed === 'object'
-        ? { ...defaultTheme, ...(parsed as Partial<ThemeConfig>) }
-        : { ...defaultTheme };
-    theme.diffStyle = normalizeDiffStyle(theme.diffStyle);
-    theme.appIconMode = normalizeAppIconMode(theme.appIconMode);
-    // Migrations run BEFORE preset detection: a legacy palette migrated onto
-    // the default variant must come out with the default's presetId, not
-    // 'custom' — otherwise Dark/System can never resolve its other variant.
-    if (storage) {
-      migrateLegacyAccent(storage, saved, theme);
-      migrateLegacyLight(storage, saved, theme);
-    }
-    // Themes saved before presets existed have no presetId: recover it by
-    // matching the saved colors against known variants, else label them custom.
-    const savedPresetId = (parsed as { presetId?: unknown } | null)?.presetId;
-    theme.presetId =
-      typeof savedPresetId === 'string' && savedPresetId
-        ? savedPresetId
-        : detectPresetId(theme, customThemes);
-    return theme;
-  } catch {
-    /* ignore */
-  }
-  return defaultTheme;
-}
-
-function loadAgentConfig(): AgentConfig {
-  try {
-    const storage = getLocalStorage();
-    if (!storage) return defaultAgentConfig;
-    const raw = storage.getItem(AGENT_CONFIG_STORAGE_KEY);
-    if (!raw) return defaultAgentConfig;
-    const parsed = JSON.parse(raw) as Partial<Record<AgentKind, Partial<AgentModelConfig>>>;
-    return {
-      primary: readAgentConfig(parsed.primary, defaultAgentConfig.primary),
-      worker: readAgentConfig(parsed.worker, defaultAgentConfig.worker),
-      validator: readAgentConfig(parsed.validator, defaultAgentConfig.validator),
-    };
-  } catch {
-    return defaultAgentConfig;
-  }
-}
-
-function readAgentConfig(
-  value: Partial<AgentModelConfig> | undefined,
-  fallback: AgentModelConfig,
-): AgentModelConfig {
-  return {
-    modelId: typeof value?.modelId === 'string' && value.modelId ? value.modelId : fallback.modelId,
-    reasoning: isReasoningEffort(value?.reasoning) ? value.reasoning : fallback.reasoning,
-  };
-}
-
-function saveAgentConfig(config: AgentConfig): AgentConfig {
-  try {
-    getLocalStorage()?.setItem(AGENT_CONFIG_STORAGE_KEY, JSON.stringify(config));
-  } catch {
-    /* ignore */
-  }
-  return config;
-}
-
-// Global compaction model: 'current-model' means each session compacts with
-// whatever model it is currently using; otherwise a specific model id is used
-// for compaction across every session.
-const COMPACTION_MODEL_STORAGE_KEY = 'droid-compaction-model';
-const LIVE_ENTER_BEHAVIOR_STORAGE_KEY = 'droid-live-enter-behavior';
-const IMAGE_PASTE_QUALITY_STORAGE_KEY = 'droid-image-paste-quality';
-const DIFF_VIEW_STORAGE_KEY = 'droid-diff-view';
-const REVIEW_SCOPE_STORAGE_KEY = 'droid-review-scope';
-const WORKSPACES_STORAGE_KEY = 'droid-workspaces';
-const SESSION_LAST_SEEN_STORAGE_KEY = 'droid-session-last-seen-v1';
-const UI_STATE_STORAGE_KEY = 'droid-ui-state-v2';
-const BROWSER_VIEWPORT_MODES = new Set<BrowserViewportMode>([
-  'fit',
-  'desktop',
-  'laptop',
-  'tablet',
-  'mobile',
-  'custom',
-]);
-
-interface PersistedUiState {
-  activeAppSessionId: string | null;
-  rightPanelOpen: boolean;
-  utilityPanels: Record<string, UtilityPanelState>;
-  sidebarCollapsed: boolean;
-  specMode: boolean;
-  missionControlMode: boolean;
-  browsers: Record<string, BrowserState>;
-  browserOpenKeys: Record<string, boolean>;
-  selectedFeatureId: string | null;
-  mainView?: 'session' | 'pull-requests';
-  prWorkspaceCwd?: string | null;
-  prWorkspaceNumber?: number | null;
-  prBacklogIds?: string[];
-}
-
-function loadCompactionModel(): string {
-  try {
-    return getLocalStorage()?.getItem(COMPACTION_MODEL_STORAGE_KEY) || 'current-model';
-  } catch {
-    return 'current-model';
-  }
-}
-
-function saveCompactionModel(value: string): string {
-  try {
-    getLocalStorage()?.setItem(COMPACTION_MODEL_STORAGE_KEY, value);
-  } catch {
-    /* ignore */
-  }
-  return value;
-}
-
-// Compaction token limit persistence and snapshot semantics live in
-// lib/compactionSettings.ts; the store only wires them into state changes.
-
-function normalizeLiveEnterBehavior(value: unknown): LiveEnterBehavior {
-  return value === 'interrupt' ? 'interrupt' : 'queue';
-}
-
-function loadLiveEnterBehavior(): LiveEnterBehavior {
-  try {
-    return normalizeLiveEnterBehavior(getLocalStorage()?.getItem(LIVE_ENTER_BEHAVIOR_STORAGE_KEY));
-  } catch {
-    return 'queue';
-  }
-}
-
-function saveLiveEnterBehavior(value: LiveEnterBehavior): LiveEnterBehavior {
-  const behavior = normalizeLiveEnterBehavior(value);
-  try {
-    getLocalStorage()?.setItem(LIVE_ENTER_BEHAVIOR_STORAGE_KEY, behavior);
-  } catch {
-    /* ignore */
-  }
-  return behavior;
-}
-
-function normalizeImagePasteQuality(value: unknown): ImagePasteQuality {
-  return value === 'high' || value === 'compact' ? value : 'original';
-}
-
-function loadImagePasteQuality(): ImagePasteQuality {
-  try {
-    return normalizeImagePasteQuality(getLocalStorage()?.getItem(IMAGE_PASTE_QUALITY_STORAGE_KEY));
-  } catch {
-    return 'original';
-  }
-}
-
-function saveImagePasteQuality(value: ImagePasteQuality): ImagePasteQuality {
-  const quality = normalizeImagePasteQuality(value);
-  try {
-    getLocalStorage()?.setItem(IMAGE_PASTE_QUALITY_STORAGE_KEY, quality);
-  } catch {
-    /* ignore */
-  }
-  return quality;
-}
-
-function loadDiffView(): DiffViewMode {
-  try {
-    return getLocalStorage()?.getItem(DIFF_VIEW_STORAGE_KEY) === 'split' ? 'split' : 'unified';
-  } catch {
-    return 'unified';
-  }
-}
-
-function saveDiffView(value: DiffViewMode): DiffViewMode {
-  const mode = value === 'split' ? 'split' : 'unified';
-  try {
-    getLocalStorage()?.setItem(DIFF_VIEW_STORAGE_KEY, mode);
-  } catch {
-    /* ignore */
-  }
-  return mode;
-}
-
-function loadReviewScope(): DiffScope {
-  try {
-    const raw = getLocalStorage()?.getItem(REVIEW_SCOPE_STORAGE_KEY) as DiffScope | null;
-    return raw && DIFF_SCOPES.includes(raw) ? raw : 'unstaged';
-  } catch {
-    return 'unstaged';
-  }
-}
-
-function saveReviewScope(value: DiffScope): DiffScope {
-  const scope = DIFF_SCOPES.includes(value) ? value : 'unstaged';
-  try {
-    getLocalStorage()?.setItem(REVIEW_SCOPE_STORAGE_KEY, scope);
-  } catch {
-    /* ignore */
-  }
-  return scope;
-}
-
-function loadWorkspaceCwds(): string[] {
-  try {
-    const raw = getLocalStorage()?.getItem(WORKSPACES_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-function saveWorkspaceCwds(cwds: string[]): string[] {
-  try {
-    getLocalStorage()?.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(cwds));
-  } catch {
-    /* ignore */
-  }
-  return cwds;
-}
-
-export function loadPersistedUiState(): Partial<PersistedUiState> {
-  try {
-    const raw = getLocalStorage()?.getItem(UI_STATE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Partial<PersistedUiState>;
-    return {
-      ...sanitizePersistedPrWorkspace(parsed.prWorkspaceCwd, parsed.prWorkspaceNumber),
-      prBacklogIds: sanitizePersistedPrBacklog(parsed.prBacklogIds),
-      activeAppSessionId:
-        typeof parsed.activeAppSessionId === 'string' ? parsed.activeAppSessionId : null,
-      rightPanelOpen:
-        typeof parsed.rightPanelOpen === 'boolean' ? parsed.rightPanelOpen : undefined,
-      utilityPanels: sanitizeUtilityPanels(parsed.utilityPanels),
-      sidebarCollapsed:
-        typeof parsed.sidebarCollapsed === 'boolean' ? parsed.sidebarCollapsed : undefined,
-      specMode: typeof parsed.specMode === 'boolean' ? parsed.specMode : undefined,
-      missionControlMode:
-        typeof parsed.missionControlMode === 'boolean' ? parsed.missionControlMode : undefined,
-      browsers: loadPersistedBrowsers(parsed.browsers),
-      browserOpenKeys: loadPersistedBrowserOpenKeys(parsed.browserOpenKeys),
-      selectedFeatureId:
-        typeof parsed.selectedFeatureId === 'string' ? parsed.selectedFeatureId : null,
-      mainView:
-        parsed.mainView === 'session' || parsed.mainView === 'pull-requests'
-          ? parsed.mainView
-          : undefined,
-    };
-  } catch {
-    return {};
-  }
-}
-
-function savePersistedUiState(state: AppState): void {
-  const snapshot: PersistedUiState = {
-    activeAppSessionId: state.activeAppSessionId,
-    rightPanelOpen: state.rightPanelOpen,
-    utilityPanels: persistUtilityPanels(state.utilityPanels),
-    sidebarCollapsed: state.sidebarCollapsed,
-    specMode: state.specMode,
-    missionControlMode: state.missionControlMode,
-    browsers: persistBrowsers(state.browsers),
-    browserOpenKeys: state.browserOpenKeys,
-    selectedFeatureId: state.selectedFeatureId,
-    mainView: state.mainView,
-    prWorkspaceCwd: state.prWorkspaceCwd,
-    prWorkspaceNumber: state.prWorkspaceNumber,
-    prBacklogIds: state.prBacklogIds,
-  };
-  try {
-    getLocalStorage()?.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
-  } catch {
-    /* ignore */
-  }
-}
-
-function loadSessionLastSeen(): Record<string, number> {
-  try {
-    const raw = getLocalStorage()?.getItem(SESSION_LAST_SEEN_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, number> = {};
-    for (const [id, value] of Object.entries(parsed)) {
-      if (typeof value === 'number' && Number.isFinite(value)) out[id] = value;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function saveSessionLastSeen(map: Record<string, number>): void {
-  try {
-    getLocalStorage()?.setItem(SESSION_LAST_SEEN_STORAGE_KEY, JSON.stringify(map));
-  } catch {
-    /* ignore */
-  }
-}
-
-function sanitizeAgentConfig(config: AgentConfig, models: ModelInfo[]): AgentConfig {
-  if (models.length === 0) return config;
-  return {
-    primary: sanitizeAgent(config.primary, models),
-    worker: sanitizeAgent(config.worker, models),
-    validator: sanitizeAgent(config.validator, models),
-  };
-}
-
-function sanitizeAgent(config: AgentModelConfig, models: ModelInfo[]): AgentModelConfig {
-  if (!config.modelId) return config;
-  const model = models.find((item) => item.id === config.modelId);
-  if (!model) return { modelId: undefined, reasoning: config.reasoning };
-  const supported = model.supportedReasoningEfforts;
-  if (supported?.length && !supported.includes(config.reasoning)) {
-    return { modelId: config.modelId, reasoning: model.defaultReasoningEffort ?? supported[0] };
-  }
-  if (
-    !supported?.length &&
-    model.defaultReasoningEffort &&
-    config.reasoning !== model.defaultReasoningEffort
-  ) {
-    return { modelId: config.modelId, reasoning: model.defaultReasoningEffort };
-  }
-  return config;
-}
-
 function applySessionOverride(
   summary: SessionSummary,
   override?: { modelId?: string; reasoningEffort?: ReasoningEffort },
@@ -1085,6 +607,10 @@ function applySessionOverride(
   return next;
 }
 
+// Loaded once at module scope so the theme loader can match saved colors
+// against custom presets when recovering a missing presetId.
+const initialCustomThemes = loadCustomThemes();
+
 const persistedUiState = loadPersistedUiState();
 const sessionSnapshot = loadSessionSnapshot();
 
@@ -1093,12 +619,14 @@ export const initialState: AppState = {
   sessions: sessionSnapshot?.sessions ?? {},
   sessionOrder: sessionSnapshot?.sessionOrder ?? [],
   listConfirmedSessionIds: sessionSnapshot?.sessionOrder ?? null,
+  earlierSessionsByCwd: {},
   activeAppSessionId: persistedUiState.activeAppSessionId ?? null,
   sessionLastSeen: loadSessionLastSeen(),
   chatMetadata: loadChatMetadata(),
   transcripts: sessionSnapshot?.transcript
     ? { [sessionSnapshot.transcript.appSessionId]: sessionSnapshot.transcript.events }
     : {},
+  transcriptMutations: {},
   transcriptRetainedCost: sessionSnapshot?.transcript
     ? {
         [sessionSnapshot.transcript.appSessionId]: estimateTranscriptCost(
@@ -1222,151 +750,9 @@ function closeActiveUtilityPanel(state: AppState): AppState {
     : { ...state, utilityPanels: { ...state.utilityPanels, [appSessionId]: panel } };
 }
 
-function withChildAccess(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-  access: ChildAccess,
-): AppState {
-  const parent = state.childAccess[parentAppSessionId] ?? {};
-  return {
-    ...state,
-    childAccess: {
-      ...state.childAccess,
-      [parentAppSessionId]: { ...parent, [childSessionId]: access },
-    },
-  };
-}
-
-function withoutChildAccess(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-): AppState {
-  const parent = { ...(state.childAccess[parentAppSessionId] ?? {}) };
-  delete parent[childSessionId];
-  const childAccess = { ...state.childAccess };
-  if (Object.keys(parent).length === 0) delete childAccess[parentAppSessionId];
-  else childAccess[parentAppSessionId] = parent;
-  return { ...state, childAccess };
-}
-
-function withChildRuntime(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-  runtime: ChildRuntimeState,
-): AppState {
-  const parent = state.childRuntime[parentAppSessionId] ?? {};
-  return {
-    ...state,
-    childRuntime: {
-      ...state.childRuntime,
-      [parentAppSessionId]: { ...parent, [childSessionId]: runtime },
-    },
-  };
-}
-
-function withChildHistory(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-  history: ChildHistoryState,
-): AppState {
-  return {
-    ...state,
-    childHistory: {
-      ...state.childHistory,
-      [parentAppSessionId]: {
-        ...state.childHistory[parentAppSessionId],
-        [childSessionId]: history,
-      },
-    },
-  };
-}
-
-function releaseInactiveChildTranscript(
-  state: AppState,
-  parentAppSessionId: string,
-  childSessionId: string,
-): AppState {
-  // These keyed renderer maps are intentionally sparse at runtime despite
-  // their long-standing Record types.
-  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-  const history = state.childHistory[parentAppSessionId]?.[childSessionId];
-  if (history && (!history.isLoaded || !history.isViewportPinned)) return state;
-  const child = state.childSessions[parentAppSessionId]?.[childSessionId];
-  const runtime = state.childRuntime[parentAppSessionId]?.[childSessionId];
-  if (child?.status === 'running' && runtime?.available) return state;
-  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-  return releaseSessionChildTranscriptWindow(
-    state,
-    parentAppSessionId,
-    childSessionId,
-    INACTIVE_TRANSCRIPT_POLICY,
-  );
-}
-
-function releaseInactiveSelectedChild(state: AppState): AppState {
-  const selected = state.selectedChild;
-  return selected
-    ? releaseInactiveChildTranscript(state, selected.parentAppSessionId, selected.childSessionId)
-    : state;
-}
-
-function invalidateSelectedChildOpening(state: AppState): AppState {
-  const selected = state.selectedChild;
-  if (!selected) return state;
-  const access = state.childAccess[selected.parentAppSessionId]?.[selected.childSessionId];
-  return access?.state === 'opening'
-    ? withChildAccess(state, selected.parentAppSessionId, selected.childSessionId, {
-        state: 'closed',
-        requestId: null,
-      })
-    : state;
-}
-
-function withHistoricalCompactionGeneration(
-  state: AppState,
-  appSessionId: string,
-  transcript: TranscriptEvent[],
-): AppState {
-  const session = state.sessions[appSessionId];
-  if (!session) return state;
-
-  const compactionMarkers = transcript.filter(
-    (event) => event.kind === 'compaction' && event.role === 'primary',
-  );
-  const restoredCompactions = Math.max(
-    compactionMarkers.filter((event) => event.id.startsWith('compaction-')).length,
-    compactionMarkers.filter((event) => !event.id.startsWith('compaction-')).length,
-  );
-  const currentCompactions = session.autoCompactions ?? 0;
-  if (restoredCompactions <= currentCompactions) return state;
-
-  const primaryContext = Object.fromEntries(
-    Object.entries(state.contextStats.primary).filter(([id]) => id !== appSessionId),
-  );
-  return {
-    ...state,
-    sessions: {
-      ...state.sessions,
-      [appSessionId]: {
-        ...session,
-        autoCompactions: restoredCompactions,
-        contextTokens: 0,
-        contextRemainingTokens: undefined,
-        contextAccuracy: undefined,
-        contextUpdatedAt: undefined,
-      },
-    },
-    contextStats: { ...state.contextStats, primary: primaryContext },
-  };
-}
-
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === 'BATCH') {
-    return action.actions.reduce(reducer, state);
+    return reduceStoreActionBatch(state, action.actions, reducer, syncBrowserOpen);
   }
   return syncBrowserOpen(baseReducer(state, action));
 }
@@ -1407,11 +793,10 @@ function baseReducer(state: AppState, action: Action): AppState {
 
       // Seed the first user message: the goal is the user's opening prompt and the
       // backend never echoes it back, so without this the first message never shows.
-      let transcripts = state.transcripts;
-      let transcriptRetainedCost = state.transcriptRetainedCost;
+      let seed: TranscriptEvent | undefined;
       const hasTranscript = (state.transcripts[action.session.appSessionId]?.length ?? 0) > 0;
       if (action.session.goal && !hasTranscript) {
-        const seed: TranscriptEvent = {
+        seed = {
           id: `seed-${action.session.appSessionId}`,
           appSessionId: action.session.appSessionId,
           sourceSessionId: 'user',
@@ -1425,11 +810,6 @@ function baseReducer(state: AppState, action: Action): AppState {
           // another window or a resumed session is restored-equivalent content.
           files: pending?.files,
         };
-        transcripts = { ...state.transcripts, [action.session.appSessionId]: [seed] };
-        transcriptRetainedCost = {
-          ...state.transcriptRetainedCost,
-          [action.session.appSessionId]: estimateTranscriptCost([seed]),
-        };
       }
 
       const pendingCompose = pending
@@ -1438,7 +818,7 @@ function baseReducer(state: AppState, action: Action): AppState {
           )
         : state.pendingCompose;
 
-      const next = {
+      const next: AppState = {
         ...childReset,
         sessions: {
           ...state.sessions,
@@ -1448,8 +828,6 @@ function baseReducer(state: AppState, action: Action): AppState {
           ),
         },
         sessionOrder: order,
-        transcripts,
-        transcriptRetainedCost,
         activeAppSessionId: shouldActivate ? action.session.appSessionId : state.activeAppSessionId,
         draftChat: shouldActivate ? null : state.draftChat,
         draftAutonomy: shouldActivate ? null : state.draftAutonomy,
@@ -1474,7 +852,17 @@ function baseReducer(state: AppState, action: Action): AppState {
             }
           : state.sessionLastSeen,
       };
-      return next;
+      return seed
+        ? withUpdatedTranscript(
+            next,
+            action.session.appSessionId,
+            [seed],
+            estimateTranscriptCost([seed]),
+            {
+              mutation: { kind: 'append', previousLength: 0, firstChangedIndex: 0 },
+            },
+          )
+        : next;
     }
 
     case 'SET_PENDING_COMPOSE':
@@ -1639,152 +1027,14 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
     }
 
-    case 'SESSION_CHILD': {
-      const child = action.child;
-      const parent = state.childSessions[child.parentAppSessionId] ?? {};
-      const previousChild = parent[child.childSessionId];
-      const runtimeParent = state.childRuntime[child.parentAppSessionId] ?? {};
-      const previousRuntime = runtimeParent[child.childSessionId];
-      if (previousRuntime && action.runtimeGeneration < previousRuntime.runtimeGeneration)
-        return state;
-      const settledWhileInactive =
-        previousChild?.status === 'running' &&
-        previousRuntime?.available &&
-        (child.status !== 'running' || !action.runtimeAvailable) &&
-        (state.activeAppSessionId !== child.parentAppSessionId ||
-          state.selectedChild?.parentAppSessionId !== child.parentAppSessionId ||
-          state.selectedChild.childSessionId !== child.childSessionId);
-      const clearContext =
-        !action.runtimeAvailable ||
-        (previousRuntime !== undefined &&
-          action.runtimeGeneration > previousRuntime.runtimeGeneration);
-      const contextParent = state.contextStats.child[child.parentAppSessionId] ?? {};
-      let next = {
-        ...state,
-        childSessions: {
-          ...state.childSessions,
-          [child.parentAppSessionId]: {
-            ...parent,
-            [child.childSessionId]: child,
-          },
-        },
-        contextStats: clearContext
-          ? {
-              ...state.contextStats,
-              child: {
-                ...state.contextStats.child,
-                [child.parentAppSessionId]: Object.fromEntries(
-                  Object.entries(contextParent).filter(
-                    ([childSessionId]) => childSessionId !== child.childSessionId,
-                  ),
-                ),
-              },
-            }
-          : state.contextStats,
-      };
-      const runtimeUnchanged =
-        // Keep the existence guard because the following comparison dereferences previousRuntime.
-        // eslint-disable-next-line @typescript-eslint/prefer-optional-chain
-        previousRuntime &&
-        action.runtimeGeneration === previousRuntime.runtimeGeneration &&
-        action.runtimeAvailable === previousRuntime.available;
-      if (!runtimeUnchanged) {
-        next = {
-          ...next,
-          childRuntime: {
-            ...state.childRuntime,
-            [child.parentAppSessionId]: {
-              ...runtimeParent,
-              [child.childSessionId]: {
-                available: action.runtimeAvailable,
-                runtimeGeneration: action.runtimeGeneration,
-              },
-            },
-          },
-        };
-        const access = state.childAccess[child.parentAppSessionId]?.[child.childSessionId];
-        if (!action.runtimeAvailable && (access?.state === 'opening' || access?.state === 'ready'))
-          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-            state: 'closed',
-            requestId: null,
-          });
-        else if (action.runtimeAvailable && access?.state === 'ready')
-          next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
-            ...access,
-            runtimeGeneration: action.runtimeGeneration,
-          });
-      }
-      return settledWhileInactive
-        ? releaseInactiveChildTranscript(next, child.parentAppSessionId, child.childSessionId)
-        : next;
-    }
+    case 'SESSION_CHILD':
+      return reduceSessionChild(state, action);
 
-    case 'CHILD_UPDATED': {
-      if (
-        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild.childSessionId !== action.childSessionId
-      )
-        return state;
-      const current = state.childAccess[action.parentAppSessionId]?.[action.childSessionId];
-      if (current?.state !== 'opening' || current.requestId !== action.requestId) return state;
-      const runtime = state.childRuntime[action.parentAppSessionId]?.[action.childSessionId];
-      if (
-        action.access === 'ready' &&
-        runtime &&
-        (action.runtimeGeneration < runtime.runtimeGeneration ||
-          (action.runtimeGeneration === runtime.runtimeGeneration && !runtime.available))
-      )
-        return state;
-      const settled = withChildAccess(
-        state,
-        action.parentAppSessionId,
-        action.childSessionId,
-        action.access === 'ready'
-          ? {
-              state: 'ready',
-              requestId: action.requestId,
-              runtimeGeneration: action.runtimeGeneration,
-            }
-          : { state: 'history', requestId: action.requestId },
-      );
-      return action.access === 'ready'
-        ? withChildRuntime(settled, action.parentAppSessionId, action.childSessionId, {
-            available: true,
-            runtimeGeneration: action.runtimeGeneration,
-          })
-        : settled;
-    }
+    case 'CHILD_UPDATED':
+      return reduceChildUpdated(state, action);
 
-    case 'CHILD_ERROR': {
-      if (action.operation === 'loadHistory') {
-        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
-        const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-        const next = withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
-          status: 'failed',
-          loadedCount: previous?.loadedCount ?? 0,
-          hasMore: previous?.hasMore ?? false,
-          error: action.message,
-          isLoaded: previous?.isLoaded ?? false,
-          isLoadingOlder: false,
-          olderCursor: previous?.olderCursor,
-          isViewportPinned: previous?.isViewportPinned ?? true,
-        });
-        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-        return next;
-      }
-      if (action.operation !== 'open' || !action.requestId) return state;
-      if (
-        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild.childSessionId !== action.childSessionId
-      )
-        return state;
-      const current = state.childAccess[action.parentAppSessionId]?.[action.childSessionId];
-      if (current?.state !== 'opening' || current.requestId !== action.requestId) return state;
-      return withChildAccess(state, action.parentAppSessionId, action.childSessionId, {
-        state: 'failed',
-        requestId: action.requestId,
-      });
-    }
+    case 'CHILD_ERROR':
+      return reduceChildError(state, action);
 
     case 'SESSION_TOKENS': {
       const mid = action.appSessionId;
@@ -1867,46 +1117,16 @@ function baseReducer(state: AppState, action: Action): AppState {
       if (!session || sessionIsLive(session)) return state;
       return releaseSessionTranscriptWindow(state, action.appSessionId, VIEWPORT_TRANSCRIPT_POLICY);
     }
-
-    case 'CHILD_TRANSCRIPT_VIEWPORT': {
-      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      if (!previous || previous.isViewportPinned === action.pinned) return state;
-      return {
-        ...state,
-        childHistory: {
-          ...state.childHistory,
-          [action.parentAppSessionId]: {
-            ...state.childHistory[action.parentAppSessionId],
-            [action.childSessionId]: {
-              ...previous,
-              isViewportPinned: action.pinned,
-            },
-          },
-        },
-      };
-    }
-
-    case 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT': {
-      if (
-        state.activeAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild?.parentAppSessionId !== action.parentAppSessionId ||
-        state.selectedChild.childSessionId !== action.childSessionId
-      ) {
-        return state;
-      }
-      const history = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      if (!history?.isLoaded || !history.isViewportPinned) return state;
-      const child = state.childSessions[action.parentAppSessionId]?.[action.childSessionId];
-      const runtime = state.childRuntime[action.parentAppSessionId]?.[action.childSessionId];
-      if (child?.status === 'running' && runtime?.available) return state;
-      return releaseSessionChildTranscriptWindow(
-        state,
-        action.parentAppSessionId,
-        action.childSessionId,
-        VIEWPORT_TRANSCRIPT_POLICY,
-      );
-    }
     /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+
+    case 'MEMORY_PRESSURE':
+      return applyMemoryPressureRelease(state);
+
+    case 'CHILD_TRANSCRIPT_VIEWPORT':
+      return reduceChildTranscriptViewport(state, action);
+
+    case 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT':
+      return reduceChildTranscriptReleaseViewport(state, action);
 
     case 'QUEUE_PROMPT': {
       const prev = state.promptQueue[action.appSessionId] ?? [];
@@ -2109,197 +1329,28 @@ function baseReducer(state: AppState, action: Action): AppState {
         sessionLastSeen: seededLastSeen,
         chatMetadata,
         listConfirmedSessionIds: action.sessions.map((m) => m.appSessionId),
+        earlierSessionsByCwd: action.earlierSessionsByCwd,
         activeAppSessionId,
       };
     }
 
     case 'SESSION_HISTORY_LOADING_OLDER':
-      return {
-        ...state,
-        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: true },
-      };
+      return reduceSessionHistoryLoadingOlder(state, action);
 
-    /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
-    case 'CHILD_HISTORY_LOADING': {
-      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
-        status: 'loading',
-        loadedCount: previous?.loadedCount ?? 0,
-        hasMore: previous?.hasMore ?? false,
-        isLoaded: false,
-        isLoadingOlder: false,
-        olderCursor: undefined,
-        isViewportPinned: previous?.isViewportPinned ?? true,
-      });
-    }
+    case 'CHILD_HISTORY_LOADING':
+      return reduceChildHistoryLoading(state, action);
 
-    case 'CHILD_HISTORY_LOADING_OLDER': {
-      const previous = state.childHistory[action.parentAppSessionId]?.[action.childSessionId];
-      if (!previous || previous.isLoadingOlder) return state;
-      return withChildHistory(state, action.parentAppSessionId, action.childSessionId, {
-        ...previous,
-        isLoadingOlder: true,
-      });
-    }
+    case 'CHILD_HISTORY_LOADING_OLDER':
+      return reduceChildHistoryLoadingOlder(state, action);
 
-    case 'SESSION_RESTORE_START': {
-      const prev = state.sessionRestore[action.appSessionId];
-      return {
-        ...state,
-        sessionRestore: {
-          ...state.sessionRestore,
-          [action.appSessionId]: {
-            status: 'loading',
-            loadedCount: prev?.loadedCount ?? 0,
-            hasMore: prev?.hasMore ?? false,
-          },
-        },
-      };
-    }
+    case 'SESSION_RESTORE_START':
+      return reduceSessionRestoreStart(state, action);
 
-    case 'SESSION_HISTORY_FAILED': {
-      if (action.childSessionId) {
-        const prev = state.childHistory[action.appSessionId]?.[action.childSessionId];
-        return withChildHistory(state, action.appSessionId, action.childSessionId, {
-          status: 'failed',
-          loadedCount: prev?.loadedCount ?? 0,
-          hasMore: prev?.hasMore ?? false,
-          error: action.message,
-          isLoaded: prev?.isLoaded ?? false,
-          isLoadingOlder: false,
-          olderCursor: prev?.olderCursor,
-          isViewportPinned: prev?.isViewportPinned ?? true,
-        });
-      }
-      const prev = state.sessionRestore[action.appSessionId];
-      return {
-        ...state,
-        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-        sessionRestore: {
-          ...state.sessionRestore,
-          [action.appSessionId]: {
-            status: 'failed',
-            loadedCount: prev?.loadedCount ?? 0,
-            hasMore: prev?.hasMore ?? false,
-            error: action.message,
-          },
-        },
-      };
-    }
+    case 'SESSION_HISTORY_FAILED':
+      return reduceSessionHistoryFailed(state, action);
 
-    case 'SESSION_HISTORY': {
-      const existing = state.transcripts[action.appSessionId] ?? [];
-      const hasMore = Boolean(action.olderCursor);
-
-      if (action.childSessionId) {
-        const reconciled = reconcileTranscriptSourcePage(
-          existing,
-          action.childSessionId,
-          action.transcripts,
-          action.mode ?? 'replace',
-          hasMore,
-        );
-        const transcriptChanged = reconciled.transcript !== existing;
-        const previousHistory = state.childHistory[action.appSessionId]?.[action.childSessionId];
-        const historyState = withChildHistory(state, action.appSessionId, action.childSessionId, {
-          status: hasMore ? 'paged' : 'loaded',
-          loadedCount: reconciled.sourceEvents.length,
-          hasMore,
-          isLoaded: true,
-          isLoadingOlder: false,
-          olderCursor: action.olderCursor,
-          isViewportPinned: previousHistory?.isViewportPinned ?? true,
-        });
-        const next = transcriptChanged
-          ? withUpdatedTranscript(
-              historyState,
-              action.appSessionId,
-              reconciled.transcript,
-              estimateTranscriptCost(reconciled.transcript),
-              action.childSessionId,
-            )
-          : historyState;
-        const isSelected =
-          next.selectedChild?.parentAppSessionId === action.appSessionId &&
-          next.selectedChild.childSessionId === action.childSessionId;
-        return isSelected
-          ? next
-          : releaseInactiveChildTranscript(next, action.appSessionId, action.childSessionId);
-      }
-
-      if (action.mode === 'prepend') {
-        const mergedTranscript = reconcilePrependedTranscript(existing, action.transcripts);
-        const transcriptChanged = mergedTranscript !== existing;
-        const historyState: AppState = {
-          ...state,
-          historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-          historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-          sessionRestore: {
-            ...state.sessionRestore,
-            [action.appSessionId]: {
-              status: hasMore ? 'paged' : 'loaded',
-              loadedCount: mergedTranscript.length,
-              hasMore,
-            },
-          },
-        };
-        const next = transcriptChanged
-          ? withUpdatedTranscript(
-              historyState,
-              action.appSessionId,
-              mergedTranscript,
-              estimateTranscriptCost(mergedTranscript),
-            )
-          : historyState;
-        return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
-      }
-
-      const mergedTranscript = reconcileRestoredTranscript(existing, action.transcripts, !hasMore);
-      const transcriptChanged = mergedTranscript !== existing;
-      const historicalChildren = action.childSessions ?? [];
-      const existingChildSessions = state.childSessions[action.appSessionId] ?? {};
-      let childSessions = state.childSessions;
-      if (historicalChildren.length > 0) {
-        const byChild = { ...existingChildSessions };
-        for (const child of historicalChildren)
-          byChild[child.childSessionId] = byChild[child.childSessionId] ?? child;
-        childSessions = {
-          ...state.childSessions,
-          [action.appSessionId]: byChild,
-        };
-      }
-      // An empty restore (e.g. a live session with no persisted history yet)
-      // must not wipe progress already delivered by live events; only adopt the
-      // replayed progress when it actually carries entries.
-      const existingProgress = state.progress[action.appSessionId] ?? [];
-      const mergedProgress = action.progress.length > 0 ? action.progress : existingProgress;
-      const historyState: AppState = {
-        ...state,
-        progress: { ...state.progress, [action.appSessionId]: mergedProgress },
-        childSessions,
-        historyLoaded: { ...state.historyLoaded, [action.appSessionId]: true },
-        historyCursor: { ...state.historyCursor, [action.appSessionId]: action.olderCursor },
-        historyLoadingOlder: { ...state.historyLoadingOlder, [action.appSessionId]: false },
-        sessionRestore: {
-          ...state.sessionRestore,
-          [action.appSessionId]: {
-            status: hasMore ? 'paged' : 'loaded',
-            loadedCount: mergedTranscript.length,
-            hasMore,
-          },
-        },
-      };
-      const next = transcriptChanged
-        ? withUpdatedTranscript(
-            historyState,
-            action.appSessionId,
-            mergedTranscript,
-            estimateTranscriptCost(mergedTranscript),
-          )
-        : historyState;
-      return withHistoricalCompactionGeneration(next, action.appSessionId, mergedTranscript);
-    }
-    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+    case 'SESSION_HISTORY':
+      return reduceSessionHistory(state, action);
 
     case 'CLEAR_PERMISSION': {
       return {
@@ -2796,11 +1847,7 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     case 'SET_THEME': {
       const next = { ...state.theme, ...action.theme };
-      try {
-        getLocalStorage()?.setItem('droid-theme', JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
+      persistTheme(next);
       return { ...state, theme: next };
     }
 
@@ -2815,48 +1862,8 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'SELECT_FEATURE':
       return { ...state, selectedFeatureId: action.id };
 
-    case 'SELECT_CHILD': {
-      const previous = state.selectedChild;
-      let next =
-        previous &&
-        (action.selection?.parentAppSessionId !== previous.parentAppSessionId ||
-          action.selection.childSessionId !== previous.childSessionId)
-          ? invalidateSelectedChildOpening(releaseInactiveSelectedChild(state))
-          : state;
-      if (!action.selection) return { ...next, selectedChild: null };
-      const { parentAppSessionId, childSessionId } = action.selection;
-      if (
-        next.activeAppSessionId !== parentAppSessionId ||
-        !next.childSessions[parentAppSessionId]?.[childSessionId]
-      )
-        return { ...next, selectedChild: null };
-      next = { ...next, selectedChild: action.selection };
-      if (action.requestId) {
-        const opening = withChildAccess(next, parentAppSessionId, childSessionId, {
-          state: 'opening',
-          requestId: action.requestId,
-        });
-        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- sparse keyed renderer maps */
-        const history = opening.childHistory[parentAppSessionId]?.[childSessionId];
-        if (history?.isLoaded) return opening;
-        const loadedCount = (opening.transcripts[parentAppSessionId] ?? []).filter(
-          (event) => event.sourceSessionId === childSessionId,
-        ).length;
-        return withChildHistory(opening, parentAppSessionId, childSessionId, {
-          status: 'loading',
-          loadedCount,
-          hasMore: false,
-          isLoaded: false,
-          isLoadingOlder: false,
-          isViewportPinned: history?.isViewportPinned ?? true,
-        });
-        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
-      }
-      const access = next.childAccess[parentAppSessionId]?.[childSessionId];
-      return access?.state === 'failed' || access?.state === 'closed'
-        ? withoutChildAccess(next, parentAppSessionId, childSessionId)
-        : next;
-    }
+    case 'SELECT_CHILD':
+      return reduceSelectChild(state, action);
 
     case 'MODELS_LIST':
       return {
@@ -3026,100 +2033,17 @@ function baseReducer(state: AppState, action: Action): AppState {
   }
 }
 
-function loadPersistedBrowsers(value: unknown): Record<string, BrowserState> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const entries = Object.entries(value as Record<string, unknown>)
-    .map(([key, browser]) => [key, sanitizePersistedBrowser(key, browser)] as const)
-    .filter((entry): entry is readonly [string, BrowserState] => Boolean(entry[1]));
-  return Object.fromEntries(entries);
-}
-
-function loadPersistedBrowserOpenKeys(value: unknown): Record<string, boolean> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  // Preserve both true (open) and false (explicitly hidden) so the "hidden"
-  // decision survives a restart; a dropped `false` would let later updates
-  // re-open a pane the user deliberately hid.
-  const entries = Object.entries(value as Record<string, unknown>).filter(
-    (entry): entry is [string, boolean] =>
-      typeof entry[0] === 'string' && entry[0].length > 0 && typeof entry[1] === 'boolean',
-  );
-  return Object.fromEntries(entries);
-}
-
-function sanitizePersistedBrowser(key: string, value: unknown): BrowserState | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const browser = value as Partial<BrowserState>;
-  if (typeof browser.browserSessionId !== 'string' || !browser.browserSessionId) return undefined;
-  if (typeof browser.url !== 'string' || !browser.url) return undefined;
-  const viewport = sanitizeBrowserViewport(browser.viewport);
-  if (!viewport) return undefined;
-  return {
-    browserSessionId: browser.browserSessionId,
-    appSessionId:
-      typeof browser.appSessionId === 'string' && browser.appSessionId ? browser.appSessionId : key,
-    url: browser.url,
-    title: typeof browser.title === 'string' ? browser.title : undefined,
-    viewport,
-    viewportMode: sanitizeBrowserViewportMode(browser.viewportMode),
-    scroll: sanitizeBrowserScroll(browser.scroll),
-    refs: [],
-    ...(browser.canGoBack === true ? { canGoBack: true } : {}),
-    ...(browser.canGoForward === true ? { canGoForward: true } : {}),
-  };
-}
-
-function sanitizeBrowserViewport(value: unknown): BrowserState['viewport'] | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const viewport = value as Partial<BrowserState['viewport']>;
-  const width = finitePositiveNumber(viewport.width);
-  const height = finitePositiveNumber(viewport.height);
-  const deviceScaleFactor = finitePositiveNumber(viewport.deviceScaleFactor);
-  if (!width || !height || !deviceScaleFactor) return undefined;
-  return { width, height, deviceScaleFactor };
-}
-
-function sanitizeBrowserViewportMode(value: unknown): BrowserViewportMode {
-  return BROWSER_VIEWPORT_MODES.has(value as BrowserViewportMode)
-    ? (value as BrowserViewportMode)
-    : 'fit';
-}
-
-function sanitizeBrowserScroll(value: unknown): BrowserState['scroll'] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { x: 0, y: 0 };
-  const scroll = value as Partial<BrowserState['scroll']>;
-  return { x: finiteNumber(scroll.x) ?? 0, y: finiteNumber(scroll.y) ?? 0 };
-}
-
-function persistBrowsers(browsers: Record<string, BrowserState>): Record<string, BrowserState> {
-  return Object.fromEntries(
-    Object.entries(browsers).map(([key, browser]) => [
-      key,
-      {
-        ...browser,
-        refs: [],
-        agentCursor: undefined,
-        screenshotPath: undefined,
-        screenshotUrl: undefined,
-      },
-    ]),
-  );
-}
-
-function finitePositiveNumber(value: unknown): number | undefined {
-  const number = finiteNumber(value);
-  return number && number > 0 ? number : undefined;
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
 /* ── Bridge event adapter ── */
 export function toastMessageForEvent(ev: ServerEvent): string | undefined {
-  if (ev.type === 'error' && ev.code === 'bridge.unsupported_command') return ev.message;
+  if (isHistoryStatusError(ev)) return undefined;
   if (
     ev.type === 'error' &&
-    (ev.code === 'session.autonomy_update_failed' || ev.code === 'session.create_failed')
+    (ev.code === 'bridge.unsupported_command' ||
+      ev.code === 'bridge.resync_required' ||
+      ev.code === 'history.unflushed_work' ||
+      ev.code === 'session.interrupted' ||
+      ev.code === 'session.autonomy_update_failed' ||
+      ev.code === 'session.create_failed')
   ) {
     return ev.message;
   }
@@ -3184,6 +2108,10 @@ export function adaptEvent(ev: ServerEvent): Action | null {
     case 'question.requested':
       return { type: 'SESSION_QUESTION', question: ev.question };
     case 'error':
+      if (isHistoryStatusError(ev)) return null;
+      if (ev.code === 'bridge.resync_required' && !ev.recoverable) {
+        return { type: 'SET_CONNECTION', status: 'error', message: ev.message };
+      }
       // A failed autonomy change is recoverable: the session keeps its last
       // confirmed level, the pending state settles, and the toast carries the
       // message (see toastMessageForEvent).
@@ -3210,7 +2138,11 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       }
       return { type: 'SESSION_ERROR', message: ev.message };
     case 'sessions.list':
-      return { type: 'SESSION_LIST', sessions: ev.sessions };
+      return {
+        type: 'SESSION_LIST',
+        sessions: ev.sessions,
+        earlierSessionsByCwd: ev.earlierSessionsByCwd,
+      };
     case 'session.history':
       return {
         type: 'SESSION_HISTORY',
@@ -3303,6 +2235,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     stateRef.current = state;
+    // Closes the perf receive→commit leg for events reduced by this commit.
+    noteStoreCommitted();
     for (const listener of listenersRef.current) listener();
   }, [state]);
 
@@ -3394,16 +2328,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       delayMs: 16,
     });
     bridgeActionBatcherRef.current = batcher;
-    const unsub = bridge.subscribe((ev) => {
-      // Verbose per-event logging runs on every streaming token and eagerly
-      // deep-clones + redacts the whole event, so keep it to dev builds only;
-      // production strips this branch entirely.
-      if (import.meta.env.DEV) console.log('[bridge]', ev.type, sanitizeForLog(ev));
-      const toastMessage = toastMessageForEvent(ev);
-      if (toastMessage !== undefined) toast.error(toastMessage);
-      const action = adaptEvent(ev);
-      if (!action) return;
-      batcher.pushBridge(action);
+    const unsub = bridge.subscribeBatch((events) => {
+      const actions: Action[] = [];
+      for (const ev of events) {
+        // Verbose per-event logging runs on every streaming token and eagerly
+        // deep-clones + redacts the whole event, so keep it to dev builds only;
+        // production strips this branch entirely.
+        if (import.meta.env.DEV) console.log('[bridge]', ev.type, sanitizeForLog(ev));
+        applyHistoryServerEvent(ev);
+        const toastMessage = toastMessageForEvent(ev);
+        if (toastMessage !== undefined) toast.error(toastMessage);
+        const action = adaptEvent(ev);
+        if (!action) {
+          // No reducer work means no commit: drop the perf leg instead of
+          // closing it against the next unrelated commit.
+          discardPendingBridgeEvent(ev);
+          continue;
+        }
+        actions.push(action);
+      }
+      batcher.pushBridgeBatch(actions);
     });
     return () => {
       unsub();

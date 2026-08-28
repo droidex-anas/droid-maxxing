@@ -52,6 +52,24 @@ interface BridgeInfo {
   token: string;
 }
 
+export type SidecarLifecycle =
+  | 'starting'
+  | 'healthy'
+  | 'degraded'
+  | 'restarting'
+  | 'recovery-required'
+  | 'stopped';
+
+export interface SidecarSupervisorSnapshot {
+  lifecycle: SidecarLifecycle;
+  processAlive: boolean;
+  bridgeResponsive: boolean;
+  lastHeartbeatAt: number | null;
+  restartCount: number;
+  reason?: string;
+  port?: number;
+}
+
 export interface TerminalSessionInfo {
   id: string;
   appSessionId: string;
@@ -63,29 +81,41 @@ export interface TerminalSessionInfo {
   exitCode?: number | null;
 }
 
-export type TerminalEvent =
+type TerminalEvent =
   | {
-      terminalId: string;
       kind: 'replay';
       data: string;
       sequence: number;
       truncated: boolean;
       droppedBytes: number;
+      byteOffset: number;
+      totalEmittedBytes: number;
     }
   | {
-      terminalId: string;
       kind: 'data';
       data: string;
       sequence: number;
       byteOffset: number;
+      truncated?: boolean;
+      droppedBytes?: number;
+      totalEmittedBytes?: number;
     }
   | {
-      terminalId: string;
       kind: 'exit';
       sequence: number;
       exitCode: number | null;
       signal: number | null;
+    }
+  | {
+      kind: 'error';
+      message: string;
     };
+
+export interface TerminalDataChannel {
+  postInput: (data: string) => void;
+  onEvent: (handler: (event: TerminalEvent) => void) => () => void;
+  close: () => void;
+}
 
 export interface FilesEntry {
   name: string;
@@ -157,6 +187,8 @@ export type NotifyResult =
 
 interface DroidControlApi {
   bridgeInfo: () => Promise<BridgeInfo>;
+  sidecarStatus: () => Promise<SidecarSupervisorSnapshot>;
+  onSidecarStatus: (handler: (status: SidecarSupervisorSnapshot) => void) => () => void;
   pickDirectory: () => Promise<string | null>;
   pickFiles: () => Promise<string[]>;
   saveImage: (dataUrl: string) => Promise<string>;
@@ -169,6 +201,11 @@ interface DroidControlApi {
   setApiKey: (key: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
   listFiles: (dir: string) => Promise<string[]>;
+  getPerformanceMetrics: () => Promise<DesktopPerformanceMetrics>;
+  systemIdleTime: () => Promise<number>;
+  powerTier: () => Promise<DesktopPowerTierSnapshot>;
+  onPowerTier: (handler: (snapshot: DesktopPowerTierSnapshot) => void) => () => void;
+  onMemoryPressure: (handler: (payload: { at: number }) => void) => () => void;
   readFile: (path: string) => Promise<string>;
   repoStatus: (dir: string) => Promise<RepoStatus | null>;
   listEditors: () => Promise<EditorId[]>;
@@ -231,6 +268,8 @@ interface DroidControlApi {
   checkAppUpdate: (options: AppUpdateCheckOptions) => Promise<AppUpdateInfo>;
   downloadAppUpdate: () => Promise<AppUpdateResult>;
   submitFeedbackReport: (report: FeedbackReportRequest) => Promise<FeedbackReportReceipt>;
+  getHardwareAcceleration: () => Promise<{ enabled: boolean }>;
+  setHardwareAcceleration: (enabled: boolean) => Promise<{ enabled: boolean }>;
   relaunchApp: () => Promise<void>;
   setAppIcon: (mode: AppIconMode) => Promise<AppIconMode>;
   openExternal: (url: string) => Promise<void>;
@@ -240,13 +279,11 @@ interface DroidControlApi {
     cols: number;
     rows: number;
   }) => Promise<TerminalSessionInfo>;
-  terminalWrite: (id: string, data: string) => Promise<void>;
   terminalResize: (id: string, cols: number, rows: number) => Promise<void>;
   terminalKill: (id: string) => Promise<void>;
   terminalList: (appSessionId: string) => Promise<TerminalSessionInfo[]>;
-  terminalSubscribe: (id: string) => Promise<void>;
+  terminalSubscribe: (id: string) => TerminalDataChannel;
   terminalUnsubscribe: (id: string) => Promise<void>;
-  onTerminalEvent: (handler: (event: TerminalEvent) => void) => () => void;
   filesAuthorizeRoot: (root: string) => Promise<string>;
   filesList: (accessToken: string, relative: string) => Promise<FilesListing>;
   filesPreview: (accessToken: string, relative: string) => Promise<FilePreviewPayload>;
@@ -293,11 +330,68 @@ declare global {
   }
 }
 
+interface DesktopPerformanceMetrics {
+  timestamp: number;
+  webContentsTotal: number;
+  ptys: number;
+  nativeBrowsers?: {
+    total: number;
+    live: number;
+    attached: number;
+    warm: number;
+    serialized: number;
+    maxLive: number;
+    idleMs: number;
+  };
+  terminals?: { live: number; retained: number; total: number };
+  powerTier?: 'interactive' | 'hidden' | 'low-power';
+  memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
+  // Cumulative since app start, not per sample: difference polls for a rate.
+  cpu: { userMs: number; systemMs: number };
+}
+
+export interface DesktopPowerTierSnapshot {
+  tier: 'interactive' | 'hidden' | 'low-power';
+  windowVisible: boolean;
+  onBattery: boolean;
+}
+
 function desktopApi(): DroidControlApi | undefined {
   return typeof window !== 'undefined' ? window.droidControl : undefined;
 }
 
 export const isDesktop = () => Boolean(desktopApi());
+
+export async function systemIdleTime(): Promise<number | null> {
+  const api = desktopApi();
+  if (!api) return null;
+  const seconds = await api.systemIdleTime();
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
+
+export async function desktopPowerTier(): Promise<DesktopPowerTierSnapshot | null> {
+  const api = desktopApi();
+  if (!api) return null;
+  try {
+    return await api.powerTier();
+  } catch {
+    return null;
+  }
+}
+
+export function onDesktopPowerTier(
+  handler: (snapshot: DesktopPowerTierSnapshot) => void,
+): () => void {
+  const api = desktopApi();
+  if (!api) return () => undefined;
+  return api.onPowerTier(handler);
+}
+
+export function onDesktopMemoryPressure(handler: (payload: { at: number }) => void): () => void {
+  const api = desktopApi();
+  if (!api) return () => undefined;
+  return api.onMemoryPressure(handler);
+}
 
 function requireDesktopApi(message: string): DroidControlApi {
   const api = desktopApi();
@@ -309,6 +403,18 @@ export async function getBridgeInfo(): Promise<BridgeInfo> {
   const api = desktopApi();
   if (!api) return { port: 8765, token: '' };
   return api.bridgeInfo();
+}
+
+export async function getSidecarStatus(): Promise<SidecarSupervisorSnapshot | null> {
+  const api = desktopApi();
+  if (!api?.sidecarStatus) return null;
+  return api.sidecarStatus();
+}
+
+export function onSidecarStatus(handler: (status: SidecarSupervisorSnapshot) => void): () => void {
+  const api = desktopApi();
+  if (!api?.onSidecarStatus) return () => undefined;
+  return api.onSidecarStatus(handler);
 }
 
 export async function pickDirectory(): Promise<string | null> {
@@ -420,12 +526,6 @@ export async function createTerminal(options: {
   );
 }
 
-export async function writeTerminal(id: string, data: string): Promise<void> {
-  const api = desktopApi();
-  if (!api) return;
-  await api.terminalWrite(id, data);
-}
-
 export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
   const api = desktopApi();
   if (!api) return;
@@ -444,22 +544,16 @@ export async function listTerminals(appSessionId: string): Promise<TerminalSessi
   return api.terminalList(appSessionId);
 }
 
-export async function subscribeTerminal(id: string): Promise<void> {
+export function subscribeTerminal(id: string): TerminalDataChannel | null {
   const api = desktopApi();
-  if (!api) return;
-  await api.terminalSubscribe(id);
+  if (!api) return null;
+  return api.terminalSubscribe(id);
 }
 
 export async function unsubscribeTerminal(id: string): Promise<void> {
   const api = desktopApi();
   if (!api) return;
   await api.terminalUnsubscribe(id);
-}
-
-export function onTerminalEvent(handler: (event: TerminalEvent) => void): () => void {
-  const api = desktopApi();
-  if (!api) return () => undefined;
-  return api.onTerminalEvent(handler);
 }
 
 export async function authorizeFilesRoot(root: string): Promise<string> {

@@ -19,9 +19,10 @@ class FakeHistory {
   readonly trace: string[] = [];
   summaryReadCount = 0;
   nextSyncError?: Error;
+  nextDurabilityPending = false;
   private readonly patches = new Map<string, Partial<SessionSummary>>();
 
-  syncSummaries(summaries: SessionSummary[]): void {
+  syncSummaries(summaries: SessionSummary[]): boolean | undefined {
     const error = this.nextSyncError;
     delete this.nextSyncError;
     if (error) throw error;
@@ -32,6 +33,11 @@ class FakeHistory {
       this.patches.set(summary.appSessionId, copy);
       if (summary.providerSessionId) this.patches.set(summary.providerSessionId, copy);
     }
+    if (this.nextDurabilityPending) {
+      this.nextDurabilityPending = false;
+      return false;
+    }
+    return undefined;
   }
 
   summaryPatchesAndHidden(): {
@@ -57,6 +63,7 @@ interface HarnessOptions {
   loadMissionControlSessions?: SessionRegistryDependencies['loadMissionControlSessions'];
   projectSummary?: SessionRegistryDependencies['projectSummary'];
   now?: () => number;
+  onLiveProviderReplaced?: (providerSessionId: string) => void;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -73,6 +80,9 @@ function createHarness(options: HarnessOptions = {}) {
       history.trace.push('publish');
       published.push(copySummary(summary));
     },
+    ...(options.onLiveProviderReplaced
+      ? { onLiveProviderReplaced: options.onLiveProviderReplaced }
+      : {}),
     now: options.now ?? (() => 100),
   };
 
@@ -122,6 +132,10 @@ function copySummary(value: Readonly<SessionSummary>): SessionSummary {
       : {}),
     features: value.features.map(copyFeature),
   };
+}
+
+function streamingStates(summaries: readonly SessionSummary[]): Array<boolean | undefined> {
+  return summaries.map((value) => value.streaming);
 }
 
 function copyFeature(feature: BridgeFeature): BridgeFeature {
@@ -279,6 +293,48 @@ test('failed summary persistence leaves live state unchanged and unpublished', (
   assert.deepEqual(published, []);
 });
 
+test('a retained settlement publishes only after durability recovery', () => {
+  const { history, published, registry } = createHarness();
+  const session = live(summary('durable-app', { streaming: true, phase: 'running' }));
+  registry.register(session);
+  history.trace.length = 0;
+  published.length = 0;
+  history.nextDurabilityPending = true;
+
+  const pending = registry.updateSummary('durable-app', {
+    streaming: false,
+    phase: 'paused',
+  });
+
+  assert.equal(pending?.streaming, false);
+  assert.equal(session.summary.streaming, false, 'the owner advances its internal state');
+  assert.equal(
+    registry.listSummaries().sessions[0]?.streaming,
+    true,
+    'renderer list stays durable',
+  );
+  assert.deepEqual(published, []);
+
+  registry.retryPendingDurability();
+  assert.equal(registry.listSummaries().sessions[0]?.streaming, false);
+  assert.deepEqual(streamingStates(published), [false]);
+});
+
+test('new live state supersedes a held settlement without replaying it later', () => {
+  const { history, published, registry } = createHarness();
+  const session = live(summary('continued-app', { streaming: true, phase: 'running' }));
+  registry.register(session);
+  published.length = 0;
+  history.nextDurabilityPending = true;
+  registry.updateSummary('continued-app', { streaming: false, phase: 'paused' });
+
+  registry.updateSummary('continued-app', { streaming: true, phase: 'running' });
+  registry.retryPendingDurability();
+
+  assert.deepEqual(streamingStates(published), [true]);
+  assert.equal(registry.listSummaries().sessions[0]?.streaming, true);
+});
+
 test('reanchorHistoricalCwd moves idle sessions and preserves nested directories', () => {
   const historical = [
     summary('at-root', { cwd: '/repo/.worktrees/feature', updatedAt: 7 }),
@@ -320,6 +376,7 @@ test('reanchorHistoricalCwd refuses to move a worktree used by a live session', 
 
 test('replaceProvider retains the alias chain and supports live and historical sessions', () => {
   let timestamp = 10;
+  const retiredProviders: string[] = [];
   const historical = summary('historical-app', {
     providerSessionId: 'historical-provider',
     compactedFromProviderSessionIds: ['historical-provider-old'],
@@ -327,6 +384,9 @@ test('replaceProvider retains the alias chain and supports live and historical s
   const { history, published, registry } = createHarness({
     ordinary: [historical],
     now: () => timestamp++,
+    onLiveProviderReplaced: (providerSessionId) => {
+      retiredProviders.push(providerSessionId);
+    },
   });
   const session = live(
     summary('live-app', {
@@ -358,6 +418,9 @@ test('replaceProvider retains the alias chain and supports live and historical s
   assert.equal(registry.getLive('live-provider-next'), session);
   assert.equal(registry.getLive('live-provider'), session);
   assert.equal(registry.getLive('live-provider-old'), session);
+  assert.equal(registry.isCurrentLiveProvider('live-provider-next'), true);
+  assert.equal(registry.isCurrentLiveProvider('live-provider'), false);
+  assert.deepEqual(retiredProviders, ['live-provider']);
 
   const historicalUpdated = registry.replaceProvider(
     'historical-provider-old',
@@ -373,6 +436,11 @@ test('replaceProvider retains the alias chain and supports live and historical s
   assert.equal(historicalUpdated?.updatedAt, 1);
   assert.equal(registry.getLive('historical-provider-next'), undefined);
   assert.equal(registry.resolveSummary('historical-provider-next')?.appSessionId, 'historical-app');
+  assert.deepEqual(
+    retiredProviders,
+    ['live-provider'],
+    'historical swaps do not retire live files',
+  );
   assert.deepEqual(history.trace, ['persist', 'publish', 'persist', 'publish']);
   assert.equal(published.length, 2);
 });
@@ -412,7 +480,7 @@ test('historical provider replacement is applied before hidden-provider filterin
   registry.replaceProvider('mission-provider-old', 'mission-provider-current');
   history.hiddenProviderIds.add('mission-provider-old');
 
-  const listed = registry.listSummaries();
+  const listed = registry.listSummaries().sessions;
   assert.equal(listed.length, 1);
   assert.equal(listed[0]?.appSessionId, 'historical-mission');
   assert.equal(listed[0]?.providerSessionId, 'mission-provider-current');
@@ -470,7 +538,7 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   registry.register(liveSession);
   history.clearPatches();
 
-  const listed = registry.listSummaries();
+  const listed = registry.listSummaries().sessions;
   const firstListed = listed[0];
   assert.ok(firstListed);
 
@@ -504,9 +572,9 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   assert.equal(resolved?.title, 'projected: live');
   assert.deepEqual(
     registry
-      .listSummaries({ workspaceCwds: ['/workspace'], limitPerWorkspace: 1 })
-      .map((item) => item.appSessionId),
-    ['live-wins'],
+      .listSummaries({ workspaceCwds: ['/workspace'] })
+      .sessions.map((item) => item.appSessionId),
+    ['live-wins', 'mission-wins', 'ordinary-only'],
   );
 
   registry.updateSummary('live-wins', { title: 'canonical update' });
@@ -541,7 +609,7 @@ test('projected and caller-owned feature state cannot mutate canonical summaries
   resolvedFeature.preconditions.push('resolved-caller-mutation');
   resolvedFeature.expectedBehavior.push('resolved-caller-mutation');
 
-  const listedFeature = registry.listSummaries()[0]?.features[0];
+  const listedFeature = registry.listSummaries().sessions[0]?.features[0];
   assert.ok(listedFeature);
   listedFeature.verificationSteps.push('listed-caller-mutation');
   listedFeature.fulfills?.push('listed-caller-mutation');
@@ -574,30 +642,49 @@ test('summary patches copy caller-owned feature state', () => {
   ]);
 });
 
-test('workspace limits apply after canonical source precedence', () => {
-  const ordinary = historicalRows([summary('shared', { title: 'ordinary', updatedAt: 100 })]);
-  const missionControl = historicalRows([
-    summary('shared', {
-      title: 'mission control',
-      sessionPurpose: 'mission-control',
-      updatedAt: 50,
-    }),
-  ]);
-  const loadWithSourceLimit =
-    (rows: HistoricalSession[]): SessionRegistryDependencies['loadOrdinarySessions'] =>
-    (options) =>
-      options?.limitPerWorkspace === undefined ? rows : rows.slice(0, options.limitPerWorkspace);
+test('workspace scoping applies after canonical source precedence', () => {
   const { registry } = createHarness({
-    loadOrdinarySessions: loadWithSourceLimit(ordinary),
-    loadMissionControlSessions: loadWithSourceLimit(missionControl),
+    ordinary: [summary('shared', { title: 'ordinary', updatedAt: 100 })],
+    missionControl: [
+      summary('shared', {
+        title: 'mission control',
+        sessionPurpose: 'mission-control',
+        updatedAt: 50,
+      }),
+    ],
   });
 
   assert.deepEqual(
     registry
-      .listSummaries({ workspaceCwds: ['/workspace'], limitPerWorkspace: 1 })
-      .map((item) => [item.appSessionId, item.title]),
+      .listSummaries({ workspaceCwds: ['/workspace'] })
+      .sessions.map((item) => [item.appSessionId, item.title]),
     [['shared', 'mission control']],
   );
+});
+
+test('a persisted app-session row keeps an old session listed past the pre-existing bound', () => {
+  const preexisting = Array.from({ length: 8 }, (_, index) =>
+    summary(`preexisting-${String(index)}`, { updatedAt: 100 + index }),
+  );
+  const { history, registry } = createHarness({
+    ordinary: [summary('ours', { updatedAt: 1 }), ...preexisting],
+  });
+
+  const bounded = registry.listSummaries({ workspaceCwds: ['/workspace'] });
+  assert.ok(!bounded.sessions.some((item) => item.appSessionId === 'ours'));
+  assert.deepEqual(bounded.earlierSessionsByCwd, { '/workspace': 4 });
+
+  history.syncSummaries([summary('ours', { updatedAt: 1 })]);
+  const owned = registry.listSummaries({ workspaceCwds: ['/workspace'] });
+  assert.ok(owned.sessions.some((item) => item.appSessionId === 'ours'));
+  assert.deepEqual(owned.earlierSessionsByCwd, { '/workspace': 3 });
+
+  const revealed = registry.listSummaries({
+    workspaceCwds: ['/workspace'],
+    revealEarlierCwds: ['/workspace'],
+  });
+  assert.equal(revealed.sessions.length, 9);
+  assert.deepEqual(revealed.earlierSessionsByCwd, {});
 });
 
 test('snapshot permits sequential unregister without skipping sessions', () => {

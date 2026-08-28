@@ -279,6 +279,10 @@ export class SessionCompaction {
     this.watchdogs.clearAll();
   }
 
+  watchdogCount(): number {
+    return this.watchdogs.size();
+  }
+
   private async retunePrimary(target: PrimaryCompactionTarget, revision?: number): Promise<void> {
     const epoch = this.epoch;
     if (!this.isRetuneCurrent(target, epoch, revision)) return;
