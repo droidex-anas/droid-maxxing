@@ -14,6 +14,15 @@ import {
   type SessionTimelineRegistry,
 } from './SessionTimeline.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
+  CanonicalEventCollisionError,
+  type TranscriptStore,
+} from './persistence/TranscriptStore.js';
+import type {
+  CanonicalEvent,
+  CanonicalIdentity,
+  PersistedCanonicalEvent,
+} from './sessionEvents.js';
 
 interface HarnessOptions {
   summaries?: SessionSummary[];
@@ -22,6 +31,8 @@ interface HarnessOptions {
   loaders?: Partial<SessionTimelineLoaders>;
   now?: () => number;
   onRecordEvent?: (event: TranscriptEvent) => boolean | void;
+  transcriptStore?: Pick<TranscriptStore, 'append'>;
+  canonicalIdentity?: CanonicalIdentity;
   streamingCoalesceMs?: number;
   streamingCoalesceMaxBytes?: number;
 }
@@ -77,6 +88,8 @@ function createHarness(options: HarnessOptions = {}) {
     ...(options.streamingCoalesceMaxBytes !== undefined
       ? { streamingCoalesceMaxBytes: options.streamingCoalesceMaxBytes }
       : {}),
+    ...(options.transcriptStore ? { transcriptStore: options.transcriptStore } : {}),
+    ...(options.canonicalIdentity ? { canonicalIdentity: options.canonicalIdentity } : {}),
   });
   return { emitted, errors, recorded, timeline, trace };
 }
@@ -946,4 +959,71 @@ test('history listing preserves loader ordering and reports loader failures', ()
   fail = true;
   harness.timeline.list();
   assert.deepEqual(harness.errors, [{ message: 'list failed' }]);
+});
+
+const CANONICAL_IDENTITY: CanonicalIdentity = {
+  providerDriverKind: 'droid',
+  providerInstanceId: 'droid',
+  runtimeGeneration: 1,
+};
+
+function fakeStore(
+  append: (event: CanonicalEvent) => PersistedCanonicalEvent,
+): Pick<TranscriptStore, 'append'> {
+  return { append };
+}
+
+test('recordAndEmit appends the canonical envelope then emits the projected persisted row', () => {
+  const appended: CanonicalEvent[] = [];
+  const { emitted, recorded, timeline, trace } = createHarness({
+    canonicalIdentity: CANONICAL_IDENTITY,
+    transcriptStore: fakeStore((event) => {
+      appended.push(event);
+      return { ...event, seq: 42 };
+    }),
+  });
+  const event = transcript('event-1', 'app-1');
+
+  timeline.append(event);
+
+  assert.equal(recorded.length, 0);
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0]?.eventId, 'event-1');
+  assert.equal(appended[0]?.nativeCorrelation, undefined);
+  assert.deepEqual(trace, ['emit:event.appended']);
+  assert.equal(emitted[0]?.type, 'event.appended');
+  if (emitted[0]?.type !== 'event.appended') return;
+  assert.equal(emitted[0].event.id, 'event-1');
+  assert.equal(emitted[0].event.seq, 42);
+  assert.equal(emitted[0].event.ts, 1);
+  assert.equal('providerDriverKind' in emitted[0].event, false);
+  assert.equal('nativeCorrelation' in emitted[0].event, false);
+});
+
+test('a failed canonical append emits no undurable event', () => {
+  const { emitted, errors, timeline } = createHarness({
+    canonicalIdentity: CANONICAL_IDENTITY,
+    transcriptStore: fakeStore(() => {
+      throw new Error('disk full');
+    }),
+  });
+
+  assert.throws(() => timeline.append(transcript('event-1', 'app-1')), /disk full/);
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(errors, []);
+});
+
+test('a colliding canonical append emits no undurable event', () => {
+  const { emitted, timeline } = createHarness({
+    canonicalIdentity: CANONICAL_IDENTITY,
+    transcriptStore: fakeStore(() => {
+      throw new CanonicalEventCollisionError('event-1');
+    }),
+  });
+
+  assert.throws(
+    () => timeline.append(transcript('event-1', 'app-1')),
+    CanonicalEventCollisionError,
+  );
+  assert.deepEqual(emitted, []);
 });
