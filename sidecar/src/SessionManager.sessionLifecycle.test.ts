@@ -698,6 +698,129 @@ test('[L10] Autonomy mutation reports provider rejection', { concurrency: false 
   }
 });
 
+test(
+  'create, resume, send, interrupt, and close publish in that user-visible order',
+  { concurrency: false },
+  async () => {
+    const h = createSessionManagerTestContext();
+    const createGate = h.runtime.deferNextCreateStream('provider-1');
+
+    try {
+      await h.create({
+        sessionPurpose: 'chat',
+        clientRef: 'lifecycle-order',
+        title: 'Order',
+        goal: 'first',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      });
+
+      const created = h.events.find((event) => event.type === 'session.created');
+      const createdIndex = h.events.findIndex((event) => event.type === 'session.created');
+      const streamingIndex = h.events.findIndex(
+        (event) => event.type === 'session.updated' && event.session.streaming,
+      );
+      assert.equal(created?.clientRef, 'lifecycle-order');
+      assert.equal(created?.session.appSessionId, 'provider-1');
+      assert.ok(streamingIndex > createdIndex);
+      assert.equal(
+        h.events.some((event) => event.type === 'session.closed'),
+        false,
+      );
+
+      createGate.resolve();
+      await h.provider.waitForPrompts('provider-1', 1);
+      await h.waitForIdle();
+
+      await h.handle({ type: 'session.resume', appSessionId: 'provider-1' });
+      const resumed = h.events.filter((event) => event.type === 'session.created').at(-1);
+      assert.equal(resumed?.clientRef, 'resume:provider-1');
+      assert.equal(resumed?.session.appSessionId, 'provider-1');
+      assert.equal(h.runtime.loadCalls.length, 0);
+
+      const sendGate = h.provider.deferNextStream('provider-1');
+      const sending = h.handle({
+        type: 'session.send',
+        appSessionId: 'provider-1',
+        text: 'second',
+      });
+      await h.provider.waitForPrompts('provider-1', 2);
+      await h.handle({ type: 'session.interrupt', appSessionId: 'provider-1' });
+      assert.equal(h.calls.filter((call) => call.method === 'interrupt').length, 1);
+      sendGate.resolve();
+      await sending;
+      await h.waitForIdle();
+
+      await h.handle({ type: 'session.close', appSessionId: 'provider-1' });
+
+      const resumeIndex = h.events.findIndex(
+        (event) => event.type === 'session.created' && event.clientRef === 'resume:provider-1',
+      );
+      const pausedIndex = h.events.findIndex(
+        (event) => event.type === 'session.updated' && event.session.phase === 'paused',
+      );
+      const closed = h.events.find((event) => event.type === 'session.closed');
+      const closedIndex = h.events.findIndex((event) => event.type === 'session.closed');
+      assert.ok(createdIndex < resumeIndex);
+      assert.ok(resumeIndex < pausedIndex);
+      assert.ok(pausedIndex < closedIndex);
+      assert.equal(closed?.appSessionId, 'provider-1');
+    } finally {
+      createGate.resolve();
+      await h.dispose();
+    }
+  },
+);
+
+test(
+  'two creates with the same clientRef open two independent sessions',
+  { concurrency: false },
+  async () => {
+    const h = createSessionManagerTestContext();
+
+    try {
+      await h.create({
+        sessionPurpose: 'chat',
+        clientRef: 'shared-ref',
+        title: 'First',
+        goal: 'one',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      });
+      await h.provider.waitForPrompts('provider-1', 1);
+      await h.create({
+        sessionPurpose: 'chat',
+        clientRef: 'shared-ref',
+        title: 'Second',
+        goal: 'two',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      });
+      await h.provider.waitForPrompts('provider-2', 1);
+
+      const created = h.events.filter((event) => event.type === 'session.created');
+      // Surprise: session.create does not dedupe clientRef. TODO: provider seam
+      // must preserve two independent sessions or deliberately reject the second.
+      assert.equal(created.length, 2);
+      assert.equal(created[0]?.clientRef, 'shared-ref');
+      assert.equal(created[1]?.clientRef, 'shared-ref');
+      assert.equal(created[0]?.session.appSessionId, 'provider-1');
+      assert.equal(created[1]?.session.appSessionId, 'provider-2');
+      assert.equal(created[0]?.session.title, 'First');
+      assert.equal(created[1]?.session.title, 'Second');
+      assert.equal(h.runtime.createCalls.length, 2);
+      assert.deepEqual(h.provider.session('provider-1').prompts, ['one']);
+      assert.deepEqual(h.provider.session('provider-2').prompts, ['two']);
+      assert.equal(
+        h.events.some((event) => event.type === 'error'),
+        false,
+      );
+    } finally {
+      await h.dispose();
+    }
+  },
+);
+
 test('Summary patches preserve existing provider transcripts', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
 
