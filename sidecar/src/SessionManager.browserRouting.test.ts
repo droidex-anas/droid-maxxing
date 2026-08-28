@@ -12,6 +12,7 @@ import {
   createNativeBrowserTestContext,
   createSessionManagerTestContext,
 } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 type NativeBrowserRequestEvent = Extract<ServerEvent, { type: 'browser.native.request' }>;
 
@@ -242,8 +243,11 @@ test('[B3] Browser continuity across compaction', { concurrency: false }, async 
       clientRef: 'b3',
       title: 'Browser continuity',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     h.provider.session(appSessionId).nextCompactResult = {
@@ -308,8 +312,11 @@ test('[B3] Browser continuity across compaction', { concurrency: false }, async 
       clientRef: 'b3-shutdown',
       title: 'Browser shutdown',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await shutdown.handle({
       type: 'browser.open',

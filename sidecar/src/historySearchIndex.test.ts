@@ -9,6 +9,7 @@ import { HistorySearchIndex } from './historySearchIndex.js';
 import { sqliteFts5UnavailableSkipReason } from './historySearchSchema.js';
 import type { SearchableSessionFileEntry } from './sessionFileCache.js';
 import type { SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const FTS5_UNAVAILABLE_REASON = sqliteFts5UnavailableSkipReason();
 
@@ -47,13 +48,16 @@ function summary(providerSessionId: string, updatedAt: number): SessionSummary {
     appSessionId: providerSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: providerSessionId,
     goal: providerSessionId,
     cwd: '/repo',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,

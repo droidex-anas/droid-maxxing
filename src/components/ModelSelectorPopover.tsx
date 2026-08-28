@@ -5,6 +5,7 @@ import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useSt
 import type { AgentKind } from '../hooks/persistedUiPreferences';
 import type { ReasoningEffort, ModelInfo } from '../types/bridge';
 import { updateAgentSettings, updateChildSettings, listModels } from '../lib/commands';
+import { sessionModelId, sessionReasoningEffort } from '../lib/sessionConfiguration';
 import {
   childSettingsReadinessLabel,
   planChildModelUpdate,
@@ -69,8 +70,8 @@ export default function ModelSelectorPopover({
     return {
       activeAppSessionId: current.activeAppSessionId,
       activeSessionAppSessionId: activeSession?.appSessionId,
-      activeSessionModelId: activeSession?.modelId,
-      activeSessionReasoning: activeSession?.reasoningEffort,
+      activeSessionModelId: activeSession ? sessionModelId(activeSession) : undefined,
+      activeSessionReasoning: activeSession ? sessionReasoningEffort(activeSession) : undefined,
       agentConfig: current.agentConfig,
       models: current.models,
     };

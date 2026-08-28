@@ -118,14 +118,14 @@ export interface SessionCompactionDependencies extends SessionCompactionExecutio
 }
 
 export function childCompactionModelId(
-  summary: Pick<SessionSummary, 'modelId' | 'workerModelId' | 'validatorModelId'>,
+  summary: Pick<SessionSummary, 'configuration' | 'droidMissionConfiguration'>,
   settings: { modelId?: string } | undefined,
   role: SessionRole,
 ): string | undefined {
   let roleModelId: string | undefined;
-  if (role === 'worker') roleModelId = summary.workerModelId;
-  else if (role === 'validator') roleModelId = summary.validatorModelId;
-  return settings?.modelId ?? roleModelId ?? summary.modelId;
+  if (role === 'worker') roleModelId = summary.droidMissionConfiguration?.worker.modelId;
+  else if (role === 'validator') roleModelId = summary.droidMissionConfiguration?.validator.modelId;
+  return settings?.modelId ?? roleModelId ?? summary.configuration.providerSelection.modelId;
 }
 
 export class SessionCompaction {
@@ -434,7 +434,7 @@ export class SessionCompaction {
 
   private primaryRetuneTarget(liveSession: LiveSession): PrimaryCompactionTarget {
     const target = this.primaryAutomaticTarget(liveSession);
-    const configuredModelId = liveSession.summary.modelId;
+    const configuredModelId = liveSession.summary.configuration.providerSelection.modelId;
     const defaultsMode = defaultsModeForSummary(liveSession.summary);
     return {
       ...target,
@@ -442,7 +442,7 @@ export class SessionCompaction {
       defaultsMode,
       isCurrent: () =>
         target.isCurrent() &&
-        liveSession.summary.modelId === configuredModelId &&
+        liveSession.summary.configuration.providerSelection.modelId === configuredModelId &&
         defaultsModeForSummary(liveSession.summary) === defaultsMode,
     };
   }

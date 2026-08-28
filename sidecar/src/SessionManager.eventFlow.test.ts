@@ -9,6 +9,7 @@ import {
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 function appendedTexts(events: ServerEvent[]): string[] {
   const texts: string[] = [];
@@ -107,8 +108,11 @@ test('design turns synchronize TodoWrite and unexpected AbortErrors fail the tur
       clientRef: 'event-design',
       title: 'Event design',
       goal: 'initial normal prompt',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -171,8 +175,11 @@ test('a buffered streaming tail is emitted before failed turn settlement', async
       clientRef: 'event-failed-tail',
       title: 'Failed tail',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -213,8 +220,11 @@ test('primary streaming persistence failures still settle and refresh context', 
       clientRef: 'event-persist-failure',
       title: 'Persist failure',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -258,8 +268,11 @@ test('terminal results quarantine only later generation from the same turn', asy
       clientRef: 'event-terminal',
       title: 'Event terminal',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -350,8 +363,11 @@ test('terminal enforcement is scoped to each provider and includes notification 
       clientRef: 'event-worker',
       title: 'Event worker',
       goal: 'primary becomes terminal',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
@@ -445,8 +461,11 @@ test('current SDK Task result persists and opens the exact completed child', asy
       clientRef: 'event-task-result-child',
       title: 'Task result child',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -521,8 +540,11 @@ test('background Task completion notification settles a child without TaskOutput
       clientRef: 'event-background-task-completion',
       title: 'Background task completion',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -609,8 +631,11 @@ test('worker token usage updates totals without replacing the primary context re
       clientRef: 'event-tokens',
       title: 'Event tokens',
       goal: 'initial',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
@@ -686,8 +711,11 @@ test('loaded child context follows its parent-scoped logical identity', async ()
       clientRef: 'event-child-context',
       title: 'Child context',
       goal: 'initial',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
@@ -781,8 +809,11 @@ test('a native notification that arrives before the session is published is drop
       clientRef: 'early-note',
       title: 'Early note',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     // Surprise: subscribePrimary attaches onNotification before register, but
@@ -823,8 +854,11 @@ test('a transcript event is recorded to history before it is broadcast', async (
       clientRef: 'record-before-emit',
       title: 'Record before emit',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);

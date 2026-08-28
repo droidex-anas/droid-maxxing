@@ -26,6 +26,7 @@ import {
   type ProviderMessageRole,
 } from './testing/providerSessionFixtures.js';
 import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-cache-home-'));
@@ -120,13 +121,16 @@ function patchFor(appSessionId: string, cwd: string): Protocol.SessionSummary {
     appSessionId,
     providerSessionId: appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Chat ${appSessionId}`,
     goal: `Chat ${appSessionId}`,
     cwd,
     workspaceKind: cwd ? 'folder' : 'none',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,
@@ -618,7 +622,7 @@ test('a settings sidecar change refreshes the cached summary', () => {
     const before = first
       .listHistoricalSessions()
       .find((row) => row.summary.appSessionId === 'cache-settings');
-    assert.equal(before?.summary.modelId, undefined);
+    assert.equal(before?.summary.configuration.providerSelection.modelId, 'default');
   } finally {
     first.close();
   }
@@ -639,7 +643,7 @@ test('a settings sidecar change refreshes the cached summary', () => {
     const after = second
       .listHistoricalSessions()
       .find((row) => row.summary.appSessionId === 'cache-settings');
-    assert.equal(after?.summary.modelId, 'cached-settings-model');
+    assert.equal(after?.summary.configuration.providerSelection.modelId, 'cached-settings-model');
   } finally {
     second.close();
   }
@@ -712,7 +716,10 @@ test('reconcileSessionFilePaths touches exactly the reported files', () => {
     const reconfigured = second
       .listHistoricalSessions()
       .find((row) => row.summary.appSessionId === 'cache-target-keep');
-    assert.equal(reconfigured?.summary.modelId, 'targeted-settings-model');
+    assert.equal(
+      reconfigured?.summary.configuration.providerSelection.modelId,
+      'targeted-settings-model',
+    );
   } finally {
     second.close();
   }

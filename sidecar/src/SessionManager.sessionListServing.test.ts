@@ -10,6 +10,7 @@ import {
   providerSessionJsonl,
   type ProviderMessageRole,
 } from './testing/providerSessionFixtures.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 // Writes a session file with no app involvement, like a Droid CLI run or a
 // parallel app instance would.
@@ -133,8 +134,11 @@ test('a live first turn stays visible before the provider writes its response', 
       clientRef: 'live-first-turn',
       title: 'Live first turn',
       goal: 'hello',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     await ctx.handle({ type: 'sessions.list', workspaceCwds: ['/tmp/live-first-turn'] });
@@ -227,8 +231,11 @@ test('closing a live session reconciles its final file before republishing', asy
       clientRef: 'finalized-session',
       title: 'Finalized session',
       goal: 'finish',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     writeExternalSession(ctx.home, 'provider-1', workspace);
     finalizedSessionFile = join(ctx.home, '.factory', 'sessions', '2026', '08', 'provider-1.jsonl');
@@ -282,8 +289,11 @@ test('provider replacement finalizes the retired file without treating its alias
       clientRef: 'compacted-session',
       title: 'Compacted session',
       goal: 'compact',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await ctx.handle({ type: 'sessions.list' });
     const targetedBefore = ctx.history.targetedReconcileCalls.length;
@@ -428,13 +438,16 @@ test('a seeded cwd patch is respected before workspace filtering', async () => {
         appSessionId: 'moved-session',
         providerSessionId: 'moved-session',
         sessionPurpose: 'chat',
-        interactionMode: 'auto',
         role: 'primary',
         title: 'Moved session',
         goal: 'Moved session',
         cwd: '/workspace-patched',
         workspaceKind: 'folder',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
         phase: 'paused',
         features: [],
         tokensIn: 0,

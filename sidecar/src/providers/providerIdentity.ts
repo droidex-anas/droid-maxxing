@@ -151,6 +151,14 @@ export function providerDriverKindForInstance(
   return PROVIDER_DRIVER_BY_INSTANCE[providerInstanceId];
 }
 
+export function configurationsEqual(a: SessionConfiguration, b: SessionConfiguration): boolean {
+  return (
+    a.interactionMode === b.interactionMode &&
+    a.autonomy === b.autonomy &&
+    providerSelectionsEqual(a.providerSelection, b.providerSelection)
+  );
+}
+
 export function providerSelectionsEqual(a: ProviderSelection, b: ProviderSelection): boolean {
   if (a.providerInstanceId !== b.providerInstanceId) {
     return false;
@@ -189,4 +197,60 @@ export function parseDroidAgentConfiguration(value: unknown): DroidAgentConfigur
 
 export function parseDroidMissionConfiguration(value: unknown): DroidMissionConfiguration {
   return droidMissionConfigurationSchema.parse(value);
+}
+
+export function droidSessionConfiguration(input: {
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  interactionMode: SessionInteractionMode;
+  autonomy: Autonomy;
+}): SessionConfiguration {
+  return {
+    providerSelection: {
+      providerInstanceId: 'droid',
+      modelId: input.modelId,
+      options:
+        input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort },
+    },
+    interactionMode: input.interactionMode,
+    autonomy: input.autonomy,
+  };
+}
+
+export function droidReasoningEffortFromSelection(
+  selection: ProviderSelection,
+): ReasoningEffort | undefined {
+  const value = selection.options.reasoningEffort;
+  if (typeof value !== 'string') return undefined;
+  const parsed = reasoningEffortSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+export function withProviderSelection(
+  configuration: SessionConfiguration,
+  patch: Partial<Pick<ProviderSelection, 'modelId' | 'providerInstanceId'>> & {
+    options?: Record<string, string | number | boolean>;
+  },
+): SessionConfiguration {
+  return {
+    ...configuration,
+    providerSelection: {
+      ...configuration.providerSelection,
+      ...patch,
+      options: patch.options ?? configuration.providerSelection.options,
+    },
+  };
+}
+
+export function assertDroidMissionConfigurationAllowed(
+  configuration: SessionConfiguration,
+  droidMissionConfiguration: DroidMissionConfiguration | undefined,
+): void {
+  if (droidMissionConfiguration === undefined) return;
+  const driver = providerDriverKindForInstance(configuration.providerSelection.providerInstanceId);
+  if (driver !== 'droid' || configuration.interactionMode !== 'agi') {
+    throw new Error(
+      'droidMissionConfiguration is valid only when the provider instance is droid and interactionMode is agi',
+    );
+  }
 }

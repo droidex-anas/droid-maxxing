@@ -5,6 +5,7 @@ import {
   FAMILIAR_PREEXISTING_SESSIONS_PER_WORKSPACE,
   filterSessionListSummaries,
 } from './sessionListFilter.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const summary = (
   appSessionId: string,
@@ -15,13 +16,16 @@ const summary = (
   appSessionId,
   providerSessionId: appSessionId,
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: appSessionId,
   goal: appSessionId,
   cwd,
   workspaceKind: cwd ? 'folder' : 'none',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'paused',
   features: [],
   tokensIn: 0,

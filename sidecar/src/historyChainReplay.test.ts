@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionSummary } from './protocol.js';
 import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-chain-replay-'));
@@ -354,13 +355,16 @@ function historicalSummary(
     providerSessionId,
     compactedFromProviderSessionIds,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'History chain',
     goal: '',
     cwd: home,
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,

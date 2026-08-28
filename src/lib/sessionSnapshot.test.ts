@@ -11,6 +11,7 @@ import {
   MAX_SNAPSHOT_TRANSCRIPT_EVENTS,
   MAX_SNAPSHOT_TRANSCRIPT_BYTES,
 } from './sessionSnapshot';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 const SNAPSHOT_KEY = 'droid-session-snapshot-v1';
 
@@ -31,12 +32,15 @@ function summary(id: string, updatedAt = 1): SessionSummary {
   return {
     appSessionId: id,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Chat ${id}`,
     goal: `Chat ${id}`,
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -96,6 +100,43 @@ test('missing or corrupt payloads degrade to no snapshot', () => {
       assert.equal(loadSessionSnapshot(), undefined, raw);
     });
   }
+});
+
+test('a summary without a complete configuration is dropped rather than coerced to droid', () => {
+  const incomplete = {
+    appSessionId: 'legacy',
+    sessionPurpose: 'chat',
+    role: 'primary',
+    title: 'Legacy',
+    goal: 'Legacy',
+    cwd: '/repo',
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+    phase: 'paused',
+    features: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    contextTokens: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  withLocalStorageMap(
+    {
+      [SNAPSHOT_KEY]: JSON.stringify({
+        sessions: [incomplete, summary('good')],
+      }),
+    },
+    () => {
+      const snapshot = loadSessionSnapshot();
+      assert.deepEqual(snapshot?.sessionOrder, ['good']);
+      assert.equal(snapshot?.sessions.legacy, undefined);
+      assert.equal(
+        snapshot?.sessions.good?.configuration.providerSelection.providerInstanceId,
+        'droid',
+      );
+    },
+  );
 });
 
 test('entries missing identity fields are dropped, valid ones survive', () => {

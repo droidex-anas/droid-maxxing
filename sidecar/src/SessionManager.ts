@@ -27,6 +27,14 @@ import {
   reasoningValue,
   type SessionInitResult,
 } from './sessionHelpers.js';
+import {
+  assertDroidMissionConfigurationAllowed,
+  configurationsEqual,
+  droidReasoningEffortFromSelection,
+  parseSessionConfiguration,
+  withProviderSelection,
+  type SessionConfiguration,
+} from './providers/providerIdentity.js';
 import { boundedInt } from './values.js';
 import {
   DroidRuntime,
@@ -226,9 +234,6 @@ export class SessionManager {
     Partial<Record<ConfigurableSessionRole, AgentSettingPatch>>
   >();
   private shutdownPromise?: Promise<void>;
-  // Per-session autonomy mutation queue: rapid changes settle against the
-  // provider in the order they were requested.
-  private readonly autonomyMutationTails = new Map<string, Promise<void>>();
   private readonly browsers: SessionBrowsers;
   private readonly createLocalMcpResource: SessionManagerDependencies['createLocalMcpResource'];
   private readonly mcpConfiguration: McpConfiguration;
@@ -692,13 +697,7 @@ export class SessionManager {
         await this.childSessions.updateSettings(cmd);
         return;
       case 'session.updateSettings':
-        await this.updateSessionSettings(cmd.appSessionId, cmd);
-        if (cmd.autonomy !== undefined) {
-          await this.setAutonomy(cmd.appSessionId, cmd.autonomy);
-        }
-        if (cmd.interactionMode !== undefined) {
-          await this.setInteractionMode(cmd.appSessionId, cmd.interactionMode);
-        }
+        this.replaceSessionConfiguration(cmd.appSessionId, cmd.configuration);
         return;
       case 'session.compact': {
         await this.compactSession(cmd.appSessionId, cmd.customInstructions);
@@ -948,7 +947,7 @@ export class SessionManager {
   }
 
   private maxContextTokensForSummary(summary: SessionSummary): number | undefined {
-    return this.maxContextTokensForModel(summary.modelId);
+    return this.maxContextTokensForModel(summary.configuration.providerSelection.modelId);
   }
 
   private maxContextTokensForModel(modelId?: string): number | undefined {
@@ -1010,15 +1009,18 @@ export class SessionManager {
         if (cmd.appSessionId) this.rememberPendingAgentSettings(cmd);
       }
       if (cmd.appSessionId) {
-        const patch = this.summaryPatchForAgent(cmd.agent, cmd);
-        if (session && appSessionId) this.registry.updateSummary(appSessionId, patch);
-        else {
-          const historical = this.registry.resolveSummary(cmd.appSessionId);
-          if (historical)
-            this.emit({
-              type: 'session.updated',
-              session: { ...historical, ...patch, updatedAt: Date.now() },
-            });
+        const base = session?.summary ?? this.registry.resolveSummary(cmd.appSessionId);
+        if (!base) return;
+        const patch = this.summaryPatchForAgent(base, cmd.agent, cmd);
+        if (session && appSessionId) {
+          this.registry.updateSummary(appSessionId, patch);
+          if (cmd.agent === 'primary')
+            session.appliedNativeConfiguration = session.summary.configuration;
+        } else {
+          this.emit({
+            type: 'session.updated',
+            session: { ...base, ...patch, updatedAt: Date.now() },
+          });
         }
         if (session && appSessionId && cmd.agent === 'primary') {
           // The auto-compaction threshold is derived from the primary model,
@@ -1057,33 +1059,68 @@ export class SessionManager {
   }
 
   private summaryPatchForAgent(
+    summary: SessionSummary,
     agent: ConfigurableSessionRole,
     settings: AgentSettingPatch,
   ): Partial<SessionSummary> {
-    const patch: Partial<SessionSummary> = {};
     if (agent === 'primary') {
+      const options = { ...summary.configuration.providerSelection.options };
+      if (settings.reasoningEffort !== undefined) {
+        if (settings.reasoningEffort) options.reasoningEffort = settings.reasoningEffort;
+        else delete options.reasoningEffort;
+      }
+      const modelId =
+        settings.modelId === undefined || settings.modelId === null
+          ? summary.configuration.providerSelection.modelId
+          : settings.modelId;
+      const patch: Partial<SessionSummary> = {
+        configuration: withProviderSelection(summary.configuration, {
+          modelId,
+          options,
+        }),
+      };
       if (settings.modelId !== undefined) {
-        patch.modelId = settings.modelId ?? undefined;
         patch.maxContextTokens = this.maxContextTokensForModel(settings.modelId ?? undefined);
       }
-      if (settings.reasoningEffort !== undefined) patch.reasoningEffort = settings.reasoningEffort;
-    } else if (agent === 'worker') {
-      if (settings.modelId !== undefined) patch.workerModelId = settings.modelId ?? undefined;
-      if (settings.reasoningEffort !== undefined)
-        patch.workerReasoningEffort = settings.reasoningEffort;
-    } else {
-      if (settings.modelId !== undefined) patch.validatorModelId = settings.modelId ?? undefined;
-      if (settings.reasoningEffort !== undefined)
-        patch.validatorReasoningEffort = settings.reasoningEffort;
+      return patch;
     }
-    return patch;
+    const current = summary.droidMissionConfiguration;
+    const nextAgent = {
+      modelId:
+        settings.modelId === undefined || settings.modelId === null
+          ? ((agent === 'worker' ? current?.worker.modelId : current?.validator.modelId) ??
+            summary.configuration.providerSelection.modelId)
+          : settings.modelId,
+      ...(settings.reasoningEffort !== undefined
+        ? { reasoningEffort: settings.reasoningEffort }
+        : agent === 'worker'
+          ? current?.worker.reasoningEffort !== undefined
+            ? { reasoningEffort: current.worker.reasoningEffort }
+            : {}
+          : current?.validator.reasoningEffort !== undefined
+            ? { reasoningEffort: current.validator.reasoningEffort }
+            : {}),
+    };
+    const other =
+      agent === 'worker'
+        ? (current?.validator ?? { modelId: summary.configuration.providerSelection.modelId })
+        : (current?.worker ?? { modelId: summary.configuration.providerSelection.modelId });
+    return {
+      droidMissionConfiguration:
+        agent === 'worker'
+          ? { worker: nextAgent, validator: other }
+          : { worker: other, validator: nextAgent },
+    };
   }
 
   private applyPendingSettingsToSummary(summary: SessionSummary): SessionSummary {
     const pending = this.pendingAgentSettings.get(summary.appSessionId);
     if (!pending) return summary;
     return (Object.entries(pending) as [ConfigurableSessionRole, AgentSettingPatch][]).reduce(
-      (next, [agent, settings]) => ({ ...next, ...this.summaryPatchForAgent(agent, settings) }),
+      (next, [agent, settings]) => ({
+        ...next,
+        ...this.summaryPatchForAgent(next, agent, settings),
+      }),
       summary,
     );
   }
@@ -1136,10 +1173,11 @@ export class SessionManager {
         if (!stillCurrent()) return false;
         await this.applyAgentSessionSettings(liveSession, agent, runtimeSettings);
         if (!stillCurrent()) return false;
-        patch = { ...patch, ...this.summaryPatchForAgent(agent, settings) };
+        patch = { ...patch, ...this.summaryPatchForAgent(liveSession.summary, agent, settings) };
       }
       if (!stillCurrent()) return false;
       this.registry.updateSummary(appSessionId, patch);
+      liveSession.appliedNativeConfiguration = liveSession.summary.configuration;
       if (pending.primary?.modelId !== undefined) {
         // A pending primary model applied before send changes the
         // auto-compaction threshold; recompute it to match the new model.
@@ -1160,6 +1198,7 @@ export class SessionManager {
     const appSessionId = liveSession.summary.appSessionId;
     const contextTarget = this.primaryContextTarget(liveSession);
     if (!this.isCurrentPrimarySession(liveSession)) return;
+    if (!(await this.applyNativeSessionConfiguration(liveSession))) return;
     this.eventFlow.beginTurn(appSessionId, appSessionId);
     this.context.beginTurn(appSessionId);
     this.context.startPolling(contextTarget);
@@ -1237,7 +1276,7 @@ export class SessionManager {
 
   private primaryCompactionTarget(liveSession: LiveSession): PrimaryCompactionTarget {
     const target = this.primaryAutomaticCompactionTarget(liveSession);
-    const configuredModelId = liveSession.summary.modelId;
+    const configuredModelId = liveSession.summary.configuration.providerSelection.modelId;
     const defaultsMode = defaultsModeForSummary(liveSession.summary);
     return {
       ...target,
@@ -1245,7 +1284,7 @@ export class SessionManager {
       defaultsMode,
       isCurrent: () =>
         target.isCurrent() &&
-        liveSession.summary.modelId === configuredModelId &&
+        liveSession.summary.configuration.providerSelection.modelId === configuredModelId &&
         defaultsModeForSummary(liveSession.summary) === defaultsMode,
     };
   }
@@ -1285,14 +1324,19 @@ export class SessionManager {
     if (summary.sessionPurpose === 'mission-control')
       return this.missionControlPolicy.resolveDefaultSettings(summary.appSessionId, role);
     const parentSettings = childSessionSettingsFromInit(initResult);
-    const roleModelId = role === 'validator' ? summary.validatorModelId : summary.workerModelId;
+    const mission = summary.droidMissionConfiguration;
+    const roleModelId = role === 'validator' ? mission?.validator.modelId : mission?.worker.modelId;
     const roleReasoningEffort =
-      role === 'validator' ? summary.validatorReasoningEffort : summary.workerReasoningEffort;
+      role === 'validator' ? mission?.validator.reasoningEffort : mission?.worker.reasoningEffort;
     const catalogDefault = this.resolveCatalogDefaultSettings();
     return {
-      modelId: summary.modelId ?? parentSettings.modelId ?? roleModelId ?? catalogDefault.modelId,
+      modelId:
+        summary.configuration.providerSelection.modelId ??
+        parentSettings.modelId ??
+        roleModelId ??
+        catalogDefault.modelId,
       reasoningEffort:
-        summary.reasoningEffort ??
+        droidReasoningEffortFromSelection(summary.configuration.providerSelection) ??
         parentSettings.reasoningEffort ??
         roleReasoningEffort ??
         catalogDefault.reasoningEffort,
@@ -1401,186 +1445,106 @@ export class SessionManager {
     }
   }
 
-  private setAutonomy(appSessionId: string, autonomy: Autonomy): Promise<void> {
-    const tail = this.autonomyMutationTails.get(appSessionId) ?? Promise.resolve();
-    // A rejected predecessor must not drop the changes queued behind it.
-    const next = tail.catch(() => undefined).then(() => this.applyAutonomy(appSessionId, autonomy));
-    this.autonomyMutationTails.set(appSessionId, next);
-    return next.finally(() => {
-      if (this.autonomyMutationTails.get(appSessionId) === next) {
-        this.autonomyMutationTails.delete(appSessionId);
-      }
-    });
-  }
-
-  private async applyAutonomy(appSessionId: string, autonomy: Autonomy): Promise<void> {
-    const liveSession = this.registry.getLive(appSessionId);
-    if (!liveSession) {
-      this.emitError({
-        code: 'session.autonomy_update_failed',
-        appSessionId,
-        message: 'Autonomy can only be changed on a live session.',
-        recoverable: true,
-      });
-      return;
-    }
-    const nextAutonomy = normalizeAutonomy(autonomy);
-    if (!nextAutonomy) {
-      this.emitError({
-        code: 'session.autonomy_update_failed',
-        appSessionId,
-        message: `Unsupported autonomy level: ${autonomy}`,
-        recoverable: true,
-      });
-      return;
-    }
-    if (liveSession.summary.autonomy === nextAutonomy) return;
-    const session = liveSession.session;
-    try {
-      await session.updateSettings({ autonomyLevel: mapAutonomy(nextAutonomy) });
-    } catch (err) {
-      this.emitError({
-        code: 'session.autonomy_update_failed',
-        appSessionId,
-        message: `Could not change autonomy: ${errMsg(err)}`,
-        recoverable: true,
-      });
-      return;
-    }
-    // The provider accepted the change, but the session may have closed or its
-    // provider session may have been swapped (compaction/resume) while the
-    // request was in flight. Publish only when the captured session is still
-    // the live one so a stale settlement cannot clobber its replacement.
-    if (
-      this.shutdownPromise ||
-      this.registry.getLive(appSessionId) !== liveSession ||
-      liveSession.session !== session ||
-      hasSessionCloseStarted(liveSession)
-    ) {
-      // Dropping the confirmation silently would leave the caller's pending
-      // state spinning forever; settle it with a recoverable error instead.
-      this.emitError({
-        code: 'session.autonomy_update_failed',
-        appSessionId,
-        message: 'Autonomy change was interrupted by a session restart or close.',
-        recoverable: true,
-      });
-      return;
-    }
-    try {
-      this.registry.updateSummary(appSessionId, { autonomy: nextAutonomy });
-    } catch (err) {
-      this.emitError({
-        code: 'session.autonomy_update_failed',
-        appSessionId,
-        message: `Could not record the autonomy change: ${errMsg(err)}`,
-        recoverable: true,
-      });
-    }
-  }
-
-  private async setInteractionMode(
-    appSessionId: string,
-    mode: SessionInteractionMode,
-  ): Promise<void> {
-    const liveSession = this.registry.getLive(appSessionId);
-    if (!liveSession) {
-      this.emitError({
-        appSessionId,
-        message: 'Interaction mode can only be changed on a live session.',
-      });
-      return;
-    }
-    const stableAppSessionId = liveSession.summary.appSessionId;
-    try {
-      if (mode === 'spec') {
-        await liveSession.session.enterSpecMode();
-        await this.alignSpecModeModel(liveSession);
-      } else {
-        await liveSession.session.updateSettings({
-          interactionMode: mode === 'agi' ? DroidInteractionMode.AGI : DroidInteractionMode.Auto,
-        });
-      }
-      this.registry.updateSummary(stableAppSessionId, { interactionMode: mode });
-      // The mode determines the default model when none is pinned, so the
-      // auto-compaction threshold must be recomputed for the new mode.
-      await this.compaction.rearmPrimary(this.primaryCompactionTarget(liveSession));
-    } catch (err) {
-      this.emitError({
-        appSessionId: stableAppSessionId,
-        message: `Could not switch interaction mode: ${errMsg(err)}`,
-      });
-    }
-  }
-
-  // Spec-mode turns run on specModeModelId. Align it with the session's visible
-  // model so toggling into spec never switches models silently.
-  private async alignSpecModeModel(liveSession: LiveSession): Promise<void> {
-    const { modelId, reasoningEffort } = liveSession.summary;
-    if (!modelId) return;
-    const specSettings: Record<string, unknown> = { specModeModelId: modelId };
-    if (reasoningEffort) specSettings.specModeReasoningEffort = reasoningEffort;
-    await liveSession.session.updateSettings(specSettings);
-  }
-
-  // eslint-disable-next-line complexity -- Session-setting policy is preserved as-is in this extraction.
-  private async updateSessionSettings(
+  private replaceSessionConfiguration(
     requestedAppSessionId: string,
-    settings: {
-      modelId?: string | null;
-      reasoningEffort?: ReasoningEffort;
-    },
-  ): Promise<void> {
+    configuration: SessionConfiguration,
+  ): void {
+    let parsed: SessionConfiguration;
+    try {
+      parsed = parseSessionConfiguration(configuration);
+    } catch (err) {
+      this.emitError({
+        appSessionId: requestedAppSessionId,
+        code: 'session.configuration_update_failed',
+        message: `Invalid session configuration: ${errMsg(err)}`,
+        recoverable: true,
+      });
+      return;
+    }
     const liveSession = this.registry.getLive(requestedAppSessionId);
-    const historical = this.registry.resolveSummary(requestedAppSessionId);
-    const appSessionId =
-      liveSession?.summary.appSessionId ?? historical?.appSessionId ?? requestedAppSessionId;
-    const patch: Partial<SessionSummary> = {};
-    const next: Record<string, unknown> = {};
-    if (settings.modelId !== undefined) {
-      // A null model means "reset to Default". The daemon has no such notion,
-      // so resolve the actual default and push it; silently dropping the update
-      // would leave the daemon generating with the previously selected model.
-      // specModeModelId mirrors it because spec-mode turns run on that setting.
-      const summaryForMode = liveSession?.summary ?? historical;
-      const effectiveModelId =
-        settings.modelId ??
-        defaultModelForAgent(
-          'primary',
-          summaryForMode ? defaultsModeForSummary(summaryForMode) : 'auto',
-          await this.getFactoryDefaults(),
-        );
-      if (effectiveModelId) {
-        next.modelId = effectiveModelId;
-        next.specModeModelId = effectiveModelId;
-      }
-      patch.modelId = settings.modelId ?? undefined;
-      patch.maxContextTokens = this.maxContextTokensForModel(settings.modelId ?? undefined);
+    if (!liveSession) {
+      this.emitError({
+        appSessionId: requestedAppSessionId,
+        code: 'session.configuration_update_failed',
+        message: 'Settings can only be changed on a live session.',
+        recoverable: true,
+      });
+      return;
     }
-    if (settings.reasoningEffort) {
-      next.reasoningEffort = settings.reasoningEffort;
-      next.specModeReasoningEffort = settings.reasoningEffort;
-      patch.reasoningEffort = settings.reasoningEffort;
+    const current = liveSession.summary.configuration;
+    if (
+      parsed.providerSelection.providerInstanceId !== current.providerSelection.providerInstanceId
+    ) {
+      this.emitError({
+        appSessionId: liveSession.summary.appSessionId,
+        code: 'session.configuration_update_failed',
+        message: 'A settings update cannot change the nested provider instance.',
+        recoverable: true,
+      });
+      return;
     }
-    if (Object.keys(next).length === 0) return;
-    const session = await this.withSession(appSessionId, async (activeSession) => {
-      await activeSession.updateSettings(next);
-      return activeSession;
+    try {
+      assertDroidMissionConfigurationAllowed(parsed, liveSession.summary.droidMissionConfiguration);
+    } catch (err) {
+      this.emitError({
+        appSessionId: liveSession.summary.appSessionId,
+        code: 'session.configuration_update_failed',
+        message: errMsg(err),
+        recoverable: true,
+      });
+      return;
+    }
+    this.registry.updateSummary(liveSession.summary.appSessionId, {
+      configuration: parsed,
+      maxContextTokens: this.maxContextTokensForModel(parsed.providerSelection.modelId),
     });
-    const stillCurrent = () =>
-      liveSession !== undefined &&
-      !this.shutdownPromise &&
-      this.registry.getLive(appSessionId) === liveSession &&
-      !hasSessionCloseStarted(liveSession);
-    if (liveSession && !stillCurrent()) return;
-    if (liveSession) this.registry.updateSummary(appSessionId, patch);
-    if (liveSession && settings.modelId !== undefined) {
-      // The model drives the auto-compaction threshold; recompute it so the
-      // daemon doesn't keep compacting against the old model's limit.
-      await this.compaction.rearmPrimary(this.primaryCompactionTarget(liveSession));
+  }
+
+  private async applyNativeSessionConfiguration(liveSession: LiveSession): Promise<boolean> {
+    const next = liveSession.summary.configuration;
+    const applied = liveSession.appliedNativeConfiguration;
+    if (applied && configurationsEqual(applied, next)) return true;
+    const stillCurrent = () => this.isCurrentPrimarySession(liveSession);
+    const modelId = next.providerSelection.modelId;
+    const reasoningEffort = droidReasoningEffortFromSelection(next.providerSelection);
+    const native: Record<string, unknown> = {
+      modelId,
+      specModeModelId: modelId,
+      autonomyLevel: mapAutonomy(next.autonomy),
+    };
+    if (reasoningEffort !== undefined) {
+      native.reasoningEffort = reasoningEffort;
+      native.specModeReasoningEffort = reasoningEffort;
     }
-    if (liveSession && session && stillCurrent())
-      await this.context.refresh(this.primaryContextTarget(liveSession));
+    try {
+      if (next.interactionMode === 'spec' && applied?.interactionMode !== 'spec') {
+        await liveSession.session.enterSpecMode();
+        if (!stillCurrent()) return false;
+      } else if (next.interactionMode !== 'spec') {
+        native.interactionMode =
+          next.interactionMode === 'agi' ? DroidInteractionMode.AGI : DroidInteractionMode.Auto;
+      }
+      await liveSession.session.updateSettings(native);
+      if (!stillCurrent()) return false;
+      liveSession.appliedNativeConfiguration = next;
+      if (
+        applied?.providerSelection.modelId !== modelId ||
+        applied?.interactionMode !== next.interactionMode
+      ) {
+        await this.compaction.rearmPrimary(this.primaryCompactionTarget(liveSession));
+      }
+      if (stillCurrent()) await this.context.refresh(this.primaryContextTarget(liveSession));
+      return stillCurrent();
+    } catch (err) {
+      if (!stillCurrent()) return false;
+      this.emitError({
+        appSessionId: liveSession.summary.appSessionId,
+        code: 'session.configuration_update_failed',
+        message: `Could not apply session configuration: ${errMsg(err)}`,
+        recoverable: true,
+      });
+      return false;
+    }
   }
 
   private async renameSession(requestedAppSessionId: string, title: string): Promise<void> {

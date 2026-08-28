@@ -6,17 +6,21 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { initialState, StaticStoreProvider, type AppState } from '../hooks/useStore';
 import type { SessionSummary } from '../types/bridge';
 import { ArchivedChatsSettings } from './ArchivedChatsSettings';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function makeSession(appSessionId: string, title: string): SessionSummary {
   return {
     appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title,
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'completed',
     features: [],
     tokensIn: 0,

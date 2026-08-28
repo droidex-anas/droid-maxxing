@@ -76,11 +76,13 @@ export class MissionControlPolicy {
     const parent = childSettingsFromInit(live.session.initResult);
     const catalog = this.d.resolveCatalogDefaultSettings();
     const roleModelId =
-      role === 'validator' ? live.summary.validatorModelId : live.summary.workerModelId;
+      role === 'validator'
+        ? live.summary.droidMissionConfiguration?.validator.modelId
+        : live.summary.droidMissionConfiguration?.worker.modelId;
     const roleReasoningEffort =
       role === 'validator'
-        ? live.summary.validatorReasoningEffort
-        : live.summary.workerReasoningEffort;
+        ? live.summary.droidMissionConfiguration?.validator.reasoningEffort
+        : live.summary.droidMissionConfiguration?.worker.reasoningEffort;
     return {
       modelId: roleModelId ?? parent.modelId ?? catalog.modelId,
       reasoningEffort: roleReasoningEffort ?? parent.reasoningEffort ?? catalog.reasoningEffort,

@@ -22,6 +22,7 @@ import {
   type StreamGate,
 } from './testing/fakeFactoryRuntime.js';
 import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface Harness {
   calls: RecordedCall[];
@@ -239,15 +240,17 @@ function summary(appSessionId: string): SessionSummary {
     appSessionId,
     providerSessionId: `${appSessionId}-provider`,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'user',
     title: appSessionId,
     goal: 'test',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    modelId: 'model-default',
-    reasoningEffort: ReasoningEffort.Low,
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

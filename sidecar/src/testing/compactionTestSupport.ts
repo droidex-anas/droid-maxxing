@@ -2,6 +2,7 @@ import { ReasoningEffort } from '@factory/droid-sdk';
 
 import type { FactorySession } from '../DroidRuntime.js';
 import type { LiveSession } from '../SessionLifecycle.js';
+import { droidSessionConfiguration } from '../providers/providerIdentity.js';
 
 export function createCompactionTestLiveSession(
   appSessionId: string,
@@ -12,15 +13,17 @@ export function createCompactionTestLiveSession(
       appSessionId,
       providerSessionId: session.sessionId,
       sessionPurpose: 'chat',
-      interactionMode: 'auto',
       role: 'user',
       title: appSessionId,
       goal: 'test',
       cwd: '/workspace',
       workspaceKind: 'folder',
-      modelId: 'model-default',
-      reasoningEffort: ReasoningEffort.Low,
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        reasoningEffort: ReasoningEffort.Low,
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
       phase: 'paused',
       features: [],
       tokensIn: 0,

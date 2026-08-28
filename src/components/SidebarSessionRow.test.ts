@@ -4,17 +4,21 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SessionRow, areSessionRowPropsEqual, type SessionRowProps } from './SidebarSessionRow';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     appSessionId: 'sess-a',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Build the thing',
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'completed',
     features: [],
     tokensIn: 0,

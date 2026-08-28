@@ -9,6 +9,7 @@ import type {
 } from '../protocol.js';
 import { FakeFactorySession } from './fakeFactoryRuntime.js';
 import type { SessionManagerTestContext } from './sessionManagerTestContext.js';
+import { droidSessionConfiguration } from '../providers/providerIdentity.js';
 
 export function latestSessionList(events: ServerEvent[]): SessionSummary[] {
   return events.filter((event) => event.type === 'sessions.list').at(-1)?.sessions ?? [];
@@ -26,9 +27,19 @@ export async function createMission(
     clientRef: 'child-settings',
     title: 'Child settings',
     goal: 'go',
-    interactionMode: 'agi',
-    autonomy: 'low',
-    ...options,
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
+    ...(options.workerModel || options.validatorModel
+      ? {
+          droidMissionConfiguration: {
+            worker: { modelId: options.workerModel ?? 'worker-default' },
+            validator: { modelId: options.validatorModel ?? 'validator-default' },
+          },
+        }
+      : {}),
   });
   await h.waitForIdle();
 }

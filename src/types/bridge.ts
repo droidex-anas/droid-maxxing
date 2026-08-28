@@ -42,6 +42,31 @@ export type ReasoningEffort =
   | 'max'
   | 'dynamic';
 
+export type ProviderDriverKind = 'droid' | 'codex' | 'claude' | 'cursor' | 'grok';
+export type ProviderInstanceId = 'droid' | 'codex' | 'claude' | 'cursor' | 'grok';
+
+export interface ProviderSelection {
+  providerInstanceId: ProviderInstanceId;
+  modelId: string;
+  options: Record<string, string | number | boolean>;
+}
+
+export interface SessionConfiguration {
+  providerSelection: ProviderSelection;
+  interactionMode: SessionInteractionMode;
+  autonomy: Autonomy;
+}
+
+export interface DroidAgentConfiguration {
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+}
+
+export interface DroidMissionConfiguration {
+  worker: DroidAgentConfiguration;
+  validator: DroidAgentConfiguration;
+}
+
 export interface BridgeFeature {
   id: string;
   description: string;
@@ -111,20 +136,14 @@ export interface SessionSummary {
   compactedFromProviderSessionIds?: string[];
   missionId?: string;
   sessionPurpose: SessionPurpose;
-  interactionMode: SessionInteractionMode;
   role: 'primary' | 'user';
   title: string;
   goal: string;
   cwd: string;
   workspaceKind?: 'folder' | 'none';
-  modelId?: string;
-  reasoningEffort?: ReasoningEffort;
+  configuration: SessionConfiguration;
+  droidMissionConfiguration?: DroidMissionConfiguration;
   compactionModel?: string;
-  workerModelId?: string;
-  workerReasoningEffort?: ReasoningEffort;
-  validatorModelId?: string;
-  validatorReasoningEffort?: ReasoningEffort;
-  autonomy: Autonomy;
   phase: SessionPhase;
   streaming?: boolean; // true while a turn is actively generating
   // Set when a runtime restart could not continue this session's in-flight turn.
@@ -580,18 +599,11 @@ export type ClientCommand =
       title: string;
       goal: string;
       sessionPurpose: SessionPurpose;
-      interactionMode?: SessionInteractionMode;
-      modelId?: string;
-      reasoningEffort?: ReasoningEffort;
+      configuration: SessionConfiguration;
+      droidMissionConfiguration?: DroidMissionConfiguration;
       compactionModel?: string;
       compactionTokenLimit?: number | null;
       compactionTokenLimitPerModel?: Record<string, number>;
-      // Explicit snapshot chosen by the sender; there is no sidecar fallback.
-      autonomy: Autonomy;
-      workerModel?: string;
-      workerReasoning?: ReasoningEffort;
-      validatorModel?: string;
-      validatorReasoning?: ReasoningEffort;
       responseFormat?: ResponseFormat;
     }
   | { type: 'session.send'; appSessionId: string; text: string; responseFormat?: ResponseFormat }
@@ -601,10 +613,7 @@ export type ClientCommand =
   | {
       type: 'session.updateSettings';
       appSessionId: string;
-      modelId?: string | null;
-      reasoningEffort?: ReasoningEffort;
-      autonomy?: Autonomy;
-      interactionMode?: SessionInteractionMode;
+      configuration: SessionConfiguration;
     }
   | { type: 'session.compact'; appSessionId: string; customInstructions?: string }
   | { type: 'session.fork'; appSessionId: string }

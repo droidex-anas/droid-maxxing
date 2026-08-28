@@ -9,6 +9,7 @@ import type {
   ServerWireMessage,
   StreamFidelity,
 } from '../types/bridge';
+import { isSessionConfiguration } from './sessionConfiguration';
 
 export function serverWireMessage(value: unknown): ServerWireMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
@@ -251,14 +252,13 @@ function isSessionSummary(value: unknown): boolean {
     hasStrings(value, [
       'appSessionId',
       'sessionPurpose',
-      'interactionMode',
       'role',
       'title',
       'goal',
       'cwd',
-      'autonomy',
       'phase',
     ]) &&
+    isSessionConfiguration(value.configuration) &&
     Array.isArray(value.features) &&
     value.features.every(isBridgeFeature) &&
     hasNumbers(value, ['tokensIn', 'tokensOut', 'contextTokens', 'createdAt', 'updatedAt']) &&

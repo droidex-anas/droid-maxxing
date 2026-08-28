@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { serverWireMessage } from './bridgeWireValidation';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 function batch(event: unknown): unknown {
   return {
@@ -60,12 +61,15 @@ test('rejects malformed features in session summaries and mission updates', () =
   const session = {
     appSessionId: 'app-1',
     sessionPurpose: 'mission-control',
-    interactionMode: 'agi',
     role: 'primary',
     title: 'Mission',
     goal: 'Ship safely',
     cwd: '/repo',
-    autonomy: 'high',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'high',
+    }),
     phase: 'running',
     features: [malformedFeature],
     tokensIn: 0,

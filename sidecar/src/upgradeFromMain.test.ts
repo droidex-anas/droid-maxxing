@@ -10,6 +10,7 @@ import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal
 import { initializeSessionFileCacheSchema } from './sessionFileCacheSchema.js';
 import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const { HistoryIndex, SESSION_INDEX_FILENAME, SESSION_SEARCH_INDEX_FILENAME } =
   await import('./history.js');
@@ -61,13 +62,16 @@ function summary(appSessionId: string, cwd: string) {
     appSessionId,
     providerSessionId: appSessionId,
     sessionPurpose: 'chat' as const,
-    interactionMode: 'auto' as const,
     role: 'primary' as const,
     title: `Chat ${appSessionId}`,
     goal: `Chat ${appSessionId}`,
     cwd,
     workspaceKind: 'folder' as const,
-    autonomy: 'low' as const,
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto' as const,
+      autonomy: 'low' as const,
+    }),
     phase: 'paused' as const,
     streaming: false,
     features: [],

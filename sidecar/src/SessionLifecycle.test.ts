@@ -21,6 +21,7 @@ import {
   FakeFactorySession,
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
+import { droidSessionConfiguration, withProviderSelection } from './providers/providerIdentity.js';
 
 class TestHistory {
   readonly persisted: SessionSummary[] = [];
@@ -316,15 +317,17 @@ function summary(
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'user',
     title: appSessionId,
     goal: 'test',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    modelId: 'model-default',
-    reasoningEffort: ReasoningEffort.Low,
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -344,8 +347,11 @@ function createCommand(goal = 'first'): SessionCreateCommand {
     goal,
     cwd: '/workspace',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
   };
 }
 
@@ -1134,57 +1140,98 @@ test('concurrent close waits for cleanup and discard overrides queue preservatio
 
 test('pending settings stay projected until successful first-send application', async () => {
   const saved = summary('app-pending', 'provider-pending', {
-    modelId: 'model-saved',
-    reasoningEffort: ReasoningEffort.Low,
+    configuration: droidSessionConfiguration({
+      modelId: 'model-saved',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
   });
   const harness = createHarness([saved]);
   const provider = new FakeFactorySession('provider-pending', {}, harness.calls, {
     settings: { modelId: 'model-saved', reasoningEffort: ReasoningEffort.Low },
   });
   queueLoad(harness, 'provider-pending', provider);
-  const pending = {
+  const pendingNative = {
     modelId: 'model-pending',
     reasoningEffort: ReasoningEffort.High,
   };
-  harness.setProjection(pending);
+  const pendingSummary: Partial<SessionSummary> = {
+    configuration: droidSessionConfiguration({
+      modelId: 'model-pending',
+      reasoningEffort: ReasoningEffort.High,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
+  };
+  harness.setProjection(pendingSummary);
   await harness.lifecycle.resume('app-pending');
-  assert.equal(harness.registry.getCanonicalSummary('app-pending')?.modelId, 'model-saved');
-  assert.equal(harness.registry.resolveSummary('app-pending')?.modelId, 'model-pending');
-  assert.equal(harness.registry.listSummaries().sessions[0]?.reasoningEffort, ReasoningEffort.High);
-  assert.equal(harness.history.persisted.at(-1)?.modelId, 'model-saved');
   assert.equal(
-    harness.events.find((event) => event.type === 'session.created')?.session.modelId,
+    harness.registry.getCanonicalSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-saved',
+  );
+  assert.equal(
+    harness.registry.resolveSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-pending',
+  );
+  assert.equal(
+    harness.registry.listSummaries().sessions[0]?.configuration.providerSelection.options
+      .reasoningEffort,
+    ReasoningEffort.High,
+  );
+  assert.equal(
+    harness.history.persisted.at(-1)?.configuration.providerSelection.modelId,
+    'model-saved',
+  );
+  assert.equal(
+    harness.events.find((event) => event.type === 'session.created')?.session.configuration
+      .providerSelection.modelId,
     'model-pending',
   );
   const replaced = harness.registry.replaceProvider('app-pending', 'provider-next');
-  assert.equal(replaced?.modelId, 'model-saved');
-  assert.equal(harness.history.persisted.at(-1)?.modelId, 'model-saved');
+  assert.equal(replaced?.configuration.providerSelection.modelId, 'model-saved');
+  assert.equal(
+    harness.history.persisted.at(-1)?.configuration.providerSelection.modelId,
+    'model-saved',
+  );
   harness.setPendingApply(async (appSessionId) => {
-    await provider.updateSettings(pending);
-    harness.registry.updateSummary(appSessionId, pending);
+    await provider.updateSettings(pendingNative);
+    harness.registry.updateSummary(appSessionId, pendingSummary);
     return true;
   });
   await harness.lifecycle.send('app-pending', 'apply now');
-  assert.deepEqual(provider.settings, [pending]);
+  assert.deepEqual(provider.settings, [pendingNative]);
   assert.deepEqual(provider.prompts, ['apply now']);
   const settingsCall = harness.calls.findIndex((call) => call.method === 'updateSettings');
   const streamCall = harness.calls.findIndex(
     (call) => call.method === 'stream' && call.args[1] === 'apply now',
   );
   assert.ok(settingsCall >= 0 && settingsCall < streamCall);
-  assert.equal(harness.registry.getCanonicalSummary('app-pending')?.modelId, 'model-pending');
-  assert.equal(harness.history.persisted.at(-1)?.reasoningEffort, ReasoningEffort.High);
+  assert.equal(
+    harness.registry.getCanonicalSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-pending',
+  );
+  assert.equal(
+    harness.history.persisted.at(-1)?.configuration.providerSelection.options.reasoningEffort,
+    ReasoningEffort.High,
+  );
 
   const failed = createHarness([saved]);
   const failedProvider = new FakeFactorySession('provider-pending', {}, failed.calls, {
     settings: { modelId: 'model-saved', reasoningEffort: ReasoningEffort.Low },
   });
   queueLoad(failed, 'provider-pending', failedProvider);
-  failed.setProjection(pending);
+  failed.setProjection(pendingSummary);
   await failed.lifecycle.resume('app-pending');
   failed.setPendingApply(() => Promise.resolve(false));
   await failed.lifecycle.send('app-pending', 'must not stream');
   assert.deepEqual(failedProvider.prompts, []);
-  assert.equal(failed.registry.getCanonicalSummary('app-pending')?.modelId, 'model-saved');
-  assert.equal(failed.registry.resolveSummary('app-pending')?.modelId, 'model-pending');
+  assert.equal(
+    failed.registry.getCanonicalSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-saved',
+  );
+  assert.equal(
+    failed.registry.resolveSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-pending',
+  );
 });

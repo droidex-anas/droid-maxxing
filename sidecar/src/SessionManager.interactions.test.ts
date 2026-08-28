@@ -12,6 +12,7 @@ import type { SessionSummary, ServerEvent } from './protocol.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import type { RecordedCall } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 type PermissionRequestedEvent = Extract<ServerEvent, { type: 'approval.requested' }>;
 type ApprovalRequestedEvent = Extract<ServerEvent, { type: 'approval.requested' }>;
@@ -93,13 +94,16 @@ function historicalSummary(appSessionId: string, providerSessionId: string): Ses
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Historical ${appSessionId}`,
     goal: '',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,
@@ -145,8 +149,11 @@ function isSpecTransitionPublication(call: RecordedCall): boolean {
   )
     return false;
   return (
-    'interactionMode' in event.session &&
-    event.session.interactionMode === 'auto' &&
+    'configuration' in event.session &&
+    typeof event.session.configuration === 'object' &&
+    event.session.configuration !== null &&
+    'interactionMode' in event.session.configuration &&
+    event.session.configuration.interactionMode === 'auto' &&
     'phase' in event.session &&
     event.session.phase === 'running'
   );
@@ -201,8 +208,11 @@ test(
         clientRef: 'p2',
         title: 'P2',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.permissionHandler;
@@ -239,8 +249,11 @@ test(
         clientRef: 'p3',
         title: 'P3',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.permissionHandler;
@@ -302,8 +315,11 @@ test(
         clientRef: 'p4',
         title: 'P4',
         goal: 'go',
-        interactionMode: 'spec',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'spec',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.permissionHandler;
@@ -352,7 +368,7 @@ test(
       );
       const transition = h.events.filter(isSessionUpdated).at(-1);
       assert.ok(transition);
-      assert.equal(transition.session.interactionMode, 'auto');
+      assert.equal(transition.session.configuration.interactionMode, 'auto');
       assert.equal(transition.session.sessionPurpose, 'chat');
       assert.equal(transition.session.missionId, undefined);
       assert.equal(transition.session.phase, 'running');
@@ -374,8 +390,11 @@ test(
         clientRef: 'q1',
         title: 'Q1',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.askUserHandler;
@@ -459,8 +478,11 @@ test('close preserves current interaction lifetime and forgets unresolved state 
       clientRef: 'interaction-close',
       title: 'Interaction close',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = h.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -539,8 +561,11 @@ test('interrupt leaves pending approvals and questions waiting for the user', as
       clientRef: 'interrupt-pending',
       title: 'Interrupt pending',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
 
@@ -593,8 +618,11 @@ test('a failed turn leaves pending approvals and questions waiting for the user'
       clientRef: 'failure-pending',
       title: 'Failure pending',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.provider.waitForPrompts('provider-1', 1);
     await h.waitForIdle();
@@ -672,8 +700,11 @@ test('a closed session forgets pending approvals and questions without settling 
       clientRef: 'close-pending',
       title: 'Close pending',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
 
@@ -721,8 +752,11 @@ test('ask-user requests tolerate omitted questions and options', async () => {
       clientRef: 'question-defaults',
       title: 'Question defaults',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     const handler = h.provider.session('provider-1').handlers.askUserHandler;

@@ -11,6 +11,7 @@ import {
 
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import { SessionInteractions, type InteractionLiveSession } from './SessionInteractions.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface HarnessOptions {
   rejectProviderUpdate?: boolean;
@@ -47,7 +48,7 @@ function createHarness(options: HarnessOptions = {}) {
     updateSummary: (id, patch) => {
       const liveSession = liveSessions.get(id);
       if (!liveSession) return;
-      trace.push(`publish:${String(patch.interactionMode ?? patch.phase ?? '')}`);
+      trace.push(`publish:${String(patch.configuration?.interactionMode ?? patch.phase ?? '')}`);
       if (options.throwSummaryUpdate) throw new Error('summary persistence failed');
       Object.assign(liveSession.summary, patch);
     },
@@ -67,13 +68,16 @@ function summary(appSessionId: string, providerSessionId: string): SessionSummar
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -242,7 +246,10 @@ test('unknown, duplicate, late, and wrong-session approvals settle at most once'
 test('Spec approval publishes, attempts provider update, then settles the callback', async () => {
   const success = createHarness();
   const liveSession = success.addLiveSession('app-spec');
-  liveSession.summary.interactionMode = 'spec';
+  liveSession.summary.configuration = {
+    ...liveSession.summary.configuration,
+    interactionMode: 'spec',
+  };
   const handler = success.interactions.makePermissionHandler({ id: 'app-spec' });
   const pending = Promise.resolve(handler(specApprovalInput('tool-spec'))).then((outcome) => {
     success.trace.push('callback');

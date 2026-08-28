@@ -13,6 +13,7 @@ import {
   type SessionTimelineLoaders,
   type SessionTimelineRegistry,
 } from './SessionTimeline.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface HarnessOptions {
   summaries?: SessionSummary[];
@@ -89,13 +90,16 @@ function summary(
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

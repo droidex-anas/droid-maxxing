@@ -6,6 +6,7 @@ import {
   createSessionManagerTestContext,
   type SessionManagerTestContext,
 } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface ObservedTimer {
   timer: ReturnType<typeof setTimeout>;
@@ -80,8 +81,11 @@ async function createMissionWithChild(h: SessionManagerTestContext): Promise<Fak
     clientRef: 'teardown',
     title: 'Teardown',
     goal: 'go',
-    interactionMode: 'agi',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
   });
   await h.waitForIdle();
   const child = new FakeFactorySession('child-backend', {}, h.calls);
@@ -257,8 +261,11 @@ test('shutdown marks later parents before blocked earlier cleanup', async () => 
       clientRef: 'parent-a',
       title: 'Parent A',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await first.waitForPrompts(1);
     await h.create({
@@ -266,8 +273,11 @@ test('shutdown marks later parents before blocked earlier cleanup', async () => 
       clientRef: 'parent-b',
       title: 'Parent B',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await second.waitForPrompts(1);
     await h.waitForIdle();

@@ -7,6 +7,7 @@ import type { SessionFileChange } from './sessionFileCache.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
 import type { ChildSessionSummary, SessionSummary, ServerEvent } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 type SessionHistoryEvent = Extract<ServerEvent, { type: 'session.history' }>;
 type SessionUpdatedEvent = Extract<ServerEvent, { type: 'session.updated' }>;
@@ -81,13 +82,16 @@ function summary(appSessionId: string, providerSessionId: string): SessionSummar
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Historical ${appSessionId}`,
     goal: '',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,
@@ -150,8 +154,11 @@ test('[H2] Paging, empty history, and retry', { concurrency: false }, async () =
       clientRef: 'empty-h2',
       title: 'Empty H2',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     rmSync(path.join(empty.home, '.factory', 'sessions'), { recursive: true, force: true });
     await empty.handle({ type: 'session.loadHistory', appSessionId: 'provider-1' });
@@ -453,8 +460,11 @@ test('[A1] Child-session link persistence', { concurrency: false }, async () => 
       clientRef: 'a1',
       title: 'A1',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     const parent = h.provider.session('provider-1');
     await parent.waitForPrompts(1);
@@ -533,8 +543,11 @@ test('[A1b] a Task child waits for exact launch settings without failing its par
       clientRef: 'a1b',
       title: 'A1b',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     const parent = h.provider.session('provider-1');
     await parent.waitForPrompts(1);
@@ -597,8 +610,11 @@ test('[A1c] provider replacement preserves the logical child identity', async ()
       clientRef: 'a1c',
       title: 'A1c',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     const parent = h.provider.session('provider-1');
     await parent.waitForPrompts(1);

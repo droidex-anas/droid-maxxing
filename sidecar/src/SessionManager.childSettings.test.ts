@@ -10,6 +10,7 @@ import {
   openChild,
 } from './testing/childSettingsTestSupport.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 test(
   'exact child settings target only the resolved worker or validator backend',
@@ -120,8 +121,8 @@ test(
       const parent = latestSessionList(h.events).find(
         (session) => session.appSessionId === 'provider-1',
       );
-      assert.equal(parent?.workerModelId, 'worker-role-default');
-      assert.equal(parent?.validatorModelId, 'validator-role-default');
+      assert.equal(parent?.droidMissionConfiguration?.worker.modelId, 'worker-role-default');
+      assert.equal(parent?.droidMissionConfiguration?.validator.modelId, 'validator-role-default');
     } finally {
       await h.dispose();
     }
@@ -337,8 +338,11 @@ test(
         clientRef: 'ordinary',
         title: 'Ordinary',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
       await h.waitForIdle();
       const before = h.provider.session('provider-1').settings.length;

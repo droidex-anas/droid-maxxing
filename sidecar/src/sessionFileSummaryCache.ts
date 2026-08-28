@@ -53,13 +53,12 @@ function isSessionSummary(value: unknown): value is SessionSummary {
 }
 
 function hasRequiredSummaryFields(summary: Record<string, unknown>): boolean {
-  const { sessionPurpose, interactionMode, role, autonomy, phase, features } = summary;
+  const { sessionPurpose, role, phase, features, configuration } = summary;
   return (
     strings(summary, ['appSessionId', 'title', 'goal', 'cwd']) &&
     oneOf(sessionPurpose, ['chat', 'design', 'mission-control']) &&
-    oneOf(interactionMode, ['auto', 'spec', 'agi']) &&
     oneOf(role, ['primary', 'user']) &&
-    oneOf(autonomy, ['off', 'low', 'medium', 'high']) &&
+    isSessionConfiguration(configuration) &&
     oneOf(phase, [
       'intake',
       'planning',
@@ -84,16 +83,12 @@ function hasOptionalSummaryFields(summary: Record<string, unknown>): boolean {
     optionalString(summary, [
       'providerSessionId',
       'missionId',
-      'modelId',
       'compactionModel',
-      'workerModelId',
-      'validatorModelId',
       'proposal',
       'contextUpdatedAt',
     ]) &&
-    optionalRecordKeyOf(summary, 'reasoningEffort', SESSION_FILE_REASONING_EFFORTS) &&
-    optionalRecordKeyOf(summary, 'workerReasoningEffort', SESSION_FILE_REASONING_EFFORTS) &&
-    optionalRecordKeyOf(summary, 'validatorReasoningEffort', SESSION_FILE_REASONING_EFFORTS) &&
+    (summary.droidMissionConfiguration === undefined ||
+      isDroidMissionConfiguration(summary.droidMissionConfiguration)) &&
     optionalRecordOneOf(summary, 'contextAccuracy', ['exact', 'estimated']) &&
     optionalRecordOneOf(summary, 'workspaceKind', ['folder', 'none']) &&
     optionalFiniteNumber(summary, [
@@ -162,6 +157,43 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[]): value i
 
 function optionalOneOf(value: unknown, allowed: readonly string[]): boolean {
   return value === undefined || oneOf(value, allowed);
+}
+
+function isSessionConfiguration(value: unknown): boolean {
+  const configuration = objectValue(value);
+  if (!configuration) return false;
+  const selection = objectValue(configuration.providerSelection);
+  if (!selection) return false;
+  const options = objectValue(selection.options);
+  if (!options) return false;
+  for (const option of Object.values(options)) {
+    if (typeof option !== 'string' && typeof option !== 'number' && typeof option !== 'boolean') {
+      return false;
+    }
+  }
+  return (
+    oneOf(selection.providerInstanceId, ['droid', 'codex', 'claude', 'cursor', 'grok']) &&
+    typeof selection.modelId === 'string' &&
+    selection.modelId.length > 0 &&
+    oneOf(configuration.interactionMode, ['auto', 'spec', 'agi']) &&
+    oneOf(configuration.autonomy, ['off', 'low', 'medium', 'high'])
+  );
+}
+
+function isDroidMissionConfiguration(value: unknown): boolean {
+  const mission = objectValue(value);
+  if (!mission) return false;
+  return isDroidAgentConfiguration(mission.worker) && isDroidAgentConfiguration(mission.validator);
+}
+
+function isDroidAgentConfiguration(value: unknown): boolean {
+  const agent = objectValue(value);
+  if (!agent) return false;
+  return (
+    typeof agent.modelId === 'string' &&
+    agent.modelId.length > 0 &&
+    optionalRecordKeyOf(agent, 'reasoningEffort', SESSION_FILE_REASONING_EFFORTS)
+  );
 }
 
 function optionalRecordKeyOf<T extends string>(

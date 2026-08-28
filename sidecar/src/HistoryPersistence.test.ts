@@ -21,6 +21,7 @@ import type { HistorySearchReply, SessionSummary, TranscriptEvent } from './prot
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 import { persistTestChild } from './testing/historyPersistenceFixture.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const FTS5_UNAVAILABLE_REASON = sqliteFts5UnavailableSkipReason();
 
@@ -71,12 +72,15 @@ function summary(patch: Partial<SessionSummary> = {}): SessionSummary {
     appSessionId: 'app',
     providerSessionId: 'provider',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Durable session',
     goal: 'Persist settled state',
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'running',
     streaming: true,
     features: [],

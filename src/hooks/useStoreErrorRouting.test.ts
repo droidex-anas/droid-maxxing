@@ -8,18 +8,22 @@ import {
   resetHistoryHealthForTests,
 } from '../lib/historyHealth';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const session: SessionSummary = {
   appSessionId: 'app-1',
   providerSessionId: 'provider-1',
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: 'Chat',
   goal: '',
   cwd: '',
   workspaceKind: 'none',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'running',
   features: [],
   tokensIn: 0,

@@ -89,7 +89,11 @@ export async function runSoak(spec: PerfScenarioSpec): Promise<ReplayReport> {
         title: `Soak ${String(cycle)}`,
         goal: `soak ${String(cycle)}`,
         sessionPurpose: 'chat',
-        autonomy: 'off',
+        configuration: {
+          providerSelection: { providerInstanceId: 'droid', modelId: 'model-default', options: {} },
+          interactionMode: 'auto',
+          autonomy: 'off',
+        },
       });
       const created = events.find(
         (event) => event.type === 'session.created' && 'session' in event,

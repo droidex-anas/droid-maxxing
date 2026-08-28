@@ -18,6 +18,7 @@ import {
   type ChatMetadataMap,
 } from './chatMetadata';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 // fakeStorage() installs a global localStorage stub; restore the original
 // global after every test so the stub cannot leak into other suites.
@@ -60,12 +61,15 @@ function makeSession(
   return {
     appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title,
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'completed',
     features: [],
     tokensIn: 0,

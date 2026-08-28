@@ -9,6 +9,7 @@ import {
 } from '../lib/childSessions';
 import { childStreamPhase } from '../lib/childSessionStream';
 import type { ChildSessionSummary, ServerEvent, SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const child = (parentAppSessionId: string, childSessionId: string): ChildSessionSummary => ({
   parentAppSessionId,
@@ -24,12 +25,15 @@ const session = (appSessionId: string): SessionSummary => ({
   appSessionId,
   providerSessionId: `provider-${appSessionId}`,
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: appSessionId,
   goal: appSessionId,
   cwd: '/workspace',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'paused',
   features: [],
   tokensIn: 0,

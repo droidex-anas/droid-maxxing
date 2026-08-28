@@ -170,7 +170,10 @@ export class SessionInteractions {
     const appSessionId = liveSession.summary.appSessionId;
     try {
       this.dependencies.updateSummary(appSessionId, {
-        interactionMode: 'auto',
+        configuration: {
+          ...liveSession.summary.configuration,
+          interactionMode: 'auto',
+        },
         phase: 'running',
       });
       await liveSession.session.updateSettings({

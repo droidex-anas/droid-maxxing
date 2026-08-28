@@ -22,12 +22,11 @@ import {
   buildCreateRuntimeOptions,
   buildResumedSession,
   createDefaultsModeForCommand,
-  createInteractionModeForCommand,
-  createMissionAgentDefaultsForMode,
-  createModelDefaultsForMode,
+  createMissionConfigurationForMode,
   errMsg,
-  requireAutonomyForCommand,
+  requireCreateConfiguration,
 } from './sessionHelpers.js';
+import { droidReasoningEffortFromSelection } from './providers/providerIdentity.js';
 
 export type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
 
@@ -74,6 +73,7 @@ export interface LiveSession extends LiveTurnState {
   todoDisabledForDesign?: boolean;
   compacting?: boolean; // Manual-compaction overlap guard; auto-compaction is separate.
   unsubscribe?: () => void; // Primary provider notification subscription, replaced on swap.
+  appliedNativeConfiguration?: SessionSummary['configuration'];
 }
 type LifecycleError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
@@ -121,14 +121,15 @@ export class SessionLifecycle {
     let pendingLiveSession: LiveSession | undefined;
 
     try {
-      // Validate the required autonomy snapshot before any slow or fallible
-      // discovery work so a missing snapshot always gets its own diagnostic.
-      const autonomy = requireAutonomyForCommand(command);
+      const configuration = requireCreateConfiguration(command);
       const defaults = await d.getFactoryDefaults();
-      const interactionMode = createInteractionModeForCommand(command, defaults);
+      const interactionMode = configuration.interactionMode;
       const defaultsMode = createDefaultsModeForCommand(command, interactionMode);
-      const primary = createModelDefaultsForMode(defaultsMode, command, defaults);
-      const agents = createMissionAgentDefaultsForMode(defaultsMode, command, defaults);
+      const primary = {
+        modelId: configuration.providerSelection.modelId,
+        reasoningEffort: droidReasoningEffortFromSelection(configuration.providerSelection),
+      };
+      const mission = createMissionConfigurationForMode(defaultsMode, command, defaults);
       const compactionModel =
         command.compactionModel ?? defaults.compactionModel ?? 'current-model';
       const compactionTokenLimit = await d.compaction.resolveLimit({
@@ -150,11 +151,10 @@ export class SessionLifecycle {
       const runtimeOptions = buildCreateRuntimeOptions({
         command,
         runtimeCwd,
-        interactionMode,
+        configuration,
         primary,
-        agents,
+        ...(mission !== undefined ? { mission } : {}),
         defaults,
-        autonomy,
         compactionModel,
         compactionTokenLimit,
         mcpServers: mcp.configs,
@@ -178,17 +178,16 @@ export class SessionLifecycle {
       const summary = buildCreatedSessionSummary({
         command,
         appSessionId,
-        interactionMode,
-        primary,
+        configuration,
         compactionModel,
-        agents,
-        autonomy,
+        ...(mission !== undefined ? { mission } : {}),
         ...(maxContextTokens !== undefined ? { maxContextTokens } : {}),
         ...(autoCompactionArmed ? { compactionTokenLimit } : {}),
         now: Date.now(),
       });
       ref.id = appSessionId;
       const liveSession = createLiveSession(summary, session, mcp);
+      liveSession.appliedNativeConfiguration = configuration;
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
@@ -267,7 +266,8 @@ export class SessionLifecycle {
         now: Date.now(),
       });
       const summary = resumed.summary;
-      const projectedModel = d.applyPendingSettingsToSummary({ ...summary }).modelId;
+      const projectedModel = d.applyPendingSettingsToSummary({ ...summary }).configuration
+        .providerSelection.modelId;
       const limit = await d.compaction.resolveLimit({
         modelId: projectedModel,
         exposed: resumed.exposedCompaction,
@@ -288,6 +288,7 @@ export class SessionLifecycle {
       this.requireOpenAdmission();
       const projectedSummary = d.applyPendingSettingsToSummary({ ...summary });
       const liveSession = createLiveSession(summary, session, mcp);
+      liveSession.appliedNativeConfiguration = summary.configuration;
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
