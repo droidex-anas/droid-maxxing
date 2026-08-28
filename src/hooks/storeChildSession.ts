@@ -234,7 +234,12 @@ export function reduceSessionChild<S extends ChildSessionStore>(
       },
     };
     const access = state.childAccess[child.parentAppSessionId]?.[child.childSessionId];
-    if (!action.runtimeAvailable && (access?.state === 'opening' || access?.state === 'ready'))
+    // Queued is waiting for a slot, not a finished open.
+    if (
+      !action.runtimeAvailable &&
+      !child.queued &&
+      (access?.state === 'opening' || access?.state === 'ready')
+    )
       next = withChildAccess(next, child.parentAppSessionId, child.childSessionId, {
         state: 'closed',
         requestId: null,
