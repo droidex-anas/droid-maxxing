@@ -1,28 +1,28 @@
 import type { AcpNotification } from '../acp/AcpConnection.js';
 import {
+  ingestToolCallUpdate,
+  parseAssistantTextDelta,
+  sessionUpdateIsReplay,
+  type AcpToolCallCoalesceState,
+  type AcpToolCallState,
+} from '../acp/acpSessionUpdate.js';
+import {
   cursorTodoFingerprint,
   extractTodosAsPlan,
   formatCursorPlanSteps,
   parseCursorUpdateTodos,
 } from './cursorExtensions.js';
-import {
-  ingestCursorToolCallUpdate,
-  parseCursorAssistantTextDelta,
-  sessionUpdateIsReplay,
-  type CursorToolCallCoalesceState,
-  type CursorToolCallState,
-} from './cursorSessionUpdate.js';
 
 export interface CursorNotificationTranscript {
   kind: 'text' | 'tool_call' | 'tool_result' | 'status';
   text: string;
-  toolCall?: CursorToolCallState;
+  toolCall?: AcpToolCallState;
 }
 
 export function interpretCursorNotification(
   notification: AcpNotification,
   state: {
-    toolCalls: Map<string, CursorToolCallCoalesceState>;
+    toolCalls: Map<string, AcpToolCallCoalesceState>;
     lastTodoFingerprint: string | undefined;
   },
 ): { transcripts: CursorNotificationTranscript[]; lastTodoFingerprint: string | undefined } {
@@ -32,14 +32,14 @@ export function interpretCursorNotification(
   if (notification.method !== 'session/update' || sessionUpdateIsReplay(notification.params)) {
     return { transcripts: [], lastTodoFingerprint: state.lastTodoFingerprint };
   }
-  const delta = parseCursorAssistantTextDelta(notification.params);
+  const delta = parseAssistantTextDelta(notification.params);
   if (delta) {
     return {
       transcripts: [{ kind: 'text', text: delta.text }],
       lastTodoFingerprint: state.lastTodoFingerprint,
     };
   }
-  const tool = ingestCursorToolCallUpdate(state.toolCalls, notification.params);
+  const tool = ingestToolCallUpdate(state.toolCalls, notification.params);
   if (!tool || !tool.emit) {
     return { transcripts: [], lastTodoFingerprint: state.lastTodoFingerprint };
   }
