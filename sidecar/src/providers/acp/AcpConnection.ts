@@ -114,6 +114,8 @@ export class AcpConnection {
 
   #state: AcpConnectionState = { kind: 'connecting' };
   #failure: AcpConnectionError | undefined;
+  #sessionSetupResult: unknown = {};
+  #pendingSessionId: string | undefined;
   #nextRequestId = 1;
   #promptTail: Promise<unknown> = Promise.resolve();
   #closePromise: Promise<void> | undefined;
@@ -147,6 +149,10 @@ export class AcpConnection {
 
   get stderrTail(): Buffer {
     return this.#stderrTail.snapshot();
+  }
+
+  get sessionSetupResult(): unknown {
+    return this.#sessionSetupResult;
   }
 
   request(method: string, params?: unknown): Promise<unknown> {
@@ -199,8 +205,9 @@ export class AcpConnection {
     await this.#request('authenticate', { methodId: handshake.authMethodId });
 
     const mcpServers = handshake.mcpServers ?? [];
+    this.#pendingSessionId = handshake.resumeSessionId;
     if (handshake.resumeSessionId) {
-      await this.#request('session/load', {
+      this.#sessionSetupResult = await this.#request('session/load', {
         sessionId: handshake.resumeSessionId,
         cwd: handshake.cwd,
         mcpServers,
@@ -214,6 +221,7 @@ export class AcpConnection {
     if (!parsed.success) {
       throw this.#protocolError('ACP peer did not return a session');
     }
+    this.#sessionSetupResult = created;
     this.#state = { kind: 'ready', sessionId: parsed.data.sessionId };
   }
 
@@ -441,6 +449,8 @@ export class AcpConnection {
         return this.#state.sessionId;
       case 'closing':
         return this.#state.sessionId;
+      case 'connecting':
+        return this.#pendingSessionId;
       default:
         return undefined;
     }

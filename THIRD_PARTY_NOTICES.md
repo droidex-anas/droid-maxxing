@@ -45,13 +45,13 @@ Each row links an upstream T3 Code path to the DROIDEX module that ports its beh
 | `packages/effect-acp/src/protocol.ts` | ACP JSON-RPC 2.0 NDJSON framing | `sidecar/src/providers/acp/acpJsonRpc.ts` |
 | `packages/effect-acp/src/client.ts` | ACP client request/notification handling | `sidecar/src/providers/acp/AcpConnection.ts` |
 | `apps/server/src/provider/acp/AcpSessionRuntime.ts` | one ACP session: initialize, authenticate, session/new, session/load, session/prompt, session/cancel | `sidecar/src/providers/acp/AcpConnection.ts` |
-| `apps/server/src/provider/acp/AcpRuntimeModel.ts` | ACP `session/update` normalization, tool-call coalescing and output bounds | not yet ported |
-| `apps/server/src/provider/acp/CursorAcpSupport.ts` | Cursor ACP spawn arguments and client capabilities | not yet ported |
-| `apps/server/src/provider/acp/CursorAcpExtension.ts` | Cursor extension methods (`cursor/ask_question`, `cursor/create_plan`, `cursor/update_todos`, `cursor/list_available_models`) | not yet ported |
+| `apps/server/src/provider/acp/AcpRuntimeModel.ts` | ACP `session/update` normalization, tool-call coalescing and output bounds | `sidecar/src/providers/cursor/cursorSessionUpdate.ts` |
+| `apps/server/src/provider/acp/CursorAcpSupport.ts` | Cursor ACP spawn arguments and client capabilities | `sidecar/src/providers/cursor/cursorHandshake.ts` |
+| `apps/server/src/provider/acp/CursorAcpExtension.ts` | Cursor extension methods (`cursor/ask_question`, `cursor/create_plan`, `cursor/update_todos`, `cursor/list_available_models`) | `sidecar/src/providers/cursor/cursorDiscovery.ts` |
 | `apps/server/src/provider/acp/GrokAcpSupport.ts` | Grok ACP spawn arguments and permission-mode flags | not yet ported |
 | `apps/server/src/provider/acp/XAiAcpExtension.ts` | xAI extension methods (`x.ai/ask_user_question`, `x.ai/exit_plan_mode`, prompt-complete) | not yet ported |
-| `apps/server/src/provider/Layers/CursorAdapter.ts` | Cursor adapter behavior | not yet ported |
-| `apps/server/src/provider/Layers/CursorProvider.ts` | Cursor discovery, version, auth, model catalog | not yet ported |
+| `apps/server/src/provider/Layers/CursorAdapter.ts` | Cursor adapter behavior | `sidecar/src/providers/cursor/cursorSession.ts` |
+| `apps/server/src/provider/Layers/CursorProvider.ts` | Cursor discovery, version, auth, model catalog | `sidecar/src/providers/cursor/cursorDiscovery.ts` |
 | `apps/server/src/provider/Layers/GrokAdapter.ts` | Grok adapter behavior | not yet ported |
 | `apps/server/src/provider/Layers/GrokProvider.ts` | Grok discovery and model catalog | not yet ported |
 | `apps/server/src/provider/Layers/CodexSessionRuntime.ts` | Codex app-server session runtime | not yet ported |
