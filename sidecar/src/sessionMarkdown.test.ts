@@ -16,15 +16,17 @@ function ev(overrides: Partial<TranscriptEvent> & Pick<TranscriptEvent, 'kind'>)
 
 const META = {
   title: 'Fix the sidebar',
-  providerSessionId: 'droid-abc',
+  appSessionId: 'app-abc',
   cwd: '/repo',
   exportedAt: new Date('2026-08-09T12:00:00.000Z'),
 };
 
-test('header carries the title, resume hint, directory, and export date', () => {
+test('header carries the title, canonical session id, directory, and export date', () => {
   const md = transcriptToMarkdown([], META);
   assert.match(md, /^# Fix the sidebar/);
-  assert.match(md, /`droid-abc` — resume with `droid -r droid-abc`/);
+  assert.match(md, /- \*\*Session:\*\* `app-abc`/);
+  assert.doesNotMatch(md, /droid -r/);
+  assert.doesNotMatch(md, /providerSessionId/);
   assert.match(md, /- \*\*Directory:\*\* `\/repo`/);
   assert.match(md, /- \*\*Exported:\*\* 2026-08-09T12:00:00\.000Z/);
 });

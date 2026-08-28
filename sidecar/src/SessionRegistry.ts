@@ -1,24 +1,33 @@
-import { applyCachedSummary, type HistoricalSession, type HistoryIndex } from './history.js';
 import { isAbsolute, relative, resolve } from 'node:path';
-import type { BridgeFeature, SessionSummary } from './protocol.js';
+
+import { applyCachedSummary, type HistoricalSession, type HistoryIndex } from './history.js';
+import type { SessionSummary } from './protocol.js';
+import type { ProviderBinding, SessionStore } from './persistence/SessionStore.js';
+import { decodeSummaryJson, encodeSummaryJson } from './persistence/sessionSummaryJson.js';
 import {
   filterSessionListSummaries,
   type SessionListFilterOptions,
   type SessionListPage,
 } from './sessionListFilter.js';
+import {
+  copySummary,
+  factoryFacingSummary,
+  liveBindingFromSummary,
+  nativeIds,
+  projectWireSessionSummary,
+  providerIds,
+  withoutIdentityFields,
+  type SessionSummaryPatch,
+} from './sessionRegistryProjection.js';
 import { uniqueStrings } from './sessionHelpers.js';
+
+export type { SessionSummaryPatch } from './sessionRegistryProjection.js';
+export { liveBindingFromSummary } from './sessionRegistryProjection.js';
 
 export interface RegisteredSession {
   summary: SessionSummary;
+  binding?: ProviderBinding;
 }
-
-type IdentityField =
-  | 'appSessionId'
-  | 'providerSessionId'
-  | 'compactedFromProviderSessionIds'
-  | 'missionId';
-
-export type SessionSummaryPatch = Omit<Partial<SessionSummary>, IdentityField>;
 
 type RegistryHistory = Pick<HistoryIndex, 'summaryPatchesAndHidden'> & {
   syncSummaries(summaries: SessionSummary[]): boolean | undefined;
@@ -38,6 +47,7 @@ export interface SessionRegistryDependencies {
   onLiveProviderReplaced?: (providerSessionId: string) => void;
   onLiveSetChanged?: () => void;
   now: () => number;
+  sessionStore?: Pick<SessionStore, 'get' | 'updateSummary' | 'replaceProviderRuntime'>;
 }
 
 export class SessionRegistry<TLive extends RegisteredSession> {
@@ -47,7 +57,6 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     string,
     { liveSession: TLive; summary: SessionSummary }
   >();
-  private readonly providerAliases = new Map<string, string>();
   private readonly historicalAliases = new Map<string, string>();
   private historicalSummaries = new Map<string, SessionSummary>();
   private ordinaryHistoricalSummaries = new Map<string, SessionSummary>();
@@ -65,33 +74,30 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     if (liveSession.summary.role !== 'primary' && liveSession.summary.role !== 'user') {
       throw new Error('SessionRegistry accepts top-level sessions only.');
     }
-    this.persistStrict(liveSession.summary);
-
-    const previous = this.sessions.get(liveSession.summary.appSessionId);
-    if (previous) this.removeAliases(previous.summary);
+    const binding = this.bindingOf(liveSession);
+    liveSession.binding = binding;
+    this.persistStrict(factoryFacingSummary(liveSession.summary, binding));
 
     this.sessions.set(liveSession.summary.appSessionId, liveSession);
     this.publishedLiveSummaries.set(liveSession.summary.appSessionId, liveSession.summary);
     this.summariesAwaitingDurability.delete(liveSession.summary.appSessionId);
-    this.indexAliases(liveSession.summary);
+    this.indexLiveAliases(liveSession);
     this.dependencies.onLiveSetChanged?.();
   }
 
-  getLive(id: string): TLive | undefined {
-    const direct = this.sessions.get(id);
-    if (direct) return direct;
-
-    const appSessionId = this.providerAliases.get(id);
-    return appSessionId ? this.sessions.get(appSessionId) : undefined;
+  getLive(appSessionId: string): TLive | undefined {
+    return this.sessions.get(appSessionId);
   }
 
-  // Gauge for hot-path metrics: live top-level sessions currently held.
   get liveCount(): number {
     return this.sessions.size;
   }
 
   isCurrentLiveProvider(providerSessionId: string): boolean {
-    return this.getLive(providerSessionId)?.summary.providerSessionId === providerSessionId;
+    for (const live of this.sessions.values()) {
+      if (this.bindingOf(live).providerSessionId === providerSessionId) return true;
+    }
+    return false;
   }
 
   getCanonicalSummary(id: string): SessionSummary | undefined {
@@ -100,21 +106,18 @@ export class SessionRegistry<TLive extends RegisteredSession> {
   }
 
   resolveSummary(id: string): SessionSummary | undefined {
-    const summary = this.resolveCanonicalSummary(id);
-    return summary ? this.project(summary) : undefined;
+    const resolved = this.resolveCanonicalAndBinding(id);
+    return resolved ? this.project(resolved.summary, resolved.binding) : undefined;
   }
 
   listSummaries(options: SessionListFilterOptions = {}): SessionListPage {
     const projected = [...this.mergeCanonicalSummaries().values()]
-      .map((summary) => this.project(summary))
+      .map((entry) => this.project(entry.summary, entry.binding))
       .sort((left, right) => right.updatedAt - left.updatedAt);
 
     return filterSessionListSummaries(projected, options, (summary) => this.isAppOwned(summary));
   }
 
-  // A session DROIDEX ran has a persisted app-session row (or is live right
-  // now); the patch overlay carries exactly those rows keyed by both
-  // identities. Anything else is a session file another Droid client wrote.
   private isAppOwned(summary: SessionSummary): boolean {
     return (
       this.sessions.has(summary.appSessionId) ||
@@ -125,24 +128,27 @@ export class SessionRegistry<TLive extends RegisteredSession> {
   }
 
   updateSummary(
-    id: string,
+    appSessionId: string,
     patch: SessionSummaryPatch,
     options: { touchActivity?: boolean } = {},
   ): SessionSummary | undefined {
-    const liveSession = this.getLive(id);
+    const liveSession = this.sessions.get(appSessionId);
     if (!liveSession) return undefined;
 
     const updated = this.withPatch(liveSession.summary, patch, options.touchActivity !== false);
-    const durable = this.persist(updated);
+    const binding = this.bindingOf(liveSession);
+    const durable = this.persist(factoryFacingSummary(updated, binding), {
+      touchActivity: options.touchActivity !== false,
+    });
     liveSession.summary = updated;
     if (durable === false) {
       this.summariesAwaitingDurability.set(updated.appSessionId, { liveSession, summary: updated });
-      return copySummary(updated);
+      return this.project(updated, binding);
     }
     this.summariesAwaitingDurability.delete(updated.appSessionId);
     this.publishedLiveSummaries.set(updated.appSessionId, updated);
-    this.publish(updated);
-    return updated;
+    this.publish(updated, binding);
+    return this.project(updated, binding);
   }
 
   reanchorHistoricalCwd(fromCwd: string, toCwd: string): SessionSummary[] {
@@ -151,7 +157,7 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     }
 
     const from = resolve(fromCwd);
-    const summaries = [...this.mergeCanonicalSummaries().values()];
+    const summaries = [...this.mergeCanonicalSummaries().values()].map((entry) => entry.summary);
     if (
       summaries.some(
         (summary) => this.sessions.has(summary.appSessionId) && isInside(from, summary.cwd),
@@ -176,10 +182,10 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     this.dependencies.history.flushSync?.();
     for (const summary of updated) {
       this.cacheHistoricalSummary(summary);
-      this.publish(summary);
+      this.publish(summary, liveBindingFromSummary(summary));
     }
     this.rebuildHistoricalAliases(this.historicalSummaries.values());
-    return updated.map(copySummary);
+    return updated.map((summary) => this.project(summary, liveBindingFromSummary(summary)));
   }
 
   replaceProvider(
@@ -189,54 +195,59 @@ export class SessionRegistry<TLive extends RegisteredSession> {
   ): SessionSummary | undefined {
     const current = this.resolveCanonicalSummary(id);
     if (!current) return undefined;
-    if (current.providerSessionId === providerSessionId) return current;
     const liveSession = this.sessions.get(current.appSessionId);
+    const liveBinding = liveSession ? this.bindingOf(liveSession) : undefined;
+    const currentNative = liveBinding?.providerSessionId ?? current.providerSessionId;
+    if (currentNative === providerSessionId) return current;
 
-    // A provider swap is compaction bookkeeping, not user-visible activity:
-    // updatedAt (sidebar order, unread marker) stays where the turn left it.
+    const previous = uniqueStrings([
+      ...(liveBinding?.previousProviderSessionIds ?? current.compactedFromProviderSessionIds ?? []),
+      currentNative,
+    ]);
     const updated = {
       ...this.withPatch(current, patch, false),
       providerSessionId,
-      compactedFromProviderSessionIds: uniqueStrings([
-        ...(current.compactedFromProviderSessionIds ?? []),
-        current.providerSessionId,
-      ]),
+      compactedFromProviderSessionIds: previous,
     };
+    const nextBinding: ProviderBinding = liveBinding
+      ? {
+          ...liveBinding,
+          providerSessionId,
+          previousProviderSessionIds: previous,
+          runtimeGeneration: liveBinding.runtimeGeneration + 1,
+        }
+      : liveBindingFromSummary(updated);
 
     this.persistStrict(updated);
+    this.replaceCanonicalRuntime(current.appSessionId, providerSessionId);
     if (liveSession) {
-      this.removeAliases(current);
+      liveSession.binding = nextBinding;
       liveSession.summary = updated;
       this.summariesAwaitingDurability.delete(updated.appSessionId);
       this.publishedLiveSummaries.set(updated.appSessionId, updated);
-      this.indexAliases(updated);
+      this.indexLiveAliases(liveSession);
     } else {
       this.cacheHistoricalSummary(updated);
       this.rebuildHistoricalAliases(this.historicalSummaries.values());
     }
 
-    this.publish(updated);
-    if (liveSession && current.providerSessionId) {
-      this.dependencies.onLiveProviderReplaced?.(current.providerSessionId);
+    this.publish(updated, nextBinding);
+    if (liveSession && currentNative) {
+      this.dependencies.onLiveProviderReplaced?.(currentNative);
     }
     return updated;
   }
 
-  unregister(id: string): TLive | undefined {
-    const liveSession = this.getLive(id);
+  unregister(appSessionId: string): TLive | undefined {
+    const liveSession = this.sessions.get(appSessionId);
     if (!liveSession) return undefined;
 
-    // SessionLifecycle emits session.closed immediately after unregister. Make
-    // queued transcript and summary state durable before that user-visible
-    // boundary rather than claiming a closed session whose final rows are only
-    // in memory.
     this.dependencies.history.flushSync?.();
     this.dependencies.history.forgetSession?.(liveSession.summary.appSessionId);
     this.historicalLoaded = false;
     this.sessions.delete(liveSession.summary.appSessionId);
     this.publishedLiveSummaries.delete(liveSession.summary.appSessionId);
     this.summariesAwaitingDurability.delete(liveSession.summary.appSessionId);
-    this.removeAliases(liveSession.summary);
     this.dependencies.onLiveSetChanged?.();
     return liveSession;
   }
@@ -250,7 +261,7 @@ export class SessionRegistry<TLive extends RegisteredSession> {
       if (pending.liveSession.summary !== pending.summary) continue;
       this.summariesAwaitingDurability.delete(appSessionId);
       this.publishedLiveSummaries.set(appSessionId, pending.summary);
-      this.publish(pending.summary);
+      this.publish(pending.summary, this.bindingOf(pending.liveSession));
     }
   }
 
@@ -259,25 +270,42 @@ export class SessionRegistry<TLive extends RegisteredSession> {
   }
 
   private resolveCanonicalSummary(id: string): SessionSummary | undefined {
-    const liveSession = this.getLive(id);
-    if (liveSession) return liveSession.summary;
-
-    this.ensureHistoricalSummaries();
-    const direct = this.historicalSummaries.get(id);
-    if (direct) return direct;
-    const indexed = this.historicalAliases.get(id);
-    return indexed ? this.historicalSummaries.get(indexed) : undefined;
+    return this.resolveCanonicalAndBinding(id)?.summary;
   }
 
-  private mergeCanonicalSummaries(): Map<string, SessionSummary> {
+  private resolveCanonicalAndBinding(
+    id: string,
+  ): { summary: SessionSummary; binding?: ProviderBinding } | undefined {
+    const liveDirect = this.sessions.get(id);
+    if (liveDirect) return { summary: liveDirect.summary, binding: this.bindingOf(liveDirect) };
+
     this.ensureHistoricalSummaries();
-    const summaries = new Map(this.historicalSummaries);
+    const appSessionId = this.historicalAliases.get(id) ?? id;
+    const live = this.sessions.get(appSessionId);
+    if (live) return { summary: live.summary, binding: this.bindingOf(live) };
+    const historical = this.historicalSummaries.get(appSessionId);
+    if (!historical) return undefined;
+    return { summary: historical, binding: liveBindingFromSummary(historical) };
+  }
+
+  private mergeCanonicalSummaries(): Map<
+    string,
+    { summary: SessionSummary; binding?: ProviderBinding }
+  > {
+    this.ensureHistoricalSummaries();
+    const summaries = new Map<string, { summary: SessionSummary; binding?: ProviderBinding }>();
+    for (const summary of this.historicalSummaries.values()) {
+      summaries.set(summary.appSessionId, {
+        summary,
+        binding: liveBindingFromSummary(summary),
+      });
+    }
     for (const liveSession of this.sessions.values()) {
       const appSessionId = liveSession.summary.appSessionId;
-      summaries.set(
-        appSessionId,
-        this.publishedLiveSummaries.get(appSessionId) ?? liveSession.summary,
-      );
+      summaries.set(appSessionId, {
+        summary: this.publishedLiveSummaries.get(appSessionId) ?? liveSession.summary,
+        binding: this.bindingOf(liveSession),
+      });
     }
     return summaries;
   }
@@ -324,7 +352,6 @@ export class SessionRegistry<TLive extends RegisteredSession> {
       const summary = applyCachedSummary(historical.summary, patches);
       const providerSessionId = summary.providerSessionId ?? summary.appSessionId;
       if (hiddenProviderSessionIds.has(providerSessionId)) continue;
-
       target.set(summary.appSessionId, summary);
     }
   }
@@ -334,9 +361,6 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     patch: SessionSummaryPatch,
     touchActivity = true,
   ): SessionSummary {
-    // updatedAt drives sidebar ordering and the renderer's unread marker, so it
-    // must only move for user-visible activity. Passive telemetry patches
-    // (token usage, context stats, compaction counters) keep the timestamp.
     return copySummary({
       ...summary,
       ...withoutIdentityFields(patch),
@@ -344,39 +368,53 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     });
   }
 
-  private project(summary: SessionSummary): SessionSummary {
-    const canonical = copySummary(summary);
-    const projected = this.dependencies.projectSummary(canonical);
-    return copySummary({ ...canonical, ...withoutIdentityFields(projected) });
+  private project(summary: SessionSummary, binding?: ProviderBinding): SessionSummary {
+    return projectWireSessionSummary(summary, this.dependencies.projectSummary, binding);
   }
 
-  private persist(summary: SessionSummary): boolean | undefined {
-    return this.dependencies.history.syncSummaries([summary]);
+  private persist(
+    summary: SessionSummary,
+    options: { touchActivity?: boolean } = {},
+  ): boolean | undefined {
+    const result = this.dependencies.history.syncSummaries([summary]);
+    this.syncCanonicalSummary(summary, options.touchActivity !== false);
+    return result;
   }
 
   private persistStrict(summary: SessionSummary): void {
-    if (this.persist(summary) !== false) return;
+    if (this.persist(summary, { touchActivity: false }) !== false) return;
     if (!this.dependencies.history.flushSync) {
       throw new Error('History durability is pending and no strict flush is available.');
     }
     this.dependencies.history.flushSync();
   }
 
-  private publish(summary: SessionSummary): void {
-    this.dependencies.onSummaryUpdated(this.project(summary));
+  private syncCanonicalSummary(summary: SessionSummary, touchActivity: boolean): void {
+    const store = this.dependencies.sessionStore;
+    if (!store) return;
+    const stored = store.get(summary.appSessionId);
+    if (!stored) return;
+    const json = decodeSummaryJson(encodeSummaryJson(summary), stored.binding.providerInstanceId);
+    store.updateSummary(summary.appSessionId, json, { touchActivity });
   }
 
-  private indexAliases(summary: SessionSummary): void {
-    for (const providerSessionId of providerIds(summary)) {
-      this.providerAliases.set(providerSessionId, summary.appSessionId);
-    }
+  private replaceCanonicalRuntime(appSessionId: string, providerSessionId: string): void {
+    const store = this.dependencies.sessionStore;
+    if (!store) return;
+    const stored = store.get(appSessionId);
+    if (!stored) return;
+    store.replaceProviderRuntime(appSessionId, stored.binding.runtimeGeneration, providerSessionId);
   }
 
-  private removeAliases(summary: SessionSummary): void {
-    for (const providerSessionId of providerIds(summary)) {
-      if (this.providerAliases.get(providerSessionId) === summary.appSessionId) {
-        this.providerAliases.delete(providerSessionId);
-      }
+  private publish(summary: SessionSummary, binding?: ProviderBinding): void {
+    this.dependencies.onSummaryUpdated(this.project(summary, binding));
+  }
+
+  private indexLiveAliases(liveSession: TLive): void {
+    const appSessionId = liveSession.summary.appSessionId;
+    this.historicalAliases.set(appSessionId, appSessionId);
+    for (const nativeId of nativeIds(this.bindingOf(liveSession), liveSession.summary)) {
+      this.historicalAliases.set(nativeId, appSessionId);
     }
   }
 
@@ -388,6 +426,13 @@ export class SessionRegistry<TLive extends RegisteredSession> {
         this.historicalAliases.set(providerSessionId, summary.appSessionId);
       }
     }
+    for (const liveSession of this.sessions.values()) {
+      this.indexLiveAliases(liveSession);
+    }
+  }
+
+  private bindingOf(live: TLive): ProviderBinding {
+    return live.binding ?? liveBindingFromSummary(live.summary);
   }
 
   private cacheHistoricalSummary(summary: SessionSummary): void {
@@ -401,42 +446,6 @@ export class SessionRegistry<TLive extends RegisteredSession> {
       this.historicalPatches.set(providerSessionId, cached);
     }
   }
-}
-
-function providerIds(summary: SessionSummary): string[] {
-  return uniqueStrings([
-    summary.providerSessionId,
-    ...(summary.compactedFromProviderSessionIds ?? []),
-  ]);
-}
-
-function withoutIdentityFields(patch: Partial<SessionSummary>): SessionSummaryPatch {
-  const safePatch = { ...patch };
-  delete safePatch.appSessionId;
-  delete safePatch.providerSessionId;
-  delete safePatch.compactedFromProviderSessionIds;
-  delete safePatch.missionId;
-  return safePatch;
-}
-
-function copySummary(summary: SessionSummary): SessionSummary {
-  return {
-    ...summary,
-    ...(summary.compactedFromProviderSessionIds
-      ? { compactedFromProviderSessionIds: [...summary.compactedFromProviderSessionIds] }
-      : {}),
-    features: summary.features.map(copyFeature),
-  };
-}
-
-function copyFeature(feature: BridgeFeature): BridgeFeature {
-  return {
-    ...feature,
-    preconditions: [...feature.preconditions],
-    expectedBehavior: [...feature.expectedBehavior],
-    verificationSteps: [...feature.verificationSteps],
-    ...(feature.fulfills ? { fulfills: [...feature.fulfills] } : {}),
-  };
 }
 
 function isInside(parent: string, candidate: string): boolean {

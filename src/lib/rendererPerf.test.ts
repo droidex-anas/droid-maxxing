@@ -141,7 +141,7 @@ test('without requestAnimationFrame the paint leg stays unmeasured', () => {
     'node test env has no rAF',
   );
 
-  noteBridgeEventReceived({ type: 'history.list', sessions: [] });
+  noteBridgeEventReceived({ type: 'history.persistenceRecovered' });
   noteStoreCommitted();
 
   const snapshot = getRendererPerfSnapshot();

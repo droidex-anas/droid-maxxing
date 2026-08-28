@@ -7,7 +7,6 @@ import { droidSessionConfiguration, sessionAutonomy } from '../lib/sessionConfig
 
 const session: SessionSummary = {
   appSessionId: 'app-1',
-  providerSessionId: 'provider-1',
   sessionPurpose: 'chat',
   role: 'primary',
   title: 'Chat',

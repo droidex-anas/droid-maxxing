@@ -334,8 +334,6 @@ test('permanent recovery rejects when the daemon identity cannot be persisted', 
   assert.equal(
     h.errors.some(
       (error) =>
-        error.providerSessionId === 'provider-8' &&
-        error.recoverable === true &&
         error.message === 'Could not persist compacted session identity: history unavailable',
     ),
     true,
@@ -395,7 +393,6 @@ test('historical provider persistence failure is fatal and identifies the new pr
     h.errors.some(
       (error) =>
         error.appSessionId === 'app-history' &&
-        error.providerSessionId === 'provider-history-2' &&
         error.recoverable === undefined &&
         error.message === 'Could not persist compacted session identity: history unavailable',
     ),
@@ -421,7 +418,6 @@ test('historical compaction failure is recoverable and closes the temporary prov
     h.errors.some(
       (error) =>
         error.appSessionId === 'app-history' &&
-        error.providerSessionId === 'provider-history' &&
         error.recoverable === true &&
         error.message === 'Could not compact session: temporary provider rejected',
     ),

@@ -237,7 +237,10 @@ test('[C1] Manual in-place compaction', { concurrency: false }, async () => {
       { customInstructions: 'preserve decisions' },
     ]);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-1'), 2);
-    assert.equal(sessionUpdates(h.events).at(-1)?.session.providerSessionId, 'provider-1');
+    assert.equal(
+      sessionUpdates(h.events).at(-1)?.session.sessionWebUrl,
+      'https://app.factory.ai/sessions/provider-1',
+    );
   } finally {
     await h.dispose();
   }
@@ -371,7 +374,7 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
     assert.ok(load);
     assert.ok(creation);
     assert.equal(update.session.appSessionId, 'provider-1');
-    assert.equal(update.session.providerSessionId, 'provider-2');
+    assert.equal(update.session.sessionWebUrl, 'https://app.factory.ai/sessions/provider-2');
     assert.equal(load.sessionId, 'provider-2');
     assert.equal(typeof load.handlers.permissionHandler, 'function');
     assert.equal(typeof load.handlers.askUserHandler, 'function');
@@ -438,7 +441,10 @@ test('[C3] Failed swap recovery', { concurrency: false }, async () => {
       ),
       true,
     );
-    assert.equal(sessionUpdates(h.events).at(-1)?.session.providerSessionId, 'provider-3');
+    assert.equal(
+      sessionUpdates(h.events).at(-1)?.session.sessionWebUrl,
+      'https://app.factory.ai/sessions/provider-3',
+    );
     assert.deepEqual(h.provider.session('provider-3').prompts, ['redeliver once']);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-3'), 1);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-1'), 1);
@@ -504,7 +510,6 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
       h.events.some(
         (event) =>
           event.type === 'error' &&
-          event.providerSessionId === 'provider-1' &&
           event.recoverable === true &&
           event.message ===
             'Could not fully close the compacted session: old provider close failed',
@@ -516,7 +521,10 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
     assert.deepEqual(h.provider.session('provider-1').prompts, ['go']);
     assert.deepEqual(resumed.prompts, ['redeliver after resume']);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-7'), 1);
-    assert.equal(sessionUpdates(h.events).at(-1)?.session.providerSessionId, 'provider-7');
+    assert.equal(
+      sessionUpdates(h.events).at(-1)?.session.sessionWebUrl,
+      'https://app.factory.ai/sessions/provider-7',
+    );
   } finally {
     await h.dispose();
   }

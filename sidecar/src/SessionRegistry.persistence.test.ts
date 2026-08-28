@@ -3,7 +3,11 @@ import test from 'node:test';
 
 import type { HistoricalSession } from './history.js';
 import type { SessionSummary } from './protocol.js';
-import { SessionRegistry, type RegisteredSession } from './SessionRegistry.js';
+import {
+  SessionRegistry,
+  liveBindingFromSummary,
+  type RegisteredSession,
+} from './SessionRegistry.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface LiveSession extends RegisteredSession {
@@ -80,8 +84,12 @@ test('historical summaries and provider aliases reload only when the history rev
   });
   revision += 1;
 
-  assert.equal(registry.resolveSummary('provider-next')?.providerSessionId, 'provider-next');
-  assert.equal(registry.resolveSummary('provider-current')?.providerSessionId, 'provider-next');
+  assert.equal(registry.resolveSummary('provider-next')?.appSessionId, 'app');
+  assert.equal(registry.resolveSummary('provider-current')?.appSessionId, 'app');
+  assert.equal(
+    registry.resolveSummary('provider-next')?.sessionWebUrl,
+    'https://app.factory.ai/sessions/provider-next',
+  );
   assert.equal(loads, 2);
 });
 
@@ -135,9 +143,13 @@ test('historical provider replacement preserves aliases at a stable history revi
 
   registry.replaceProvider('provider-old', 'provider-next');
 
-  assert.equal(registry.resolveSummary('provider-next')?.providerSessionId, 'provider-next');
-  assert.equal(registry.resolveSummary('provider-current')?.providerSessionId, 'provider-next');
-  assert.equal(registry.resolveSummary('provider-old')?.providerSessionId, 'provider-next');
+  assert.equal(registry.resolveSummary('provider-next')?.appSessionId, 'app');
+  assert.equal(registry.resolveSummary('provider-current')?.appSessionId, 'app');
+  assert.equal(registry.resolveSummary('provider-old')?.appSessionId, 'app');
+  assert.equal(
+    registry.resolveSummary('provider-next')?.sessionWebUrl,
+    'https://app.factory.ai/sessions/provider-next',
+  );
 });
 
 test('Mission Control history is cached until the history revision changes', () => {
@@ -239,10 +251,14 @@ test('unregister flushes persistence before exposing the session as closed', () 
     onSummaryUpdated: () => undefined,
     now: () => 2,
   });
-  const live = { marker: 'live', summary: summary('app', 'provider') };
+  const live = {
+    marker: 'live',
+    summary: summary('app', 'provider'),
+    binding: liveBindingFromSummary(summary('app', 'provider')),
+  };
   registry.register(live);
 
-  assert.equal(registry.unregister('provider'), live);
+  assert.equal(registry.unregister('app'), live);
   assert.deepEqual(trace, ['enqueue', 'flush', 'forget']);
   assert.equal(registry.getLive('app'), undefined);
 });

@@ -39,6 +39,10 @@ export class DroidexDatabase {
     }
   }
 
+  get databasePath(): string {
+    return this.path;
+  }
+
   transaction<T>(operation: () => T): T {
     this.assertOpen();
     if (this.inTransaction) {

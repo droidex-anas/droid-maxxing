@@ -58,7 +58,6 @@ export class McpSettings {
           this.emit({
             type: 'mcp.authRequested',
             requestId: command.requestId,
-            providerSessionId: session?.sessionId,
             serverName: parsed.data.serverName,
             authUrl: parsed.data.authUrl,
             message: parsed.data.message,

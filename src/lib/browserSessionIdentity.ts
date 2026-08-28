@@ -3,7 +3,7 @@ import type { SessionSummary } from '../types/bridge';
 export function browserKeyForSession(session: SessionSummary | undefined): string | undefined {
   if (!session) return undefined;
   // The backend keys browser sessions by the stable app session id, which never
-  // changes (compaction swaps providerSessionId, but the browser key must not).
+  // changes (compaction replaces the private native session, but the browser key must not).
   return session.appSessionId;
 }
 

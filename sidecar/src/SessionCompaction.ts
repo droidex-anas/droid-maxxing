@@ -181,7 +181,6 @@ export class SessionCompaction {
       if (this.isCurrent(target, epoch))
         this.dependencies.emitError({
           ...(target.appSessionId === undefined ? {} : { appSessionId: target.appSessionId }),
-          providerSessionId: target.session.sessionId,
           message: `Could not arm auto-compaction: ${errMsg(error)}. This session will not compact automatically until its settings are reapplied.`,
           recoverable: true,
         });

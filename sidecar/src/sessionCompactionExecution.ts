@@ -59,7 +59,7 @@ export class SessionCompactionExecution {
     customInstructions: string | undefined,
   ): Promise<CompactionExecutionResult> {
     const appSessionId = liveSession.summary.appSessionId;
-    const preCompactSessionId = liveSession.summary.providerSessionId;
+    const preCompactSessionId = liveSession.binding.providerSessionId;
     const carryover: UsageOffset = {
       tokensIn: liveSession.summary.tokensIn,
       tokensOut: liveSession.summary.tokensOut,
@@ -75,7 +75,6 @@ export class SessionCompactionExecution {
           },
           error: (message) => {
             this.dependencies.emitError({
-              providerSessionId: liveSession.summary.providerSessionId,
               appSessionId,
               message: `Could not compact session: ${message}`,
               recoverable: true,
@@ -83,7 +82,7 @@ export class SessionCompactionExecution {
           },
           refresh: () => {
             const current = this.dependencies.registry.getLive(appSessionId);
-            if (current?.summary.providerSessionId === preCompactSessionId) {
+            if (current?.binding.providerSessionId === preCompactSessionId) {
               // In-place compaction: recordCompaction owns the reset so its
               // generation bump keeps in-flight pre-compaction stats polls
               // from re-publishing the old usage over the reset meter.
@@ -169,7 +168,6 @@ export class SessionCompactionExecution {
       this.replaceProvider(appSessionId, providerSessionId, carryover);
     } catch (error) {
       this.dependencies.emitError({
-        providerSessionId,
         appSessionId,
         message: `Could not persist compacted session identity: ${errMsg(error)}`,
         recoverable: true,
@@ -210,7 +208,6 @@ export class SessionCompactionExecution {
         this.persistHistoricalProvider(appSessionId, providerSessionId);
     } catch (error) {
       this.dependencies.emitError({
-        providerSessionId: oldProviderSessionId,
         appSessionId,
         message: `Could not compact session: ${errMsg(error)}`,
         recoverable: true,
@@ -225,7 +222,6 @@ export class SessionCompactionExecution {
       this.dependencies.registry.replaceProvider(appSessionId, providerSessionId);
     } catch (error) {
       this.dependencies.emitError({
-        providerSessionId,
         appSessionId,
         message: `Could not persist compacted session identity: ${errMsg(error)}`,
       });

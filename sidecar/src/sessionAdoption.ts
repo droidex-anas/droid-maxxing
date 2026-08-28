@@ -25,7 +25,10 @@ const ACTIVE_PHASES = new Set<SessionPhase>([
 export interface SessionAdoptionDependencies {
   journal: LiveRuntimeJournal;
   registry: {
-    liveSessionsSnapshot(): readonly { summary: SessionSummary }[];
+    liveSessionsSnapshot(): readonly {
+      summary: SessionSummary;
+      binding?: { providerSessionId?: string };
+    }[];
     getCanonicalSummary(id: string): SessionSummary | undefined;
     getLive(id: string): { summary: SessionSummary } | undefined;
   };
@@ -60,7 +63,7 @@ export class SessionAdoption {
     const sessions: LiveSessionIdentity[] = this.dependencies.registry
       .liveSessionsSnapshot()
       .flatMap((live) => {
-        const providerSessionId = live.summary.providerSessionId;
+        const providerSessionId = live.binding?.providerSessionId ?? live.summary.providerSessionId;
         if (!providerSessionId) return [];
         return [
           {

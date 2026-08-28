@@ -12,7 +12,6 @@ import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const session = (overrides: Partial<SessionSummary> = {}): SessionSummary => ({
   appSessionId: 's1',
-  providerSessionId: 'provider-s1',
   sessionPurpose: 'chat',
   role: 'primary',
   title: 's1',

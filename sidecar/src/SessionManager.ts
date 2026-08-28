@@ -71,6 +71,7 @@ import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
 import { createBrowserMcpServer } from './browser/browserMcpServer.js';
 import { isDesignPrompt } from './browser/designPromptPacks.js';
 import { SessionRegistry } from './SessionRegistry.js';
+import { projectWireSessionSummary } from './sessionRegistryProjection.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
 import { isReportedStreamingTranscriptError, SessionTimeline } from './SessionTimeline.js';
@@ -526,7 +527,14 @@ export class SessionManager {
         })),
       persistSummaries: (summaries) => {
         this.history.syncSummaries(summaries);
-        for (const session of summaries) this.emit({ type: 'session.updated', session });
+        for (const session of summaries) {
+          this.emit({
+            type: 'session.updated',
+            session: projectWireSessionSummary(session, (item) =>
+              this.applyPendingSettingsToSummary({ ...item }),
+            ),
+          });
+        }
       },
       emitStatus: (appSessionId, text) => {
         this.timeline.appendStatus(appSessionId, text);
@@ -629,10 +637,10 @@ export class SessionManager {
         return;
       }
       case 'catalog.tools':
-        await this.emitToolCatalog(cmd.providerSessionId);
+        await this.emitToolCatalog(cmd.appSessionId);
         return;
       case 'catalog.skills':
-        await this.emitSkillCatalog(cmd.providerSessionId);
+        await this.emitSkillCatalog(cmd.appSessionId);
         return;
       case 'mcp.list':
       case 'mcp.add':
@@ -747,12 +755,6 @@ export class SessionManager {
         return;
       case 'sessions.list':
         await this.sessionFiles.list(cmd);
-        return;
-      case 'history.list':
-        this.timeline.list();
-        return;
-      case 'history.page':
-        this.timeline.loadProviderPage(cmd.providerSessionId, cmd.cursor, cmd.limit);
         return;
       case 'session.loadHistory':
         await this.sessionFiles.whenBootReconciled();
@@ -1415,14 +1417,12 @@ export class SessionManager {
         if (closeFailure) {
           this.emitError({
             appSessionId: result.appSessionId,
-            providerSessionId: previousLiveSession?.session.sessionId,
             message: `Could not fully close the compacted session: ${errMsg(closeFailure.error)}`,
             recoverable: true,
           });
         }
         this.emitError({
           appSessionId: result.appSessionId,
-          providerSessionId: result.providerSessionId,
           message: `Compaction moved this conversation to a new session but reloading it failed: ${result.reloadError}. It will reload on your next message.`,
           recoverable: true,
         });
@@ -1579,12 +1579,10 @@ export class SessionManager {
   }
 
   private async catalogSession(
-    providerSessionId?: string,
+    appSessionId?: string,
   ): Promise<{ session: FactorySession; close: () => Promise<void> }> {
     const first = this.registry.liveSessionsSnapshot().at(0);
-    const live = providerSessionId
-      ? this.registry.getLive(providerSessionId)?.session
-      : first?.session;
+    const live = appSessionId ? this.registry.getLive(appSessionId)?.session : first?.session;
     if (live) return { session: live, close: () => Promise.resolve() };
     const session = await this.runtime.createSession({
       cwd: tmpdir(),
@@ -1594,8 +1592,8 @@ export class SessionManager {
     return { session, close: () => session.close() };
   }
 
-  private async emitToolCatalog(providerSessionId?: string): Promise<void> {
-    const { session, close } = await this.catalogSession(providerSessionId);
+  private async emitToolCatalog(appSessionId?: string): Promise<void> {
+    const { session, close } = await this.catalogSession(appSessionId);
     try {
       const result = await session.listTools();
       this.emit({ type: 'catalog.updated', catalog: 'tools', items: arrayItems(result, 'tools') });
@@ -1604,15 +1602,15 @@ export class SessionManager {
     }
   }
 
-  private async emitSkillCatalog(providerSessionId?: string): Promise<void> {
-    const { session, close } = await this.catalogSession(providerSessionId);
+  private async emitSkillCatalog(appSessionId?: string): Promise<void> {
+    const { session, close } = await this.catalogSession(appSessionId);
     try {
       const result = await session.listSkills();
       this.emit({
         type: 'catalog.updated',
         catalog: 'skills',
         items: arrayItems(result, 'skills'),
-        providerSessionId: providerSessionId ?? null,
+        appSessionId: appSessionId ?? null,
       });
     } finally {
       await close();
@@ -1623,7 +1621,6 @@ export class SessionManager {
     code?: string;
     clientRef?: string;
     requestId?: string;
-    providerSessionId?: string;
     appSessionId?: string;
     message: string;
     recoverable?: boolean;

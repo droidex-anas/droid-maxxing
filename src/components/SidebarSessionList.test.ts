@@ -11,7 +11,6 @@ import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 function session(appSessionId: string, updatedAt: number): SessionSummary {
   return {
     appSessionId,
-    providerSessionId: appSessionId,
     sessionPurpose: 'chat',
     role: 'primary',
     title: appSessionId,

@@ -2,37 +2,40 @@ import { ReasoningEffort } from '@factory/droid-sdk';
 
 import type { FactorySession } from '../DroidRuntime.js';
 import type { LiveSession } from '../SessionLifecycle.js';
+import { liveBindingFromSummary } from '../SessionRegistry.js';
 import { droidSessionConfiguration } from '../providers/providerIdentity.js';
 
 export function createCompactionTestLiveSession(
   appSessionId: string,
   session: FactorySession,
 ): LiveSession {
+  const summary = {
+    appSessionId,
+    providerSessionId: session.sessionId,
+    sessionPurpose: 'chat' as const,
+    role: 'user' as const,
+    title: appSessionId,
+    goal: 'test',
+    cwd: '/workspace',
+    workspaceKind: 'folder' as const,
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
+    phase: 'paused' as const,
+    features: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    contextTokens: 0,
+    maxContextTokens: 1_000,
+    createdAt: 1,
+    updatedAt: 1,
+  };
   return {
-    summary: {
-      appSessionId,
-      providerSessionId: session.sessionId,
-      sessionPurpose: 'chat',
-      role: 'user',
-      title: appSessionId,
-      goal: 'test',
-      cwd: '/workspace',
-      workspaceKind: 'folder',
-      configuration: droidSessionConfiguration({
-        modelId: 'model-default',
-        reasoningEffort: ReasoningEffort.Low,
-        interactionMode: 'auto',
-        autonomy: 'low',
-      }),
-      phase: 'paused',
-      features: [],
-      tokensIn: 0,
-      tokensOut: 0,
-      contextTokens: 0,
-      maxContextTokens: 1_000,
-      createdAt: 1,
-      updatedAt: 1,
-    },
+    summary,
+    binding: liveBindingFromSummary(summary),
     session,
     streaming: false,
     autoCompacting: false,

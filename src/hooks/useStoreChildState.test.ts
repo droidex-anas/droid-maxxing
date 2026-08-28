@@ -9,7 +9,6 @@ import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 function session(appSessionId: string): SessionSummary {
   return {
     appSessionId,
-    providerSessionId: `provider-${appSessionId}`,
     sessionPurpose: 'mission-control',
     role: 'primary',
     title: appSessionId,

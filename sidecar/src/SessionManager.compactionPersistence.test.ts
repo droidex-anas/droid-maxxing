@@ -48,7 +48,6 @@ test('failed provider identity persistence does not settle queued work', async (
       h.events.some(
         (event) =>
           event.type === 'error' &&
-          event.providerSessionId === 'provider-9' &&
           event.recoverable === true &&
           event.message === 'Could not persist compacted session identity: history unavailable',
       ),

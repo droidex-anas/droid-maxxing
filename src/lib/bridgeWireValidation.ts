@@ -221,8 +221,6 @@ function isServerEvent(value: unknown): value is ServerEvent {
       );
     case 'history.persistenceRecovered':
       return true;
-    case 'history.list':
-      return Array.isArray(value.sessions) && value.sessions.every(isSessionHistoryEntry);
     case 'browser.updated':
       return isBrowserState(value.state);
     case 'browser.native.request':
@@ -373,14 +371,6 @@ function isEnvironmentReport(value: unknown): boolean {
     isRecord(value.packageManagers) &&
     isRecord(value.auth) &&
     stringArray(value.availableChannels)
-  );
-}
-
-function isSessionHistoryEntry(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    hasStrings(value, ['providerSessionId', 'title']) &&
-    hasNumbers(value, ['modifiedTime', 'createdTime', 'messageCount'])
   );
 }
 

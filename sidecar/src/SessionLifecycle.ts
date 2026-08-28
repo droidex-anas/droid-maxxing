@@ -7,13 +7,14 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
 import { droidexUserDataDir } from './droidexPaths.js';
+import type { ProviderBinding } from './persistence/SessionStore.js';
 import type {
   ClientCommand,
   FactoryDefaultSettings,
   ServerEvent,
   SessionSummary,
 } from './protocol.js';
-import type { SessionRegistry } from './SessionRegistry.js';
+import { liveBindingFromSummary, type SessionRegistry } from './SessionRegistry.js';
 import type { PrimaryAutomaticCompactionTarget, SessionCompaction } from './SessionCompaction.js';
 import type { LiveOperationTarget, SessionContext } from './SessionContext.js';
 import type { ChildSessions } from './ChildSessions.js';
@@ -64,6 +65,7 @@ interface LiveTurnState {
 type SessionCloseMode = 'discard-pending' | 'preserve-pending';
 export interface LiveSession extends LiveTurnState {
   summary: SessionSummary;
+  binding: ProviderBinding;
   session: FactorySession;
   closeMode?: SessionCloseMode;
   closePromise?: Promise<void>;
@@ -192,7 +194,11 @@ export class SessionLifecycle {
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
       d.childSessions.attachParent(appSessionId);
-      d.emit({ type: 'session.created', clientRef: command.clientRef, session: summary });
+      d.emit({
+        type: 'session.created',
+        clientRef: command.clientRef,
+        session: publishedSummary(d.registry, appSessionId),
+      });
       this.driveInBackground(appSessionId, command.goal);
     } catch (error) {
       await this.cleanupFailedOpen(pendingMcpServers, pendingSession, pendingLiveSession);
@@ -229,13 +235,10 @@ export class SessionLifecycle {
     const providerSessionId = historical?.providerSessionId ?? requestedAppSessionId;
     const existing = d.registry.getLive(appSessionId);
     if (existing) {
-      const projectedSummary =
-        d.registry.resolveSummary(appSessionId) ??
-        d.applyPendingSettingsToSummary({ ...existing.summary });
       d.emit({
         type: 'session.created',
         clientRef: `resume:${appSessionId}`,
-        session: projectedSummary,
+        session: publishedSummary(d.registry, appSessionId),
       });
       void d.context.refresh(this.primaryContextTarget(existing));
       return true;
@@ -286,38 +289,32 @@ export class SessionLifecycle {
         summary.compactionTokenLimit = limit;
       }
       this.requireOpenAdmission();
-      const projectedSummary = d.applyPendingSettingsToSummary({ ...summary });
       const liveSession = createLiveSession(summary, session, mcp);
       liveSession.appliedNativeConfiguration = summary.configuration;
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
       d.childSessions.attachParent(appSessionId);
+      const published = publishedSummary(d.registry, appSessionId);
       d.emit({
         type: 'session.created',
         clientRef: `resume:${appSessionId}`,
-        session: projectedSummary,
+        session: published,
       });
-      d.emit({ type: 'session.updated', session: projectedSummary });
-      if (
-        projectedSummary.sessionPurpose === 'mission-control' &&
-        projectedSummary.features.length > 0
-      ) {
+      d.emit({ type: 'session.updated', session: published });
+      if (published.sessionPurpose === 'mission-control' && published.features.length > 0) {
         d.emit({
           type: 'mission.features',
           appSessionId,
-          ...(projectedSummary.missionId !== undefined
-            ? { missionId: projectedSummary.missionId }
-            : {}),
-          features: projectedSummary.features,
+          ...(published.missionId !== undefined ? { missionId: published.missionId } : {}),
+          features: published.features,
         });
       }
       void d.context.refresh(this.primaryContextTarget(liveSession));
       return true;
     } catch (error) {
       await this.cleanupFailedOpen(pendingMcpServers, pendingSession, pendingLiveSession);
-      if (!isOpenAdmissionClosed(error))
-        d.emitError({ appSessionId, providerSessionId, message: errMsg(error) });
+      if (!isOpenAdmissionClosed(error)) d.emitError({ appSessionId, message: errMsg(error) });
       return false;
     }
   }
@@ -357,7 +354,10 @@ export class SessionLifecycle {
   }
 
   async interrupt(requestedAppSessionId: string): Promise<void> {
-    const liveSession = this.dependencies.registry.getLive(requestedAppSessionId);
+    const resolvedAppSessionId =
+      this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+      requestedAppSessionId;
+    const liveSession = this.dependencies.registry.getLive(resolvedAppSessionId);
     if (!liveSession) return;
     const appSessionId = liveSession.summary.appSessionId;
     liveSession.pendingSends = [];
@@ -567,7 +567,10 @@ export class SessionLifecycle {
     };
   }
 
-  private async prepareToSend(appSessionId: string): Promise<LiveSession | undefined> {
+  private async prepareToSend(requestedAppSessionId: string): Promise<LiveSession | undefined> {
+    const appSessionId =
+      this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+      requestedAppSessionId;
     let liveSession = this.dependencies.registry.getLive(appSessionId);
     // A send that lands while the runtime is being released must wait for that
     // close and reopen, not vanish. Retirement makes this window reachable.
@@ -712,8 +715,14 @@ function createLiveSession(
   session: FactorySession,
   mcp: StartedLocalMcpResources,
 ): LiveSession {
+  const base = liveBindingFromSummary(summary);
   return {
     summary,
+    binding: {
+      ...base,
+      providerSessionId: session.sessionId,
+      runtimeGeneration: base.runtimeGeneration === 0 ? 1 : base.runtimeGeneration,
+    },
     session,
     streaming: false,
     pendingSends: [],
@@ -739,4 +748,13 @@ function isOpenAdmissionClosed(error: unknown): boolean {
 
 function errorFromUnknown(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function publishedSummary(
+  registry: SessionRegistry<LiveSession>,
+  appSessionId: string,
+): SessionSummary {
+  const summary = registry.resolveSummary(appSessionId);
+  if (!summary) throw new Error(`Session ${appSessionId} has no published summary.`);
+  return summary;
 }

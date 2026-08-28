@@ -10,7 +10,7 @@ import {
   type LiveOperationTarget,
 } from './SessionContext.js';
 import type { LiveSession } from './SessionLifecycle.js';
-import { SessionRegistry } from './SessionRegistry.js';
+import { liveBindingFromSummary, SessionRegistry } from './SessionRegistry.js';
 import {
   FakeFactoryRuntime,
   FakeFactorySession,
@@ -65,6 +65,7 @@ function registerLive(
   const session = new FakeFactorySession(providerSessionId, {}, h.calls);
   const live: LiveSession = {
     summary: summary(appSessionId, providerSessionId),
+    binding: liveBindingFromSummary(summary(appSessionId, providerSessionId)),
     session,
     streaming: false,
     autoCompacting: false,

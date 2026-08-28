@@ -810,7 +810,7 @@ test('interrupt handles idle, streaming, manual compaction, and auto-compaction 
   const aliased = createHarness([summary('stable-stop', 'provider-stop')]);
   queueLoad(aliased, 'provider-stop');
   await aliased.lifecycle.resume('stable-stop');
-  const aliasedLive = requireLive(aliased, 'provider-stop');
+  const aliasedLive = requireLive(aliased, 'stable-stop');
   aliasedLive.autoCompacting = true;
   aliased.calls.length = 0;
   await aliased.lifecycle.interrupt('provider-stop');

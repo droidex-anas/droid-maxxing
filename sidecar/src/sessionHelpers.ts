@@ -315,8 +315,7 @@ export function buildCreatedSessionSummary(input: {
   const { command, appSessionId } = input;
   const cwd = command.cwd ?? '';
   return {
-    appSessionId,
-    providerSessionId: appSessionId,
+    appSessionId: input.appSessionId,
     ...(command.sessionPurpose === 'mission-control' ? { missionId: appSessionId } : {}),
     sessionPurpose: command.sessionPurpose,
     role: 'primary',
@@ -363,8 +362,6 @@ export function buildResumedSession(input: BuildResumedSessionInput): {
   return {
     summary: {
       appSessionId: input.appSessionId,
-      providerSessionId: input.providerSessionId,
-      compactedFromProviderSessionIds: input.historical?.compactedFromProviderSessionIds ?? [],
       ...classified,
       ...(missionId !== undefined ? { missionId } : {}),
       ...resumedLocation(input),
@@ -406,7 +403,7 @@ function resumedLocation(
     historical?.title,
   );
   return {
-    title: title.length > 0 ? title : `Session ${input.providerSessionId.slice(0, 8)}`,
+    title: title.length > 0 ? title : `Session ${input.appSessionId.slice(0, 8)}`,
     goal: historical?.goal ?? '',
     cwd,
     workspaceKind: cwd ? 'folder' : (historical?.workspaceKind ?? 'none'),
