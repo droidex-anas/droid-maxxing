@@ -49,11 +49,11 @@ about sockets, batches, replay cursors, or renderer frame cadence.
    replay batches, and client socket buffers all have explicit ceilings.
 6. **A reconnect cannot silently skip a known gap.** It receives retained
    batches or an explicit reset reason.
-7. **Mixed installed versions remain functional.** Batch envelopes are sent
-   only to renderers that advertise protocol version 2. A legacy renderer gets
-   the same ordered events unpacked into the previous one-event wire format.
-8. **The new renderer accepts both formats.** This protects renderer-first
-   development reloads and any temporary update transition.
+7. **Unsupported protocol versions are rejected.** Clients that do not advertise
+   the current bridge protocol are closed with code 1002. There is no unpacked
+   one-event compatibility path.
+8. **The renderer speaks one wire format.** Dual-format acceptance was dropped
+   with the compatibility path; a client must advertise the current protocol.
 
 ## Wire protocol
 
