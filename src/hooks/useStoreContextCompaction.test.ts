@@ -6,7 +6,6 @@ import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const session = (autoCompactions = 0): SessionSummary => ({
   appSessionId: 'm1',
-  providerSessionId: 'provider-1',
   sessionPurpose: 'chat',
   role: 'primary',
   title: 'Context test',
@@ -69,7 +68,6 @@ test('SESSION_UPDATED invalidates stale context stats when compaction generation
       m2: {
         ...session(),
         appSessionId: 'm2',
-        providerSessionId: 'provider-2',
       },
     },
     contextStats: {

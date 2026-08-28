@@ -132,8 +132,6 @@ export interface ChildSessionSummary {
 
 export interface SessionSummary {
   appSessionId: string;
-  providerSessionId?: string;
-  compactedFromProviderSessionIds?: string[];
   missionId?: string;
   sessionPurpose: SessionPurpose;
   role: 'primary' | 'user';
@@ -168,6 +166,7 @@ export interface SessionSummary {
   autoCompactions?: number;
   createdAt: number;
   updatedAt: number;
+  sessionWebUrl?: string;
 }
 
 export interface TranscriptEvent {
@@ -329,15 +328,6 @@ export interface ContextBreakdownSnapshot {
   usedTokens: number;
   freeTokens: number;
   categories: ContextBreakdownCategory[];
-}
-
-export interface SessionHistoryEntry {
-  providerSessionId: string;
-  title: string;
-  cwd?: string;
-  modifiedTime: number;
-  createdTime: number;
-  messageCount: number;
 }
 
 // One transcript line that matched a sessions.search query, shaped for the
@@ -589,8 +579,8 @@ export type ClientCommand =
   | { type: 'cli.install'; channel: InstallChannel }
   | { type: 'cli.update'; channel?: InstallChannel }
   | { type: 'catalog.models' }
-  | { type: 'catalog.tools'; providerSessionId?: string }
-  | { type: 'catalog.skills'; providerSessionId?: string }
+  | { type: 'catalog.tools'; appSessionId?: string; providerInstanceId?: ProviderInstanceId }
+  | { type: 'catalog.skills'; appSessionId?: string; providerInstanceId?: ProviderInstanceId }
   | { type: 'settings.defaults' }
   | {
       type: 'session.create';
@@ -693,8 +683,6 @@ export type ClientCommand =
       cancelled: boolean;
       answers: { index: number; question: string; answer: string }[];
     }
-  | { type: 'history.list' }
-  | { type: 'history.page'; providerSessionId: string; cursor?: string; limit?: number }
   | {
       type: 'settings.agent.update';
       appSessionId?: string;
@@ -853,7 +841,8 @@ export type ServerEvent =
       type: 'catalog.updated';
       catalog: 'models' | 'tools' | 'skills';
       items: unknown[];
-      providerSessionId?: string | null;
+      appSessionId?: string | null;
+      providerInstanceId?: ProviderInstanceId | null;
     }
   | { type: 'settings.defaults'; defaults: FactoryDefaultSettings }
   | {
@@ -864,7 +853,6 @@ export type ServerEvent =
       // can tell their own failure apart from a foreign command's.
       requestId?: string;
       appSessionId?: string;
-      providerSessionId?: string;
       message: string;
       recoverable?: boolean;
     }
@@ -912,7 +900,6 @@ export type ServerEvent =
       indexingIncomplete: boolean;
     }
   | { type: 'history.persistenceRecovered' }
-  | { type: 'history.list'; sessions: SessionHistoryEntry[] }
   | { type: 'browser.updated'; state: BrowserState }
   | { type: 'browser.native.request'; request: BrowserNativeRequest }
   | { type: 'browser.closed'; appSessionId: string }

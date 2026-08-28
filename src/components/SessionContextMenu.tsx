@@ -13,19 +13,21 @@ const MENU_MARGIN = 8;
 // estimate is computed per-open instead of using a worst-case constant.
 const MENU_CHROME_PX = 18;
 const MENU_ROW_PX = 30;
+const DROID_SESSION_WEB_PREFIX = 'https://app.factory.ai/sessions/';
 
 // POSIX single-quote: wrap in '...', escaping embedded quotes as '\''. The
 // resume recipe is pasted into a shell, so an unquoted path with spaces (or
 // shell metacharacters) would break or execute unintended text.
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
+function droidSessionIdFromWebUrl(url: string): string | undefined {
+  if (!url.startsWith(DROID_SESSION_WEB_PREFIX)) return undefined;
+  const id = url.slice(DROID_SESSION_WEB_PREFIX.length);
+  return id.length > 0 && !id.includes('/') ? id : undefined;
+}
+
 const itemClass =
   'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:bg-droid-elevated/60 focus-visible:text-droid-text focus-visible:outline-none';
-
-// Where the Factory web app renders a synced session. Deep links only resolve
-// for sessions that cloud sync has uploaded (signed-in, non-airgap).
-const sessionWebLink = (providerSessionId: string) =>
-  `https://app.factory.ai/sessions/${providerSessionId}`;
 
 function copyText(text: string, message: string): void {
   // The Electron renderer always exposes the clipboard API; a rejected write
@@ -42,9 +44,8 @@ export interface SessionContextMenuProps {
   pinned: boolean;
   // Absent for workspace-less sessions; the Copy Working Directory row hides.
   cwd?: string;
-  // The real Droid session id (vs our appSessionId). Absent until the harness
-  // assigns one; the session-id/link rows hide in that case.
-  providerSessionId?: string;
+  // Sidecar-computed web URL. Present for Droid once a native session exists.
+  sessionWebUrl?: string;
   onRename: () => void;
   onTogglePin: () => void;
   onArchive: () => void;
@@ -83,7 +84,7 @@ export function SessionContextMenuPanel({
   y,
   pinned,
   cwd,
-  providerSessionId,
+  sessionWebUrl,
   onRename,
   onTogglePin,
   onArchive,
@@ -150,7 +151,8 @@ export function SessionContextMenuPanel({
   // unclamped; the clamp applies on the client where a window exists.
   const viewportWidth = typeof window === 'undefined' ? undefined : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? undefined : window.innerHeight;
-  const rowCount = 4 + (cwd ? 1 : 0) + (providerSessionId ? 2 : 0);
+  const sessionCopyId = sessionWebUrl ? droidSessionIdFromWebUrl(sessionWebUrl) : undefined;
+  const rowCount = 4 + (cwd ? 1 : 0) + (sessionCopyId ? 1 : 0) + (sessionWebUrl ? 1 : 0);
   const estimatedMenuHeight = MENU_CHROME_PX + rowCount * MENU_ROW_PX;
   const left =
     viewportWidth === undefined
@@ -241,7 +243,7 @@ export function SessionContextMenuPanel({
           Copy Working Directory
         </button>
       )}
-      {providerSessionId && (
+      {sessionCopyId && (
         <button
           type="button"
           role="menuitem"
@@ -250,10 +252,10 @@ export function SessionContextMenuPanel({
           // a path with spaces pastes back intact.
           onClick={() => {
             const resume = cwd
-              ? `cd ${shellQuote(cwd)} && droid -r ${shellQuote(providerSessionId)}`
-              : `droid -r ${shellQuote(providerSessionId)}`;
+              ? `cd ${shellQuote(cwd)} && droid -r ${shellQuote(sessionCopyId)}`
+              : `droid -r ${shellQuote(sessionCopyId)}`;
             copyAndClose(
-              providerSessionId,
+              sessionCopyId,
               `Droid session ID copied. Continue in the official CLI: ${resume}`,
             );
           }}
@@ -263,12 +265,12 @@ export function SessionContextMenuPanel({
           Copy Session ID
         </button>
       )}
-      {providerSessionId && (
+      {sessionWebUrl && (
         <button
           type="button"
           role="menuitem"
           onClick={() => {
-            copyAndClose(sessionWebLink(providerSessionId), 'Session link copied.');
+            copyAndClose(sessionWebUrl, 'Session link copied.');
           }}
           className={itemClass}
         >

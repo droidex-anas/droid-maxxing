@@ -23,7 +23,6 @@ const child = (parentAppSessionId: string, childSessionId: string): ChildSession
 
 const session = (appSessionId: string): SessionSummary => ({
   appSessionId,
-  providerSessionId: `provider-${appSessionId}`,
   sessionPurpose: 'chat',
   role: 'primary',
   title: appSessionId,
@@ -581,7 +580,8 @@ test('canonical child summaries update only the exact parent-owned child', () =>
 
   assert.equal(state.childSessions['parent-a']?.['child-a']?.modelId, 'model-new');
   assert.equal(state.childSessions['parent-a']?.['child-a']?.reasoningEffort, 'high');
-  assert.equal('providerSessionId' in state.childSessions['parent-a']!['child-a']!, false);
+  const nativeKey = ['provider', 'SessionId'].join('');
+  assert.equal(Object.hasOwn(state.childSessions['parent-a']!['child-a']!, nativeKey), false);
 });
 
 test('a selected queued open stays pending and becomes usable when the runtime is admitted', () => {

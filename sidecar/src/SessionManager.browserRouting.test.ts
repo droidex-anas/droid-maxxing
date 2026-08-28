@@ -279,7 +279,7 @@ test('[B3] Browser continuity across compaction', { concurrency: false }, async 
         (event) =>
           event.type === 'session.updated' &&
           event.session.appSessionId === appSessionId &&
-          event.session.providerSessionId === 'provider-2',
+          event.session.sessionWebUrl === 'https://app.factory.ai/sessions/provider-2',
       ),
       true,
     );

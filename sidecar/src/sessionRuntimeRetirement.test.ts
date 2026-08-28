@@ -123,6 +123,13 @@ function liveSession(appSessionId: string, updatedAt: number): LiveSession {
   } satisfies SessionSummary;
   return {
     summary,
+    binding: {
+      providerDriverKind: 'droid',
+      providerInstanceId: 'droid',
+      providerSessionId: appSessionId,
+      previousProviderSessionIds: [],
+      runtimeGeneration: 1,
+    },
     session: new FakeFactorySession(appSessionId, {}, []),
     streaming: false,
     autoCompacting: false,

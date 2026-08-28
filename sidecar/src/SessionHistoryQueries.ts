@@ -65,7 +65,7 @@ export class SessionHistoryQueries {
       if (events.length === 0) throw new Error('No stored transcript for this chat.');
       const markdown = transcriptToMarkdown(events, {
         title: cmd.title ?? summary?.title ?? 'Chat export',
-        providerSessionId,
+        appSessionId,
         cwd: summary?.cwd,
         // The window caps at 100k events; an export missing older turns must
         // say so rather than read as the complete chat.

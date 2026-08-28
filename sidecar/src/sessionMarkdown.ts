@@ -10,7 +10,7 @@ const MAX_THINKING_CHARS = 4_000;
 
 export interface SessionMarkdownMeta {
   title: string;
-  providerSessionId: string;
+  appSessionId: string;
   cwd?: string;
   // Caveat shown right under the header, e.g. when the export is truncated.
   note?: string;
@@ -74,7 +74,7 @@ export function transcriptToMarkdown(events: TranscriptEvent[], meta: SessionMar
   const header = [
     `# ${meta.title}`,
     '',
-    `- **Droid session:** \`${meta.providerSessionId}\` — resume with \`droid -r ${meta.providerSessionId}\``,
+    `- **Session:** \`${meta.appSessionId}\``,
     ...(meta.cwd ? [`- **Directory:** \`${meta.cwd}\``] : []),
     `- **Exported:** ${exportedAt.toISOString()}`,
   ].join('\n');

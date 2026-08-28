@@ -7,13 +7,14 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
 import { droidexUserDataDir } from './droidexPaths.js';
+import type { ProviderBinding } from './persistence/SessionStore.js';
 import type {
   ClientCommand,
   FactoryDefaultSettings,
   ServerEvent,
   SessionSummary,
 } from './protocol.js';
-import type { SessionRegistry } from './SessionRegistry.js';
+import { liveBindingFromSummary, type SessionRegistry } from './SessionRegistry.js';
 import type { PrimaryAutomaticCompactionTarget, SessionCompaction } from './SessionCompaction.js';
 import type { LiveOperationTarget, SessionContext } from './SessionContext.js';
 import type { ChildSessions } from './ChildSessions.js';
@@ -64,6 +65,7 @@ interface LiveTurnState {
 type SessionCloseMode = 'discard-pending' | 'preserve-pending';
 export interface LiveSession extends LiveTurnState {
   summary: SessionSummary;
+  binding: ProviderBinding;
   session: FactorySession;
   closeMode?: SessionCloseMode;
   closePromise?: Promise<void>;
@@ -316,8 +318,7 @@ export class SessionLifecycle {
       return true;
     } catch (error) {
       await this.cleanupFailedOpen(pendingMcpServers, pendingSession, pendingLiveSession);
-      if (!isOpenAdmissionClosed(error))
-        d.emitError({ appSessionId, providerSessionId, message: errMsg(error) });
+      if (!isOpenAdmissionClosed(error)) d.emitError({ appSessionId, message: errMsg(error) });
       return false;
     }
   }
@@ -357,7 +358,10 @@ export class SessionLifecycle {
   }
 
   async interrupt(requestedAppSessionId: string): Promise<void> {
-    const liveSession = this.dependencies.registry.getLive(requestedAppSessionId);
+    const resolvedAppSessionId =
+      this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+      requestedAppSessionId;
+    const liveSession = this.dependencies.registry.getLive(resolvedAppSessionId);
     if (!liveSession) return;
     const appSessionId = liveSession.summary.appSessionId;
     liveSession.pendingSends = [];
@@ -567,7 +571,10 @@ export class SessionLifecycle {
     };
   }
 
-  private async prepareToSend(appSessionId: string): Promise<LiveSession | undefined> {
+  private async prepareToSend(requestedAppSessionId: string): Promise<LiveSession | undefined> {
+    const appSessionId =
+      this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+      requestedAppSessionId;
     let liveSession = this.dependencies.registry.getLive(appSessionId);
     // A send that lands while the runtime is being released must wait for that
     // close and reopen, not vanish. Retirement makes this window reachable.
@@ -712,8 +719,14 @@ function createLiveSession(
   session: FactorySession,
   mcp: StartedLocalMcpResources,
 ): LiveSession {
+  const base = liveBindingFromSummary(summary);
   return {
     summary,
+    binding: {
+      ...base,
+      providerSessionId: session.sessionId,
+      runtimeGeneration: base.runtimeGeneration === 0 ? 1 : base.runtimeGeneration,
+    },
     session,
     streaming: false,
     pendingSends: [],

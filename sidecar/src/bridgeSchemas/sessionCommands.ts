@@ -9,6 +9,7 @@ import {
 } from '../protocol.js';
 import {
   droidMissionConfigurationSchema,
+  providerInstanceIdSchema,
   reasoningEffortSchema,
 } from '../providers/providerIdentity.js';
 import {
@@ -49,10 +50,12 @@ const questionAnswerSchema = z
 export const sessionCommandSchemas = {
   'catalog.models': strictCommand('catalog.models', {}),
   'catalog.tools': strictCommand('catalog.tools', {
-    providerSessionId: optionalIdStringSchema,
+    appSessionId: optionalIdStringSchema,
+    providerInstanceId: providerInstanceIdSchema.optional(),
   }),
   'catalog.skills': strictCommand('catalog.skills', {
-    providerSessionId: optionalIdStringSchema,
+    appSessionId: optionalIdStringSchema,
+    providerInstanceId: providerInstanceIdSchema.optional(),
   }),
   'settings.defaults': strictCommand('settings.defaults', {}),
   'settings.agent.update': strictCommand('settings.agent.update', {
@@ -146,12 +149,6 @@ export const sessionCommandSchemas = {
   'history.indexingIdle': strictCommand('history.indexingIdle', {
     isIdle: z.boolean(),
   }),
-  'history.list': strictCommand('history.list', {}),
-  'history.page': strictCommand('history.page', {
-    providerSessionId: idStringSchema,
-    cursor: optionalIdStringSchema,
-    limit: optionalHistoryLimitSchema,
-  }),
   'child.open': strictCommand('child.open', {
     parentAppSessionId: idStringSchema,
     childSessionId: idStringSchema,
@@ -223,8 +220,6 @@ export const sessionCommandSchemas = {
     | 'session.loadHistory'
     | 'sessions.search'
     | 'history.indexingIdle'
-    | 'history.list'
-    | 'history.page'
     | 'child.open'
     | 'child.send'
     | 'child.sendNow'

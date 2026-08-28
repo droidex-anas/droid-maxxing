@@ -226,7 +226,7 @@ export default function PromptInput({
       promptQueue: current.promptQueue,
       selectedChild: current.selectedChild,
       skills: current.skills,
-      skillsProviderSessionId: current.skillsProviderSessionId,
+      skillsAppSessionId: current.skillsAppSessionId,
       specMode: current.specMode,
     }),
     shallowEqual,
@@ -438,9 +438,9 @@ export default function PromptInput({
   }, []);
 
   const cwd = activeSession?.cwd ?? state.draftChat?.cwd ?? null;
-  const skillsProviderSessionId = activeSession?.providerSessionId ?? null;
+  const skillsAppSessionId = activeSession?.appSessionId ?? null;
   const pendingSkillsRequest = useRef<{
-    providerSessionId: string | null;
+    appSessionId: string | null;
     requestedAt: number;
   } | null>(null);
 
@@ -580,10 +580,10 @@ export default function PromptInput({
 
   const invocableSkills = useMemo(
     () =>
-      state.skillsProviderSessionId === skillsProviderSessionId
+      state.skillsAppSessionId === skillsAppSessionId
         ? state.skills.filter((s) => s.userInvocable !== false && s.enabled !== false)
         : [],
-    [skillsProviderSessionId, state.skills, state.skillsProviderSessionId],
+    [skillsAppSessionId, state.skills, state.skillsAppSessionId],
   );
 
   useEffect(() => {
@@ -591,23 +591,22 @@ export default function PromptInput({
       pendingSkillsRequest.current = null;
       return;
     }
-    if (state.skillsProviderSessionId === skillsProviderSessionId) {
+    if (state.skillsAppSessionId === skillsAppSessionId) {
       pendingSkillsRequest.current = null;
       return;
     }
     const pending = pendingSkillsRequest.current;
     const now = Date.now();
-    if (pending?.providerSessionId === skillsProviderSessionId && now - pending.requestedAt < 2_000)
-      return;
+    if (pending?.appSessionId === skillsAppSessionId && now - pending.requestedAt < 2_000) return;
     pendingSkillsRequest.current = {
-      providerSessionId: skillsProviderSessionId,
+      appSessionId: skillsAppSessionId,
       requestedAt: now,
     };
-    listSkills(activeSession?.providerSessionId);
+    listSkills(activeSession?.appSessionId);
   }, [
-    activeSession?.providerSessionId,
-    skillsProviderSessionId,
-    state.skillsProviderSessionId,
+    activeSession?.appSessionId,
+    skillsAppSessionId,
+    state.skillsAppSessionId,
     trigger?.kind,
     trigger?.query,
     trigger?.start,

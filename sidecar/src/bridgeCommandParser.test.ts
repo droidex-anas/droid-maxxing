@@ -149,8 +149,6 @@ const validCommands = {
     cancelled: false,
     answers: [{ index: 0, question: 'Q', answer: 'A' }],
   },
-  'history.list': { type: 'history.list' },
-  'history.page': { type: 'history.page', providerSessionId: 'native-1' },
   'settings.agent.update': { type: 'settings.agent.update', agent: 'primary' },
   'settings.compaction.update': { type: 'settings.compaction.update' },
   'browser.open': { type: 'browser.open', appSessionId: 'app-1', url: 'https://example.test' },
@@ -219,7 +217,7 @@ function bytesOf(count: number, char = 'a'): string {
 }
 
 test('every ClientCommand discriminant has exactly one valid fixture', () => {
-  assert.equal(CLIENT_COMMAND_TYPES.length, 60);
+  assert.equal(CLIENT_COMMAND_TYPES.length, 58);
   for (const type of CLIENT_COMMAND_TYPES) {
     const result = parseObject(validCommands[type]);
     assert.equal(result.ok, true, type);

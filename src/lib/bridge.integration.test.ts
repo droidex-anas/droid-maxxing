@@ -214,7 +214,6 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
     assert.equal(await reanchoring, 2);
     const session = {
       appSessionId: 'r1',
-      providerSessionId: 'provider-r1',
       sessionPurpose: 'chat',
       role: 'primary',
       title: 'R1',

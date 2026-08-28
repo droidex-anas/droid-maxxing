@@ -71,8 +71,8 @@ export const requestRuntimeStatus = () => {
 export const listModels = () => {
   bridge.send({ type: 'catalog.models' });
 };
-export const listSkills = (providerSessionId?: string) => {
-  bridge.send({ type: 'catalog.skills', providerSessionId });
+export const listSkills = (appSessionId?: string) => {
+  bridge.send({ type: 'catalog.skills', appSessionId });
 };
 export const listMcpServers = (requestId: string, cwd?: string) => {
   bridge.send({ type: 'mcp.list', requestId, ...(cwd ? { cwd } : {}) });

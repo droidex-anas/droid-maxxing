@@ -65,7 +65,6 @@ export type McpServerEvent =
   | {
       type: 'mcp.authRequested';
       requestId: string;
-      providerSessionId?: string;
       serverName?: string;
       authUrl?: string;
       message?: string;

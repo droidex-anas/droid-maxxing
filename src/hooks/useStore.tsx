@@ -350,7 +350,7 @@ export interface AppState {
 
   // Skills catalog (for / invocation)
   skills: SkillInfo[];
-  skillsProviderSessionId?: string | null;
+  skillsAppSessionId?: string | null;
 
   // Attachments for the first message of a not-yet-created session, keyed by clientRef.
   pendingCompose: Partial<Record<string, { text: string; skills: string[]; files: string[] }>>;
@@ -452,7 +452,6 @@ type Action =
   | {
       type: 'SESSION_ERROR';
       appSessionId?: string;
-      providerSessionId?: string;
       message: string;
     }
   | { type: 'SESSION_CREATE_FAILED'; clientRef: string; message: string }
@@ -586,7 +585,7 @@ type Action =
   | {
       type: 'SKILLS_LIST';
       skills: SkillInfo[];
-      providerSessionId: string | null;
+      appSessionId: string | null;
     }
   | { type: 'FACTORY_DEFAULTS'; defaults: FactoryDefaultSettings }
   | { type: 'SET_AGENT_MODEL'; agent: AgentKind; modelId?: string }
@@ -705,7 +704,7 @@ export const initialState: AppState = {
   diffView: loadDiffView(),
   sessionSettingOverrides: {},
   skills: [],
-  skillsProviderSessionId: undefined,
+  skillsAppSessionId: undefined,
   agentConfig: loadAgentConfig(),
   pendingCompose: {},
   lastCreatedSessionRequest: null,
@@ -906,10 +905,8 @@ function baseReducer(state: AppState, action: Action): AppState {
               contextUpdatedAt: previous.contextUpdatedAt,
             }
           : incoming;
-      const previousCompactions =
-        (previous?.compactedFromProviderSessionIds?.length ?? 0) + (previous?.autoCompactions ?? 0);
-      const nextCompactions =
-        (m.compactedFromProviderSessionIds?.length ?? 0) + (m.autoCompactions ?? 0);
+      const previousCompactions = previous?.autoCompactions ?? 0;
+      const nextCompactions = m.autoCompactions ?? 0;
       const contextStats =
         nextCompactions > previousCompactions
           ? {
@@ -1891,7 +1888,7 @@ function baseReducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         skills: action.skills,
-        skillsProviderSessionId: action.providerSessionId,
+        skillsAppSessionId: action.appSessionId,
       };
 
     case 'FACTORY_DEFAULTS': {
@@ -2163,7 +2160,6 @@ export function adaptEvent(ev: ServerEvent): Action | null {
         return {
           type: 'SESSION_ERROR',
           appSessionId: ev.appSessionId,
-          providerSessionId: ev.providerSessionId,
           message: ev.message,
         };
       }
@@ -2216,7 +2212,7 @@ export function adaptEvent(ev: ServerEvent): Action | null {
         return {
           type: 'SKILLS_LIST',
           skills,
-          providerSessionId: ev.providerSessionId ?? null,
+          appSessionId: ev.appSessionId ?? null,
         };
       }
       return null;

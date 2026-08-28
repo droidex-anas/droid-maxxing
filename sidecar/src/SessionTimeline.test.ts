@@ -4,7 +4,6 @@ import test from 'node:test';
 import type {
   ChildSessionSummary,
   ServerEvent,
-  SessionHistoryEntry,
   SessionSummary,
   TranscriptEvent,
 } from './protocol.js';
@@ -45,21 +44,22 @@ function createHarness(options: HarnessOptions = {}) {
   const summaries = options.summaries ?? [];
   const liveAppSessionIds = new Set(options.liveAppSessionIds ?? []);
   const loaders: SessionTimelineLoaders = {
-    list: () => [],
     page: () => ({ events: [] }),
     hydrateMission: () => ({ progress: [], transcripts: [] }),
     resolveChain: (_appSessionId, providerSessionId) => [providerSessionId],
     transcriptWindow: () => ({ events: [] }),
     ...options.loaders,
   };
+  const resolve = (id: string) =>
+    summaries.find(
+      (summary) =>
+        summary.appSessionId === id ||
+        summary.providerSessionId === id ||
+        summary.compactedFromProviderSessionIds?.includes(id),
+    );
   const registry: SessionTimelineRegistry = {
-    resolveSummary: (id) =>
-      summaries.find(
-        (summary) =>
-          summary.appSessionId === id ||
-          summary.providerSessionId === id ||
-          summary.compactedFromProviderSessionIds?.includes(id),
-      ),
+    resolveSummary: resolve,
+    getCanonicalSummary: resolve,
     getLive: (id) => (liveAppSessionIds.has(id) ? true : undefined),
   };
   const timeline = new SessionTimeline({
@@ -159,16 +159,6 @@ function waitForTestCoalesce(): Promise<void> {
   return new Promise((resolve) =>
     setTimeout(resolve, TEST_COALESCE_MS + TEST_COALESCE_SETTLE_MARGIN_MS),
   );
-}
-
-function historyEntry(providerSessionId: string, modifiedTime: number): SessionHistoryEntry {
-  return {
-    providerSessionId,
-    title: providerSessionId,
-    modifiedTime,
-    createdTime: 1,
-    messageCount: 1,
-  };
 }
 
 function delta(
@@ -564,6 +554,7 @@ test('older restore prepends only transcripts and preserves page telemetry', () 
   const timeline = new SessionTimeline({
     registry: {
       resolveSummary: () => summary('app-1', 'provider-1'),
+      getCanonicalSummary: () => summary('app-1', 'provider-1'),
       getLive: () => undefined,
     },
     history: {
@@ -578,7 +569,6 @@ test('older restore prepends only transcripts and preserves page telemetry', () 
     emit: (emitted) => harness.emitted.push(emitted),
     emitError: (error) => harness.errors.push(error),
     loaders: {
-      list: () => [],
       page: () => ({ events: [] }),
       hydrateMission: () => ({ progress: [], transcripts: [] }),
       resolveChain: () => ['provider-1'],
@@ -665,7 +655,6 @@ test('non-live failure emits stable recoverable errors and permits retry', () =>
   assert.deepEqual(harness.errors, [
     {
       appSessionId: 'stable-app',
-      providerSessionId: 'provider-current',
       message: 'temporarily unavailable',
       recoverable: true,
     },
@@ -703,48 +692,10 @@ test('recording failure prevents a history page after a partial write', () => {
   assert.deepEqual(harness.errors, [
     {
       appSessionId: 'stable-app',
-      providerSessionId: 'provider-current',
       message: 'index unavailable',
       recoverable: true,
     },
   ]);
-});
-
-test('legacy provider pages keep their shape, identity, order, limit, and error behavior', () => {
-  const calls: unknown[][] = [];
-  let fail = false;
-  const events = [transcript('page-first'), transcript('page-second')];
-  const harness = createHarness({
-    summaries: [summary('stable-app', 'provider-current')],
-    loaders: {
-      page: (...args) => {
-        calls.push(args);
-        if (fail) throw new Error('page failed');
-        return { events };
-      },
-    },
-  });
-
-  harness.timeline.loadProviderPage('stable-app', '40', 25);
-
-  assert.deepEqual(calls[0], ['provider-current', 'stable-app', '40', 25]);
-  assert.deepEqual(
-    harness.recorded.map((event) => event.id),
-    ['page-first', 'page-second'],
-  );
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal('mode' in page, false);
-  assert.equal('loadedCount' in page, false);
-
-  fail = true;
-  harness.timeline.loadProviderPage('provider-current');
-  assert.deepEqual(harness.errors.at(-1), {
-    appSessionId: 'stable-app',
-    providerSessionId: 'provider-current',
-    message: 'page failed',
-  });
 });
 
 test('child history loads a canonical replace batch and reports replay failures for retry', () => {
@@ -808,7 +759,6 @@ test('child history loads a canonical replace batch and reports replay failures 
   });
   assert.deepEqual(harness.errors.at(-1), {
     appSessionId: 'app-1',
-    providerSessionId: 'child-provider',
     message: 'not flushed',
     recoverable: true,
   });
@@ -939,26 +889,6 @@ test('automatic compaction appends a persistent provider-identified divider', ()
     },
   ]);
   assert.deepEqual(harness.trace, ['record:compaction-worker-1-summary-1', 'emit:event.appended']);
-});
-
-test('history listing preserves loader ordering and reports loader failures', () => {
-  const sessions = [historyEntry('newer', 2), historyEntry('older', 1)];
-  let fail = false;
-  const harness = createHarness({
-    loaders: {
-      list: () => {
-        if (fail) throw new Error('list failed');
-        return sessions;
-      },
-    },
-  });
-
-  harness.timeline.list();
-  assert.deepEqual(harness.emitted, [{ type: 'history.list', sessions }]);
-
-  fail = true;
-  harness.timeline.list();
-  assert.deepEqual(harness.errors, [{ message: 'list failed' }]);
 });
 
 const CANONICAL_IDENTITY: CanonicalIdentity = {

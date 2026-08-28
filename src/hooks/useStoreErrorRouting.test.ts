@@ -12,7 +12,6 @@ import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const session: SessionSummary = {
   appSessionId: 'app-1',
-  providerSessionId: 'provider-1',
   sessionPurpose: 'chat',
   role: 'primary',
   title: 'Chat',
@@ -90,7 +89,6 @@ test('a primary error fails only the primary session', () => {
   const action = adaptEvent({
     type: 'error',
     appSessionId: 'app-1',
-    providerSessionId: 'provider-1',
     message: 'resume failed',
   });
   assert.ok(action);
@@ -173,7 +171,6 @@ test('a recoverable parent error stays out of reducer state', () => {
   const action = adaptEvent({
     type: 'error',
     appSessionId: 'app-1',
-    providerSessionId: 'provider-1',
     message: 'history restore failed',
     recoverable: true,
   });

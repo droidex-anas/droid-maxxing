@@ -15,7 +15,7 @@ function render(props: Partial<SessionContextMenuProps> = {}): string {
       y: 40,
       pinned: false,
       cwd: '/repo',
-      providerSessionId: 'droid-123',
+      sessionWebUrl: 'https://app.factory.ai/sessions/droid-123',
       onRename: () => undefined,
       onTogglePin: () => undefined,
       onArchive: () => undefined,
@@ -101,8 +101,8 @@ test('SessionContextMenu separator is exposed to assistive technology', () => {
   assert.match(render(), /role="separator"/);
 });
 
-test('SessionContextMenu hides the session id and link rows until the harness assigns an id', () => {
-  const html = render({ providerSessionId: undefined });
+test('SessionContextMenu hides the session id and link rows until a web URL exists', () => {
+  const html = render({ sessionWebUrl: undefined });
   assert.doesNotMatch(html, /Copy Session ID/);
   assert.doesNotMatch(html, /Copy Session Link/);
   assert.match(html, /Copy Working Directory/);

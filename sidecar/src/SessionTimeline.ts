@@ -1,6 +1,5 @@
 import {
   hydrateHistoricalSession,
-  loadSessionHistory,
   loadSessionPage,
   loadSessionTranscriptWindow,
   resolveSessionChain,
@@ -30,7 +29,6 @@ interface TimelineHistory {
 type TimelineError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
 export interface SessionTimelineLoaders {
-  list: typeof loadSessionHistory;
   page: typeof loadSessionPage;
   hydrateMission: typeof hydrateHistoricalSession;
   resolveChain: typeof resolveSessionChain;
@@ -39,6 +37,7 @@ export interface SessionTimelineLoaders {
 
 export interface SessionTimelineRegistry {
   resolveSummary(id: string): SessionSummary | undefined;
+  getCanonicalSummary(id: string): SessionSummary | undefined;
   getLive(id: string): unknown;
 }
 
@@ -129,7 +128,6 @@ export class SessionTimeline {
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
     this.loaders = dependencies.loaders ?? {
-      list: loadSessionHistory,
       page: loadSessionPage,
       hydrateMission: hydrateHistoricalSession,
       resolveChain: resolveSessionChain,
@@ -144,16 +142,10 @@ export class SessionTimeline {
     });
   }
 
-  list(): void {
-    try {
-      this.dependencies.emit({ type: 'history.list', sessions: this.loaders.list() });
-    } catch (error) {
-      this.dependencies.emitError({ message: errMsg(error) });
-    }
-  }
-
   load(appSessionIdOrProviderSessionId: string, cursor?: string, limit?: number): void {
-    const summary = this.dependencies.registry.resolveSummary(appSessionIdOrProviderSessionId);
+    const summary =
+      this.dependencies.registry.getCanonicalSummary(appSessionIdOrProviderSessionId) ??
+      this.dependencies.registry.resolveSummary(appSessionIdOrProviderSessionId);
     const appSessionId = summary?.appSessionId ?? appSessionIdOrProviderSessionId;
     const providerSessionId = summary?.providerSessionId ?? appSessionIdOrProviderSessionId;
     try {
@@ -205,31 +197,8 @@ export class SessionTimeline {
       this.dependencies.emit({ type: 'session.history.error', appSessionId, message });
       this.dependencies.emitError({
         appSessionId,
-        providerSessionId,
         message,
         recoverable: true,
-      });
-    }
-  }
-
-  loadProviderPage(providerSessionId: string, cursor?: string, limit?: number): void {
-    const summary = this.dependencies.registry.resolveSummary(providerSessionId);
-    const appSessionId = summary?.appSessionId ?? providerSessionId;
-    const resolvedProviderSessionId = summary?.providerSessionId ?? providerSessionId;
-    try {
-      const page = this.loaders.page(resolvedProviderSessionId, appSessionId, cursor, limit);
-      this.record(page.events);
-      this.dependencies.emit({
-        type: 'session.history',
-        appSessionId,
-        progress: [],
-        transcripts: page.events,
-      });
-    } catch (error) {
-      this.dependencies.emitError({
-        appSessionId,
-        providerSessionId: resolvedProviderSessionId,
-        message: errMsg(error),
       });
     }
   }
@@ -277,7 +246,6 @@ export class SessionTimeline {
         ...(window.olderCursor ? { olderCursor: window.olderCursor } : {}),
       });
     } catch (error) {
-      const providerSessionId = childProviderSessionIds.at(-1) ?? childSessionId;
       const message = errMsg(error);
       this.dependencies.emit({
         type: 'session.history.error',
@@ -287,7 +255,6 @@ export class SessionTimeline {
       });
       this.dependencies.emitError({
         appSessionId,
-        providerSessionId,
         message,
         recoverable: true,
       });

@@ -1,17 +1,25 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import type { HistoricalSession } from './history.js';
 import type { BridgeFeature, SessionSummary } from './protocol.js';
 import {
   SessionRegistry,
+  liveBindingFromSummary,
   type RegisteredSession,
   type SessionRegistryDependencies,
 } from './SessionRegistry.js';
-import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import type { ProviderBinding } from './persistence/SessionStore.js';
+import { droidSessionConfiguration, withProviderSelection } from './providers/providerIdentity.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
 
 interface TestLiveSession extends RegisteredSession {
   name: string;
+  binding: ProviderBinding;
 }
 
 class FakeHistory {
@@ -99,7 +107,7 @@ function historicalRows(summaries: SessionSummary[]): HistoricalSession[] {
 }
 
 function live(summary: SessionSummary): TestLiveSession {
-  return { name: summary.title, summary };
+  return { name: summary.title, summary, binding: liveBindingFromSummary(summary) };
 }
 
 function summary(appSessionId: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -165,7 +173,7 @@ function feature(id: string): BridgeFeature {
   };
 }
 
-test('register persists once and resolves stable, current, and superseded identities', () => {
+test('register persists once and live lookup is app-id only', () => {
   const { history, published, registry } = createHarness();
   const first = live(
     summary('app-a', {
@@ -179,8 +187,9 @@ test('register persists once and resolves stable, current, and superseded identi
   registry.register(directAppId);
 
   assert.equal(registry.getLive('app-a'), first);
-  assert.equal(registry.getLive('provider-a-old'), first);
+  assert.equal(registry.getLive('provider-a-old'), undefined);
   assert.equal(registry.getLive('provider-a'), directAppId);
+  assert.equal(registry.resolveSummary('provider-a-old')?.appSessionId, 'app-a');
   assert.deepEqual(
     history.persisted.map((persisted) => persisted.appSessionId),
     ['app-a', 'provider-a'],
@@ -215,8 +224,8 @@ test('failed registration leaves the previous live identity intact', () => {
   );
 
   assert.equal(registry.getLive('stable'), previous);
-  assert.equal(registry.getLive('provider-previous'), previous);
-  assert.equal(registry.getLive('provider-old'), previous);
+  assert.equal(registry.getLive('provider-previous'), undefined);
+  assert.equal(registry.getLive('provider-old'), undefined);
   assert.equal(registry.getLive('provider-replacement'), undefined);
 });
 
@@ -241,19 +250,24 @@ test('updateSummary persists canonical state before one publication and protects
     title: 'Updated title',
     updatedAt: 999,
   };
-  const updated = registry.updateSummary('provider-old', unsafePatch);
+  const updated = registry.updateSummary('stable-app', unsafePatch);
 
   assert.equal(updated?.appSessionId, 'stable-app');
-  assert.equal(updated?.providerSessionId, 'provider-current');
-  assert.deepEqual(updated?.compactedFromProviderSessionIds, ['provider-old']);
+  assert.equal(updated && 'providerSessionId' in updated, false);
+  assert.equal(updated && 'compactedFromProviderSessionIds' in updated, false);
+  assert.equal(updated?.sessionWebUrl, 'https://app.factory.ai/sessions/provider-current');
+  assert.equal(session.binding.providerSessionId, 'provider-current');
+  assert.deepEqual(session.binding.previousProviderSessionIds, ['provider-old']);
   assert.equal(updated?.missionId, 'mission-stable');
   assert.equal(updated?.title, 'Updated title');
   assert.equal(updated?.updatedAt, 42);
   assert.deepEqual(history.trace, ['persist', 'publish']);
-  assert.deepEqual(history.persisted, [updated]);
-  assert.deepEqual(published, [updated]);
+  assert.equal(history.persisted[0]?.providerSessionId, 'provider-current');
+  assert.equal(published[0]?.sessionWebUrl, 'https://app.factory.ai/sessions/provider-current');
+  assert.equal(published[0] && 'providerSessionId' in published[0], false);
   assert.equal(registry.getLive('changed-app'), undefined);
-  assert.equal(registry.getLive('provider-old'), session);
+  assert.equal(registry.getLive('provider-old'), undefined);
+  assert.equal(registry.getLive('stable-app'), session);
 });
 
 test('updateSummary with touchActivity false keeps the activity timestamp', () => {
@@ -276,8 +290,8 @@ test('updateSummary with touchActivity false keeps the activity timestamp', () =
   assert.equal(updated?.contextTokens, 128);
   assert.equal(updated?.updatedAt, 7);
   assert.deepEqual(history.trace, ['persist', 'publish']);
-  assert.deepEqual(history.persisted, [updated]);
-  assert.deepEqual(published, [updated]);
+  assert.equal(history.persisted[0]?.tokensIn, 500);
+  assert.equal(published[0]?.tokensIn, 500);
 });
 
 test('failed summary persistence leaves live state unchanged and unpublished', () => {
@@ -360,7 +374,13 @@ test('reanchorHistoricalCwd moves idle sessions and preserves nested directories
   assert.equal(registry.resolveSummary('nested')?.cwd, '/repo/packages/app');
   assert.equal(registry.resolveSummary('sibling')?.cwd, '/repo/.worktrees/feature-next');
   assert.deepEqual(published, updated);
-  assert.deepEqual(history.persisted, updated);
+  assert.deepEqual(
+    history.persisted.map((session) => [session.appSessionId, session.cwd, session.updatedAt]),
+    [
+      ['at-root', '/repo', 7],
+      ['nested', '/repo/packages/app', 8],
+    ],
+  );
 });
 
 test('reanchorHistoricalCwd refuses to move a worktree used by a live session', () => {
@@ -401,13 +421,13 @@ test('replaceProvider retains the alias chain and supports live and historical s
   registry.register(session);
   history.trace.length = 0;
 
-  const unchanged = registry.replaceProvider('live-provider-old', 'live-provider');
+  const unchanged = registry.replaceProvider('live-app', 'live-provider');
 
   assert.equal(unchanged, session.summary);
   assert.deepEqual(history.trace, []);
   assert.equal(published.length, 0);
 
-  const liveUpdated = registry.replaceProvider('live-provider-old', 'live-provider-next', {
+  const liveUpdated = registry.replaceProvider('live-app', 'live-provider-next', {
     title: 'Live compacted',
   });
 
@@ -416,20 +436,24 @@ test('replaceProvider retains the alias chain and supports live and historical s
     'live-provider-old',
     'live-provider',
   ]);
-  // A compaction provider swap is background bookkeeping: it must not move
-  // updatedAt, or it would reorder the sidebar and read as unread.
   assert.equal(liveUpdated?.updatedAt, 1);
-  assert.equal(registry.getLive('live-provider-next'), session);
-  assert.equal(registry.getLive('live-provider'), session);
-  assert.equal(registry.getLive('live-provider-old'), session);
+  assert.equal(registry.getLive('live-app'), session);
+  assert.equal(registry.getLive('live-provider-next'), undefined);
+  assert.equal(session.binding.providerSessionId, 'live-provider-next');
   assert.equal(registry.isCurrentLiveProvider('live-provider-next'), true);
   assert.equal(registry.isCurrentLiveProvider('live-provider'), false);
   assert.deepEqual(retiredProviders, ['live-provider']);
-
-  const historicalUpdated = registry.replaceProvider(
-    'historical-provider-old',
-    'historical-provider-next',
+  assert.equal(
+    registry.resolveSummary('live-app')?.sessionWebUrl,
+    'https://app.factory.ai/sessions/live-provider-next',
   );
+  assert.equal(
+    registry.resolveSummary('live-app') &&
+      'providerSessionId' in (registry.resolveSummary('live-app') ?? {}),
+    false,
+  );
+
+  const historicalUpdated = registry.replaceProvider('historical-app', 'historical-provider-next');
 
   assert.equal(historicalUpdated?.appSessionId, 'historical-app');
   assert.equal(historicalUpdated?.providerSessionId, 'historical-provider-next');
@@ -461,14 +485,15 @@ test('failed provider replacement preserves the live summary and aliases', () =>
   history.nextSyncError = new Error('persist failed');
 
   assert.throws(
-    () => registry.replaceProvider('provider-old', 'provider-next', { title: 'Uncommitted' }),
+    () => registry.replaceProvider('stable-app', 'provider-next', { title: 'Uncommitted' }),
     /persist failed/,
   );
 
   assert.equal(session.summary.providerSessionId, 'provider-current');
+  assert.equal(session.binding.providerSessionId, 'provider-current');
   assert.equal(session.summary.title, 'stable-app');
-  assert.equal(registry.getLive('provider-current'), session);
-  assert.equal(registry.getLive('provider-old'), session);
+  assert.equal(registry.getLive('stable-app'), session);
+  assert.equal(registry.getLive('provider-current'), undefined);
   assert.equal(registry.getLive('provider-next'), undefined);
   assert.deepEqual(published, []);
 });
@@ -491,7 +516,11 @@ test('historical provider replacement is applied before hidden-provider filterin
   const listed = registry.listSummaries().sessions;
   assert.equal(listed.length, 1);
   assert.equal(listed[0]?.appSessionId, 'historical-mission');
-  assert.equal(listed[0]?.providerSessionId, 'mission-provider-current');
+  assert.equal(listed[0] && 'providerSessionId' in listed[0], false);
+  assert.equal(
+    listed[0]?.sessionWebUrl,
+    'https://app.factory.ai/sessions/mission-provider-current',
+  );
 });
 
 test('resolve and list project copies after ordinary, Mission Control, and live merging', () => {
@@ -572,8 +601,9 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
       ['ordinary-only', 'projected: ordinary'],
     ],
   );
-  assert.equal(firstListed.providerSessionId, 'live-provider');
-  assert.deepEqual(firstListed.compactedFromProviderSessionIds, ['live-provider-old']);
+  assert.equal(firstListed && 'providerSessionId' in firstListed, false);
+  assert.equal(firstListed && 'compactedFromProviderSessionIds' in firstListed, false);
+  assert.equal(firstListed.sessionWebUrl, 'https://app.factory.ai/sessions/live-provider');
   assert.equal(firstListed.missionId, undefined);
   assert.equal(firstListed.configuration.providerSelection.modelId, 'projected-model');
   assert.equal(liveSession.summary.title, 'live');
@@ -585,12 +615,10 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   canonical?.compactedFromProviderSessionIds?.push('canonical-caller-mutation');
   assert.deepEqual(liveSession.summary.compactedFromProviderSessionIds, ['live-provider-old']);
 
-  firstListed.compactedFromProviderSessionIds?.push('caller-mutation');
-  assert.deepEqual(liveSession.summary.compactedFromProviderSessionIds, ['live-provider-old']);
-
   const resolved = registry.resolveSummary('live-provider-old');
   assert.equal(resolved?.appSessionId, 'live-wins');
-  assert.equal(resolved?.providerSessionId, 'live-provider');
+  assert.equal(resolved && 'providerSessionId' in (resolved ?? {}), false);
+  assert.equal(resolved?.sessionWebUrl, 'https://app.factory.ai/sessions/live-provider');
   assert.equal(resolved?.title, 'projected: live');
   assert.deepEqual(
     registry
@@ -722,13 +750,13 @@ test('snapshot permits sequential unregister without skipping sessions', () => {
   registry.register(second);
 
   const snapshot = registry.liveSessionsSnapshot();
-  assert.equal(registry.unregister('provider-first'), first);
-  assert.equal(registry.unregister('provider-second-old'), second);
+  assert.equal(registry.unregister('first'), first);
+  assert.equal(registry.unregister('second'), second);
 
   assert.deepEqual(snapshot, [first, second]);
   assert.deepEqual(registry.liveSessionsSnapshot(), []);
-  assert.equal(registry.getLive('provider-first'), undefined);
-  assert.equal(registry.getLive('provider-second-old'), undefined);
+  assert.equal(registry.getLive('first'), undefined);
+  assert.equal(registry.getLive('second'), undefined);
   assert.equal(registry.unregister('missing'), undefined);
 });
 
@@ -738,4 +766,95 @@ test('listSummaries reads patches and hidden ids through a single history call',
   registry.listSummaries();
 
   assert.equal(history.summaryReadCount, 1);
+});
+
+test('published summaries include a Droid web URL and omit native ids', () => {
+  const { published, registry } = createHarness();
+  registry.register(live(summary('app-droid', { providerSessionId: 'native-1' })));
+  registry.updateSummary('app-droid', { title: 'Named' });
+  const wire = published.at(-1);
+  assert.equal(wire?.sessionWebUrl, 'https://app.factory.ai/sessions/native-1');
+  assert.equal(wire && 'providerSessionId' in wire, false);
+  assert.equal(JSON.stringify(wire).includes('"native-1"'), false);
+});
+
+test('published summaries omit sessionWebUrl for non-Droid providers', () => {
+  const { published, registry } = createHarness();
+  registry.register(
+    live(
+      summary('app-cursor', {
+        providerSessionId: 'native-1',
+        configuration: withProviderSelection(
+          droidSessionConfiguration({
+            modelId: 'model-default',
+            interactionMode: 'auto',
+            autonomy: 'low',
+          }),
+          { providerInstanceId: 'cursor' },
+        ),
+      }),
+    ),
+  );
+  registry.updateSummary('app-cursor', { title: 'Cursor' });
+  const wire = published.at(-1);
+  assert.equal(wire?.sessionWebUrl, undefined);
+  assert.equal(wire && 'providerSessionId' in wire, false);
+  assert.equal(JSON.stringify(wire).includes('native-1'), false);
+});
+
+test('two live instances may share native id native-1 without colliding', () => {
+  const { registry } = createHarness();
+  const droid = live(summary('droid-app', { providerSessionId: 'native-1' }));
+  const cursor = live(
+    summary('cursor-app', {
+      providerSessionId: 'native-1',
+      configuration: withProviderSelection(
+        droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
+        { providerInstanceId: 'cursor' },
+      ),
+    }),
+  );
+  registry.register(droid);
+  registry.register(cursor);
+  assert.equal(registry.getLive('droid-app'), droid);
+  assert.equal(registry.getLive('cursor-app'), cursor);
+  assert.equal(registry.getLive('native-1'), undefined);
+  assert.equal(droid.binding.providerSessionId, 'native-1');
+  assert.equal(cursor.binding.providerSessionId, 'native-1');
+});
+
+test('registry dual-writes summary updates through SessionStore when a row exists', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-registry-store-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  const store = new SessionStore(db);
+  try {
+    store.createProvisional({
+      appSessionId: 'app-store',
+      clientRef: 'ref-store',
+      summary: summary('app-store'),
+    });
+    const { history } = createHarness();
+    const withStore = new SessionRegistry<TestLiveSession>({
+      history,
+      loadOrdinarySessions: () => [],
+      loadMissionControlSessions: () => [],
+      projectSummary: (value) => copySummary(value),
+      onSummaryUpdated: () => undefined,
+      now: () => 50,
+      sessionStore: store,
+    });
+    withStore.register(live(summary('app-store', { providerSessionId: 'native-store' })));
+    withStore.updateSummary('app-store', { title: 'Stored title' });
+    assert.equal(store.get('app-store')?.summary.title, 'Stored title');
+    withStore.replaceProvider('app-store', 'native-next');
+    assert.equal(store.get('app-store')?.binding.providerSessionId, 'native-next');
+    assert.equal(store.get('app-store')?.binding.runtimeGeneration, 1);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
