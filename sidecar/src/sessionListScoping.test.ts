@@ -8,6 +8,7 @@ import type * as Protocol from './protocol.js';
 import { FAMILIAR_PREEXISTING_SESSIONS_PER_WORKSPACE } from './sessionListFilter.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-session-scoping-home-'));
@@ -49,13 +50,16 @@ function appSummary(appSessionId: string, cwd: string, updatedAt: number): Proto
     appSessionId,
     providerSessionId: appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `DROIDEX chat ${appSessionId}`,
     goal: `DROIDEX chat ${appSessionId}`,
     cwd,
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,

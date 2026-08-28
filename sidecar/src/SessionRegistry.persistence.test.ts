@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { HistoricalSession } from './history.js';
 import type { SessionSummary } from './protocol.js';
 import { SessionRegistry, type RegisteredSession } from './SessionRegistry.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface LiveSession extends RegisteredSession {
   marker: string;
@@ -18,12 +19,15 @@ function summary(
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

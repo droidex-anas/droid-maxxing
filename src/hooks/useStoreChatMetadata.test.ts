@@ -3,17 +3,21 @@ import test from 'node:test';
 
 import { initialState, reducer, type AppState } from './useStore';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function makeSession(appSessionId: string, updatedAt = 1): SessionSummary {
   return {
     appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'completed',
     features: [],
     tokensIn: 0,

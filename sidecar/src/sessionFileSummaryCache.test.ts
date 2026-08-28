@@ -6,18 +6,22 @@ import {
   serializeCachedSessionSummary,
 } from './sessionFileSummaryCache.js';
 import type { SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 function summary(): SessionSummary {
   return {
     appSessionId: 'app',
     providerSessionId: 'provider',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Valid cached session',
     goal: 'Validate derived rows',
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 1,
@@ -36,7 +40,10 @@ test('cached session summaries accept the complete canonical contract', () => {
 test('cached session summaries reject malformed required arrays and discriminants', () => {
   const missingFeatures = { ...summary(), features: undefined };
   const invalidPhase = { ...summary(), phase: 'sleeping' };
-  const invalidReasoning = { ...summary(), reasoningEffort: 'extreme' };
+  const invalidConfiguration = {
+    ...summary(),
+    configuration: { ...summary().configuration, autonomy: 'extreme' },
+  };
   const invalidAccuracy = { ...summary(), contextAccuracy: 'guessed' };
   const invalidWorkspace = { ...summary(), workspaceKind: 'repository' };
   assert.equal(
@@ -47,7 +54,7 @@ test('cached session summaries reject malformed required arrays and discriminant
     parseCachedSessionSummary(JSON.stringify({ cacheVersion: 1, summary: invalidPhase })),
     undefined,
   );
-  for (const invalid of [invalidReasoning, invalidAccuracy, invalidWorkspace]) {
+  for (const invalid of [invalidConfiguration, invalidAccuracy, invalidWorkspace]) {
     assert.equal(
       parseCachedSessionSummary(JSON.stringify({ cacheVersion: 1, summary: invalid })),
       undefined,
@@ -55,8 +62,11 @@ test('cached session summaries reject malformed required arrays and discriminant
   }
 });
 
-test('inherited Object.prototype keys are not restored as reasoning effort', () => {
-  const inherited = { ...summary(), reasoningEffort: 'toString' };
+test('inherited Object.prototype keys are not restored as configuration enums', () => {
+  const inherited = {
+    ...summary(),
+    configuration: { ...summary().configuration, autonomy: 'toString' },
+  };
   assert.equal(
     parseCachedSessionSummary(JSON.stringify({ cacheVersion: 1, summary: inherited })),
     undefined,

@@ -9,14 +9,22 @@ import type { CreateRuntimeSessionOptions } from './DroidRuntime.js';
 import type {
   Autonomy,
   ClientCommand,
+  DroidMissionConfiguration,
   FactoryDefaultSettings,
   ReasoningEffort,
+  SessionConfiguration,
   SessionInteractionMode,
   SessionPhase,
   SessionSummary,
 } from './protocol.js';
 import type { CompactionTokenLimitPatch } from './compaction.js';
 import { bridgeFeature } from './missionFeatures.js';
+import {
+  assertDroidMissionConfigurationAllowed,
+  droidReasoningEffortFromSelection,
+  droidSessionConfiguration,
+  parseSessionConfiguration,
+} from './providers/providerIdentity.js';
 import { stringValue } from './values.js';
 
 export interface SessionInitResult {
@@ -70,7 +78,7 @@ export function errMsg(err: unknown): string {
 
 export function defaultsModeForSummary(summary: SessionSummary): SessionInteractionMode {
   if (summary.sessionPurpose === 'mission-control') return 'agi';
-  if (summary.interactionMode === 'spec') return 'spec';
+  if (summary.configuration.interactionMode === 'spec') return 'spec';
   return 'auto';
 }
 
@@ -91,10 +99,17 @@ export function reasoningValue(value?: string): ReasoningEffort | undefined {
   return undefined;
 }
 
+interface SessionClassification {
+  sessionPurpose: SessionSummary['sessionPurpose'];
+  interactionMode: SessionInteractionMode;
+  role: SessionSummary['role'];
+  missionId?: string;
+}
+
 function classifySession(
   init: SessionInitResult,
   historical?: SessionSummary,
-): Pick<SessionSummary, 'sessionPurpose' | 'interactionMode' | 'role' | 'missionId'> {
+): SessionClassification {
   const session = init.session ?? {};
   const decompType = stringValue(session.decompSessionType);
   const missionId = stringValue(session.decompMissionId) ?? historical?.missionId;
@@ -114,7 +129,7 @@ function standardSessionClassification(
   mode: string | undefined,
   historical?: SessionSummary,
 ): ReturnType<typeof classifySession> {
-  if (mode === 'spec' || historical?.interactionMode === 'spec') {
+  if (mode === 'spec' || historical?.configuration.interactionMode === 'spec') {
     return {
       sessionPurpose: historical?.sessionPurpose ?? 'chat',
       interactionMode: 'spec',
@@ -152,7 +167,7 @@ function missionControlClassification(
   const interactionMode =
     mode === 'auto' || mode === 'spec' || mode === 'agi'
       ? mode
-      : (historical?.interactionMode ?? 'agi');
+      : (historical?.configuration.interactionMode ?? 'agi');
   return {
     sessionPurpose: 'mission-control',
     interactionMode,
@@ -169,17 +184,12 @@ function phaseFromInit(init: SessionInitResult): SessionPhase {
   return phaseFromState(init.mission?.state) ?? 'paused';
 }
 
-// session.create must carry an explicit autonomy snapshot chosen by the
-// sender; the sidecar never invents one. Anything missing or invalid fails
-// fast instead of silently falling back to a default.
-export function requireAutonomyForCommand(command: { autonomy?: Autonomy }): Autonomy {
-  const autonomy = normalizeAutonomy(command.autonomy);
-  if (!autonomy) {
-    throw new Error(
-      'session.create requires an explicit autonomy level (off, low, medium, or high)',
-    );
-  }
-  return autonomy;
+type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
+
+export function requireCreateConfiguration(command: SessionCreateCommand): SessionConfiguration {
+  const configuration = parseSessionConfiguration(command.configuration);
+  assertDroidMissionConfigurationAllowed(configuration, command.droidMissionConfiguration);
+  return configuration;
 }
 
 export function createModelDefaultsForMode(
@@ -203,44 +213,33 @@ export function createModelDefaultsForMode(
   };
 }
 
-export function createMissionAgentDefaultsForMode(
+export function createMissionConfigurationForMode(
   mode: SessionInteractionMode,
-  command: {
-    workerModel?: string;
-    workerReasoning?: ReasoningEffort;
-    validatorModel?: string;
-    validatorReasoning?: ReasoningEffort;
-  },
+  command: SessionCreateCommand,
   defaults: Pick<
     FactoryDefaultSettings,
     'workerModelId' | 'workerReasoningEffort' | 'validatorModelId' | 'validatorReasoningEffort'
   >,
-): Pick<
-  SessionSummary,
-  'workerModelId' | 'workerReasoningEffort' | 'validatorModelId' | 'validatorReasoningEffort'
-> {
-  if (mode !== 'agi') return {};
-  const workerModelId = command.workerModel ?? defaults.workerModelId;
-  const workerReasoningEffort = command.workerReasoning ?? defaults.workerReasoningEffort;
-  const validatorModelId = command.validatorModel ?? defaults.validatorModelId;
-  const validatorReasoningEffort = command.validatorReasoning ?? defaults.validatorReasoningEffort;
+): DroidMissionConfiguration | undefined {
+  if (mode !== 'agi') return undefined;
+  if (command.droidMissionConfiguration) return command.droidMissionConfiguration;
+  const workerModelId = defaults.workerModelId;
+  const validatorModelId = defaults.validatorModelId;
+  if (!workerModelId || !validatorModelId) return undefined;
   return {
-    ...(workerModelId !== undefined ? { workerModelId } : {}),
-    ...(workerReasoningEffort !== undefined ? { workerReasoningEffort } : {}),
-    ...(validatorModelId !== undefined ? { validatorModelId } : {}),
-    ...(validatorReasoningEffort !== undefined ? { validatorReasoningEffort } : {}),
+    worker: {
+      modelId: workerModelId,
+      ...(defaults.workerReasoningEffort !== undefined
+        ? { reasoningEffort: defaults.workerReasoningEffort }
+        : {}),
+    },
+    validator: {
+      modelId: validatorModelId,
+      ...(defaults.validatorReasoningEffort !== undefined
+        ? { reasoningEffort: defaults.validatorReasoningEffort }
+        : {}),
+    },
   };
-}
-
-type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
-
-export function createInteractionModeForCommand(
-  command: SessionCreateCommand,
-  defaults: FactoryDefaultSettings,
-): SessionInteractionMode {
-  if (command.interactionMode) return command.interactionMode;
-  if (command.sessionPurpose === 'mission-control') return 'agi';
-  return defaults.interactionMode ?? 'auto';
 }
 
 export function createDefaultsModeForCommand(
@@ -254,33 +253,26 @@ export function createDefaultsModeForCommand(
 export function buildCreateRuntimeOptions(input: {
   command: SessionCreateCommand;
   runtimeCwd: string;
-  interactionMode: SessionInteractionMode;
-  primary: { modelId?: string; reasoningEffort?: ReasoningEffort };
-  agents: Pick<
-    SessionSummary,
-    'workerModelId' | 'workerReasoningEffort' | 'validatorModelId' | 'validatorReasoningEffort'
-  >;
+  configuration: SessionConfiguration;
+  primary: { modelId: string; reasoningEffort?: ReasoningEffort };
+  mission?: DroidMissionConfiguration;
   defaults: FactoryDefaultSettings;
-  autonomy: Autonomy;
   compactionModel: string;
   compactionTokenLimit: number;
   mcpServers: McpServerConfig[];
   permissionHandler: PermissionHandler;
   askUserHandler: AskUserHandler;
 }): CreateRuntimeSessionOptions {
-  const usePrimaryForSpec =
-    input.interactionMode === 'spec' ||
-    Boolean(input.command.modelId) ||
-    Boolean(input.command.reasoningEffort);
+  const usePrimaryForSpec = input.configuration.interactionMode === 'spec';
   const specModeModelId = usePrimaryForSpec ? input.primary.modelId : input.defaults.specModelId;
   const specModeReasoningEffort = usePrimaryForSpec
     ? input.primary.reasoningEffort
     : input.defaults.specReasoningEffort;
   return {
     cwd: input.runtimeCwd,
-    interactionMode: input.interactionMode,
-    ...(input.primary.modelId !== undefined ? { modelId: input.primary.modelId } : {}),
-    autonomyLevel: input.autonomy,
+    interactionMode: input.configuration.interactionMode,
+    modelId: input.primary.modelId,
+    autonomyLevel: input.configuration.autonomy,
     ...(input.primary.reasoningEffort !== undefined
       ? { reasoningEffort: input.primary.reasoningEffort }
       : {}),
@@ -289,7 +281,18 @@ export function buildCreateRuntimeOptions(input: {
     ...(input.command.sessionPurpose === 'mission-control'
       ? { decompSessionType: DecompSessionType.Orchestrator }
       : {}),
-    ...input.agents,
+    ...(input.mission
+      ? {
+          workerModelId: input.mission.worker.modelId,
+          ...(input.mission.worker.reasoningEffort !== undefined
+            ? { workerReasoningEffort: input.mission.worker.reasoningEffort }
+            : {}),
+          validatorModelId: input.mission.validator.modelId,
+          ...(input.mission.validator.reasoningEffort !== undefined
+            ? { validatorReasoningEffort: input.mission.validator.reasoningEffort }
+            : {}),
+        }
+      : {}),
     compactionModel: input.compactionModel,
     compactionTokenLimit: input.compactionTokenLimit,
     compactionThresholdCheckEnabled: true,
@@ -302,36 +305,28 @@ export function buildCreateRuntimeOptions(input: {
 export function buildCreatedSessionSummary(input: {
   command: SessionCreateCommand;
   appSessionId: string;
-  interactionMode: SessionInteractionMode;
-  primary: { modelId?: string; reasoningEffort?: ReasoningEffort };
+  configuration: SessionConfiguration;
   compactionModel: string;
-  agents: Pick<
-    SessionSummary,
-    'workerModelId' | 'workerReasoningEffort' | 'validatorModelId' | 'validatorReasoningEffort'
-  >;
-  autonomy: Autonomy;
+  mission?: DroidMissionConfiguration;
   maxContextTokens?: number;
   compactionTokenLimit?: number;
   now: number;
 }): SessionSummary {
-  const { command, appSessionId, primary, agents } = input;
+  const { command, appSessionId } = input;
   const cwd = command.cwd ?? '';
   return {
     appSessionId,
     providerSessionId: appSessionId,
     ...(command.sessionPurpose === 'mission-control' ? { missionId: appSessionId } : {}),
     sessionPurpose: command.sessionPurpose,
-    interactionMode: input.interactionMode,
     role: 'primary',
     title: command.title,
     goal: command.goal,
     cwd,
     workspaceKind: cwd ? 'folder' : 'none',
-    ...(primary.modelId !== undefined ? { modelId: primary.modelId } : {}),
-    ...(primary.reasoningEffort !== undefined ? { reasoningEffort: primary.reasoningEffort } : {}),
+    configuration: input.configuration,
+    ...(input.mission !== undefined ? { droidMissionConfiguration: input.mission } : {}),
     compactionModel: input.compactionModel,
-    ...agents,
-    autonomy: input.autonomy,
     phase: 'intake',
     streaming: false,
     queuedSends: 0,
@@ -363,14 +358,17 @@ export function buildResumedSession(input: BuildResumedSessionInput): {
   exposedCompaction: CompactionTokenLimitPatch;
 } {
   const classification = classifySession(input.init, input.historical);
+  const { missionId, interactionMode, ...classified } = classification;
+  const resumed = resumedModelSettings(input, interactionMode);
   return {
     summary: {
       appSessionId: input.appSessionId,
       providerSessionId: input.providerSessionId,
       compactedFromProviderSessionIds: input.historical?.compactedFromProviderSessionIds ?? [],
-      ...classification,
+      ...classified,
+      ...(missionId !== undefined ? { missionId } : {}),
       ...resumedLocation(input),
-      ...resumedModelSettings(input),
+      ...resumed,
       phase:
         classification.sessionPurpose === 'mission-control'
           ? phaseFromInit(input.init)
@@ -415,79 +413,70 @@ function resumedLocation(
   };
 }
 
-type ResumedModelSettings = Pick<SessionSummary, 'autonomy' | 'compactionModel'> &
-  Partial<
-    Pick<
-      SessionSummary,
-      | 'modelId'
-      | 'reasoningEffort'
-      | 'workerModelId'
-      | 'workerReasoningEffort'
-      | 'validatorModelId'
-      | 'validatorReasoningEffort'
-      | 'maxContextTokens'
-    >
-  >;
+type ResumedModelSettings = Pick<SessionSummary, 'configuration' | 'compactionModel'> &
+  Partial<Pick<SessionSummary, 'droidMissionConfiguration' | 'maxContextTokens'>>;
 
-function resumedModelSettings(input: BuildResumedSessionInput): ResumedModelSettings {
-  return {
-    ...resumedBaseModelSettings(input),
-    ...resumedPrimaryModelSettings(input),
-    ...resumedAgentSettings(input.historical, input.defaults),
-  };
-}
-
-function resumedBaseModelSettings(
+function resumedModelSettings(
   input: BuildResumedSessionInput,
-): Pick<ResumedModelSettings, 'autonomy' | 'compactionModel'> {
+  interactionMode: SessionInteractionMode,
+): ResumedModelSettings {
   const { init, historical, defaults } = input;
+  const historicalSelection = historical?.configuration.providerSelection;
+  const modelId =
+    init.settings?.modelId ?? historicalSelection?.modelId ?? defaults.modelId ?? 'default';
+  const reasoningEffort =
+    reasoningValue(init.settings?.reasoningEffort) ??
+    (historicalSelection ? droidReasoningEffortFromSelection(historicalSelection) : undefined) ??
+    defaults.reasoningEffort;
+  const autonomy =
+    normalizeAutonomy(init.settings?.autonomyLevel) ??
+    historical?.configuration.autonomy ??
+    defaults.autonomy ??
+    'low';
+  const maxContextTokens = historical?.maxContextTokens ?? input.maxContextTokensForModel(modelId);
+  const mission = resumedMissionConfiguration(historical, defaults, interactionMode);
   return {
+    configuration: droidSessionConfiguration({
+      modelId,
+      interactionMode,
+      autonomy,
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    }),
     compactionModel:
       init.settings?.compactionModel ??
       historical?.compactionModel ??
       defaults.compactionModel ??
       'current-model',
-    autonomy:
-      normalizeAutonomy(init.settings?.autonomyLevel) ??
-      historical?.autonomy ??
-      defaults.autonomy ??
-      'low',
+    ...(mission !== undefined ? { droidMissionConfiguration: mission } : {}),
+    ...(maxContextTokens !== undefined ? { maxContextTokens } : {}),
   };
 }
 
-function resumedPrimaryModelSettings(
-  input: BuildResumedSessionInput,
-): Partial<ResumedModelSettings> {
-  const { init, historical, defaults } = input;
-  const modelId = init.settings?.modelId ?? historical?.modelId ?? defaults.modelId;
-  const reasoningEffort =
-    reasoningValue(init.settings?.reasoningEffort) ??
-    historical?.reasoningEffort ??
-    defaults.reasoningEffort;
-  const maxContextTokens = historical?.maxContextTokens ?? input.maxContextTokensForModel(modelId);
-  const settings: Partial<ResumedModelSettings> = {};
-  if (modelId !== undefined) settings.modelId = modelId;
-  if (reasoningEffort !== undefined) settings.reasoningEffort = reasoningEffort;
-  if (maxContextTokens !== undefined) settings.maxContextTokens = maxContextTokens;
-  return settings;
-}
-
-function resumedAgentSettings(
+function resumedMissionConfiguration(
   historical: SessionSummary | undefined,
   defaults: FactoryDefaultSettings,
-): Partial<ResumedModelSettings> {
-  const workerModelId = historical?.workerModelId ?? defaults.workerModelId;
-  const workerReasoningEffort = historical?.workerReasoningEffort ?? defaults.workerReasoningEffort;
-  const validatorModelId = historical?.validatorModelId ?? defaults.validatorModelId;
-  const validatorReasoningEffort =
-    historical?.validatorReasoningEffort ?? defaults.validatorReasoningEffort;
-  const settings: Partial<ResumedModelSettings> = {};
-  if (workerModelId !== undefined) settings.workerModelId = workerModelId;
-  if (workerReasoningEffort !== undefined) settings.workerReasoningEffort = workerReasoningEffort;
-  if (validatorModelId !== undefined) settings.validatorModelId = validatorModelId;
-  if (validatorReasoningEffort !== undefined)
-    settings.validatorReasoningEffort = validatorReasoningEffort;
-  return settings;
+  interactionMode: SessionInteractionMode,
+): DroidMissionConfiguration | undefined {
+  if (historical?.droidMissionConfiguration) return historical.droidMissionConfiguration;
+  if (interactionMode !== 'agi' && historical?.sessionPurpose !== 'mission-control')
+    return undefined;
+  const workerModelId = defaults.workerModelId;
+  const validatorModelId = defaults.validatorModelId;
+  if (!workerModelId || !validatorModelId) return undefined;
+  return {
+    worker: {
+      modelId: workerModelId,
+      ...(defaults.workerReasoningEffort !== undefined
+        ? { reasoningEffort: defaults.workerReasoningEffort }
+        : {}),
+    },
+    validator: {
+      modelId: validatorModelId,
+      ...(defaults.validatorReasoningEffort !== undefined
+        ? { reasoningEffort: defaults.validatorReasoningEffort }
+        : {}),
+    },
+  };
 }
 
 type ResumedUsage = Pick<SessionSummary, 'tokensIn' | 'tokensOut' | 'contextTokens'> &

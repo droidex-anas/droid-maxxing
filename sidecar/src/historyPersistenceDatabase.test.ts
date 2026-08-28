@@ -9,6 +9,7 @@ import { HistoryIndex } from './history.js';
 import { HistoryPersistenceDatabase } from './historyPersistenceDatabase.js';
 import type { HistoryPersistenceBatch, HistoryWriterLease } from './historyPersistenceProtocol.js';
 import type { SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 function createSchema(path: string): void {
   const db = new DatabaseSync(path);
@@ -21,12 +22,15 @@ function summary(tokensOut: number): SessionSummary {
     appSessionId: 'app',
     providerSessionId: 'provider',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'App',
     goal: 'Goal',
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'running',
     features: [],
     tokensIn: 1,

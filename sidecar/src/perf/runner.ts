@@ -244,7 +244,11 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         title: `Perf replay ${String(index)}`,
         goal: `replay session ${String(index)}`,
         sessionPurpose: 'chat',
-        autonomy: 'off',
+        configuration: {
+          providerSelection: { providerInstanceId: 'droid', modelId: 'model-default', options: {} },
+          interactionMode: 'auto',
+          autonomy: 'off',
+        },
       });
       await created;
       throwIfClientProtocolFailed();

@@ -387,7 +387,9 @@ export class SessionContext {
 
     const windowModelId =
       providerSnapshot.breakdown?.modelId ??
-      (isChildTarget(target) ? undefined : liveSession.summary.modelId);
+      (isChildTarget(target)
+        ? undefined
+        : liveSession.summary.configuration.providerSelection.modelId);
     if (windowModelId !== undefined && providerSnapshot.limit > 0)
       this.dependencies.noteContextWindow(windowModelId, providerSnapshot.limit);
 

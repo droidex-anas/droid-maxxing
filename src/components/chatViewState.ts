@@ -42,7 +42,7 @@ function equalActiveChatSession(
     (previous?.appSessionId === next?.appSessionId &&
       previous?.createdAt === next?.createdAt &&
       previous?.cwd === next?.cwd &&
-      previous?.interactionMode === next?.interactionMode &&
+      previous?.configuration.interactionMode === next?.configuration.interactionMode &&
       previous?.title === next?.title &&
       previous?.interruptReason === next?.interruptReason)
   );

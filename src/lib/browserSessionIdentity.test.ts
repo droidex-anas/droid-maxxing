@@ -6,18 +6,22 @@ import {
   nativeBrowserRequestTargetsVisibleSurface,
 } from './browserSessionIdentity';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 const session = (appSessionId: string, providerSessionId?: string): SessionSummary => ({
   appSessionId,
   providerSessionId,
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: appSessionId,
   goal: appSessionId,
   cwd: '',
   workspaceKind: 'none',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'running',
   features: [],
   tokensIn: 0,

@@ -10,6 +10,7 @@ import {
   createSessionManagerTestContext,
   type SessionManagerTestContext,
 } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 function historicalSummary(
   appSessionId: string,
@@ -20,12 +21,15 @@ function historicalSummary(
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,
@@ -102,8 +106,11 @@ async function openIdleSession(
     clientRef,
     title: clientRef,
     goal: `first turn for ${clientRef}`,
-    interactionMode: 'auto',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
   });
   const created = h.events.find(
     (event) => event.type === 'session.created' && event.clientRef === clientRef,

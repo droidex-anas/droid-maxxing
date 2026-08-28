@@ -10,6 +10,7 @@
 // versioned; bump it when the stored shape changes.
 
 import type { BridgeFeature, SessionSummary, TranscriptEvent } from '../types/bridge';
+import { isSessionConfiguration } from './sessionConfiguration';
 
 const SESSION_SNAPSHOT_STORAGE_KEY = 'droid-session-snapshot-v1';
 export const MAX_SNAPSHOT_SESSIONS = 200;
@@ -88,6 +89,7 @@ function sanitizeSummary(value: unknown): SessionSummary | null {
   if (typeof summary.role !== 'string') return null;
   if (typeof summary.phase !== 'string') return null;
   if (!isFiniteNumber(summary.createdAt) || !isFiniteNumber(summary.updatedAt)) return null;
+  if (!isSessionConfiguration(summary.configuration)) return null;
   return {
     ...summary,
     features: Array.isArray(summary.features)

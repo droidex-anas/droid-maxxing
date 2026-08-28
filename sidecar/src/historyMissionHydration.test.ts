@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import type { SessionSummary } from './protocol.js';
 import { persistTestChild, persistTestSummaries } from './testing/historyPersistenceFixture.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-mission-history-'));
@@ -91,13 +92,16 @@ function missionSummary(): SessionSummary {
     providerSessionId: 'parent-provider',
     missionId: 'mission-1',
     sessionPurpose: 'mission-control',
-    interactionMode: 'agi',
     role: 'primary',
     title: 'Mission',
     goal: 'Ship',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'medium',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'medium',
+    }),
     phase: 'completed',
     features: [],
     tokensIn: 0,

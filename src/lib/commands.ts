@@ -1,19 +1,19 @@
 import { bridge } from './bridge';
 import { isAppUpdateInstalling } from './appUpdate';
 import type {
-  Autonomy,
   BrowserNativeResult,
   BrowserScrollDirection,
   BrowserViewport,
   BrowserViewportMode,
   ConfigurableSessionRole,
   DesignReference,
+  DroidMissionConfiguration,
   InstallChannel,
   McpServerInput,
   PermissionOutcome,
   ReasoningEffort,
   ResponseFormat,
-  SessionInteractionMode,
+  SessionConfiguration,
   SessionPurpose,
 } from '../types/bridge';
 
@@ -37,17 +37,11 @@ export const createSession = (input: {
   title: string;
   goal: string;
   sessionPurpose: SessionPurpose;
-  interactionMode?: SessionInteractionMode;
-  modelId?: string;
-  reasoningEffort?: ReasoningEffort;
+  configuration: SessionConfiguration;
+  droidMissionConfiguration?: DroidMissionConfiguration;
   compactionModel?: string;
   compactionTokenLimit?: number | null;
   compactionTokenLimitPerModel?: Record<string, number>;
-  autonomy: Autonomy;
-  workerModel?: string;
-  workerReasoning?: ReasoningEffort;
-  validatorModel?: string;
-  validatorReasoning?: ReasoningEffort;
   responseFormat?: ResponseFormat;
 }) => {
   requireAgentWorkAvailable();
@@ -56,10 +50,7 @@ export const createSession = (input: {
 
 export const updateSessionSettings = (input: {
   appSessionId: string;
-  modelId?: string | null;
-  reasoningEffort?: ReasoningEffort;
-  autonomy?: Autonomy;
-  interactionMode?: SessionInteractionMode;
+  configuration: SessionConfiguration;
 }) => {
   bridge.send({ type: 'session.updateSettings', ...input });
 };

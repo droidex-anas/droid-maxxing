@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Bridge } from './bridge';
 import type { ServerEvent } from '../types/bridge';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 class FakeWebSocket {
   static readonly OPEN = 1;
@@ -127,8 +128,11 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
       title: 'R1',
       goal: 'hello',
       sessionPurpose: 'chat',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     updateChildSettings({
       parentAppSessionId: 'r1',
@@ -153,8 +157,11 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
       title: 'R1',
       goal: 'hello',
       sessionPurpose: 'chat',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     assert.deepEqual(JSON.parse(socket.sent[1]), {
       type: 'child.updateSettings',
@@ -209,12 +216,15 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
       appSessionId: 'r1',
       providerSessionId: 'provider-r1',
       sessionPurpose: 'chat',
-      interactionMode: 'auto',
       role: 'primary',
       title: 'R1',
       goal: 'hello',
       cwd: '/repo',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
       phase: 'intake',
       features: [],
       tokensIn: 0,

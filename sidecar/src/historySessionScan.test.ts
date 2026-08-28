@@ -59,14 +59,14 @@ test('a settings sidecar written between scans invalidates the summary', () => {
   const id = `scan-settings-${seq}`;
   writeSession(id, `settings session ${seq}`);
   const before = loadHistoricalSessions().find((row) => row.summary.appSessionId === id);
-  assert.equal(before?.summary.modelId, undefined);
+  assert.equal(before?.summary.configuration.providerSelection.modelId, 'default');
 
   writeFileSync(
     join(home, '.factory', 'sessions', `${id}.settings.json`),
     JSON.stringify({ modelId: 'scan-test-model' }),
   );
   const after = loadHistoricalSessions().find((row) => row.summary.appSessionId === id);
-  assert.equal(after?.summary.modelId, 'scan-test-model');
+  assert.equal(after?.summary.configuration.providerSelection.modelId, 'scan-test-model');
 });
 
 test('a session file created between scans appears, and a deleted one disappears', () => {

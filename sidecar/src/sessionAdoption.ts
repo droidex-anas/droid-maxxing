@@ -4,6 +4,7 @@ import type {
   LiveSessionIdentity,
 } from './liveRuntimeJournal.js';
 import type { InterruptedSessionRecord, SessionPhase, SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 import { errMsg } from './sessionHelpers.js';
 import type { SessionLifecycle } from './SessionLifecycle.js';
 import { adoptedSessionFacts, isDueForRetirement } from './sessionRuntimeRetirement.js';
@@ -191,12 +192,15 @@ function syntheticSummary(identity: LiveSessionIdentity): SessionSummary {
     appSessionId: identity.appSessionId,
     providerSessionId: identity.providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Session ${identity.providerSessionId.slice(0, 8)}`,
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'paused',
     streaming: false,
     features: [],

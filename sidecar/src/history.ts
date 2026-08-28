@@ -11,6 +11,7 @@ import type {
   SessionHistoryEntry,
   SessionPhase,
   SessionSummary,
+  DroidMissionConfiguration,
   ProgressEntry,
   ReasoningEffort,
   TranscriptEvent,
@@ -96,6 +97,50 @@ export interface HydratedSessionHistory {
 }
 
 export type FactoryDefaults = FactoryDefaultSettings;
+
+// Task 9 deletes the Factory history reader and this projection in full.
+// Native Factory records still store model/mode/autonomy as flat fields; this
+// checkpoint must publish the canonical nested SessionConfiguration.
+function canonicalConfigurationFromNativeRecord(input: {
+  modelId?: string;
+  reasoningEffort?: ReasoningEffort;
+  interactionMode?: SessionSummary['configuration']['interactionMode'];
+  autonomy?: Autonomy;
+}): SessionSummary['configuration'] {
+  return {
+    providerSelection: {
+      providerInstanceId: 'droid',
+      modelId: input.modelId || 'default',
+      options:
+        input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort },
+    },
+    interactionMode: input.interactionMode ?? 'auto',
+    autonomy: input.autonomy ?? 'low',
+  };
+}
+
+function canonicalMissionFromNativeRecord(input: {
+  workerModelId?: string;
+  workerReasoningEffort?: ReasoningEffort;
+  validatorModelId?: string;
+  validatorReasoningEffort?: ReasoningEffort;
+}): DroidMissionConfiguration | undefined {
+  if (!input.workerModelId || !input.validatorModelId) return undefined;
+  return {
+    worker: {
+      modelId: input.workerModelId,
+      ...(input.workerReasoningEffort !== undefined
+        ? { reasoningEffort: input.workerReasoningEffort }
+        : {}),
+    },
+    validator: {
+      modelId: input.validatorModelId,
+      ...(input.validatorReasoningEffort !== undefined
+        ? { reasoningEffort: input.validatorReasoningEffort }
+        : {}),
+    },
+  };
+}
 
 export interface HistoryPage {
   events: TranscriptEvent[];
@@ -830,18 +875,22 @@ function summaryPatchesFromRows(
         HISTORY_SCHEMA_RECOVERY,
       ),
       sessionPurpose: sessionPurpose(stringValue(row.session_purpose)),
-      interactionMode: sessionInteractionModeValue(stringValue(row.interaction_mode)),
       title: stringValue(row.title),
       cwd: stringValue(row.cwd),
       workspaceKind: workspaceKind(stringValue(row.workspace_kind)),
-      modelId: stringValue(row.model_id),
-      reasoningEffort: mapReasoning(stringValue(row.reasoning_effort)),
+      configuration: canonicalConfigurationFromNativeRecord({
+        modelId: stringValue(row.model_id),
+        reasoningEffort: mapReasoning(stringValue(row.reasoning_effort)),
+        interactionMode: sessionInteractionModeValue(stringValue(row.interaction_mode)),
+        autonomy: mapAutonomy(stringValue(row.autonomy)),
+      }),
       compactionModel: stringValue(row.compaction_model),
-      workerModelId: stringValue(row.worker_model_id),
-      workerReasoningEffort: mapReasoning(stringValue(row.worker_reasoning_effort)),
-      validatorModelId: stringValue(row.validator_model_id),
-      validatorReasoningEffort: mapReasoning(stringValue(row.validator_reasoning_effort)),
-      autonomy: mapAutonomy(stringValue(row.autonomy)),
+      droidMissionConfiguration: canonicalMissionFromNativeRecord({
+        workerModelId: stringValue(row.worker_model_id),
+        workerReasoningEffort: mapReasoning(stringValue(row.worker_reasoning_effort)),
+        validatorModelId: stringValue(row.validator_model_id),
+        validatorReasoningEffort: mapReasoning(stringValue(row.validator_reasoning_effort)),
+      }),
       tokensIn: numberValue(row.tokens_in),
       tokensOut: numberValue(row.tokens_out),
       contextTokens: numberValue(row.context_tokens),
@@ -888,7 +937,6 @@ export function applyCachedSummary(
     providerSessionId: defined.providerSessionId ?? summary.providerSessionId,
     missionId: defined.missionId ?? summary.missionId,
     sessionPurpose: defined.sessionPurpose ?? summary.sessionPurpose,
-    interactionMode: defined.interactionMode ?? summary.interactionMode,
     role: defined.role ?? summary.role,
   };
 }
@@ -1171,6 +1219,12 @@ function loadMissionControlSession(dir: string): HistoricalSession & {
     dateMs(progress[progress.length - 1]?.timestamp) ||
     statSync(dir).mtimeMs;
   const modelSettings = readMissionModelSettings(dir);
+  const mission = canonicalMissionFromNativeRecord({
+    workerModelId: modelSettings.workerModelId,
+    workerReasoningEffort: modelSettings.workerReasoningEffort,
+    validatorModelId: modelSettings.validatorModelId,
+    validatorReasoningEffort: modelSettings.validatorReasoningEffort,
+  });
 
   return {
     summary: {
@@ -1178,14 +1232,21 @@ function loadMissionControlSession(dir: string): HistoricalSession & {
       providerSessionId,
       missionId: state.missionId ?? dirId,
       sessionPurpose: 'mission-control',
-      interactionMode: 'agi',
       role: 'primary',
       title,
       goal: progress[0]?.message || title,
       cwd,
       workspaceKind: cwd ? 'folder' : 'none',
-      ...modelSettings,
-      autonomy: modelSettings.autonomy ?? 'medium',
+      configuration: canonicalConfigurationFromNativeRecord({
+        modelId: modelSettings.modelId,
+        reasoningEffort: modelSettings.reasoningEffort,
+        interactionMode: 'agi',
+        autonomy: modelSettings.autonomy ?? 'medium',
+      }),
+      ...(mission !== undefined ? { droidMissionConfiguration: mission } : {}),
+      ...(modelSettings.compactionModel !== undefined
+        ? { compactionModel: modelSettings.compactionModel }
+        : {}),
       phase: STATE_TO_PHASE[String(state.state ?? '')] ?? 'paused',
       features,
       tokensIn: 0,
@@ -1481,14 +1542,20 @@ function summarizeSessionFile(
       providerSessionId,
       missionId: classification.missionId,
       sessionPurpose: classification.sessionPurpose,
-      interactionMode: classification.interactionMode,
       role: classification.role,
       title,
       goal: title,
       cwd: start.cwd ?? '',
       workspaceKind: start.cwd ? 'folder' : 'none',
-      ...settings,
-      autonomy: settings.autonomy ?? 'low',
+      configuration: canonicalConfigurationFromNativeRecord({
+        modelId: settings.modelId,
+        reasoningEffort: settings.reasoningEffort,
+        interactionMode: classification.interactionMode,
+        autonomy: settings.autonomy ?? 'low',
+      }),
+      ...(settings.compactionModel !== undefined
+        ? { compactionModel: settings.compactionModel }
+        : {}),
       phase: 'paused',
       streaming: false,
       queuedSends: 0,
@@ -1519,9 +1586,11 @@ function readJsonLines<T>(path: string): T[] {
   return parseJsonLines(readFileSync(path, 'utf8'));
 }
 
-function classifyStoredSession(
-  start: StoredSessionStart,
-): Pick<SessionSummary, 'sessionPurpose' | 'interactionMode' | 'role' | 'missionId'> | null {
+function classifyStoredSession(start: StoredSessionStart):
+  | (Pick<SessionSummary, 'sessionPurpose' | 'role' | 'missionId'> & {
+      interactionMode: SessionSummary['configuration']['interactionMode'];
+    })
+  | null {
   if (start.decompSessionType === 'worker') return null;
   if (start.decompSessionType === 'validator') return null;
   // Factory Task-tool children are never standalone conversations.
@@ -1664,7 +1733,7 @@ function sessionPurpose(value?: string): SessionSummary['sessionPurpose'] | unde
 
 function sessionInteractionModeValue(
   value?: string,
-): SessionSummary['interactionMode'] | undefined {
+): SessionSummary['configuration']['interactionMode'] | undefined {
   if (value === 'auto' || value === 'spec' || value === 'agi') return value;
   return undefined;
 }

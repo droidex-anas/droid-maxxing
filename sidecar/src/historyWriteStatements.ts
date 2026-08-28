@@ -150,19 +150,19 @@ export class HistoryWriteStatements {
       providerSessionId,
       providerAliases,
       summary.sessionPurpose,
-      summary.interactionMode,
+      summary.configuration.interactionMode,
       summary.title,
       sqlValue(summary.cwd),
       sqlValue(summary.workspaceKind),
       summary.updatedAt,
-      sqlValue(summary.modelId),
-      sqlValue(summary.reasoningEffort),
+      sqlValue(summary.configuration.providerSelection.modelId),
+      sqlValue(reasoningEffortColumn(summary.configuration.providerSelection.options)),
       sqlValue(summary.compactionModel),
-      sqlValue(summary.workerModelId),
-      sqlValue(summary.workerReasoningEffort),
-      sqlValue(summary.validatorModelId),
-      sqlValue(summary.validatorReasoningEffort),
-      sqlValue(summary.autonomy),
+      sqlValue(summary.droidMissionConfiguration?.worker.modelId),
+      sqlValue(summary.droidMissionConfiguration?.worker.reasoningEffort),
+      sqlValue(summary.droidMissionConfiguration?.validator.modelId),
+      sqlValue(summary.droidMissionConfiguration?.validator.reasoningEffort),
+      sqlValue(summary.configuration.autonomy),
       summary.tokensIn,
       summary.tokensOut,
       summary.contextTokens,
@@ -198,6 +198,13 @@ export class HistoryWriteStatements {
       child.updatedAt,
     );
   }
+}
+
+function reasoningEffortColumn(
+  options: SessionSummary['configuration']['providerSelection']['options'],
+): string | undefined {
+  const value = options.reasoningEffort;
+  return typeof value === 'string' ? value : undefined;
 }
 
 function sqlValue(value: string | number | undefined): string | number | null {

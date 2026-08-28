@@ -1,22 +1,52 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { FactoryDefaultSettings, SessionSummary } from './protocol.js';
+import type { ClientCommand, FactoryDefaultSettings, SessionSummary } from './protocol.js';
 import {
   buildResumedSession,
-  createMissionAgentDefaultsForMode,
+  createMissionConfigurationForMode,
   createModelDefaultsForMode,
   defaultsModeForSummary,
-  requireAutonomyForCommand,
+  requireCreateConfiguration,
 } from './sessionHelpers.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
-test('create requires an explicit autonomy snapshot and never falls back', () => {
-  assert.equal(requireAutonomyForCommand({ autonomy: 'low' }), 'low');
-  assert.equal(requireAutonomyForCommand({ autonomy: 'high' }), 'high');
-  assert.throws(() => requireAutonomyForCommand({}), /requires an explicit autonomy/);
-  assert.throws(
-    () => requireAutonomyForCommand({ autonomy: 'invalid' as never }),
-    /requires an explicit autonomy/,
+type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
+
+function createCommand(
+  configuration: SessionCreateCommand['configuration'],
+  extras: Partial<Omit<SessionCreateCommand, 'type' | 'configuration'>> = {},
+): SessionCreateCommand {
+  return {
+    type: 'session.create',
+    clientRef: 'ref',
+    title: 'title',
+    goal: 'goal',
+    sessionPurpose: extras.sessionPurpose ?? 'chat',
+    configuration,
+    ...extras,
+  };
+}
+
+test('create requires a complete configuration and never falls back', () => {
+  const configuration = droidSessionConfiguration({
+    modelId: 'model-a',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  });
+  assert.deepEqual(requireCreateConfiguration(createCommand(configuration)), configuration);
+  assert.throws(() =>
+    requireCreateConfiguration(
+      createCommand({ interactionMode: 'auto', autonomy: 'low' } as never),
+    ),
+  );
+  assert.throws(() =>
+    requireCreateConfiguration(
+      createCommand({
+        ...configuration,
+        autonomy: 'invalid' as never,
+      }),
+    ),
   );
 
   const defaults: Pick<
@@ -51,22 +81,66 @@ test('worker and validator defaults apply only to Mission Control sessions', () 
     validatorModelId: 'validator-default',
     validatorReasoningEffort: 'high',
   };
+  const agi = droidSessionConfiguration({
+    modelId: 'model-a',
+    interactionMode: 'agi',
+    autonomy: 'high',
+  });
+  const custom = {
+    worker: { modelId: 'worker-custom', reasoningEffort: 'low' as const },
+    validator: { modelId: 'validator-default', reasoningEffort: 'high' as const },
+  };
 
   assert.deepEqual(
-    createMissionAgentDefaultsForMode(
+    createMissionConfigurationForMode(
       'agi',
-      { workerModel: 'worker-custom', workerReasoning: 'low' },
+      createCommand(agi, {
+        sessionPurpose: 'mission-control',
+        droidMissionConfiguration: custom,
+      }),
+      defaults,
+    ),
+    custom,
+  );
+  assert.deepEqual(
+    createMissionConfigurationForMode(
+      'agi',
+      createCommand(agi, { sessionPurpose: 'mission-control' }),
       defaults,
     ),
     {
-      workerModelId: 'worker-custom',
-      workerReasoningEffort: 'low',
-      validatorModelId: 'validator-default',
-      validatorReasoningEffort: 'high',
+      worker: { modelId: 'worker-default', reasoningEffort: 'medium' },
+      validator: { modelId: 'validator-default', reasoningEffort: 'high' },
     },
   );
-  assert.deepEqual(createMissionAgentDefaultsForMode('auto', {}, defaults), {});
-  assert.deepEqual(createMissionAgentDefaultsForMode('spec', {}, defaults), {});
+  assert.equal(
+    createMissionConfigurationForMode(
+      'auto',
+      createCommand(
+        droidSessionConfiguration({
+          modelId: 'model-a',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
+      ),
+      defaults,
+    ),
+    undefined,
+  );
+  assert.equal(
+    createMissionConfigurationForMode(
+      'spec',
+      createCommand(
+        droidSessionConfiguration({
+          modelId: 'model-a',
+          interactionMode: 'spec',
+          autonomy: 'low',
+        }),
+      ),
+      defaults,
+    ),
+    undefined,
+  );
 });
 
 test('summary defaults depend on purpose and spec mode, not AGI interaction alone', () => {
@@ -74,13 +148,16 @@ test('summary defaults depend on purpose and spec mode, not AGI interaction alon
     appSessionId: 'chat-app',
     providerSessionId: 'chat-provider',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Chat',
     goal: 'Test defaults',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -90,13 +167,29 @@ test('summary defaults depend on purpose and spec mode, not AGI interaction alon
     updatedAt: 1,
   };
 
-  assert.equal(defaultsModeForSummary({ ...ordinary, interactionMode: 'agi' }), 'auto');
-  assert.equal(defaultsModeForSummary({ ...ordinary, interactionMode: 'spec' }), 'spec');
+  assert.equal(
+    defaultsModeForSummary({
+      ...ordinary,
+      configuration: { ...ordinary.configuration, interactionMode: 'agi' },
+    }),
+    'auto',
+  );
+  assert.equal(
+    defaultsModeForSummary({
+      ...ordinary,
+      configuration: { ...ordinary.configuration, interactionMode: 'spec' },
+    }),
+    'spec',
+  );
   assert.equal(
     defaultsModeForSummary({
       ...ordinary,
       sessionPurpose: 'mission-control',
-      interactionMode: 'agi',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     }),
     'agi',
   );
@@ -108,13 +201,16 @@ test('cold resume preserves a persisted Mission Control proposal', () => {
     providerSessionId: 'mission-provider',
     missionId: 'mission-id',
     sessionPurpose: 'mission-control',
-    interactionMode: 'agi',
     role: 'primary',
     title: 'Mission',
     goal: 'Complete the mission',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     proposal: '# Persisted plan',
     features: [],
@@ -146,13 +242,16 @@ test('resume keeps the historical updatedAt so reading never reorders the sideba
     appSessionId: 'chat-app',
     providerSessionId: 'chat-provider',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Chat',
     goal: 'Old conversation',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -181,13 +280,16 @@ test('resume keeps an app-reanchored cwd instead of restoring stale provider met
     appSessionId: 'app-session',
     providerSessionId: 'provider-session',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Recovered chat',
     goal: '',
     cwd: '/repo',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

@@ -8,6 +8,7 @@ import {
   type RegisteredSession,
   type SessionRegistryDependencies,
 } from './SessionRegistry.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface TestLiveSession extends RegisteredSession {
   name: string;
@@ -106,13 +107,16 @@ function summary(appSessionId: string, overrides: Partial<SessionSummary> = {}):
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -473,7 +477,11 @@ test('historical provider replacement is applied before hidden-provider filterin
   const mission = summary('historical-mission', {
     providerSessionId: 'mission-provider-old',
     sessionPurpose: 'mission-control',
-    interactionMode: 'agi',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
   });
   const { history, registry } = createHarness({ missionControl: [mission] });
 
@@ -501,16 +509,24 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
     summary('mission-wins', {
       providerSessionId: 'mission-provider',
       sessionPurpose: 'mission-control',
-      interactionMode: 'agi',
       title: 'mission',
       updatedAt: 50,
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     }),
     summary('live-wins', {
       providerSessionId: 'mission-live-provider',
       sessionPurpose: 'mission-control',
-      interactionMode: 'agi',
       title: 'mission live shadow',
       updatedAt: 60,
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     }),
   ];
   const { history, published, registry } = createHarness({
@@ -523,7 +539,13 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
       compactedFromProviderSessionIds: ['projected-alias'],
       missionId: 'projected-mission',
       title: `projected: ${canonical.title}`,
-      modelId: 'projected-model',
+      configuration: {
+        ...canonical.configuration,
+        providerSelection: {
+          ...canonical.configuration.providerSelection,
+          modelId: 'projected-model',
+        },
+      },
     }),
   });
   history.hiddenProviderIds.add('hidden-provider');
@@ -553,13 +575,13 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   assert.equal(firstListed.providerSessionId, 'live-provider');
   assert.deepEqual(firstListed.compactedFromProviderSessionIds, ['live-provider-old']);
   assert.equal(firstListed.missionId, undefined);
-  assert.equal(firstListed.modelId, 'projected-model');
+  assert.equal(firstListed.configuration.providerSelection.modelId, 'projected-model');
   assert.equal(liveSession.summary.title, 'live');
-  assert.equal(liveSession.summary.modelId, undefined);
+  assert.equal(liveSession.summary.configuration.providerSelection.modelId, 'model-default');
 
   const canonical = registry.getCanonicalSummary('live-provider-old');
   assert.equal(canonical?.title, 'live');
-  assert.equal(canonical?.modelId, undefined);
+  assert.equal(canonical?.configuration.providerSelection.modelId, 'model-default');
   canonical?.compactedFromProviderSessionIds?.push('canonical-caller-mutation');
   assert.deepEqual(liveSession.summary.compactedFromProviderSessionIds, ['live-provider-old']);
 
@@ -578,9 +600,9 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   );
 
   registry.updateSummary('live-wins', { title: 'canonical update' });
-  assert.equal(history.persisted.at(-1)?.modelId, undefined);
+  assert.equal(history.persisted.at(-1)?.configuration.providerSelection.modelId, 'model-default');
   assert.equal(history.persisted.at(-1)?.title, 'canonical update');
-  assert.equal(published.at(-1)?.modelId, 'projected-model');
+  assert.equal(published.at(-1)?.configuration.providerSelection.modelId, 'projected-model');
   assert.equal(published.at(-1)?.title, 'projected: canonical update');
   assert.equal(registry.resolveSummary('live-wins')?.title, 'projected: canonical update');
 });

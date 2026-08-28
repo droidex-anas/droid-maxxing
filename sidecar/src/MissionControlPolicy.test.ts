@@ -9,8 +9,9 @@ import type {
   ChildSpawnObservation,
 } from './ChildSessionState.js';
 import type { NormalizedSideEffects } from './SessionEventFlow.js';
-import type { ServerEvent, SessionSummary } from './protocol.js';
+import type { ServerEvent, SessionInteractionMode, SessionSummary } from './protocol.js';
 import { FakeFactorySession, type RecordedCall } from './testing/fakeFactoryRuntime.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface Harness {
   policy: MissionControlPolicy;
@@ -23,7 +24,7 @@ interface Harness {
 
 function createHarness(
   sessionPurpose: SessionSummary['sessionPurpose'] = 'mission-control',
-  interactionMode: SessionSummary['interactionMode'] = 'agi',
+  interactionMode: SessionInteractionMode = 'agi',
 ): Harness {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
@@ -251,8 +252,10 @@ test('ignores Mission effects for ordinary auto, spec, and agi chat sessions', (
 
 test('owns Mission defaults, features, phase, and teardown-only correlation state', () => {
   const h = createHarness();
-  h.summary.workerModelId = 'worker-model';
-  h.summary.workerReasoningEffort = ReasoningEffort.High;
+  h.summary.droidMissionConfiguration = {
+    worker: { modelId: 'worker-model', reasoningEffort: ReasoningEffort.High },
+    validator: { modelId: 'accepted-parent-model' },
+  };
   assert.deepEqual(h.policy.resolveDefaultSettings('parent-app', 'worker'), {
     modelId: 'worker-model',
     reasoningEffort: ReasoningEffort.High,
@@ -297,20 +300,23 @@ function progressEntries(events: ServerEvent[]) {
 
 function missionSummary(
   sessionPurpose: SessionSummary['sessionPurpose'],
-  interactionMode: SessionSummary['interactionMode'],
+  interactionMode: SessionInteractionMode,
 ): SessionSummary {
   return {
     appSessionId: 'parent-app',
     providerSessionId: 'parent-provider',
     missionId: 'mission-1',
     sessionPurpose,
-    interactionMode,
     role: 'primary',
     title: 'Mission',
     goal: 'Ship',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'medium',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode,
+      autonomy: 'medium',
+    }),
     phase: 'running',
     features: [],
     tokensIn: 0,

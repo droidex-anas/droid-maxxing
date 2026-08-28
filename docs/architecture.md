@@ -108,10 +108,10 @@ flowchart LR
 ### Autonomy
 
 - The canonical levels are `off`, `low`, `medium`, and `high`, shared verbatim by the renderer, the bridge protocol, and the sidecar.
-- Every `session.create` carries an explicit autonomy snapshot. The sidecar fails fast when it is missing instead of falling back to provider or factory defaults.
+- Every `session.create` carries a complete nested `configuration`. The sidecar fails fast when it is missing instead of falling back to provider or factory defaults.
 - The application default (Medium on first run) is persisted by the renderer and edited only in Settings → Configuration. The composer drafts a per-session override from that default; the draft resets whenever the create target changes.
 - Starting a Mission requires High autonomy. The composer blocks a lower draft behind an explicit choice to raise it; autonomy is never elevated silently.
-- Live changes go provider-first through `session.updateSettings`, serialized per session. The renderer shows a pending state and settles only when the confirmed summary arrives; rejections surface as recoverable `session.autonomy_update_failed` errors, and a settlement that lands after close or provider replacement is discarded.
+- Live changes replace the nested `configuration` through `session.updateSettings`. The renderer shows a pending state and settles when the confirmed summary arrives. Native Droid settings are applied immediately before the next accepted turn, never during the update command. Rejections and native apply failures surface as recoverable `session.configuration_update_failed` errors, and a settlement that lands after close or provider replacement is discarded.
 - Child sessions report their confirmed effective autonomy only while their runtime is live. It is read from the provider init result, never persisted, and never inherited from the parent; historical or unopened children report none and the renderer labels them provider managed.
 
 ## Performance instrumentation

@@ -4,19 +4,23 @@ import test from 'node:test';
 import type { ChildSessionSummary, SessionSummary } from '../types/bridge';
 import { childSessionIsLive } from '../lib/childSessions';
 import { initialState, reducer } from './useStore';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function session(appSessionId: string): SessionSummary {
   return {
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
     sessionPurpose: 'mission-control',
-    interactionMode: 'agi',
     role: 'primary',
     title: appSessionId,
     goal: 'test',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

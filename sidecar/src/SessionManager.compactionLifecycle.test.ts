@@ -15,6 +15,7 @@ import {
   runShutdownOnlyCleanupScenario,
   seedInitModel,
 } from './testing/compactionCharacterizationScenarios.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 type SessionUpdatedEvent = Extract<ServerEvent, { type: 'session.updated' }>;
 type TranscriptEventAppended = Extract<ServerEvent, { type: 'event.appended' }>;
@@ -66,9 +67,12 @@ test('[C0] Create arms daemon compaction without client-side turn compaction', a
       clientRef: 'c0',
       title: 'C0',
       goal: 'ordinary turn',
-      interactionMode: 'auto',
-      autonomy: 'low',
       compactionTokenLimit: 600,
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
 
@@ -97,9 +101,12 @@ test('daemon compaction notifications stream before an active turn settles', asy
       clientRef: 'mid-turn-compaction',
       title: 'Mid-turn compaction',
       goal: 'initial turn',
-      interactionMode: 'auto',
-      autonomy: 'low',
       compactionTokenLimit: 600,
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
 
@@ -149,8 +156,11 @@ test('[C1] Manual in-place compaction', { concurrency: false }, async () => {
       clientRef: 'c1',
       title: 'C1',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const compactGate = h.provider.deferNextCompaction('provider-1');
@@ -245,8 +255,11 @@ test(
         clientRef: 'compaction-failure',
         title: 'Compaction failure',
         goal: 'initial',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
       await h.waitForIdle();
       h.events.length = 0;
@@ -293,8 +306,11 @@ test('manual compaction is rejected while an ordinary turn is streaming', async 
       clientRef: 'compaction-streaming',
       title: 'Compaction streaming',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const streamGate = h.provider.deferNextStream('provider-1');
@@ -333,8 +349,11 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
       clientRef: 'c2',
       title: 'C2',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     h.provider.session('provider-1').nextCompactResult = {
@@ -389,8 +408,11 @@ test('[C3] Failed swap recovery', { concurrency: false }, async () => {
       clientRef: 'c3',
       title: 'C3',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const compactGate = h.provider.deferNextCompaction('provider-1');
@@ -436,8 +458,11 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
       clientRef: 'c7',
       title: 'C7',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const compactGate = h.provider.deferNextCompaction('provider-1');
@@ -589,11 +614,15 @@ test('[C5] Compaction retuning uses each live session model', { concurrency: fal
       clientRef: 'c5',
       title: 'C5',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
-      modelId: 'model-parent-effective',
-      workerModel: 'model-worker-fallback',
-      validatorModel: 'model-validator-fallback',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-parent-effective',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
+      droidMissionConfiguration: {
+        worker: { modelId: 'model-worker-fallback' },
+        validator: { modelId: 'model-validator-fallback' },
+      },
     });
     await h.waitForIdle();
     h.history.seedChildSessions([
@@ -728,9 +757,11 @@ test(
         clientRef: 'c7',
         title: 'C7',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
-        modelId: 'custom-model',
+        configuration: droidSessionConfiguration({
+          modelId: 'custom-model',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
       await h.waitForIdle();
 
@@ -765,8 +796,11 @@ test(
         clientRef: 'c8',
         title: 'C8',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
       await h.waitForIdle();
 
@@ -786,11 +820,20 @@ test(
       await h.handle({
         type: 'session.updateSettings',
         appSessionId: 'provider-1',
-        interactionMode: 'spec',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'spec',
+          autonomy: 'low',
+        }),
       });
+      await h.waitForIdle();
+      assert.equal(compactionArmCount(), armsBefore);
+
+      await h.handle({ type: 'session.send', appSessionId: 'provider-1', text: 'after spec' });
       await h.waitForIdle();
 
       // Switching to spec mode must re-arm with the new mode's default model.
+      // Native apply (and therefore re-arm) happens on the next accepted turn.
       // The limit is the daemon default (250k) clamped to 80% of the model
       // window (1k → 800), so the re-arm must carry compactionTokenLimit 800.
       assert.equal(compactionArmCount() > armsBefore, true);
@@ -809,8 +852,11 @@ test('[C10] Arm failure emits a visible recoverable error', { concurrency: false
       clientRef: 'c9',
       title: 'C9',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     h.events.length = 0;
@@ -859,9 +905,11 @@ test(
         clientRef: 'c11',
         title: 'C11',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
-        modelId: 'custom-model',
+        configuration: droidSessionConfiguration({
+          modelId: 'custom-model',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
         compactionTokenLimit: 250_000,
       });
       for (let i = 0; i < 5; i++) await h.waitForIdle();

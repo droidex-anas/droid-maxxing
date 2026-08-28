@@ -13,6 +13,7 @@ import {
 } from './chat';
 import { readFile } from '../lib/desktop';
 import { interruptChild, loadChildHistory, loadSessionHistory } from '../lib/commands';
+import { sessionInteractionMode } from '../lib/sessionConfiguration';
 import { chatDisplayTitle } from '../lib/chatMetadata';
 import {
   childSessionActivityForTarget,
@@ -403,7 +404,7 @@ export default function ChatView({
   // the real feed (which seeds the same message) takes over once it exists.
   const startingCompose = !activeSession ? Object.values(state.pendingCompose).at(-1) : undefined;
 
-  const isSpec = activeSession?.interactionMode === 'spec';
+  const isSpec = activeSession ? sessionInteractionMode(activeSession) === 'spec' : false;
   const capturedPlan = activeSession ? state.specPlans[activeSession.appSessionId] : undefined;
   const storedSpec = activeSession ? state.sessionSpecs[activeSession.appSessionId] : undefined;
   // The spec stays available after exiting spec mode: keep detecting/loading it

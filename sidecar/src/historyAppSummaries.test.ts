@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { SessionSummary } from './protocol.js';
 import { providerSessionJsonl } from './testing/providerSessionFixtures.js';
 import { persistTestEvent, persistTestSummaries } from './testing/historyPersistenceFixture.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-history-home-'));
@@ -40,13 +41,16 @@ function summary(appSessionId: string, cwd: string): SessionSummary {
     appSessionId,
     providerSessionId: appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Plain chat',
     goal: 'Plain chat',
     cwd,
     workspaceKind: cwd ? 'folder' : 'none',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,

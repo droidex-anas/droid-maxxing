@@ -5,6 +5,7 @@ import {
   createSessionManagerTestContext,
   type SessionManagerTestContext,
 } from './sessionManagerTestContext.js';
+import { droidSessionConfiguration } from '../providers/providerIdentity.js';
 
 function daemonCompactionNotification(kind: 'started' | 'completed'): Record<string, unknown> {
   return {
@@ -138,8 +139,11 @@ export async function runAutoCompactionScenario(h: SessionManagerTestContext) {
     clientRef: 'c4',
     title: 'C4',
     goal: 'go',
-    interactionMode: 'agi',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
   });
   await h.waitForIdle();
   seedChild(h, 'provider-1', 'child-c4', 'worker-c4');
@@ -286,8 +290,11 @@ export async function runCloseCleanupScenario() {
       clientRef: 'c6',
       title: 'C6',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await h.provider.waitForPrompts(parentKey, 1);
     const initialParentPoller = required(timers.latestInterval(), 'initial parent poller');
@@ -395,8 +402,11 @@ export async function runShutdownOnlyCleanupScenario() {
       clientRef: 'c6-shutdown',
       title: 'C6 shutdown',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await h.provider.waitForPrompts(parentKey, 1);
     const parentPoller = required(timers.latestInterval(), 'shutdown parent poller');

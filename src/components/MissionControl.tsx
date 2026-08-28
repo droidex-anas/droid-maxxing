@@ -3,6 +3,11 @@ import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useSt
 import type { ChildAccess, ChildRuntimeState } from '../hooks/storeChildSession';
 import { useRepoStatus } from '../hooks/useRepoStatus';
 import { interruptVisibleSession, updateSessionSettings } from '../lib/commands';
+import {
+  sessionAutonomy,
+  sessionModelId,
+  sessionReasoningEffort,
+} from '../lib/sessionConfiguration';
 import { utilityPanelForSession } from '../lib/utilityPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -428,7 +433,7 @@ function AgentsSection({
         {/* Confirmed autonomy only — the pill never moves ahead of the provider. */}
         <AutonomySelector
           scope="session"
-          value={mission.autonomy}
+          value={sessionAutonomy(mission)}
           pending={pendingAutonomy}
           placement="down"
           onSelect={(level) => {
@@ -437,7 +442,10 @@ function AgentsSection({
               appSessionId: mission.appSessionId,
               autonomy: level,
             });
-            updateSessionSettings({ appSessionId: mission.appSessionId, autonomy: level });
+            updateSessionSettings({
+              appSessionId: mission.appSessionId,
+              configuration: { ...mission.configuration, autonomy: level },
+            });
           }}
         />
       </div>
@@ -445,8 +453,12 @@ function AgentsSection({
       <div className="space-y-0.5">
         <AgentRow
           title="Orchestrator"
-          id={mission.modelId}
-          meta={[modelLabel(models, mission.modelId), mission.reasoningEffort, mission.phase]
+          id={sessionModelId(mission)}
+          meta={[
+            modelLabel(models, sessionModelId(mission)),
+            sessionReasoningEffort(mission),
+            mission.phase,
+          ]
             .filter(Boolean)
             .join(' · ')}
           models={models}

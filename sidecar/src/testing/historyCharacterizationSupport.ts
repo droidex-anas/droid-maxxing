@@ -22,18 +22,12 @@ type PersistedSummaryPatch = Pick<
   | 'providerSessionId'
   | 'compactedFromProviderSessionIds'
   | 'sessionPurpose'
-  | 'interactionMode'
   | 'title'
   | 'cwd'
   | 'workspaceKind'
-  | 'modelId'
-  | 'reasoningEffort'
+  | 'configuration'
+  | 'droidMissionConfiguration'
   | 'compactionModel'
-  | 'workerModelId'
-  | 'workerReasoningEffort'
-  | 'validatorModelId'
-  | 'validatorReasoningEffort'
-  | 'autonomy'
   | 'tokensIn'
   | 'tokensOut'
   | 'contextTokens'
@@ -253,22 +247,14 @@ function materializePersistedSummaryPatch(summary: Protocol.SessionSummary): Per
     providerSessionId: summary.providerSessionId ?? summary.appSessionId,
     compactedFromProviderSessionIds: [...(summary.compactedFromProviderSessionIds ?? [])],
     sessionPurpose: summary.sessionPurpose,
-    interactionMode: summary.interactionMode,
     title: summary.title,
     cwd: summary.cwd,
     ...whenDefined(summary.workspaceKind, (workspaceKind) => ({ workspaceKind })),
-    ...whenDefined(summary.modelId, (modelId) => ({ modelId })),
-    ...whenDefined(summary.reasoningEffort, (reasoningEffort) => ({ reasoningEffort })),
+    configuration: summary.configuration,
+    ...whenDefined(summary.droidMissionConfiguration, (droidMissionConfiguration) => ({
+      droidMissionConfiguration,
+    })),
     ...whenDefined(summary.compactionModel, (compactionModel) => ({ compactionModel })),
-    ...whenDefined(summary.workerModelId, (workerModelId) => ({ workerModelId })),
-    ...whenDefined(summary.workerReasoningEffort, (workerReasoningEffort) => ({
-      workerReasoningEffort,
-    })),
-    ...whenDefined(summary.validatorModelId, (validatorModelId) => ({ validatorModelId })),
-    ...whenDefined(summary.validatorReasoningEffort, (validatorReasoningEffort) => ({
-      validatorReasoningEffort,
-    })),
-    autonomy: summary.autonomy,
     tokensIn: summary.tokensIn,
     tokensOut: summary.tokensOut,
     contextTokens: summary.contextTokens,

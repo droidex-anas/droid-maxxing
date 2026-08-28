@@ -12,6 +12,7 @@ import type {
   HistoryPersistenceResult,
 } from './historyPersistenceProtocol.js';
 import type { SessionSearchResult, SessionSummary, TranscriptEvent } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 class FakeClient implements HistoryPersistenceClient {
   readonly batches: HistoryPersistenceBatch[] = [];
@@ -66,12 +67,15 @@ function summary(appSessionId: string, tokensIn: number): SessionSummary {
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'running',
     streaming: true,
     features: [],

@@ -12,6 +12,7 @@ import { HistoryPersistence } from './HistoryPersistence.js';
 import { SESSION_INDEX_FILENAME, SESSION_SEARCH_INDEX_FILENAME } from './history.js';
 import type { HistoryPersistenceBatch } from './historyPersistenceProtocol.js';
 import type { SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 import {
   HistorySearchUnavailableError,
   isHistorySearchUnavailableError,
@@ -92,12 +93,15 @@ function summary(): SessionSummary {
     appSessionId: 'app',
     providerSessionId: 'provider',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Worker-backed persistence',
     goal: 'Persist off the orchestration thread',
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 10,

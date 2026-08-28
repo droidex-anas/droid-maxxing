@@ -7,6 +7,7 @@ import {
   createSessionManagerTestContext,
   type SessionManagerTestContext,
 } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 class DirectPrimaryFailureSession extends FakeFactorySession {
   readonly streamStarted: Promise<void>;
@@ -56,8 +57,11 @@ test('shutdown admission immediately suppresses a queued primary stream failure'
       clientRef: 'primary-shutdown-race',
       title: 'Primary shutdown race',
       goal: 'wait',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await provider.streamStarted;
 
@@ -85,8 +89,11 @@ test('shutdown abandons a child open before map insertion and readiness', async 
       clientRef: 'open-race',
       title: 'Open race',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const child = new FakeFactorySession('opening-backend', {}, h.calls);
@@ -152,8 +159,11 @@ test('pending settings completion after close cannot publish or re-arm', async (
       clientRef: 'pending-settings-race',
       title: 'Pending settings race',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
 
@@ -189,8 +199,11 @@ test('a child send waits for the shared parent-owned open attempt', async () => 
       clientRef: 'open-once',
       title: 'Open once',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const child = new FakeFactorySession('same-backend', {}, h.calls);
@@ -252,8 +265,11 @@ test('joined child opens cannot settle after the parent closes', async () => {
       clientRef: 'joined-open-close',
       title: 'Joined open close',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await h.provider.waitForPrompts('provider-1', 1);
     await h.waitForIdle();
@@ -328,16 +344,22 @@ test('a failure in one live session does not disturb another live session', asyn
       clientRef: 'stable',
       title: 'Stable',
       goal: 'keep going',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.create({
       sessionPurpose: 'chat',
       clientRef: 'failing',
       title: 'Failing',
       goal: 'will fail',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await stable.waitForPrompts(1);
     await failing.waitForPrompts(1);
@@ -400,8 +422,11 @@ test('an existing child runtime cannot acknowledge after parent close admission'
       clientRef: 'existing-open-close',
       title: 'Existing open close',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await h.provider.waitForPrompts('provider-1', 1);
     await h.waitForIdle();

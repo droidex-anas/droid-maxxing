@@ -2,18 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { initialState, reducer, type AppState } from './useStore';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function sessionSummary(appSessionId: string): SessionSummary {
   return {
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/workspace',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

@@ -11,6 +11,7 @@ import {
   type SessionCompactionDependencies,
 } from './SessionCompaction.js';
 import { createCompactionTestLiveSession } from './testing/compactionTestSupport.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 import {
   FakeFactoryRuntime,
   FakeFactorySession,
@@ -190,9 +191,15 @@ test('limit resolution preserves UI, exposed, default, override, and window prec
   );
   assert.equal(await h.compaction.resolveLimit({ modelId: 'model-a' }), 800);
   const summary = {
-    modelId: 'parent-model',
-    workerModelId: 'worker-model',
-    validatorModelId: 'validator-model',
+    configuration: droidSessionConfiguration({
+      modelId: 'parent-model',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
+    droidMissionConfiguration: {
+      worker: { modelId: 'worker-model' },
+      validator: { modelId: 'validator-model' },
+    },
   };
   assert.equal(
     childCompactionModelId(summary, { modelId: 'loaded-model' }, 'worker'),

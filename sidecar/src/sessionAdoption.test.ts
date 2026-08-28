@@ -13,6 +13,7 @@ import {
 import { SessionAdoption } from './sessionAdoption.js';
 import { SESSION_RUNTIME_IDLE_RETIREMENT_MS } from './sessionRuntimeRetirement.js';
 import type { SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const NOW = 4_000_000_000;
 
@@ -21,12 +22,15 @@ function summary(appSessionId: string, phase: SessionSummary['phase'] = 'running
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase,
     streaming: phase === 'running',
     features: [],

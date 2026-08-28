@@ -3,17 +3,21 @@ import assert from 'node:assert/strict';
 import { initialState, type AppState } from '../hooks/useStore';
 import type { SessionSummary } from '../types/bridge';
 import { equalVisibleChatState, selectChatViewState } from './chatViewState';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function session(appSessionId: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '/tmp/project',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'completed',
     features: [],
     tokensIn: 0,

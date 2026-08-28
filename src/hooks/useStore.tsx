@@ -47,6 +47,12 @@ import {
   type LiveEnterBehavior,
 } from './persistedUiPreferences';
 import {
+  sessionAutonomy,
+  sessionInteractionMode,
+  withProviderSelection,
+  withSessionConfiguration,
+} from '../lib/sessionConfiguration';
+import {
   clearDesignMode,
   setDesignMode,
   toggleDesignMode,
@@ -56,6 +62,7 @@ import type {
   Autonomy,
   FactoryDefaultSettings,
   ServerEvent,
+  SessionInteractionMode,
   SessionSummary,
   TranscriptEvent,
   ProgressEntry,
@@ -534,7 +541,7 @@ type Action =
   | {
       type: 'SESSION_SET_INTERACTION_MODE';
       appSessionId: string;
-      interactionMode: SessionSummary['interactionMode'];
+      interactionMode: SessionInteractionMode;
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
@@ -601,10 +608,15 @@ function applySessionOverride(
   override?: { modelId?: string; reasoningEffort?: ReasoningEffort },
 ): SessionSummary {
   if (!override) return summary;
-  const next = { ...summary };
-  if ('modelId' in override) next.modelId = override.modelId;
-  if (override.reasoningEffort !== undefined) next.reasoningEffort = override.reasoningEffort;
-  return next;
+  const options = { ...summary.configuration.providerSelection.options };
+  if (override.reasoningEffort !== undefined) options.reasoningEffort = override.reasoningEffort;
+  return withSessionConfiguration(
+    summary,
+    withProviderSelection(summary.configuration, {
+      ...(override.modelId ? { modelId: override.modelId } : {}),
+      options,
+    }),
+  );
 }
 
 // Loaded once at module scope so the theme loader can match saved colors
@@ -915,8 +927,8 @@ function baseReducer(state: AppState, action: Action): AppState {
         m.appSessionId in state.pendingAutonomy ? state.pendingAutonomy[m.appSessionId] : undefined;
       const autonomySettled =
         requestedAutonomy !== undefined &&
-        (m.autonomy === requestedAutonomy ||
-          (m.appSessionId in state.sessions && m.autonomy !== previous.autonomy));
+        (sessionAutonomy(m) === requestedAutonomy ||
+          (m.appSessionId in state.sessions && sessionAutonomy(m) !== sessionAutonomy(previous)));
       const pendingAutonomy = autonomySettled
         ? Object.fromEntries(
             Object.entries(state.pendingAutonomy).filter(([id]) => id !== m.appSessionId),
@@ -1622,12 +1634,15 @@ function baseReducer(state: AppState, action: Action): AppState {
       // Optimistic interaction-mode flip so the spec toggle reflects instantly;
       // a later SESSION_UPDATED from the backend confirms (or corrects) it.
       const session = state.sessions[action.appSessionId];
-      if (!session || session.interactionMode === action.interactionMode) return state;
+      if (!session || sessionInteractionMode(session) === action.interactionMode) return state;
       return {
         ...state,
         sessions: {
           ...state.sessions,
-          [action.appSessionId]: { ...session, interactionMode: action.interactionMode },
+          [action.appSessionId]: withSessionConfiguration(session, {
+            ...session.configuration,
+            interactionMode: action.interactionMode,
+          }),
         },
       };
     }
@@ -1941,7 +1956,15 @@ function baseReducer(state: AppState, action: Action): AppState {
       const prevOverride = state.sessionSettingOverrides[action.appSessionId] ?? {};
       return {
         ...state,
-        sessions: { ...state.sessions, [action.appSessionId]: { ...m, modelId: action.modelId } },
+        sessions: {
+          ...state.sessions,
+          [action.appSessionId]: withSessionConfiguration(
+            m,
+            withProviderSelection(m.configuration, {
+              ...(action.modelId ? { modelId: action.modelId } : {}),
+            }),
+          ),
+        },
         sessionSettingOverrides: {
           ...state.sessionSettingOverrides,
           [action.appSessionId]: { ...prevOverride, modelId: action.modelId },
@@ -1957,7 +1980,15 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         sessions: {
           ...state.sessions,
-          [action.appSessionId]: { ...m, reasoningEffort: action.reasoning },
+          [action.appSessionId]: withSessionConfiguration(
+            m,
+            withProviderSelection(m.configuration, {
+              options: {
+                ...m.configuration.providerSelection.options,
+                reasoningEffort: action.reasoning,
+              },
+            }),
+          ),
         },
         sessionSettingOverrides: {
           ...state.sessionSettingOverrides,
@@ -2042,7 +2073,7 @@ export function toastMessageForEvent(ev: ServerEvent): string | undefined {
       ev.code === 'bridge.resync_required' ||
       ev.code === 'history.unflushed_work' ||
       ev.code === 'session.interrupted' ||
-      ev.code === 'session.autonomy_update_failed' ||
+      ev.code === 'session.configuration_update_failed' ||
       ev.code === 'session.create_failed')
   ) {
     return ev.message;
@@ -2112,10 +2143,10 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       if (ev.code === 'bridge.resync_required' && !ev.recoverable) {
         return { type: 'SET_CONNECTION', status: 'error', message: ev.message };
       }
-      // A failed autonomy change is recoverable: the session keeps its last
-      // confirmed level, the pending state settles, and the toast carries the
-      // message (see toastMessageForEvent).
-      if (ev.code === 'session.autonomy_update_failed') {
+      // A failed configuration replacement is recoverable: the session keeps
+      // its last confirmed settings, pending autonomy settles, and the toast
+      // carries the message (see toastMessageForEvent).
+      if (ev.code === 'session.configuration_update_failed') {
         return ev.appSessionId
           ? { type: 'AUTONOMY_UPDATE_SETTLED', appSessionId: ev.appSessionId }
           : null;
