@@ -19,15 +19,17 @@ import {
 import { ShutdownDeadline } from '../shutdownDeadline.js';
 import {
   buildCursorSnapshot,
-  defaultCursorCommandRunner,
   fallbackCursorModel,
   missingCursorExecutableSnapshot,
-  parseCursorAboutOutput,
   parseCursorModelCatalog,
-  runCursorAbout,
   unavailableCursorSnapshot,
-  type CursorCommandRunner,
 } from './cursorDiscovery.js';
+import {
+  defaultCursorCommandRunner,
+  parseCursorAboutOutput,
+  runCursorAbout,
+  type CursorCommandRunner,
+} from './cursorAbout.js';
 import {
   CURSOR_ABOUT_TIMEOUT_MS,
   CURSOR_DEFAULT_BINARY,
@@ -169,6 +171,7 @@ export class CursorProviderAdapter implements ProviderAdapter {
         spawn,
         handshake: buildCursorHandshake({ cwd: input.cwd, resumeSessionId }),
         onNotification: (notification) => session.onAcpNotification(notification),
+        onServerRequest: (request) => session.onAcpServerRequest(request),
       });
       if (session.failedOpen) {
         await connection.close(ShutdownDeadline.fromDurationMs(0));

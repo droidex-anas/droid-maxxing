@@ -4,14 +4,16 @@ import test from 'node:test';
 import { ProviderContractError } from '../providerTypes.js';
 import {
   CURSOR_UNAUTHENTICATED_MESSAGE,
-  buildCursorSnapshot,
-  fallbackCursorModel,
   isCursorAboutJsonFormatUnsupported,
   parseCursorAboutOutput,
-  parseCursorModelCatalog,
   runCursorAbout,
   stripAnsi,
   type CursorCommandResult,
+} from './cursorAbout.js';
+import {
+  buildCursorSnapshot,
+  fallbackCursorModel,
+  parseCursorModelCatalog,
 } from './cursorDiscovery.js';
 import { CURSOR_ABOUT_TIMEOUT_MS, CURSOR_DEFAULT_MODEL_ID } from './cursorHandshake.js';
 
