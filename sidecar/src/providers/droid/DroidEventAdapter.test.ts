@@ -247,7 +247,7 @@ test('classifyPermission reads the SDK toolUses shape for MCP tools', () => {
   } as never;
 
   assert.equal(confirmationType(params), 'mcp_tool');
-  const req = classifyPermission('m1', 'r1', params);
+  const req = classifyPermission(params);
   assert.equal(req.kind, 'mcp');
   assert.equal(req.title, 'droidmaxx-browser · design_reference');
   assert.match(req.detail, /url: https:\/\/skeina\.app/);
@@ -272,7 +272,7 @@ test('classifyPermission reads the SDK toolUses shape for exec', () => {
     ],
   } as never;
 
-  const req = classifyPermission('m1', 'r2', params);
+  const req = classifyPermission(params);
   assert.equal(req.kind, 'exec');
   assert.equal(req.title, 'Run command');
   assert.equal(req.detail, 'rtk rm -rf build');

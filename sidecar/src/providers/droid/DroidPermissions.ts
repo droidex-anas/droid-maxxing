@@ -1,6 +1,6 @@
 import type { RequestPermissionRequestParams } from '@factory/droid-sdk';
 
-import type { PermissionKind, PermissionRequest } from '../../protocol.js';
+import type { PermissionKind } from '../../protocol.js';
 
 const PERMISSION_KIND: Record<string, PermissionKind> = {
   edit: 'edit',
@@ -55,11 +55,15 @@ function mcpToolDetail(detail: ConfirmationDetail, input: Record<string, unknown
   return lines.join('\n');
 }
 
-export function classifyPermission(
-  appSessionId: string,
-  requestId: string,
-  params: RequestPermissionRequestParams,
-): PermissionRequest {
+export interface DroidPermissionView {
+  kind: PermissionKind;
+  title: string;
+  detail: string;
+  plan?: string;
+  options?: string[];
+}
+
+export function classifyPermission(params: RequestPermissionRequestParams): DroidPermissionView {
   const confirmation = primaryConfirmation(params);
   const type = String(confirmation.type ?? 'other');
   let title = 'Permission required';
@@ -130,7 +134,7 @@ export function classifyPermission(
       detail = JSON.stringify(confirmation);
   }
 
-  return { appSessionId, requestId, kind, title, detail, plan, options, raw: params };
+  return { kind, title, detail, plan, options };
 }
 
 export function confirmationType(params: RequestPermissionRequestParams): string {

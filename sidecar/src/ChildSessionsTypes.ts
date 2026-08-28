@@ -4,7 +4,7 @@ import type { ServerEvent, SessionSummary } from './protocol.js';
 import type { SessionRegistry } from './SessionRegistry.js';
 import type { SessionTimeline } from './SessionTimeline.js';
 import type { SessionEventFlow } from './SessionEventFlow.js';
-import type { SessionInteractions } from './SessionInteractions.js';
+import type { DroidInteractions } from './providers/droid/DroidInteractions.js';
 import type { SessionContext } from './SessionContext.js';
 import type { SessionCompaction } from './SessionCompaction.js';
 import type { SessionInitResult } from './sessionHelpers.js';
@@ -32,7 +32,7 @@ export interface ChildSessionsDependencies {
     'append' | 'appendStatus' | 'loadChildHistory' | 'flushStreamingFor' | 'settleStreaming'
   >;
   eventFlow: Pick<SessionEventFlow, 'beginTurn' | 'applyNotification' | 'applyStreamEvent'>;
-  interactions: Pick<SessionInteractions, 'makePermissionHandler' | 'makeAskUserHandler'>;
+  interactions: Pick<DroidInteractions, 'makePermissionHandler' | 'makeAskUserHandler'>;
   context: Pick<SessionContext, 'forgetChild' | 'refresh' | 'startPolling' | 'stopPolling'>;
   compaction: Pick<
     SessionCompaction,

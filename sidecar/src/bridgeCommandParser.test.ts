@@ -147,7 +147,13 @@ const validCommands = {
     appSessionId: 'app-1',
     requestId: 'req-1',
     cancelled: false,
-    answers: [{ index: 0, question: 'Q', answer: 'A' }],
+    answers: { '0': ['A'] },
+  },
+  'plan_review.respond': {
+    type: 'plan_review.respond',
+    appSessionId: 'app-1',
+    requestId: 'req-1',
+    decision: 'implement',
   },
   'settings.agent.update': { type: 'settings.agent.update', agent: 'primary' },
   'settings.compaction.update': { type: 'settings.compaction.update' },
@@ -217,7 +223,7 @@ function bytesOf(count: number, char = 'a'): string {
 }
 
 test('every ClientCommand discriminant has exactly one valid fixture', () => {
-  assert.equal(CLIENT_COMMAND_TYPES.length, 58);
+  assert.equal(CLIENT_COMMAND_TYPES.length, 59);
   for (const type of CLIENT_COMMAND_TYPES) {
     const result = parseObject(validCommands[type]);
     assert.equal(result.ok, true, type);
@@ -493,11 +499,9 @@ test('ID, model ID, title, path, prompt, and list boundaries are enforced', () =
   assert.equal(parseObject({ type: 'sessions.list', workspaceCwds: sixtyFourCwds }).ok, true);
   assertInvalid(parseObject({ type: 'sessions.list', workspaceCwds: sixtyFiveCwds }));
 
-  const sixtyFourAnswers = Array.from({ length: MAX_BRIDGE_LIST_ITEMS }, (_, index) => ({
-    index,
-    question: 'Q',
-    answer: 'A',
-  }));
+  const sixtyFourAnswers: Record<string, string[]> = Object.fromEntries(
+    Array.from({ length: MAX_BRIDGE_LIST_ITEMS }, (_, index) => [String(index), ['A']]),
+  );
   assert.equal(
     parseObject({
       type: 'question.respond',
@@ -514,7 +518,7 @@ test('ID, model ID, title, path, prompt, and list boundaries are enforced', () =
       appSessionId: 'app-1',
       requestId: 'req-1',
       cancelled: false,
-      answers: [...sixtyFourAnswers, { index: 64, question: 'Q', answer: 'A' }],
+      answers: { ...sixtyFourAnswers, '64': ['A'] },
     }),
   );
 

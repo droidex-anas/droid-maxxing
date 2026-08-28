@@ -170,9 +170,24 @@ export const respondQuestion = (
   appSessionId: string,
   requestId: string,
   cancelled: boolean,
-  answers: { index: number; question: string; answer: string }[],
+  answers: Record<string, string[]>,
 ) => {
   bridge.send({ type: 'question.respond', appSessionId, requestId, cancelled, answers });
+};
+
+export const respondPlanReview = (
+  appSessionId: string,
+  requestId: string,
+  decision: 'implement' | 'iterate' | 'cancel',
+  feedback?: string,
+) => {
+  bridge.send({
+    type: 'plan_review.respond',
+    appSessionId,
+    requestId,
+    decision,
+    ...(feedback !== undefined ? { feedback } : {}),
+  });
 };
 
 export const interruptSession = (appSessionId: string) => {

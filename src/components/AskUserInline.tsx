@@ -5,7 +5,7 @@ import { respondQuestion } from '../lib/commands';
 import type { SessionQuestion } from '../types/bridge';
 import { inlineCardMotion } from './inlineCardMotion';
 import {
-  answerFor,
+  answersFor,
   canAdvance,
   createStepper,
   isLastStep,
@@ -36,7 +36,7 @@ export default function AskUserInline() {
   // interaction settles instead of wedging the composer.
   useEffect(() => {
     if (question?.questions.length === 0) {
-      respondQuestion(question.appSessionId, question.requestId, true, []);
+      respondQuestion(question.appSessionId, question.requestId, true, {});
       dispatch({ type: 'CLEAR_QUESTION', appSessionId: question.appSessionId });
     }
   }, [question, dispatch]);
@@ -54,7 +54,7 @@ export default function AskUserInline() {
             dispatch({ type: 'CLEAR_QUESTION', appSessionId: question.appSessionId });
           }}
           onCancel={() => {
-            respondQuestion(question.appSessionId, question.requestId, true, []);
+            respondQuestion(question.appSessionId, question.requestId, true, {});
             dispatch({ type: 'CLEAR_QUESTION', appSessionId: question.appSessionId });
           }}
         />
@@ -71,7 +71,7 @@ export function QuestionCard({
   onCancel,
 }: {
   question: SessionQuestion;
-  onAnswer: (answers: { index: number; question: string; answer: string }[]) => void;
+  onAnswer: (answers: Record<string, string[]>) => void;
   onCancel: () => void;
 }) {
   const reduceMotion = useReducedMotion();
@@ -82,9 +82,9 @@ export function QuestionCard({
   const step = stepper.current;
   const q = question.questions[step];
   const isLast = isLastStep(stepper);
-  const answer = answerFor(stepper, q.index);
-  const typing = isTyping(stepper, q.index);
-  const advanceEnabled = canAdvance(stepper, q.index);
+  const selected = answersFor(stepper, q.id);
+  const typing = isTyping(stepper, q.id);
+  const advanceEnabled = canAdvance(stepper, q.id);
 
   useEffect(() => {
     if (typing) {
@@ -96,11 +96,15 @@ export function QuestionCard({
   }, [typing, step]);
 
   const pickOption = (opt: string) => {
-    dispatchStep({ type: 'pickOption', questionIndex: q.index, option: opt });
+    if (q.multiSelect) {
+      dispatchStep({ type: 'toggleOption', questionId: q.id, option: opt });
+      return;
+    }
+    dispatchStep({ type: 'pickOption', questionId: q.id, option: opt });
   };
 
   const openCustom = () => {
-    dispatchStep({ type: 'openCustomAnswer', questionIndex: q.index });
+    dispatchStep({ type: 'openCustomAnswer', questionId: q.id });
   };
 
   const next = () => {
@@ -121,7 +125,7 @@ export function QuestionCard({
           aria-hidden
         />
         <div className="min-w-0 flex-1 text-[13px] font-medium leading-snug text-droid-text break-words">
-          {q.question}
+          {q.prompt}
         </div>
         {total > 1 && (
           <span className="shrink-0 pt-px text-[11px] text-droid-text-muted">
@@ -132,32 +136,34 @@ export function QuestionCard({
 
       <div className="mt-2.5 space-y-1 px-3">
         {q.options.map((opt, i) => {
-          const selected = !typing && answer === opt.trim();
+          const optionSelected = !typing && selected.includes(opt.trim());
           return (
             <button
               key={`${opt}-${String(i)}`}
               type="button"
-              aria-pressed={selected}
+              aria-pressed={optionSelected}
               onClick={() => {
                 pickOption(opt);
               }}
               className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                selected
+                optionSelected
                   ? 'border-droid-border-hover bg-droid-bg/55'
                   : 'border-transparent hover:border-droid-border hover:bg-droid-bg/30'
               }`}
             >
               <span
-                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                  selected ? 'border-droid-text-secondary' : 'border-droid-text-muted/50'
+                className={`flex h-4 w-4 shrink-0 items-center justify-center ${
+                  q.multiSelect ? 'rounded-sm' : 'rounded-full'
+                } border ${
+                  optionSelected ? 'border-droid-text-secondary' : 'border-droid-text-muted/50'
                 }`}
                 aria-hidden="true"
               >
-                {selected && <span className="h-1.5 w-1.5 rounded-full bg-droid-text" />}
+                {optionSelected && <span className="h-1.5 w-1.5 rounded-full bg-droid-text" />}
               </span>
               <span
                 className={`text-[13px] leading-snug break-words ${
-                  selected ? 'text-droid-text' : 'text-droid-text-secondary'
+                  optionSelected ? 'text-droid-text' : 'text-droid-text-secondary'
                 }`}
               >
                 {opt}
@@ -185,9 +191,9 @@ export function QuestionCard({
             <input
               ref={inputRef}
               type="text"
-              value={stepper.answers[q.index] ?? ''}
+              value={stepper.answers[q.id]?.[0] ?? ''}
               onChange={(e) => {
-                dispatchStep({ type: 'typeAnswer', questionIndex: q.index, value: e.target.value });
+                dispatchStep({ type: 'typeAnswer', questionId: q.id, value: e.target.value });
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {

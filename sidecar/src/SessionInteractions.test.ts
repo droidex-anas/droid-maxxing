@@ -1,133 +1,83 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  ToolConfirmationOutcome,
-  ToolConfirmationType,
-  type AskUserRequestParams,
-  type RequestPermissionRequestParams,
-  type UpdateSessionSettingsRequestParams,
-} from '@factory/droid-sdk';
+import type { ServerEvent } from './protocol.js';
+import { SessionInteractions } from './SessionInteractions.js';
+import type { SessionTarget } from './providers/providerIdentity.js';
+import type {
+  ProviderApprovalRequest,
+  ProviderPlanReviewRequest,
+  ProviderQuestionRequest,
+} from './providers/providerTypes.js';
 
-import type { ServerEvent, SessionSummary } from './protocol.js';
-import { SessionInteractions, type InteractionLiveSession } from './SessionInteractions.js';
-import { droidSessionConfiguration } from './providers/providerIdentity.js';
+const SENTINEL = 'SENTINEL_NATIVE_PAYLOAD_DO_NOT_CROSS_BRIDGE';
 
-interface HarnessOptions {
-  rejectProviderUpdate?: boolean;
-  throwSummaryUpdate?: boolean;
-}
-
-function createHarness(options: HarnessOptions = {}) {
+function createHarness() {
   const emitted: ServerEvent[] = [];
   const errors: Array<Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>> = [];
-  const trace: string[] = [];
-  const liveSessions = new Map<string, InteractionLiveSession>();
-
-  const addLiveSession = (appSessionId: string, providerSessionId = appSessionId) => {
-    const liveSession: InteractionLiveSession = {
-      summary: summary(appSessionId, providerSessionId),
-      session: {
-        updateSettings: (settings: Partial<UpdateSessionSettingsRequestParams>) => {
-          trace.push(`provider:${String(settings.interactionMode ?? '')}`);
-          return options.rejectProviderUpdate
-            ? Promise.reject(new Error('provider rejected'))
-            : Promise.resolve({});
-        },
-      },
-    };
-    liveSessions.set(appSessionId, liveSession);
-    return liveSession;
-  };
   const interactions = new SessionInteractions({
-    getLiveSession: (id) =>
-      [...liveSessions.values()].find(
-        (liveSession) =>
-          liveSession.summary.appSessionId === id || liveSession.summary.providerSessionId === id,
-      ),
-    updateSummary: (id, patch) => {
-      const liveSession = liveSessions.get(id);
-      if (!liveSession) return;
-      trace.push(`publish:${String(patch.configuration?.interactionMode ?? patch.phase ?? '')}`);
-      if (options.throwSummaryUpdate) throw new Error('summary persistence failed');
-      Object.assign(liveSession.summary, patch);
-    },
     emit: (event) => {
       emitted.push(event);
     },
     emitError: (error) => {
-      trace.push(`error:${error.code ?? ''}`);
       errors.push(error);
     },
   });
-  return { addLiveSession, emitted, errors, interactions, liveSessions, trace };
+  return { emitted, errors, interactions };
 }
 
-function summary(appSessionId: string, providerSessionId: string): SessionSummary {
+function sessionTarget(appSessionId: string): SessionTarget {
+  return { kind: 'session', appSessionId };
+}
+
+function approvalInput(
+  appSessionId: string,
+  requestId: string,
+  extras: Partial<ProviderApprovalRequest> = {},
+): ProviderApprovalRequest {
   return {
-    appSessionId,
-    providerSessionId,
-    sessionPurpose: 'chat',
-    role: 'primary',
-    title: appSessionId,
-    goal: appSessionId,
-    cwd: '/workspace',
-    workspaceKind: 'folder',
-    configuration: droidSessionConfiguration({
-      modelId: 'model-default',
-      interactionMode: 'auto',
-      autonomy: 'low',
-    }),
-    phase: 'paused',
-    features: [],
-    tokensIn: 0,
-    tokensOut: 0,
-    contextTokens: 0,
-    createdAt: 1,
-    updatedAt: 1,
+    requestId,
+    target: sessionTarget(appSessionId),
+    runtimeGeneration: 1,
+    kind: 'exec',
+    title: 'Run command',
+    detail: 'pwd',
+    ...extras,
   };
 }
 
-function permissionInput(toolUseId: string, command = 'pwd'): RequestPermissionRequestParams {
+function questionInput(
+  appSessionId: string,
+  requestId: string,
+  extras: Partial<ProviderQuestionRequest> = {},
+): ProviderQuestionRequest {
   return {
-    toolUses: [
+    requestId,
+    target: sessionTarget(appSessionId),
+    runtimeGeneration: 1,
+    questions: [
       {
-        toolUse: {
-          type: 'tool_use',
-          id: toolUseId,
-          name: 'Bash',
-          input: { command },
-        },
-        confirmationType: ToolConfirmationType.Execute,
-        details: {
-          type: ToolConfirmationType.Execute,
-          fullCommand: command,
-          command,
-        },
+        id: 'q1',
+        prompt: 'Pick one',
+        options: ['a', 'b'],
+        multiSelect: false,
       },
     ],
-    options: [],
+    ...extras,
   };
 }
 
-function specApprovalInput(toolUseId: string): RequestPermissionRequestParams {
+function planInput(
+  appSessionId: string,
+  requestId: string,
+  extras: Partial<ProviderPlanReviewRequest> = {},
+): ProviderPlanReviewRequest {
   return {
-    toolUses: [
-      {
-        toolUse: {
-          type: 'tool_use',
-          id: toolUseId,
-          name: 'ExitSpecMode',
-          input: {},
-        },
-        confirmationType: ToolConfirmationType.ExitSpecMode,
-        details: {
-          type: ToolConfirmationType.ExitSpecMode,
-          plan: 'Run the reviewed plan.',
-        },
-      },
-    ],
-    options: [],
+    requestId,
+    target: sessionTarget(appSessionId),
+    runtimeGeneration: 1,
+    plan: 'Ship it.',
+    ...extras,
   };
 }
 
@@ -145,262 +95,274 @@ function questionRequests(events: ServerEvent[]) {
   );
 }
 
-function latestApprovalRequest(events: ServerEvent[]) {
-  const event = approvalRequests(events).at(-1);
-  assert.ok(event);
-  return event.request;
+function planRequests(events: ServerEvent[]) {
+  return events.filter(
+    (event): event is Extract<ServerEvent, { type: 'plan_review.requested' }> =>
+      event.type === 'plan_review.requested',
+  );
 }
 
-function latestQuestionRequest(events: ServerEvent[]) {
-  const event = questionRequests(events).at(-1);
-  assert.ok(event);
-  return event.question;
+function collectedStrings(value: unknown, seen = new Set<unknown>()): string[] {
+  if (typeof value === 'string') return [value];
+  if (!value || typeof value !== 'object') return [];
+  if (seen.has(value)) return [];
+  seen.add(value);
+  const strings: string[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) strings.push(...collectedStrings(item, seen));
+    return strings;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    strings.push(key);
+    strings.push(...collectedStrings(nested, seen));
+  }
+  return strings;
 }
 
-test('permission requests keep stable identity, exact correlation, and one event', async () => {
+test('equal native request ids from two sessions stay distinct', async () => {
   const harness = createHarness();
-  harness.addLiveSession('app-1', 'provider-1');
-  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
-
-  const pending = Promise.resolve(handler(permissionInput('tool-1')));
+  const first = harness.interactions.requestApproval(approvalInput('app-1', 'native-1'));
+  const second = harness.interactions.requestApproval(approvalInput('app-2', 'native-1'));
   const requests = approvalRequests(harness.emitted);
 
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2);
   assert.equal(requests[0]?.request.appSessionId, 'app-1');
-  assert.match(requests[0]?.request.requestId ?? '', /^req-/);
-  const requestId = latestApprovalRequest(harness.emitted).requestId;
-  await harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
-  assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
-});
+  assert.equal(requests[1]?.request.appSessionId, 'app-2');
+  assert.notEqual(requests[0]?.request.requestId, requests[1]?.request.requestId);
+  assert.match(requests[0]?.request.requestId ?? '', /app-1:native-1/);
+  assert.match(requests[1]?.request.requestId ?? '', /app-2:native-1/);
 
-test('ProceedAlways bypasses only an equivalent later permission signature', async () => {
-  const harness = createHarness();
-  harness.addLiveSession('app-1');
-  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
-  const first = Promise.resolve(handler(permissionInput('tool-1', 'pwd')));
-  const firstRequestId = latestApprovalRequest(harness.emitted).requestId;
-
-  await harness.interactions.respondToApproval('app-1', firstRequestId, 'proceed_always');
-  assert.equal(await first, ToolConfirmationOutcome.ProceedAlways);
-  assert.equal(
-    await handler(permissionInput('tool-2', 'pwd')),
-    ToolConfirmationOutcome.ProceedAlways,
+  harness.interactions.respondToApproval(
+    'app-1',
+    requests[0]?.request.requestId ?? '',
+    'proceed_once',
   );
-  assert.equal(approvalRequests(harness.emitted).length, 1);
+  assert.deepEqual(await first, { decision: 'allow_once' });
+  await Promise.resolve();
+  const secondState = await Promise.race([
+    second.then((decision) => ({ settled: true, decision })),
+    Promise.resolve({ settled: false, decision: undefined }),
+  ]);
+  assert.equal(secondState.settled, false);
 
-  const different = Promise.resolve(handler(permissionInput('tool-3', 'ls')));
-  assert.equal(approvalRequests(harness.emitted).length, 2);
-  const differentRequestId = latestApprovalRequest(harness.emitted).requestId;
-  await harness.interactions.respondToApproval('app-1', differentRequestId, 'cancel');
-  assert.equal(await different, ToolConfirmationOutcome.Cancel);
+  harness.interactions.respondToApproval('app-2', requests[1]?.request.requestId ?? '', 'cancel');
+  assert.deepEqual(await second, { decision: 'cancel' });
 });
 
-test('invalid outcomes emit an error, settle Cancel once, and create no grant', async () => {
+test('invalid approval outcomes are rejected and leave the request pending', async () => {
   const harness = createHarness();
-  harness.addLiveSession('app-1');
-  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
-  let settlements = 0;
-  const first = Promise.resolve(handler(permissionInput('tool-1'))).then((outcome) => {
-    settlements += 1;
-    return outcome;
-  });
-  const firstRequestId = latestApprovalRequest(harness.emitted).requestId;
+  let settled = false;
+  const pending = harness.interactions
+    .requestApproval(approvalInput('app-1', 'native-1'))
+    .then((decision) => {
+      settled = true;
+      return decision;
+    });
+  const requestId = approvalRequests(harness.emitted)[0]?.request.requestId ?? '';
 
-  await harness.interactions.respondToApproval('app-1', firstRequestId, 'not-an-outcome');
-
-  assert.equal(await first, ToolConfirmationOutcome.Cancel);
-  assert.equal(settlements, 1);
+  harness.interactions.respondToApproval('app-1', requestId, 'not-an-outcome');
+  await Promise.resolve();
+  assert.equal(settled, false);
   assert.equal(harness.errors[0]?.code, 'permission.invalid_outcome');
-  const second = Promise.resolve(handler(permissionInput('tool-2')));
-  assert.equal(approvalRequests(harness.emitted).length, 2);
-  const secondRequestId = latestApprovalRequest(harness.emitted).requestId;
-  await harness.interactions.respondToApproval('app-1', secondRequestId, 'cancel');
-  await second;
-  assert.equal(settlements, 1);
+
+  harness.interactions.respondToApproval('app-1', requestId, 'cancel');
+  assert.deepEqual(await pending, { decision: 'cancel' });
+  assert.equal(settled, true);
 });
 
 test('unknown, duplicate, late, and wrong-session approvals settle at most once', async () => {
   const harness = createHarness();
-  harness.addLiveSession('app-1');
-  harness.addLiveSession('app-2');
-  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
   let settlements = 0;
-  const pending = Promise.resolve(handler(permissionInput('tool-1'))).then((outcome) => {
-    settlements += 1;
-    return outcome;
-  });
-  const requestId = latestApprovalRequest(harness.emitted).requestId;
-
-  await harness.interactions.respondToApproval('app-2', requestId, 'proceed_once');
-  await harness.interactions.respondToApproval('app-1', 'unknown', 'proceed_once');
-  await Promise.resolve();
-  assert.equal(settlements, 0);
-  await harness.interactions.respondToApproval('app-1', requestId, 'cancel');
-  assert.equal(await pending, ToolConfirmationOutcome.Cancel);
-  await harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
-  harness.liveSessions.delete('app-1');
-  await harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
-  assert.equal(settlements, 1);
-});
-
-test('Spec approval publishes, attempts provider update, then settles the callback', async () => {
-  const success = createHarness();
-  const liveSession = success.addLiveSession('app-spec');
-  liveSession.summary.configuration = {
-    ...liveSession.summary.configuration,
-    interactionMode: 'spec',
-  };
-  const handler = success.interactions.makePermissionHandler({ id: 'app-spec' });
-  const pending = Promise.resolve(handler(specApprovalInput('tool-spec'))).then((outcome) => {
-    success.trace.push('callback');
-    return outcome;
-  });
-  const requestId = latestApprovalRequest(success.emitted).requestId;
-
-  await success.interactions.respondToApproval('app-spec', requestId, 'proceed_once');
-
-  assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
-  assert.deepEqual(success.trace, ['publish:auto', 'provider:auto', 'callback']);
-  assert.equal(liveSession.summary.phase, 'running');
-
-  const rejected = createHarness({ rejectProviderUpdate: true });
-  rejected.addLiveSession('app-spec');
-  const rejectedHandler = rejected.interactions.makePermissionHandler({ id: 'app-spec' });
-  const rejectedPending = Promise.resolve(rejectedHandler(specApprovalInput('tool-spec'))).then(
-    (outcome) => {
-      rejected.trace.push('callback');
-      return outcome;
-    },
-  );
-  const rejectedRequestId = latestApprovalRequest(rejected.emitted).requestId;
-  await rejected.interactions.respondToApproval('app-spec', rejectedRequestId, 'proceed_once');
-  assert.equal(await rejectedPending, ToolConfirmationOutcome.ProceedOnce);
-  assert.deepEqual(rejected.trace, [
-    'publish:auto',
-    'provider:auto',
-    'error:spec.exit_failed',
-    'callback',
-  ]);
-});
-
-test('Spec approval reports summary failure and still settles the callback once', async () => {
-  const harness = createHarness({ throwSummaryUpdate: true });
-  harness.addLiveSession('app-spec');
-  const handler = harness.interactions.makePermissionHandler({ id: 'app-spec' });
-  let settlements = 0;
-  const pending = Promise.resolve(handler(specApprovalInput('tool-spec'))).then((outcome) => {
-    settlements += 1;
-    harness.trace.push('callback');
-    return outcome;
-  });
-  const requestId = latestApprovalRequest(harness.emitted).requestId;
-
-  await harness.interactions.respondToApproval('app-spec', requestId, 'proceed_once');
-
-  assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
-  assert.equal(settlements, 1);
-  assert.deepEqual(harness.trace, ['publish:auto', 'error:spec.exit_failed', 'callback']);
-  assert.equal(harness.errors[0]?.code, 'spec.exit_failed');
-  assert.match(harness.errors[0]?.message ?? '', /summary persistence failed/);
-
-  await harness.interactions.respondToApproval('app-spec', requestId, 'proceed_once');
-  assert.equal(settlements, 1);
-});
-
-test('ask-user normalizes omitted values and preserves identities and answers', async () => {
-  const harness = createHarness();
-  harness.addLiveSession('app-1');
-  const handler = harness.interactions.makeAskUserHandler({ id: 'app-1' });
-  const input = {
-    toolCallId: 'question-tool',
-    questions: [{ index: 7, topic: 'input', question: 'What should change?' }],
-  } as AskUserRequestParams;
-  const pending = Promise.resolve(handler(input));
-  const request = latestQuestionRequest(harness.emitted);
-
-  assert.equal(request.appSessionId, 'app-1');
-  assert.match(request.requestId, /^req-/);
-  assert.deepEqual(request.questions, [{ index: 7, question: 'What should change?', options: [] }]);
-  const answers = [{ index: 7, question: 'What should change?', answer: 'The title' }];
-  harness.interactions.respondToQuestion('app-1', request.requestId, false, answers);
-  assert.deepEqual(await pending, { cancelled: false, answers });
-
-  const empty = Promise.resolve(handler({ toolCallId: 'empty' } as AskUserRequestParams));
-  assert.deepEqual(questionRequests(harness.emitted).at(-1)?.question.questions, []);
-  const emptyRequestId = latestQuestionRequest(harness.emitted).requestId;
-  harness.interactions.respondToQuestion('app-1', emptyRequestId, true, []);
-  assert.deepEqual(await empty, { cancelled: true, answers: [] });
-});
-
-test('question answers, cancellation, duplicate, late, and wrong-session responses settle once', async () => {
-  const harness = createHarness();
-  harness.addLiveSession('app-1');
-  harness.addLiveSession('app-2');
-  const handler = harness.interactions.makeAskUserHandler({ id: 'app-1' });
-  let settlements = 0;
-  const pending = Promise.resolve(handler({ toolCallId: 'question', questions: [] })).then(
-    (result) => {
+  const pending = harness.interactions
+    .requestApproval(approvalInput('app-1', 'native-1'))
+    .then((decision) => {
       settlements += 1;
-      return result;
-    },
-  );
-  const requestId = latestQuestionRequest(harness.emitted).requestId;
+      return decision;
+    });
+  const requestId = approvalRequests(harness.emitted)[0]?.request.requestId ?? '';
 
-  harness.interactions.respondToQuestion('app-2', requestId, false, []);
-  harness.interactions.respondToQuestion('app-1', 'unknown', false, []);
+  harness.interactions.respondToApproval('app-2', requestId, 'proceed_once');
+  harness.interactions.respondToApproval('app-1', 'unknown', 'proceed_once');
   await Promise.resolve();
   assert.equal(settlements, 0);
-  harness.interactions.respondToQuestion('app-1', requestId, true, []);
-  assert.deepEqual(await pending, { cancelled: true, answers: [] });
-  harness.interactions.respondToQuestion('app-1', requestId, false, []);
-  harness.liveSessions.delete('app-1');
-  harness.interactions.respondToQuestion('app-1', requestId, false, []);
+  harness.interactions.respondToApproval('app-1', requestId, 'cancel');
+  assert.deepEqual(await pending, { decision: 'cancel' });
+  harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
   assert.equal(settlements, 1);
 });
 
-test('cancelAllPending settles native callbacks as cancelled without deleting scopes', async () => {
+test('structured multi-question answers preserve exact keys', async () => {
   const harness = createHarness();
-  harness.addLiveSession('app-1');
-  const permission = harness.interactions.makePermissionHandler({ id: 'app-1' });
-  const question = harness.interactions.makeAskUserHandler({ id: 'app-1' });
-  const pendingPermission = Promise.resolve(permission(permissionInput('shutdown')));
-  const pendingQuestion = Promise.resolve(question({ toolCallId: 'shutdown-q', questions: [] }));
+  const pending = harness.interactions.requestQuestion(
+    questionInput('app-1', 'native-q', {
+      questions: [
+        { id: 'color', prompt: 'Color?', options: ['red', 'blue'], multiSelect: false },
+        { id: 'tags', prompt: 'Tags?', options: ['a', 'b', 'c'], multiSelect: true },
+      ],
+    }),
+  );
+  const request = questionRequests(harness.emitted)[0]?.question;
+  assert.ok(request);
+  assert.deepEqual(request.questions, [
+    { id: 'color', prompt: 'Color?', options: ['red', 'blue'], multiSelect: false },
+    { id: 'tags', prompt: 'Tags?', options: ['a', 'b', 'c'], multiSelect: true },
+  ]);
+
+  harness.interactions.respondToQuestion('app-1', request.requestId, false, {
+    color: ['blue'],
+    tags: ['a', 'c'],
+  });
+  assert.deepEqual(await pending, {
+    status: 'answered',
+    answers: { color: ['blue'], tags: ['a', 'c'] },
+  });
+});
+
+test('single-select and multi-select shapes reject invalid answer arrays', async () => {
+  const harness = createHarness();
+  const single = harness.interactions.requestQuestion(questionInput('app-1', 'single'));
+  const singleId = questionRequests(harness.emitted)[0]?.question.requestId ?? '';
+  harness.interactions.respondToQuestion('app-1', singleId, false, { q1: ['a', 'b'] });
+  await Promise.resolve();
+  assert.equal(harness.errors[0]?.code, 'question.invalid_answer');
+
+  harness.interactions.respondToQuestion('app-1', singleId, false, { q1: ['a'] });
+  assert.deepEqual(await single, { status: 'answered', answers: { q1: ['a'] } });
+
+  const multi = harness.interactions.requestQuestion(
+    questionInput('app-2', 'multi', {
+      questions: [{ id: 'tags', prompt: 'Tags?', options: ['a', 'b'], multiSelect: true }],
+    }),
+  );
+  const multiId = questionRequests(harness.emitted).at(-1)?.question.requestId ?? '';
+  harness.interactions.respondToQuestion('app-2', multiId, false, { tags: [] });
+  await Promise.resolve();
+  assert.equal(harness.errors.at(-1)?.code, 'question.invalid_answer');
+  harness.interactions.respondToQuestion('app-2', multiId, false, { tags: ['a', 'b'] });
+  assert.deepEqual(await multi, { status: 'answered', answers: { tags: ['a', 'b'] } });
+});
+
+test('question cancellation, duplicate, late, and wrong-session responses settle once', async () => {
+  const harness = createHarness();
+  let settlements = 0;
+  const pending = harness.interactions
+    .requestQuestion(questionInput('app-1', 'native-q'))
+    .then((answer) => {
+      settlements += 1;
+      return answer;
+    });
+  const requestId = questionRequests(harness.emitted)[0]?.question.requestId ?? '';
+
+  harness.interactions.respondToQuestion('app-2', requestId, false, { q1: ['a'] });
+  harness.interactions.respondToQuestion('app-1', 'unknown', true, {});
+  await Promise.resolve();
+  assert.equal(settlements, 0);
+  harness.interactions.respondToQuestion('app-1', requestId, true, {});
+  assert.deepEqual(await pending, { status: 'cancelled' });
+  harness.interactions.respondToQuestion('app-1', requestId, false, { q1: ['a'] });
+  assert.equal(settlements, 1);
+});
+
+test('plan review accepts implement, iterate with feedback, and cancel', async () => {
+  const harness = createHarness();
+  const implement = harness.interactions.requestPlanReview(planInput('app-1', 'plan-1'));
+  const implementId = planRequests(harness.emitted)[0]?.request.requestId ?? '';
+  harness.interactions.respondToPlanReview('app-1', implementId, { decision: 'implement' });
+  assert.deepEqual(await implement, { decision: 'implement' });
+
+  const iterate = harness.interactions.requestPlanReview(planInput('app-1', 'plan-2'));
+  const iterateId = planRequests(harness.emitted).at(-1)?.request.requestId ?? '';
+  harness.interactions.respondToPlanReview('app-1', iterateId, { decision: 'iterate' });
+  await Promise.resolve();
+  assert.equal(harness.errors[0]?.code, 'plan_review.invalid_decision');
+  harness.interactions.respondToPlanReview('app-1', iterateId, {
+    decision: 'iterate',
+    feedback: 'Tighten the rollback.',
+  });
+  assert.deepEqual(await iterate, { decision: 'iterate', feedback: 'Tighten the rollback.' });
+
+  const cancel = harness.interactions.requestPlanReview(planInput('app-1', 'plan-3'));
+  const cancelId = planRequests(harness.emitted).at(-1)?.request.requestId ?? '';
+  harness.interactions.respondToPlanReview('app-1', cancelId, { decision: 'cancel' });
+  assert.deepEqual(await cancel, { decision: 'cancel' });
+});
+
+test('cancelAllPending settles every pending request as cancelled', async () => {
+  const harness = createHarness();
+  const approval = harness.interactions.requestApproval(approvalInput('app-1', 'a'));
+  const question = harness.interactions.requestQuestion(questionInput('app-1', 'q'));
+  const plan = harness.interactions.requestPlanReview(planInput('app-2', 'p'));
   await Promise.resolve();
   harness.interactions.cancelAllPending();
-  assert.equal(await pendingPermission, ToolConfirmationOutcome.Cancel);
-  assert.deepEqual(await pendingQuestion, { cancelled: true, answers: [] });
+  assert.deepEqual(await approval, { decision: 'cancel' });
+  assert.deepEqual(await question, { status: 'cancelled' });
+  assert.deepEqual(await plan, { decision: 'cancel' });
   harness.interactions.cancelAllPending();
+});
+
+test('cancelSession settles one session and leaves the other pending', async () => {
+  const harness = createHarness();
+  const kept = harness.interactions.requestApproval(approvalInput('app-keep', 'native-1'));
+  const crashed = harness.interactions.requestApproval(approvalInput('app-crash', 'native-1'));
+  harness.interactions.cancelSession('app-crash');
+  assert.deepEqual(await crashed, { decision: 'cancel' });
+  const keptId = approvalRequests(harness.emitted).find(
+    (event) => event.request.appSessionId === 'app-keep',
+  )?.request.requestId;
+  assert.ok(keptId);
+  harness.interactions.respondToApproval('app-keep', keptId, 'proceed_once');
+  assert.deepEqual(await kept, { decision: 'allow_once' });
+});
+
+test('replacement generation cancel settles the replaced session', async () => {
+  const harness = createHarness();
+  const pending = harness.interactions.requestApproval(
+    approvalInput('app-1', 'native-1', { runtimeGeneration: 3 }),
+  );
+  harness.interactions.cancelSession('app-1');
+  assert.deepEqual(await pending, { decision: 'cancel' });
 });
 
 test('forgetSession is protocol-silent, resolves nothing, and discards owned state', async () => {
   const harness = createHarness();
-  harness.addLiveSession('app-1');
-  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
-  const granted = Promise.resolve(handler(permissionInput('grant')));
-  const grantRequestId = latestApprovalRequest(harness.emitted).requestId;
-  await harness.interactions.respondToApproval('app-1', grantRequestId, 'proceed_always');
-  await granted;
-  assert.equal(await handler(permissionInput('bypass')), ToolConfirmationOutcome.ProceedAlways);
-
   let pendingSettled = false;
-  void Promise.resolve(handler(permissionInput('pending', 'whoami'))).then(() => {
+  void harness.interactions.requestApproval(approvalInput('app-1', 'pending')).then(() => {
     pendingSettled = true;
   });
   const eventCount = harness.emitted.length;
   const errorCount = harness.errors.length;
-  harness.liveSessions.delete('app-1');
-
   harness.interactions.forgetSession('app-1');
   await Promise.resolve();
-
   assert.equal(pendingSettled, false);
   assert.equal(harness.emitted.length, eventCount);
   assert.equal(harness.errors.length, errorCount);
 
-  harness.addLiveSession('app-1');
-  const afterResume = Promise.resolve(handler(permissionInput('after-resume')));
+  const afterResume = harness.interactions.requestApproval(approvalInput('app-1', 'after-resume'));
   const request = approvalRequests(harness.emitted).at(-1);
   assert.ok(request);
-  await harness.interactions.respondToApproval('app-1', request.request.requestId, 'cancel');
-  assert.equal(await afterResume, ToolConfirmationOutcome.Cancel);
+  harness.interactions.respondToApproval('app-1', request.request.requestId, 'cancel');
+  assert.deepEqual(await afterResume, { decision: 'cancel' });
+});
+
+test('serialized bridge events omit a sentinel native payload', async () => {
+  const harness = createHarness();
+  const input = approvalInput('app-1', 'native-1');
+  (input as unknown as Record<string, unknown>)[SENTINEL] = {
+    fileContents: SENTINEL,
+    command: SENTINEL,
+    token: SENTINEL,
+  };
+  const pending = harness.interactions.requestApproval(input);
+  const event = approvalRequests(harness.emitted)[0];
+  assert.ok(event);
+  const serialized = JSON.stringify(event);
+  assert.equal(serialized.includes(SENTINEL), false);
+  assert.equal('raw' in event.request, false);
+  const walked = collectedStrings(event);
+  assert.equal(
+    walked.some((value) => value.includes(SENTINEL)),
+    false,
+  );
+  harness.interactions.respondToApproval('app-1', event.request.requestId, 'cancel');
+  await pending;
 });
