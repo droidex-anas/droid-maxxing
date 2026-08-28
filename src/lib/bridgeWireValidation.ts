@@ -109,7 +109,9 @@ function interruptedRecord(value: unknown): value is InterruptedSessionRecord {
 // eslint-disable-next-line complexity
 function isServerEvent(value: unknown): value is ServerEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
-  switch (value.type) {
+  // Runtime `type` is a string; narrowing to the union makes a missing variant fail this switch.
+  const type = value.type as ServerEvent['type'];
+  switch (type) {
     case 'connection':
       return value.status === 'connected' || value.status === 'error';
     case 'runtime.updated':
@@ -235,8 +237,11 @@ function isServerEvent(value: unknown): value is ServerEvent {
       );
     case 'mcp.error':
       return hasStrings(value, ['requestId', 'message']);
-    default:
+    default: {
+      const unexpected: never = type;
+      void unexpected;
       return false;
+    }
   }
 }
 
@@ -423,7 +428,7 @@ function progressArray(value: unknown): boolean {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isEarlierSessionCounts(value: unknown): boolean {
