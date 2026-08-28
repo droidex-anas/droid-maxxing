@@ -452,7 +452,7 @@ function parseLaunchSettings(raw: unknown): SessionFileLaunchSettings | null | u
 function isSessionFileReasoningEffort(
   value: unknown,
 ): value is NonNullable<SessionFileLaunchSettings['reasoningEffort']> {
-  return typeof value === 'string' && value in SESSION_FILE_REASONING_EFFORTS;
+  return typeof value === 'string' && Object.hasOwn(SESSION_FILE_REASONING_EFFORTS, value);
 }
 
 function rollback(db: DatabaseSync): void {

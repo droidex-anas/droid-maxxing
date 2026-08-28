@@ -1,8 +1,9 @@
 // Same scenario + seed → identical event stream, order, and sizes. Wall-clock
 // pacing and measured latencies are machine-dependent by design.
 
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { cpus, tmpdir } from 'node:os';
+import { availableParallelism as osAvailableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { McpServerConfigSchema, type McpServerConfig } from '@factory/droid-sdk';
@@ -53,8 +54,8 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   const previousHome = process.env.HOME;
   process.env.HOME = home;
 
-  const token = `perf-${Math.random().toString(36).slice(2)}`;
-  const assetToken = `perf-asset-${Math.random().toString(36).slice(2)}`;
+  const token = `perf-${randomUUID()}`;
+  const assetToken = `perf-asset-${randomUUID()}`;
   const providerEvents: ReplayYieldReport[] = [];
   const markerYields = new Map<string, number>();
   // First provider yield of each turn, keyed sessionIndex:turn.
@@ -213,7 +214,11 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
   // temp dir: cleanup runs whether or not the snapshot succeeds.
   let sidecar: HotPathMetricsSnapshot | null = null;
   try {
-    sidecar = await fetchSidecarMetrics(server.port, token);
+    sidecar = await withTimeout(
+      fetchSidecarMetrics(server.port, token),
+      10_000,
+      'metrics snapshot timed out',
+    );
   } catch (error) {
     if (failure === null) failure = error;
   } finally {
@@ -409,7 +414,9 @@ function numberFromClientRef(clientRef: string): number {
 }
 
 async function fetchSidecarMetrics(port: number, token: string): Promise<HotPathMetricsSnapshot> {
-  const response = await fetch(`http://127.0.0.1:${String(port)}/perf/metrics?token=${token}`);
+  const response = await fetch(`http://127.0.0.1:${String(port)}/perf/metrics?token=${token}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!response.ok) throw new Error(`Metrics endpoint returned ${String(response.status)}`);
   return (await response.json()) as HotPathMetricsSnapshot;
 }
@@ -432,10 +439,10 @@ async function waitFor(
   }
 }
 
-async function withTimeout(work: Promise<void>, timeoutMs: number, message: string): Promise<void> {
+async function withTimeout<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([
+    return await Promise.race([
       work,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
@@ -455,7 +462,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function availableParallelism(): number {
-  return cpus().length;
+  return osAvailableParallelism();
 }
 
 function stubMcpResource(): { start(): Promise<McpServerConfig>; close(): Promise<void> } {

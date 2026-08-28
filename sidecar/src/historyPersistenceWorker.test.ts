@@ -111,9 +111,10 @@ function summary(): SessionSummary {
 test('worker persists a complete batch and supports synchronous durability waits', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'droidex-history-worker-'));
   const dbPath = join(dir, 'history.sqlite');
+  let client: HistoryWorkerClient | undefined;
   try {
     createSchema(dbPath);
-    const client = new HistoryWorkerClient({
+    client = new HistoryWorkerClient({
       workerData: { dbPath, lane: 'persistence' },
     });
     const batch: HistoryPersistenceBatch = {
@@ -127,7 +128,6 @@ test('worker persists a complete batch and supports synchronous durability waits
     assert.equal(result.eventsWritten, 1);
     assert.equal(result.summariesWritten, 1);
     assert.ok((result.initializationMs ?? -1) >= 0);
-    client.closeSync();
 
     const db = new DatabaseSync(dbPath, { readOnly: true });
     assert.equal(
@@ -144,6 +144,7 @@ test('worker persists a complete batch and supports synchronous durability waits
     );
     db.close();
   } finally {
+    client?.closeSync();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -186,9 +187,10 @@ test('a locked derived search database cannot delay canonical durability', () =>
 test('worker lanes reject requests from the other persistence contract', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'droidex-history-worker-lane-contract-'));
   const dbPath = join(dir, 'history.sqlite');
+  let searchClient: HistoryWorkerClient | undefined;
   try {
     createSchema(dbPath);
-    const searchClient = new HistoryWorkerClient({
+    searchClient = new HistoryWorkerClient({
       workerData: { dbPath, lane: 'search' },
     });
     await assert.rejects(
@@ -196,8 +198,8 @@ test('worker lanes reject requests from the other persistence contract', async (
         .promise,
       /search worker cannot handle persist/,
     );
-    searchClient.closeSync();
   } finally {
+    searchClient?.closeSync();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -225,9 +227,10 @@ test(
         settings: { interactionMode: 'auto' },
       }),
     );
+    let client: HistoryWorkerClient | undefined;
     try {
       createSchema(dbPath);
-      const client = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
+      client = new HistoryWorkerClient({ workerData: { dbPath, lane: 'search' } });
 
       const reconciliation = await client.reconcileSessionFiles();
       assert.equal(reconciliation.changed, 1);
@@ -248,8 +251,8 @@ test(
       const afterRemoval = await client.search('hello');
       assert.deepEqual(afterRemoval.results, []);
       assert.equal(afterRemoval.indexingIncomplete, false);
-      client.closeSync();
     } finally {
+      client?.closeSync();
       if (previousHome === undefined) delete process.env['HOME'];
       else process.env['HOME'] = previousHome;
       rmSync(home, { recursive: true, force: true });

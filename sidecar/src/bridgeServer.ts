@@ -6,6 +6,7 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { pipeline } from 'node:stream/promises';
 
 import { assertValidResponseFormat } from './appPrompt.js';
 import { BridgeEventBatcher, type BridgeEventBatchMetadata } from './bridgeEventBatcher.js';
@@ -47,6 +48,7 @@ export function startBridgeServer(options: {
   const clients = new Set<WebSocket>();
   const replay = new BridgeReplayBuffer();
   let boundPort = options.requestedPort;
+  let closed = false;
   let closePromise: Promise<void> | null = null;
 
   const server = createServer((req, res) => {
@@ -70,6 +72,7 @@ export function startBridgeServer(options: {
   });
 
   function broadcast(event: ServerEvent): void {
+    if (closed) return;
     batcher.enqueue(event);
   }
 
@@ -364,9 +367,15 @@ export function startBridgeServer(options: {
           'content-type': contentType(resolvedPath),
           'cache-control': 'no-store',
         });
-        createReadStream(resolvedPath).pipe(res);
+        await pipeline(createReadStream(resolvedPath), res);
       })
-      .catch(() => res.writeHead(404).end('not found'));
+      .catch(() => {
+        if (res.headersSent) {
+          res.destroy();
+          return;
+        }
+        res.writeHead(404).end('not found');
+      });
     return true;
   }
 
@@ -379,6 +388,7 @@ export function startBridgeServer(options: {
 
   function close(): Promise<void> {
     if (closePromise) return closePromise;
+    closed = true;
     batcher.close();
     closePromise = new Promise<void>((resolve) => {
       let pendingServers = 2;
