@@ -77,6 +77,7 @@ const CAPACITY = 4_096;
 // dropped rather than recorded against a meaningless far-future frame.
 const PAINT_STALE_MS = 10_000;
 const MAX_AWAITING_PAINT = 4_096;
+const MAX_PENDING = 4_096;
 
 const receiveToCommit = new Float64Array(CAPACITY);
 const receiveToPaint = new Float64Array(CAPACITY);
@@ -170,6 +171,9 @@ export function noteBridgeEventReceived(event: ServerEvent): void {
     record(appendToReceive, 'append', now - clampEpoch(event.event.ts));
   }
   pending.push({ receivedAt: now, source: event });
+  if (pending.length > MAX_PENDING) {
+    pending = pending.slice(pending.length - MAX_PENDING);
+  }
 }
 
 /**

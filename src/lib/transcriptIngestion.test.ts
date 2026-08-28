@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TranscriptEvent } from '../types/bridge';
-import { ingestTranscriptEvents } from './transcriptIngestion';
+import { ingestTranscriptEvents, firstUserTranscriptEvent } from './transcriptIngestion';
 import { estimateTranscriptCost } from './transcriptWindow';
 
 function transcriptEvent(id: string, overrides: Partial<TranscriptEvent> = {}): TranscriptEvent {
@@ -173,6 +173,33 @@ test('a live-tail delta copies bounded chunk state instead of retained history',
   assert.equal(streamed.events.at(-1)?.text, 'ACB');
   assert.equal(streamed.events[0], beforeStreaming[0]);
   assert.equal(streamed.events[2_999], beforeStreaming[2_999]);
+});
+
+test('first-user lookup reuses runtime indexes for a plain hydrated array', () => {
+  let idReads = 0;
+  const events = [
+    transcriptEvent('user-1', {
+      author: 'user',
+      text: 'hello',
+    }),
+    transcriptEvent('assistant-1'),
+  ].map((event) => {
+    Object.defineProperty(event, 'id', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        idReads += 1;
+        return event.kind === 'text' && event.author === 'user' ? 'user-1' : 'assistant-1';
+      },
+    });
+    return event;
+  });
+
+  assert.equal(firstUserTranscriptEvent(events)?.author, 'user');
+  const readsAfterFirstLookup = idReads;
+  assert.ok(readsAfterFirstLookup > 0);
+  assert.equal(firstUserTranscriptEvent(events)?.author, 'user');
+  assert.equal(idReads, readsAfterFirstLookup);
 });
 
 function retainedEvents(count: number, onIdRead: () => void): TranscriptEvent[] {

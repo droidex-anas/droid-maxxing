@@ -81,3 +81,16 @@ test('derived operations keep an existing sequence chunk size instead of renorma
   });
   assert.equal(chunkedSequenceChunks(replaced)[0], sequenceChunks[0]);
 });
+
+test('suffix replacement concatenates a large live replacement without spreading arguments', () => {
+  const sequence = asChunkedSequence([0, 1, 2], 2);
+  const replacement = Array.from({ length: 80_000 }, (_, index) => index + 10);
+
+  const next = replaceChunkedSequenceSuffix(sequence, 2, replacement);
+
+  assert.equal(next.length, 80_002);
+  assert.equal(next[0], 0);
+  assert.equal(next[1], 1);
+  assert.equal(next[2], 10);
+  assert.equal(next.at(-1), 80_009);
+});

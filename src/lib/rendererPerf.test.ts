@@ -271,3 +271,17 @@ test('a paint frame that runs late records nothing stale', () => {
     'a frame firing past the threshold stamps nothing',
   );
 });
+
+test('the pre-commit telemetry queue drops oldest samples once it hits capacity', () => {
+  resetRendererPerfForTest();
+  const overflow = 10;
+  const capacity = 4_096;
+  for (let index = 0; index < capacity + overflow; index += 1) {
+    noteBridgeEventReceived({ type: 'history.persistenceRecovered' });
+  }
+  noteStoreCommitted();
+
+  const snapshot = getRendererPerfSnapshot();
+  assert.equal(snapshot.eventsReceived, capacity + overflow);
+  assert.equal(snapshot.receiveToCommitMs.count, capacity);
+});

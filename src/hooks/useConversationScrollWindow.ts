@@ -19,6 +19,7 @@ import {
   shouldLoadOlderHistoryAtTop,
   shouldReleaseConversationTranscript,
   shouldReportPinnedViewport,
+  deferredViewportRestoreAction,
   TOP_AUTO_LOAD_PX,
   type ConversationContentResizeBinding,
   type PendingHistoryPrepend,
@@ -452,7 +453,14 @@ export function useConversationScrollWindow({
           binding.ownedRestoreGeneration = restoreGeneration;
           if (binding.releaseFrame) cancelAnimationFrame(binding.releaseFrame);
           binding.releaseFrame = requestAnimationFrame(() => {
-            if (viewportAnchor.current !== null && !restored.didFindRow) {
+            binding.ownedRestoreGeneration = null;
+            const action = deferredViewportRestoreAction(
+              viewportRestoreGeneration.current,
+              restoreGeneration,
+              viewportAnchor.current !== null && !restored.didFindRow,
+            );
+            if (action === 'skip') return;
+            if (action === 'retry' && viewportAnchor.current !== null) {
               const retried = restoreViewportAnchor(
                 element,
                 viewportAnchor.current,
@@ -464,11 +472,8 @@ export function useConversationScrollWindow({
                 : captureViewportAnchor(element, true);
               expectedRestoredScrollTop.current = element.scrollTop;
             }
-            if (viewportRestoreGeneration.current === restoreGeneration) {
-              isRestoringViewport.current = false;
-              expectedRestoredScrollTop.current = null;
-            }
-            binding.ownedRestoreGeneration = null;
+            isRestoringViewport.current = false;
+            expectedRestoredScrollTop.current = null;
           });
         }
       }),

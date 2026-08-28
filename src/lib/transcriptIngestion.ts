@@ -225,7 +225,9 @@ function buildTranscriptRuntime(source: readonly TranscriptEvent[]): TranscriptR
   const events = asChunkedSequence(source);
   let eventIds = emptyEventIdIndex();
   for (const event of events) eventIds = addEventId(eventIds, event.id);
-  return registerTranscriptRuntime(events, eventIds, buildIndexes(events));
+  const runtime = registerTranscriptRuntime(events, eventIds, buildIndexes(events));
+  if (events !== source) transcriptRuntimes.set(source, runtime);
+  return runtime;
 }
 
 function registerTranscriptRuntime(

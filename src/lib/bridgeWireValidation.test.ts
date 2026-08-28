@@ -83,3 +83,19 @@ test('rejects malformed features in session summaries and mission updates', () =
     null,
   );
 });
+
+test('rejects object payloads that are actually arrays', () => {
+  assert.equal(serverWireMessage(batch({ type: 'settings.defaults', defaults: [] })), null);
+  assert.ok(serverWireMessage(batch({ type: 'settings.defaults', defaults: {} })));
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'sessions.searchResults',
+        requestId: 'req-1',
+        results: [[]],
+        indexingIncomplete: false,
+      }),
+    ),
+    null,
+  );
+});

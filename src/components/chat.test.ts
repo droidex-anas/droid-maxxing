@@ -1422,6 +1422,31 @@ test('final response projection retains settled turns while the live turn change
   assert.deepEqual([...nextTurn.liveKeys], []);
 });
 
+test('appending two prompts in one batch still settles the skipped turn response', () => {
+  const message = (id: string, author: 'user' | 'assistant'): FeedItem => ({
+    type: 'message',
+    key: id,
+    event: ev({ id, author, text: id }),
+  });
+  const initial = [message('user-1', 'user'), message('answer-1', 'assistant')];
+  const first = projectFinalResponseKeys(null, 'm:primary', initial, 'full');
+  const batched = projectFinalResponseKeys(
+    first,
+    'm:primary',
+    [
+      ...initial,
+      message('user-2', 'user'),
+      message('answer-2', 'assistant'),
+      message('user-3', 'user'),
+    ],
+    'append',
+  );
+
+  assert.equal(batched.settledKeys.has('answer-1'), true);
+  assert.equal(batched.settledKeys.has('answer-2'), true);
+  assert.deepEqual([...batched.liveKeys], []);
+});
+
 test('live final-response keys keep their reference while the live key is unchanged', () => {
   const message = (id: string, author: 'user' | 'assistant'): FeedItem => ({
     type: 'message',
