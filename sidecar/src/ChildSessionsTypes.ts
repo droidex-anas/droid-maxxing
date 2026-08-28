@@ -1,4 +1,4 @@
-import type { FactoryRuntime } from './DroidRuntime.js';
+import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
 import type { HistoryIndex, PersistedChildSession } from './history.js';
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import type { SessionRegistry } from './SessionRegistry.js';

@@ -1,4 +1,5 @@
-import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
+import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
+import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import {
   ContextPollHost,
   contextPollIntervalMs,

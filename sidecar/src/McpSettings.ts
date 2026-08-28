@@ -7,7 +7,7 @@ import {
 } from '@factory/droid-sdk';
 
 import type { McpConfiguration } from './DroidMcpConfiguration.js';
-import type { FactorySession } from './DroidRuntime.js';
+import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import type {
   ClientCommand,
   McpServerInfo,

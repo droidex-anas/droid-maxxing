@@ -1,4 +1,4 @@
-import { factoryReasoningEffort } from './DroidRuntime.js';
+import { factoryReasoningEffort } from './providers/droid/DroidModeMapping.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
 import type { ChildSessionSummary, ClientCommand } from './protocol.js';
 import type { ChildOperationTarget } from './SessionContext.js';

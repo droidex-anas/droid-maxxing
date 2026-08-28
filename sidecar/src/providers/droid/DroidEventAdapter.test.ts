@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { ProviderRuntimeEventBase } from '../providerEvents.js';
 import {
-  classifyPermission,
-  confirmationType,
   extractCompactionNotification,
   mapProgress,
   normalizeNotification,
-  permissionSignature,
   normalizeStreamEvent,
-} from './normalize.js';
+  providerEventsFromNormalized,
+} from './DroidEventAdapter.js';
+import { classifyPermission, confirmationType, permissionSignature } from './DroidPermissions.js';
 
 test('mapProgress keeps Mission provider and spawn correlation internal for policy projection', () => {
   assert.deepEqual(
@@ -583,4 +583,73 @@ test('does not treat child output or failed Task text as a provider session id',
 
   assert.equal(laterOutput?.childSession?.providerSessionId, undefined);
   assert.equal(failed?.childSession?.providerSessionId, undefined);
+});
+
+const eventBase: ProviderRuntimeEventBase = {
+  eventId: 'evt-1',
+  target: { kind: 'session', appSessionId: 'app-1' },
+  providerDriverKind: 'droid',
+  providerInstanceId: 'droid',
+  runtimeGeneration: 1,
+  createdAt: 1_000,
+  turnId: 'turn-1',
+};
+
+test('providerEventsFromNormalized maps transcript, usage, and observational effects', () => {
+  const events = providerEventsFromNormalized(
+    {
+      transcript: {
+        id: 't1',
+        appSessionId: 'app-1',
+        sourceSessionId: 'native-1',
+        role: 'primary',
+        ts: 1_000,
+        kind: 'text',
+        text: 'hello',
+      },
+      tokens: { tokensIn: 3, tokensOut: 4, contextTokens: 5 },
+      childSession: { providerSessionId: 'child-1', label: 'reviewer' },
+    },
+    eventBase,
+  );
+  assert.equal(events[0]?.type, 'transcript');
+  assert.equal(events[1]?.type, 'usage');
+  assert.equal(events[2]?.type, 'session.effect');
+  if (events[2]?.type === 'session.effect') {
+    assert.equal(events[2].effect.kind, 'observational_task');
+  }
+  assert.equal(JSON.stringify(events).includes('"raw"'), false);
+});
+
+test('stream error and thinking deltas do not leak a raw payload field', () => {
+  const thinking = normalizeStreamEvent('app-1', 'native-1', 'primary', {
+    type: 'thinking_text_delta',
+    messageId: 'm1',
+    blockIndex: 0,
+    text: 'hmm',
+  });
+  const error = normalizeStreamEvent('app-1', 'native-1', 'primary', {
+    type: 'error',
+    message: 'boom',
+  } as never);
+  const done = normalizeStreamEvent('app-1', 'native-1', 'primary', {
+    type: 'result',
+    sessionId: 'native-1',
+    durationMs: 0,
+    numTurns: 1,
+    result: '',
+    tokenUsage: null,
+    messages: [],
+    text: '',
+    turnCount: 1,
+    success: true,
+    subtype: 'success',
+    isError: false,
+    error: null,
+  } as never);
+  assert.equal(thinking?.transcript?.kind, 'thinking');
+  assert.equal(error?.transcript?.kind, 'error');
+  assert.equal(done?.done, true);
+  const mapped = providerEventsFromNormalized(thinking ?? {}, eventBase);
+  assert.equal(JSON.stringify(mapped).includes('"raw":'), false);
 });

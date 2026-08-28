@@ -5,7 +5,8 @@ import {
 } from '@factory/droid-sdk';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
+import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
+import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import { droidexUserDataDir } from './droidexPaths.js';
 import type { ProviderBinding } from './persistence/SessionStore.js';
 import type {

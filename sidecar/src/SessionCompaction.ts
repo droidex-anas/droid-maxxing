@@ -8,7 +8,7 @@ import {
   AutoCompactionWatchdogs,
   POST_TURN_AUTO_COMPACTION_WATCHDOG_MS,
 } from './autoCompactionWatchdog.js';
-import { extractCompactionNotification } from './normalize.js';
+import { extractCompactionNotification } from './providers/droid/DroidEventAdapter.js';
 import type {
   FactoryDefaultSettings,
   SessionInteractionMode,

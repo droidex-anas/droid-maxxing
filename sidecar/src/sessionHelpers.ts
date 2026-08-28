@@ -5,7 +5,7 @@ import {
   type MissionFeature,
   type PermissionHandler,
 } from '@factory/droid-sdk';
-import type { CreateRuntimeSessionOptions } from './DroidRuntime.js';
+import type { CreateRuntimeSessionOptions } from './providers/droid/DroidModeMapping.js';
 import type {
   Autonomy,
   ClientCommand,
