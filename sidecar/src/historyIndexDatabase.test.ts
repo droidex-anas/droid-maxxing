@@ -36,18 +36,19 @@ function scheduler(): {
   ) => ReturnType<typeof setTimeout>;
   cancel: (timer: ReturnType<typeof setTimeout>) => void;
   runNext: () => Promise<void>;
+  drain: () => Promise<void>;
   nextDelay: () => number | undefined;
 } {
   const scheduled: ScheduledSlice[] = [];
-  return {
+  const api = {
     scheduled,
-    schedule: (callback, delayMs) => {
+    schedule: (callback: () => void | Promise<void>, delayMs: number) => {
       const timer = setTimeout(() => undefined, 60_000);
       timer.unref();
       scheduled.push({ callback, delayMs, timer, cancelled: false });
       return timer;
     },
-    cancel: (timer) => {
+    cancel: (timer: ReturnType<typeof setTimeout>) => {
       const pending = scheduled.find((entry) => entry.timer === timer);
       if (pending) pending.cancelled = true;
       clearTimeout(timer);
@@ -58,8 +59,12 @@ function scheduler(): {
       const [entry] = scheduled.splice(index, 1);
       await entry?.callback();
     },
+    drain: async () => {
+      while (api.nextDelay() !== undefined) await api.runNext();
+    },
     nextDelay: () => scheduled.find((entry) => !entry.cancelled)?.delayMs,
   };
+  return api;
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -433,13 +438,13 @@ test(
       );
       database.reconcileSessionFilePaths([{ providerSessionId: 'racing-provider', path }]);
 
-      let result = (await database.search('concurrent octopus'))[0]?.appSessionId;
-      for (let attempt = 0; result === undefined && attempt < 100; attempt += 1) {
-        if (slices.nextDelay() !== undefined) await slices.runNext();
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        result = (await database.search('concurrent octopus'))[0]?.appSessionId;
-      }
-      assert.equal(result, 'racing-provider');
+      await activeSlice;
+      activeSlice = undefined;
+      await slices.drain();
+      assert.equal(
+        (await database.search('concurrent octopus'))[0]?.appSessionId,
+        'racing-provider',
+      );
     } finally {
       try {
         await activeSlice;
@@ -580,8 +585,13 @@ test(
 );
 
 test('indexing does not arm a slice timer when there is nothing to index', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'droidex-index-idle-empty-'));
-  const dbPath = join(directory, 'session-index.sqlite');
+  const home = mkdtempSync(join(tmpdir(), 'droidex-index-idle-empty-'));
+  const previousHome = process.env['HOME'];
+  process.env['HOME'] = home;
+  const databaseDirectory = join(home, '.factory', 'droidex');
+  mkdirSync(databaseDirectory, { recursive: true });
+  mkdirSync(join(home, '.factory', 'sessions'), { recursive: true });
+  const dbPath = join(databaseDirectory, 'session-index.sqlite');
   createCanonicalDatabase(dbPath);
   const slices = scheduler();
   const database = new HistoryIndexDatabase(dbPath, {
@@ -599,7 +609,9 @@ test('indexing does not arm a slice timer when there is nothing to index', async
     assert.equal(slices.nextDelay(), undefined);
   } finally {
     await database.close();
-    rmSync(directory, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env['HOME'];
+    else process.env['HOME'] = previousHome;
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
