@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { renderReportMarkdown } from './report.js';
 import { acceptReplayWireMessage, runReplay } from './runner.js';
 import { resolveScenario } from './scenario.js';
 
@@ -41,6 +42,18 @@ test('replay run drives the real sidecar pipeline and reports measurements', asy
     assert.ok(['pass', 'fail', 'unmeasured'].includes(result.status));
     assert.ok(result.budgetMs > 0);
   }
+
+  const markdown = renderReportMarkdown(report);
+  const latencySection = markdown.slice(
+    markdown.indexOf('## Stage latencies'),
+    markdown.indexOf('## Transport batches'),
+  );
+  const distributionSection = markdown.slice(
+    markdown.indexOf('## Transport batches'),
+    markdown.indexOf('## Client-observed latency'),
+  );
+  assert.equal(latencySection.includes('coalesce merged'), false);
+  assert.equal(distributionSection.includes('coalesce merged'), true);
 });
 
 test('long-history runs include first/second half drift comparison', async () => {

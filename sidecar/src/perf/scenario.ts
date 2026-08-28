@@ -186,7 +186,7 @@ export const SKIPPED_PERF_SCENARIOS: Record<string, string> = {
 };
 
 function scenarioBuilderByName(name: string): (() => PerfScenarioSpec) | undefined {
-  return PERF_SCENARIOS[name];
+  return Object.hasOwn(PERF_SCENARIOS, name) ? PERF_SCENARIOS[name] : undefined;
 }
 
 function availableScenarioNames(): string[] {

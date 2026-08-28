@@ -49,9 +49,17 @@ test('unknown scenario names fail fast', () => {
   assert.throws(() => resolveScenario('does-not-exist'), /Unknown scenario/);
 });
 
+test('inherited object names are not scenario builders', () => {
+  assert.throws(() => resolveScenario('constructor'), /Unknown scenario/);
+  assert.throws(() => resolveScenario('toString'), /Unknown scenario/);
+});
+
 test('mulberry32 repeats deterministically for a seed', () => {
-  const first = Array.from({ length: 5 }, () => mulberry32(99)());
-  const second = Array.from({ length: 5 }, () => mulberry32(99)());
+  const firstRandom = mulberry32(99);
+  const secondRandom = mulberry32(99);
+  const first = Array.from({ length: 5 }, () => firstRandom());
+  const second = Array.from({ length: 5 }, () => secondRandom());
   assert.deepEqual(first, second);
+  assert.equal(new Set(first).size, first.length, 'the generator must advance between draws');
   assert.ok(first.every((value) => value >= 0 && value < 1));
 });
