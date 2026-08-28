@@ -685,6 +685,7 @@ export class SessionManager {
         await this.childSessions.interrupt(cmd);
         return;
       case 'child.loadHistory':
+        await this.sessionFiles.whenBootReconciled();
         await this.childSessions.loadHistory(cmd);
         return;
       case 'child.updateSettings':
@@ -755,6 +756,7 @@ export class SessionManager {
         this.timeline.loadProviderPage(cmd.providerSessionId, cmd.cursor, cmd.limit);
         return;
       case 'session.loadHistory':
+        await this.sessionFiles.whenBootReconciled();
         this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
       case 'sessions.search':
