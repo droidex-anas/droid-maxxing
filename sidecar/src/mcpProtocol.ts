@@ -11,6 +11,54 @@ export type McpServerSource =
   | 'dynamic'
   | 'builtin';
 
+export const MCP_SERVER_TYPES = [
+  'http',
+  'sse',
+  'stdio',
+] as const satisfies readonly McpServerType[];
+export const MCP_HTTP_SERVER_TYPES = ['http', 'sse'] as const satisfies readonly Exclude<
+  McpServerType,
+  'stdio'
+>[];
+export const MCP_SERVER_STATUSES = [
+  'connecting',
+  'connected',
+  'disconnected',
+  'failed',
+  'disabled',
+] as const satisfies readonly McpServerStatus[];
+export const MCP_SERVER_SOURCES = [
+  'org',
+  'runtime',
+  'user',
+  'project',
+  'folder',
+  'dynamic',
+  'builtin',
+] as const satisfies readonly McpServerSource[];
+
+type AssertNoMissing<TUnion, TListed extends TUnion> =
+  Exclude<TUnion, TListed> extends never
+    ? true
+    : ['missing enum members', Exclude<TUnion, TListed>];
+
+const _mcpServerTypesComplete = true satisfies AssertNoMissing<
+  McpServerType,
+  (typeof MCP_SERVER_TYPES)[number]
+>;
+const _mcpHttpServerTypesComplete = true satisfies AssertNoMissing<
+  Exclude<McpServerType, 'stdio'>,
+  (typeof MCP_HTTP_SERVER_TYPES)[number]
+>;
+const _mcpServerStatusesComplete = true satisfies AssertNoMissing<
+  McpServerStatus,
+  (typeof MCP_SERVER_STATUSES)[number]
+>;
+const _mcpServerSourcesComplete = true satisfies AssertNoMissing<
+  McpServerSource,
+  (typeof MCP_SERVER_SOURCES)[number]
+>;
+
 export interface McpServerInfo {
   name: string;
   status: McpServerStatus;
