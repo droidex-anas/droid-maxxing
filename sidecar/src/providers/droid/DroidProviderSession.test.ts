@@ -5,6 +5,7 @@ import {
   FakeFactoryRuntime,
   FakeFactorySession,
   assistantTextDelta,
+  type RecordedCall,
 } from '../../testing/fakeFactoryRuntime.js';
 import {
   PRE_ACTIVATION_MAX_BYTES,
@@ -197,8 +198,9 @@ test('interrupt targets the captured turn and generation and dedupes settlement'
   await session.close(ShutdownDeadline.fromDurationMs(0));
 });
 
-test('steer interrupts the in-flight turn without waiting for Factory completion', async () => {
-  const factory = new FakeFactorySession('provider-1', {}, []);
+test('steer throws unsupported_capability and does not interrupt', async () => {
+  const calls: RecordedCall[] = [];
+  const factory = new FakeFactorySession('provider-1', {}, calls);
   factory.deferNextStream();
   const { session, recorded } = await openSession(factory);
   const input = createInput(recorded.sink);
@@ -209,11 +211,26 @@ test('steer interrupts the in-flight turn without waiting for Factory completion
     configuration: input.configuration,
   });
   assertStartTurnDidNotSettle(returned, recorded.events, 'turn-steer');
-  await session.steer({
-    turnId: 'turn-steer',
-    prompt: { text: 'nudge', skills: [], files: [], browserRefs: [] },
-  });
-  assertExactlyOneTurnSettlement(recorded.events, 'turn-steer', { status: 'interrupted' });
+  await assert.rejects(
+    () =>
+      session.steer({
+        turnId: 'turn-steer',
+        prompt: { text: 'nudge', skills: [], files: [], browserRefs: [] },
+      }),
+    (error: unknown) =>
+      error instanceof ProviderContractError &&
+      error.code === 'unsupported_capability' &&
+      error.providerInstanceId === 'droid' &&
+      error.message.includes('steer'),
+  );
+  assert.equal(
+    calls.some((call) => call.method === 'interrupt'),
+    false,
+  );
+  assert.equal(
+    recorded.events.some((event) => event.type === 'turn.settled'),
+    false,
+  );
   await session.close(ShutdownDeadline.fromDurationMs(0));
 });
 

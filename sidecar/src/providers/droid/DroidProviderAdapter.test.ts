@@ -211,7 +211,7 @@ test('probe reports missing, unauthenticated, and ready Droid snapshots', async 
   assert.deepEqual(snapshot.models, models);
   assert.equal(snapshot.capabilities.usageReporting, true);
   assert.equal(snapshot.capabilities.reasoningStream, true);
-  assert.equal(snapshot.capabilities.steer, true);
+  assert.equal(snapshot.capabilities.steer, false);
   assert.equal(snapshot.capabilities.missionControl, true);
 });
 

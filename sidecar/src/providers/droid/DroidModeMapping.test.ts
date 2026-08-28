@@ -79,7 +79,7 @@ test('Droid capabilities are complete and truthful', () => {
   assert.deepEqual(capabilities.autonomyLevels, ['off', 'low', 'medium', 'high']);
   assert.equal(capabilities.modelChange, 'before_turn');
   assert.equal(capabilities.resume, true);
-  assert.equal(capabilities.steer, true);
+  assert.equal(capabilities.steer, false);
   assert.equal(capabilities.interrupt, true);
   assert.equal(capabilities.approvals, true);
   assert.equal(capabilities.questions, true);

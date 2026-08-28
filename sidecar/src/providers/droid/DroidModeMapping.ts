@@ -94,7 +94,7 @@ export function droidCapabilities(): ProviderCapabilities {
     autonomyLevels: ['off', 'low', 'medium', 'high'],
     modelChange: 'before_turn',
     resume: true,
-    steer: true,
+    steer: false,
     interrupt: true,
     approvals: true,
     questions: true,

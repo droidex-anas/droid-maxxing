@@ -166,8 +166,8 @@ export class DroidProviderSession implements ProviderSession {
     });
   }
 
-  async steer(input: ProviderSteerInput): Promise<void> {
-    await this.interrupt({ turnId: input.turnId, runtimeGeneration: this.#runtimeGeneration });
+  async steer(_input: ProviderSteerInput): Promise<void> {
+    throw droidError('unsupported_capability', 'provider droid does not support steer', 'refresh');
   }
 
   async interrupt(input: { turnId: string; runtimeGeneration: number }): Promise<void> {
