@@ -18,7 +18,6 @@ import {
   resolveDroidPath,
   buildDroidInvocation,
 } from '../../Environment.js';
-import { normalizePermissionOutcome } from '../../permissionOutcomes.js';
 import { droidReasoningEffortFromSelection } from '../providerIdentity.js';
 import {
   ProviderContractError,
@@ -32,9 +31,8 @@ import {
   type ProviderSnapshot,
 } from '../providerTypes.js';
 import { ShutdownDeadline } from '../shutdownDeadline.js';
-import { classifyPermission, confirmationType } from './DroidPermissions.js';
+import { createDroidNativeHandlers } from './DroidInteractions.js';
 import {
-  APPROVAL_DECISION_TO_OUTCOME,
   DROID_DEFINITION,
   createInitializeSessionParams,
   droidCapabilities,
@@ -242,7 +240,7 @@ export class DroidProviderAdapter implements ProviderAdapter {
         : {}),
     });
     this.sessions.push(session);
-    const handlers = nativeHandlersFor(session);
+    const handlers = createDroidNativeHandlers(session);
     try {
       const factory = resumeSessionId
         ? await this.#runtime.loadSession(resumeSessionId, {
@@ -286,76 +284,6 @@ export class DroidProviderAdapter implements ProviderAdapter {
       return toProviderModels(readDroidCliModelCatalogCache(droidPath));
     }
   }
-}
-
-function nativeHandlersFor(session: DroidProviderSession): {
-  permissionHandler: PermissionHandler;
-  askUserHandler: AskUserHandler;
-} {
-  return {
-    permissionHandler: (params) =>
-      session.runNativeCallback(async () => {
-        const requestId = session.createInput.ids.nextEventId();
-        const classified = classifyPermission(
-          session.createInput.target.kind === 'session'
-            ? session.createInput.target.appSessionId
-            : requestId,
-          requestId,
-          params,
-        );
-        const type = confirmationType(params);
-        if (type === 'exit_spec_mode' || type === 'propose_mission') {
-          const decision = await session.createInput.interactionSink.requestPlanReview({
-            requestId,
-            target: session.createInput.target,
-            runtimeGeneration: session.runtimeGeneration,
-            plan: classified.plan ?? classified.detail,
-          });
-          return normalizePermissionOutcome(
-            decision.decision === 'implement' ? 'proceed_once' : 'cancel',
-          );
-        }
-        const decision = await session.createInput.interactionSink.requestApproval({
-          requestId,
-          target: session.createInput.target,
-          runtimeGeneration: session.runtimeGeneration,
-          kind: classified.kind,
-          title: classified.title,
-          detail: classified.detail,
-          ...(classified.plan ? { plan: classified.plan } : {}),
-          ...(classified.options ? { options: classified.options } : {}),
-        });
-        if (decision.decision === 'option') return normalizePermissionOutcome(decision.option);
-        const row = APPROVAL_DECISION_TO_OUTCOME.find(
-          (entry) => entry.decision === decision.decision,
-        );
-        return normalizePermissionOutcome(row?.outcome ?? 'cancel');
-      }),
-    askUserHandler: (params) =>
-      session.runNativeCallback(async () => {
-        const requestId = session.createInput.ids.nextEventId();
-        const questions = (params.questions ?? []).map((question, index) => ({
-          id: String(question.index ?? index),
-          prompt: question.question,
-          options: question.options ?? [],
-          multiSelect: false,
-        }));
-        const answer = await session.createInput.interactionSink.requestQuestion({
-          requestId,
-          target: session.createInput.target,
-          runtimeGeneration: session.runtimeGeneration,
-          questions,
-        });
-        if (answer.status === 'cancelled') return { cancelled: true, answers: [] };
-        return {
-          answers: questions.map((question, index) => ({
-            index,
-            question: question.prompt,
-            answer: answer.answers[question.id]?.[0] ?? '',
-          })),
-        };
-      }),
-  };
 }
 
 function createOptionsFromInput(

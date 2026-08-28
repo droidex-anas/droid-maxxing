@@ -71,6 +71,7 @@ import { SessionRegistry } from './SessionRegistry.js';
 import { projectWireSessionSummary } from './sessionRegistryProjection.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
+import { DroidInteractions } from './providers/droid/DroidInteractions.js';
 import { isReportedStreamingTranscriptError, SessionTimeline } from './SessionTimeline.js';
 import { SessionContext, type LiveOperationTarget } from './SessionContext.js';
 import {
@@ -221,6 +222,7 @@ export class SessionManager {
   private readonly registry: SessionRegistry<LiveSession>;
   private readonly timeline: SessionTimeline;
   private readonly interactions: SessionInteractions;
+  private readonly droidInteractions: DroidInteractions;
   private readonly eventFlow: SessionEventFlow;
   private readonly context: SessionContext;
   private readonly compaction: SessionCompaction;
@@ -364,12 +366,26 @@ export class SessionManager {
         : {}),
     });
     this.interactions = new SessionInteractions({
-      getLiveSession: (id) => this.registry.getLive(id),
-      updateSummary: (id, patch) => {
-        this.registry.updateSummary(id, patch);
-      },
       emit: (event) => {
         this.emit(event);
+      },
+      emitError: (error) => {
+        this.emitError(error);
+      },
+    });
+    this.droidInteractions = new DroidInteractions({
+      sink: this.interactions,
+      getLiveSession: (id) => {
+        const live = this.registry.getLive(id);
+        if (!live) return undefined;
+        return {
+          summary: live.summary,
+          session: live.session,
+          runtimeGeneration: live.binding.runtimeGeneration,
+        };
+      },
+      updateSummary: (id, patch) => {
+        this.registry.updateSummary(id, patch);
       },
       emitError: (error) => {
         this.emitError(error);
@@ -380,8 +396,8 @@ export class SessionManager {
       context: this.context,
       timeline: this.timeline,
       runtime: this.runtime,
-      makePermissionHandler: (ref) => this.interactions.makePermissionHandler(ref),
-      makeAskUserHandler: (ref) => this.interactions.makeAskUserHandler(ref),
+      makePermissionHandler: (ref) => this.droidInteractions.makePermissionHandler(ref),
+      makeAskUserHandler: (ref) => this.droidInteractions.makeAskUserHandler(ref),
       emitError: (error) => {
         this.emitError(error);
       },
@@ -421,7 +437,7 @@ export class SessionManager {
       history: this.history,
       timeline: this.timeline,
       eventFlow: this.eventFlow,
-      interactions: this.interactions,
+      interactions: this.droidInteractions,
       context: this.context,
       compaction: this.compaction,
       resolveDefaultSettings: (summary, initResult, role) =>
@@ -470,8 +486,8 @@ export class SessionManager {
       getFactoryDefaults: () => this.getFactoryDefaults(),
       maxContextTokensForModel: (modelId) => this.maxContextTokensForModel(modelId),
       startLocalMcpServers: (ref, cwd) => this.startLocalMcpServers(ref, cwd),
-      makePermissionHandler: (ref) => this.interactions.makePermissionHandler(ref),
-      makeAskUserHandler: (ref) => this.interactions.makeAskUserHandler(ref),
+      makePermissionHandler: (ref) => this.droidInteractions.makePermissionHandler(ref),
+      makeAskUserHandler: (ref) => this.droidInteractions.makeAskUserHandler(ref),
       compaction: this.compaction,
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       childSessions: this.childSessions,
@@ -481,6 +497,7 @@ export class SessionManager {
       context: this.context,
       forgetInteractions: (appSessionId) => {
         this.interactions.forgetSession(appSessionId);
+        this.droidInteractions.forgetSession(appSessionId);
       },
       forgetEventFlow: (appSessionId) => {
         this.eventFlow.forgetSession(appSessionId);
@@ -678,7 +695,8 @@ export class SessionManager {
         );
         return;
       case 'approval.respond':
-        await this.interactions.respondToApproval(cmd.appSessionId, cmd.requestId, cmd.outcome);
+        this.interactions.respondToApproval(cmd.appSessionId, cmd.requestId, cmd.outcome);
+        await this.droidInteractions.drain();
         return;
       case 'question.respond':
         this.interactions.respondToQuestion(
@@ -687,6 +705,13 @@ export class SessionManager {
           cmd.cancelled,
           cmd.answers,
         );
+        await this.droidInteractions.drain();
+        return;
+      case 'plan_review.respond':
+        this.interactions.respondToPlanReview(cmd.appSessionId, cmd.requestId, {
+          decision: cmd.decision,
+          ...(cmd.feedback !== undefined ? { feedback: cmd.feedback } : {}),
+        });
         return;
       case 'session.interrupt':
         await this.lifecycle.interrupt(cmd.appSessionId);

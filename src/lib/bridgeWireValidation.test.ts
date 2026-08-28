@@ -25,7 +25,6 @@ test('rejects approval requests with unknown permission kinds', () => {
           kind: 'unknown-permission',
           title: 'Approve action',
           detail: 'Run the requested action.',
-          raw: {},
         },
       }),
     ),

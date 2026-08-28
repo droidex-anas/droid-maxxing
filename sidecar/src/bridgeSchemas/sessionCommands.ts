@@ -17,6 +17,7 @@ import {
   idStringSchema,
   inboundSessionConfigurationSchema,
   modelIdStringSchema,
+  nonemptyPromptStringSchema,
   optionalCompactionTokenLimitPerModelSchema,
   optionalCompactionTokenLimitSchema,
   optionalHistoryLimitSchema,
@@ -28,6 +29,7 @@ import {
   strictCommand,
   titleStringSchema,
   utf8ByteString,
+  MAX_BRIDGE_LIST_ITEMS,
   MAX_LABEL_BYTES,
 } from './commandBounds.js';
 
@@ -39,13 +41,13 @@ const configurableSessionRoleSchema = z.enum(CONFIGURABLE_SESSION_ROLES);
 const optionalReasoningEffortSchema = reasoningEffortSchema.optional();
 const nullableModelIdSchema = z.union([modelIdStringSchema, z.null()]);
 
-const questionAnswerSchema = z
-  .object({
-    index: z.number().int().nonnegative(),
-    question: promptStringSchema,
-    answer: promptStringSchema,
-  })
-  .strict();
+const questionAnswerRecordSchema = z
+  .record(idStringSchema, boundedArray(promptStringSchema))
+  .refine((record) => Object.keys(record).length <= MAX_BRIDGE_LIST_ITEMS, {
+    message: 'too many record entries',
+  });
+
+const planReviewDecisionSchema = z.enum(['implement', 'iterate', 'cancel']);
 
 export const sessionCommandSchemas = {
   'catalog.models': strictCommand('catalog.models', {}),
@@ -191,7 +193,13 @@ export const sessionCommandSchemas = {
     appSessionId: idStringSchema,
     requestId: idStringSchema,
     cancelled: z.boolean(),
-    answers: boundedArray(questionAnswerSchema),
+    answers: questionAnswerRecordSchema,
+  }),
+  'plan_review.respond': strictCommand('plan_review.respond', {
+    appSessionId: idStringSchema,
+    requestId: idStringSchema,
+    decision: planReviewDecisionSchema,
+    feedback: nonemptyPromptStringSchema.optional(),
   }),
 } satisfies {
   [K in Extract<
@@ -228,5 +236,6 @@ export const sessionCommandSchemas = {
     | 'child.updateSettings'
     | 'approval.respond'
     | 'question.respond'
+    | 'plan_review.respond'
   >]: z.ZodType<Extract<ClientCommand, { type: K }>>;
 };

@@ -1,213 +1,231 @@
-import {
-  DroidInteractionMode,
-  type AskUserHandler,
-  type AskUserRequestParams,
-  type AskUserResult,
-  type PermissionHandler,
-  type RequestPermissionHandlerResult,
-  type RequestPermissionRequestParams,
-} from '@factory/droid-sdk';
-
-import type { FactorySession } from './providers/droid/DroidProviderSession.js';
-import {
-  classifyPermission,
-  confirmationType,
-  permissionSignature,
-} from './providers/droid/DroidPermissions.js';
-import {
-  isAlwaysOutcome,
-  isApprovalOutcome,
-  normalizePermissionOutcome,
-} from './permissionOutcomes.js';
-import type { PermissionKind, ServerEvent, SessionSummary } from './protocol.js';
+import type { ServerEvent } from './protocol.js';
 import { errMsg } from './sessionHelpers.js';
+import {
+  appSessionIdFromTarget,
+  approvalDecisionFromOutcome,
+  CANCEL_APPROVAL,
+  CANCEL_PLAN_REVIEW,
+  CANCEL_QUESTION,
+  parsePlanReviewDecision,
+  parseQuestionAnswer,
+  toPermissionRequest,
+  toPlanReviewRequest,
+  toSessionQuestion,
+  uniqueCanonicalRequestId,
+} from './providers/providerInteractions.js';
+import type {
+  ProviderApprovalDecision,
+  ProviderApprovalRequest,
+  ProviderInteractionSink,
+  ProviderPlanReviewDecision,
+  ProviderPlanReviewRequest,
+  ProviderQuestionAnswer,
+  ProviderQuestionRequest,
+} from './providers/providerTypes.js';
 
-interface PendingPermission {
-  resolve: (result: RequestPermissionHandlerResult) => void;
-  kind: PermissionKind;
-  signature?: string;
+interface PendingApproval {
+  resolve: (decision: ProviderApprovalDecision) => void;
+  request: ProviderApprovalRequest;
+}
+
+interface PendingQuestion {
+  resolve: (answer: ProviderQuestionAnswer) => void;
+  request: ProviderQuestionRequest;
+}
+
+interface PendingPlanReview {
+  resolve: (decision: ProviderPlanReviewDecision) => void;
+  request: ProviderPlanReviewRequest;
 }
 
 interface InteractionScope {
-  pendingPermissions: Map<string, PendingPermission>;
-  pendingQuestions: Map<string, (result: AskUserResult) => void>;
-  permissionGrants: Set<string>;
-}
-
-export interface InteractionLiveSession {
-  summary: SessionSummary;
-  session: Pick<FactorySession, 'updateSettings'>;
+  approvals: Map<string, PendingApproval>;
+  questions: Map<string, PendingQuestion>;
+  planReviews: Map<string, PendingPlanReview>;
 }
 
 type InteractionError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
 export interface SessionInteractionsDependencies {
-  getLiveSession: (id: string) => InteractionLiveSession | undefined;
-  updateSummary: (id: string, patch: Partial<SessionSummary>) => void;
   emit: (event: ServerEvent) => void;
   emitError: (error: InteractionError) => void;
 }
 
-let requestSequence = 0;
-const defaultNextRequestId = () =>
-  `req-${Date.now().toString(36)}-${(requestSequence++).toString(36)}`;
-
-export class SessionInteractions {
+export class SessionInteractions implements ProviderInteractionSink {
   private readonly scopes = new Map<string, InteractionScope>();
 
   constructor(private readonly dependencies: SessionInteractionsDependencies) {}
 
-  makePermissionHandler(ref: { id: string }): PermissionHandler {
-    return (params: RequestPermissionRequestParams) =>
-      new Promise<RequestPermissionHandlerResult>((resolve) => {
-        const liveSession = this.dependencies.getLiveSession(ref.id);
-        const requestId = defaultNextRequestId();
-        const type = confirmationType(params);
-        const request = classifyPermission(ref.id, requestId, params);
-        const signature = permissionSignature(params);
-        const scope = liveSession ? this.scope(liveSession.summary.appSessionId) : undefined;
-        if (scope && signature && scope.permissionGrants.has(signature)) {
-          resolve(normalizePermissionOutcome('proceed_always'));
-          return;
-        }
-        if (liveSession && scope) {
-          scope.pendingPermissions.set(requestId, {
-            resolve,
-            kind: request.kind,
-            ...(signature ? { signature } : {}),
-          });
-          if (type === 'propose_mission') {
-            this.dependencies.updateSummary(ref.id, {
-              phase: 'awaiting_plan_approval',
-              proposal: request.detail,
-            });
-          } else if (type === 'start_mission_run') {
-            this.dependencies.updateSummary(ref.id, { phase: 'awaiting_run_start' });
-          }
-        }
-        this.dependencies.emit({ type: 'approval.requested', request });
+  requestApproval(input: ProviderApprovalRequest): Promise<ProviderApprovalDecision> {
+    return new Promise((resolve) => {
+      const appSessionId = appSessionIdFromTarget(input.target);
+      const scope = this.scope(appSessionId);
+      const requestId = uniqueCanonicalRequestId(appSessionId, input.requestId, (id) =>
+        this.hasPending(scope, id),
+      );
+      const request: ProviderApprovalRequest = { ...input, requestId };
+      scope.approvals.set(requestId, { resolve, request });
+      this.dependencies.emit({
+        type: 'approval.requested',
+        request: toPermissionRequest(appSessionId, requestId, request),
       });
+    });
   }
 
-  makeAskUserHandler(ref: { id: string }): AskUserHandler {
-    return (params: AskUserRequestParams) =>
-      new Promise<AskUserResult>((resolve) => {
-        const liveSession = this.dependencies.getLiveSession(ref.id);
-        const requestId = defaultNextRequestId();
-        const runtimeParams: {
-          questions?: { index: number; question: string; options?: string[] }[];
-        } = params;
-        const questions = (runtimeParams.questions ?? []).map((question) => ({
-          index: question.index,
-          question: question.question,
-          options: question.options ?? [],
-        }));
-        if (liveSession) {
-          this.scope(liveSession.summary.appSessionId).pendingQuestions.set(requestId, resolve);
-        }
-        this.dependencies.emit({
-          type: 'question.requested',
-          question: { appSessionId: ref.id, requestId, questions },
-        });
+  requestQuestion(input: ProviderQuestionRequest): Promise<ProviderQuestionAnswer> {
+    return new Promise((resolve) => {
+      const appSessionId = appSessionIdFromTarget(input.target);
+      const scope = this.scope(appSessionId);
+      const requestId = uniqueCanonicalRequestId(appSessionId, input.requestId, (id) =>
+        this.hasPending(scope, id),
+      );
+      const request: ProviderQuestionRequest = { ...input, requestId };
+      scope.questions.set(requestId, { resolve, request });
+      this.dependencies.emit({
+        type: 'question.requested',
+        question: toSessionQuestion(appSessionId, requestId, request),
       });
+    });
   }
 
-  async respondToApproval(appSessionId: string, requestId: string, outcome: string): Promise<void> {
-    const liveSession = this.dependencies.getLiveSession(appSessionId);
-    if (!liveSession) return;
-    const scope = this.scopes.get(liveSession.summary.appSessionId);
-    const pending = scope?.pendingPermissions.get(requestId);
+  requestPlanReview(input: ProviderPlanReviewRequest): Promise<ProviderPlanReviewDecision> {
+    return new Promise((resolve) => {
+      const appSessionId = appSessionIdFromTarget(input.target);
+      const scope = this.scope(appSessionId);
+      const requestId = uniqueCanonicalRequestId(appSessionId, input.requestId, (id) =>
+        this.hasPending(scope, id),
+      );
+      const request: ProviderPlanReviewRequest = { ...input, requestId };
+      scope.planReviews.set(requestId, { resolve, request });
+      this.dependencies.emit({
+        type: 'plan_review.requested',
+        request: toPlanReviewRequest(appSessionId, requestId, request.plan),
+      });
+    });
+  }
+
+  respondToApproval(appSessionId: string, requestId: string, outcome: string): void {
+    const scope = this.scopes.get(appSessionId);
+    const pending = scope?.approvals.get(requestId);
     if (!scope || !pending) return;
-    scope.pendingPermissions.delete(requestId);
-    let normalized: RequestPermissionHandlerResult;
+    let decision: ProviderApprovalDecision;
     try {
-      normalized = normalizePermissionOutcome(outcome);
+      decision = approvalDecisionFromOutcome(outcome);
     } catch (error) {
       this.dependencies.emitError({
         code: 'permission.invalid_outcome',
         appSessionId,
         message: errMsg(error),
       });
-      normalized = normalizePermissionOutcome('cancel');
+      return;
     }
-    if (pending.signature && isAlwaysOutcome(outcome)) {
-      scope.permissionGrants.add(pending.signature);
-    }
-    if (pending.kind === 'spec' && isApprovalOutcome(normalized)) {
-      await this.prepareSpecExitForRun(liveSession);
-    }
-    pending.resolve(normalized);
+    scope.approvals.delete(requestId);
+    pending.resolve(decision);
   }
 
   respondToQuestion(
     appSessionId: string,
     requestId: string,
     cancelled: boolean,
-    answers: { index: number; question: string; answer: string }[],
+    answers: Record<string, readonly string[]>,
   ): void {
-    const liveSession = this.dependencies.getLiveSession(appSessionId);
-    if (!liveSession) return;
-    const scope = this.scopes.get(liveSession.summary.appSessionId);
-    const resolve = scope?.pendingQuestions.get(requestId);
-    if (!scope || !resolve) return;
-    scope.pendingQuestions.delete(requestId);
-    resolve({ cancelled, answers });
+    const scope = this.scopes.get(appSessionId);
+    const pending = scope?.questions.get(requestId);
+    if (!scope || !pending) return;
+    let answer: ProviderQuestionAnswer;
+    try {
+      answer = parseQuestionAnswer(
+        cancelled,
+        answers,
+        pending.request.questions.map((question) => ({
+          id: question.id,
+          multiSelect: question.multiSelect,
+        })),
+      );
+    } catch (error) {
+      this.dependencies.emitError({
+        code: 'question.invalid_answer',
+        appSessionId,
+        message: errMsg(error),
+      });
+      return;
+    }
+    scope.questions.delete(requestId);
+    pending.resolve(answer);
+  }
+
+  respondToPlanReview(appSessionId: string, requestId: string, value: unknown): void {
+    const scope = this.scopes.get(appSessionId);
+    const pending = scope?.planReviews.get(requestId);
+    if (!scope || !pending) return;
+    let decision: ProviderPlanReviewDecision;
+    try {
+      decision = parsePlanReviewDecision(value);
+    } catch (error) {
+      this.dependencies.emitError({
+        code: 'plan_review.invalid_decision',
+        appSessionId,
+        message: errMsg(error),
+      });
+      return;
+    }
+    scope.planReviews.delete(requestId);
+    pending.resolve(decision);
   }
 
   forgetSession(appSessionId: string): void {
     this.scopes.delete(appSessionId);
   }
 
+  cancelSession(appSessionId: string): void {
+    const scope = this.scopes.get(appSessionId);
+    if (!scope) return;
+    this.settleScope(scope);
+  }
+
   /**
    * Settle every pending native callback as cancelled. Shutdown calls this
-   * before discarding provider resources so no Factory/native waiter is left
-   * hanging. Per-session close still uses `forgetSession`, which discards
-   * without settling.
+   * before discarding provider resources so no native waiter is left hanging.
+   * Per-session close still uses `forgetSession`, which discards without settling.
    */
   cancelAllPending(): void {
     for (const scope of this.scopes.values()) {
-      for (const pending of scope.pendingPermissions.values()) {
-        pending.resolve(normalizePermissionOutcome('cancel'));
-      }
-      for (const resolve of scope.pendingQuestions.values()) {
-        resolve({ cancelled: true, answers: [] });
-      }
-      scope.pendingPermissions.clear();
-      scope.pendingQuestions.clear();
+      this.settleScope(scope);
     }
+  }
+
+  private settleScope(scope: InteractionScope): void {
+    for (const pending of scope.approvals.values()) {
+      pending.resolve(CANCEL_APPROVAL);
+    }
+    for (const pending of scope.questions.values()) {
+      pending.resolve(CANCEL_QUESTION);
+    }
+    for (const pending of scope.planReviews.values()) {
+      pending.resolve(CANCEL_PLAN_REVIEW);
+    }
+    scope.approvals.clear();
+    scope.questions.clear();
+    scope.planReviews.clear();
+  }
+
+  private hasPending(scope: InteractionScope, requestId: string): boolean {
+    return (
+      scope.approvals.has(requestId) ||
+      scope.questions.has(requestId) ||
+      scope.planReviews.has(requestId)
+    );
   }
 
   private scope(appSessionId: string): InteractionScope {
     const existing = this.scopes.get(appSessionId);
     if (existing) return existing;
     const created: InteractionScope = {
-      pendingPermissions: new Map(),
-      pendingQuestions: new Map(),
-      permissionGrants: new Set(),
+      approvals: new Map(),
+      questions: new Map(),
+      planReviews: new Map(),
     };
     this.scopes.set(appSessionId, created);
     return created;
-  }
-
-  private async prepareSpecExitForRun(liveSession: InteractionLiveSession): Promise<void> {
-    const appSessionId = liveSession.summary.appSessionId;
-    try {
-      this.dependencies.updateSummary(appSessionId, {
-        configuration: {
-          ...liveSession.summary.configuration,
-          interactionMode: 'auto',
-        },
-        phase: 'running',
-      });
-      await liveSession.session.updateSettings({
-        interactionMode: DroidInteractionMode.Auto,
-      });
-    } catch (error) {
-      this.dependencies.emitError({
-        code: 'spec.exit_failed',
-        appSessionId,
-        message: `Could not switch spec session to Auto before run: ${errMsg(error)}`,
-      });
-    }
   }
 }

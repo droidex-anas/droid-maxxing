@@ -235,13 +235,23 @@ export interface PermissionRequest {
   detail: string; // human readable (command, file path, diff snippet)
   plan?: string; // full plan/spec body (exit_spec_mode)
   options?: string[]; // custom option names offered by the tool
-  raw: unknown;
 }
 
 export interface SessionQuestion {
   appSessionId: string;
   requestId: string;
-  questions: { index: number; question: string; options: string[] }[];
+  questions: {
+    id: string;
+    prompt: string;
+    options: string[];
+    multiSelect: boolean;
+  }[];
+}
+
+export interface PlanReviewRequest {
+  appSessionId: string;
+  requestId: string;
+  plan: string;
 }
 
 export type SkillLocation = 'project' | 'personal' | 'builtin';
@@ -689,7 +699,14 @@ export type ClientCommand =
       appSessionId: string;
       requestId: string;
       cancelled: boolean;
-      answers: { index: number; question: string; answer: string }[];
+      answers: Record<string, string[]>;
+    }
+  | {
+      type: 'plan_review.respond';
+      appSessionId: string;
+      requestId: string;
+      decision: 'implement' | 'iterate' | 'cancel';
+      feedback?: string;
     }
   | {
       type: 'settings.agent.update';
@@ -836,6 +853,7 @@ export type ServerEvent =
   | { type: 'event.appended'; event: TranscriptEvent }
   | { type: 'approval.requested'; request: PermissionRequest }
   | { type: 'question.requested'; question: SessionQuestion }
+  | { type: 'plan_review.requested'; request: PlanReviewRequest }
   | {
       type: 'context.updated';
       appSessionId: string;

@@ -67,6 +67,7 @@ import type {
   TranscriptEvent,
   ProgressEntry,
   PermissionRequest,
+  PlanReviewRequest,
   SessionQuestion,
   ModelInfo,
   ChildSessionSummary,
@@ -243,6 +244,7 @@ export interface AppState {
   pendingPermissions: Record<string, PermissionRequest>;
   // Same scoping for AskUser questions: keyed by the asking session.
   pendingQuestions: Record<string, SessionQuestion>;
+  pendingPlanReviews: Record<string, PlanReviewRequest>;
   contextStats: {
     primary: Record<string, ContextStatsSnapshot>;
     child: Record<string, Record<string, ContextStatsSnapshot>>;
@@ -449,6 +451,7 @@ type Action =
   | { type: 'SPEC_CLOSE_WIKI' }
   | { type: 'SESSION_PERMISSION'; request: PermissionRequest }
   | { type: 'SESSION_QUESTION'; question: SessionQuestion }
+  | { type: 'SESSION_PLAN_REVIEW'; request: PlanReviewRequest }
   | {
       type: 'SESSION_ERROR';
       appSessionId?: string;
@@ -503,6 +506,7 @@ type Action =
     }
   | { type: 'CLEAR_PERMISSION'; appSessionId: string }
   | { type: 'CLEAR_QUESTION'; appSessionId: string }
+  | { type: 'CLEAR_PLAN_REVIEW'; appSessionId: string }
 
   // UI
   | { type: 'SET_ACTIVE_SESSION'; id: string | null }
@@ -657,6 +661,7 @@ export const initialState: AppState = {
   childRuntime: {},
   pendingPermissions: {},
   pendingQuestions: {},
+  pendingPlanReviews: {},
   contextStats: { primary: {}, child: {} },
   specPlans: {},
   sessionSpecs: {},
@@ -966,6 +971,9 @@ function baseReducer(state: AppState, action: Action): AppState {
         pendingQuestions: Object.fromEntries(
           Object.entries(state.pendingQuestions).filter(([id]) => id !== action.appSessionId),
         ),
+        pendingPlanReviews: Object.fromEntries(
+          Object.entries(state.pendingPlanReviews).filter(([id]) => id !== action.appSessionId),
+        ),
         contextStats: { ...state.contextStats, child: childContext },
         pendingAutonomy: Object.fromEntries(
           Object.entries(state.pendingAutonomy).filter(([id]) => id !== action.appSessionId),
@@ -1242,6 +1250,15 @@ function baseReducer(state: AppState, action: Action): AppState {
         },
       };
 
+    case 'SESSION_PLAN_REVIEW':
+      return {
+        ...state,
+        pendingPlanReviews: {
+          ...state.pendingPlanReviews,
+          [action.request.appSessionId]: action.request,
+        },
+      };
+
     case 'SESSION_CREATE_FAILED':
       return {
         ...state,
@@ -1375,6 +1392,15 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         pendingQuestions: Object.fromEntries(
           Object.entries(state.pendingQuestions).filter(([id]) => id !== action.appSessionId),
+        ),
+      };
+    }
+
+    case 'CLEAR_PLAN_REVIEW': {
+      return {
+        ...state,
+        pendingPlanReviews: Object.fromEntries(
+          Object.entries(state.pendingPlanReviews).filter(([id]) => id !== action.appSessionId),
         ),
       };
     }
@@ -2135,6 +2161,8 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       return { type: 'SESSION_PERMISSION', request: ev.request };
     case 'question.requested':
       return { type: 'SESSION_QUESTION', question: ev.question };
+    case 'plan_review.requested':
+      return { type: 'SESSION_PLAN_REVIEW', request: ev.request };
     case 'error':
       if (isHistoryStatusError(ev)) return null;
       if (ev.code === 'bridge.resync_required' && !ev.recoverable) {

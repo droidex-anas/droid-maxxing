@@ -11,7 +11,6 @@ function makePermission(appSessionId: string): PermissionRequest {
     kind: 'exec',
     title: 'Run command',
     detail: 'ls',
-    raw: {},
   };
 }
 
@@ -19,7 +18,7 @@ function makeQuestion(appSessionId: string): SessionQuestion {
   return {
     appSessionId,
     requestId: `req-${appSessionId}`,
-    questions: [{ index: 0, question: 'Pick one', options: ['a', 'b'] }],
+    questions: [{ id: '0', prompt: 'Pick one', options: ['a', 'b'], multiSelect: false }],
   };
 }
 

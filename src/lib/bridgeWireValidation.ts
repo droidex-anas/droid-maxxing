@@ -169,6 +169,8 @@ function isServerEvent(value: unknown): value is ServerEvent {
       return isPermissionRequest(value.request);
     case 'question.requested':
       return isSessionQuestion(value.question);
+    case 'plan_review.requested':
+      return isPlanReviewRequest(value.request);
     case 'context.updated':
       return hasStrings(value, ['appSessionId', 'sourceSessionId']) && isContextStats(value.stats);
     case 'catalog.updated':
@@ -289,8 +291,7 @@ function isPermissionRequest(value: unknown): boolean {
   return (
     isRecord(value) &&
     hasStrings(value, ['appSessionId', 'requestId', 'kind', 'title', 'detail']) &&
-    isPermissionKind(value.kind) &&
-    'raw' in value
+    isPermissionKind(value.kind)
   );
 }
 
@@ -331,11 +332,16 @@ function isSessionQuestion(value: unknown): boolean {
     value.questions.every(
       (question) =>
         isRecord(question) &&
-        typeof question.index === 'number' &&
-        typeof question.question === 'string' &&
+        typeof question.id === 'string' &&
+        typeof question.prompt === 'string' &&
+        typeof question.multiSelect === 'boolean' &&
         stringArray(question.options),
     )
   );
+}
+
+function isPlanReviewRequest(value: unknown): boolean {
+  return isRecord(value) && hasStrings(value, ['appSessionId', 'requestId', 'plan']);
 }
 
 function isContextStats(value: unknown): boolean {

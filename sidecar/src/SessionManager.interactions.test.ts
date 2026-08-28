@@ -417,7 +417,7 @@ test(
         appSessionId: answerRequest.question.appSessionId,
         requestId: answerRequest.question.requestId,
         cancelled: false,
-        answers: [{ index: 0, question: 'Proceed?', answer: 'yes' }],
+        answers: { '0': ['yes'] },
       });
       assert.deepEqual(await answered, {
         cancelled: false,
@@ -429,7 +429,7 @@ test(
         appSessionId: answerRequest.question.appSessionId,
         requestId: answerRequest.question.requestId,
         cancelled: true,
-        answers: [],
+        answers: {},
       });
       await h.waitForIdle();
       assert.equal(answerResolutionCount, 1);
@@ -446,7 +446,7 @@ test(
         appSessionId: cancellationRequest.question.appSessionId,
         requestId: cancellationRequest.question.requestId,
         cancelled: true,
-        answers: [],
+        answers: {},
       });
       assert.deepEqual(await cancelled, { cancelled: true, answers: [] });
 
@@ -455,7 +455,7 @@ test(
         appSessionId: cancellationRequest.question.appSessionId,
         requestId: cancellationRequest.question.requestId,
         cancelled: false,
-        answers: [{ index: 0, question: 'Proceed?', answer: 'no' }],
+        answers: { '0': ['no'] },
       });
       await h.waitForIdle();
 
@@ -542,7 +542,7 @@ test('close preserves current interaction lifetime and forgets unresolved state 
       appSessionId: question.appSessionId,
       requestId: question.requestId,
       cancelled: true,
-      answers: [],
+      answers: {},
     });
     assert.equal(questionSettlements, 0);
     assert.equal(h.events.length, eventCountAfterResume);
@@ -596,7 +596,7 @@ test('interrupt leaves pending approvals and questions waiting for the user', as
       appSessionId: questionRequest.appSessionId,
       requestId: questionRequest.requestId,
       cancelled: false,
-      answers: [{ index: 0, question: 'Proceed?', answer: 'yes' }],
+      answers: { '0': ['yes'] },
     });
 
     assert.equal(await approval, ToolConfirmationOutcome.ProceedOnce);
@@ -681,7 +681,7 @@ test('a failed turn leaves pending approvals and questions waiting for the user'
       appSessionId: questionRequest.appSessionId,
       requestId: questionRequest.requestId,
       cancelled: true,
-      answers: [],
+      answers: {},
     });
 
     assert.equal(await approval, ToolConfirmationOutcome.Cancel);
@@ -772,7 +772,7 @@ test('ask-user requests tolerate omitted questions and options', async () => {
       appSessionId: emptyRequest.question.appSessionId,
       requestId: emptyRequest.question.requestId,
       cancelled: true,
-      answers: [],
+      answers: {},
     });
     assert.deepEqual(await emptyRequestResult, { cancelled: true, answers: [] });
 
@@ -784,14 +784,14 @@ test('ask-user requests tolerate omitted questions and options', async () => {
     );
     const freeFormRequest = latestQuestion(h.events);
     assert.deepEqual(freeFormRequest.question.questions, [
-      { index: 0, question: 'What should change?', options: [] },
+      { id: '0', prompt: 'What should change?', options: [], multiSelect: false },
     ]);
     await h.handle({
       type: 'question.respond',
       appSessionId: freeFormRequest.question.appSessionId,
       requestId: freeFormRequest.question.requestId,
       cancelled: false,
-      answers: [{ index: 0, question: 'What should change?', answer: 'The title' }],
+      answers: { '0': ['The title'] },
     });
     assert.deepEqual(await freeFormResult, {
       cancelled: false,

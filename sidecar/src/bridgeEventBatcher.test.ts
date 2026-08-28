@@ -234,7 +234,6 @@ test('priority events flush queued work before their immediate batch', () => {
       kind: 'exec',
       title: 'Run command',
       detail: 'npm test',
-      raw: {},
     },
   });
 
