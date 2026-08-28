@@ -170,5 +170,5 @@ function optionalRecordKeyOf<T extends string>(
   allowed: Record<T, true>,
 ): boolean {
   const value = record[key];
-  return value === undefined || (typeof value === 'string' && value in allowed);
+  return value === undefined || (typeof value === 'string' && Object.hasOwn(allowed, value));
 }

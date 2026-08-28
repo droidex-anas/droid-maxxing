@@ -55,6 +55,14 @@ test('cached session summaries reject malformed required arrays and discriminant
   }
 });
 
+test('inherited Object.prototype keys are not restored as reasoning effort', () => {
+  const inherited = { ...summary(), reasoningEffort: 'toString' };
+  assert.equal(
+    parseCachedSessionSummary(JSON.stringify({ cacheVersion: 1, summary: inherited })),
+    undefined,
+  );
+});
+
 test('only SQL NULL represents an intentionally excluded session summary', () => {
   assert.equal(parseCachedSessionSummary(null), null);
   for (const corruptValue of [undefined, 1, new Uint8Array([1, 2, 3]), {}]) {
