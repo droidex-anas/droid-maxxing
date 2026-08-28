@@ -62,6 +62,43 @@ function isAppendedTranscript(call: RecordedCall, text: string): boolean {
   return 'text' in event.event && event.event.text === text;
 }
 
+function skillActivationNotification(detail: string): Record<string, unknown> {
+  return {
+    jsonrpc: '2.0',
+    method: 'droid.session_notification',
+    params: {
+      notification: {
+        type: 'create_message',
+        message: {
+          id: detail,
+          role: 'user',
+          visibility: 'user_only',
+          content: [{ type: 'text', text: `Skill "early" activated: ${detail}` }],
+        },
+      },
+    },
+  };
+}
+
+class EarlyNativeNotificationSession extends FakeFactorySession {
+  override async updateSettings(
+    settings: Parameters<FakeFactorySession['updateSettings']>[0],
+  ): ReturnType<FakeFactorySession['updateSettings']> {
+    if (this.notifications.size === 0) {
+      this.emitNotification(skillActivationNotification('before DROIDEX subscribed'));
+    }
+    return super.updateSettings(settings);
+  }
+
+  override onNotification(
+    ...args: Parameters<FakeFactorySession['onNotification']>
+  ): ReturnType<FakeFactorySession['onNotification']> {
+    const unsubscribe = super.onNotification(...args);
+    this.emitNotification(skillActivationNotification('as soon as DROIDEX subscribed'));
+    return unsubscribe;
+  }
+}
+
 test('design turns synchronize TodoWrite and unexpected AbortErrors fail the turn', async () => {
   const context = createSessionManagerTestContext();
   try {
@@ -727,6 +764,87 @@ test('loaded child context follows its parent-scoped logical identity', async ()
     );
     assert.equal(runtimeContext?.type, 'context.updated');
     assert.equal(runtimeContext.stats.compactions, 1);
+  } finally {
+    await context.dispose();
+  }
+});
+
+test('a native notification that arrives before the session is published is dropped', async () => {
+  const context = createSessionManagerTestContext();
+  const provider = new EarlyNativeNotificationSession('provider-early', {}, context.calls);
+  const streamGate = provider.deferNextStream();
+  context.runtime.createQueue.push(provider);
+
+  try {
+    await context.create({
+      sessionPurpose: 'chat',
+      clientRef: 'early-note',
+      title: 'Early note',
+      goal: 'initial',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+
+    // Surprise: subscribePrimary attaches onNotification before register, but
+    // isCurrent requires the live registry entry, so both the pre-subscribe
+    // note and the subscribe-time note are dropped. There is no pre-activation
+    // buffer. TODO: provider seam must preserve this drop or flush a buffer.
+    assert.equal(
+      appendedTexts(context.events).some((text) => text.includes('before DROIDEX subscribed')),
+      false,
+    );
+    assert.equal(
+      appendedTexts(context.events).some((text) => text.includes('as soon as DROIDEX subscribed')),
+      false,
+    );
+    assert.ok(context.events.some((event) => event.type === 'session.created'));
+
+    context.provider.emitNotification(
+      'provider-early',
+      skillActivationNotification('after the session is published'),
+    );
+    assert.equal(
+      appendedTexts(context.events).includes(
+        'Skill "early" activated: after the session is published',
+      ),
+      true,
+    );
+  } finally {
+    streamGate.resolve();
+    await context.dispose();
+  }
+});
+
+test('a transcript event is recorded to history before it is broadcast', async () => {
+  const context = createSessionManagerTestContext();
+  try {
+    await context.create({
+      sessionPurpose: 'chat',
+      clientRef: 'record-before-emit',
+      title: 'Record before emit',
+      goal: 'initial',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+    const provider = context.provider.session('provider-1');
+    await provider.waitForPrompts(1);
+    await context.waitForIdle();
+
+    provider.queueStreamEvents([assistantTextDelta('durable before broadcast')]);
+    await context.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: 'speak',
+    });
+
+    const recordIndex = context.calls.findIndex((call) =>
+      isRecordedTranscript(call, 'durable before broadcast'),
+    );
+    const emitIndex = context.calls.findIndex((call) =>
+      isAppendedTranscript(call, 'durable before broadcast'),
+    );
+    assert.ok(recordIndex >= 0);
+    assert.ok(emitIndex > recordIndex);
   } finally {
     await context.dispose();
   }

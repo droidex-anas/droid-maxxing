@@ -530,6 +530,188 @@ test('close preserves current interaction lifetime and forgets unresolved state 
   }
 });
 
+test('interrupt leaves pending approvals and questions waiting for the user', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'interrupt-pending',
+      title: 'Interrupt pending',
+      goal: 'go',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+    await h.waitForIdle();
+
+    const permissionHandler = h.provider.session('provider-1').handlers.permissionHandler;
+    const askUserHandler = h.provider.session('provider-1').handlers.askUserHandler;
+    assert.ok(permissionHandler);
+    assert.ok(askUserHandler);
+
+    const approval = Promise.resolve(permissionHandler(permissionInput('interrupt-approval')));
+    const question = Promise.resolve(askUserHandler(questionInput('interrupt-question')));
+    const approvalRequest = permissionRequest(h.events).request;
+    const questionRequest = latestQuestion(h.events).question;
+
+    await h.handle({ type: 'session.interrupt', appSessionId: 'provider-1' });
+    await h.waitForIdle();
+
+    // Surprise: SessionLifecycle.interrupt never touches SessionInteractions.
+    // TODO: provider seam must preserve live pending callbacks or settle them.
+
+    await h.handle({
+      type: 'approval.respond',
+      appSessionId: approvalRequest.appSessionId,
+      requestId: approvalRequest.requestId,
+      outcome: 'proceed_once',
+    });
+    await h.handle({
+      type: 'question.respond',
+      appSessionId: questionRequest.appSessionId,
+      requestId: questionRequest.requestId,
+      cancelled: false,
+      answers: [{ index: 0, question: 'Proceed?', answer: 'yes' }],
+    });
+
+    assert.equal(await approval, ToolConfirmationOutcome.ProceedOnce);
+    assert.deepEqual(await question, {
+      cancelled: false,
+      answers: [{ index: 0, question: 'Proceed?', answer: 'yes' }],
+    });
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('a failed turn leaves pending approvals and questions waiting for the user', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'failure-pending',
+      title: 'Failure pending',
+      goal: 'go',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+    await h.provider.waitForPrompts('provider-1', 1);
+    await h.waitForIdle();
+
+    const permissionHandler = h.provider.session('provider-1').handlers.permissionHandler;
+    const askUserHandler = h.provider.session('provider-1').handlers.askUserHandler;
+    assert.ok(permissionHandler);
+    assert.ok(askUserHandler);
+
+    const streamGate = h.provider.deferNextStream('provider-1');
+    const sending = h.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: 'explode',
+    });
+    await h.provider.waitForPrompts('provider-1', 2);
+
+    const approval = Promise.resolve(permissionHandler(permissionInput('failure-approval')));
+    const question = Promise.resolve(askUserHandler(questionInput('failure-question')));
+    const approvalRequest = permissionRequest(h.events).request;
+    const questionRequest = latestQuestion(h.events).question;
+
+    h.provider.session('provider-1').nextStreamError = new Error('turn exploded');
+    streamGate.resolve();
+    await sending;
+    await h.waitForIdle();
+
+    assert.equal(
+      h.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.appSessionId === 'provider-1' &&
+          event.message === 'turn exploded',
+      ),
+      true,
+    );
+    assert.equal(
+      h.events.some(
+        (event) => event.type === 'session.updated' && event.session.phase === 'failed',
+      ),
+      true,
+    );
+
+    // Surprise: runPrimaryTurn marks the session failed without touching
+    // SessionInteractions. TODO: provider seam must preserve live callbacks
+    // across turn failure or settle them.
+
+    await h.handle({
+      type: 'approval.respond',
+      appSessionId: approvalRequest.appSessionId,
+      requestId: approvalRequest.requestId,
+      outcome: 'cancel',
+    });
+    await h.handle({
+      type: 'question.respond',
+      appSessionId: questionRequest.appSessionId,
+      requestId: questionRequest.requestId,
+      cancelled: true,
+      answers: [],
+    });
+
+    assert.equal(await approval, ToolConfirmationOutcome.Cancel);
+    assert.deepEqual(await question, { cancelled: true, answers: [] });
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('a closed session forgets pending approvals and questions without settling them', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'close-pending',
+      title: 'Close pending',
+      goal: 'go',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+    await h.waitForIdle();
+
+    const permissionHandler = h.provider.session('provider-1').handlers.permissionHandler;
+    const askUserHandler = h.provider.session('provider-1').handlers.askUserHandler;
+    assert.ok(permissionHandler);
+    assert.ok(askUserHandler);
+
+    let approvalSettlements = 0;
+    let questionSettlements = 0;
+    void Promise.resolve(permissionHandler(permissionInput('close-approval'))).then(() => {
+      approvalSettlements += 1;
+    });
+    void Promise.resolve(askUserHandler(questionInput('close-question'))).then(() => {
+      questionSettlements += 1;
+    });
+    assert.ok(permissionRequest(h.events));
+    assert.ok(latestQuestion(h.events));
+
+    await h.handle({ type: 'session.close', appSessionId: 'provider-1' });
+    await h.waitForIdle();
+
+    // Surprise: SessionInteractions.forgetSession deletes pending maps and
+    // never resolves native callbacks. Close is not "denied"; it is forgotten.
+    // TODO: provider seam must preserve this hang or deliberately settle on close.
+    assert.equal(approvalSettlements, 0);
+    assert.equal(questionSettlements, 0);
+    assert.equal(
+      h.events.some(
+        (event) => event.type === 'session.closed' && event.appSessionId === 'provider-1',
+      ),
+      true,
+    );
+  } finally {
+    await h.dispose();
+  }
+});
+
 test('ask-user requests tolerate omitted questions and options', async () => {
   const h = createSessionManagerTestContext();
 
