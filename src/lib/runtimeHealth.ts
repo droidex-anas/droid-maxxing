@@ -29,12 +29,14 @@ let supervisor: SidecarSupervisorSnapshot = {
 let transport: TransportHealth = 'disconnected';
 let hasConnectedTransport = false;
 let subscribed = false;
+let receivedSupervisorStatus = false;
 
 function emit(): void {
   for (const listener of listeners) listener();
 }
 
 export function applySidecarStatus(next: SidecarSupervisorSnapshot): void {
+  receivedSupervisorStatus = true;
   supervisor = next;
   emit();
 }
@@ -62,7 +64,14 @@ export function getRuntimeHealth(): RuntimeHealthSnapshot {
   };
 }
 
+function sidecarSupervisorPresent(): boolean {
+  if (typeof window === 'undefined') return false;
+  return typeof window.droidControl?.sidecarStatus === 'function';
+}
+
 export function canRunAgents(): boolean {
+  // No supervisor means browser/Vite: treating that as down disables send permanently.
+  if (!receivedSupervisorStatus && !sidecarSupervisorPresent()) return true;
   const health = getRuntimeHealth();
   if (health.lifecycle === 'healthy' || health.lifecycle === 'degraded') {
     return health.transport === 'connected';
@@ -112,5 +121,6 @@ export function resetRuntimeHealthForTests(): void {
   transport = 'disconnected';
   hasConnectedTransport = false;
   subscribed = false;
+  receivedSupervisorStatus = false;
   listeners.clear();
 }
