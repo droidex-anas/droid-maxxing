@@ -59,8 +59,7 @@ export function replaceChunkedSequenceSuffix<T>(
 
   if (start >= state.settledLength) {
     const livePrefixLength = start - state.settledLength;
-    const live = state.liveChunk.slice(0, livePrefixLength);
-    live.push(...replacement);
+    const live = state.liveChunk.slice(0, livePrefixLength).concat(replacement);
     return createSequence(normalizeLiveChunk(state, live));
   }
 

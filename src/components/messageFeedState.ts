@@ -20,13 +20,12 @@ export function projectFinalResponseKeys(
   const projectedLiveKeys = finalResponseKeysInRange(items, latestPromptIndex + 1);
   const liveKeys = reuseLiveKeys(previous, identity, projectedLiveKeys);
 
-  if (previous?.identity === identity && updateKind === 'append') {
-    if (previous.latestPromptEvent === latestPromptEvent) {
-      return { ...previous, liveKeys };
-    }
-    const settledKeys = new Set(previous.settledKeys);
-    for (const key of previous.liveKeys) settledKeys.add(key);
-    return { identity, latestPromptEvent, settledKeys, liveKeys };
+  if (
+    previous?.identity === identity &&
+    updateKind === 'append' &&
+    previous.latestPromptEvent === latestPromptEvent
+  ) {
+    return { ...previous, liveKeys };
   }
 
   const settledKeys = new Set<string>();

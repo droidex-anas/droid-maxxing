@@ -12,6 +12,7 @@ import {
 import {
   applyConversationContentResize,
   didCommitRequestedHistoryPrepend,
+  deferredViewportRestoreAction,
   shouldBindConversationContentResize,
   shouldCompensateConversationContentResize,
   shouldLoadOlderHistoryAtTop,
@@ -375,4 +376,10 @@ test('content resize compensation stays off during an unpinned user scroll', () 
     }),
     true,
   );
+});
+
+test('deferred content-resize restore skips when a newer owner took the generation', () => {
+  assert.equal(deferredViewportRestoreAction(4, 3, true), 'skip');
+  assert.equal(deferredViewportRestoreAction(3, 3, true), 'retry');
+  assert.equal(deferredViewportRestoreAction(3, 3, false), 'release');
 });

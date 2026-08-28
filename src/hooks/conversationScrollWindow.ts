@@ -194,3 +194,12 @@ export function shouldCompensateConversationContentResize(options: {
 }): boolean {
   return options.isPinned || options.isSettlingHistoryPrepend || !options.isUserScrolling;
 }
+
+export function deferredViewportRestoreAction(
+  currentGeneration: number,
+  restoreGeneration: number,
+  shouldRetryAnchor: boolean,
+): 'skip' | 'retry' | 'release' {
+  if (currentGeneration !== restoreGeneration) return 'skip';
+  return shouldRetryAnchor ? 'retry' : 'release';
+}
