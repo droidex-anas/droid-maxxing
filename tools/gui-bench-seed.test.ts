@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { hasCompletedConversation } from '../sidecar/src/sessionHistoryAdmission.ts';
+import { readSessionFileHead } from '../sidecar/src/sessionFileHead.ts';
 import { parseFullSessionTranscript } from '../sidecar/src/sessionTranscript.ts';
 import { GUI_BENCH_SESSION_IDS, seedGuiBenchHistory } from './gui-bench-seed.ts';
 
@@ -34,7 +34,7 @@ test('seed writes admitted 3k and 10k chats plus a child-heavy and rich-content 
 
   for (const session of [chat3k, chat10k, children]) {
     const size = readFileSync(session.path).byteLength;
-    assert.equal(hasCompletedConversation(session.path, size), true);
+    assert.equal(readSessionFileHead(session.path, size).hasCompletedConversation, true);
     const events = parseFullSessionTranscript(session.id, session.id, session.path, 'primary');
     assert.ok(events.length >= session.eventCount - 2);
     const kinds = new Set(events.map((event) => event.kind));
