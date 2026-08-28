@@ -579,8 +579,8 @@ export default function ChatView({
     );
   }
 
-  const messageFeedCwd = optionalValue(activeSession?.cwd);
-  const messageFeedSubagentsDock = optionalValue(subagentsDock);
+  const messageFeedCwd = activeSession?.cwd;
+  const messageFeedSubagentsDock = subagentsDock;
   let conversationContent: ReactNode;
   if (activeSession && transcript.length > 0) {
     conversationContent = (
@@ -744,8 +744,4 @@ export default function ChatView({
       </div>
     </div>
   );
-}
-
-function optionalValue<T>(value: T): T | undefined {
-  return value;
 }
