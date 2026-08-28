@@ -585,8 +585,13 @@ test(
 );
 
 test('indexing does not arm a slice timer when there is nothing to index', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'droidex-index-idle-empty-'));
-  const dbPath = join(directory, 'session-index.sqlite');
+  const home = mkdtempSync(join(tmpdir(), 'droidex-index-idle-empty-'));
+  const previousHome = process.env['HOME'];
+  process.env['HOME'] = home;
+  const databaseDirectory = join(home, '.factory', 'droidex');
+  mkdirSync(databaseDirectory, { recursive: true });
+  mkdirSync(join(home, '.factory', 'sessions'), { recursive: true });
+  const dbPath = join(databaseDirectory, 'session-index.sqlite');
   createCanonicalDatabase(dbPath);
   const slices = scheduler();
   const database = new HistoryIndexDatabase(dbPath, {
@@ -604,7 +609,9 @@ test('indexing does not arm a slice timer when there is nothing to index', async
     assert.equal(slices.nextDelay(), undefined);
   } finally {
     await database.close();
-    rmSync(directory, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env['HOME'];
+    else process.env['HOME'] = previousHome;
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
