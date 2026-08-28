@@ -17,11 +17,10 @@ import {
 import type { Autonomy, ReasoningEffort } from '../protocol.js';
 import type {
   CreateRuntimeSessionOptions,
-  FactoryRuntime,
-  FactorySession,
   RuntimeHandlers,
-  RuntimeStatus,
-} from '../DroidRuntime.js';
+} from '../providers/droid/DroidModeMapping.js';
+import type { FactoryRuntime, RuntimeStatus } from '../providers/droid/DroidProviderAdapter.js';
+import type { FactorySession } from '../providers/droid/DroidProviderSession.js';
 
 export interface RecordedCall {
   target: 'runtime' | 'provider' | 'history' | 'browser' | 'cleanup' | 'protocol';

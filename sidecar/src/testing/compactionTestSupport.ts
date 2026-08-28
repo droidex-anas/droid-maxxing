@@ -1,6 +1,6 @@
 import { ReasoningEffort } from '@factory/droid-sdk';
 
-import type { FactorySession } from '../DroidRuntime.js';
+import type { FactorySession } from '../providers/droid/DroidProviderSession.js';
 import type { LiveSession } from '../SessionLifecycle.js';
 import { liveBindingFromSummary } from '../SessionRegistry.js';
 import { droidSessionConfiguration } from '../providers/providerIdentity.js';

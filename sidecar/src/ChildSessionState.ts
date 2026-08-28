@@ -1,5 +1,5 @@
 import type { McpServerConfig } from '@factory/droid-sdk';
-import type { FactorySession } from './DroidRuntime.js';
+import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
 import { publishedStreamFidelity } from './childStreamFidelity.js';
 import type {

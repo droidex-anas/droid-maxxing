@@ -1,7 +1,8 @@
 import type { AskUserHandler, PermissionHandler } from '@factory/droid-sdk';
 
 import { runCompaction } from './compaction.js';
-import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
+import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
+import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import type { ServerEvent } from './protocol.js';
 import type { LiveOperationTarget, SessionContext, UsageOffset } from './SessionContext.js';
 import type { LiveSession } from './SessionLifecycle.js';

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ContextStatsAccuracy, ReasoningEffort } from '@factory/droid-sdk';
 
-import { DroidRuntime } from './DroidRuntime.js';
+import { DroidRuntime } from './providers/droid/DroidProviderAdapter.js';
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import {
   SessionContext,

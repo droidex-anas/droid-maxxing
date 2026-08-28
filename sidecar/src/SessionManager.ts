@@ -36,12 +36,9 @@ import {
   type SessionConfiguration,
 } from './providers/providerIdentity.js';
 import { boundedInt } from './values.js';
-import {
-  DroidRuntime,
-  mapAutonomy,
-  type FactoryRuntime,
-  type FactorySession,
-} from './DroidRuntime.js';
+import { mapAutonomy } from './providers/droid/DroidModeMapping.js';
+import { DroidRuntime, type FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
+import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import { detectEnvironment } from './Environment.js';
 import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInstaller.js';
 import {

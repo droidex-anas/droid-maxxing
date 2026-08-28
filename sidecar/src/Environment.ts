@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_WINDOWS_EXECUTABLE_EXTENSIONS = '.COM;.EXE;.BAT;.CMD';
 
 // Shared resolution order so what onboarding reports as "installed" is exactly
-// what DroidRuntime will spawn for login/update/session commands.
+// what the Droid adapter will spawn for login/update/session commands.
 const CLI_CANDIDATES = [
   join(homedir(), '.factory', 'bin', 'droid'),
   join(homedir(), '.local', 'bin', 'droid'),
@@ -20,15 +20,15 @@ const CLI_CANDIDATES = [
 // Synchronous, runtime-facing resolver. Returns the literal `droid` (resolved
 // via PATH at spawn time) when no known location holds an executable.
 export function resolveDroidPath(): string {
-  // Only trust DROID_PATH when it points at a runnable binary; a stale override
-  // must fall through to a real install instead of being spawned and failing.
+  return findInstalledDroidPath() ?? 'droid';
+}
+
+export function findInstalledDroidPath(): string | undefined {
   if (process.env.DROID_PATH && isExecutable(process.env.DROID_PATH)) return process.env.DROID_PATH;
   for (const candidate of CLI_CANDIDATES) {
     if (isExecutable(candidate)) return candidate;
   }
-  // Resolve the real PATH entry (on Windows this is usually a `droid.cmd` shim)
-  // so callers can spawn it correctly instead of a bare `droid`.
-  return resolveOnPathSync('droid') ?? 'droid';
+  return resolveOnPathSync('droid');
 }
 
 // Builds the spawn target for the daemon transport. The SDK's ProcessTransport

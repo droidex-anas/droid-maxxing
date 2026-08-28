@@ -8,8 +8,12 @@ import {
   type RequestPermissionRequestParams,
 } from '@factory/droid-sdk';
 
-import type { FactorySession } from './DroidRuntime.js';
-import { classifyPermission, confirmationType, permissionSignature } from './normalize.js';
+import type { FactorySession } from './providers/droid/DroidProviderSession.js';
+import {
+  classifyPermission,
+  confirmationType,
+  permissionSignature,
+} from './providers/droid/DroidPermissions.js';
 import {
   isAlwaysOutcome,
   isApprovalOutcome,
