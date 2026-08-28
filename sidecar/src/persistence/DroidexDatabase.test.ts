@@ -879,6 +879,11 @@ test('opening the canonical database does not read or change Factory history fil
   });
 });
 
+// Sentinels that must never become real provider vocabulary, so widening the
+// union cannot turn this test's "not a member" assertions into false positives.
+const SYNTHETIC_DRIVER = 'never-a-provider';
+const SYNTHETIC_ACTION = 'open_never_a_provider_setup';
+
 test('generated provider CHECK SQL tracks the TypeScript unions', () => {
   for (const id of providerInstanceIdSchema.options) {
     assert.ok(
@@ -899,20 +904,22 @@ test('generated provider CHECK SQL tracks the TypeScript unions', () => {
   }
 
   const widenedPair = providerPairCheckSql(
-    [...providerDriverKindSchema.options, 'cursor'],
-    [...providerInstanceIdSchema.options, 'cursor'],
+    [...providerDriverKindSchema.options, SYNTHETIC_DRIVER],
+    [...providerInstanceIdSchema.options, SYNTHETIC_DRIVER],
   );
   assert.ok(
-    widenedPair.includes("(provider_driver_kind = 'cursor' AND provider_instance_id = 'cursor')"),
+    widenedPair.includes(
+      `(provider_driver_kind = '${SYNTHETIC_DRIVER}' AND provider_instance_id = '${SYNTHETIC_DRIVER}')`,
+    ),
   );
-  assert.equal(PROVIDER_PAIR_CHECK.includes("provider_driver_kind = 'cursor'"), false);
+  assert.equal(PROVIDER_PAIR_CHECK.includes(SYNTHETIC_DRIVER), false);
 
   const widenedActions = sqlInList('failure_recovery_action', [
     ...providerRecoveryActionSchema.options,
-    'open_cursor_setup',
+    SYNTHETIC_ACTION,
   ]);
-  assert.ok(widenedActions.includes("'open_cursor_setup'"));
-  assert.equal(FAILURE_ACTION_CHECK.includes("'open_cursor_setup'"), false);
+  assert.ok(widenedActions.includes(`'${SYNTHETIC_ACTION}'`));
+  assert.equal(FAILURE_ACTION_CHECK.includes(SYNTHETIC_ACTION), false);
 
   assert.throws(() => providerPairCheckSql(['droid'], ["dro'id"]));
   assert.throws(() => providerPairCheckSql(['droid', 'codex'], ['droid']));
