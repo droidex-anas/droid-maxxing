@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import type { Autonomy, ReasoningEffort, SessionInteractionMode } from '../protocol.js';
 
-export type ProviderDriverKind = 'droid' | 'codex' | 'claude';
-export type ProviderInstanceId = 'droid' | 'codex' | 'claude';
+export type ProviderDriverKind = 'droid' | 'codex' | 'claude' | 'cursor' | 'grok';
+export type ProviderInstanceId = 'droid' | 'codex' | 'claude' | 'cursor' | 'grok';
 
 export type SessionTarget =
   | { kind: 'session'; appSessionId: string }
@@ -70,8 +70,8 @@ const _reasoningEffortsComplete = true satisfies AssertNoMissing<
   (typeof REASONING_EFFORTS)[number]
 >;
 
-export const providerDriverKindSchema = z.enum(['droid', 'codex', 'claude']);
-export const providerInstanceIdSchema = z.enum(['droid', 'codex', 'claude']);
+export const providerDriverKindSchema = z.enum(['droid', 'codex', 'claude', 'cursor', 'grok']);
+export const providerInstanceIdSchema = z.enum(['droid', 'codex', 'claude', 'cursor', 'grok']);
 export const sessionInteractionModeSchema = z.enum(SESSION_INTERACTION_MODES);
 export const autonomySchema = z.enum(AUTONOMY_LEVELS);
 export const reasoningEffortSchema = z.enum(REASONING_EFFORTS);
@@ -141,6 +141,8 @@ const PROVIDER_DRIVER_BY_INSTANCE: Record<ProviderInstanceId, ProviderDriverKind
   droid: 'droid',
   codex: 'codex',
   claude: 'claude',
+  cursor: 'cursor',
+  grok: 'grok',
 };
 
 export function providerDriverKindForInstance(

@@ -15,9 +15,11 @@ import {
   sessionTargetSchema,
 } from './providerIdentity.js';
 
-const VALID_V1_INSTANCES = ['droid', 'codex', 'claude'] as const;
+const VALID_V1_INSTANCES = ['droid', 'codex', 'claude', 'cursor', 'grok'] as const;
 
-function validSelection(providerInstanceId: 'droid' | 'codex' | 'claude' = 'droid') {
+function validSelection(
+  providerInstanceId: 'droid' | 'codex' | 'claude' | 'cursor' | 'grok' = 'droid',
+) {
   return {
     providerInstanceId,
     modelId: 'model-a',
@@ -34,7 +36,7 @@ function validConfiguration(overrides: Record<string, unknown> = {}) {
   };
 }
 
-test('only the three exact v1 driver/instance pairs validate through providerDriverKindForInstance', () => {
+test('only the five exact v1 driver/instance pairs validate through providerDriverKindForInstance', () => {
   for (const providerInstanceId of VALID_V1_INSTANCES) {
     assert.equal(providerDriverKindForInstance(providerInstanceId), providerInstanceId);
     assert.equal(providerInstanceIdSchema.parse(providerInstanceId), providerInstanceId);
@@ -43,6 +45,7 @@ test('only the three exact v1 driver/instance pairs validate through providerDri
 
 test('unknown providerInstanceId values are rejected', () => {
   assert.throws(() => providerInstanceIdSchema.parse('unknown'));
+  assert.throws(() => providerInstanceIdSchema.parse('opencode'));
 });
 
 test('equal modelId with different providerInstanceId are not equal selections', () => {

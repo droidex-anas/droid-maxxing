@@ -21,6 +21,8 @@ export type ProviderRecoveryAction =
   | 'open_droid_setup'
   | 'open_codex_setup'
   | 'open_claude_setup'
+  | 'open_cursor_setup'
+  | 'open_grok_setup'
   | 'reset_canonical_state'
   | 'retry_session'
   | 'close_session';
@@ -54,6 +56,8 @@ const PROVIDER_RECOVERY_ACTIONS = [
   'open_droid_setup',
   'open_codex_setup',
   'open_claude_setup',
+  'open_cursor_setup',
+  'open_grok_setup',
   'reset_canonical_state',
   'retry_session',
   'close_session',

@@ -30,6 +30,8 @@ const PROVIDER_RECOVERY_ACTIONS = [
   'open_droid_setup',
   'open_codex_setup',
   'open_claude_setup',
+  'open_cursor_setup',
+  'open_grok_setup',
   'reset_canonical_state',
   'retry_session',
   'close_session',
@@ -61,8 +63,8 @@ test('unknown ProviderErrorCode values are rejected', () => {
   assert.throws(() => parseProviderError(validError({ code: 'provider_timeout' })));
 });
 
-test('only the 7 ProviderRecoveryAction values decode', () => {
-  assert.equal(PROVIDER_RECOVERY_ACTIONS.length, 7);
+test('only the 9 ProviderRecoveryAction values decode', () => {
+  assert.equal(PROVIDER_RECOVERY_ACTIONS.length, 9);
   for (const recoveryAction of PROVIDER_RECOVERY_ACTIONS) {
     assert.equal(providerRecoveryActionSchema.parse(recoveryAction), recoveryAction);
     assert.deepEqual(
