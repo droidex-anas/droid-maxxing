@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import os from 'node:os';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -129,7 +129,10 @@ test(
       : false,
   },
   () => {
-    const loadavg = readFileSync('/proc/loadavg', 'utf8').trim();
+    const loadavg = os
+      .loadavg()
+      .map((value) => value.toFixed(2))
+      .join(' ');
     const mixed = [
       longProse(),
       wideTable(),

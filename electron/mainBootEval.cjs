@@ -108,7 +108,9 @@ function createElectronStub(options) {
     shell: unused('shell'),
     webContents: { getAllWebContents: () => [] },
     net: unused('net'),
-    autoUpdater: unused('autoUpdater'),
+    // electron-updater's MacUpdater registers native autoUpdater listeners
+    // while `require('electron-updater')` evaluates on darwin.
+    autoUpdater: new EventEmitter(),
     screen: unused('screen'),
   };
 }
