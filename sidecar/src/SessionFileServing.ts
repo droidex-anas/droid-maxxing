@@ -37,12 +37,20 @@ export class SessionFileServing {
 
   async list(options: SessionListFilterOptions): Promise<void> {
     this.lastListOptions = options;
-    this.bootstrap();
-    const boot = this.bootReconcile;
-    if (boot) await boot;
+    await this.whenBootReconciled();
     if (!this.dependencies.isShutdownStarted() && this.lastListOptions === options) {
       this.emit(options);
     }
+  }
+
+  // History restore uses the worker-published path mirror. Loading before the
+  // first boot reconcile finishes reports "not found" for sessions that are
+  // already on disk, including every origin/main upgrade whose derived cache
+  // does not exist yet.
+  async whenBootReconciled(): Promise<void> {
+    this.bootstrap();
+    const boot = this.bootReconcile;
+    if (boot) await boot;
   }
 
   finalizeReplacedProvider(providerSessionId: string): void {
