@@ -19,11 +19,7 @@ import type {
   ProviderQuestionAnswer,
 } from '../providerTypes.js';
 import { APPROVAL_DECISION_TO_OUTCOME } from './DroidModeMapping.js';
-import {
-  classifyPermission,
-  confirmationType,
-  permissionSignature,
-} from './DroidPermissions.js';
+import { classifyPermission, confirmationType, permissionSignature } from './DroidPermissions.js';
 
 export interface DroidInteractionLiveSession {
   summary: SessionSummary;

@@ -88,7 +88,9 @@ function specApprovalInput(toolUseId: string): RequestPermissionRequestParams {
   };
 }
 
-function createHarness(options: { rejectProviderUpdate?: boolean; throwSummaryUpdate?: boolean } = {}) {
+function createHarness(
+  options: { rejectProviderUpdate?: boolean; throwSummaryUpdate?: boolean } = {},
+) {
   const emitted: ServerEvent[] = [];
   const errors: Array<Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>> = [];
   const trace: string[] = [];
@@ -202,20 +204,21 @@ test('ProceedAlways bypasses only an equivalent later permission signature', asy
   harness.addLiveSession('app-1');
   const handler = harness.droid.makePermissionHandler({ id: 'app-1' });
   const first = handler(permissionInput('tool-1', 'pwd'));
-  await harness.sink.respondToApproval('app-1', latestApproval(harness.emitted).requestId, 'proceed_always');
+  await harness.sink.respondToApproval(
+    'app-1',
+    latestApproval(harness.emitted).requestId,
+    'proceed_always',
+  );
   await harness.droid.drain();
   assert.equal(await first, ToolConfirmationOutcome.ProceedAlways);
-  assert.equal(await handler(permissionInput('tool-2', 'pwd')), ToolConfirmationOutcome.ProceedAlways);
   assert.equal(
-    harness.emitted.filter((event) => event.type === 'approval.requested').length,
-    1,
+    await handler(permissionInput('tool-2', 'pwd')),
+    ToolConfirmationOutcome.ProceedAlways,
   );
+  assert.equal(harness.emitted.filter((event) => event.type === 'approval.requested').length, 1);
 
   const different = handler(permissionInput('tool-3', 'ls'));
-  assert.equal(
-    harness.emitted.filter((event) => event.type === 'approval.requested').length,
-    2,
-  );
+  assert.equal(harness.emitted.filter((event) => event.type === 'approval.requested').length, 2);
   harness.sink.respondToApproval('app-1', latestApproval(harness.emitted).requestId, 'cancel');
   await harness.droid.drain();
   assert.equal(await different, ToolConfirmationOutcome.Cancel);
@@ -234,7 +237,11 @@ test('Spec approval publishes, attempts provider update, then settles the callba
     success.trace.push('callback');
     return outcome;
   });
-  success.sink.respondToApproval('app-spec', latestApproval(success.emitted).requestId, 'proceed_once');
+  success.sink.respondToApproval(
+    'app-spec',
+    latestApproval(success.emitted).requestId,
+    'proceed_once',
+  );
   await success.droid.drain();
   assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
   assert.deepEqual(success.trace, ['publish:auto', 'provider:auto', 'callback']);
@@ -354,7 +361,11 @@ test('propose_mission updates the session phase before emitting the approval', a
       {
         toolUse: { type: 'tool_use', id: 'm1', name: 'ProposeMission', input: {} },
         confirmationType: 'propose_mission' as never,
-        details: { type: 'propose_mission', proposal: 'Do the work.', title: 'Mission plan proposed' },
+        details: {
+          type: 'propose_mission',
+          proposal: 'Do the work.',
+          title: 'Mission plan proposed',
+        },
       },
     ],
     options: [],
@@ -364,4 +375,3 @@ test('propose_mission updates the session phase before emitting the approval', a
   await harness.droid.drain();
   assert.equal(await pending, ToolConfirmationOutcome.Cancel);
 });
-

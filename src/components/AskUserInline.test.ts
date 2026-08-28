@@ -21,7 +21,12 @@ function renderCard(question: SessionQuestion): string {
 }
 
 const SINGLE = makeQuestion([
-  { id: '0', prompt: 'Which database should I use?', options: ['SQLite', 'Postgres'], multiSelect: false },
+  {
+    id: '0',
+    prompt: 'Which database should I use?',
+    options: ['SQLite', 'Postgres'],
+    multiSelect: false,
+  },
 ]);
 
 test('renders the question, every option, and a custom-answer row', () => {

@@ -152,12 +152,12 @@ test('equal native request ids from two sessions stay distinct', async () => {
 test('invalid approval outcomes are rejected and leave the request pending', async () => {
   const harness = createHarness();
   let settled = false;
-  const pending = harness.interactions.requestApproval(approvalInput('app-1', 'native-1')).then(
-    (decision) => {
+  const pending = harness.interactions
+    .requestApproval(approvalInput('app-1', 'native-1'))
+    .then((decision) => {
       settled = true;
       return decision;
-    },
-  );
+    });
   const requestId = approvalRequests(harness.emitted)[0]?.request.requestId ?? '';
 
   harness.interactions.respondToApproval('app-1', requestId, 'not-an-outcome');
@@ -173,12 +173,12 @@ test('invalid approval outcomes are rejected and leave the request pending', asy
 test('unknown, duplicate, late, and wrong-session approvals settle at most once', async () => {
   const harness = createHarness();
   let settlements = 0;
-  const pending = harness.interactions.requestApproval(approvalInput('app-1', 'native-1')).then(
-    (decision) => {
+  const pending = harness.interactions
+    .requestApproval(approvalInput('app-1', 'native-1'))
+    .then((decision) => {
       settlements += 1;
       return decision;
-    },
-  );
+    });
   const requestId = approvalRequests(harness.emitted)[0]?.request.requestId ?? '';
 
   harness.interactions.respondToApproval('app-2', requestId, 'proceed_once');
