@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import os from 'node:os';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -129,7 +129,10 @@ test(
       : false,
   },
   () => {
-    const loadavg = readFileSync('/proc/loadavg', 'utf8').trim();
+    const loadavg = os
+      .loadavg()
+      .map((value) => value.toFixed(2))
+      .join(' ');
     const mixed = [
       longProse(),
       wideTable(),
@@ -186,14 +189,16 @@ test(
 
     // These are guards against a silent blow-up, not product budgets. GUI numbers
     // decide whether a deferral is justified; SSR markup is the CPU floor.
-    assert.ok(rows.prose.medianMs < 80, `prose first render ${String(rows.prose.medianMs)}ms`);
-    assert.ok(rows.table.medianMs < 80, `table first render ${String(rows.table.medianMs)}ms`);
+    // GitHub-hosted runners are noisy enough that a 80ms table floor flakes
+    // (ubuntu-latest median ~110ms); keep the ceiling far above local samples.
+    assert.ok(rows.prose.medianMs < 250, `prose first render ${String(rows.prose.medianMs)}ms`);
+    assert.ok(rows.table.medianMs < 250, `table first render ${String(rows.table.medianMs)}ms`);
     assert.ok(
-      rows.codeFence.medianMs < 80,
+      rows.codeFence.medianMs < 250,
       `code fence first render ${String(rows.codeFence.medianMs)}ms`,
     );
     assert.ok(
-      rows.mixedMessage.medianMs < 150,
+      rows.mixedMessage.medianMs < 400,
       `mixed first render ${String(rows.mixedMessage.medianMs)}ms`,
     );
     assert.ok(
