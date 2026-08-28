@@ -2,36 +2,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  MAX_BOUNDED_ID_CHARS,
-  MAX_MODEL_ID_CHARS,
   parseDroidAgentConfiguration,
   parseDroidMissionConfiguration,
-  parseProviderBinding,
   parseProviderSelection,
   parseSessionConfiguration,
   parseSessionTarget,
-  providerBindingSchema,
   providerDriverKindForInstance,
+  providerInstanceIdSchema,
   providerSelectionsEqual,
   providerSelectionSchema,
   sessionConfigurationSchema,
   sessionTargetSchema,
 } from './providerIdentity.js';
 
-const VALID_V1_BINDINGS = [
-  { providerDriverKind: 'droid', providerInstanceId: 'droid' },
-  { providerDriverKind: 'codex', providerInstanceId: 'codex' },
-  { providerDriverKind: 'claude', providerInstanceId: 'claude' },
-] as const;
-
-const INVALID_BINDING_PAIRS = [
-  { providerDriverKind: 'droid', providerInstanceId: 'codex' },
-  { providerDriverKind: 'codex', providerInstanceId: 'claude' },
-  { providerDriverKind: 'claude', providerInstanceId: 'droid' },
-  { providerDriverKind: 'droid', providerInstanceId: 'claude' },
-  { providerDriverKind: 'codex', providerInstanceId: 'droid' },
-  { providerDriverKind: 'claude', providerInstanceId: 'codex' },
-] as const;
+const VALID_V1_INSTANCES = ['droid', 'codex', 'claude'] as const;
 
 function validSelection(providerInstanceId: 'droid' | 'codex' | 'claude' = 'droid') {
   return {
@@ -50,26 +34,15 @@ function validConfiguration(overrides: Record<string, unknown> = {}) {
   };
 }
 
-test('only the three exact v1 driver/instance pairs validate', () => {
-  for (const binding of VALID_V1_BINDINGS) {
-    assert.deepEqual(parseProviderBinding(binding), binding);
-    assert.equal(
-      providerDriverKindForInstance(binding.providerInstanceId),
-      binding.providerDriverKind,
-    );
+test('only the three exact v1 driver/instance pairs validate through providerDriverKindForInstance', () => {
+  for (const providerInstanceId of VALID_V1_INSTANCES) {
+    assert.equal(providerDriverKindForInstance(providerInstanceId), providerInstanceId);
+    assert.equal(providerInstanceIdSchema.parse(providerInstanceId), providerInstanceId);
   }
 });
 
-test('every other driver/instance combination is rejected', () => {
-  for (const binding of INVALID_BINDING_PAIRS) {
-    assert.throws(() => parseProviderBinding(binding));
-  }
-  assert.throws(() =>
-    providerBindingSchema.parse({ providerDriverKind: 'unknown', providerInstanceId: 'droid' }),
-  );
-  assert.throws(() =>
-    providerBindingSchema.parse({ providerDriverKind: 'droid', providerInstanceId: 'unknown' }),
-  );
+test('unknown providerInstanceId values are rejected', () => {
+  assert.throws(() => providerInstanceIdSchema.parse('unknown'));
 });
 
 test('equal modelId with different providerInstanceId are not equal selections', () => {
@@ -134,13 +107,6 @@ test('provider option values outside string | number | boolean are rejected', ()
 });
 
 test('unknown extra keys are rejected in strict provider identity objects', () => {
-  assert.throws(() =>
-    parseProviderBinding({
-      providerDriverKind: 'droid',
-      providerInstanceId: 'droid',
-      extra: true,
-    }),
-  );
   assert.throws(() =>
     parseProviderSelection({
       ...validSelection(),
@@ -214,18 +180,25 @@ test('SessionTarget child variant round-trips and rejects mixed session fields',
   );
 });
 
-test('bounded ids and model ids reject empty and over-long values', () => {
+test('bounded ids and model ids reject empty, padded, and over-long values', () => {
   assert.throws(() => parseSessionTarget({ kind: 'session', appSessionId: '   ' }));
+  assert.throws(() => parseSessionTarget({ kind: 'session', appSessionId: '  droid-1  ' }));
   assert.throws(() =>
     parseProviderSelection({
       ...validSelection(),
-      modelId: 'x'.repeat(MAX_MODEL_ID_CHARS + 1),
+      modelId: '  model-a  ',
+    }),
+  );
+  assert.throws(() =>
+    parseProviderSelection({
+      ...validSelection(),
+      modelId: 'x'.repeat(257),
     }),
   );
   assert.throws(() =>
     parseSessionTarget({
       kind: 'session',
-      appSessionId: 'x'.repeat(MAX_BOUNDED_ID_CHARS + 1),
+      appSessionId: 'x'.repeat(257),
     }),
   );
 });

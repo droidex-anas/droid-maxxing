@@ -31,13 +31,8 @@ export interface DroidMissionConfiguration {
   validator: DroidAgentConfiguration;
 }
 
-export interface ProviderBinding {
-  providerDriverKind: ProviderDriverKind;
-  providerInstanceId: ProviderInstanceId;
-}
-
-export const MAX_BOUNDED_ID_CHARS = 256;
-export const MAX_MODEL_ID_CHARS = 256;
+const MAX_BOUNDED_ID_CHARS = 256;
+const MAX_MODEL_ID_CHARS = 256;
 
 const SESSION_INTERACTION_MODES = [
   'auto',
@@ -57,30 +52,44 @@ const REASONING_EFFORTS = [
   'dynamic',
 ] as const satisfies readonly ReasoningEffort[];
 
+type AssertNoMissing<TUnion, TListed extends TUnion> =
+  Exclude<TUnion, TListed> extends never
+    ? true
+    : ['missing enum members', Exclude<TUnion, TListed>];
+
+const _sessionInteractionModesComplete = true satisfies AssertNoMissing<
+  SessionInteractionMode,
+  (typeof SESSION_INTERACTION_MODES)[number]
+>;
+const _autonomyLevelsComplete = true satisfies AssertNoMissing<
+  Autonomy,
+  (typeof AUTONOMY_LEVELS)[number]
+>;
+const _reasoningEffortsComplete = true satisfies AssertNoMissing<
+  ReasoningEffort,
+  (typeof REASONING_EFFORTS)[number]
+>;
+
 export const providerDriverKindSchema = z.enum(['droid', 'codex', 'claude']);
 export const providerInstanceIdSchema = z.enum(['droid', 'codex', 'claude']);
 export const sessionInteractionModeSchema = z.enum(SESSION_INTERACTION_MODES);
 export const autonomySchema = z.enum(AUTONOMY_LEVELS);
 export const reasoningEffortSchema = z.enum(REASONING_EFFORTS);
 
-const boundedIdSchema = z.string().trim().min(1).max(MAX_BOUNDED_ID_CHARS);
-const modelIdSchema = z.string().trim().min(1).max(MAX_MODEL_ID_CHARS);
+const boundedIdSchema = z
+  .string()
+  .min(1)
+  .max(MAX_BOUNDED_ID_CHARS)
+  .refine((value) => value === value.trim(), 'id must not have leading or trailing whitespace');
+const modelIdSchema = z
+  .string()
+  .min(1)
+  .max(MAX_MODEL_ID_CHARS)
+  .refine(
+    (value) => value === value.trim(),
+    'modelId must not have leading or trailing whitespace',
+  );
 const providerOptionValueSchema = z.union([z.string(), z.number(), z.boolean()]);
-
-export const providerBindingSchema = z
-  .object({
-    providerDriverKind: providerDriverKindSchema,
-    providerInstanceId: providerInstanceIdSchema,
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.providerDriverKind !== value.providerInstanceId) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'providerDriverKind must match providerInstanceId for v1 bindings',
-      });
-    }
-  });
 
 export const providerSelectionSchema = z
   .object({
@@ -140,15 +149,6 @@ export function providerDriverKindForInstance(
   return PROVIDER_DRIVER_BY_INSTANCE[providerInstanceId];
 }
 
-export function providerBindingForInstance(
-  providerInstanceId: ProviderInstanceId,
-): ProviderBinding {
-  return {
-    providerDriverKind: providerDriverKindForInstance(providerInstanceId),
-    providerInstanceId,
-  };
-}
-
 export function providerSelectionsEqual(a: ProviderSelection, b: ProviderSelection): boolean {
   if (a.providerInstanceId !== b.providerInstanceId) {
     return false;
@@ -167,10 +167,6 @@ export function providerSelectionsEqual(a: ProviderSelection, b: ProviderSelecti
     }
   }
   return true;
-}
-
-export function parseProviderBinding(value: unknown): ProviderBinding {
-  return providerBindingSchema.parse(value);
 }
 
 export function parseProviderSelection(value: unknown): ProviderSelection {
