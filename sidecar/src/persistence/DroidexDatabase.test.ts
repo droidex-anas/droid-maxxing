@@ -7,7 +7,22 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { droidexDatabasePath } from '../droidexPaths.js';
+import {
+  providerErrorCodeSchema,
+  providerRecoveryActionSchema,
+} from '../providers/providerErrors.js';
+import {
+  providerDriverKindSchema,
+  providerInstanceIdSchema,
+} from '../providers/providerIdentity.js';
 import { DROIDEX_SCHEMA_VERSION, DroidexDatabase } from './DroidexDatabase.js';
+import {
+  FAILURE_ACTION_CHECK,
+  FAILURE_CODE_CHECK,
+  PROVIDER_PAIR_CHECK,
+  providerPairCheckSql,
+  sqlInList,
+} from './droidexSchema.js';
 
 const RECOVERY = 'move or remove this file, then restart DROIDEX';
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -85,12 +100,10 @@ function indexMeta(db: DroidexDatabase, table: string, name: string) {
   assert.ok(index, `index ${name} is missing on ${table}`);
   const info = db.prepare(`PRAGMA index_info(${name})`).all() as { name: string }[];
   const sql = schemaSql(db, 'index', name);
-  const where = /\bwhere\s+(.+)$/.exec(sql)?.[1] ?? null;
   return {
     unique: index.unique,
     partial: index.partial,
     columns: info.map((row) => row.name),
-    where,
     sql,
   };
 }
@@ -409,14 +422,12 @@ test('named indexes have exact columns and partial predicates', () => {
       unique: 1,
       partial: 0,
       columns: ['client_ref'],
-      where: null,
       sql: normalizeSql('CREATE UNIQUE INDEX sessions_client_ref_unique ON sessions (client_ref)'),
     });
     assert.deepEqual(indexMeta(db, 'sessions', 'sessions_native_binding_unique'), {
       unique: 1,
       partial: 1,
       columns: ['provider_instance_id', 'provider_session_id'],
-      where: 'provider_session_id is not null',
       sql: normalizeSql(
         'CREATE UNIQUE INDEX sessions_native_binding_unique ON sessions (provider_instance_id, provider_session_id) WHERE provider_session_id IS NOT NULL',
       ),
@@ -425,7 +436,6 @@ test('named indexes have exact columns and partial predicates', () => {
       unique: 0,
       partial: 0,
       columns: ['hidden', 'updated_at', 'app_session_id'],
-      where: null,
       sql: normalizeSql(
         'CREATE INDEX sessions_activity ON sessions (hidden, updated_at DESC, app_session_id)',
       ),
@@ -434,7 +444,6 @@ test('named indexes have exact columns and partial predicates', () => {
       unique: 1,
       partial: 1,
       columns: ['provider_instance_id', 'provider_session_id'],
-      where: 'provider_session_id is not null',
       sql: normalizeSql(
         'CREATE UNIQUE INDEX child_sessions_native_binding_unique ON child_sessions (provider_instance_id, provider_session_id) WHERE provider_session_id IS NOT NULL',
       ),
@@ -443,7 +452,6 @@ test('named indexes have exact columns and partial predicates', () => {
       unique: 0,
       partial: 0,
       columns: ['parent_app_session_id', 'updated_at', 'child_session_id'],
-      where: null,
       sql: normalizeSql(
         'CREATE INDEX child_sessions_activity ON child_sessions (parent_app_session_id, updated_at DESC, child_session_id)',
       ),
@@ -452,7 +460,6 @@ test('named indexes have exact columns and partial predicates', () => {
       unique: 0,
       partial: 0,
       columns: ['parent_app_session_id', 'child_session_id', 'started_at', 'turn_id'],
-      where: null,
       sql: normalizeSql(
         'CREATE INDEX turns_target_activity ON turns (parent_app_session_id, child_session_id, started_at DESC, turn_id)',
       ),
@@ -461,7 +468,6 @@ test('named indexes have exact columns and partial predicates', () => {
       unique: 0,
       partial: 1,
       columns: ['parent_app_session_id', 'event_order'],
-      where: 'child_session_id is null',
       sql: normalizeSql(
         'CREATE INDEX transcript_events_session_page ON transcript_events (parent_app_session_id, event_order) WHERE child_session_id IS NULL',
       ),
@@ -470,7 +476,6 @@ test('named indexes have exact columns and partial predicates', () => {
       unique: 0,
       partial: 1,
       columns: ['parent_app_session_id', 'child_session_id', 'event_order'],
-      where: 'child_session_id is not null',
       sql: normalizeSql(
         'CREATE INDEX transcript_events_child_page ON transcript_events (parent_app_session_id, child_session_id, event_order) WHERE child_session_id IS NOT NULL',
       ),
@@ -829,6 +834,28 @@ test('nonempty version-0 and wrong-version files fail with the exact path and re
     rawExtra.exec('CREATE TABLE extra (id INTEGER PRIMARY KEY)');
     rawExtra.close();
     assertRecovery(() => new DroidexDatabase(extraTable), extraTable);
+
+    const narrowerPairs = join(dir, 'narrower-pairs.sqlite');
+    const current = new DroidexDatabase(narrowerPairs);
+    current.close();
+    const rawNarrow = openRaw(narrowerPairs);
+    const sessionsSql = (
+      rawNarrow
+        .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'sessions'")
+        .get() as { sql: string }
+    ).sql;
+    const narrowed = sessionsSql.replace(
+      "\n    OR (provider_driver_kind = 'claude' AND provider_instance_id = 'claude')",
+      '',
+    );
+    assert.notEqual(narrowed, sessionsSql);
+    rawNarrow.exec('PRAGMA writable_schema = ON');
+    rawNarrow
+      .prepare("UPDATE sqlite_schema SET sql = ? WHERE type = 'table' AND name = 'sessions'")
+      .run(narrowed);
+    rawNarrow.exec('PRAGMA writable_schema = OFF');
+    rawNarrow.close();
+    assertRecovery(() => new DroidexDatabase(narrowerPairs), narrowerPairs);
   });
 });
 
@@ -849,5 +876,54 @@ test('opening the canonical database does not read or change Factory history fil
     assert.equal(sources.includes('session-index.sqlite'), false);
     assert.equal(sources.includes('.factory/droidex'), false);
     assert.equal(sources.includes('~/.factory'), false);
+  });
+});
+
+test('generated provider CHECK SQL tracks the TypeScript unions', () => {
+  for (const id of providerInstanceIdSchema.options) {
+    assert.ok(
+      PROVIDER_PAIR_CHECK.includes(
+        `(provider_driver_kind = '${id}' AND provider_instance_id = '${id}')`,
+      ),
+      id,
+    );
+  }
+  for (const kind of providerDriverKindSchema.options) {
+    assert.ok(PROVIDER_PAIR_CHECK.includes(`provider_driver_kind = '${kind}'`), kind);
+  }
+  for (const action of providerRecoveryActionSchema.options) {
+    assert.ok(FAILURE_ACTION_CHECK.includes(`'${action}'`), action);
+  }
+  for (const code of providerErrorCodeSchema.options) {
+    assert.ok(FAILURE_CODE_CHECK.includes(`'${code}'`), code);
+  }
+
+  const widenedPair = providerPairCheckSql(
+    [...providerDriverKindSchema.options, 'cursor'],
+    [...providerInstanceIdSchema.options, 'cursor'],
+  );
+  assert.ok(
+    widenedPair.includes("(provider_driver_kind = 'cursor' AND provider_instance_id = 'cursor')"),
+  );
+  assert.equal(PROVIDER_PAIR_CHECK.includes("provider_driver_kind = 'cursor'"), false);
+
+  const widenedActions = sqlInList('failure_recovery_action', [
+    ...providerRecoveryActionSchema.options,
+    'open_cursor_setup',
+  ]);
+  assert.ok(widenedActions.includes("'open_cursor_setup'"));
+  assert.equal(FAILURE_ACTION_CHECK.includes("'open_cursor_setup'"), false);
+
+  assert.throws(() => providerPairCheckSql(['droid'], ["dro'id"]));
+  assert.throws(() => providerPairCheckSql(['droid', 'codex'], ['droid']));
+  assert.throws(() => sqlInList('failure_recovery_action', ["open_droid_setup'"]));
+});
+
+test('created tables embed the generated provider CHECK SQL', () => {
+  withDb((db) => {
+    const sessionsSql = schemaSql(db, 'table', 'sessions');
+    assert.ok(sessionsSql.includes(normalizeSql(PROVIDER_PAIR_CHECK)));
+    assert.ok(sessionsSql.includes(normalizeSql(FAILURE_ACTION_CHECK)));
+    assert.ok(sessionsSql.includes(normalizeSql(FAILURE_CODE_CHECK)));
   });
 });

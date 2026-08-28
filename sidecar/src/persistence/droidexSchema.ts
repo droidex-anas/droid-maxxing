@@ -1,13 +1,78 @@
+import {
+  providerErrorCodeSchema,
+  providerRecoveryActionSchema,
+} from '../providers/providerErrors.js';
+import {
+  providerDriverKindSchema,
+  providerInstanceIdSchema,
+} from '../providers/providerIdentity.js';
+
 export const DROIDEX_SCHEMA_VERSION = 1;
 const DROIDEX_ID_MAX_BYTES = 256;
 
 const ID = `BETWEEN 1 AND ${String(DROIDEX_ID_MAX_BYTES)}`;
 
-const PROVIDER_PAIR_CHECK = `(
-    (provider_driver_kind = 'droid' AND provider_instance_id = 'droid')
-    OR (provider_driver_kind = 'codex' AND provider_instance_id = 'codex')
-    OR (provider_driver_kind = 'claude' AND provider_instance_id = 'claude')
-  )`;
+function sqlStringLiteral(value: string): string {
+  if (value.length === 0) {
+    throw new Error('SQL string literals must be nonempty.');
+  }
+  if (value.includes("'")) {
+    throw new Error(
+      `Provider contract value contains a single quote and cannot be embedded in SQL.`,
+    );
+  }
+  return `'${value}'`;
+}
+
+export function sqlInList(column: string, values: readonly string[]): string {
+  if (values.length === 0) {
+    throw new Error(`${column} CHECK requires at least one closed value.`);
+  }
+  const list = values.map(sqlStringLiteral).join(',\n    ');
+  return `${column} IN (\n    ${list}\n  )`;
+}
+
+export function providerPairCheckSql(
+  driverKinds: readonly string[],
+  instanceIds: readonly string[],
+): string {
+  for (const value of driverKinds) sqlStringLiteral(value);
+  for (const value of instanceIds) sqlStringLiteral(value);
+  assertUniqueSqlValues(driverKinds, 'provider driver kind');
+  assertUniqueSqlValues(instanceIds, 'provider instance id');
+  const drivers = new Set(driverKinds);
+  const instances = new Set(instanceIds);
+  if (
+    drivers.size !== instances.size ||
+    instanceIds.some((id) => !drivers.has(id)) ||
+    driverKinds.some((kind) => !instances.has(kind))
+  ) {
+    throw new Error(
+      'Provider driver kind and instance id unions must contain the same members so SQL pairs stay exact.',
+    );
+  }
+  const clauses = instanceIds.map(
+    (id) =>
+      `(provider_driver_kind = ${sqlStringLiteral(id)} AND provider_instance_id = ${sqlStringLiteral(id)})`,
+  );
+  return `(\n    ${clauses.join('\n    OR ')}\n  )`;
+}
+
+function assertUniqueSqlValues(values: readonly string[], label: string): void {
+  if (new Set(values).size !== values.length) {
+    throw new Error(`Duplicate ${label} in provider contract.`);
+  }
+}
+
+export const PROVIDER_PAIR_CHECK = providerPairCheckSql(
+  providerDriverKindSchema.options,
+  providerInstanceIdSchema.options,
+);
+export const FAILURE_CODE_CHECK = sqlInList('failure_code', providerErrorCodeSchema.options);
+export const FAILURE_ACTION_CHECK = sqlInList(
+  'failure_recovery_action',
+  providerRecoveryActionSchema.options,
+);
 
 const SESSION_LIFECYCLE_CHECK = `lifecycle_status IN ('initializing', 'running', 'paused', 'completed', 'failed')`;
 
@@ -16,31 +81,6 @@ const TURN_LIFECYCLE_CHECK = `lifecycle_status IN ('pending', 'running', 'comple
 const TARGET_SHAPE_CHECK = `(
     (target_kind = 'session' AND child_session_id IS NULL)
     OR (target_kind = 'child' AND child_session_id IS NOT NULL AND length(child_session_id) ${ID})
-  )`;
-
-const FAILURE_CODE_CHECK = `failure_code IN (
-    'invalid_provider_configuration',
-    'missing_executable',
-    'unauthenticated_provider',
-    'unsupported_provider_version',
-    'unavailable_provider_instance',
-    'unsupported_capability',
-    'native_session_start_failed',
-    'incompatible_provider_protocol',
-    'provider_process_exited',
-    'interaction_cancelled',
-    'stale_provider_operation',
-    'canonical_persistence_unavailable'
-  )`;
-
-const FAILURE_ACTION_CHECK = `failure_recovery_action IN (
-    'refresh',
-    'open_droid_setup',
-    'open_codex_setup',
-    'open_claude_setup',
-    'reset_canonical_state',
-    'retry_session',
-    'close_session'
   )`;
 
 const FAILURE_FIELDS_CHECK = `(
@@ -235,7 +275,7 @@ export interface ExpectedForeignKey {
   table: string;
   from: readonly string[];
   to: readonly string[];
-  onDelete: 'CASCADE';
+  onDelete: string;
 }
 
 export interface ExpectedIndex {
@@ -244,7 +284,6 @@ export interface ExpectedIndex {
   unique: 0 | 1;
   partial: 0 | 1;
   columns: readonly string[];
-  where: string | null;
   sql: string;
 }
 
@@ -252,11 +291,13 @@ export interface ExpectedTable {
   name: string;
   columns: readonly ExpectedColumn[];
   foreignKeys: readonly ExpectedForeignKey[];
+  sql: string;
 }
 
 export const EXPECTED_TABLES: readonly ExpectedTable[] = [
   {
     name: 'sessions',
+    sql: CREATE_SESSIONS_SQL,
     columns: [
       { name: 'app_session_id', type: 'TEXT', notnull: 0, pk: 1 },
       { name: 'client_ref', type: 'TEXT', notnull: 1, pk: 0 },
@@ -279,6 +320,7 @@ export const EXPECTED_TABLES: readonly ExpectedTable[] = [
   },
   {
     name: 'child_sessions',
+    sql: CREATE_CHILD_SESSIONS_SQL,
     columns: [
       { name: 'parent_app_session_id', type: 'TEXT', notnull: 1, pk: 1 },
       { name: 'child_session_id', type: 'TEXT', notnull: 1, pk: 2 },
@@ -304,6 +346,7 @@ export const EXPECTED_TABLES: readonly ExpectedTable[] = [
   },
   {
     name: 'turns',
+    sql: CREATE_TURNS_SQL,
     columns: [
       { name: 'turn_id', type: 'TEXT', notnull: 0, pk: 1 },
       { name: 'parent_app_session_id', type: 'TEXT', notnull: 1, pk: 0 },
@@ -332,6 +375,7 @@ export const EXPECTED_TABLES: readonly ExpectedTable[] = [
   },
   {
     name: 'transcript_events',
+    sql: CREATE_TRANSCRIPT_EVENTS_SQL,
     columns: [
       { name: 'event_order', type: 'INTEGER', notnull: 0, pk: 1 },
       { name: 'event_id', type: 'TEXT', notnull: 1, pk: 0 },
@@ -374,7 +418,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 1,
     partial: 0,
     columns: ['client_ref'],
-    where: null,
     sql: CREATE_INDEX_SQL[0],
   },
   {
@@ -383,7 +426,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 1,
     partial: 1,
     columns: ['provider_instance_id', 'provider_session_id'],
-    where: 'provider_session_id is not null',
     sql: CREATE_INDEX_SQL[1],
   },
   {
@@ -392,7 +434,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 0,
     partial: 0,
     columns: ['hidden', 'updated_at', 'app_session_id'],
-    where: null,
     sql: CREATE_INDEX_SQL[2],
   },
   {
@@ -401,7 +442,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 1,
     partial: 1,
     columns: ['provider_instance_id', 'provider_session_id'],
-    where: 'provider_session_id is not null',
     sql: CREATE_INDEX_SQL[3],
   },
   {
@@ -410,7 +450,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 0,
     partial: 0,
     columns: ['parent_app_session_id', 'updated_at', 'child_session_id'],
-    where: null,
     sql: CREATE_INDEX_SQL[4],
   },
   {
@@ -419,7 +458,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 0,
     partial: 0,
     columns: ['parent_app_session_id', 'child_session_id', 'started_at', 'turn_id'],
-    where: null,
     sql: CREATE_INDEX_SQL[5],
   },
   {
@@ -428,7 +466,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 0,
     partial: 1,
     columns: ['parent_app_session_id', 'event_order'],
-    where: 'child_session_id is null',
     sql: CREATE_INDEX_SQL[6],
   },
   {
@@ -437,7 +474,6 @@ export const EXPECTED_INDEXES: readonly ExpectedIndex[] = [
     unique: 0,
     partial: 1,
     columns: ['parent_app_session_id', 'child_session_id', 'event_order'],
-    where: 'child_session_id is not null',
     sql: CREATE_INDEX_SQL[7],
   },
 ];

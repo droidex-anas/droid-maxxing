@@ -75,6 +75,15 @@ export class DroidexDatabase {
 
   private configureConnection(): void {
     this.db.exec('PRAGMA journal_mode = WAL');
+    const journal = this.db.prepare('PRAGMA journal_mode').get() as
+      | Record<string, unknown>
+      | undefined;
+    const mode = stringValue(journal?.journal_mode)?.toLowerCase();
+    if (mode !== 'wal') {
+      throw new Error(
+        `Canonical DROIDEX database at ${this.path} requires WAL journal mode, but SQLite reported ${mode ?? 'unknown'}.`,
+      );
+    }
     this.db.exec('PRAGMA foreign_keys = ON');
     this.db.exec('PRAGMA busy_timeout = 5000');
   }
@@ -161,6 +170,9 @@ export class DroidexDatabase {
     if (JSON.stringify(columns) !== JSON.stringify(wanted)) {
       throw this.mismatch(`table ${expected.name} columns`);
     }
+    if (this.schemaSql('table', expected.name) !== normalizeSql(expected.sql)) {
+      throw this.mismatch(`table ${expected.name} definition`);
+    }
     const foreignKeys = this.readForeignKeys(expected.name);
     const wantedKeys = [...expected.foreignKeys].map(foreignKeyKey).sort();
     const actualKeys = foreignKeys.map(foreignKeyKey).sort();
@@ -188,9 +200,8 @@ export class DroidexDatabase {
       throw this.mismatch(`index ${expected.name} columns`);
     }
     const sql = this.schemaSql('index', expected.name);
-    const where = /\bwhere\s+(.+)$/.exec(sql)?.[1] ?? null;
-    if (where !== expected.where || sql !== normalizeSql(expected.sql)) {
-      throw this.mismatch(`index ${expected.name} predicate`);
+    if (sql !== normalizeSql(expected.sql)) {
+      throw this.mismatch(`index ${expected.name} SQL`);
     }
   }
 
@@ -212,11 +223,8 @@ export class DroidexDatabase {
         table: stringValue(row.table) ?? '',
         from: [],
         to: [],
-        onDelete: 'CASCADE',
+        onDelete: stringValue(row.on_delete) ?? '',
       };
-      if ((stringValue(row.on_delete) ?? '') !== 'CASCADE') {
-        throw this.mismatch(`table ${table} foreign key delete action`);
-      }
       current.from[seq] = stringValue(row.from) ?? '';
       current.to[seq] = stringValue(row.to) ?? '';
       grouped.set(id, current);
@@ -229,7 +237,7 @@ export class DroidexDatabase {
     return this.db.prepare(`PRAGMA ${pragma}(${table})`).all() as Record<string, unknown>[];
   }
 
-  private schemaSql(type: 'index' | 'trigger', name: string): string {
+  private schemaSql(type: 'table' | 'index' | 'trigger', name: string): string {
     const row = this.db
       .prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?')
       .get(type, name) as Record<string, unknown> | undefined;
