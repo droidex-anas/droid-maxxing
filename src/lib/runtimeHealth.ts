@@ -80,7 +80,37 @@ function ensureSidecarSubscription(): void {
   if (subscribed) return;
   subscribed = true;
   onSidecarStatus(applySidecarStatus);
-  void getSidecarStatus().then((status) => {
-    if (status) applySidecarStatus(status);
-  });
+  void getSidecarStatus().then(
+    (status) => {
+      if (status) applySidecarStatus(status);
+    },
+    (error: unknown) => {
+      const reason =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : 'Agent runtime status is unavailable.';
+      applySidecarStatus({
+        lifecycle: 'recovery-required',
+        processAlive: false,
+        bridgeResponsive: false,
+        lastHeartbeatAt: supervisor.lastHeartbeatAt,
+        restartCount: supervisor.restartCount,
+        reason,
+      });
+    },
+  );
+}
+
+export function resetRuntimeHealthForTests(): void {
+  supervisor = {
+    lifecycle: 'starting',
+    processAlive: false,
+    bridgeResponsive: false,
+    lastHeartbeatAt: null,
+    restartCount: 0,
+  };
+  transport = 'disconnected';
+  hasConnectedTransport = false;
+  subscribed = false;
+  listeners.clear();
 }
