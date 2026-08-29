@@ -504,8 +504,13 @@ export class SessionLifecycle {
         this.dependencies.childSessions.closeParent(liveSession.summary.appSessionId),
       );
     if (liveSession) this.dependencies.compaction.forgetSession(liveSession.summary.appSessionId);
+    const leftover = provider
+      ? (this.dependencies.takeOpenedResources?.(provider) ?? { servers: [], configs: [] })
+      : { servers: [], configs: [] };
     await Promise.all(
-      (liveSession?.mcpServers ?? []).map((server) => runBestEffortAsync(() => server.close())),
+      [...(liveSession?.mcpServers ?? []), ...leftover.servers].map((server) =>
+        runBestEffortAsync(() => server.close()),
+      ),
     );
     if (provider) await runBestEffortAsync(() => provider.close(zeroDeadline()));
     if (

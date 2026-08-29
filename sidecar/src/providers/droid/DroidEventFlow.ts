@@ -76,6 +76,14 @@ export class DroidEventFlow {
       return;
     }
     for (const event of providerEventsFromNormalized(normalized, base)) {
+      if (
+        event.type === 'session.effect' &&
+        event.effect.kind === 'observational_task' &&
+        normalized.transcript &&
+        normalized.childSession
+      ) {
+        continue;
+      }
       this.eventFlow.apply({ ...event, eventId: nextConvertedId() }, live);
     }
   }
