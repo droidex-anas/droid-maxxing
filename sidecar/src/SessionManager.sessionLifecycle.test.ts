@@ -1080,10 +1080,16 @@ test('F7 create persists a distinct app id before native startup', async () => {
       assert.equal(created.session.appSessionId, 'app-f7');
       assert.notEqual(created.session.appSessionId, 'provider-1');
     }
-    assert.ok(
-      boundaries.indexOf('provisional-persisted') < boundaries.indexOf('before-provider-open'),
-    );
-    assert.ok(boundaries.indexOf('binding-persisted') < boundaries.indexOf('activated'));
+    const persisted = boundaries.indexOf('provisional-persisted');
+    const beforeOpen = boundaries.indexOf('before-provider-open');
+    const bound = boundaries.indexOf('binding-persisted');
+    const activated = boundaries.indexOf('activated');
+    assert.notEqual(persisted, -1, 'missing create boundary: provisional-persisted');
+    assert.notEqual(beforeOpen, -1, 'missing create boundary: before-provider-open');
+    assert.notEqual(bound, -1, 'missing create boundary: binding-persisted');
+    assert.notEqual(activated, -1, 'missing create boundary: activated');
+    assert.ok(persisted < beforeOpen);
+    assert.ok(bound < activated);
     assert.equal(store.get('app-f7')?.binding.providerSessionId, 'provider-1');
     assert.equal(store.get('app-f7')?.lifecycleStatus, 'running');
     assert.equal(store.findByClientRef('f7-create')?.summary.appSessionId, 'app-f7');
@@ -1101,10 +1107,7 @@ test('F7 create persists a distinct app id before native startup', async () => {
       }),
     });
     assert.equal(h.runtime.createCalls.length, 1);
-    assert.equal(
-      transcript.page({ kind: 'session', appSessionId: 'app-f7' }).events.length >= 0,
-      true,
-    );
+    assert.equal(transcript.page({ kind: 'session', appSessionId: 'app-f7' }).events.length, 0);
   } finally {
     await h.dispose();
     try {

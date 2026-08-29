@@ -30,6 +30,7 @@ import {
   type ProviderSessionCreateInput,
 } from './providers/providerTypes.js';
 import { ShutdownDeadline } from './providers/shutdownDeadline.js';
+import type { StoredSession } from './persistence/SessionStore.js';
 import type {
   LiveNativeSession,
   LiveSession,
@@ -65,11 +66,7 @@ export async function createAppSession(
     const configuration = requireCreateConfiguration(command);
     const existing = d.sessionStore?.findByClientRef(command.clientRef);
     if (existing) {
-      d.emit({
-        type: 'session.created',
-        clientRef: command.clientRef,
-        session: d.registry.resolveSummary(existing.summary.appSessionId) ?? existing.summary,
-      });
+      emitExistingCreateOutcome(d, command, existing);
       return;
     }
     allocated = allocateCreateIdentity(d, () => host.nextId());
@@ -395,6 +392,26 @@ function providerOpenInput(
     },
     clock: { now: () => Date.now() },
   };
+}
+
+function emitExistingCreateOutcome(
+  d: SessionLifecycleDependencies,
+  command: SessionCreateCommand,
+  existing: StoredSession,
+): void {
+  if (existing.lifecycleStatus === 'failed') {
+    d.emitError({
+      code: 'session.create_failed',
+      clientRef: command.clientRef,
+      message: existing.failure?.message ?? 'Session start failed',
+    });
+    return;
+  }
+  d.emit({
+    type: 'session.created',
+    clientRef: command.clientRef,
+    session: d.registry.resolveSummary(existing.summary.appSessionId) ?? existing.summary,
+  });
 }
 
 function publishedSummary(
