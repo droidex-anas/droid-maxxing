@@ -1396,6 +1396,18 @@ test('a close racing an unactivated open discards the buffer and cannot resurrec
   assert.equal(harness.registry.getLive('race-open'), undefined);
 });
 
+function assertCreateBoundaryOrder(
+  boundaries: readonly string[],
+  earlier: SessionCreateBoundary,
+  later: SessionCreateBoundary,
+): void {
+  const earlierIndex = boundaries.indexOf(earlier);
+  const laterIndex = boundaries.indexOf(later);
+  assert.notEqual(earlierIndex, -1, `missing create boundary: ${earlier}`);
+  assert.notEqual(laterIndex, -1, `missing create boundary: ${later}`);
+  assert.ok(earlierIndex < laterIndex, `${earlier} must precede ${later}`);
+}
+
 async function waitForAppliedTurn(harness: Harness): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (
@@ -1411,6 +1423,7 @@ async function waitForAppliedTurn(harness: Harness): Promise<void> {
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+  throw new Error('No turn.settled provider event was applied.');
 }
 
 async function withCanonicalStores(
@@ -1457,10 +1470,8 @@ test('create allocates identity before native work and never uses the native id'
     assert.deepEqual(created.mcpRefs, ['app-canonical-1']);
     assert.equal(store.get('app-canonical-1')?.binding.providerSessionId, 'native-9');
     assert.equal(store.findByClientRef('client-1')?.summary.appSessionId, 'app-canonical-1');
-    assert.ok(
-      boundaries.indexOf('provisional-persisted') < boundaries.indexOf('before-provider-open'),
-    );
-    assert.ok(boundaries.indexOf('binding-persisted') < boundaries.indexOf('activated'));
+    assertCreateBoundaryOrder(boundaries, 'provisional-persisted', 'before-provider-open');
+    assertCreateBoundaryOrder(boundaries, 'binding-persisted', 'activated');
     const createdIndex = created.events.findIndex((event) => event.type === 'session.created');
     assert.equal(
       created.events.slice(0, createdIndex).some((event) => event.type === 'event.appended'),
@@ -1625,6 +1636,20 @@ test('a failed open stays visible and is never rebound', async () => {
     queueCreate(retry, 'native-rebind');
     await retry.lifecycle.create(createCommand());
     assert.equal(retry.runtime.createCalls.length, 0);
+    assert.equal(
+      retry.events.some((event) => event.type === 'session.created'),
+      false,
+    );
+    assert.equal(
+      retry.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.code === 'session.create_failed' &&
+          event.clientRef === 'client-1' &&
+          event.message === 'native exploded',
+      ),
+      true,
+    );
     assert.equal(store.get('app-failed-open')?.binding.providerSessionId, undefined);
     assert.equal(store.get('app-failed-rebind'), undefined);
   });

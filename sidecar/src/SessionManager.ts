@@ -121,7 +121,10 @@ import {
   type ProviderRegistry,
 } from './providers/ProviderRegistry.js';
 import type { DroidexDatabase } from './persistence/DroidexDatabase.js';
-import { bindCanonicalStores, canonicalReadBindings } from './sessionCanonicalPersistence.js';
+import {
+  bindCanonicalStoresForManager,
+  canonicalReadBindings,
+} from './sessionCanonicalPersistence.js';
 import type { SessionCreatePersistence } from './sessionCreateIdentity.js';
 import { searchFromStore } from './sessionCanonicalServing.js';
 
@@ -314,9 +317,7 @@ export class SessionManager {
       this.nextChildSessionId = nextChildSessionId;
       startWatcher = startSessionFileWatcher;
     }
-    const canonical = bindCanonicalStores(options.dependencies, {
-      createIfMissing: !options.dependencies,
-    });
+    const canonical = bindCanonicalStoresForManager(options.dependencies, this);
     this.database = canonical.database;
     this.providerRegistry =
       options.dependencies?.providerRegistry ??
