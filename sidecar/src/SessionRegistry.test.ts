@@ -861,6 +861,39 @@ test('registry dual-writes summary updates through SessionStore when a row exist
   }
 });
 
+test('reanchorHistoricalCwd writes the new cwd through SessionStore', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-registry-reanchor-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  const store = new SessionStore(db);
+  try {
+    store.createProvisional({
+      appSessionId: 'app-reanchor',
+      clientRef: 'ref-reanchor',
+      summary: summary('app-reanchor', { cwd: '/repo/.worktrees/feature' }),
+    });
+    const { history } = createHarness();
+    const registry = new SessionRegistry<TestLiveSession>({
+      history,
+      loadOrdinarySessions: () => [],
+      loadMissionControlSessions: () => [],
+      projectSummary: (value) => copySummary(value),
+      onSummaryUpdated: () => undefined,
+      now: () => 50,
+      sessionStore: store,
+    });
+    const updated = registry.reanchorHistoricalCwd('/repo/.worktrees/feature', '/repo');
+    assert.deepEqual(
+      updated.map((session) => [session.appSessionId, session.cwd]),
+      [['app-reanchor', '/repo']],
+    );
+    assert.equal(store.get('app-reanchor')?.summary.cwd, '/repo');
+    assert.equal(store.list()[0]?.summary.cwd, '/repo');
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('invalidateAndUnregisterLive bumps generations and removes live sessions before awaits', () => {
   const { registry } = createHarness();
   const first = live(summary('first'));

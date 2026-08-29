@@ -181,6 +181,7 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     this.dependencies.history.syncSummaries(updated);
     this.dependencies.history.flushSync?.();
     for (const summary of updated) {
+      this.syncCanonicalSummary(summary, false);
       this.cacheHistoricalSummary(summary);
       this.publish(summary, liveBindingFromSummary(summary));
     }
