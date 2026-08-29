@@ -134,3 +134,29 @@ test('apply drops post-terminal generated output', () => {
   );
   assert.equal(harness.transcripts.length, 0);
 });
+
+test('apply still records a failed Task child after the source is terminal', () => {
+  const harness = createHarness();
+  harness.eventFlow.apply(
+    parseProviderRuntimeEvent({
+      eventId: 'settled',
+      target: { kind: 'session', appSessionId: 'app-1' },
+      providerDriverKind: 'droid',
+      providerInstanceId: 'droid',
+      runtimeGeneration: 1,
+      createdAt: 1,
+      type: 'turn.settled',
+      settlement: { status: 'completed' },
+    }),
+    admission(),
+  );
+  harness.eventFlow.apply(
+    providerTranscript(
+      { eventId: 'failed-task' },
+      { kind: 'tool_result', toolName: 'Task', toolUseId: 'task-1', text: 'worker failed', isError: true },
+    ),
+    admission(),
+  );
+  assert.equal(harness.transcripts[0]?.isError, true);
+  assert.equal(harness.sideEffects[0]?.value.childSession?.done, true);
+});

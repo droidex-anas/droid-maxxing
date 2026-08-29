@@ -1,7 +1,12 @@
 import type { BridgeFeature } from './protocol.js';
 import type { ProviderRuntimeEvent, ProviderSessionEffect } from './providers/providerEvents.js';
 import type { NormalizedProgressEntry } from './providers/droid/DroidMissionSignals.js';
-import { detectChildSession, taskResultChildUpdate, type ChildSessionSignal } from './subagentSignals.js';
+import {
+  detectChildSession,
+  isTaskFamilyToolName,
+  taskResultChildUpdate,
+  type ChildSessionSignal,
+} from './subagentSignals.js';
 
 export interface NormalizedSideEffects {
   features?: BridgeFeature[];
@@ -39,8 +44,11 @@ export function sideEffectsFromProviderEvent(event: ProviderRuntimeEvent): Norma
       undefined,
       event.event.toolUseId,
     );
-    const resultUpdate = taskResultChildUpdate(event.event.toolName, event.event.text);
-    if (!childSession && !resultUpdate) return {};
+    const resultUpdate = event.event.isError
+      ? undefined
+      : taskResultChildUpdate(event.event.toolName, event.event.text);
+    const failedTask = event.event.isError === true && isTaskFamilyToolName(event.event.toolName);
+    if (!childSession && !resultUpdate && !failedTask) return {};
     return {
       childSession: {
         ...(childSession ?? {}),
@@ -48,6 +56,7 @@ export function sideEffectsFromProviderEvent(event: ProviderRuntimeEvent): Norma
           ? { providerSessionId: resultUpdate.providerSessionId }
           : {}),
         ...(resultUpdate ? { done: resultUpdate.done } : {}),
+        ...(failedTask ? { done: true } : {}),
       },
     };
   }

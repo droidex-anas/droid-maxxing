@@ -27,6 +27,7 @@ export interface DroidInteractionLiveSession {
     updateSettings: (settings: Partial<UpdateSessionSettingsRequestParams>) => Promise<unknown>;
   };
   runtimeGeneration: number;
+  markConfigurationApplied?: () => void;
 }
 
 type InteractionError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
@@ -175,6 +176,7 @@ export class DroidInteractions {
         },
         phase: 'running',
       });
+      liveSession.markConfigurationApplied?.();
       await liveSession.session.updateSettings({
         interactionMode: DroidInteractionMode.Auto,
       });

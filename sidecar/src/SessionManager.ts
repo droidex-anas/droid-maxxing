@@ -401,6 +401,9 @@ export class SessionManager {
           summary: live.summary,
           session: live.session,
           runtimeGeneration: live.binding.runtimeGeneration,
+          markConfigurationApplied: () => {
+            live.appliedNativeConfiguration = live.summary.configuration;
+          },
         };
       },
       updateSummary: (id, patch) => {
