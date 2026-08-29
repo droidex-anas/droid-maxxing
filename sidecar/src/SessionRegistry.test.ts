@@ -11,11 +11,15 @@ import {
   type RegisteredSession,
   type SessionRegistryDependencies,
 } from './SessionRegistry.js';
-import type { ProviderBinding, SessionStore as SessionStoreApi } from './persistence/SessionStore.js';
+import type {
+  ProviderBinding,
+  SessionStore as SessionStoreApi,
+} from './persistence/SessionStore.js';
 import { encodeDroidResumeState } from './providers/droid/DroidModeMapping.js';
 import { droidSessionConfiguration, withProviderSelection } from './providers/providerIdentity.js';
 import { DroidexDatabase } from './persistence/DroidexDatabase.js';
 import { SessionStore } from './persistence/SessionStore.js';
+import { FAMILIAR_PREEXISTING_SESSIONS_PER_WORKSPACE } from './sessionListFilter.js';
 
 interface TestLiveSession extends RegisteredSession {
   name: string;
@@ -120,12 +124,7 @@ function seedStoredSession(store: SessionStore, summary: SessionSummary): void {
     : [...previous];
   if (chain.length > 0) {
     const [first, ...rest] = chain;
-    store.bindInitialProviderRuntime(
-      summary.appSessionId,
-      0,
-      first,
-      encodeDroidResumeState(first),
-    );
+    store.bindInitialProviderRuntime(summary.appSessionId, 0, first, encodeDroidResumeState(first));
     let generation = 1;
     for (const next of rest) {
       store.replaceProviderRuntime(
@@ -484,11 +483,7 @@ test('replaceProvider retains the alias chain and supports live and stored sessi
   assert.equal(registry.getLive('historical-provider-next'), undefined);
   assert.equal(registry.resolveSummary('historical-app')?.appSessionId, 'historical-app');
   assert.equal(store.get('historical-app')?.binding.providerSessionId, 'historical-provider-next');
-  assert.deepEqual(
-    retiredProviders,
-    ['live-provider'],
-    'stored swaps do not retire live files',
-  );
+  assert.deepEqual(retiredProviders, ['live-provider'], 'stored swaps do not retire live files');
   assert.deepEqual(persistTrace, ['persist', 'publish', 'persist', 'persist', 'publish']);
   assert.equal(published.length, 2);
 });
@@ -691,6 +686,26 @@ test('workspace scoping lists only the requested folder', (t) => {
       .sessions.map((item) => [item.appSessionId, item.title]),
     [['here', 'in workspace']],
   );
+});
+
+test('workspace filter keeps every store-only DROIDEX session past the preexisting bound', (t) => {
+  const count = FAMILIAR_PREEXISTING_SESSIONS_PER_WORKSPACE + 2;
+  const ordinary = Array.from({ length: count }, (_, index) =>
+    summary(`store-${String(index)}`, {
+      title: `store ${String(index)}`,
+      updatedAt: index + 1,
+    }),
+  );
+  const { registry } = createHarness(t, { ordinary });
+  const page = registry.listSummaries({ workspaceCwds: ['/workspace'] });
+  assert.deepEqual(
+    page.sessions.map((item) => item.appSessionId),
+    ordinary
+      .slice()
+      .reverse()
+      .map((item) => item.appSessionId),
+  );
+  assert.deepEqual(page.earlierSessionsByCwd, {});
 });
 
 test('snapshot permits sequential unregister without skipping sessions', (t) => {

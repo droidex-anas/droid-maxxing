@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { normalizeCompactionTokenLimit } from './compaction.js';
 import type {
@@ -67,11 +67,24 @@ export function readFactorySessionLaunchSettings(
 }
 
 function findFactorySessionSettingsPath(providerSessionId: string): string | undefined {
-  if (!providerSessionId) return undefined;
+  if (!isSafeSessionFileToken(providerSessionId)) return undefined;
   const root = FACTORY_SESSIONS_ROOT();
-  const direct = join(root, `${providerSessionId}.settings.json`);
-  if (existsSync(direct)) return direct;
-  return walkSettingsPath(root, `${providerSessionId}.settings.json`, 0);
+  const fileName = `${providerSessionId}.settings.json`;
+  const direct = join(root, fileName);
+  if (isInside(root, direct) && existsSync(direct)) return direct;
+  return walkSettingsPath(root, fileName, 0);
+}
+
+function isSafeSessionFileToken(value: string): boolean {
+  if (!value || value.includes('\0')) return false;
+  if (value.includes('/') || value.includes('\\') || value.includes(sep)) return false;
+  return value !== '.' && value !== '..';
+}
+
+function isInside(parent: string, candidate: string): boolean {
+  const root = resolve(parent);
+  const path = relative(root, resolve(candidate));
+  return path === '' || (!path.startsWith('..') && !isAbsolute(path));
 }
 
 function walkSettingsPath(dir: string, fileName: string, depth: number): string | undefined {
@@ -90,7 +103,9 @@ function walkSettingsPath(dir: string, fileName: string, depth: number): string 
     } catch {
       continue;
     }
-    if (name === fileName && !isDirectory) return path;
+    if (name === fileName && !isDirectory) {
+      return isInside(FACTORY_SESSIONS_ROOT(), path) ? path : undefined;
+    }
     if (isDirectory) {
       const nested = walkSettingsPath(path, fileName, depth + 1);
       if (nested) return nested;

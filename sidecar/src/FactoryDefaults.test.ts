@@ -87,3 +87,18 @@ test('readFactorySessionLaunchSettings reads the adjacent Task settings file', (
     assert.equal(readFactorySessionLaunchSettings('missing-task'), undefined);
   });
 });
+
+test('readFactorySessionLaunchSettings ignores path separators and traversal tokens', () => {
+  withHome((home) => {
+    mkdirSync(join(home, '.factory', 'sessions'), { recursive: true });
+    writeFileSync(
+      join(home, '.factory', 'secret.settings.json'),
+      JSON.stringify({ model: 'stolen-model' }),
+    );
+    assert.equal(readFactorySessionLaunchSettings('../secret'), undefined);
+    assert.equal(readFactorySessionLaunchSettings('..\\secret'), undefined);
+    assert.equal(readFactorySessionLaunchSettings('nested/secret'), undefined);
+    assert.equal(readFactorySessionLaunchSettings('.'), undefined);
+    assert.equal(readFactorySessionLaunchSettings('..'), undefined);
+  });
+});
