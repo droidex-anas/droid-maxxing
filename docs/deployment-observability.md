@@ -157,8 +157,14 @@ not use those system capabilities.
 
 The sidecar uses Electron's bundled Node 22 runtime and its built-in
 `node:sqlite`; users do not install or download SQLite. The canonical session
-index is `~/.factory/droidex/session-index.sqlite`. It is DROIDEX-owned derived
-state built from raw Factory session history under `~/.factory/sessions`.
+database is `$DROIDEX_USER_DATA_DIR/state/droidex.sqlite` (default
+`~/Library/Application Support/DROIDEX/state/droidex.sqlite`). Schema
+`user_version` is `1`. It is the sole application source of truth for session
+summaries, private provider bindings, children, turns, and transcripts.
+Provider-native files under `~/.factory/sessions` are resume-only and are never
+imported. A mismatched or corrupt database fails with its path and the recovery
+action `move or remove this file, then restart DROIDEX`. DROIDEX does not
+rebuild that file from Factory history.
 
 ## Crash and bug intake
 
