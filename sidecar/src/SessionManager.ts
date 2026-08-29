@@ -100,10 +100,8 @@ import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 import { formatResponsePrompt } from './appPrompt.js';
 import { SIDECAR_SHUTDOWN_BUDGET_MS, ShutdownDeadline } from './providers/shutdownDeadline.js';
-import {
-  createDefaultProviderRegistry,
-  type ProviderRegistry,
-} from './providers/ProviderRegistry.js';
+import { createHostProviderRegistry } from './providers/hostProviderRegistry.js';
+import type { ProviderRegistry } from './providers/ProviderRegistry.js';
 import type { DroidexDatabase } from './persistence/DroidexDatabase.js';
 import {
   bindCanonicalStoresForManager,
@@ -264,7 +262,7 @@ export class SessionManager {
     this.database = canonical.database;
     this.providerRegistry =
       options.dependencies?.providerRegistry ??
-      createDefaultProviderRegistry({
+      createHostProviderRegistry({
         droid: () =>
           new DroidProviderAdapter({
             runtime: this.runtime,
