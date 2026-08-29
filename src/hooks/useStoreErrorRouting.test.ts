@@ -8,18 +8,21 @@ import {
   resetHistoryHealthForTests,
 } from '../lib/historyHealth';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const session: SessionSummary = {
   appSessionId: 'app-1',
-  providerSessionId: 'provider-1',
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: 'Chat',
   goal: '',
   cwd: '',
   workspaceKind: 'none',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'running',
   features: [],
   tokensIn: 0,
@@ -86,7 +89,6 @@ test('a primary error fails only the primary session', () => {
   const action = adaptEvent({
     type: 'error',
     appSessionId: 'app-1',
-    providerSessionId: 'provider-1',
     message: 'resume failed',
   });
   assert.ok(action);
@@ -169,7 +171,6 @@ test('a recoverable parent error stays out of reducer state', () => {
   const action = adaptEvent({
     type: 'error',
     appSessionId: 'app-1',
-    providerSessionId: 'provider-1',
     message: 'history restore failed',
     recoverable: true,
   });

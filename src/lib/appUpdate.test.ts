@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 test('automatic update checks start before CLI environment detection and repeat while enabled', async () => {
   const module = (await import('./appUpdate')) as unknown as {
@@ -184,7 +185,11 @@ test('new agent work is blocked for the full automatic update transaction', asyn
           title: 'Blocked during update',
           goal: 'Do not send',
           sessionPurpose: 'chat',
-          autonomy: 'off',
+          configuration: droidSessionConfiguration({
+            modelId: 'model-default',
+            interactionMode: 'auto',
+            autonomy: 'off',
+          }),
         }),
       /new agent work is paused until restart/,
     );

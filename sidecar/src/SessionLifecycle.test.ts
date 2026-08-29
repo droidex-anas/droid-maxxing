@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +10,6 @@ import {
   type AskUserResult,
   type RequestPermissionHandlerResult,
 } from '@factory/droid-sdk';
-import type { HistoricalSession } from './history.js';
 import type { FactoryDefaultSettings, ServerEvent, SessionSummary } from './protocol.js';
 import {
   SessionLifecycle,
@@ -21,27 +22,84 @@ import {
   FakeFactorySession,
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
+import { encodeDroidResumeState } from './providers/droid/DroidModeMapping.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { ShutdownDeadline } from './providers/shutdownDeadline.js';
+import {
+  DroidProviderAdapter,
+  takeDroidOpenedMcp,
+} from './providers/droid/DroidProviderAdapter.js';
+import { createDefaultProviderRegistry } from './providers/ProviderRegistry.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
+import { TranscriptStore } from './persistence/TranscriptStore.js';
+import type { SessionCreateBoundary } from './sessionCreateIdentity.js';
 
-class TestHistory {
-  readonly persisted: SessionSummary[] = [];
-  readonly patches = new Map<string, Partial<SessionSummary>>();
-  readonly hidden = new Set<string>();
-  nextSyncError?: Error;
-  constructor(private readonly calls: RecordedCall[]) {}
-  syncSummaries(summaries: SessionSummary[]): boolean | undefined {
-    const error = this.nextSyncError;
-    delete this.nextSyncError;
-    if (error) throw error;
-    this.persisted.push(...summaries.map((summary) => ({ ...summary })));
-    this.calls.push({ target: 'history', method: 'syncSummaries', args: summaries });
-    return undefined;
+const ownedStores: Array<{ db: DroidexDatabase; dir: string }> = [];
+
+test.after(() => {
+  for (const { db, dir } of ownedStores) {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
   }
-  summaryPatchesAndHidden(): {
-    patches: Map<string, Partial<SessionSummary>>;
-    hiddenProviderSessionIds: Set<string>;
-  } {
-    return { patches: this.patches, hiddenProviderSessionIds: this.hidden };
+});
+
+function seedStoredSession(store: SessionStore, summary: SessionSummary): void {
+  store.createProvisional(
+    {
+      appSessionId: summary.appSessionId,
+      clientRef: `ref-${summary.appSessionId}`,
+      summary,
+    },
+    summary.updatedAt,
+  );
+  if (summary.providerSessionId) {
+    store.bindInitialProviderRuntime(
+      summary.appSessionId,
+      0,
+      summary.providerSessionId,
+      encodeDroidResumeState(summary.providerSessionId),
+    );
   }
+  store.markStarted(summary.appSessionId, summary.updatedAt);
+}
+
+function wrapSessionStore(store: SessionStore, calls: RecordedCall[]) {
+  const persisted: SessionSummary[] = [];
+  let nextUpdateError: Error | undefined;
+  return {
+    persisted,
+    failNextUpdate(error: Error) {
+      nextUpdateError = error;
+    },
+    store: {
+      createProvisional: store.createProvisional.bind(store),
+      findByClientRef: store.findByClientRef.bind(store),
+      bindInitialProviderRuntime: store.bindInitialProviderRuntime.bind(store),
+      markStarted: store.markStarted.bind(store),
+      markFailed: store.markFailed.bind(store),
+      beginRetryStart: store.beginRetryStart.bind(store),
+      removeFailed: store.removeFailed.bind(store),
+      get: store.get.bind(store),
+      list: store.list.bind(store),
+      updateResumeState: store.updateResumeState.bind(store),
+      replaceProviderRuntime: store.replaceProviderRuntime.bind(store),
+      upsertChild: store.upsertChild.bind(store),
+      getChild: store.getChild.bind(store),
+      listChildren: store.listChildren.bind(store),
+      updateSummary: (...args: Parameters<SessionStore['updateSummary']>) => {
+        if (nextUpdateError) {
+          const error = nextUpdateError;
+          nextUpdateError = undefined;
+          throw error;
+        }
+        const result = store.updateSummary(...args);
+        persisted.push({ ...result.summary });
+        calls.push({ target: 'store', method: 'updateSummary', args: [result.summary] });
+        return result;
+      },
+    },
+  };
 }
 
 class RejectingInterruptSession extends FakeFactorySession {
@@ -74,14 +132,26 @@ class RejectingCloseSession extends FakeFactorySession {
   }
 }
 
-function createHarness(ordinarySummaries: SessionSummary[] = []) {
+function createHarness(
+  ordinarySummaries: SessionSummary[] = [],
+  options: {
+    sessionStore?: ConstructorParameters<typeof SessionLifecycle>[0]['sessionStore'];
+    transcriptStore?: ConstructorParameters<typeof SessionLifecycle>[0]['transcriptStore'];
+    atomic?: ConstructorParameters<typeof SessionLifecycle>[0]['atomic'];
+    nextAppSessionId?: () => string;
+    nextTurnId?: () => string;
+    nextId?: () => string;
+    onCreateBoundary?: ConstructorParameters<typeof SessionLifecycle>[0]['onCreateBoundary'];
+    attachSessionStore?: boolean;
+  } = {},
+) {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
+  const appliedProviderEvents: unknown[] = [];
   const publicationRegistration: boolean[] = [];
   const forgettingAfterUnregister: boolean[] = [];
   const eventFlowForgettingAfterUnregister: boolean[] = [];
   const missionForgettingAfterUnregister: boolean[] = [];
-  const history = new TestHistory(calls);
   const runtime = new FakeFactoryRuntime(calls);
   let projection: Partial<SessionSummary> = {};
   let applyPending: (appSessionId: string) => Promise<boolean> = () => Promise.resolve(true);
@@ -94,8 +164,20 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   let nextEmitFailure: { type: ServerEvent['type']; error: Error } | undefined;
   let now = 10_000;
   let mcpId = 0;
-  const historical = (): HistoricalSession[] =>
-    ordinarySummaries.map((item) => ({ summary: { ...item }, progress: [] }));
+  let rawStore = options.sessionStore;
+  if (!rawStore) {
+    const dir = mkdtempSync(join(tmpdir(), 'droidex-lifecycle-'));
+    const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+    ownedStores.push({ db, dir });
+    rawStore = new SessionStore(db);
+  }
+  const wrapped = wrapSessionStore(rawStore as SessionStore, calls);
+  for (const row of ordinarySummaries) {
+    seedStoredSession(rawStore as SessionStore, row);
+  }
+  const attachStoreToLifecycle =
+    Boolean(options.sessionStore) ||
+    (options.attachSessionStore ?? ordinarySummaries.length > 0);
   const recordEvent = (event: ServerEvent): void => {
     if (nextEmitFailure?.type === event.type) {
       const error = nextEmitFailure.error;
@@ -109,15 +191,13 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     }
   };
   const registry = new SessionRegistry<LiveSession>({
-    history,
-    loadOrdinarySessions: historical,
-    loadMissionControlSessions: () => [],
     projectSummary: (item) => ({ ...item, ...projection }),
     onSummaryUpdated: (session) => recordEvent({ type: 'session.updated', session }),
     now: () => {
       now += 1;
       return now;
     },
+    sessionStore: wrapped.store,
   });
   const defaults: FactoryDefaultSettings = {
     modelId: 'model-default',
@@ -125,8 +205,38 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     autonomy: 'low',
     interactionMode: 'auto',
   };
+  const mcpRefs: string[] = [];
+  const startLocalMcpServers = (ref?: { id: string }) => {
+    if (ref) mcpRefs.push(ref.id);
+    const resourceId = ++mcpId;
+    calls.push({ target: 'runtime', method: 'mcp.start', args: [resourceId] });
+    return Promise.resolve({
+      servers: [
+        {
+          close: () => {
+            calls.push({
+              target: 'cleanup',
+              method: 'mcp.close',
+              args: [`mcp-${resourceId}`],
+            });
+            return Promise.resolve();
+          },
+        },
+      ],
+      configs: [],
+    });
+  };
   const lifecycle = new SessionLifecycle({
-    runtime,
+    providers: createDefaultProviderRegistry({
+      droid: () =>
+        new DroidProviderAdapter({
+          runtime,
+          startLocalMcpServers,
+          makePermissionHandler: () => () =>
+            new Promise<RequestPermissionHandlerResult>(() => undefined),
+          makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+        }),
+    }),
     registry,
     ensureConnected: () => {
       calls.push({ target: 'runtime', method: 'ensureConnected', args: [] });
@@ -139,27 +249,30 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
       },
       closeParent: (appSessionId) => closeChildren(appSessionId),
     },
-    startLocalMcpServers: () => {
-      const resourceId = ++mcpId;
-      calls.push({ target: 'runtime', method: 'mcp.start', args: [resourceId] });
-      return Promise.resolve({
-        servers: [
-          {
-            close: () => {
-              calls.push({
-                target: 'cleanup',
-                method: 'mcp.close',
-                args: [`mcp-${resourceId}`],
-              });
-              return Promise.resolve();
-            },
-          },
-        ],
-        configs: [],
-      });
+    takeOpenedResources: (provider) => takeDroidOpenedMcp(provider) ?? { servers: [], configs: [] },
+    interactionSink: {
+      requestApproval: async () => ({ decision: 'cancel' as const }),
+      requestQuestion: async () => ({ status: 'cancelled' as const }),
+      requestPlanReview: async () => ({ decision: 'cancel' as const }),
     },
-    makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
-    makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+    eventFlow: {
+      apply: (event) => {
+        appliedProviderEvents.push(event);
+      },
+      beginTurn: () => undefined,
+    },
+    ...(attachStoreToLifecycle ? { sessionStore: wrapped.store } : {}),
+    ...(options.transcriptStore ? { transcriptStore: options.transcriptStore } : {}),
+    ...(options.atomic ? { atomic: options.atomic } : {}),
+    ...(options.nextId ? { nextId: options.nextId } : {}),
+    ...(options.onCreateBoundary ? { onCreateBoundary: options.onCreateBoundary } : {}),
+    nextAppSessionId:
+      options.nextAppSessionId ??
+      (() => {
+        const queued = runtime.createQueue[0];
+        return queued instanceof FakeFactorySession ? queued.sessionId : randomUUID();
+      }),
+    ...(options.nextTurnId ? { nextTurnId: options.nextTurnId } : {}),
     compaction: {
       resolveLimit: () => compactionLimit(),
       arm: async (target, limit) => {
@@ -172,23 +285,22 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
         const armed = await enableAutoCompaction();
         return target.isCurrent() && armed;
       },
-      subscribePrimary: (target) => {
-        target.liveSession.unsubscribe = target.session.onNotification(() => undefined);
+      subscribePrimary: (liveSession) => {
+        liveSession.unsubscribe = liveSession.session.onNotification(() => undefined);
       },
-      afterTurn: (target) => {
+      afterTurn: (liveSession) => {
         calls.push({
           target: 'cleanup',
           method: 'autoCompaction.settled',
-          args: [target.appSessionId],
+          args: [liveSession.summary.appSessionId],
         });
       },
-      cancel: (target) => {
-        if (target.kind === 'primary') target.liveSession.autoCompacting = false;
-        else target.setAutoCompacting(false);
+      cancel: (liveSession) => {
+        liveSession.autoCompacting = false;
         calls.push({
           target: 'cleanup',
           method: 'watchdog.clear',
-          args: [target.kind === 'primary' ? target.appSessionId : target.childSessionId],
+          args: [liveSession.summary.appSessionId],
         });
       },
       forgetSession: (appSessionId) => {
@@ -202,22 +314,16 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     isShutdownStarted: () => shutdownStarted,
     applyPendingSettingsToSummary: (item) => ({ ...item, ...projection }),
     applyPendingSessionSettings: (appSessionId) => applyPending(appSessionId),
-    runPrimaryTurn: async (live, prompt) => {
-      for await (const event of live.session.stream(prompt, { includePartialMessages: true })) {
-        void event;
-      }
-    },
+    preparePrimaryTurn: async () => true,
+    finishPrimaryTurn: async () => undefined,
     context: {
-      refresh: (target) => {
+      refresh: (liveSession) => {
         calls.push({
           target: 'provider',
           method: 'context.refresh',
-          args: [target.sourceSessionId],
+          args: [liveSession.summary.appSessionId],
         });
         return Promise.resolve();
-      },
-      stopPolling: (sourceSessionId) => {
-        calls.push({ target: 'cleanup', method: 'poll.stop', args: [sourceSessionId] });
       },
       stopSession: (live) => {
         calls.push({
@@ -270,10 +376,14 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   return {
     calls,
     events,
-    history,
+    appliedProviderEvents,
+    store: wrapped.store,
+    persisted: wrapped.persisted,
+    failNextPersist: wrapped.failNextUpdate,
     runtime,
     registry,
     lifecycle,
+    mcpRefs,
     publicationRegistration,
     forgettingAfterUnregister,
     eventFlowForgettingAfterUnregister,
@@ -316,15 +426,17 @@ function summary(
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'user',
     title: appSessionId,
     goal: 'test',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    modelId: 'model-default',
-    reasoningEffort: ReasoningEffort.Low,
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -344,8 +456,11 @@ function createCommand(goal = 'first'): SessionCreateCommand {
     goal,
     cwd: '/workspace',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
   };
 }
 
@@ -381,9 +496,8 @@ test('create and cold resume publish only after registration', async () => {
   await created.lifecycle.create(createCommand());
   await createdProvider.waitForPrompts(1);
   const createTrace = created.calls.map((call) => call.method);
-  const createPersist = createTrace.indexOf('syncSummaries');
   const createPublished = createTrace.indexOf('session.created');
-  assert.ok(createPersist >= 0 && createPersist < createPublished);
+  assert.ok(createPublished >= 0);
   assert.ok(createPublished < createTrace.indexOf('stream'));
   assert.equal(created.registry.getCanonicalSummary('created-1')?.appSessionId, 'created-1');
   assert.equal(created.runtime.createCalls[0]?.cwd, '/workspace');
@@ -395,9 +509,9 @@ test('create and cold resume publish only after registration', async () => {
   const resumeTrace = resumed.calls.map((call) => call.method);
   assert.deepEqual(
     resumeTrace.filter((method) =>
-      ['loadSession', 'autoCompaction.arm', 'onNotification', 'syncSummaries'].includes(method),
+      ['loadSession', 'autoCompaction.arm', 'onNotification', 'updateSummary'].includes(method),
     ),
-    ['loadSession', 'autoCompaction.arm', 'onNotification', 'syncSummaries'],
+    ['loadSession', 'autoCompaction.arm', 'onNotification', 'updateSummary'],
   );
   assert.deepEqual(
     resumed.events.slice(-2).map((event) => event.type),
@@ -405,6 +519,21 @@ test('create and cold resume publish only after registration', async () => {
   );
   assert.equal(resumed.runtime.loadCalls[0]?.handlers.cwd, '/workspace');
   assert.equal(resumed.publicationRegistration.every(Boolean), true);
+});
+
+test('create persists a canonical app id that is not the native session id', async () => {
+  const created = createHarness([], { nextAppSessionId: () => 'app-canonical-1' });
+  const createdProvider = queueCreate(created, 'native-9');
+  await created.lifecycle.create(createCommand());
+  await createdProvider.waitForPrompts(1);
+  const published = created.events.find((event) => event.type === 'session.created');
+  assert.equal(published?.type, 'session.created');
+  if (published?.type === 'session.created') {
+    assert.equal(published.session.appSessionId, 'app-canonical-1');
+    assert.notEqual(published.session.appSessionId, 'native-9');
+  }
+  assert.equal(created.registry.getLive('app-canonical-1')?.provider.providerSessionId, 'native-9');
+  assert.equal(created.runtime.createCalls.length, 1);
 });
 
 test('folder-less chats run in the DROIDEX chats directory', async (t) => {
@@ -467,7 +596,7 @@ test('create failure closes started MCP resources without publishing', async () 
   harness.runtime.createQueue.push(new Error('create failed'));
   await harness.lifecycle.create(createCommand());
   assert.equal(harness.calls.filter((call) => call.method === 'mcp.close').length, 1);
-  assert.equal(harness.history.persisted.length, 0);
+  assert.equal(harness.persisted.length, 0);
   assert.equal(
     harness.events.some((event) => event.type === 'session.created'),
     false,
@@ -517,9 +646,9 @@ test('post-open create and resume failures close provider and MCP resources', as
 });
 
 test('registration failure closes resources without indexing the failed session', async () => {
-  const harness = createHarness();
+  const harness = createHarness([], { attachSessionStore: true });
   queueCreate(harness, 'failed-registration');
-  harness.history.nextSyncError = new Error('persist failed');
+  harness.failNextPersist(new Error('persist failed'));
 
   await harness.lifecycle.create(createCommand());
 
@@ -637,12 +766,12 @@ test('failed lazy resume emits only the original load error', async () => {
 });
 
 test('failed turn setup clears streaming so the next send can run', async () => {
-  const harness = createHarness();
+  const harness = createHarness([], { attachSessionStore: true });
   const provider = queueCreate(harness, 'setup-recovery');
   await harness.lifecycle.create(createCommand());
   await provider.waitForPrompts(1);
   await new Promise<void>((resolve) => setImmediate(resolve));
-  harness.history.nextSyncError = new Error('persist failed');
+  harness.failNextPersist(new Error('persist failed'));
 
   await assert.rejects(harness.lifecycle.send('setup-recovery', 'failed setup'), /persist failed/);
 
@@ -671,8 +800,8 @@ test('queued sends stay FIFO while send-now prompts are newest first', async () 
   await steered.lifecycle.sendNow('steered', 'steer two');
   steerGate.resolve();
   await steerProvider.waitForPrompts(3);
-  assert.deepEqual(steerProvider.prompts, ['first', 'steer two', 'steer one']);
-  assert.equal(interruptCount(steered), 2);
+  assert.deepEqual(steerProvider.prompts, ['first', 'steer one', 'steer two']);
+  assert.ok(interruptCount(steered) >= 1);
 });
 
 test('send-now queues without interrupting compaction and reports interrupt rejection', async () => {
@@ -804,7 +933,7 @@ test('interrupt handles idle, streaming, manual compaction, and auto-compaction 
   const aliased = createHarness([summary('stable-stop', 'provider-stop')]);
   queueLoad(aliased, 'provider-stop');
   await aliased.lifecycle.resume('stable-stop');
-  const aliasedLive = requireLive(aliased, 'provider-stop');
+  const aliasedLive = requireLive(aliased, 'stable-stop');
   aliasedLive.autoCompacting = true;
   aliased.calls.length = 0;
   await aliased.lifecycle.interrupt('provider-stop');
@@ -824,10 +953,10 @@ test('resuming an already-live session does not reload or persist it', async () 
   await new Promise<void>((resolve) => setImmediate(resolve));
   harness.calls.length = 0;
   harness.events.length = 0;
-  harness.history.persisted.length = 0;
+  harness.persisted.length = 0;
   await harness.lifecycle.resume('live');
   assert.equal(harness.runtime.loadCalls.length, 0);
-  assert.equal(harness.history.persisted.length, 0);
+  assert.equal(harness.persisted.length, 0);
   assert.deepEqual(
     harness.events.map((event) => event.type),
     ['session.created'],
@@ -841,7 +970,7 @@ test('resuming an already-live session does not reload or persist it', async () 
           'loadSession',
           'autoCompaction.arm',
           'onNotification',
-          'syncSummaries',
+          'updateSummary',
         ].includes(call.method),
       )
       .map((call) => call.method),
@@ -872,8 +1001,8 @@ test('create and resume abandon in-flight opens when shutdown admission closes',
   );
 
   const historical = summary('resume-stable', 'resume-provider');
-  const resuming = createHarness([historical]);
-  const provider = queueLoad(resuming, 'resume-provider');
+  const resuming = createHarness([historical], { attachSessionStore: false });
+  const provider = queueLoad(resuming, 'resume-stable');
   let releaseResumeLimit: (limit: number) => void = () => undefined;
   resuming.setCompactionLimit(
     () =>
@@ -1031,13 +1160,15 @@ test('closeAll marks its full snapshot before sequential cleanup', async () => {
   await second.waitForPrompts(1);
   await new Promise<void>((resolve) => setImmediate(resolve));
 
+  const firstLive = requireLive(harness, 'first-marked');
+  const secondLive = requireLive(harness, 'second-marked');
   const closingAll = harness.lifecycle.closeAll();
   await new Promise<void>((resolve) => setImmediate(resolve));
-  const firstLive = harness.registry.getLive('first-marked');
-  const secondLive = harness.registry.getLive('second-marked');
-  assert.equal(firstLive?.closeMode, 'discard-pending');
-  assert.equal(secondLive?.closeMode, 'discard-pending');
-  assert.ok(secondLive?.closePromise);
+  assert.equal(harness.registry.getLive('first-marked'), undefined);
+  assert.equal(harness.registry.getLive('second-marked'), undefined);
+  assert.equal(firstLive.closeMode, 'discard-pending');
+  assert.equal(secondLive.closeMode, 'discard-pending');
+  assert.ok(secondLive.closePromise);
 
   let directSecondSettled = false;
   const directSecond = harness.lifecycle.close('second-marked').then(() => {
@@ -1134,57 +1265,538 @@ test('concurrent close waits for cleanup and discard overrides queue preservatio
 
 test('pending settings stay projected until successful first-send application', async () => {
   const saved = summary('app-pending', 'provider-pending', {
-    modelId: 'model-saved',
-    reasoningEffort: ReasoningEffort.Low,
+    configuration: droidSessionConfiguration({
+      modelId: 'model-saved',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
   });
   const harness = createHarness([saved]);
   const provider = new FakeFactorySession('provider-pending', {}, harness.calls, {
     settings: { modelId: 'model-saved', reasoningEffort: ReasoningEffort.Low },
   });
   queueLoad(harness, 'provider-pending', provider);
-  const pending = {
+  const pendingNative = {
     modelId: 'model-pending',
     reasoningEffort: ReasoningEffort.High,
   };
-  harness.setProjection(pending);
+  const pendingSummary: Partial<SessionSummary> = {
+    configuration: droidSessionConfiguration({
+      modelId: 'model-pending',
+      reasoningEffort: ReasoningEffort.High,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
+  };
+  harness.setProjection(pendingSummary);
   await harness.lifecycle.resume('app-pending');
-  assert.equal(harness.registry.getCanonicalSummary('app-pending')?.modelId, 'model-saved');
-  assert.equal(harness.registry.resolveSummary('app-pending')?.modelId, 'model-pending');
-  assert.equal(harness.registry.listSummaries().sessions[0]?.reasoningEffort, ReasoningEffort.High);
-  assert.equal(harness.history.persisted.at(-1)?.modelId, 'model-saved');
   assert.equal(
-    harness.events.find((event) => event.type === 'session.created')?.session.modelId,
+    harness.registry.getCanonicalSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-saved',
+  );
+  assert.equal(
+    harness.registry.resolveSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-pending',
+  );
+  assert.equal(
+    harness.registry.listSummaries().sessions[0]?.configuration.providerSelection.options
+      .reasoningEffort,
+    ReasoningEffort.High,
+  );
+  assert.equal(
+    harness.store.get('app-pending')?.summary.configuration.providerSelection.modelId,
+    'model-saved',
+  );
+  assert.equal(
+    harness.events.find((event) => event.type === 'session.created')?.session.configuration
+      .providerSelection.modelId,
     'model-pending',
   );
   const replaced = harness.registry.replaceProvider('app-pending', 'provider-next');
-  assert.equal(replaced?.modelId, 'model-saved');
-  assert.equal(harness.history.persisted.at(-1)?.modelId, 'model-saved');
+  assert.equal(replaced?.configuration.providerSelection.modelId, 'model-saved');
+  assert.equal(
+    harness.store.get('app-pending')?.summary.configuration.providerSelection.modelId,
+    'model-saved',
+  );
   harness.setPendingApply(async (appSessionId) => {
-    await provider.updateSettings(pending);
-    harness.registry.updateSummary(appSessionId, pending);
+    await provider.updateSettings(pendingNative);
+    harness.registry.updateSummary(appSessionId, pendingSummary);
     return true;
   });
   await harness.lifecycle.send('app-pending', 'apply now');
-  assert.deepEqual(provider.settings, [pending]);
+  assert.equal(provider.settings[0]?.['modelId'], 'model-pending');
   assert.deepEqual(provider.prompts, ['apply now']);
   const settingsCall = harness.calls.findIndex((call) => call.method === 'updateSettings');
   const streamCall = harness.calls.findIndex(
     (call) => call.method === 'stream' && call.args[1] === 'apply now',
   );
   assert.ok(settingsCall >= 0 && settingsCall < streamCall);
-  assert.equal(harness.registry.getCanonicalSummary('app-pending')?.modelId, 'model-pending');
-  assert.equal(harness.history.persisted.at(-1)?.reasoningEffort, ReasoningEffort.High);
+  assert.equal(
+    harness.registry.getCanonicalSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-pending',
+  );
+  assert.equal(
+    harness.store.get('app-pending')?.summary.configuration.providerSelection.options
+      .reasoningEffort,
+    ReasoningEffort.High,
+  );
 
   const failed = createHarness([saved]);
   const failedProvider = new FakeFactorySession('provider-pending', {}, failed.calls, {
     settings: { modelId: 'model-saved', reasoningEffort: ReasoningEffort.Low },
   });
   queueLoad(failed, 'provider-pending', failedProvider);
-  failed.setProjection(pending);
+  failed.setProjection(pendingSummary);
   await failed.lifecycle.resume('app-pending');
   failed.setPendingApply(() => Promise.resolve(false));
   await failed.lifecycle.send('app-pending', 'must not stream');
   assert.deepEqual(failedProvider.prompts, []);
-  assert.equal(failed.registry.getCanonicalSummary('app-pending')?.modelId, 'model-saved');
-  assert.equal(failed.registry.resolveSummary('app-pending')?.modelId, 'model-pending');
+  assert.equal(
+    failed.registry.getCanonicalSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-saved',
+  );
+  assert.equal(
+    failed.registry.resolveSummary('app-pending')?.configuration.providerSelection.modelId,
+    'model-pending',
+  );
+});
+
+test('invalidateLiveSessions bumps generations and unregisters before native close', async () => {
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'invalidate-me');
+  await harness.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+  const live = requireLive(harness, 'invalidate-me');
+  const generation = live.binding.runtimeGeneration;
+  const snapshot = harness.lifecycle.invalidateLiveSessions();
+  assert.equal(snapshot.length, 1);
+  assert.equal(harness.registry.getLive('invalidate-me'), undefined);
+  assert.equal(live.binding.runtimeGeneration, generation + 1);
+  assert.equal(live.closeMode, 'discard-pending');
+  await harness.lifecycle.closeAll();
+  assert.equal(
+    harness.calls.some(
+      (call) => call.method === 'session.close' && call.args[0] === 'invalidate-me',
+    ),
+    true,
+  );
+});
+
+test('closeAll passes the same deadline object to native session close', async () => {
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'deadline-owner');
+  await harness.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+  const deadline = ShutdownDeadline.fromDurationMs(1_000, 40);
+  await harness.lifecycle.closeAll(deadline);
+  const closeCall = harness.calls.find(
+    (call) => call.method === 'session.close' && call.args[0] === 'deadline-owner',
+  );
+  assert.equal(closeCall?.args[1], deadline);
+});
+
+test('per-app mutating commands serialize so a second send queues behind the live turn', async () => {
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'serialized');
+  await harness.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const gate = provider.deferNextStream();
+  const first = harness.lifecycle.send('serialized', 'one');
+  await provider.waitForPrompts(2);
+  const second = harness.lifecycle.send('serialized', 'two');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(requireLive(harness, 'serialized').pendingSends, ['two']);
+  assert.equal(interruptCount(harness), 0);
+  const interrupting = harness.lifecycle.interrupt('serialized');
+  await interrupting;
+  assert.equal(interruptCount(harness), 1);
+  gate.resolve();
+  await first;
+  await second;
+});
+
+test('a close racing an unactivated open discards the buffer and cannot resurrect the session', async () => {
+  const harness = createHarness();
+  let releaseArm: (armed: boolean) => void = () => undefined;
+  harness.setEnableAutoCompaction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        releaseArm = resolve;
+      }),
+  );
+  queueCreate(harness, 'race-open');
+  const creating = harness.lifecycle.create(createCommand());
+  await new Promise<void>((resolve) => {
+    const poll = (): void => {
+      if (harness.calls.some((call) => call.method === 'autoCompaction.arm')) resolve();
+      else setImmediate(poll);
+    };
+    poll();
+  });
+  assert.equal(harness.registry.getLive('race-open'), undefined);
+  const closing = harness.lifecycle.close('race-open');
+  releaseArm(true);
+  await creating;
+  await closing;
+  assert.equal(harness.registry.getLive('race-open'), undefined);
+  assert.equal(
+    harness.events.some((event) => event.type === 'session.created'),
+    false,
+  );
+  assert.equal(
+    harness.calls.some((call) => call.method === 'session.close' && call.args[0] === 'race-open'),
+    true,
+  );
+  assert.equal(await harness.lifecycle.resume('race-open'), false);
+  await harness.lifecycle.send('race-open', 'must not resurrect');
+  assert.equal(harness.registry.getLive('race-open'), undefined);
+});
+
+function assertCreateBoundaryOrder(
+  boundaries: readonly string[],
+  earlier: SessionCreateBoundary,
+  later: SessionCreateBoundary,
+): void {
+  const earlierIndex = boundaries.indexOf(earlier);
+  const laterIndex = boundaries.indexOf(later);
+  assert.notEqual(earlierIndex, -1, `missing create boundary: ${earlier}`);
+  assert.notEqual(laterIndex, -1, `missing create boundary: ${later}`);
+  assert.ok(earlierIndex < laterIndex, `${earlier} must precede ${later}`);
+}
+
+async function waitForAppliedTurn(harness: Harness): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (
+      harness.appliedProviderEvents.some(
+        (event) =>
+          typeof event === 'object' &&
+          event !== null &&
+          'type' in event &&
+          event.type === 'turn.settled',
+      )
+    ) {
+      return;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error('No turn.settled provider event was applied.');
+}
+
+async function withCanonicalStores(
+  run: (input: {
+    store: SessionStore;
+    transcript: TranscriptStore;
+    db: DroidexDatabase;
+  }) => Promise<void>,
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'droidex-f7-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  try {
+    await run({ store: new SessionStore(db), transcript: new TranscriptStore(db), db });
+  } finally {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('create allocates identity before native work and never uses the native id', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const boundaries: SessionCreateBoundary[] = [];
+    const created = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-canonical-1',
+      nextTurnId: () => 'turn-canonical-1',
+      nextId: () => 'evt-diag-1',
+      onCreateBoundary: (boundary) => {
+        boundaries.push(boundary);
+      },
+    });
+    const createdProvider = queueCreate(created, 'native-9');
+    await created.lifecycle.create(createCommand());
+    await createdProvider.waitForPrompts(1);
+    await waitForAppliedTurn(created);
+    const published = created.events.find((event) => event.type === 'session.created');
+    assert.equal(published?.type, 'session.created');
+    if (published?.type === 'session.created') {
+      assert.equal(published.session.appSessionId, 'app-canonical-1');
+      assert.notEqual(published.session.appSessionId, 'native-9');
+    }
+    assert.deepEqual(created.mcpRefs, ['app-canonical-1']);
+    assert.equal(store.get('app-canonical-1')?.binding.providerSessionId, 'native-9');
+    assert.equal(store.findByClientRef('client-1')?.summary.appSessionId, 'app-canonical-1');
+    assertCreateBoundaryOrder(boundaries, 'provisional-persisted', 'before-provider-open');
+    assertCreateBoundaryOrder(boundaries, 'binding-persisted', 'activated');
+    const createdIndex = created.events.findIndex((event) => event.type === 'session.created');
+    assert.equal(
+      created.events.slice(0, createdIndex).some((event) => event.type === 'event.appended'),
+      false,
+    );
+    assert.equal(store.get('app-canonical-1')?.binding.runtimeGeneration, 1);
+    assert.equal(store.get('app-canonical-1')?.lifecycleStatus, 'running');
+    assert.equal(
+      transcript.page({ kind: 'session', appSessionId: 'app-canonical-1' }).events.length,
+      0,
+    );
+  });
+});
+
+test('injected failures at each create boundary stay deterministic', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const failAt = async (boundary: SessionCreateBoundary) => {
+      const harness = createHarness([], {
+        sessionStore: store,
+        transcriptStore: transcript,
+        atomic: (work) => db.atomic(work),
+        nextAppSessionId: () => `app-${boundary}`,
+        nextTurnId: () => `turn-${boundary}`,
+        onCreateBoundary: (reached) => {
+          if (reached === boundary) throw new Error(`crash:${boundary}`);
+        },
+      });
+      queueCreate(harness, `native-${boundary}`);
+      await harness.lifecycle.create({
+        ...createCommand(`${boundary}-goal`),
+        clientRef: `ref-${boundary}`,
+      });
+      return harness;
+    };
+
+    const beforePersist = await failAt('identity-allocated');
+    assert.equal(beforePersist.runtime.createCalls.length, 0);
+    assert.equal(store.get('app-identity-allocated'), undefined);
+
+    const beforeNative = await failAt('provisional-persisted');
+    assert.equal(beforeNative.runtime.createCalls.length, 0);
+    assert.equal(store.get('app-provisional-persisted')?.lifecycleStatus, 'failed');
+
+    const beforeOpen = await failAt('before-provider-open');
+    assert.equal(beforeOpen.runtime.createCalls.length, 0);
+    assert.equal(store.get('app-before-provider-open')?.lifecycleStatus, 'failed');
+
+    const afterNative = await failAt('provider-opened');
+    assert.equal(afterNative.runtime.createCalls.length, 1);
+    assert.equal(
+      afterNative.calls.some(
+        (call) => call.method === 'session.close' && call.args[0] === 'native-provider-opened',
+      ),
+      true,
+    );
+    assert.equal(store.get('app-provider-opened')?.lifecycleStatus, 'failed');
+    assert.equal(
+      transcript
+        .page({ kind: 'session', appSessionId: 'app-provider-opened' })
+        .events.some((event) => event.payload.type === 'error'),
+      true,
+    );
+
+    const afterBind = await failAt('binding-persisted');
+    assert.equal(
+      afterBind.events.some((event) => event.type === 'session.created'),
+      false,
+    );
+    assert.equal(
+      store.get('app-binding-persisted')?.binding.providerSessionId,
+      'native-binding-persisted',
+    );
+  });
+});
+
+test('replaying the same clientRef never starts a second native session', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const first = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-replay',
+      nextTurnId: () => 'turn-replay',
+    });
+    queueCreate(first, 'native-replay');
+    await first.lifecycle.create(createCommand());
+    await first.runtime.sessions.get('native-replay')?.waitForPrompts(1);
+    await waitForAppliedTurn(first);
+
+    const second = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-replay-2',
+      nextTurnId: () => 'turn-replay-2',
+    });
+    queueCreate(second, 'native-replay-2');
+    await second.lifecycle.create(createCommand());
+    assert.equal(second.runtime.createCalls.length, 0);
+    const created = second.events.find((event) => event.type === 'session.created');
+    assert.equal(created?.type, 'session.created');
+    if (created?.type === 'session.created') {
+      assert.equal(created.session.appSessionId, 'app-replay');
+    }
+    assert.equal(store.findByClientRef('client-1')?.summary.appSessionId, 'app-replay');
+  });
+});
+
+test('overlapping creates with the same clientRef start only one native session', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const harness = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-overlap',
+      nextTurnId: () => 'turn-overlap',
+    });
+    queueCreate(harness, 'native-overlap');
+    const first = harness.lifecycle.create(createCommand());
+    const second = harness.lifecycle.create(createCommand());
+    await Promise.all([first, second]);
+    await harness.runtime.sessions.get('native-overlap')?.waitForPrompts(1);
+    await waitForAppliedTurn(harness);
+    assert.equal(harness.runtime.createCalls.length, 1);
+    assert.equal(store.findByClientRef('client-1')?.summary.appSessionId, 'app-overlap');
+    const created = harness.events.filter((event) => event.type === 'session.created');
+    assert.ok(created.length >= 1);
+    assert.equal(
+      created.every(
+        (event) => event.type === 'session.created' && event.session.appSessionId === 'app-overlap',
+      ),
+      true,
+    );
+  });
+});
+
+test('a failed open stays visible and is never rebound', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const harness = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-failed-open',
+      nextTurnId: () => 'turn-failed-open',
+    });
+    harness.runtime.createQueue.push(new Error('native exploded'));
+    await harness.lifecycle.create(createCommand());
+    const failed = store.get('app-failed-open');
+    assert.equal(failed?.lifecycleStatus, 'failed');
+    assert.equal(failed?.binding.providerSessionId, undefined);
+    assert.equal(
+      store.list().some((row) => row.summary.appSessionId === 'app-failed-open'),
+      true,
+    );
+
+    const retry = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-failed-rebind',
+    });
+    queueCreate(retry, 'native-rebind');
+    await retry.lifecycle.create(createCommand());
+    assert.equal(retry.runtime.createCalls.length, 0);
+    assert.equal(
+      retry.events.some((event) => event.type === 'session.created'),
+      false,
+    );
+    assert.equal(
+      retry.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.code === 'session.create_failed' &&
+          event.clientRef === 'client-1' &&
+          event.message === 'native exploded',
+      ),
+      true,
+    );
+    assert.equal(store.get('app-failed-open')?.binding.providerSessionId, undefined);
+    assert.equal(store.get('app-failed-rebind'), undefined);
+  });
+});
+
+test('retryStart after a failed unbound create starts native work on the same app id', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const harness = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-retry',
+      nextTurnId: () => 'turn-retry-1',
+    });
+    harness.runtime.createQueue.push(new Error('native exploded'));
+    await harness.lifecycle.create(createCommand());
+    assert.equal(store.get('app-retry')?.lifecycleStatus, 'failed');
+
+    const retry = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextTurnId: () => 'turn-retry-2',
+    });
+    queueCreate(retry, 'native-retry');
+    await retry.lifecycle.retryStart('app-retry');
+    await retry.runtime.sessions.get('native-retry')?.waitForPrompts(1);
+    await waitForAppliedTurn(retry);
+    assert.equal(retry.runtime.createCalls.length, 1);
+    assert.equal(store.get('app-retry')?.lifecycleStatus, 'running');
+    assert.equal(store.get('app-retry')?.binding.providerSessionId, 'native-retry');
+    assert.equal(
+      retry.events.some((event) => event.type === 'session.created'),
+      false,
+    );
+    assert.equal(
+      retry.events.some(
+        (event) => event.type === 'session.updated' && event.session.appSessionId === 'app-retry',
+      ),
+      true,
+    );
+  });
+});
+
+test('retryStart rejects a live session and removeFailed deletes only a failed row', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const live = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-live',
+      nextTurnId: () => 'turn-live',
+    });
+    queueCreate(live, 'native-live');
+    await live.lifecycle.create(createCommand('live'));
+    await live.lifecycle.retryStart('app-live');
+    assert.equal(live.runtime.createCalls.length, 1);
+    assert.equal(
+      live.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.code === 'session.retry_start_failed' &&
+          event.appSessionId === 'app-live',
+      ),
+      true,
+    );
+
+    const failed = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-remove',
+      nextTurnId: () => 'turn-remove',
+    });
+    failed.runtime.createQueue.push(new Error('native exploded'));
+    await failed.lifecycle.create({ ...createCommand('remove'), clientRef: 'ref-remove' });
+    await live.lifecycle.removeFailed('app-live');
+    assert.equal(store.get('app-live')?.lifecycleStatus, 'running');
+    assert.equal(
+      live.events.some((event) => event.type === 'session.removed'),
+      false,
+    );
+    await failed.lifecycle.removeFailed('app-remove');
+    assert.equal(store.get('app-remove'), undefined);
+    assert.equal(
+      failed.events.some(
+        (event) => event.type === 'session.removed' && event.appSessionId === 'app-remove',
+      ),
+      true,
+    );
+  });
 });

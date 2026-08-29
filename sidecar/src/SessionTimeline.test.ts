@@ -1,29 +1,50 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import type {
   ChildSessionSummary,
   ServerEvent,
-  SessionHistoryEntry,
   SessionSummary,
   TranscriptEvent,
 } from './protocol.js';
+import { SessionTimeline, type SessionTimelineRegistry } from './SessionTimeline.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 import {
-  SessionTimeline,
-  type SessionTimelineLoaders,
-  type SessionTimelineRegistry,
-} from './SessionTimeline.js';
+  CanonicalEventCollisionError,
+  TranscriptStore,
+} from './persistence/TranscriptStore.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
+import {
+  liftRendererTranscriptEvent,
+  projectTranscriptEvent,
+  type CanonicalEvent,
+  type CanonicalIdentity,
+  type PersistedCanonicalEvent,
+} from './sessionEvents.js';
 
 interface HarnessOptions {
   summaries?: SessionSummary[];
   liveAppSessionIds?: string[];
   childSessions?: ChildSessionSummary[];
-  loaders?: Partial<SessionTimelineLoaders>;
   now?: () => number;
   onRecordEvent?: (event: TranscriptEvent) => boolean | void;
+  transcriptStore?: Pick<TranscriptStore, 'append'> & Partial<Pick<TranscriptStore, 'page'>>;
+  sessionStore?: SessionStore;
+  canonicalIdentity?: CanonicalIdentity;
   streamingCoalesceMs?: number;
   streamingCoalesceMaxBytes?: number;
 }
+
+const CANONICAL_IDENTITY: CanonicalIdentity = {
+  providerDriverKind: 'droid',
+  providerInstanceId: 'droid',
+  runtimeGeneration: 1,
+};
 
 function createHarness(options: HarnessOptions = {}) {
   const emitted: ServerEvent[] = [];
@@ -32,43 +53,44 @@ function createHarness(options: HarnessOptions = {}) {
   const trace: string[] = [];
   const summaries = options.summaries ?? [];
   const liveAppSessionIds = new Set(options.liveAppSessionIds ?? []);
-  const loaders: SessionTimelineLoaders = {
-    list: () => [],
-    page: () => ({ events: [] }),
-    hydrateMission: () => ({ progress: [], transcripts: [] }),
-    resolveChain: (_appSessionId, providerSessionId) => [providerSessionId],
-    transcriptWindow: () => ({ events: [] }),
-    ...options.loaders,
-  };
+  const resolve = (id: string) =>
+    summaries.find(
+      (liveSummary) =>
+        liveSummary.appSessionId === id ||
+        liveSummary.providerSessionId === id ||
+        liveSummary.compactedFromProviderSessionIds?.includes(id),
+    );
   const registry: SessionTimelineRegistry = {
-    resolveSummary: (id) =>
-      summaries.find(
-        (summary) =>
-          summary.appSessionId === id ||
-          summary.providerSessionId === id ||
-          summary.compactedFromProviderSessionIds?.includes(id),
-      ),
+    resolveSummary: resolve,
+    getCanonicalSummary: resolve,
     getLive: (id) => (liveAppSessionIds.has(id) ? true : undefined),
   };
+  let transcriptStore = options.transcriptStore;
+  if (!transcriptStore && options.onRecordEvent) {
+    transcriptStore = {
+      append: (canonical) => {
+        const projected = projectTranscriptEvent({ ...canonical, seq: recorded.length + 1 });
+        if (!projected) throw new Error('unprojectable canonical event');
+        trace.push(`record:${projected.id}`);
+        options.onRecordEvent?.(projected);
+        recorded.push(projected);
+        return { ...canonical, seq: recorded.length };
+      },
+    };
+  }
   const timeline = new SessionTimeline({
     registry,
-    history: {
-      recordEvent: (event) => {
-        trace.push(`record:${event.id}`);
-        const durable = options.onRecordEvent?.(event);
-        recorded.push(event);
-        return durable;
-      },
-    },
     getChildSessions: () => options.childSessions ?? [],
     emit: (event) => {
       trace.push(`emit:${event.type}`);
       emitted.push(event);
+      if (event.type === 'event.appended' && !transcriptStore) {
+        recorded.push(event.event);
+      }
     },
     emitError: (error) => {
       errors.push(error);
     },
-    loaders,
     ...(options.now ? { now: options.now } : {}),
     ...(options.streamingCoalesceMs !== undefined
       ? { streamingCoalesceMs: options.streamingCoalesceMs }
@@ -76,6 +98,13 @@ function createHarness(options: HarnessOptions = {}) {
     ...(options.streamingCoalesceMaxBytes !== undefined
       ? { streamingCoalesceMaxBytes: options.streamingCoalesceMaxBytes }
       : {}),
+    ...(transcriptStore ? { transcriptStore } : {}),
+    ...(options.canonicalIdentity
+      ? { canonicalIdentity: options.canonicalIdentity }
+      : transcriptStore
+        ? { canonicalIdentity: CANONICAL_IDENTITY }
+        : {}),
+    ...(options.sessionStore ? { sessionStore: options.sessionStore } : {}),
   });
   return { emitted, errors, recorded, timeline, trace };
 }
@@ -89,13 +118,16 @@ function summary(
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/workspace',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -142,16 +174,6 @@ function waitForTestCoalesce(): Promise<void> {
   return new Promise((resolve) =>
     setTimeout(resolve, TEST_COALESCE_MS + TEST_COALESCE_SETTLE_MARGIN_MS),
   );
-}
-
-function historyEntry(providerSessionId: string, modifiedTime: number): SessionHistoryEntry {
-  return {
-    providerSessionId,
-    title: providerSessionId,
-    modifiedTime,
-    createdTime: 1,
-    messageCount: 1,
-  };
 }
 
 function delta(
@@ -324,12 +346,7 @@ test('non-mergeable streaming events flush the buffer and keep order', () => {
   timeline.appendStreaming(delta('b', { text: 'stream', kind: 'thinking' }));
   timeline.appendStreaming(delta('echo', { author: 'user' }));
 
-  assert.deepEqual(trace, [
-    'record:a',
-    'emit:event.appended',
-    'record:echo',
-    'emit:event.appended',
-  ]);
+  assert.deepEqual(trace, ['emit:event.appended', 'emit:event.appended']);
   assert.equal(recorded[0]?.text, 'thought stream');
   timeline.flushStreaming();
   assert.equal(recorded.length, 2);
@@ -396,12 +413,7 @@ test('plain append flushes the buffered run first and flush is idempotent', () =
   timeline.flushStreaming();
   timeline.flushStreaming();
 
-  assert.deepEqual(trace, [
-    'record:buffered',
-    'emit:event.appended',
-    'record:status-line',
-    'emit:event.appended',
-  ]);
+  assert.deepEqual(trace, ['emit:event.appended', 'emit:event.appended']);
 });
 
 test('coalescing disabled records and emits every delta immediately', () => {
@@ -422,459 +434,303 @@ test('append records before emitting exactly one live transcript event', () => {
 
   timeline.append(event);
 
-  assert.deepEqual(trace, ['record:event-1', 'emit:event.appended']);
+  assert.deepEqual(trace, ['emit:event.appended']);
   assert.deepEqual(recorded, [event]);
   assert.deepEqual(emitted, [{ type: 'event.appended', event }]);
 });
 
-test('plain restore resolves aliases, records in order, and emits replace telemetry', () => {
-  const restored = [transcript('first'), transcript('second')];
-  const childSessions = [child('app-1', 'worker-1', 'running')];
-  const calls: unknown[][] = [];
-  const stable = summary('app-1', 'provider-current', {
-    compactedFromProviderSessionIds: ['provider-old'],
+
+function withCanonicalStores(
+  run: (stores: { sessionStore: SessionStore; transcriptStore: TranscriptStore }) => void,
+): void {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-timeline-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  try {
+    run({
+      sessionStore: new SessionStore(db),
+      transcriptStore: new TranscriptStore(db),
+    });
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function seedStoredSession(store: SessionStore, liveSummary: SessionSummary): void {
+  store.createProvisional({
+    appSessionId: liveSummary.appSessionId,
+    clientRef: `ref-${liveSummary.appSessionId}`,
+    summary: liveSummary,
   });
-  const harness = createHarness({
-    summaries: [stable],
-    childSessions,
-    loaders: {
-      resolveChain: (...args) => {
-        calls.push(args);
-        return ['provider-old', 'provider-current'];
-      },
-      transcriptWindow: (...args) => {
-        calls.push(args);
-        return { events: restored, olderCursor: 'older-1' };
-      },
+  if (liveSummary.providerSessionId) {
+    store.bindInitialProviderRuntime(liveSummary.appSessionId, 0, liveSummary.providerSessionId);
+  }
+  store.markStarted(liveSummary.appSessionId);
+}
+
+function seedChild(store: SessionStore, parentAppSessionId: string, childSessionId: string): void {
+  store.upsertChild({
+    parentAppSessionId,
+    childSessionId,
+    summary: {
+      parentAppSessionId,
+      childSessionId,
+      role: 'worker',
+      status: 'completed',
+      modelId: 'model-default',
+      transcriptAvailable: true,
+      streamFidelity: 'state',
+    },
+    binding: {
+      providerDriverKind: 'droid',
+      providerInstanceId: 'droid',
+      providerSessionId: childSessionId,
     },
   });
+}
 
-  harness.timeline.load('provider-old');
+function seedTranscript(transcriptStore: TranscriptStore, event: TranscriptEvent): void {
+  transcriptStore.append(liftRendererTranscriptEvent(event, CANONICAL_IDENTITY));
+}
 
-  assert.deepEqual(calls, [
-    ['app-1', 'provider-current'],
-    ['app-1', ['provider-old', 'provider-current'], { cursor: undefined }],
-  ]);
-  assert.deepEqual(
-    harness.recorded.map((event) => [event.id, event.appSessionId]),
-    [
-      ['first', 'app-1'],
-      ['second', 'app-1'],
-    ],
-  );
-  assert.deepEqual(harness.trace, ['record:first', 'record:second', 'emit:session.history']);
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal(page.appSessionId, 'app-1');
-  assert.equal(page.mode, 'replace');
-  assert.equal(page.olderCursor, 'older-1');
-  assert.equal(page.loadedCount, 2);
-  assert.equal(page.hasMore, true);
-  assert.deepEqual(page.childSessions, childSessions);
+test('load serves canonical transcripts as a replace page with child links', () => {
+  withCanonicalStores(({ sessionStore, transcriptStore }) => {
+    const liveSummary = summary('app-1', 'provider-1');
+    seedStoredSession(sessionStore, liveSummary);
+    seedTranscript(transcriptStore, transcript('first', 'app-1'));
+    seedTranscript(transcriptStore, transcript('second', 'app-1'));
+    const childSessions = [child('app-1', 'worker-1', 'running')];
+    const harness = createHarness({
+      summaries: [liveSummary],
+      childSessions,
+      sessionStore,
+      transcriptStore,
+    });
+
+    harness.timeline.load('app-1');
+
+    const page = harness.emitted[0];
+    assert.equal(page?.type, 'session.history');
+    if (page?.type !== 'session.history') return;
+    assert.equal(page.appSessionId, 'app-1');
+    assert.equal(page.mode, 'replace');
+    assert.equal(page.loadedCount, 2);
+    assert.equal(page.hasMore, false);
+    assert.deepEqual(
+      page.transcripts.map((event) => event.id),
+      ['first', 'second'],
+    );
+    assert.deepEqual(page.childSessions, childSessions);
+  });
 });
 
-test('history page limits tune only the bounded local transcript window', () => {
-  const calls: unknown[][] = [];
-  const harness = createHarness({
-    summaries: [summary('app-1', 'provider-1')],
-    loaders: {
-      resolveChain: () => ['provider-1'],
-      transcriptWindow: (...args) => {
-        calls.push(args);
-        return { events: [] };
-      },
-    },
+test('older load prepends transcripts and omits child links', () => {
+  withCanonicalStores(({ sessionStore, transcriptStore }) => {
+    const liveSummary = summary('app-1', 'provider-1');
+    seedStoredSession(sessionStore, liveSummary);
+    for (const id of ['oldest', 'middle', 'newest']) {
+      seedTranscript(transcriptStore, transcript(id, 'app-1'));
+    }
+    const harness = createHarness({
+      summaries: [liveSummary],
+      childSessions: [child('app-1', 'worker-1', 'running')],
+      sessionStore,
+      transcriptStore,
+    });
+
+    harness.timeline.load('app-1', undefined, 2);
+    const newest = harness.emitted[0];
+    assert.equal(newest?.type, 'session.history');
+    if (newest?.type !== 'session.history') return;
+    assert.equal(newest.mode, 'replace');
+    assert.equal(newest.hasMore, true);
+    assert.ok(newest.olderCursor);
+
+    harness.timeline.load('app-1', newest.olderCursor, 2);
+    const older = harness.emitted[1];
+    assert.equal(older?.type, 'session.history');
+    if (older?.type !== 'session.history') return;
+    assert.equal(older.mode, 'prepend');
+    assert.equal(older.childSessions, undefined);
+    assert.deepEqual(
+      older.transcripts.map((event) => event.id),
+      ['oldest'],
+    );
+    assert.equal(older.hasMore, false);
   });
-
-  harness.timeline.load('app-1', 'cursor-1', 240);
-  harness.timeline.load('app-1', 'cursor-2', 100_000);
-
-  assert.deepEqual(calls, [
-    ['app-1', ['provider-1'], { cursor: 'cursor-1', limit: 240 }],
-    ['app-1', ['provider-1'], { cursor: 'cursor-2', limit: 1_600 }],
-  ]);
 });
 
-test('Mission Control restore preserves progress, child links, cursor, identity, and order', () => {
-  const progress = [{ type: 'feature', timestamp: '2026-07-28T00:00:00.000Z' }];
-  const restored = [transcript('mission-first'), transcript('mission-second')];
-  const childSessions = [child('mission-app', 'mission-worker', 'running')];
-  const calls: unknown[][] = [];
-  const harness = createHarness({
-    summaries: [summary('mission-app', 'mission-provider', { sessionPurpose: 'mission-control' })],
-    childSessions,
-    loaders: {
-      hydrateMission: (...args) => {
-        calls.push(args);
-        return { progress, transcripts: restored, olderCursor: 'mission-older' };
-      },
-      resolveChain: () => {
-        throw new Error('plain restore must not run');
-      },
-    },
-  });
-
-  harness.timeline.load('mission-provider');
-
-  assert.deepEqual(calls, [['mission-app', { cursor: undefined }]]);
-  assert.deepEqual(
-    harness.recorded.map((event) => event.id),
-    ['mission-first', 'mission-second'],
-  );
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal(page.appSessionId, 'mission-app');
-  assert.deepEqual(page.progress, progress);
-  assert.deepEqual(page.childSessions, childSessions);
-  assert.equal(page.olderCursor, 'mission-older');
-  assert.equal(page.mode, 'replace');
-});
-
-test('older restore prepends only transcripts and preserves page telemetry', () => {
-  let childLinkReads = 0;
-  const event = transcript('older');
-  const harness = createHarness({
-    summaries: [summary('app-1', 'provider-1')],
-    loaders: {
-      transcriptWindow: (_appSessionId, _chain, options) => {
-        assert.deepEqual(options, { cursor: 'cursor-1' });
-        return { events: [event], olderCursor: 'cursor-2' };
-      },
-    },
-  });
-  const timeline = new SessionTimeline({
-    registry: {
-      resolveSummary: () => summary('app-1', 'provider-1'),
-      getLive: () => undefined,
-    },
-    history: {
-      recordEvent: (recorded) => {
-        harness.recorded.push(recorded);
-      },
-    },
-    getChildSessions: () => {
-      childLinkReads += 1;
-      return [];
-    },
-    emit: (emitted) => harness.emitted.push(emitted),
-    emitError: (error) => harness.errors.push(error),
-    loaders: {
-      list: () => [],
-      page: () => ({ events: [] }),
-      hydrateMission: () => ({ progress: [], transcripts: [] }),
-      resolveChain: () => ['provider-1'],
-      transcriptWindow: (_appSessionId, _chain, options) => {
-        assert.deepEqual(options, { cursor: 'cursor-1' });
-        return { events: [event], olderCursor: 'cursor-2' };
-      },
-    },
-  });
-
-  timeline.load('provider-1', 'cursor-1');
-
-  assert.equal(childLinkReads, 0);
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal(page.mode, 'prepend');
-  assert.deepEqual(page.progress, []);
-  assert.equal(page.childSessions, undefined);
-  assert.equal(page.olderCursor, 'cursor-2');
-  assert.equal(page.loadedCount, 1);
-  assert.equal(page.hasMore, true);
-});
-
-test('older failure emits an empty terminal prepend without an error', () => {
-  const harness = createHarness({
-    summaries: [summary('app-1', 'provider-1')],
-    loaders: {
-      transcriptWindow: () => {
-        throw new Error('read failed');
-      },
-    },
-  });
-
-  harness.timeline.load('provider-1', 'cursor-1');
-
-  assert.equal(harness.errors.length, 0);
-  assert.equal(harness.emitted.length, 1);
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal(page.mode, 'prepend');
-  assert.deepEqual(page.transcripts, []);
-  assert.equal(page.olderCursor, undefined);
-  assert.equal(page.hasMore, false);
-});
-
-test('missing live history emits an authoritative empty replace page', () => {
-  const childSessions = [child('app-live', 'worker-live', 'running')];
-  const harness = createHarness({
-    summaries: [summary('app-live', 'provider-live')],
-    liveAppSessionIds: ['app-live'],
-    childSessions,
-    loaders: { resolveChain: () => [] },
-  });
-
-  harness.timeline.load('provider-live');
-
-  assert.equal(harness.errors.length, 0);
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal(page.mode, 'replace');
-  assert.deepEqual(page.transcripts, []);
-  assert.deepEqual(page.childSessions, childSessions);
-  assert.equal(page.loadedCount, 0);
-  assert.equal(page.hasMore, false);
-});
-
-test('non-live failure emits stable recoverable errors and permits retry', () => {
-  let fail = true;
-  const harness = createHarness({
-    summaries: [summary('stable-app', 'provider-current')],
-    loaders: {
-      transcriptWindow: () => {
-        if (fail) throw new Error('temporarily unavailable');
-        return { events: [transcript('retry-success')] };
-      },
-    },
-  });
-
-  harness.timeline.load('provider-current');
+test('load without a canonical store reports a recoverable error', () => {
+  const harness = createHarness({ summaries: [summary('app-1', 'provider-1')] });
+  harness.timeline.load('app-1');
   assert.equal(harness.emitted[0]?.type, 'session.history.error');
   assert.deepEqual(harness.errors, [
     {
-      appSessionId: 'stable-app',
-      providerSessionId: 'provider-current',
-      message: 'temporarily unavailable',
-      recoverable: true,
-    },
-  ]);
-
-  fail = false;
-  harness.timeline.load('provider-current');
-  assert.equal(harness.emitted.at(-1)?.type, 'session.history');
-});
-
-test('recording failure prevents a history page after a partial write', () => {
-  const harness = createHarness({
-    summaries: [summary('stable-app', 'provider-current')],
-    loaders: {
-      transcriptWindow: () => ({
-        events: [transcript('recorded-first'), transcript('recording-fails')],
-      }),
-    },
-    onRecordEvent: (event) => {
-      if (event.id === 'recording-fails') throw new Error('index unavailable');
-    },
-  });
-
-  harness.timeline.load('provider-current');
-
-  assert.deepEqual(
-    harness.recorded.map((event) => event.id),
-    ['recorded-first'],
-  );
-  assert.equal(
-    harness.emitted.some((event) => event.type === 'session.history'),
-    false,
-  );
-  assert.equal(harness.emitted[0]?.type, 'session.history.error');
-  assert.deepEqual(harness.errors, [
-    {
-      appSessionId: 'stable-app',
-      providerSessionId: 'provider-current',
-      message: 'index unavailable',
+      appSessionId: 'app-1',
+      message: 'Canonical transcript store is required.',
       recoverable: true,
     },
   ]);
 });
 
-test('legacy provider pages keep their shape, identity, order, limit, and error behavior', () => {
-  const calls: unknown[][] = [];
-  let fail = false;
-  const events = [transcript('page-first'), transcript('page-second')];
-  const harness = createHarness({
-    summaries: [summary('stable-app', 'provider-current')],
-    loaders: {
-      page: (...args) => {
-        calls.push(args);
-        if (fail) throw new Error('page failed');
-        return { events };
-      },
-    },
-  });
-
-  harness.timeline.loadProviderPage('stable-app', '40', 25);
-
-  assert.deepEqual(calls[0], ['provider-current', 'stable-app', '40', 25]);
-  assert.deepEqual(
-    harness.recorded.map((event) => event.id),
-    ['page-first', 'page-second'],
-  );
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal('mode' in page, false);
-  assert.equal('loadedCount' in page, false);
-
-  fail = true;
-  harness.timeline.loadProviderPage('provider-current');
-  assert.deepEqual(harness.errors.at(-1), {
-    appSessionId: 'stable-app',
-    providerSessionId: 'provider-current',
-    message: 'page failed',
+test('unknown app session load reports a recoverable error', () => {
+  withCanonicalStores(({ sessionStore, transcriptStore }) => {
+    const harness = createHarness({ sessionStore, transcriptStore });
+    harness.timeline.load('missing');
+    assert.equal(harness.emitted[0]?.type, 'session.history.error');
+    assert.equal(harness.errors[0]?.appSessionId, 'missing');
+    assert.equal(harness.errors[0]?.recoverable, true);
   });
 });
 
-test('child history loads a canonical replace batch and reports replay failures for retry', () => {
-  let fail = false;
-  const events = [transcript('child-first'), transcript('child-second')];
-  const harness = createHarness({
-    loaders: {
-      resolveChain: (appSessionId, providerSessionId) => {
-        assert.deepEqual([appSessionId, providerSessionId], ['child-logical', 'child-provider']);
-        return ['child-provider'];
+test('a page failure is recoverable and permits retry', () => {
+  withCanonicalStores(({ sessionStore, transcriptStore }) => {
+    const liveSummary = summary('app-1', 'provider-1');
+    seedStoredSession(sessionStore, liveSummary);
+    seedTranscript(transcriptStore, transcript('retry-success', 'app-1'));
+    let fail = true;
+    const harness = createHarness({
+      summaries: [liveSummary],
+      sessionStore,
+      transcriptStore: {
+        append: (event) => transcriptStore.append(event),
+        page: (input) => {
+          if (fail) throw new Error('temporarily unavailable');
+          return transcriptStore.page(input);
+        },
       },
-      transcriptWindow: (appSessionId, chain, options) => {
-        assert.deepEqual(
-          [appSessionId, chain, options],
-          [
-            'app-1',
-            ['child-old', 'child-provider'],
-            Object.assign(
-              Object.defineProperty({}, 'cursor', { enumerable: true, value: undefined }),
-              { role: 'worker' },
-            ),
-          ],
-        );
-        if (fail) throw new Error('not flushed');
-        return { events, olderCursor: 'v2:0:1:0' };
-      },
-    },
-  });
+    });
 
-  harness.timeline.loadChildHistory({
-    appSessionId: 'app-1',
-    childSessionId: 'child-logical',
-    childProviderSessionIds: ['child-old', 'child-provider'],
-    role: 'worker',
-  });
-
-  assert.deepEqual(harness.trace, ['emit:session.history']);
-  const page = harness.emitted[0];
-  assert.equal(page?.type, 'session.history');
-  if (page?.type !== 'session.history') return;
-  assert.equal(page.appSessionId, 'app-1');
-  assert.equal(page.childSessionId, 'child-logical');
-  assert.equal(page.mode, 'replace');
-  assert.equal(page.olderCursor, 'v2:0:1:0');
-  assert.equal(page.loadedCount, 2);
-  assert.equal(page.hasMore, true);
-  assert.deepEqual(page.progress, []);
-  assert.deepEqual(
-    page.transcripts.map((event) => [event.appSessionId, event.sourceSessionId, event.role]),
-    [
-      ['app-1', 'child-logical', 'worker'],
-      ['app-1', 'child-logical', 'worker'],
-    ],
-  );
-  fail = true;
-  harness.timeline.loadChildHistory({
-    appSessionId: 'app-1',
-    childSessionId: 'child-logical',
-    childProviderSessionIds: ['child-old', 'child-provider'],
-    role: 'worker',
-  });
-  assert.deepEqual(harness.errors.at(-1), {
-    appSessionId: 'app-1',
-    providerSessionId: 'child-provider',
-    message: 'not flushed',
-    recoverable: true,
-  });
-  assert.deepEqual(harness.emitted.at(-1), {
-    type: 'session.history.error',
-    appSessionId: 'app-1',
-    childSessionId: 'child-logical',
-    message: 'not flushed',
+    harness.timeline.load('app-1');
+    assert.equal(harness.emitted[0]?.type, 'session.history.error');
+    fail = false;
+    harness.timeline.load('app-1');
+    assert.equal(harness.emitted.at(-1)?.type, 'session.history');
   });
 });
 
-test('a live child with no flushed provider file returns an empty successful history page', () => {
-  const harness = createHarness({
-    loaders: {
-      resolveChain: () => [],
-      transcriptWindow: (_appSessionId, chain) => {
-        assert.deepEqual(chain, ['child-provider']);
-        return { events: [] };
-      },
-    },
-  });
-
-  harness.timeline.loadChildHistory({
-    appSessionId: 'app-1',
-    childSessionId: 'child-logical',
-    childProviderSessionIds: ['child-provider'],
-    role: 'worker',
-  });
-
-  assert.equal(harness.errors.length, 0);
-  assert.deepEqual(harness.emitted, [
-    {
-      type: 'session.history',
+test('child history loads a canonical replace page and empty live history succeeds', () => {
+  withCanonicalStores(({ sessionStore, transcriptStore }) => {
+    seedStoredSession(sessionStore, summary('app-1', 'provider-1'));
+    seedChild(sessionStore, 'app-1', 'child-logical');
+    transcriptStore.append(
+      liftRendererTranscriptEvent(
+        {
+          id: 'child-first',
+          appSessionId: 'app-1',
+          sourceSessionId: 'child-logical',
+          role: 'worker',
+          ts: 1,
+          kind: 'text',
+          text: 'child-first',
+        },
+        CANONICAL_IDENTITY,
+      ),
+    );
+    transcriptStore.append(
+      liftRendererTranscriptEvent(
+        {
+          id: 'child-second',
+          appSessionId: 'app-1',
+          sourceSessionId: 'child-logical',
+          role: 'worker',
+          ts: 2,
+          kind: 'text',
+          text: 'child-second',
+        },
+        CANONICAL_IDENTITY,
+      ),
+    );
+    const harness = createHarness({ sessionStore, transcriptStore });
+    harness.timeline.loadChildHistory({
       appSessionId: 'app-1',
       childSessionId: 'child-logical',
-      progress: [],
-      transcripts: [],
-      mode: 'replace',
-      loadedCount: 0,
-      hasMore: false,
-    },
-  ]);
+      childProviderSessionIds: ['child-provider'],
+      role: 'worker',
+    });
+    const page = harness.emitted[0];
+    assert.equal(page?.type, 'session.history');
+    if (page?.type !== 'session.history') return;
+    assert.equal(page.childSessionId, 'child-logical');
+    assert.equal(page.mode, 'replace');
+    assert.equal(page.loadedCount, 2);
+    assert.deepEqual(
+      page.transcripts.map((event) => [event.id, event.sourceSessionId, event.role]),
+      [
+        ['child-first', 'child-logical', 'worker'],
+        ['child-second', 'child-logical', 'worker'],
+      ],
+    );
+
+    harness.timeline.loadChildHistory({
+      appSessionId: 'app-1',
+      childSessionId: 'missing-child',
+      childProviderSessionIds: ['missing'],
+      role: 'worker',
+    });
+    const empty = harness.emitted.at(-1);
+    assert.equal(empty?.type, 'session.history');
+    if (empty?.type !== 'session.history') return;
+    assert.equal(empty.childSessionId, 'missing-child');
+    assert.equal(empty.loadedCount, 0);
+    assert.equal(empty.hasMore, false);
+  });
 });
 
-test('child history older page prepends and reports cursor exhaustion', () => {
-  const harness = createHarness({
-    loaders: {
-      resolveChain: () => ['child-provider'],
-      transcriptWindow: (_appSessionId, _chain, options) =>
-        options?.cursor === 'older' ? { events: [transcript('older')] } : { events: [] },
-    },
-  });
+test('child history older page prepends until the cursor is exhausted', () => {
+  withCanonicalStores(({ sessionStore, transcriptStore }) => {
+    seedStoredSession(sessionStore, summary('app-1', 'provider-1'));
+    seedChild(sessionStore, 'app-1', 'child-logical');
+    for (const [id, ts] of [
+      ['oldest', 1],
+      ['middle', 2],
+      ['newest', 3],
+    ] as const) {
+      transcriptStore.append(
+        liftRendererTranscriptEvent(
+          {
+            id,
+            appSessionId: 'app-1',
+            sourceSessionId: 'child-logical',
+            role: 'validator',
+            ts,
+            kind: 'text',
+            text: id,
+          },
+          CANONICAL_IDENTITY,
+        ),
+      );
+    }
+    const harness = createHarness({ sessionStore, transcriptStore });
+    harness.timeline.loadChildHistory({
+      appSessionId: 'app-1',
+      childSessionId: 'child-logical',
+      childProviderSessionIds: ['child-provider'],
+      role: 'validator',
+      limit: 2,
+    });
+    const first = harness.emitted[0];
+    assert.equal(first?.type, 'session.history');
+    if (first?.type !== 'session.history') return;
+    assert.equal(first.mode, 'replace');
+    assert.equal(first.hasMore, true);
 
-  harness.timeline.loadChildHistory({
-    appSessionId: 'app-1',
-    childSessionId: 'child-logical',
-    childProviderSessionIds: ['child-provider'],
-    role: 'validator',
-    cursor: 'older',
-    limit: 50,
+    harness.timeline.loadChildHistory({
+      appSessionId: 'app-1',
+      childSessionId: 'child-logical',
+      childProviderSessionIds: ['child-provider'],
+      role: 'validator',
+      cursor: first.olderCursor,
+      limit: 2,
+    });
+    const second = harness.emitted[1];
+    assert.equal(second?.type, 'session.history');
+    if (second?.type !== 'session.history') return;
+    assert.equal(second.mode, 'prepend');
+    assert.equal(second.loadedCount, 1);
+    assert.equal(second.transcripts[0]?.id, 'oldest');
+    assert.equal(second.hasMore, false);
   });
-  harness.timeline.loadChildHistory({
-    appSessionId: 'app-1',
-    childSessionId: 'child-logical',
-    childProviderSessionIds: ['child-provider'],
-    role: 'validator',
-    cursor: 'done',
-    limit: 50,
-  });
-
-  const pages = harness.emitted.filter((event) => event.type === 'session.history');
-  assert.equal(pages.length, 2);
-  const first = pages[0];
-  const second = pages[1];
-  if (first?.type !== 'session.history' || second?.type !== 'session.history') return;
-  assert.equal(first.mode, 'prepend');
-  assert.equal(first.loadedCount, 1);
-  assert.equal(first.hasMore, false);
-  assert.equal(first.transcripts[0]?.sourceSessionId, 'child-logical');
-  assert.equal(first.transcripts[0]?.role, 'validator');
-  assert.equal(second.mode, 'prepend');
-  assert.equal(second.loadedCount, 0);
-  assert.equal(second.hasMore, false);
 });
 
 test('status appends keep unique IDs, clock behavior, compact type, source, and role', () => {
@@ -921,25 +777,73 @@ test('automatic compaction appends a persistent provider-identified divider', ()
       compactType: 'auto',
     },
   ]);
-  assert.deepEqual(harness.trace, ['record:compaction-worker-1-summary-1', 'emit:event.appended']);
+  assert.deepEqual(harness.trace, ['emit:event.appended']);
 });
 
-test('history listing preserves loader ordering and reports loader failures', () => {
-  const sessions = [historyEntry('newer', 2), historyEntry('older', 1)];
-  let fail = false;
-  const harness = createHarness({
-    loaders: {
-      list: () => {
-        if (fail) throw new Error('list failed');
-        return sessions;
-      },
-    },
+function fakeStore(
+  append: (event: CanonicalEvent) => PersistedCanonicalEvent,
+): Pick<TranscriptStore, 'append'> {
+  return { append };
+}
+
+test('recordAndEmit appends the canonical envelope then emits the projected persisted row', () => {
+  const appended: CanonicalEvent[] = [];
+  const { emitted, recorded, timeline, trace } = createHarness({
+    canonicalIdentity: CANONICAL_IDENTITY,
+    transcriptStore: fakeStore((event) => {
+      appended.push(event);
+      return { ...event, seq: 42 };
+    }),
+  });
+  const event = transcript('event-1', 'app-1');
+
+  timeline.append(event);
+
+  assert.equal(recorded.length, 0);
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0]?.eventId, 'event-1');
+  assert.equal(appended[0]?.nativeCorrelation, undefined);
+  assert.deepEqual(trace, ['emit:event.appended']);
+  assert.equal(emitted[0]?.type, 'event.appended');
+  if (emitted[0]?.type !== 'event.appended') return;
+  assert.equal(emitted[0].event.id, 'event-1');
+  assert.equal(emitted[0].event.seq, 42);
+  assert.equal(emitted[0].event.ts, 1);
+  assert.equal('providerDriverKind' in emitted[0].event, false);
+  assert.equal('nativeCorrelation' in emitted[0].event, false);
+});
+
+test('a failed canonical append emits no undurable event', () => {
+  const { emitted, errors, timeline } = createHarness({
+    canonicalIdentity: CANONICAL_IDENTITY,
+    transcriptStore: fakeStore(() => {
+      throw new Error('disk full');
+    }),
   });
 
-  harness.timeline.list();
-  assert.deepEqual(harness.emitted, [{ type: 'history.list', sessions }]);
+  assert.throws(() => timeline.append(transcript('event-1', 'app-1')), /disk full/);
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(errors, []);
+});
 
-  fail = true;
-  harness.timeline.list();
-  assert.deepEqual(harness.errors, [{ message: 'list failed' }]);
+test('a colliding canonical append emits no undurable event', () => {
+  const { emitted, timeline } = createHarness({
+    canonicalIdentity: CANONICAL_IDENTITY,
+    transcriptStore: fakeStore(() => {
+      throw new CanonicalEventCollisionError('event-1');
+    }),
+  });
+
+  assert.throws(
+    () => timeline.append(transcript('event-1', 'app-1')),
+    CanonicalEventCollisionError,
+  );
+  assert.deepEqual(emitted, []);
+});
+
+test('flushStreaming accepts the shared shutdown deadline without replacing it', () => {
+  const harness = createHarness();
+  const deadline = ShutdownDeadline.fromDurationMs(1_000, 5);
+  harness.timeline.flushStreaming(deadline);
+  harness.timeline.flushStreaming(deadline);
 });

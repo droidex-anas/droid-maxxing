@@ -7,6 +7,7 @@ import {
   uniqueWorktreeRepositories,
   worktreeChatStatus,
 } from './worktreeSettings';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 function session(
   appSessionId: string,
@@ -16,12 +17,15 @@ function session(
   return {
     appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd,
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: overrides.phase ?? 'completed',
     streaming: overrides.streaming,
     features: [],

@@ -360,6 +360,7 @@ export function pruneRemovedSessionState(
     sessionSettingOverrides: pruneSessionRecord(state.sessionSettingOverrides, retainedSessionIds),
     pendingPermissions: pruneSessionRecord(state.pendingPermissions, retainedSessionIds),
     pendingQuestions: pruneSessionRecord(state.pendingQuestions, retainedSessionIds),
+    pendingPlanReviews: pruneSessionRecord(state.pendingPlanReviews, retainedSessionIds),
   };
 }
 

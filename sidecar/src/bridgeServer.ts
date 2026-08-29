@@ -8,7 +8,8 @@ import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream/promises';
 
-import { assertValidResponseFormat } from './appPrompt.js';
+import { parseBridgeCommand } from './bridgeCommandParser.js';
+import { MAX_BRIDGE_FRAME_BYTES } from './bridgeSchemas/commandBounds.js';
 import { BridgeEventBatcher, type BridgeEventBatchMetadata } from './bridgeEventBatcher.js';
 import { BridgeReplayBuffer, type SerializedEventBatch } from './bridgeReplayBuffer.js';
 import { resolveBrowserAssetPath } from './browser/browserPaths.js';
@@ -24,6 +25,7 @@ import {
 } from './protocol.js';
 import { emptyRuntimeSnapshot } from './runtimeSnapshot.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
+import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
 
 const HOST = '127.0.0.1';
 const SOFT_CLIENT_BUFFER_BYTES = 512 * 1024;
@@ -35,7 +37,7 @@ export interface BridgeServer {
   readonly ready: Promise<void>;
   broadcast(event: ServerEvent): void;
   browserAssetUrl(filePath: string): string;
-  close(): Promise<void>;
+  close(deadline?: ShutdownDeadline): Promise<void>;
 }
 
 export function startBridgeServer(options: {
@@ -58,7 +60,12 @@ export function startBridgeServer(options: {
     res.writeHead(404).end('not found');
   });
 
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: MAX_BRIDGE_FRAME_BYTES,
+    // The parser owns UTF-8 so invalid sequences close with 1003, not 1007.
+    skipUTF8Validation: true,
+  });
   const batcher = new BridgeEventBatcher({
     isUnderPressure: () => maxBufferedAmount(clients) >= SOFT_CLIENT_BUFFER_BYTES,
     sendBatch,
@@ -138,7 +145,7 @@ export function startBridgeServer(options: {
     const admitted = await resumeClient(ws, url);
     if (!admitted || ws.readyState !== ws.OPEN) return;
     clients.add(ws);
-    ws.on('message', (raw) => void handleMessage(ws, raw));
+    ws.on('message', (raw, isBinary) => void handleMessage(ws, raw, isBinary));
     ws.on('close', () => clients.delete(ws));
     ws.on('error', () => clients.delete(ws));
   }
@@ -237,19 +244,18 @@ export function startBridgeServer(options: {
     });
   }
 
-  async function handleMessage(ws: WebSocket, raw: RawData): Promise<void> {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(messageText(raw));
-    } catch {
-      sendDirectWire(ws, { type: 'error', message: 'Invalid JSON command' });
+  async function handleMessage(ws: WebSocket, raw: RawData, isBinary: boolean): Promise<void> {
+    const parsed = parseBridgeCommand(raw, isBinary);
+    if (!parsed.ok) {
+      if (parsed.closeCode !== undefined) {
+        ws.close(parsed.closeCode);
+        return;
+      }
+      sendDirectWire(ws, { type: 'error', code: parsed.code, message: parsed.message });
       return;
     }
     try {
-      if (typeof parsed === 'object' && parsed !== null && 'responseFormat' in parsed) {
-        assertValidResponseFormat(parsed.responseFormat);
-      }
-      await options.onCommand(parsed as ClientCommand);
+      await options.onCommand(parsed.command);
     } catch (err) {
       sendDirectWire(ws, {
         type: 'error',
@@ -276,12 +282,6 @@ export function startBridgeServer(options: {
     hotPathMetrics.recordBackpressureDisconnect(projectedBufferedBytes);
     ws.terminate();
     return true;
-  }
-
-  function messageText(raw: RawData): string {
-    if (Buffer.isBuffer(raw)) return raw.toString('utf8');
-    if (raw instanceof ArrayBuffer) return Buffer.from(raw).toString('utf8');
-    return Buffer.concat(raw).toString('utf8');
   }
 
   function browserAssetUrl(filePath: string): string {
@@ -386,7 +386,7 @@ export function startBridgeServer(options: {
     return 'application/octet-stream';
   }
 
-  function close(): Promise<void> {
+  function close(deadline?: ShutdownDeadline): Promise<void> {
     if (closePromise) return closePromise;
     closed = true;
     batcher.close();
@@ -396,10 +396,14 @@ export function startBridgeServer(options: {
         pendingServers -= 1;
         if (pendingServers === 0) resolve();
       };
+      const drainMs =
+        deadline !== undefined
+          ? Math.min(CLIENT_CLOSE_DRAIN_MS, deadline.remainingMs())
+          : CLIENT_CLOSE_DRAIN_MS;
       const forceClose = setTimeout(() => {
         for (const ws of clients.keys()) ws.terminate();
         clients.clear();
-      }, CLIENT_CLOSE_DRAIN_MS);
+      }, drainMs);
       forceClose.unref();
 
       for (const ws of clients.keys()) {

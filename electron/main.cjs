@@ -78,6 +78,13 @@ const sidecarSupervisor = createSidecarSupervisor({
   userData: () => app.getPath('userData'),
   onUnexpectedExit: (error) => diagnostics.captureException(error, { process: 'sidecar' }),
 });
+// Repeated before-quit / window-all-closed / updater paths share the supervisor's
+// single stop promise so they cannot start a second outer-guard timer.
+let sidecarStopPromise = null;
+function stopSidecar() {
+  sidecarStopPromise ??= sidecarSupervisor.stop();
+  return sidecarStopPromise;
+}
 // subscribe() replays the current status synchronously, so mainWindow must
 // already be initialized when this runs.
 let mainWindow = null;
@@ -92,7 +99,7 @@ const appUpdater = createAppUpdater({
   installMode: buildMetadata.updateInstallMode,
   sparkleFeedUrl: buildMetadata.sparkleFeedUrl,
   sparkleUpdater: () => require('@droidex/sparkle-updater'),
-  prepareToInstall: () => sidecarSupervisor.stop(),
+  prepareToInstall: () => stopSidecar(),
   logError: (message, error) => console.error('[update] %s:', message, error),
 });
 const rendererOomRecovery = createRendererOomRecovery();
@@ -200,12 +207,12 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  sidecarSupervisor.stop();
+  stopSidecar();
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
-  sidecarSupervisor.stop();
+  stopSidecar();
   githubVcs.cancelSetup();
   closeAllDesktopNotifications();
   terminalManager.closeAll();
@@ -216,6 +223,7 @@ app.on('before-quit', () => {
 app.on('activate', () => {
   if (!mainWindow) createMainWindow();
   else focusMainWindow();
+  sidecarStopPromise = null;
   void sidecarSupervisor.start().catch((error) => console.error(error));
   deliverPendingNotificationOpen();
 });

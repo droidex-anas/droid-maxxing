@@ -1,20 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+import type { PersistedChildSession } from '../ChildSessionState.js';
 import type * as Protocol from '../protocol.js';
-import type { SessionFileChange } from '../sessionFileCache.js';
-import type { SessionManagerDependencies } from '../SessionManager.js';
-import {
-  applyCachedSummary,
-  loadHistoricalSessions,
-  type HistoricalSession,
-  type HistoricalSummaryFilter,
-  type PersistedChildSession,
-} from '../history.js';
 import type { RecordedCall } from './fakeFactoryRuntime.js';
 import { providerSessionJsonl } from './providerSessionFixtures.js';
-
-type SessionHistoryDependencies = SessionManagerDependencies['history'];
 
 type PersistedSummaryPatch = Pick<
   Protocol.SessionSummary,
@@ -22,18 +12,12 @@ type PersistedSummaryPatch = Pick<
   | 'providerSessionId'
   | 'compactedFromProviderSessionIds'
   | 'sessionPurpose'
-  | 'interactionMode'
   | 'title'
   | 'cwd'
   | 'workspaceKind'
-  | 'modelId'
-  | 'reasoningEffort'
+  | 'configuration'
+  | 'droidMissionConfiguration'
   | 'compactionModel'
-  | 'workerModelId'
-  | 'workerReasoningEffort'
-  | 'validatorModelId'
-  | 'validatorReasoningEffort'
-  | 'autonomy'
   | 'tokensIn'
   | 'tokensOut'
   | 'contextTokens'
@@ -45,7 +29,7 @@ type PersistedSummaryPatch = Pick<
   | 'updatedAt'
 >;
 
-export class FakeHistoryIndex implements SessionHistoryDependencies {
+export class FakeHistoryIndex {
   nextCloseError?: Error;
   nextSyncError?: Error;
   recordEventErrorForText?: { text: string; error: Error };
@@ -55,6 +39,8 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
     string,
     Pick<Protocol.FactoryDefaultSettings, 'modelId' | 'reasoningEffort'>
   >();
+
+  persistChildSession?: (child: PersistedChildSession) => void;
 
   constructor(private readonly calls: RecordedCall[]) {}
 
@@ -109,78 +95,18 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
     return { patches, hiddenProviderSessionIds };
   }
 
-  // SessionManager tests pin a temp HOME and write provider session files into
-  // it, so the fake delegates to the real disk scan for the on-disk rows. But
-  // unlike production, the fake persists app-session patches only in memory
-  // (summariesByAppId), never to the sqlite the real scan reads. Filtering
-  // inside loadHistoricalSessions would therefore use the on-disk cwd, not the
-  // patched cwd a test seeded, so a session moved between workspaces by a
-  // patch could be filtered out before the patch is applied. To stay faithful
-  // to production (which applies its patches before filtering), the fake loads
-  // every row, overlays its own patches, then filters.
-  listHistoricalSessions(options: HistoricalSummaryFilter = {}): HistoricalSession[] {
-    const rows = loadHistoricalSessions();
-    if (!options.workspaceCwds && options.includePlainChats === undefined) return rows;
-    const { patches } = this.summaryPatchesAndHidden();
-    const workspaceCwds = new Set(options.workspaceCwds ?? []);
-    return rows
-      .map((row) => applyCachedSummary(row.summary, patches))
-      .filter((summary) =>
-        summary.cwd ? workspaceCwds.has(summary.cwd) : Boolean(options.includePlainChats),
-      )
-      .map((summary) => ({ summary, progress: [] }));
-  }
-
-  // The fake does not scan transcripts; tests that exercise the
-  // sessions.search command seed the results they expect back.
-  nextSearchResults: Protocol.SessionSearchResult[] = [];
-  nextIndexingIncomplete = false;
-  lastSearchQuery: string | null = null;
-
-  // Mirrors the production contract: records the query for assertions and
-  // returns nothing once the scan has been superseded.
-  searchSessions(query?: string, isStale?: () => boolean): Promise<Protocol.HistorySearchReply> {
-    this.lastSearchQuery = query ?? null;
-    return Promise.resolve({
-      results: isStale?.() ? [] : this.nextSearchResults,
-      indexingIncomplete: this.nextIndexingIncomplete,
-    });
-  }
+  // Optional store-search stand-in so tests can gate or supersede a scan
+  // without going through Factory history.
+  searchImpl?: (
+    query: string,
+    isStale?: () => boolean,
+  ) => Promise<Protocol.SessionSearchResult[]>;
 
   readonly indexingIdleStates: boolean[] = [];
 
   setIndexingIdle(isIdle: boolean): Promise<void> {
     this.indexingIdleStates.push(isIdle);
     return Promise.resolve();
-  }
-
-  // The fake has no SQLite cache. Reconciles are counted no-ops because its
-  // listHistoricalSessions implementation already scans the test directory.
-  // Counters stay out of the recorded-call log so strict call-sequence
-  // assertions are unaffected by the boot reconcile. Tests may set a nonzero
-  // sessionFileCacheSize to characterize a previously populated cache.
-  fullReconcileCalls = 0;
-  readonly targetedReconcileCalls: SessionFileChange[][] = [];
-  sessionFileCacheSize = 0;
-  // When set, the next full reconcile throws it once, so tests can exercise
-  // the boot gate's resilience to a failed reconcile.
-  failNextReconcile: Error | null = null;
-  failNextTargetedReconcile: Error | null = null;
-
-  reconcileSessionFiles(): Promise<number> {
-    this.fullReconcileCalls += 1;
-    const failure = this.failNextReconcile;
-    this.failNextReconcile = null;
-    if (failure) return Promise.reject(failure);
-    return Promise.resolve(0);
-  }
-
-  reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number> {
-    this.targetedReconcileCalls.push(changes);
-    const failure = this.failNextTargetedReconcile;
-    this.failNextTargetedReconcile = null;
-    if (failure) return Promise.reject(failure);
-    return Promise.resolve(0);
   }
 
   upsertChildSession(child: PersistedChildSession): boolean | undefined {
@@ -194,6 +120,7 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
       method: 'upsertChildSession',
       args: [child],
     });
+    this.persistChildSession?.(child);
     return undefined;
   }
 
@@ -253,22 +180,14 @@ function materializePersistedSummaryPatch(summary: Protocol.SessionSummary): Per
     providerSessionId: summary.providerSessionId ?? summary.appSessionId,
     compactedFromProviderSessionIds: [...(summary.compactedFromProviderSessionIds ?? [])],
     sessionPurpose: summary.sessionPurpose,
-    interactionMode: summary.interactionMode,
     title: summary.title,
     cwd: summary.cwd,
     ...whenDefined(summary.workspaceKind, (workspaceKind) => ({ workspaceKind })),
-    ...whenDefined(summary.modelId, (modelId) => ({ modelId })),
-    ...whenDefined(summary.reasoningEffort, (reasoningEffort) => ({ reasoningEffort })),
+    configuration: summary.configuration,
+    ...whenDefined(summary.droidMissionConfiguration, (droidMissionConfiguration) => ({
+      droidMissionConfiguration,
+    })),
     ...whenDefined(summary.compactionModel, (compactionModel) => ({ compactionModel })),
-    ...whenDefined(summary.workerModelId, (workerModelId) => ({ workerModelId })),
-    ...whenDefined(summary.workerReasoningEffort, (workerReasoningEffort) => ({
-      workerReasoningEffort,
-    })),
-    ...whenDefined(summary.validatorModelId, (validatorModelId) => ({ validatorModelId })),
-    ...whenDefined(summary.validatorReasoningEffort, (validatorReasoningEffort) => ({
-      validatorReasoningEffort,
-    })),
-    autonomy: summary.autonomy,
     tokensIn: summary.tokensIn,
     tokensOut: summary.tokensOut,
     contextTokens: summary.contextTokens,

@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { ChildSessionSummary, SessionSummary, TranscriptEvent } from '../types/bridge';
 import { estimateTranscriptCost } from '../lib/transcriptWindow';
 import { initialState, reducer, type AppState } from './useStore';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function session(
   appSessionId: string,
@@ -12,12 +13,15 @@ function session(
   return {
     appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '/tmp',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: streaming ? 'running' : 'completed',
     streaming,
     features: [],

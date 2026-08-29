@@ -6,7 +6,7 @@ import {
   type ChildSessionState,
   type ParentChildSessions,
 } from './ChildSessionState.js';
-import type { PersistedChildSession } from './history.js';
+import type { PersistedChildSession } from './ChildSessionState.js';
 import {
   nextChildRuntimeRetirementAt,
   parentHasUnsettledChildren,
@@ -14,6 +14,7 @@ import {
 } from './childRuntimeRetirement.js';
 import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
 import { FakeFactorySession } from './testing/fakeFactoryRuntime.js';
+import { droidParentLease, stubChildRuntime } from './testing/droidProviderTestSupport.js';
 
 const IDLE_MS = 300_000;
 const nothingUndelivered = () => false;
@@ -37,11 +38,11 @@ function liveChild(
   patch: Partial<ChildSessionState> = {},
 ): ChildSessionState {
   const child = childStateFromRecord(record(childSessionId));
-  child.runtime = {
-    session: new FakeFactorySession(`provider-${childSessionId}`, {}, []),
-    generation: 1,
+  child.runtime = stubChildRuntime(
+    new FakeFactorySession(`provider-${childSessionId}`, {}, []),
+    1,
     lastUsedAt,
-  };
+  );
   return Object.assign(child, patch);
 }
 
@@ -49,11 +50,10 @@ function parentOf(...children: ChildSessionState[]): ParentChildSessions {
   return {
     parentAppSessionId: 'parent',
     generation: 1,
-    lease: {
-      summary: {} as ParentChildSessions['lease']['summary'],
-      session: new FakeFactorySession('parent-provider', {}, []),
-      mcpConfigs: [],
-    },
+    lease: droidParentLease(
+      {} as ParentChildSessions['lease']['summary'],
+      new FakeFactorySession('parent-provider', {}, []),
+    ),
     children: new Map(children.map((child) => [child.identity.childSessionId, child])),
     pendingSpawns: new Map(),
     openAttempts: new Map(),

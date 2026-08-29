@@ -7,3 +7,7 @@ export function droidexUserDataDir(): string {
     join(homedir(), 'Library', 'Application Support', 'DROIDEX')
   );
 }
+
+export function droidexDatabasePath(): string {
+  return join(droidexUserDataDir(), 'state', 'droidex.sqlite');
+}

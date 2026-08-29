@@ -437,3 +437,23 @@ test('an error during an intentional stop does not restart', async () => {
   assert.equal(scheduled.filter((item) => !item.cancelled).length, 0);
   assert.equal(calls.length, 1);
 });
+
+test('repeated stop shares one outer-guard timer and sends no second deadline', async () => {
+  const child = fakeChild();
+  const { supervisor, scheduled } = harness([child]);
+  child.stdout.write('SIDECAR_READY 43001\n');
+  await supervisor.start();
+
+  const first = supervisor.stop();
+  const second = supervisor.stop();
+  assert.equal(first, second);
+  const guards = scheduled.filter((item) => !item.cancelled && item.delayMs === 6_000);
+  assert.equal(guards.length, 1);
+  const sidecarSource = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, 'sidecar.cjs'),
+    'utf8',
+  );
+  assert.equal(sidecarSource.includes('ShutdownDeadline'), false);
+  child.emit('exit', null, 'SIGTERM');
+  await first;
+});

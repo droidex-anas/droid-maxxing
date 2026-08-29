@@ -12,6 +12,7 @@ import type { SessionSummary, ServerEvent } from './protocol.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import type { RecordedCall } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 type PermissionRequestedEvent = Extract<ServerEvent, { type: 'approval.requested' }>;
 type ApprovalRequestedEvent = Extract<ServerEvent, { type: 'approval.requested' }>;
@@ -93,13 +94,16 @@ function historicalSummary(appSessionId: string, providerSessionId: string): Ses
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Historical ${appSessionId}`,
     goal: '',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,
@@ -145,8 +149,11 @@ function isSpecTransitionPublication(call: RecordedCall): boolean {
   )
     return false;
   return (
-    'interactionMode' in event.session &&
-    event.session.interactionMode === 'auto' &&
+    'configuration' in event.session &&
+    typeof event.session.configuration === 'object' &&
+    event.session.configuration !== null &&
+    'interactionMode' in event.session.configuration &&
+    event.session.configuration.interactionMode === 'auto' &&
     'phase' in event.session &&
     event.session.phase === 'running'
   );
@@ -201,8 +208,11 @@ test(
         clientRef: 'p2',
         title: 'P2',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.permissionHandler;
@@ -239,8 +249,11 @@ test(
         clientRef: 'p3',
         title: 'P3',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.permissionHandler;
@@ -302,8 +315,11 @@ test(
         clientRef: 'p4',
         title: 'P4',
         goal: 'go',
-        interactionMode: 'spec',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'spec',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.permissionHandler;
@@ -352,7 +368,7 @@ test(
       );
       const transition = h.events.filter(isSessionUpdated).at(-1);
       assert.ok(transition);
-      assert.equal(transition.session.interactionMode, 'auto');
+      assert.equal(transition.session.configuration.interactionMode, 'auto');
       assert.equal(transition.session.sessionPurpose, 'chat');
       assert.equal(transition.session.missionId, undefined);
       assert.equal(transition.session.phase, 'running');
@@ -374,8 +390,11 @@ test(
         clientRef: 'q1',
         title: 'Q1',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
 
       const handler = h.provider.session('provider-1').handlers.askUserHandler;
@@ -398,7 +417,7 @@ test(
         appSessionId: answerRequest.question.appSessionId,
         requestId: answerRequest.question.requestId,
         cancelled: false,
-        answers: [{ index: 0, question: 'Proceed?', answer: 'yes' }],
+        answers: { '0': ['yes'] },
       });
       assert.deepEqual(await answered, {
         cancelled: false,
@@ -410,7 +429,7 @@ test(
         appSessionId: answerRequest.question.appSessionId,
         requestId: answerRequest.question.requestId,
         cancelled: true,
-        answers: [],
+        answers: {},
       });
       await h.waitForIdle();
       assert.equal(answerResolutionCount, 1);
@@ -427,7 +446,7 @@ test(
         appSessionId: cancellationRequest.question.appSessionId,
         requestId: cancellationRequest.question.requestId,
         cancelled: true,
-        answers: [],
+        answers: {},
       });
       assert.deepEqual(await cancelled, { cancelled: true, answers: [] });
 
@@ -436,7 +455,7 @@ test(
         appSessionId: cancellationRequest.question.appSessionId,
         requestId: cancellationRequest.question.requestId,
         cancelled: false,
-        answers: [{ index: 0, question: 'Proceed?', answer: 'no' }],
+        answers: { '0': ['no'] },
       });
       await h.waitForIdle();
 
@@ -459,8 +478,11 @@ test('close preserves current interaction lifetime and forgets unresolved state 
       clientRef: 'interaction-close',
       title: 'Interaction close',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = h.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -520,12 +542,203 @@ test('close preserves current interaction lifetime and forgets unresolved state 
       appSessionId: question.appSessionId,
       requestId: question.requestId,
       cancelled: true,
-      answers: [],
+      answers: {},
     });
     assert.equal(questionSettlements, 0);
     assert.equal(h.events.length, eventCountAfterResume);
   } finally {
     releaseClose();
+    await h.dispose();
+  }
+});
+
+test('interrupt leaves pending approvals and questions waiting for the user', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'interrupt-pending',
+      title: 'Interrupt pending',
+      goal: 'go',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    await h.waitForIdle();
+
+    const permissionHandler = h.provider.session('provider-1').handlers.permissionHandler;
+    const askUserHandler = h.provider.session('provider-1').handlers.askUserHandler;
+    assert.ok(permissionHandler);
+    assert.ok(askUserHandler);
+
+    const approval = Promise.resolve(permissionHandler(permissionInput('interrupt-approval')));
+    const question = Promise.resolve(askUserHandler(questionInput('interrupt-question')));
+    const approvalRequest = permissionRequest(h.events).request;
+    const questionRequest = latestQuestion(h.events).question;
+
+    await h.handle({ type: 'session.interrupt', appSessionId: 'provider-1' });
+    await h.waitForIdle();
+
+    // Surprise: SessionLifecycle.interrupt never touches SessionInteractions.
+    // TODO: provider seam must preserve live pending callbacks or settle them.
+
+    await h.handle({
+      type: 'approval.respond',
+      appSessionId: approvalRequest.appSessionId,
+      requestId: approvalRequest.requestId,
+      outcome: 'proceed_once',
+    });
+    await h.handle({
+      type: 'question.respond',
+      appSessionId: questionRequest.appSessionId,
+      requestId: questionRequest.requestId,
+      cancelled: false,
+      answers: { '0': ['yes'] },
+    });
+
+    assert.equal(await approval, ToolConfirmationOutcome.ProceedOnce);
+    assert.deepEqual(await question, {
+      cancelled: false,
+      answers: [{ index: 0, question: 'Proceed?', answer: 'yes' }],
+    });
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('a failed turn leaves pending approvals and questions waiting for the user', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'failure-pending',
+      title: 'Failure pending',
+      goal: 'go',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    await h.provider.waitForPrompts('provider-1', 1);
+    await h.waitForIdle();
+
+    const permissionHandler = h.provider.session('provider-1').handlers.permissionHandler;
+    const askUserHandler = h.provider.session('provider-1').handlers.askUserHandler;
+    assert.ok(permissionHandler);
+    assert.ok(askUserHandler);
+
+    const streamGate = h.provider.deferNextStream('provider-1');
+    const sending = h.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: 'explode',
+    });
+    await h.provider.waitForPrompts('provider-1', 2);
+
+    const approval = Promise.resolve(permissionHandler(permissionInput('failure-approval')));
+    const question = Promise.resolve(askUserHandler(questionInput('failure-question')));
+    const approvalRequest = permissionRequest(h.events).request;
+    const questionRequest = latestQuestion(h.events).question;
+
+    h.provider.session('provider-1').nextStreamError = new Error('turn exploded');
+    streamGate.resolve();
+    await sending;
+    await h.waitForIdle();
+
+    assert.equal(
+      h.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.appSessionId === 'provider-1' &&
+          event.message === 'turn exploded',
+      ),
+      true,
+    );
+    assert.equal(
+      h.events.some(
+        (event) => event.type === 'session.updated' && event.session.phase === 'failed',
+      ),
+      true,
+    );
+
+    // Surprise: runPrimaryTurn marks the session failed without touching
+    // SessionInteractions. TODO: provider seam must preserve live callbacks
+    // across turn failure or settle them.
+
+    await h.handle({
+      type: 'approval.respond',
+      appSessionId: approvalRequest.appSessionId,
+      requestId: approvalRequest.requestId,
+      outcome: 'cancel',
+    });
+    await h.handle({
+      type: 'question.respond',
+      appSessionId: questionRequest.appSessionId,
+      requestId: questionRequest.requestId,
+      cancelled: true,
+      answers: {},
+    });
+
+    assert.equal(await approval, ToolConfirmationOutcome.Cancel);
+    assert.deepEqual(await question, { cancelled: true, answers: [] });
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('a closed session forgets pending approvals and questions without settling them', async () => {
+  const h = createSessionManagerTestContext();
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'close-pending',
+      title: 'Close pending',
+      goal: 'go',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    await h.waitForIdle();
+
+    const permissionHandler = h.provider.session('provider-1').handlers.permissionHandler;
+    const askUserHandler = h.provider.session('provider-1').handlers.askUserHandler;
+    assert.ok(permissionHandler);
+    assert.ok(askUserHandler);
+
+    let approvalSettlements = 0;
+    let questionSettlements = 0;
+    void Promise.resolve(permissionHandler(permissionInput('close-approval'))).then(() => {
+      approvalSettlements += 1;
+    });
+    void Promise.resolve(askUserHandler(questionInput('close-question'))).then(() => {
+      questionSettlements += 1;
+    });
+    assert.ok(permissionRequest(h.events));
+    assert.ok(latestQuestion(h.events));
+
+    await h.handle({ type: 'session.close', appSessionId: 'provider-1' });
+    await h.waitForIdle();
+
+    // Surprise: SessionInteractions.forgetSession deletes pending maps and
+    // never resolves native callbacks. Close is not "denied"; it is forgotten.
+    // TODO: provider seam must preserve this hang or deliberately settle on close.
+    assert.equal(approvalSettlements, 0);
+    assert.equal(questionSettlements, 0);
+    assert.equal(
+      h.events.some(
+        (event) => event.type === 'session.closed' && event.appSessionId === 'provider-1',
+      ),
+      true,
+    );
+  } finally {
     await h.dispose();
   }
 });
@@ -539,8 +752,11 @@ test('ask-user requests tolerate omitted questions and options', async () => {
       clientRef: 'question-defaults',
       title: 'Question defaults',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     const handler = h.provider.session('provider-1').handlers.askUserHandler;
@@ -556,7 +772,7 @@ test('ask-user requests tolerate omitted questions and options', async () => {
       appSessionId: emptyRequest.question.appSessionId,
       requestId: emptyRequest.question.requestId,
       cancelled: true,
-      answers: [],
+      answers: {},
     });
     assert.deepEqual(await emptyRequestResult, { cancelled: true, answers: [] });
 
@@ -568,14 +784,14 @@ test('ask-user requests tolerate omitted questions and options', async () => {
     );
     const freeFormRequest = latestQuestion(h.events);
     assert.deepEqual(freeFormRequest.question.questions, [
-      { index: 0, question: 'What should change?', options: [] },
+      { id: '0', prompt: 'What should change?', options: [], multiSelect: false },
     ]);
     await h.handle({
       type: 'question.respond',
       appSessionId: freeFormRequest.question.appSessionId,
       requestId: freeFormRequest.question.requestId,
       cancelled: false,
-      answers: [{ index: 0, question: 'What should change?', answer: 'The title' }],
+      answers: { '0': ['The title'] },
     });
     assert.deepEqual(await freeFormResult, {
       cancelled: false,

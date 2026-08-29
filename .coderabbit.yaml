@@ -1,0 +1,10 @@
+# Slice PRs target the integration branch, not main. Review those too.
+reviews:
+  auto_review:
+    enabled: true
+    drafts: true
+    base_branches:
+      - cursor/multi-provider-integration-330f
+      - cursor/multi-provider-runtime-spec-f09f
+      - cursor/mp-.*
+      - integration/multi-provider-.*

@@ -2,6 +2,11 @@
 // The frontend keeps a mirror copy at src/types/bridge.ts — keep them in sync.
 
 import type { McpClientCommand, McpServerEvent } from './mcpProtocol.js';
+import type {
+  DroidMissionConfiguration,
+  ProviderInstanceId,
+  SessionConfiguration,
+} from './providers/providerIdentity.js';
 export type {
   McpServerInfo,
   McpServerInput,
@@ -11,6 +16,14 @@ export type {
   McpStatusSummary,
   McpToolInfo,
 } from './mcpProtocol.js';
+export type {
+  DroidAgentConfiguration,
+  DroidMissionConfiguration,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ProviderSelection,
+  SessionConfiguration,
+} from './providers/providerIdentity.js';
 
 export type SessionPhase =
   | 'intake'
@@ -105,26 +118,27 @@ export interface ChildSessionSummary {
   queued?: boolean;
 }
 
+export interface ProviderSessionRef {
+  /** Display and copy only. Never a routing key; commands still target appSessionId. */
+  id: string;
+  /** Provider-built CLI recipe, e.g. `droid -r 'abc'`. Absent when the provider has none. */
+  resumeCommand?: string;
+}
+
 export interface SessionSummary {
   appSessionId: string;
   providerSessionId?: string;
   compactedFromProviderSessionIds?: string[];
   missionId?: string;
   sessionPurpose: SessionPurpose;
-  interactionMode: SessionInteractionMode;
   role: 'primary' | 'user';
   title: string;
   goal: string;
   cwd: string;
   workspaceKind?: 'folder' | 'none';
-  modelId?: string;
-  reasoningEffort?: ReasoningEffort;
+  configuration: SessionConfiguration;
+  droidMissionConfiguration?: DroidMissionConfiguration;
   compactionModel?: string;
-  workerModelId?: string;
-  workerReasoningEffort?: ReasoningEffort;
-  validatorModelId?: string;
-  validatorReasoningEffort?: ReasoningEffort;
-  autonomy: Autonomy;
   phase: SessionPhase;
   streaming?: boolean; // true while a turn is actively generating
   // Set when a runtime restart could not continue this session's in-flight turn.
@@ -149,6 +163,8 @@ export interface SessionSummary {
   autoCompactions?: number;
   createdAt: number;
   updatedAt: number;
+  sessionWebUrl?: string;
+  sessionRef?: ProviderSessionRef;
 }
 
 export interface TranscriptEvent {
@@ -209,13 +225,23 @@ export interface PermissionRequest {
   detail: string; // human readable (command, file path, diff snippet)
   plan?: string; // full plan/spec body (exit_spec_mode)
   options?: string[]; // custom option names offered by the tool
-  raw: unknown;
 }
 
 export interface SessionQuestion {
   appSessionId: string;
   requestId: string;
-  questions: { index: number; question: string; options: string[] }[];
+  questions: {
+    id: string;
+    prompt: string;
+    options: string[];
+    multiSelect: boolean;
+  }[];
+}
+
+export interface PlanReviewRequest {
+  appSessionId: string;
+  requestId: string;
+  plan: string;
 }
 
 export interface ModelInfo {
@@ -548,6 +574,126 @@ export type PermissionOutcome =
   | 'proceed_edit'
   | 'cancel';
 
+type AssertClosedEnum<TUnion, TListed extends TUnion> =
+  Exclude<TUnion, TListed> extends never
+    ? true
+    : ['missing enum members', Exclude<TUnion, TListed>];
+
+export const INSTALL_CHANNELS = [
+  'script',
+  'brew',
+  'npm',
+] as const satisfies readonly InstallChannel[];
+export const SESSION_PURPOSES = [
+  'chat',
+  'design',
+  'mission-control',
+] as const satisfies readonly SessionPurpose[];
+export const RESPONSE_FORMATS = [
+  'app-create',
+  'app-followup',
+] as const satisfies readonly ResponseFormat[];
+export const PERMISSION_OUTCOMES = [
+  'proceed_once',
+  'proceed_always',
+  'proceed_auto_run',
+  'proceed_auto_run_low',
+  'proceed_auto_run_medium',
+  'proceed_auto_run_high',
+  'proceed_new_session',
+  'proceed_new_session_low',
+  'proceed_new_session_medium',
+  'proceed_new_session_high',
+  'proceed_edit',
+  'cancel',
+] as const satisfies readonly PermissionOutcome[];
+export const CONFIGURABLE_SESSION_ROLES = [
+  'primary',
+  'worker',
+  'validator',
+] as const satisfies readonly ConfigurableSessionRole[];
+export const BROWSER_VIEWPORT_MODES = [
+  'fit',
+  'desktop',
+  'laptop',
+  'tablet',
+  'mobile',
+  'custom',
+] as const satisfies readonly BrowserViewportMode[];
+export const BROWSER_SCROLL_DIRECTIONS = [
+  'up',
+  'down',
+  'left',
+  'right',
+] as const satisfies readonly BrowserScrollDirection[];
+export const BACKGROUND_WORK_TIERS = [
+  'interactive',
+  'hidden',
+  'low-power',
+] as const satisfies readonly ('interactive' | 'hidden' | 'low-power')[];
+export const BROWSER_INPUT_SOURCES = ['agent', 'user'] as const satisfies readonly (
+  | 'agent'
+  | 'user'
+)[];
+export const DESIGN_ANCHOR_KINDS = [
+  'element',
+  'region',
+  'text',
+] as const satisfies readonly DesignAnchor['kind'][];
+export const ELEMENT_SOURCE_FRAMEWORKS = [
+  'react',
+  'vue',
+  'svelte',
+  'unknown',
+] as const satisfies readonly NonNullable<ElementSource['framework']>[];
+export const ELEMENT_SOURCE_CONFIDENCES = [
+  'exact',
+  'attribute',
+  'heuristic',
+  'none',
+] as const satisfies readonly ElementSource['confidence'][];
+
+const _installChannelsComplete = true satisfies AssertClosedEnum<
+  InstallChannel,
+  (typeof INSTALL_CHANNELS)[number]
+>;
+const _sessionPurposesComplete = true satisfies AssertClosedEnum<
+  SessionPurpose,
+  (typeof SESSION_PURPOSES)[number]
+>;
+const _responseFormatsComplete = true satisfies AssertClosedEnum<
+  ResponseFormat,
+  (typeof RESPONSE_FORMATS)[number]
+>;
+const _permissionOutcomesComplete = true satisfies AssertClosedEnum<
+  PermissionOutcome,
+  (typeof PERMISSION_OUTCOMES)[number]
+>;
+const _configurableSessionRolesComplete = true satisfies AssertClosedEnum<
+  ConfigurableSessionRole,
+  (typeof CONFIGURABLE_SESSION_ROLES)[number]
+>;
+const _browserViewportModesComplete = true satisfies AssertClosedEnum<
+  BrowserViewportMode,
+  (typeof BROWSER_VIEWPORT_MODES)[number]
+>;
+const _browserScrollDirectionsComplete = true satisfies AssertClosedEnum<
+  BrowserScrollDirection,
+  (typeof BROWSER_SCROLL_DIRECTIONS)[number]
+>;
+const _designAnchorKindsComplete = true satisfies AssertClosedEnum<
+  DesignAnchor['kind'],
+  (typeof DESIGN_ANCHOR_KINDS)[number]
+>;
+const _elementSourceFrameworksComplete = true satisfies AssertClosedEnum<
+  NonNullable<ElementSource['framework']>,
+  (typeof ELEMENT_SOURCE_FRAMEWORKS)[number]
+>;
+const _elementSourceConfidencesComplete = true satisfies AssertClosedEnum<
+  ElementSource['confidence'],
+  (typeof ELEMENT_SOURCE_CONFIDENCES)[number]
+>;
+
 // ── Frontend -> Sidecar ──────────────────────────────────────────────
 export type ClientCommand =
   | McpClientCommand
@@ -558,8 +704,8 @@ export type ClientCommand =
   | { type: 'cli.install'; channel: InstallChannel }
   | { type: 'cli.update'; channel?: InstallChannel }
   | { type: 'catalog.models' }
-  | { type: 'catalog.tools'; providerSessionId?: string }
-  | { type: 'catalog.skills'; providerSessionId?: string }
+  | { type: 'catalog.tools'; appSessionId?: string; providerInstanceId?: ProviderInstanceId }
+  | { type: 'catalog.skills'; appSessionId?: string; providerInstanceId?: ProviderInstanceId }
   | { type: 'settings.defaults' }
   | {
       type: 'session.create';
@@ -568,18 +714,11 @@ export type ClientCommand =
       title: string;
       goal: string;
       sessionPurpose: SessionPurpose;
-      interactionMode?: SessionInteractionMode;
-      modelId?: string;
-      reasoningEffort?: ReasoningEffort;
+      configuration: SessionConfiguration;
+      droidMissionConfiguration?: DroidMissionConfiguration;
       compactionModel?: string;
       compactionTokenLimit?: number | null;
       compactionTokenLimitPerModel?: Record<string, number>;
-      // Explicit snapshot chosen by the sender; there is no sidecar fallback.
-      autonomy: Autonomy;
-      workerModel?: string;
-      workerReasoning?: ReasoningEffort;
-      validatorModel?: string;
-      validatorReasoning?: ReasoningEffort;
       responseFormat?: ResponseFormat;
     }
   | { type: 'session.send'; appSessionId: string; text: string; responseFormat?: ResponseFormat }
@@ -589,10 +728,7 @@ export type ClientCommand =
   | {
       type: 'session.updateSettings';
       appSessionId: string;
-      modelId?: string | null;
-      reasoningEffort?: ReasoningEffort;
-      autonomy?: Autonomy;
-      interactionMode?: SessionInteractionMode;
+      configuration: SessionConfiguration;
     }
   | { type: 'session.compact'; appSessionId: string; customInstructions?: string }
   | { type: 'session.fork'; appSessionId: string }
@@ -609,6 +745,8 @@ export type ClientCommand =
   | { type: 'session.rewindInfo'; appSessionId: string }
   | { type: 'session.rewind'; appSessionId: string; rewindId?: string }
   | { type: 'session.close'; appSessionId: string }
+  | { type: 'session.retryStart'; appSessionId: string }
+  | { type: 'session.removeFailed'; appSessionId: string }
   | {
       type: 'sessions.list';
       workspaceCwds?: string[];
@@ -670,10 +808,15 @@ export type ClientCommand =
       appSessionId: string;
       requestId: string;
       cancelled: boolean;
-      answers: { index: number; question: string; answer: string }[];
+      answers: Record<string, string[]>;
     }
-  | { type: 'history.list' }
-  | { type: 'history.page'; providerSessionId: string; cursor?: string; limit?: number }
+  | {
+      type: 'plan_review.respond';
+      appSessionId: string;
+      requestId: string;
+      decision: 'implement' | 'iterate' | 'cancel';
+      feedback?: string;
+    }
   | {
       type: 'settings.agent.update';
       appSessionId?: string;
@@ -794,6 +937,7 @@ export type ServerEvent =
   | { type: 'session.created'; clientRef: string; session: SessionSummary }
   | { type: 'session.updated'; session: SessionSummary }
   | { type: 'session.closed'; appSessionId: string }
+  | { type: 'session.removed'; appSessionId: string }
   | {
       type: 'sessions.cwdReanchored';
       requestId: string;
@@ -819,6 +963,7 @@ export type ServerEvent =
   | { type: 'event.appended'; event: TranscriptEvent }
   | { type: 'approval.requested'; request: PermissionRequest }
   | { type: 'question.requested'; question: SessionQuestion }
+  | { type: 'plan_review.requested'; request: PlanReviewRequest }
   | {
       type: 'context.updated';
       appSessionId: string;
@@ -832,7 +977,8 @@ export type ServerEvent =
       type: 'catalog.updated';
       catalog: 'models' | 'tools' | 'skills';
       items: unknown[];
-      providerSessionId?: string | null;
+      appSessionId?: string | null;
+      providerInstanceId?: ProviderInstanceId | null;
     }
   | { type: 'settings.defaults'; defaults: FactoryDefaultSettings }
   | {
@@ -843,7 +989,6 @@ export type ServerEvent =
       // can tell their own failure apart from a foreign command's.
       requestId?: string;
       appSessionId?: string;
-      providerSessionId?: string;
       message: string;
       recoverable?: boolean;
     }
@@ -891,7 +1036,6 @@ export type ServerEvent =
       indexingIncomplete: boolean;
     }
   | { type: 'history.persistenceRecovered' }
-  | { type: 'history.list'; sessions: SessionHistoryEntry[] }
   | { type: 'browser.updated'; state: BrowserState }
   | { type: 'browser.native.request'; request: BrowserNativeRequest }
   | { type: 'browser.closed'; appSessionId: string }

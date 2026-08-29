@@ -38,6 +38,7 @@
     "sidecar:typecheck:strict": "npm --prefix sidecar run typecheck:strict",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "quality:provenance": "node tools/check-provenance.mjs",
     "quality:file-size": "node tools/check-file-size.mjs",
     "quality:bundle-budgets": "node tools/check-bundle-budgets.mjs",
     "quality:perf-gates": "npm --prefix sidecar run perf:replay -- --gates --enforce-gates",

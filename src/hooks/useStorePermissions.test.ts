@@ -11,7 +11,6 @@ function makePermission(appSessionId: string, kind: PermissionRequest['kind'] = 
     kind,
     title: 'Run command',
     detail: 'rm -rf build',
-    raw: {},
   };
   const action = adaptEvent({ type: 'approval.requested', request });
   assert.ok(action);
@@ -22,7 +21,7 @@ function makeQuestion(appSessionId: string) {
   const question: SessionQuestion = {
     appSessionId,
     requestId: `req-${appSessionId}`,
-    questions: [{ index: 0, question: 'Pick one', options: ['a', 'b'] }],
+    questions: [{ id: '0', prompt: 'Pick one', options: ['a', 'b'], multiSelect: false }],
   };
   const action = adaptEvent({ type: 'question.requested', question });
   assert.ok(action);
@@ -61,7 +60,6 @@ test('a newer permission request replaces the previous one for that session', ()
       kind: 'edit' as const,
       title: 'Edit file',
       detail: 'src/app.ts',
-      raw: {},
     },
   });
   assert.ok(replacement);
@@ -100,7 +98,6 @@ test('a spec permission still seeds the session spec while pending', () => {
       title: 'Plan ready for review',
       detail: '# Plan',
       plan: '# Plan',
-      raw: {},
     },
   });
   assert.ok(action);

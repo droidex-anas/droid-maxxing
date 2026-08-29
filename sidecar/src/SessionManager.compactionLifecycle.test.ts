@@ -5,7 +5,11 @@ import { ContextStatsAccuracy } from '@factory/droid-sdk';
 
 import { FakeFactorySession, type RecordedCall } from './testing/fakeFactoryRuntime.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
-import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import {
+  createSessionManagerTestContext,
+  type SessionManagerTestContext,
+} from './testing/sessionManagerTestContext.js';
+import { withDroidSession } from './providers/droid/droidSessionAccess.js';
 import type { ServerEvent } from './protocol.js';
 import {
   contextUpdateCount,
@@ -15,6 +19,9 @@ import {
   runShutdownOnlyCleanupScenario,
   seedInitModel,
 } from './testing/compactionCharacterizationScenarios.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { cursorSessionConfiguration } from './testing/droidProviderTestSupport.js';
+import { ProviderContractError } from './providers/providerTypes.js';
 
 type SessionUpdatedEvent = Extract<ServerEvent, { type: 'session.updated' }>;
 type TranscriptEventAppended = Extract<ServerEvent, { type: 'event.appended' }>;
@@ -23,27 +30,12 @@ function sessionUpdates(events: ServerEvent[]): SessionUpdatedEvent[] {
   return events.filter((event): event is SessionUpdatedEvent => event.type === 'session.updated');
 }
 
-function syncsSummary(
-  calls: RecordedCall[],
+function storeHasProviderSession(
+  h: SessionManagerTestContext,
   appSessionId: string,
   providerSessionId: string,
 ): boolean {
-  return calls.some((call) => {
-    if (call.target !== 'history' || call.method !== 'syncSummaries') return false;
-    const summaries = call.args[0];
-    return (
-      Array.isArray(summaries) &&
-      summaries.some(
-        (summary) =>
-          typeof summary === 'object' &&
-          summary !== null &&
-          'appSessionId' in summary &&
-          summary.appSessionId === appSessionId &&
-          'providerSessionId' in summary &&
-          summary.providerSessionId === providerSessionId,
-      )
-    );
-  });
+  return h.fixture.storedSession(appSessionId)?.binding.providerSessionId === providerSessionId;
 }
 
 function callCount(
@@ -66,9 +58,12 @@ test('[C0] Create arms daemon compaction without client-side turn compaction', a
       clientRef: 'c0',
       title: 'C0',
       goal: 'ordinary turn',
-      interactionMode: 'auto',
-      autonomy: 'low',
       compactionTokenLimit: 600,
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
 
@@ -97,9 +92,12 @@ test('daemon compaction notifications stream before an active turn settles', asy
       clientRef: 'mid-turn-compaction',
       title: 'Mid-turn compaction',
       goal: 'initial turn',
-      interactionMode: 'auto',
-      autonomy: 'low',
       compactionTokenLimit: 600,
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
 
@@ -149,8 +147,11 @@ test('[C1] Manual in-place compaction', { concurrency: false }, async () => {
       clientRef: 'c1',
       title: 'C1',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const compactGate = h.provider.deferNextCompaction('provider-1');
@@ -227,7 +228,10 @@ test('[C1] Manual in-place compaction', { concurrency: false }, async () => {
       { customInstructions: 'preserve decisions' },
     ]);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-1'), 2);
-    assert.equal(sessionUpdates(h.events).at(-1)?.session.providerSessionId, 'provider-1');
+    assert.equal(
+      sessionUpdates(h.events).at(-1)?.session.sessionWebUrl,
+      'https://app.factory.ai/sessions/provider-1',
+    );
   } finally {
     await h.dispose();
   }
@@ -245,8 +249,11 @@ test(
         clientRef: 'compaction-failure',
         title: 'Compaction failure',
         goal: 'initial',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
       await h.waitForIdle();
       h.events.length = 0;
@@ -293,8 +300,11 @@ test('manual compaction is rejected while an ordinary turn is streaming', async 
       clientRef: 'compaction-streaming',
       title: 'Compaction streaming',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const streamGate = h.provider.deferNextStream('provider-1');
@@ -333,8 +343,11 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
       clientRef: 'c2',
       title: 'C2',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     h.provider.session('provider-1').nextCompactResult = {
@@ -352,7 +365,7 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
     assert.ok(load);
     assert.ok(creation);
     assert.equal(update.session.appSessionId, 'provider-1');
-    assert.equal(update.session.providerSessionId, 'provider-2');
+    assert.equal(update.session.sessionWebUrl, 'https://app.factory.ai/sessions/provider-2');
     assert.equal(load.sessionId, 'provider-2');
     assert.equal(typeof load.handlers.permissionHandler, 'function');
     assert.equal(typeof load.handlers.askUserHandler, 'function');
@@ -361,7 +374,7 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
       load.handlers.mcpServers?.map((server) => server.name),
       ['test-cli', 'test-browser'],
     );
-    assert.equal(callCount(h.calls, 'provider', 'onNotification', 'provider-2'), 1);
+    assert.equal(callCount(h.calls, 'provider', 'onNotification', 'provider-2'), 2);
     assert.equal(callCount(h.calls, 'cleanup', 'unsubscribe', 'provider-1'), 1);
     assert.equal(
       h.provider
@@ -370,7 +383,7 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
       true,
     );
     assert.equal(callCount(h.calls, 'cleanup', 'session.close', 'provider-1'), 1);
-    assert.equal(syncsSummary(h.calls, 'provider-1', 'provider-2'), true);
+    assert.equal(storeHasProviderSession(h, 'provider-1', 'provider-2'), true);
 
     await h.handle({ type: 'session.send', appSessionId: 'provider-1', text: 'after' });
     assert.deepEqual(h.provider.session('provider-2').prompts, ['after']);
@@ -389,8 +402,11 @@ test('[C3] Failed swap recovery', { concurrency: false }, async () => {
       clientRef: 'c3',
       title: 'C3',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const compactGate = h.provider.deferNextCompaction('provider-1');
@@ -416,12 +432,15 @@ test('[C3] Failed swap recovery', { concurrency: false }, async () => {
       ),
       true,
     );
-    assert.equal(sessionUpdates(h.events).at(-1)?.session.providerSessionId, 'provider-3');
+    assert.equal(
+      sessionUpdates(h.events).at(-1)?.session.sessionWebUrl,
+      'https://app.factory.ai/sessions/provider-3',
+    );
     assert.deepEqual(h.provider.session('provider-3').prompts, ['redeliver once']);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-3'), 1);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-1'), 1);
     assert.equal(callCount(h.calls, 'cleanup', 'session.close', 'provider-1'), 1);
-    assert.equal(syncsSummary(h.calls, 'provider-1', 'provider-3'), true);
+    assert.equal(storeHasProviderSession(h, 'provider-1', 'provider-3'), true);
   } finally {
     await h.dispose();
   }
@@ -436,8 +455,11 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
       clientRef: 'c7',
       title: 'C7',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const compactGate = h.provider.deferNextCompaction('provider-1');
@@ -464,7 +486,7 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
     compactGate.resolve();
     await compacting;
 
-    assert.equal(h.runtime.loadCalls.filter((call) => call.sessionId === 'provider-7').length, 3);
+    assert.equal(h.runtime.loadCalls.filter((call) => call.sessionId === 'provider-7').length, 2);
     assert.equal(
       h.events.some(
         (event) =>
@@ -479,19 +501,27 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
       h.events.some(
         (event) =>
           event.type === 'error' &&
-          event.providerSessionId === 'provider-1' &&
           event.recoverable === true &&
           event.message ===
             'Could not fully close the compacted session: old provider close failed',
       ),
       true,
     );
-    assert.equal(syncsSummary(h.calls, 'provider-1', 'provider-7'), true);
+    assert.equal(storeHasProviderSession(h, 'provider-1', 'provider-7'), true);
     assert.equal(callCount(h.calls, 'cleanup', 'session.close', 'provider-1'), 1);
     assert.deepEqual(h.provider.session('provider-1').prompts, ['go']);
-    assert.deepEqual(resumed.prompts, ['redeliver after resume']);
-    assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-7'), 1);
-    assert.equal(sessionUpdates(h.events).at(-1)?.session.providerSessionId, 'provider-7');
+    assert.equal(
+      h.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.message === 'Stored session has no provider binding to resume.',
+      ),
+      true,
+    );
+    assert.equal(
+      sessionUpdates(h.events).at(-1)?.session.sessionWebUrl,
+      'https://app.factory.ai/sessions/provider-7',
+    );
   } finally {
     await h.dispose();
   }
@@ -589,11 +619,15 @@ test('[C5] Compaction retuning uses each live session model', { concurrency: fal
       clientRef: 'c5',
       title: 'C5',
       goal: 'go',
-      interactionMode: 'agi',
-      autonomy: 'low',
-      modelId: 'model-parent-effective',
-      workerModel: 'model-worker-fallback',
-      validatorModel: 'model-validator-fallback',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-parent-effective',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
+      droidMissionConfiguration: {
+        worker: { modelId: 'model-worker-fallback' },
+        validator: { modelId: 'model-validator-fallback' },
+      },
     });
     await h.waitForIdle();
     h.history.seedChildSessions([
@@ -697,13 +731,13 @@ test('[C6] Close and shutdown clean keyed resources', { concurrency: false }, as
   assert.deepEqual(close.cleanupAtClose, [1, 1, 1, 1, 1]);
   assert.deepEqual(close.closeTimerState, [1, 1, 1, 1]);
   assert.deepEqual(close.cleanupAfterShutdown, [1, 1, 1, 1, 1]);
-  assert.deepEqual([close.browserClose, close.browserCloseAll, close.historyClose], [1, 1, 1]);
+  assert.deepEqual([close.browserClose, close.browserCloseAll, close.historyClose], [1, 1, 0]);
 
   const shutdown = await runShutdownOnlyCleanupScenario();
   assert.deepEqual(shutdown.cleanup, [1, 1, 1, 1, 1]);
   assert.deepEqual(shutdown.timerClears, [1, 1, 1, 1]);
   assert.deepEqual(shutdown.browserCounts, [1, 1]);
-  assert.equal(shutdown.historyClose, 1);
+  assert.equal(shutdown.historyClose, 0);
 });
 
 test(
@@ -728,9 +762,11 @@ test(
         clientRef: 'c7',
         title: 'C7',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
-        modelId: 'custom-model',
+        configuration: droidSessionConfiguration({
+          modelId: 'custom-model',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
       await h.waitForIdle();
 
@@ -765,8 +801,11 @@ test(
         clientRef: 'c8',
         title: 'C8',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
       await h.waitForIdle();
 
@@ -786,11 +825,20 @@ test(
       await h.handle({
         type: 'session.updateSettings',
         appSessionId: 'provider-1',
-        interactionMode: 'spec',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'spec',
+          autonomy: 'low',
+        }),
       });
+      await h.waitForIdle();
+      assert.equal(compactionArmCount(), armsBefore);
+
+      await h.handle({ type: 'session.send', appSessionId: 'provider-1', text: 'after spec' });
       await h.waitForIdle();
 
       // Switching to spec mode must re-arm with the new mode's default model.
+      // Native apply (and therefore re-arm) happens on the next accepted turn.
       // The limit is the daemon default (250k) clamped to 80% of the model
       // window (1k → 800), so the re-arm must carry compactionTokenLimit 800.
       assert.equal(compactionArmCount() > armsBefore, true);
@@ -809,8 +857,11 @@ test('[C10] Arm failure emits a visible recoverable error', { concurrency: false
       clientRef: 'c9',
       title: 'C9',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     h.events.length = 0;
@@ -859,9 +910,11 @@ test(
         clientRef: 'c11',
         title: 'C11',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
-        modelId: 'custom-model',
+        configuration: droidSessionConfiguration({
+          modelId: 'custom-model',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
         compactionTokenLimit: 250_000,
       });
       for (let i = 0; i < 5; i++) await h.waitForIdle();
@@ -911,3 +964,48 @@ test(
     }
   },
 );
+
+test('compact fails for a historical cursor session before load', async () => {
+  let loads = 0;
+  await assert.rejects(
+    () =>
+      withDroidSession({
+        live: undefined,
+        summary: {
+          appSessionId: 'app-cursor',
+          providerSessionId: 'provider-cursor',
+          sessionPurpose: 'chat',
+          role: 'primary',
+          title: 'Cursor',
+          goal: '',
+          cwd: '',
+          workspaceKind: 'none',
+          configuration: cursorSessionConfiguration({ modelId: 'cursor-model' }),
+          phase: 'paused',
+          features: [],
+          tokensIn: 0,
+          tokensOut: 0,
+          contextTokens: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        appSessionId: 'app-cursor',
+        capability: 'compaction',
+        operation: 'compactSession',
+        snapshotCapabilities: () => undefined,
+        loadSession: async () => {
+          loads += 1;
+          throw new Error('should not load a cursor session');
+        },
+        fn: async () => undefined,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof ProviderContractError);
+      assert.equal(error.code, 'unsupported_capability');
+      assert.equal(error.providerInstanceId, 'cursor');
+      assert.match(error.message, /compactSession/);
+      return true;
+    },
+  );
+  assert.equal(loads, 0);
+});

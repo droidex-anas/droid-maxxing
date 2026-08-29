@@ -12,6 +12,14 @@ import {
 } from './SessionCompaction.js';
 import { createCompactionTestLiveSession } from './testing/compactionTestSupport.js';
 import {
+  assertUnsupportedCapability,
+  droidExtensionForFactory,
+} from './testing/droidProviderTestSupport.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
   FakeFactoryRuntime,
   FakeFactorySession,
   type RecordedCall,
@@ -83,6 +91,7 @@ function primaryTarget(
 ): {
   session: FakeFactorySession;
   target: PrimaryCompactionTarget;
+  liveSession: ReturnType<typeof createCompactionTestLiveSession>;
   setCurrent(value: boolean): void;
 } {
   const session = new FakeFactorySession(`${id}-backend`, {}, h.calls);
@@ -94,12 +103,13 @@ function primaryTarget(
     providerSessionId: session.sessionId,
     sourceSessionId: id,
     session,
+    droid: droidExtensionForFactory(session),
     liveSession,
     configuredModelId,
     defaultsMode: 'auto',
     isCurrent: () => current,
   };
-  return { session, target, setCurrent: (value) => (current = value) };
+  return { session, target, liveSession, setCurrent: (value) => (current = value) };
 }
 
 function childTarget(
@@ -123,6 +133,7 @@ function childTarget(
     providerSessionId: session.sessionId,
     sourceSessionId: session.sessionId,
     session,
+    droid: droidExtensionForFactory(session),
     role: 'worker',
     parentGeneration: 1,
     runtimeGeneration: 1,
@@ -190,9 +201,15 @@ test('limit resolution preserves UI, exposed, default, override, and window prec
   );
   assert.equal(await h.compaction.resolveLimit({ modelId: 'model-a' }), 800);
   const summary = {
-    modelId: 'parent-model',
-    workerModelId: 'worker-model',
-    validatorModelId: 'validator-model',
+    configuration: droidSessionConfiguration({
+      modelId: 'parent-model',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
+    droidMissionConfiguration: {
+      worker: { modelId: 'worker-model' },
+      validator: { modelId: 'validator-model' },
+    },
   };
   assert.equal(
     childCompactionModelId(summary, { modelId: 'loaded-model' }, 'worker'),
@@ -368,4 +385,26 @@ test('clearAll invalidates unresolved policy work and provider arming', async ()
   h.compaction.clearAll();
   gate.resolve();
   assert.equal(await arming, false);
+});
+
+test('arm fails for a stub provider before writing compaction settings', () => {
+  const { session, liveSession } = primaryTarget(createHarness());
+  liveSession.provider = new StubProviderSession(session.sessionId);
+  liveSession.binding = { ...liveSession.binding, providerInstanceId: 'cursor' };
+  const writes = session.settings.length;
+  assert.throws(
+    () =>
+      requireDroidCapability(liveSession, 'compaction', 'armAutoCompaction', {
+        ...UNAVAILABLE_PROVIDER_CAPABILITIES,
+      }),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'armAutoCompaction',
+        capability: 'compaction',
+      });
+      return true;
+    },
+  );
+  assert.equal(session.settings.length, writes);
 });

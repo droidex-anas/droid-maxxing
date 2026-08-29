@@ -9,7 +9,8 @@ import {
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSessionsDependencies } from './ChildSessionsTypes.js';
 import type { ChildParentLease } from './ChildSessionState.js';
-import type { PersistedChildSession } from './history.js';
+import { memoryChildPersistence } from './childCanonicalPersistence.js';
+import type { PersistedChildSession } from './ChildSessionState.js';
 import type {
   AutoCompactionSettlement,
   ChildAutomaticCompactionTarget,
@@ -21,13 +22,32 @@ import {
   type RecordedCall,
   type StreamGate,
 } from './testing/fakeFactoryRuntime.js';
-import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
+  assertUnsupportedCapability,
+  cursorSessionConfiguration,
+  droidParentLease,
+} from './testing/droidProviderTestSupport.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 
 interface Harness {
+  lease: ChildParentLease;
   calls: RecordedCall[];
   events: ServerEvent[];
   sequence: string[];
-  history: FakeHistoryIndex;
+  history: {
+    childSession(
+      parentAppSessionId: string,
+      childSessionId: string,
+    ): PersistedChildSession | undefined;
+    childSessions(parentAppSessionId: string): PersistedChildSession[];
+    seedSessionLaunchSettings(
+      providerSessionId: string,
+      settings: { modelId?: string; reasoningEffort?: ReasoningEffort },
+    ): void;
+    upsertChildSession(child: PersistedChildSession): boolean | undefined;
+  };
   runtime: FakeFactoryRuntime;
   owner: ChildSessions;
   parentId: string;
@@ -55,7 +75,11 @@ function createHarness(
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
   const sequence: string[] = [];
-  const history = new FakeHistoryIndex(calls);
+  const store = memoryChildPersistence();
+  const launchSettings = new Map<
+    string,
+    { modelId?: string; reasoningEffort?: ReasoningEffort }
+  >();
   const runtime = new FakeFactoryRuntime(calls);
   const parentId = 'parent';
   let missReplayChildOnce = options.missReplayChildOnce;
@@ -69,22 +93,40 @@ function createHarness(
     failDriveSetup = undefined;
     throw new Error(`${stage} failed`);
   };
-  const upsertChildSession = history.upsertChildSession.bind(history);
-  history.upsertChildSession = (child) => {
-    if (child.status === 'running') throwDriveSetup('commit');
-    const durable = upsertChildSession(child);
-    if (child.status === deferDurabilityForStatus) {
-      deferDurabilityForStatus = undefined;
-      return false;
-    }
-    return durable;
-  };
-  history.seedChildSessions(records);
   let parent = parentLease(parentId, calls);
+  const history = {
+    childSession(parentAppSessionId: string, childSessionId: string) {
+      return store.get(parentAppSessionId, childSessionId);
+    },
+    childSessions(parentAppSessionId: string) {
+      return store.list(parentAppSessionId);
+    },
+    seedSessionLaunchSettings(
+      providerSessionId: string,
+      settings: { modelId?: string; reasoningEffort?: ReasoningEffort },
+    ) {
+      launchSettings.set(providerSessionId, settings);
+    },
+    upsertChildSession(child: PersistedChildSession): boolean | undefined {
+      if (child.status === 'running') throwDriveSetup('commit');
+      calls.push({ target: 'history', method: 'upsertChildSession', args: [child] });
+      if (child.status === deferDurabilityForStatus) {
+        deferDurabilityForStatus = undefined;
+        return false;
+      }
+      return store.upsert(child, parent.binding);
+    },
+  };
+  for (const record of records) store.upsert(record, parent.binding);
   const dependencies: ChildSessionsDependencies = {
     runtime,
     registry: { getLive: (id) => (id === parentId ? parent : undefined) },
-    history,
+    childPersistence: {
+      list: (id) => store.list(id),
+      get: (parentId, childId) => store.get(parentId, childId),
+      upsert: (child) => history.upsertChildSession(child),
+    },
+    readLaunchSettings: (providerSessionId) => launchSettings.get(providerSessionId),
     timeline: {
       append: (event) => {
         calls.push({ target: 'protocol', method: 'timeline.append', args: [event] });
@@ -186,6 +228,7 @@ function createHarness(
   const owner = new ChildSessions(dependencies);
   owner.attachParent(parentId);
   const harness: Harness = {
+    lease: parent,
     calls,
     events,
     sequence,
@@ -227,11 +270,8 @@ function createHarness(
 }
 
 function parentLease(appSessionId: string, calls: RecordedCall[]): ChildParentLease {
-  return {
-    summary: summary(appSessionId),
-    session: new FakeFactorySession(`${appSessionId}-provider`, {}, calls),
-    mcpConfigs: [],
-  };
+  const session = new FakeFactorySession(`${appSessionId}-provider`, {}, calls);
+  return droidParentLease(summary(appSessionId), session);
 }
 
 function summary(appSessionId: string): SessionSummary {
@@ -239,15 +279,17 @@ function summary(appSessionId: string): SessionSummary {
     appSessionId,
     providerSessionId: `${appSessionId}-provider`,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'user',
     title: appSessionId,
     goal: 'test',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    modelId: 'model-default',
-    reasoningEffort: ReasoningEffort.Low,
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -1973,4 +2015,43 @@ test('opening a child arms the retirement wakeup that later releases it', async 
       .map((call) => call.args[0]),
     ['provider'],
   );
+});
+
+test('shutdown passes the shared deadline to child provider close', async () => {
+  const record = childRecord('child', 'provider');
+  const h = createHarness([record]);
+  await h.open(record);
+  const deadline = ShutdownDeadline.fromDurationMs(2_000, 9);
+  await h.owner.shutdown(deadline);
+  const closeCall = h.calls.find(
+    (call) => call.target === 'cleanup' && call.method === 'session.close',
+  );
+  assert.equal(closeCall?.args[0], 'provider');
+  assert.equal(closeCall?.args[1], deadline);
+});
+
+test('child.open fails for a cursor parent before loading a runtime', async () => {
+  const record = childRecord('child', 'provider-cursor');
+  const h = createHarness([record]);
+  h.lease.binding = {
+    providerDriverKind: 'cursor',
+    providerInstanceId: 'cursor',
+    previousProviderSessionIds: [],
+    runtimeGeneration: 1,
+  };
+  h.lease.provider = new StubProviderSession('cursor-parent');
+  h.lease.summary.configuration = cursorSessionConfiguration({ modelId: 'cursor-model' });
+  const loads = h.runtime.loadCalls.length;
+  await assert.rejects(
+    () => h.open(record),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'child.open',
+        capability: 'addressableChildren',
+      });
+      return true;
+    },
+  );
+  assert.equal(h.runtime.loadCalls.length, loads);
 });

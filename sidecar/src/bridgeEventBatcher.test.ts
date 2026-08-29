@@ -13,6 +13,7 @@ import type {
   SessionSummary,
   TranscriptEvent,
 } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 interface FakeTimer {
   callback: () => void;
@@ -84,12 +85,15 @@ function sessionSummary(appSessionId: string, streaming = true): SessionSummary 
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: 'test',
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'running',
     streaming,
     features: [],
@@ -230,7 +234,6 @@ test('priority events flush queued work before their immediate batch', () => {
       kind: 'exec',
       title: 'Run command',
       detail: 'npm test',
-      raw: {},
     },
   });
 

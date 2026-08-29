@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { McpServerConfigSchema, type McpServerConfig } from '@factory/droid-sdk';
 
 import { BrowserSessionManager } from '../browser/BrowserSessionManager.js';
-import { HistoryPersistence } from '../HistoryPersistence.js';
 import { SessionManager, type SessionManagerDependencies } from '../SessionManager.js';
 import { hotPathMetrics } from '../telemetry/hotPathMetrics.js';
 import { evaluateReplayGates } from './gates.js';
@@ -37,15 +36,12 @@ export async function runSoak(spec: PerfScenarioSpec): Promise<ReplayReport> {
     onYield: () => undefined,
     onTurnSettled: () => undefined,
   });
-  const history = new HistoryPersistence();
-  history.flushSync();
   const browsers = new BrowserSessionManager({
     assetUrlFor: (path) => `http://127.0.0.1/soak/${path}`,
     emit: () => undefined,
   });
   const dependencies: SessionManagerDependencies = {
     runtime,
-    history,
     browsers,
     createLocalMcpResource: () => stubMcpResource(),
     mcpConfiguration: {
@@ -89,7 +85,11 @@ export async function runSoak(spec: PerfScenarioSpec): Promise<ReplayReport> {
         title: `Soak ${String(cycle)}`,
         goal: `soak ${String(cycle)}`,
         sessionPurpose: 'chat',
-        autonomy: 'off',
+        configuration: {
+          providerSelection: { providerInstanceId: 'droid', modelId: 'model-default', options: {} },
+          interactionMode: 'auto',
+          autonomy: 'off',
+        },
       });
       const created = events.find(
         (event) => event.type === 'session.created' && 'session' in event,

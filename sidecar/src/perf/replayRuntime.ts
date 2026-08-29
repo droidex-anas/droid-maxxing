@@ -13,11 +13,10 @@ import {
 } from '@factory/droid-sdk';
 import type {
   CreateRuntimeSessionOptions,
-  FactoryRuntime,
-  FactorySession,
   RuntimeHandlers,
-  RuntimeStatus,
-} from '../DroidRuntime.js';
+} from '../providers/droid/DroidModeMapping.js';
+import type { FactoryRuntime, RuntimeStatus } from '../providers/droid/DroidProviderAdapter.js';
+import type { FactorySession } from '../providers/droid/DroidProviderSession.js';
 import type { ReplayTurnPlan } from './scenario.js';
 import { successfulResultEvent } from '../testing/fakeFactoryRuntime.js';
 

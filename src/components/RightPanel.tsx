@@ -6,6 +6,7 @@ import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory'
 import { usePullRequest } from '../hooks/usePullRequest';
 import { useGithubSetup } from '../hooks/useGithubSetup';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
+import { sessionModelId, sessionReasoningEffort } from '../lib/sessionConfiguration';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Loader2, ChevronRight, FileText } from 'lucide-react';
 import { ModelIcon, providerOf } from './ModelIcon';
@@ -93,18 +94,15 @@ export default function RightPanel() {
     ),
   );
 
-  const modelInfo = activeSession?.modelId
-    ? state.models.find((m) => m.id === activeSession.modelId)
-    : undefined;
-  const modelLabel = activeSession
-    ? (modelInfo?.displayName ?? activeSession.modelId ?? 'default')
-    : 'default';
+  const modelId = activeSession ? sessionModelId(activeSession) : undefined;
+  const modelInfo = modelId ? state.models.find((m) => m.id === modelId) : undefined;
+  const modelLabel = activeSession ? (modelInfo?.displayName ?? modelId ?? 'default') : 'default';
   // The pill next to the model carries the session's reasoning effort, resolved
   // the same way as the composer badge: the session's own pinned effort, falling
   // back to the global default. Models without reasoning support show no pill.
   const reasoningEffort = activeSession
     ? resolveReasoningEffortDisplay(
-        activeSession.reasoningEffort,
+        sessionReasoningEffort(activeSession),
         state.agentConfig.primary.reasoning,
         modelInfo,
       )
@@ -163,9 +161,7 @@ export default function RightPanel() {
                 onPrCreated={pr.refresh}
               />
               <Row
-                icon={
-                  <ModelIcon provider={providerOf(modelInfo, activeSession.modelId)} size={16} />
-                }
+                icon={<ModelIcon provider={providerOf(modelInfo, modelId)} size={16} />}
                 label={modelLabel}
                 meta={reasoningEffort}
               />

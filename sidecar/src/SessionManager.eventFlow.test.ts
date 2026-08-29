@@ -9,6 +9,7 @@ import {
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 function appendedTexts(events: ServerEvent[]): string[] {
   const texts: string[] = [];
@@ -34,14 +35,10 @@ function latestSessionUpdate(events: ServerEvent[]) {
 }
 
 function isRecordedTranscript(call: RecordedCall, text: string): boolean {
-  const event = call.args[0];
   return (
-    call.target === 'history' &&
-    call.method === 'recordEvent' &&
-    typeof event === 'object' &&
-    event !== null &&
-    'text' in event &&
-    event.text === text
+    call.target === 'store' &&
+    call.method === 'append' &&
+    JSON.stringify(call.args[0] ?? {}).includes(text)
   );
 }
 
@@ -62,6 +59,43 @@ function isAppendedTranscript(call: RecordedCall, text: string): boolean {
   return 'text' in event.event && event.event.text === text;
 }
 
+function skillActivationNotification(detail: string): Record<string, unknown> {
+  return {
+    jsonrpc: '2.0',
+    method: 'droid.session_notification',
+    params: {
+      notification: {
+        type: 'create_message',
+        message: {
+          id: detail,
+          role: 'user',
+          visibility: 'user_only',
+          content: [{ type: 'text', text: `Skill "early" activated: ${detail}` }],
+        },
+      },
+    },
+  };
+}
+
+class EarlyNativeNotificationSession extends FakeFactorySession {
+  override async updateSettings(
+    settings: Parameters<FakeFactorySession['updateSettings']>[0],
+  ): ReturnType<FakeFactorySession['updateSettings']> {
+    if (this.notifications.size === 0) {
+      this.emitNotification(skillActivationNotification('before DROIDEX subscribed'));
+    }
+    return super.updateSettings(settings);
+  }
+
+  override onNotification(
+    ...args: Parameters<FakeFactorySession['onNotification']>
+  ): ReturnType<FakeFactorySession['onNotification']> {
+    const unsubscribe = super.onNotification(...args);
+    this.emitNotification(skillActivationNotification('as soon as DROIDEX subscribed'));
+    return unsubscribe;
+  }
+}
+
 test('design turns synchronize TodoWrite and unexpected AbortErrors fail the turn', async () => {
   const context = createSessionManagerTestContext();
   try {
@@ -70,8 +104,11 @@ test('design turns synchronize TodoWrite and unexpected AbortErrors fail the tur
       clientRef: 'event-design',
       title: 'Event design',
       goal: 'initial normal prompt',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -134,8 +171,11 @@ test('a buffered streaming tail is emitted before failed turn settlement', async
       clientRef: 'event-failed-tail',
       title: 'Failed tail',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -176,8 +216,11 @@ test('primary streaming persistence failures still settle and refresh context', 
       clientRef: 'event-persist-failure',
       title: 'Persist failure',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -221,8 +264,11 @@ test('terminal results quarantine only later generation from the same turn', asy
       clientRef: 'event-terminal',
       title: 'Event terminal',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -313,8 +359,11 @@ test('terminal enforcement is scoped to each provider and includes notification 
       clientRef: 'event-worker',
       title: 'Event worker',
       goal: 'primary becomes terminal',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
@@ -408,8 +457,11 @@ test('current SDK Task result persists and opens the exact completed child', asy
       clientRef: 'event-task-result-child',
       title: 'Task result child',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -446,7 +498,7 @@ test('current SDK Task result persists and opens the exact completed child', asy
       text: 'spawn worker',
     });
 
-    const child = context.history.childSessions('provider-1')[0];
+    const child = context.fixture.childRecords('provider-1')[0];
     assert.equal(child?.parentAppSessionId, 'provider-1');
     assert.equal(child?.childSessionId, 'child-1');
     assert.equal(child?.providerSessionId, 'provider-child-current');
@@ -484,8 +536,11 @@ test('background Task completion notification settles a child without TaskOutput
       clientRef: 'event-background-task-completion',
       title: 'Background task completion',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const provider = context.provider.session('provider-1');
     await provider.waitForPrompts(1);
@@ -521,7 +576,7 @@ test('background Task completion notification settles a child without TaskOutput
       text: 'launch background worker',
     });
 
-    const launched = context.history.childSessions('provider-1')[0];
+    const launched = context.fixture.childRecords('provider-1')[0];
     assert.equal(launched?.status, 'running');
     assert.equal(launched?.label, 'worker-2');
     assert.equal(launched?.modelId, 'custom:glm-5.2');
@@ -549,7 +604,7 @@ test('background Task completion notification settles a child without TaskOutput
       },
     });
 
-    assert.equal(context.history.childSessions('provider-1')[0]?.status, 'completed');
+    assert.equal(context.fixture.childRecords('provider-1')[0]?.status, 'completed');
     assert.equal(
       context.events.some(
         (event) =>
@@ -572,8 +627,11 @@ test('worker token usage updates totals without replacing the primary context re
       clientRef: 'event-tokens',
       title: 'Event tokens',
       goal: 'initial',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
@@ -649,8 +707,11 @@ test('loaded child context follows its parent-scoped logical identity', async ()
       clientRef: 'event-child-context',
       title: 'Child context',
       goal: 'initial',
-      interactionMode: 'agi',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
     });
     await context.provider.waitForPrompts('provider-1', 1);
     await context.waitForIdle();
@@ -727,6 +788,93 @@ test('loaded child context follows its parent-scoped logical identity', async ()
     );
     assert.equal(runtimeContext?.type, 'context.updated');
     assert.equal(runtimeContext.stats.compactions, 1);
+  } finally {
+    await context.dispose();
+  }
+});
+
+test('a native notification that arrives before the session is published is dropped', async () => {
+  const context = createSessionManagerTestContext();
+  const provider = new EarlyNativeNotificationSession('provider-early', {}, context.calls);
+  const streamGate = provider.deferNextStream();
+  context.runtime.createQueue.push(provider);
+
+  try {
+    await context.create({
+      sessionPurpose: 'chat',
+      clientRef: 'early-note',
+      title: 'Early note',
+      goal: 'initial',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+
+    // Surprise: subscribePrimary attaches onNotification before register, but
+    // isCurrent requires the live registry entry, so both the pre-subscribe
+    // note and the subscribe-time note are dropped. There is no pre-activation
+    // buffer. TODO: provider seam must preserve this drop or flush a buffer.
+    assert.equal(
+      appendedTexts(context.events).some((text) => text.includes('before DROIDEX subscribed')),
+      false,
+    );
+    assert.equal(
+      appendedTexts(context.events).some((text) => text.includes('as soon as DROIDEX subscribed')),
+      false,
+    );
+    assert.ok(context.events.some((event) => event.type === 'session.created'));
+
+    context.provider.emitNotification(
+      'provider-early',
+      skillActivationNotification('after the session is published'),
+    );
+    assert.equal(
+      appendedTexts(context.events).includes(
+        'Skill "early" activated: after the session is published',
+      ),
+      true,
+    );
+  } finally {
+    streamGate.resolve();
+    await context.dispose();
+  }
+});
+
+test('a transcript event is recorded to history before it is broadcast', async () => {
+  const context = createSessionManagerTestContext();
+  try {
+    await context.create({
+      sessionPurpose: 'chat',
+      clientRef: 'record-before-emit',
+      title: 'Record before emit',
+      goal: 'initial',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    const provider = context.provider.session('provider-1');
+    await provider.waitForPrompts(1);
+    await context.waitForIdle();
+
+    provider.queueStreamEvents([assistantTextDelta('durable before broadcast')]);
+    await context.handle({
+      type: 'session.send',
+      appSessionId: 'provider-1',
+      text: 'speak',
+    });
+
+    const recordIndex = context.calls.findIndex((call) =>
+      isRecordedTranscript(call, 'durable before broadcast'),
+    );
+    const emitIndex = context.calls.findIndex((call) =>
+      isAppendedTranscript(call, 'durable before broadcast'),
+    );
+    assert.ok(recordIndex >= 0);
+    assert.ok(emitIndex > recordIndex);
   } finally {
     await context.dispose();
   }

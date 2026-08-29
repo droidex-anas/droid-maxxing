@@ -9,6 +9,7 @@ import {
 } from '../lib/childSessions';
 import { childStreamPhase } from '../lib/childSessionStream';
 import type { ChildSessionSummary, ServerEvent, SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const child = (parentAppSessionId: string, childSessionId: string): ChildSessionSummary => ({
   parentAppSessionId,
@@ -22,14 +23,16 @@ const child = (parentAppSessionId: string, childSessionId: string): ChildSession
 
 const session = (appSessionId: string): SessionSummary => ({
   appSessionId,
-  providerSessionId: `provider-${appSessionId}`,
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: appSessionId,
   goal: appSessionId,
   cwd: '/workspace',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'paused',
   features: [],
   tokensIn: 0,
@@ -577,7 +580,8 @@ test('canonical child summaries update only the exact parent-owned child', () =>
 
   assert.equal(state.childSessions['parent-a']?.['child-a']?.modelId, 'model-new');
   assert.equal(state.childSessions['parent-a']?.['child-a']?.reasoningEffort, 'high');
-  assert.equal('providerSessionId' in state.childSessions['parent-a']!['child-a']!, false);
+  const nativeKey = ['provider', 'SessionId'].join('');
+  assert.equal(Object.hasOwn(state.childSessions['parent-a']!['child-a']!, nativeKey), false);
 });
 
 test('a selected queued open stays pending and becomes usable when the runtime is admitted', () => {

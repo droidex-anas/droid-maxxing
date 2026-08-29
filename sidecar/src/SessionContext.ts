@@ -1,4 +1,4 @@
-import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
+import type { DroidSessionExtension } from './providers/droid/DroidProviderSession.js';
 import {
   ContextPollHost,
   contextPollIntervalMs,
@@ -14,10 +14,11 @@ import {
 } from './contextSnapshots.js';
 import type { ContextStatsSnapshot, ServerEvent, SessionSummary } from './protocol.js';
 import type { SessionRegistry } from './SessionRegistry.js';
-import type { LiveSession } from './SessionLifecycle.js';
+import type { LiveNativeSession, LiveSession } from './SessionLifecycle.js';
 
 export interface ProviderOperationTarget {
-  session: FactorySession;
+  session: Pick<LiveNativeSession, 'sessionId' | 'onNotification'>;
+  droid: DroidSessionExtension;
   isCurrent(): boolean;
 }
 
@@ -54,7 +55,6 @@ export interface UsageOffset {
 
 interface SessionContextDependencies {
   registry: SessionRegistry<LiveSession>;
-  runtime: Pick<FactoryRuntime, 'readContextBreakdown'>;
   emit: (event: ServerEvent) => void;
   maxContextTokensForSummary: (summary: SessionSummary) => number | undefined;
   // Reports the context window the provider itself measured for a model, so
@@ -219,11 +219,11 @@ export class SessionContext {
     const generation = this.compactions.get(contextResourceKey(target)) ?? 0;
     if (!target.isCurrent()) return;
     try {
-      const stats = await target.session.getContextStats();
+      const stats = await target.droid.getContextStats();
       if (!this.isCurrent(target, epoch)) return;
       let breakdown: unknown;
       try {
-        breakdown = await this.dependencies.runtime.readContextBreakdown(target.session);
+        breakdown = await target.droid.readContextBreakdown();
       } catch {
         breakdown = undefined;
       }
@@ -387,7 +387,9 @@ export class SessionContext {
 
     const windowModelId =
       providerSnapshot.breakdown?.modelId ??
-      (isChildTarget(target) ? undefined : liveSession.summary.modelId);
+      (isChildTarget(target)
+        ? undefined
+        : liveSession.summary.configuration.providerSelection.modelId);
     if (windowModelId !== undefined && providerSnapshot.limit > 0)
       this.dependencies.noteContextWindow(windowModelId, providerSnapshot.limit);
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -9,6 +10,10 @@ import type { SessionSummary } from './protocol.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import { assistantTextDelta, FakeFactorySession } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
+import { TranscriptStore } from './persistence/TranscriptStore.js';
 
 class DeferredDesignPolicySession extends FakeFactorySession {
   private rejectDesignPolicyUpdate?: (error: Error) => void;
@@ -37,8 +42,11 @@ test('[L1] Ordinary create', { concurrency: false }, async () => {
       clientRef: 'l1',
       title: 'ordinary',
       goal: 'hello',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     const options = h.runtime.createCalls[0];
@@ -75,8 +83,11 @@ test('App response format enriches the provider prompt without changing the user
       title: 'App request',
       goal: '/visualize compare renderer timings',
       responseFormat: 'app-create',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     const createPrompt = h.provider.session('provider-1').prompts[0];
@@ -109,8 +120,11 @@ test('unsupported App response formats fail before reaching the provider', async
       clientRef: 'invalid-app-format',
       title: 'App request',
       goal: 'hello',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     await assert.rejects(
@@ -137,10 +151,12 @@ test('[L2] Spec create', { concurrency: false }, async () => {
       clientRef: 'l2',
       title: 'spec',
       goal: 'write',
-      interactionMode: 'spec',
-      autonomy: 'off',
-      modelId: 'spec-model',
-      reasoningEffort: 'high',
+      configuration: droidSessionConfiguration({
+        modelId: 'spec-model',
+        reasoningEffort: 'high',
+        interactionMode: 'spec',
+        autonomy: 'off',
+      }),
     });
 
     const options = h.runtime.createCalls[0];
@@ -149,7 +165,8 @@ test('[L2] Spec create', { concurrency: false }, async () => {
     assert.equal(options.specModeModelId, 'spec-model');
     assert.equal(options.workerModelId, undefined);
     assert.equal(
-      h.events.find((event) => event.type === 'session.created')?.session.interactionMode,
+      h.events.find((event) => event.type === 'session.created')?.session.configuration
+        .interactionMode,
       'spec',
     );
   } finally {
@@ -169,13 +186,16 @@ test(
         clientRef: 'design-purpose',
         title: 'design',
         goal: 'draw',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
 
       const created = h.events.find((event) => event.type === 'session.created');
       assert.equal(created?.session.sessionPurpose, 'design');
-      assert.equal(created?.session.interactionMode, 'auto');
+      assert.equal(created?.session.configuration.interactionMode, 'auto');
       assert.equal(created?.session.missionId, undefined);
       assert.equal(h.runtime.createCalls[0]?.decompSessionType, undefined);
     } finally {
@@ -196,13 +216,16 @@ test(
         clientRef: 'agi-chat',
         title: 'agi chat',
         goal: 'reason',
-        interactionMode: 'agi',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'agi',
+          autonomy: 'low',
+        }),
       });
 
       const created = h.events.find((event) => event.type === 'session.created');
       assert.equal(created?.session.sessionPurpose, 'chat');
-      assert.equal(created?.session.interactionMode, 'agi');
+      assert.equal(created?.session.configuration.interactionMode, 'agi');
       assert.equal(created?.session.missionId, undefined);
       assert.equal(h.runtime.createCalls[0]?.decompSessionType, undefined);
     } finally {
@@ -220,10 +243,15 @@ test('[L3] AGI create', { concurrency: false }, async () => {
       clientRef: 'l3',
       title: 'agi',
       goal: 'plan',
-      interactionMode: 'agi',
-      autonomy: 'low',
-      workerModel: 'worker',
-      validatorModel: 'validator',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'agi',
+        autonomy: 'low',
+      }),
+      droidMissionConfiguration: {
+        worker: { modelId: 'worker' },
+        validator: { modelId: 'validator' },
+      },
     });
 
     const options = h.runtime.createCalls[0];
@@ -250,8 +278,11 @@ test('[L4] Create failure cleanup', { concurrency: false }, async () => {
       clientRef: 'l4',
       title: 'failure',
       goal: 'fail',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     assert.equal(
@@ -314,7 +345,14 @@ test(
 
     try {
       h.fixture.seedHistorySummaries([
-        { ...summary('app-agi-chat', 'provider-agi-chat'), interactionMode: 'agi' },
+        {
+          ...summary('app-agi-chat', 'provider-agi-chat'),
+          configuration: droidSessionConfiguration({
+            modelId: 'model-default',
+            interactionMode: 'agi',
+            autonomy: 'low',
+          }),
+        },
       ]);
       writeProviderConversation(h.home, 'provider-agi-chat', 'AGI chat');
       h.runtime.loadQueue.set('provider-agi-chat', [
@@ -328,7 +366,7 @@ test(
 
       const resumed = h.events.find((event) => event.type === 'session.created')?.session;
       assert.equal(resumed?.sessionPurpose, 'chat');
-      assert.equal(resumed?.interactionMode, 'agi');
+      assert.equal(resumed?.configuration.interactionMode, 'agi');
       assert.equal(resumed?.missionId, undefined);
       assert.deepEqual(resumed?.features, []);
       assert.equal(resumed?.phase, 'paused');
@@ -364,7 +402,7 @@ test('[L6] Send lazily resumes a historical session', { concurrency: false }, as
 });
 
 test(
-  'mixed stable and provider identities preserve output across turns',
+  'resumed session output stays on the app identity across turns',
   { concurrency: false },
   async () => {
     const h = createSessionManagerTestContext();
@@ -378,7 +416,7 @@ test(
       h.runtime.loadQueue.set('provider-alias', [provider]);
 
       await h.handle({ type: 'session.send', appSessionId: 'app-alias', text: 'first' });
-      await h.handle({ type: 'session.send', appSessionId: 'provider-alias', text: 'second' });
+      await h.handle({ type: 'session.send', appSessionId: 'app-alias', text: 'second' });
 
       const textEvents = h.events.flatMap((event) =>
         event.type === 'event.appended' && event.event.kind === 'text' ? [event.event] : [],
@@ -409,13 +447,17 @@ test(
       h.fixture.seedHistorySummaries([
         {
           ...summary('app-pending-alias', providerSessionId),
-          modelId: 'model-old',
+          configuration: droidSessionConfiguration({
+            modelId: 'model-old',
+            interactionMode: 'auto',
+            autonomy: 'low',
+          }),
         },
       ]);
       writeProviderConversation(h.home, providerSessionId, 'Pending alias');
       await h.handle({
         type: 'settings.agent.update',
-        appSessionId: providerSessionId,
+        appSessionId: 'app-pending-alias',
         agent: 'primary',
         modelId: 'model-default',
       });
@@ -426,7 +468,7 @@ test(
 
       await h.handle({
         type: 'session.send',
-        appSessionId: providerSessionId,
+        appSessionId: 'app-pending-alias',
         text: 'apply pending model',
       });
 
@@ -461,8 +503,11 @@ test('[L7] Send-now steers ahead of queued sends', { concurrency: false }, async
       clientRef: 'l7',
       title: 'L7',
       goal: 'first',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.handle({ type: 'session.send', appSessionId: 'provider-1', text: 'second' });
     await h.handle({ type: 'session.sendNow', appSessionId: 'provider-1', text: 'steer' });
@@ -487,8 +532,11 @@ test('closing an active turn suppresses later provider errors and context refres
       clientRef: 'close-active',
       title: 'Close active',
       goal: 'wait',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.provider.waitForPrompts('provider-close', 1);
     h.provider.session('provider-close').nextStreamError = new Error('transport closed');
@@ -518,8 +566,11 @@ test('closing suppresses in-flight policy and context updates', async () => {
       clientRef: 'close-late-effects',
       title: 'Close late effects',
       goal: 'wait',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
 
     await h.handle({ type: 'session.close', appSessionId: 'provider-late-effects' });
@@ -545,8 +596,11 @@ test('[L8] Stop state matrix', { concurrency: false }, async () => {
       clientRef: 'l8',
       title: 'L8',
       goal: 'idle',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     await h.handle({ type: 'session.interrupt', appSessionId: 'provider-1' });
@@ -595,48 +649,49 @@ test(
         clientRef: 'l9',
         title: 'L9',
         goal: 'go',
-        interactionMode: 'auto',
-        autonomy: 'low',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
       });
+      await h.waitForIdle();
+      const specCallsAfterCreate = h.calls.filter((call) => call.method === 'enterSpecMode').length;
       await h.handle({
         type: 'session.updateSettings',
         appSessionId: 'provider-1',
-        interactionMode: 'spec',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'spec',
+          autonomy: 'low',
+        }),
       });
       assert.equal(
-        h.calls.some((call) => call.method === 'enterSpecMode'),
-        true,
+        h.calls.filter((call) => call.method === 'enterSpecMode').length,
+        specCallsAfterCreate,
       );
       assert.equal(
-        h.events.filter((event) => event.type === 'session.updated').pop()?.session.interactionMode,
+        h.events.filter((event) => event.type === 'session.updated').pop()?.session.configuration
+          .interactionMode,
         'spec',
       );
       assert.equal(
-        h.events.filter((event) => event.type === 'session.updated').pop()?.session.autonomy,
+        h.events.filter((event) => event.type === 'session.updated').pop()?.session.configuration
+          .autonomy,
         'low',
       );
 
-      const updatesBeforeFailure = h.events.filter(
-        (event) => event.type === 'session.updated',
-      ).length;
       h.provider.session('provider-1').nextEnterSpecModeError = new Error('mode rejected');
-      await h.handle({
-        type: 'session.updateSettings',
-        appSessionId: 'provider-1',
-        interactionMode: 'spec',
-      });
+      await h.handle({ type: 'session.send', appSessionId: 'provider-1', text: 'next' });
+      await h.waitForIdle();
 
       assert.equal(
         h.events.some(
           (event) =>
             event.type === 'error' &&
-            event.message === 'Could not switch interaction mode: mode rejected',
+            event.message === 'Could not apply session configuration: mode rejected',
         ),
         true,
-      );
-      assert.equal(
-        h.events.filter((event) => event.type === 'session.updated').length,
-        updatesBeforeFailure,
       );
     } finally {
       await h.dispose();
@@ -653,50 +708,166 @@ test('[L10] Autonomy mutation reports provider rejection', { concurrency: false 
       clientRef: 'l10',
       title: 'L10',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'off',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'off',
+      }),
     });
-    await h.handle({ type: 'session.updateSettings', appSessionId: 'provider-1', autonomy: 'low' });
-    assert.equal(
-      h.provider
-        .session('provider-1')
-        .settings.some((settings) => settings['autonomyLevel'] === 'low'),
-      true,
-    );
-    assert.equal(
-      h.events.filter((event) => event.type === 'session.updated').pop()?.session.autonomy,
-      'low',
-    );
-
-    // Let the successful update's trailing context-refresh chain settle so the
-    // baseline below measures a quiescent state.
-    for (let i = 0; i < 5; i++) await h.waitForIdle();
-    const updatesBeforeFailure = h.events.filter(
-      (event) => event.type === 'session.updated',
-    ).length;
-    h.provider.session('provider-1').nextUpdateSettingsError = new Error('autonomy rejected');
+    await h.waitForIdle();
+    const nativeWritesAfterCreate = h.provider.session('provider-1').settings.length;
     await h.handle({
       type: 'session.updateSettings',
       appSessionId: 'provider-1',
-      autonomy: 'high',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
+    assert.equal(h.provider.session('provider-1').settings.length, nativeWritesAfterCreate);
+    assert.equal(
+      h.events.filter((event) => event.type === 'session.updated').pop()?.session.configuration
+        .autonomy,
+      'low',
+    );
+
+    h.provider.session('provider-1').nextUpdateSettingsError = new Error('autonomy rejected');
+    await h.handle({ type: 'session.send', appSessionId: 'provider-1', text: 'next' });
+    await h.waitForIdle();
 
     assert.equal(
       h.events.some(
         (event) =>
           event.type === 'error' &&
-          event.message === 'Could not change autonomy: autonomy rejected',
+          event.message === 'Could not apply session configuration: autonomy rejected',
       ),
       true,
-    );
-    assert.equal(
-      h.events.filter((event) => event.type === 'session.updated').length,
-      updatesBeforeFailure,
     );
   } finally {
     await h.dispose();
   }
 });
+
+test(
+  'create, resume, send, interrupt, and close publish in that user-visible order',
+  { concurrency: false },
+  async () => {
+    const h = createSessionManagerTestContext();
+    const createGate = h.runtime.deferNextCreateStream('provider-1');
+
+    try {
+      await h.create({
+        sessionPurpose: 'chat',
+        clientRef: 'lifecycle-order',
+        title: 'Order',
+        goal: 'first',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
+      });
+
+      const created = h.events.find((event) => event.type === 'session.created');
+      const createdIndex = h.events.findIndex((event) => event.type === 'session.created');
+      const streamingIndex = h.events.findIndex(
+        (event) => event.type === 'session.updated' && event.session.streaming,
+      );
+      assert.equal(created?.clientRef, 'lifecycle-order');
+      assert.equal(created?.session.appSessionId, 'provider-1');
+      assert.ok(streamingIndex > createdIndex);
+      assert.equal(
+        h.events.some((event) => event.type === 'session.closed'),
+        false,
+      );
+
+      createGate.resolve();
+      await h.provider.waitForPrompts('provider-1', 1);
+      await h.waitForIdle();
+
+      await h.handle({ type: 'session.resume', appSessionId: 'provider-1' });
+      const resumed = h.events.filter((event) => event.type === 'session.created').at(-1);
+      assert.equal(resumed?.clientRef, 'resume:provider-1');
+      assert.equal(resumed?.session.appSessionId, 'provider-1');
+      assert.equal(h.runtime.loadCalls.length, 0);
+
+      const sendGate = h.provider.deferNextStream('provider-1');
+      const sending = h.handle({
+        type: 'session.send',
+        appSessionId: 'provider-1',
+        text: 'second',
+      });
+      await h.provider.waitForPrompts('provider-1', 2);
+      await h.handle({ type: 'session.interrupt', appSessionId: 'provider-1' });
+      assert.equal(h.calls.filter((call) => call.method === 'interrupt').length, 1);
+      sendGate.resolve();
+      await sending;
+      await h.waitForIdle();
+
+      await h.handle({ type: 'session.close', appSessionId: 'provider-1' });
+
+      const resumeIndex = h.events.findIndex(
+        (event) => event.type === 'session.created' && event.clientRef === 'resume:provider-1',
+      );
+      const pausedIndex = h.events.findIndex(
+        (event) => event.type === 'session.updated' && event.session.phase === 'paused',
+      );
+      const closed = h.events.find((event) => event.type === 'session.closed');
+      const closedIndex = h.events.findIndex((event) => event.type === 'session.closed');
+      assert.ok(createdIndex < resumeIndex);
+      assert.ok(resumeIndex < pausedIndex);
+      assert.ok(pausedIndex < closedIndex);
+      assert.equal(closed?.appSessionId, 'provider-1');
+    } finally {
+      createGate.resolve();
+      await h.dispose();
+    }
+  },
+);
+
+test(
+  'two creates with the same clientRef replay the stored session',
+  { concurrency: false },
+  async () => {
+    const h = createSessionManagerTestContext();
+
+    try {
+      await h.create({
+        sessionPurpose: 'chat',
+        clientRef: 'shared-ref',
+        title: 'First',
+        goal: 'one',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
+      });
+      await h.provider.waitForPrompts('provider-1', 1);
+      await h.create({
+        sessionPurpose: 'chat',
+        clientRef: 'shared-ref',
+        title: 'Second',
+        goal: 'two',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
+      });
+
+      const created = h.events.filter((event) => event.type === 'session.created');
+      assert.equal(h.runtime.createCalls.length, 1);
+      assert.equal(created.at(-1)?.session.appSessionId, 'provider-1');
+      assert.equal(created.at(-1)?.session.title, 'First');
+      assert.deepEqual(h.provider.session('provider-1').prompts, ['one']);
+      assert.equal(h.fixture.storedSession('provider-1')?.summary.title, 'First');
+    } finally {
+      await h.dispose();
+    }
+  },
+);
 
 test('Summary patches preserve existing provider transcripts', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
@@ -707,8 +878,11 @@ test('Summary patches preserve existing provider transcripts', { concurrency: fa
       clientRef: 'l11',
       title: 'L11',
       goal: 'go',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     const file = path.join(h.home, '.factory', 'sessions', 'provider-1.jsonl');
     const transcript =
@@ -726,25 +900,23 @@ test('Summary patches preserve existing provider transcripts', { concurrency: fa
     writeFileSync(file, transcript);
 
     await h.waitForIdle();
-    const syncSummariesBefore = h.calls.filter(
-      (call) => call.target === 'history' && call.method === 'syncSummaries',
-    ).length;
 
     await h.handle({
       type: 'session.updateSettings',
       appSessionId: 'provider-1',
-      autonomy: 'high',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'high',
+      }),
     });
 
     assert.equal(
-      h.calls.filter((call) => call.target === 'history' && call.method === 'syncSummaries').length,
-      syncSummariesBefore + 1,
-    );
-    assert.equal(
-      h.events.filter((event) => event.type === 'session.updated').at(-1)?.session.autonomy,
+      h.events.filter((event) => event.type === 'session.updated').at(-1)?.session.configuration
+        .autonomy,
       'high',
     );
-    assert.equal(h.history.summaryPatchesAndHidden().patches.get('provider-1')?.autonomy, 'high');
+    assert.equal(h.fixture.storedSession('provider-1')?.summary.configuration.autonomy, 'high');
     assert.equal(readFileSync(file, 'utf8'), transcript);
   } finally {
     await h.dispose();
@@ -768,14 +940,17 @@ test(
       title: 'Persisted title',
       goal: 'transient goal',
       workspaceKind: 'folder',
-      modelId: 'primary-model',
-      reasoningEffort: 'high',
+      configuration: droidSessionConfiguration({
+        modelId: 'primary-model',
+        reasoningEffort: 'high',
+        interactionMode: 'auto',
+        autonomy: 'high',
+      }),
+      droidMissionConfiguration: {
+        worker: { modelId: 'worker-model', reasoningEffort: 'medium' },
+        validator: { modelId: 'validator-model', reasoningEffort: 'low' },
+      },
       compactionModel: 'compaction-model',
-      workerModelId: 'worker-model',
-      workerReasoningEffort: 'medium',
-      validatorModelId: 'validator-model',
-      validatorReasoningEffort: 'low',
-      autonomy: 'high',
       phase: 'running',
       streaming: true,
       queuedSends: 2,
@@ -811,18 +986,20 @@ test(
           'provider-older',
         ],
         sessionPurpose: 'chat',
-        interactionMode: 'auto',
         title: 'Persisted title',
         cwd: '',
         workspaceKind: 'folder',
-        modelId: 'primary-model',
-        reasoningEffort: 'high',
+        configuration: droidSessionConfiguration({
+          modelId: 'primary-model',
+          reasoningEffort: 'high',
+          interactionMode: 'auto',
+          autonomy: 'high',
+        }),
+        droidMissionConfiguration: {
+          worker: { modelId: 'worker-model', reasoningEffort: 'medium' },
+          validator: { modelId: 'validator-model', reasoningEffort: 'low' },
+        },
         compactionModel: 'compaction-model',
-        workerModelId: 'worker-model',
-        workerReasoningEffort: 'medium',
-        validatorModelId: 'validator-model',
-        validatorReasoningEffort: 'low',
-        autonomy: 'high',
         tokensIn: 11,
         tokensOut: 12,
         contextTokens: 13,
@@ -845,19 +1022,147 @@ test(
   },
 );
 
+test('F7 create persists a distinct app id before native startup', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'droidex-f7-mgr-'));
+  const db = new DroidexDatabase(path.join(dir, 'state', 'droidex.sqlite'));
+  const store = new SessionStore(db);
+  const transcript = new TranscriptStore(db);
+  const boundaries: string[] = [];
+  const h = createSessionManagerTestContext({
+    database: db,
+    nextAppSessionId: () => 'app-f7',
+    nextTurnId: () => 'turn-f7',
+    onCreateBoundary: (boundary) => {
+      boundaries.push(boundary);
+      if (boundary === 'before-provider-open') {
+        assert.equal(h.runtime.createCalls.length, 0);
+        assert.equal(store.get('app-f7')?.lifecycleStatus, 'initializing');
+      }
+    },
+  });
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'f7-create',
+      title: 'F7',
+      goal: 'hello',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    const created = h.events.find((event) => event.type === 'session.created');
+    assert.equal(created?.type, 'session.created');
+    if (created?.type === 'session.created') {
+      assert.equal(created.session.appSessionId, 'app-f7');
+      assert.notEqual(created.session.appSessionId, 'provider-1');
+    }
+    const persisted = boundaries.indexOf('provisional-persisted');
+    const beforeOpen = boundaries.indexOf('before-provider-open');
+    const bound = boundaries.indexOf('binding-persisted');
+    const activated = boundaries.indexOf('activated');
+    assert.notEqual(persisted, -1, 'missing create boundary: provisional-persisted');
+    assert.notEqual(beforeOpen, -1, 'missing create boundary: before-provider-open');
+    assert.notEqual(bound, -1, 'missing create boundary: binding-persisted');
+    assert.notEqual(activated, -1, 'missing create boundary: activated');
+    assert.ok(persisted < beforeOpen);
+    assert.ok(bound < activated);
+    assert.equal(store.get('app-f7')?.binding.providerSessionId, 'provider-1');
+    assert.equal(store.get('app-f7')?.lifecycleStatus, 'running');
+    assert.equal(store.findByClientRef('f7-create')?.summary.appSessionId, 'app-f7');
+    await h.provider.waitForPrompts('provider-1', 1);
+
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'f7-create',
+      title: 'F7 replay',
+      goal: 'again',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    assert.equal(h.runtime.createCalls.length, 1);
+    assert.equal(transcript.page({ kind: 'session', appSessionId: 'app-f7' }).events.length, 0);
+  } finally {
+    await h.dispose();
+    try {
+      db.close();
+    } catch {
+      // SessionManager shutdown already closed the shared database.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('F8 resume rejects a native id and does not start a second runtime', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'droidex-f8-resume-'));
+  const db = new DroidexDatabase(path.join(dir, 'state', 'droidex.sqlite'));
+  const store = new SessionStore(db);
+  const h = createSessionManagerTestContext({
+    database: db,
+    nextAppSessionId: () => 'app-f8',
+    nextTurnId: () => 'turn-f8',
+  });
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'f8-resume',
+      title: 'F8',
+      goal: 'hello',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    await h.provider.waitForPrompts('provider-1', 1);
+    const loadsBefore = h.runtime.loadCalls.length;
+    await h.handle({ type: 'session.resume', appSessionId: 'native-1' });
+    assert.equal(h.runtime.loadCalls.length, loadsBefore);
+    assert.equal(store.get('native-1'), undefined);
+    assert.equal(store.get('app-f8')?.lifecycleStatus, 'running');
+    assert.equal(
+      h.events.some((event) => event.type === 'error' && event.appSessionId === 'native-1'),
+      true,
+    );
+    await h.handle({ type: 'session.loadHistory', appSessionId: 'native-1' });
+    assert.equal(
+      h.events.some(
+        (event) => event.type === 'session.history.error' && event.appSessionId === 'native-1',
+      ),
+      true,
+    );
+  } finally {
+    await h.dispose();
+    try {
+      db.close();
+    } catch {
+      // SessionManager shutdown already closed the shared database.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function summary(appSessionId: string, providerSessionId: string): SessionSummary {
   const now = Date.now();
   return {
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Historical ${appSessionId}`,
     goal: '',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,

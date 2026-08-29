@@ -3,18 +3,21 @@ import assert from 'node:assert/strict';
 
 import { adaptEvent, initialState, reducer, toastMessageForEvent } from './useStore';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration, sessionAutonomy } from '../lib/sessionConfiguration';
 
 const session: SessionSummary = {
   appSessionId: 'app-1',
-  providerSessionId: 'provider-1',
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: 'Chat',
   goal: '',
   cwd: '',
   workspaceKind: 'none',
-  autonomy: 'medium',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'medium',
+  }),
   phase: 'running',
   features: [],
   tokensIn: 0,
@@ -86,7 +89,7 @@ test('a pending autonomy change settles only on a confirmed level change', () =>
   // The provider confirming the requested level settles it.
   const confirmed = reducer(requested, {
     type: 'SESSION_UPDATED',
-    session: { ...session, autonomy: 'high' },
+    session: { ...session, configuration: { ...session.configuration, autonomy: 'high' } },
   });
   assert.equal(confirmed.pendingAutonomy['app-1'], undefined);
 
@@ -94,7 +97,7 @@ test('a pending autonomy change settles only on a confirmed level change', () =>
   // request is no longer the latest truth.
   const externallyChanged = reducer(requested, {
     type: 'SESSION_UPDATED',
-    session: { ...session, autonomy: 'off' },
+    session: { ...session, configuration: { ...session.configuration, autonomy: 'off' } },
   });
   assert.equal(externallyChanged.pendingAutonomy['app-1'], undefined);
 });
@@ -112,9 +115,9 @@ test('closing a session drops its pending autonomy entry', () => {
 test('a failed autonomy update settles pending and toasts without failing the session', () => {
   const failure = {
     type: 'error' as const,
-    code: 'session.autonomy_update_failed',
+    code: 'session.configuration_update_failed',
     appSessionId: 'app-1',
-    message: 'Could not change autonomy: provider rejected the update',
+    message: 'Could not apply session configuration: provider rejected the update',
     recoverable: true as const,
   };
 
@@ -129,14 +132,16 @@ test('a failed autonomy update settles pending and toasts without failing the se
   };
   const next = reducer(state, action!);
   assert.equal(next.pendingAutonomy['app-1'], undefined);
-  assert.equal(next.sessions['app-1']?.phase, 'running');
-  assert.equal(next.sessions['app-1']?.autonomy, 'medium');
+  const confirmedSession = next.sessions['app-1'];
+  assert.ok(confirmedSession);
+  assert.equal(confirmedSession.phase, 'running');
+  assert.equal(sessionAutonomy(confirmedSession), 'medium');
 });
 
 test('an autonomy failure without a session id produces no reducer action', () => {
   const action = adaptEvent({
     type: 'error',
-    code: 'session.autonomy_update_failed',
+    code: 'session.configuration_update_failed',
     message: 'no session',
     recoverable: true,
   });

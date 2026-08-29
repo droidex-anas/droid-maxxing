@@ -1,10 +1,3 @@
-import {
-  hydrateHistoricalSession,
-  loadSessionHistory,
-  loadSessionPage,
-  loadSessionTranscriptWindow,
-  resolveSessionChain,
-} from './history.js';
 import type {
   ChildSessionSummary,
   ProgressEntry,
@@ -14,36 +7,40 @@ import type {
   TranscriptEvent,
 } from './protocol.js';
 import type { CompactType } from './compaction.js';
+import type { SessionStore } from './persistence/SessionStore.js';
+import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import { errMsg } from './sessionHelpers.js';
+import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
+import {
+  liftRendererTranscriptEvent,
+  projectTranscriptEvent,
+  type CanonicalIdentity,
+} from './sessionEvents.js';
+import {
+  childHistoryPageFromStore,
+  historyPageFromStore,
+  requireStoredSession,
+} from './sessionCanonicalServing.js';
 import { StreamingDeltaCoalescer, streamingEventOwner } from './streamingDeltaCoalescer.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
-interface TimelineHistory {
-  recordEvent(event: TranscriptEvent): void;
-}
 type TimelineError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
-
-export interface SessionTimelineLoaders {
-  list: typeof loadSessionHistory;
-  page: typeof loadSessionPage;
-  hydrateMission: typeof hydrateHistoricalSession;
-  resolveChain: typeof resolveSessionChain;
-  transcriptWindow: typeof loadSessionTranscriptWindow;
-}
 
 export interface SessionTimelineRegistry {
   resolveSummary(id: string): SessionSummary | undefined;
+  getCanonicalSummary(id: string): SessionSummary | undefined;
   getLive(id: string): unknown;
 }
 
 export interface SessionTimelineDependencies {
   registry: SessionTimelineRegistry;
-  history: TimelineHistory;
   getChildSessions: (appSessionId: string) => ChildSessionSummary[];
   emit: (event: ServerEvent) => void;
   emitError: (error: TimelineError) => void;
   now?: () => number;
-  loaders?: SessionTimelineLoaders;
+  transcriptStore?: Pick<TranscriptStore, 'append'> & Partial<Pick<TranscriptStore, 'page'>>;
+  sessionStore?: Pick<SessionStore, 'get'>;
+  canonicalIdentity?: CanonicalIdentity;
   // Streaming deltas buffered longer than this are flushed as one event.
   // 0 disables coalescing (every delta records and emits immediately).
   streamingCoalesceMs?: number;
@@ -64,31 +61,8 @@ interface SessionHistoryPage {
 
 // Protocol mirror of src/lib/transcriptStoreMemory.ts. Scroll pages are smaller;
 // this ceiling also permits one bounded recent-tail repair after local release.
-const MAX_HISTORY_PAGE_EVENTS = 1_600;
-
-// Preserve the existing enumerable `cursor: undefined` loader boundary while
-// keeping the extracted module clean under exactOptionalPropertyTypes. Limits
-// tune only local disk/bridge page size; they never change provider traffic.
-function historyWindowOptions(
-  cursor: string | undefined,
-  limit: number | undefined,
-  role?: SessionRole,
-): { cursor?: string; limit?: number; role?: SessionRole } {
-  const options: { cursor?: string; limit?: number; role?: SessionRole } = {};
-  Object.defineProperty(options, 'cursor', { enumerable: true, value: cursor });
-  if (limit !== undefined && Number.isFinite(limit)) {
-    options.limit = Math.min(MAX_HISTORY_PAGE_EVENTS, Math.max(1, Math.floor(limit)));
-  }
-  if (role !== undefined) options.role = role;
-  return options;
-}
-
 const DEFAULT_STREAMING_COALESCE_MS = 40;
 const DEFAULT_STREAMING_COALESCE_MAX_BYTES = 64 * 1024;
-
-function dedupeProviderSessionIds(providerSessionIds: readonly string[]): string[] {
-  return [...new Set(providerSessionIds.filter(Boolean))];
-}
 
 export class StreamingTranscriptPersistenceError extends Error {
   readonly isReported = true;
@@ -115,18 +89,10 @@ function streamingSourceKey(appSessionId: string, sourceSessionId: string): stri
 
 export class SessionTimeline {
   private statusSeq = 0;
-  private readonly loaders: SessionTimelineLoaders;
   private readonly streaming: StreamingDeltaCoalescer;
   private readonly streamingFlushFailures = new Map<string, StreamingTranscriptPersistenceError>();
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
-    this.loaders = dependencies.loaders ?? {
-      list: loadSessionHistory,
-      page: loadSessionPage,
-      hydrateMission: hydrateHistoricalSession,
-      resolveChain: resolveSessionChain,
-      transcriptWindow: loadSessionTranscriptWindow,
-    };
     this.streaming = new StreamingDeltaCoalescer({
       windowMs: dependencies.streamingCoalesceMs ?? DEFAULT_STREAMING_COALESCE_MS,
       maxBytes: dependencies.streamingCoalesceMaxBytes ?? DEFAULT_STREAMING_COALESCE_MAX_BYTES,
@@ -136,100 +102,42 @@ export class SessionTimeline {
     });
   }
 
-  list(): void {
-    try {
-      this.dependencies.emit({ type: 'history.list', sessions: this.loaders.list() });
-    } catch (error) {
-      this.dependencies.emitError({ message: errMsg(error) });
-    }
-  }
-
   load(appSessionIdOrProviderSessionId: string, cursor?: string, limit?: number): void {
-    const summary = this.dependencies.registry.resolveSummary(appSessionIdOrProviderSessionId);
-    const appSessionId = summary?.appSessionId ?? appSessionIdOrProviderSessionId;
-    const providerSessionId = summary?.providerSessionId ?? appSessionIdOrProviderSessionId;
-    try {
-      const history =
-        summary?.sessionPurpose === 'mission-control'
-          ? this.loaders.hydrateMission(appSessionId, historyWindowOptions(cursor, limit))
-          : this.loadStandard(appSessionId, providerSessionId, cursor, limit);
-      const transcripts = history.transcripts.map((event) => ({ ...event, appSessionId }));
-      this.record(transcripts);
-      if (cursor) {
-        this.emitHistory({
-          appSessionId,
-          progress: [],
-          transcripts,
-          mode: 'prepend',
-          ...(history.olderCursor ? { olderCursor: history.olderCursor } : {}),
-        });
-        return;
-      }
-      this.emitHistory({
-        appSessionId,
-        progress: history.progress,
-        transcripts,
-        childSessions: this.dependencies.getChildSessions(appSessionId),
-        mode: 'replace',
-        ...(history.olderCursor ? { olderCursor: history.olderCursor } : {}),
-      });
-    } catch (error) {
-      if (cursor) {
-        this.emitHistory({
-          appSessionId,
-          progress: [],
-          transcripts: [],
-          mode: 'prepend',
-        });
-        return;
-      }
-      if (this.dependencies.registry.getLive(appSessionId)) {
-        this.emitHistory({
-          appSessionId,
-          progress: [],
-          transcripts: [],
-          childSessions: this.dependencies.getChildSessions(appSessionId),
-          mode: 'replace',
-        });
-        return;
-      }
-      const message = errMsg(error);
-      this.dependencies.emit({ type: 'session.history.error', appSessionId, message });
-      this.dependencies.emitError({
-        appSessionId,
-        providerSessionId,
-        message,
-        recoverable: true,
-      });
+    const store = this.dependencies.sessionStore;
+    const transcriptStore = this.dependencies.transcriptStore;
+    const pageFn = transcriptStore?.page;
+    if (!store || !transcriptStore || !pageFn) {
+      this.emitHistoryError(appSessionIdOrProviderSessionId, 'Canonical transcript store is required.');
+      return;
     }
-  }
-
-  loadProviderPage(providerSessionId: string, cursor?: string, limit?: number): void {
-    const summary = this.dependencies.registry.resolveSummary(providerSessionId);
-    const appSessionId = summary?.appSessionId ?? providerSessionId;
-    const resolvedProviderSessionId = summary?.providerSessionId ?? providerSessionId;
     try {
-      const page = this.loaders.page(resolvedProviderSessionId, appSessionId, cursor, limit);
-      this.record(page.events);
-      this.dependencies.emit({
-        type: 'session.history',
-        appSessionId,
+      const stored = requireStoredSession(store, appSessionIdOrProviderSessionId);
+      const page = historyPageFromStore(
+        { page: pageFn.bind(transcriptStore) },
+        stored.summary.appSessionId,
+        cursor,
+        limit,
+      );
+      this.emitHistory({
+        appSessionId: stored.summary.appSessionId,
         progress: [],
-        transcripts: page.events,
+        transcripts: page.transcripts,
+        ...(cursor
+          ? { mode: 'prepend' as const }
+          : {
+              mode: 'replace' as const,
+              childSessions: this.dependencies.getChildSessions(stored.summary.appSessionId),
+            }),
+        ...(page.olderCursor !== undefined ? { olderCursor: page.olderCursor } : {}),
       });
     } catch (error) {
-      this.dependencies.emitError({
-        appSessionId,
-        providerSessionId: resolvedProviderSessionId,
-        message: errMsg(error),
-      });
+      this.emitHistoryError(appSessionIdOrProviderSessionId, errMsg(error));
     }
   }
 
   loadChildHistory({
     appSessionId,
     childSessionId,
-    childProviderSessionIds,
     role,
     cursor,
     limit,
@@ -241,48 +149,31 @@ export class SessionTimeline {
     cursor?: string;
     limit?: number;
   }): void {
+    const transcriptStore = this.dependencies.transcriptStore;
+    const pageFn = transcriptStore?.page;
+    if (!transcriptStore || !pageFn) {
+      this.emitHistoryError(appSessionId, 'Canonical transcript store is required.', childSessionId);
+      return;
+    }
     try {
-      const currentProviderSessionId = childProviderSessionIds.at(-1) ?? childSessionId;
-      const discoveredChain = this.loaders.resolveChain(childSessionId, currentProviderSessionId);
-      const chain = dedupeProviderSessionIds([
-        ...childProviderSessionIds.slice(0, -1),
-        ...discoveredChain.filter((id) => id !== currentProviderSessionId),
-        currentProviderSessionId,
-      ]);
-      const window = this.loaders.transcriptWindow(
+      const page = childHistoryPageFromStore(
+        { page: pageFn.bind(transcriptStore) },
         appSessionId,
-        chain,
-        historyWindowOptions(cursor, limit, role),
+        childSessionId,
+        cursor,
+        limit,
       );
-      const transcripts = window.events.map((event) => ({
-        ...event,
-        appSessionId,
-        sourceSessionId: childSessionId,
-        role,
-      }));
+      const events = page.transcripts.map((event) => ({ ...event, role }));
       this.emitHistory({
         appSessionId,
         childSessionId,
         progress: [],
-        transcripts,
+        transcripts: events,
         mode: cursor ? 'prepend' : 'replace',
-        ...(window.olderCursor ? { olderCursor: window.olderCursor } : {}),
+        ...(page.olderCursor ? { olderCursor: page.olderCursor } : {}),
       });
     } catch (error) {
-      const providerSessionId = childProviderSessionIds.at(-1) ?? childSessionId;
-      const message = errMsg(error);
-      this.dependencies.emit({
-        type: 'session.history.error',
-        appSessionId,
-        childSessionId,
-        message,
-      });
-      this.dependencies.emitError({
-        appSessionId,
-        providerSessionId,
-        message,
-        recoverable: true,
-      });
+      this.emitHistoryError(appSessionId, errMsg(error), childSessionId);
     }
   }
 
@@ -299,7 +190,7 @@ export class SessionTimeline {
 
   // Emits every buffered delta run immediately. Shutdown only: turn settlement
   // and mid-turn side effects flush the one source that owns the run.
-  flushStreaming(): void {
+  flushStreaming(_deadline?: ShutdownDeadline): void {
     this.streaming.flushAll();
   }
 
@@ -370,15 +261,33 @@ export class SessionTimeline {
   }
 
   private recordAndEmit(event: TranscriptEvent): void {
-    this.dependencies.history.recordEvent(event);
-    this.emitRecordedEvent(event);
+    const store = this.dependencies.transcriptStore;
+    if (!store) {
+      this.emitRecordedEvent(event);
+      return;
+    }
+    const persistStartedAt = performance.now();
+    let persisted;
+    try {
+      persisted = store.append(
+        liftRendererTranscriptEvent(event, this.canonicalIdentityFor(event)),
+      );
+    } catch (error) {
+      hotPathMetrics.recordPersistenceFailure();
+      throw error;
+    }
+    hotPathMetrics.recordPersist(performance.now() - persistStartedAt);
+    const projected = projectTranscriptEvent(persisted);
+    if (!projected) return;
+    this.emitRecordedEvent(projected);
   }
 
   private emitRecordedEvent(event: TranscriptEvent): void {
     // Emit timing covers handoff into the ordered bridge queue. Priority or
     // size-boundary events can synchronously trigger a flush inside that call;
-    // transportMs isolates the serialization + fan-out slice. Persistence is
-    // measured independently by the worker-backed persistence queue.
+    // transportMs isolates the serialization + fan-out slice. Persist timing is
+    // recorded around the in-process TranscriptStore append.
+
     const emitStartedAt = performance.now();
     this.dependencies.emit({ type: 'event.appended', event });
     hotPathMetrics.recordEmit(performance.now() - emitStartedAt);
@@ -427,24 +336,31 @@ export class SessionTimeline {
     });
   }
 
-  private loadStandard(
-    appSessionId: string,
-    providerSessionId: string,
-    cursor?: string,
-    limit?: number,
-  ): ReturnType<typeof hydrateHistoricalSession> {
-    const chain = this.loaders.resolveChain(appSessionId, providerSessionId);
-    if (chain.length === 0) throw new Error(`Session history not found for ${providerSessionId}`);
-    const window = this.loaders.transcriptWindow(
-      appSessionId,
-      chain,
-      historyWindowOptions(cursor, limit),
-    );
+  private canonicalIdentityFor(event: TranscriptEvent): CanonicalIdentity {
+    if (this.dependencies.canonicalIdentity) return this.dependencies.canonicalIdentity;
+    const stored = this.dependencies.sessionStore?.get(event.appSessionId);
+    if (!stored) {
+      throw new Error('canonicalIdentity is required when transcriptStore is set.');
+    }
     return {
-      progress: [],
-      transcripts: window.events,
-      ...(window.olderCursor ? { olderCursor: window.olderCursor } : {}),
+      providerDriverKind: stored.binding.providerDriverKind,
+      providerInstanceId: stored.binding.providerInstanceId,
+      runtimeGeneration: stored.binding.runtimeGeneration,
     };
+  }
+
+  private emitHistoryError(appSessionId: string, message: string, childSessionId?: string): void {
+    this.dependencies.emit({
+      type: 'session.history.error',
+      appSessionId,
+      ...(childSessionId ? { childSessionId } : {}),
+      message,
+    });
+    this.dependencies.emitError({
+      appSessionId,
+      message,
+      recoverable: true,
+    });
   }
 
   private emitHistory(page: SessionHistoryPage): void {
@@ -460,9 +376,5 @@ export class SessionTimeline {
       loadedCount: page.transcripts.length,
       hasMore: Boolean(page.olderCursor),
     });
-  }
-
-  private record(events: TranscriptEvent[]): void {
-    for (const event of events) this.dependencies.history.recordEvent(event);
   }
 }

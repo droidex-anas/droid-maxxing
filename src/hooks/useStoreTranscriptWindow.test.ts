@@ -4,17 +4,21 @@ import { transcriptRehydrationLimit } from '../lib/transcriptStoreMemory';
 import { estimateTranscriptCost } from '../lib/transcriptWindow';
 import type { ChildSessionSummary, SessionSummary, TranscriptEvent } from '../types/bridge';
 import { initialState, reducer, type AppState } from './useStore';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function session(appSessionId: string, streaming = false): SessionSummary {
   return {
     appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '/tmp',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'running',
     streaming,
     features: [],

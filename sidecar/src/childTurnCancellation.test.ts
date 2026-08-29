@@ -99,7 +99,7 @@ test('a send queued after interrupt still drains on a later admission', () => {
 test('prepareChildInterrupt of a live child keeps the runtime path', () => {
   const state = child();
   state.turn.pendingSends.push('cancelled');
-  state.runtime = { session: {} as never, generation: 1, lastUsedAt: 0 };
+  state.runtime = { session: {} as never, droid: {} as never, generation: 1, lastUsedAt: 0 };
   const prepared = prepareChildInterrupt(parentWith(state), state);
   assert.equal(prepared.kind, 'live');
   assert.deepEqual(state.turn.pendingSends, []);
@@ -113,7 +113,7 @@ test('cancelInFlightOpen is a no-op once a runtime exists and is idempotent', ()
   assert.equal(cancelInFlightOpen(parent, state), true);
   assert.equal(open.isCancelled, true);
   assert.equal(cancelInFlightOpen(parent, state), true);
-  state.runtime = { session: {} as never, generation: 1, lastUsedAt: 0 };
+  state.runtime = { session: {} as never, droid: {} as never, generation: 1, lastUsedAt: 0 };
   assert.equal(cancelInFlightOpen(parent, state), false);
 });
 

@@ -1,7 +1,7 @@
-import { factoryReasoningEffort } from './DroidRuntime.js';
-import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
+import { factoryReasoningEffort } from './providers/droid/DroidModeMapping.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
+import type { PersistedChildSession, PersistedChildSpawnLink } from './ChildSessionState.js';
 import type { ChildSessionSummary, ClientCommand } from './protocol.js';
-import type { ChildOperationTarget } from './SessionContext.js';
 import {
   matchesChildGenerationSnapshot,
   type AutoCompactionSettlement,
@@ -12,6 +12,7 @@ import {
 } from './SessionCompaction.js';
 import { errMsg, isUserCancellation } from './sessionHelpers.js';
 import { isReportedStreamingTranscriptError } from './SessionTimeline.js';
+import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
 import {
   applyObservedChild,
   childAcceptsWork,
@@ -25,6 +26,7 @@ import {
   findPendingChildObservation,
   forgetPendingChildObservation,
   mergeChildObservations,
+  childContextTarget,
   newChildState,
   persistedChild,
   rememberPendingChildObservation,
@@ -104,7 +106,7 @@ export class ChildSessions {
       runtimeQueue: [],
       closing: false,
     };
-    for (const record of this.d.history.childSessions(parentAppSessionId))
+    for (const record of this.d.childPersistence.list(parentAppSessionId))
       parent.children.set(record.childSessionId, childStateFromRecord(record));
     this.parents.set(parentAppSessionId, parent);
   }
@@ -112,8 +114,8 @@ export class ChildSessions {
   list(parentAppSessionId: string): ChildSessionSummary[] {
     const parent = this.parents.get(parentAppSessionId);
     if (parent) return [...parent.children.values()].map(childSummary);
-    return this.d.history
-      .childSessions(parentAppSessionId)
+    return this.d.childPersistence
+      .list(parentAppSessionId)
       .map((record) => childSummary({ ...record, status: restoredChildStatus(record.status) }));
   }
 
@@ -314,7 +316,7 @@ export class ChildSessions {
       return;
     }
 
-    const record = this.d.history.childSession(command.parentAppSessionId, command.childSessionId);
+    const record = this.d.childPersistence.get(command.parentAppSessionId, command.childSessionId);
     if (!record) {
       this.emitError(
         identity,
@@ -430,6 +432,7 @@ export class ChildSessions {
 
   async updateSettings(command: ChildSettingsCommand): Promise<void> {
     const parent = this.parents.get(command.parentAppSessionId);
+    if (parent) requireDroidCapability(parent.lease, 'modelChange', 'child.updateSettings');
     const child = parent?.children.get(command.childSessionId);
     if (
       !parent ||
@@ -526,12 +529,14 @@ export class ChildSessions {
       await this.close(identity);
   }
 
-  async closeParent(parentAppSessionId: string): Promise<void> {
+  async closeParent(parentAppSessionId: string, deadline?: ShutdownDeadline): Promise<void> {
     const parent = this.parents.get(parentAppSessionId);
     if (!parent) return;
     parent.closing = true;
+    parent.generation += 1;
     await cancelOpenAttempts(parent);
-    for (const child of parent.children.values()) await this.closeRuntime(parent, child, false);
+    for (const child of parent.children.values())
+      await this.closeRuntime(parent, child, false, deadline);
     parent.pendingSpawns.clear();
     parent.reservedOpenSlots.clear();
     parent.runtimeQueue = [];
@@ -542,10 +547,12 @@ export class ChildSessions {
     if (this.parents.get(parentAppSessionId) === parent) this.parents.delete(parentAppSessionId);
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(deadline?: ShutdownDeadline): Promise<void> {
     this.shuttingDown = true;
     this.retirementTimer.cancel();
-    for (const parent of this.parents.values()) await this.closeParent(parent.parentAppSessionId);
+    const parents = [...this.parents.values()];
+    for (const parent of parents) parent.closing = true;
+    for (const parent of parents) await this.closeParent(parent.parentAppSessionId, deadline);
   }
 
   // Release the provider process behind every child that has been settled and
@@ -592,7 +599,7 @@ export class ChildSessions {
     const identity = childIdentity(parentAppSessionId, childSessionId);
     const liveParent = this.d.registry.getLive(parentAppSessionId);
     if (liveParent?.closeMode) return;
-    const record = this.d.history.childSession(parentAppSessionId, childSessionId);
+    const record = this.d.childPersistence.get(parentAppSessionId, childSessionId);
     if (!record) {
       this.emitError(
         identity,
@@ -624,6 +631,7 @@ export class ChildSessions {
       parent.children.set(childSessionId, child);
     }
     if (!this.isCurrentParent(parent)) return;
+    requireDroidCapability(parent.lease, 'addressableChildren', `child.${operation}`);
     if (child.mutationTail) {
       await child.mutationTail;
       if (!this.isCurrentParent(parent)) return;
@@ -850,12 +858,12 @@ export class ChildSessions {
       if (command.modelId === null)
         modelId = this.d.resolveDefaultSettings(
           parent.lease.summary,
-          parent.lease.session.initResult,
+          parent.lease.session.initResult ?? {},
           child.role,
         ).modelId;
       if (!modelId) throw new Error(`No Factory default is available for ${child.role}.`);
       if (!this.isSettingsTransaction(target)) return;
-      await runtime.session.updateSettings({
+      await runtime.droid.updateSettings({
         modelId,
         ...(command.reasoningEffort === undefined
           ? {}
@@ -915,7 +923,7 @@ export class ChildSessions {
       : {
           ...this.d.resolveDefaultSettings(
             parent.lease.summary,
-            parent.lease.session.initResult,
+            parent.lease.session.initResult ?? {},
             role,
           ),
           ...launchSettings,
@@ -936,7 +944,7 @@ export class ChildSessions {
 
   private readLaunchSettings(providerSessionId: string): ChildSettings | undefined {
     try {
-      return this.d.history.sessionLaunchSettings(providerSessionId);
+      return this.d.readLaunchSettings(providerSessionId);
     } catch (error) {
       console.error(
         `Could not read Task launch settings for ${providerSessionId}: ${errMsg(error)}`,
@@ -990,6 +998,7 @@ export class ChildSessions {
     parent: ParentChildSessions,
     child: ChildSessionState,
     publish: boolean,
+    deadline?: ShutdownDeadline,
   ): Promise<void> {
     const runtime = child.runtime;
     if (!runtime) return child.mutationTail;
@@ -1014,16 +1023,15 @@ export class ChildSessions {
     const cleanupTarget = this.contextTarget(parent, child, runtime);
     void runCleanup(this.d.context.forgetChild.bind(this.d.context, child.identity));
     void runCleanup(this.d.context.stopPolling.bind(this.d.context, cleanupTarget));
-    const cleanupTasks = [
-      runtime.unsubscribe ?? ignoreError,
-      runtime.session.close.bind(runtime.session),
-    ];
+    const closeSession = () =>
+      (runtime.session.close as (closeDeadline?: ShutdownDeadline) => Promise<void>)(deadline);
+    const cleanupTasks = [runtime.unsubscribe ?? ignoreError, closeSession];
     const cleanup = (child.mutationTail ?? Promise.resolve())
       .catch(ignoreError)
       .then(() => Promise.allSettled(cleanupTasks.map(runCleanup)))
       .then(ignoreError);
     child.mutationTail = cleanup;
-    await cleanup;
+    await (deadline ? deadline.awaitSettled(cleanup) : cleanup);
     this.clearMutation(child, cleanup);
     if (
       publish &&
@@ -1039,16 +1047,10 @@ export class ChildSessions {
     parent: ParentChildSessions,
     child: ChildSessionState,
     runtime: ChildRuntimeState,
-  ): ChildOperationTarget {
-    return {
-      ...child.identity,
-      appSessionId: parent.parentAppSessionId,
-      providerSessionId: runtime.session.sessionId,
-      sourceSessionId: child.identity.childSessionId,
-      session: runtime.session,
-      role: child.role,
-      isCurrent: () => this.isCurrentRuntime(parent, child, runtime),
-    };
+  ) {
+    return childContextTarget(parent, child, runtime, () =>
+      this.isCurrentRuntime(parent, child, runtime),
+    );
   }
 
   private automaticTarget(
@@ -1195,10 +1197,19 @@ export class ChildSessions {
   }
 
   private persist(child: ChildSessionState): boolean | undefined {
-    return this.d.history.upsertChildSession({
-      ...persistedChild(child),
-      updatedAt: this.d.now(),
-    });
+    const parent = this.parents.get(child.identity.parentAppSessionId);
+    if (!parent) {
+      throw new Error(
+        `Cannot persist child ${child.identity.childSessionId} without attached parent ${child.identity.parentAppSessionId}.`,
+      );
+    }
+    return this.d.childPersistence.upsert(
+      {
+        ...persistedChild(child),
+        updatedAt: this.d.now(),
+      },
+      parent.lease.binding,
+    );
   }
 
   private commit(child: ChildSessionState): boolean {

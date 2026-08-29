@@ -9,6 +9,9 @@ import type {
 } from '../protocol.js';
 import { FakeFactorySession } from './fakeFactoryRuntime.js';
 import type { SessionManagerTestContext } from './sessionManagerTestContext.js';
+import { droidSessionConfiguration } from '../providers/providerIdentity.js';
+
+let missionCreateCount = 0;
 
 export function latestSessionList(events: ServerEvent[]): SessionSummary[] {
   return events.filter((event) => event.type === 'sessions.list').at(-1)?.sessions ?? [];
@@ -17,18 +20,29 @@ export function latestSessionList(events: ServerEvent[]): SessionSummary[] {
 export async function createMission(
   h: SessionManagerTestContext,
   options: {
+    clientRef?: string;
     workerModel?: string;
     validatorModel?: string;
   } = {},
 ): Promise<void> {
   await h.create({
     sessionPurpose: 'mission-control',
-    clientRef: 'child-settings',
+    clientRef: options.clientRef ?? `child-settings-${++missionCreateCount}`,
     title: 'Child settings',
     goal: 'go',
-    interactionMode: 'agi',
-    autonomy: 'low',
-    ...options,
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'agi',
+      autonomy: 'low',
+    }),
+    ...(options.workerModel || options.validatorModel
+      ? {
+          droidMissionConfiguration: {
+            worker: { modelId: options.workerModel ?? 'worker-default' },
+            validator: { modelId: options.validatorModel ?? 'validator-default' },
+          },
+        }
+      : {}),
   });
   await h.waitForIdle();
 }

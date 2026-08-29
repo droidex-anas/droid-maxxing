@@ -37,6 +37,7 @@ function createSidecarSupervisor(options) {
   let child = null;
   let bridgeInfo = null;
   let pendingStart = null;
+  let pendingStop = null;
   let activeRun = null;
   let lifecycle = 'stopped';
   let processAlive = false;
@@ -95,6 +96,7 @@ function createSidecarSupervisor(options) {
     if (bridgeInfo && isLiveChild(child)) return Promise.resolve(bridgeInfo);
     cancelRestart?.();
     cancelRestart = null;
+    pendingStop = null;
     return spawnSidecar();
   }
 
@@ -320,6 +322,7 @@ function createSidecarSupervisor(options) {
   }
 
   function stop() {
+    if (pendingStop) return pendingStop;
     cancelRestart?.();
     cancelRestart = null;
     stopHeartbeat();
@@ -337,20 +340,25 @@ function createSidecarSupervisor(options) {
     bridgeResponsive = false;
     setLifecycle('stopped');
     rejectWaiters(new Error('Sidecar is stopped.'));
-    if (!current || current.killed) return Promise.resolve();
+    if (!current || current.killed) {
+      pendingStop = Promise.resolve();
+      return pendingStop;
+    }
     current.stdin?.end();
     current.kill('SIGTERM');
-    let timeout;
+    let cancelForceKill = null;
     const forcedExit = new Promise((resolve) => {
-      timeout = setTimeout(() => {
+      // Outer hard guard only: this races the sidecar's own shutdown attempt
+      // and must not grant a second cleanup window or send a second deadline.
+      cancelForceKill = schedule(() => {
         if (current.exitCode === null && current.signalCode === null) current.kill('SIGKILL');
         resolve();
       }, shutdownTimeoutMs);
-      timeout.unref?.();
     });
-    return Promise.race([run?.exitPromise ?? Promise.resolve(), forcedExit]).finally(() => {
-      clearTimeout(timeout);
+    pendingStop = Promise.race([run?.exitPromise ?? Promise.resolve(), forcedExit]).finally(() => {
+      cancelForceKill?.();
     });
+    return pendingStop;
   }
 
   return { start, getBridgeInfo, stop, snapshot, subscribe };

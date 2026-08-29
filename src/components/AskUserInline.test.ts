@@ -21,7 +21,12 @@ function renderCard(question: SessionQuestion): string {
 }
 
 const SINGLE = makeQuestion([
-  { index: 0, question: 'Which database should I use?', options: ['SQLite', 'Postgres'] },
+  {
+    id: '0',
+    prompt: 'Which database should I use?',
+    options: ['SQLite', 'Postgres'],
+    multiSelect: false,
+  },
 ]);
 
 test('renders the question, every option, and a custom-answer row', () => {
@@ -56,8 +61,8 @@ test('a single question hides the step counter and Back', () => {
 test('multiple questions show progress and a Next action', () => {
   const html = renderCard(
     makeQuestion([
-      { index: 0, question: 'First?', options: ['a'] },
-      { index: 1, question: 'Second?', options: ['b'] },
+      { id: '0', prompt: 'First?', options: ['a'], multiSelect: false },
+      { id: '1', prompt: 'Second?', options: ['b'], multiSelect: false },
     ]),
   );
 

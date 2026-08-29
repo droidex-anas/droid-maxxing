@@ -1,8 +1,8 @@
 import type { ClientCommand, HistorySearchReply, ServerEvent, SessionSummary } from './protocol.js';
-import { loadSessionTranscriptWindow, resolveSessionChain } from './history.js';
-import { isHistorySearchUnavailableError } from './historySearchSchema.js';
+import type { SessionStore } from './persistence/SessionStore.js';
+import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import { errMsg } from './sessionHelpers.js';
-import { transcriptToMarkdown } from './sessionMarkdown.js';
+import { exportMarkdownFromStore, requireStoredSession } from './sessionCanonicalServing.js';
 
 type Emit = (event: ServerEvent) => void;
 
@@ -10,6 +10,8 @@ export interface SessionHistoryQueriesDependencies {
   searchSessions: (query: string, isStale?: () => boolean) => Promise<HistorySearchReply>;
   resolveSummary: (appSessionId: string) => SessionSummary | undefined;
   emit: Emit;
+  sessionStore?: Pick<SessionStore, 'get'>;
+  transcriptStore?: Pick<TranscriptStore, 'page'>;
 }
 
 export class SessionHistoryQueries {
@@ -35,7 +37,6 @@ export class SessionHistoryQueries {
         });
       }
     } catch (error) {
-      if (!isHistorySearchUnavailableError(error)) throw error;
       if (!isStale()) {
         this.d.emit({
           type: 'error',
@@ -48,33 +49,13 @@ export class SessionHistoryQueries {
     }
   }
 
-  // Reads the stored .jsonl files straight from disk, so the export is
-  // complete even for a chat the renderer never opened (its transcript is not
-  // in memory). Compaction rekeys the backing session, so the full chain must
-  // be replayed like the chat scrollback — otherwise pre-compaction messages
-  // silently vanish from the export.
   exportMarkdown(cmd: { appSessionId: string; requestId: string; title?: string }): void {
     try {
-      const summary = this.d.resolveSummary(cmd.appSessionId);
-      const providerSessionId = summary?.providerSessionId ?? cmd.appSessionId;
-      const appSessionId = summary?.appSessionId ?? cmd.appSessionId;
-      const chain = resolveSessionChain(appSessionId, providerSessionId);
-      const { events, olderCursor } = loadSessionTranscriptWindow(appSessionId, chain, {
-        limit: 100_000,
-      });
-      if (events.length === 0) throw new Error('No stored transcript for this chat.');
-      const markdown = transcriptToMarkdown(events, {
-        title: cmd.title ?? summary?.title ?? 'Chat export',
-        providerSessionId,
-        cwd: summary?.cwd,
-        // The window caps at 100k events; an export missing older turns must
-        // say so rather than read as the complete chat.
-        ...(olderCursor !== undefined
-          ? {
-              note: 'This chat exceeds the 100,000-event export limit; only the most recent events are included.',
-            }
-          : {}),
-      });
+      if (!this.d.sessionStore || !this.d.transcriptStore) {
+        throw new Error('Canonical transcript store is required.');
+      }
+      const stored = requireStoredSession(this.d.sessionStore, cmd.appSessionId);
+      const markdown = exportMarkdownFromStore(this.d.transcriptStore, stored, cmd.title);
       this.d.emit({
         type: 'session.markdownExported',
         requestId: cmd.requestId,

@@ -11,6 +11,8 @@ import {
   type SessionRuntimeRetirementDependencies,
 } from './sessionRuntimeRetirement.js';
 import { FakeFactorySession } from './testing/fakeFactoryRuntime.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const IDLE_MS = 1_800_000;
 
@@ -102,12 +104,15 @@ function liveSession(appSessionId: string, updatedAt: number): LiveSession {
     appSessionId,
     providerSessionId: appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'paused',
     streaming: false,
     features: [],
@@ -119,7 +124,15 @@ function liveSession(appSessionId: string, updatedAt: number): LiveSession {
   } satisfies SessionSummary;
   return {
     summary,
+    binding: {
+      providerDriverKind: 'droid',
+      providerInstanceId: 'droid',
+      providerSessionId: appSessionId,
+      previousProviderSessionIds: [],
+      runtimeGeneration: 1,
+    },
     session: new FakeFactorySession(appSessionId, {}, []),
+    provider: new StubProviderSession(appSessionId),
     streaming: false,
     autoCompacting: false,
     pendingSends: [],

@@ -23,6 +23,13 @@ import {
 } from '../lib/commands';
 import { browserTranscriptReferencesFromDesignReferences } from './browser/browserTranscriptReferences';
 import {
+  droidSessionConfiguration,
+  sessionAutonomy,
+  sessionInteractionMode,
+  sessionModelId,
+  sessionReasoningEffort,
+} from '../lib/sessionConfiguration';
+import {
   pickDirectory,
   pickFiles,
   listFiles,
@@ -219,7 +226,7 @@ export default function PromptInput({
       promptQueue: current.promptQueue,
       selectedChild: current.selectedChild,
       skills: current.skills,
-      skillsProviderSessionId: current.skillsProviderSessionId,
+      skillsAppSessionId: current.skillsAppSessionId,
       specMode: current.specMode,
     }),
     shallowEqual,
@@ -340,9 +347,11 @@ export default function PromptInput({
   // (so a chat reopened in spec mode shows Spec); only fall back to the global
   // compose flag while drafting a brand-new chat.
   const isSpecMode =
-    activeSession?.sessionPurpose !== 'mission-control'
-      ? activeSession?.interactionMode === 'spec' || (!activeSession && state.specMode)
-      : false;
+    activeSession?.sessionPurpose === 'mission-control'
+      ? false
+      : activeSession
+        ? sessionInteractionMode(activeSession) === 'spec'
+        : state.specMode;
   const selectedChild = state.selectedChild;
   const visibleTarget: VisibleSessionTarget = visibleSessionTarget(
     activeSession?.appSessionId,
@@ -429,9 +438,9 @@ export default function PromptInput({
   }, []);
 
   const cwd = activeSession?.cwd ?? state.draftChat?.cwd ?? null;
-  const skillsProviderSessionId = activeSession?.providerSessionId ?? null;
+  const skillsAppSessionId = activeSession?.appSessionId ?? null;
   const pendingSkillsRequest = useRef<{
-    providerSessionId: string | null;
+    appSessionId: string | null;
     requestedAt: number;
   } | null>(null);
 
@@ -449,7 +458,10 @@ export default function PromptInput({
       });
       updateSessionSettings({
         appSessionId: activeSession.appSessionId,
-        interactionMode: turningOn ? 'spec' : 'auto',
+        configuration: {
+          ...activeSession.configuration,
+          interactionMode: turningOn ? 'spec' : 'auto',
+        },
       });
     } else {
       // Brand-new draft chat with no session yet: just flip the compose flag.
@@ -568,10 +580,10 @@ export default function PromptInput({
 
   const invocableSkills = useMemo(
     () =>
-      state.skillsProviderSessionId === skillsProviderSessionId
+      state.skillsAppSessionId === skillsAppSessionId
         ? state.skills.filter((s) => s.userInvocable !== false && s.enabled !== false)
         : [],
-    [skillsProviderSessionId, state.skills, state.skillsProviderSessionId],
+    [skillsAppSessionId, state.skills, state.skillsAppSessionId],
   );
 
   useEffect(() => {
@@ -579,23 +591,22 @@ export default function PromptInput({
       pendingSkillsRequest.current = null;
       return;
     }
-    if (state.skillsProviderSessionId === skillsProviderSessionId) {
+    if (state.skillsAppSessionId === skillsAppSessionId) {
       pendingSkillsRequest.current = null;
       return;
     }
     const pending = pendingSkillsRequest.current;
     const now = Date.now();
-    if (pending?.providerSessionId === skillsProviderSessionId && now - pending.requestedAt < 2_000)
-      return;
+    if (pending?.appSessionId === skillsAppSessionId && now - pending.requestedAt < 2_000) return;
     pendingSkillsRequest.current = {
-      providerSessionId: skillsProviderSessionId,
+      appSessionId: skillsAppSessionId,
       requestedAt: now,
     };
-    listSkills(activeSession?.providerSessionId);
+    listSkills(activeSession?.appSessionId);
   }, [
-    activeSession?.providerSessionId,
-    skillsProviderSessionId,
-    state.skillsProviderSessionId,
+    activeSession?.appSessionId,
+    skillsAppSessionId,
+    state.skillsAppSessionId,
     trigger?.kind,
     trigger?.query,
     trigger?.start,
@@ -718,7 +729,9 @@ export default function PromptInput({
   // A single chat carries its own model/reasoning; only fall back to the global
   // default while composing a brand-new chat that has no session yet.
   const chatScoped = !missionPreview && !!activeSession;
-  const primaryModelId = chatScoped ? activeSession.modelId : state.agentConfig.primary.modelId;
+  const primaryModelId = chatScoped
+    ? sessionModelId(activeSession)
+    : state.agentConfig.primary.modelId;
   const selectedModel = primaryModelId
     ? state.models.find((m) => m.id === primaryModelId)
     : undefined;
@@ -726,7 +739,7 @@ export default function PromptInput({
     ? (selectedModel?.displayName ?? primaryModelId)
     : 'Default model';
   const primaryReasoning = resolveReasoningEffortDisplay(
-    chatScoped ? activeSession.reasoningEffort : undefined,
+    chatScoped ? sessionReasoningEffort(activeSession) : undefined,
     state.agentConfig.primary.reasoning,
     selectedModel,
   );
@@ -947,18 +960,25 @@ export default function PromptInput({
           title,
           goal: composed,
           sessionPurpose: 'mission-control',
-          interactionMode: 'agi',
-          autonomy,
-          modelId: primary.modelId,
-          reasoningEffort: primary.reasoning,
+          configuration: droidSessionConfiguration({
+            modelId:
+              primary.modelId ?? state.models.find((model) => model.isDefault)?.id ?? 'default',
+            reasoningEffort: primary.reasoning,
+            interactionMode: 'agi',
+            autonomy,
+          }),
+          ...(worker.modelId && validator.modelId
+            ? {
+                droidMissionConfiguration: {
+                  worker: { modelId: worker.modelId, reasoningEffort: worker.reasoning },
+                  validator: { modelId: validator.modelId, reasoningEffort: validator.reasoning },
+                },
+              }
+            : {}),
           compactionModel:
             state.compactionModel === 'current-model' ? undefined : state.compactionModel,
           // Only user-configured limits may override the daemon's model default.
           ...compactionSettingsSnapshot(compactionSettingsInput),
-          workerModel: worker.modelId,
-          workerReasoning: worker.reasoning,
-          validatorModel: validator.modelId,
-          validatorReasoning: validator.reasoning,
           ...(responseFormat ? { responseFormat } : {}),
         });
         armTurnStartingTimeout();
@@ -996,10 +1016,13 @@ export default function PromptInput({
           title,
           goal: composed,
           sessionPurpose: 'chat',
-          interactionMode: isSpecMode ? 'spec' : 'auto',
-          autonomy: draftAutonomy,
-          modelId: primary.modelId,
-          reasoningEffort: primary.reasoning,
+          configuration: droidSessionConfiguration({
+            modelId:
+              primary.modelId ?? state.models.find((model) => model.isDefault)?.id ?? 'default',
+            reasoningEffort: primary.reasoning,
+            interactionMode: isSpecMode ? 'spec' : 'auto',
+            autonomy: draftAutonomy,
+          }),
           compactionModel:
             state.compactionModel === 'current-model' ? undefined : state.compactionModel,
           ...compactionSettingsSnapshot(compactionSettingsInput),
@@ -1670,7 +1693,7 @@ export default function PromptInput({
             ) : activeSession ? (
               <AutonomySelector
                 scope="session"
-                value={activeSession.autonomy}
+                value={sessionAutonomy(activeSession)}
                 pending={activeSession.appSessionId in state.pendingAutonomy}
                 onSelect={(level) => {
                   dispatch({
@@ -1680,7 +1703,10 @@ export default function PromptInput({
                   });
                   updateSessionSettings({
                     appSessionId: activeSession.appSessionId,
-                    autonomy: level,
+                    configuration: {
+                      ...activeSession.configuration,
+                      autonomy: level,
+                    },
                   });
                 }}
               />

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 test('failed provider identity persistence does not settle queued work', async () => {
   const h = createSessionManagerTestContext();
@@ -12,8 +13,11 @@ test('failed provider identity persistence does not settle queued work', async (
       clientRef: 'compaction-persistence',
       title: 'Compaction persistence',
       goal: 'initial',
-      interactionMode: 'auto',
-      autonomy: 'low',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
     });
     await h.waitForIdle();
     const compactGate = h.provider.deferNextCompaction('provider-1');
@@ -44,7 +48,6 @@ test('failed provider identity persistence does not settle queued work', async (
       h.events.some(
         (event) =>
           event.type === 'error' &&
-          event.providerSessionId === 'provider-9' &&
           event.recoverable === true &&
           event.message === 'Could not persist compacted session identity: history unavailable',
       ),

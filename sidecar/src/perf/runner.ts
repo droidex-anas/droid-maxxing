@@ -9,7 +9,6 @@ import { WebSocket } from 'ws';
 import { McpServerConfigSchema, type McpServerConfig } from '@factory/droid-sdk';
 
 import { SessionManager, type SessionManagerDependencies } from '../SessionManager.js';
-import { HistoryPersistence } from '../HistoryPersistence.js';
 import { BrowserSessionManager } from '../browser/BrowserSessionManager.js';
 import { startBridgeServer } from '../bridgeServer.js';
 import { hotPathMetrics, type HotPathMetricsSnapshot } from '../telemetry/hotPathMetrics.js';
@@ -107,14 +106,10 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
       server.broadcast(event);
     },
   });
-  // Worker startup is a sidecar-start concern, not a steady-state settlement
-  // sample. Establish the writer and its durability checkpoint before metrics
-  // begin so the boundary histogram measures live orchestration behavior.
-  const history = new HistoryPersistence();
-  history.flushSync();
+  // Canonical SessionStore durability is in-process; there is no history
+  // write-behind worker to warm before metrics begin.
   const dependencies: SessionManagerDependencies = {
     runtime,
-    history,
     browsers,
     createLocalMcpResource: () => stubMcpResource(),
     mcpConfiguration: {
@@ -244,7 +239,11 @@ export async function runReplay(options: ReplayRunOptions): Promise<ReplayReport
         title: `Perf replay ${String(index)}`,
         goal: `replay session ${String(index)}`,
         sessionPurpose: 'chat',
-        autonomy: 'off',
+        configuration: {
+          providerSelection: { providerInstanceId: 'droid', modelId: 'model-default', options: {} },
+          interactionMode: 'auto',
+          autonomy: 'off',
+        },
       });
       await created;
       throwIfClientProtocolFailed();

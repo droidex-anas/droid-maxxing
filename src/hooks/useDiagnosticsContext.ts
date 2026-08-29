@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { shallowEqual, useStoreSelector } from './useStore';
 import { addDiagnosticsBreadcrumb, setDiagnosticsContext } from '../lib/rendererDiagnostics';
+import { sessionAutonomy, sessionInteractionMode } from '../lib/sessionConfiguration';
 
 /**
  * Keeps Sentry app-state context and the session-log ring buffer in sync with
@@ -15,8 +16,8 @@ export function useDiagnosticsContext(): void {
       : undefined;
     return {
       sessionCount: Object.keys(state.sessions).length,
-      interactionMode: activeSession?.interactionMode,
-      autonomy: activeSession?.autonomy,
+      interactionMode: activeSession ? sessionInteractionMode(activeSession) : undefined,
+      autonomy: activeSession ? sessionAutonomy(activeSession) : undefined,
       sessionPurpose: activeSession?.sessionPurpose,
     };
   }, shallowEqual);

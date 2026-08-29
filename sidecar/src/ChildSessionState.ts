@@ -1,6 +1,10 @@
-import type { McpServerConfig } from '@factory/droid-sdk';
-import type { FactorySession } from './DroidRuntime.js';
-import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
+import type { ProviderBinding } from './persistence/SessionStore.js';
+import type {
+  DroidSessionExtension,
+  FactorySession,
+} from './providers/droid/DroidProviderSession.js';
+import type { ProviderSession } from './providers/providerTypes.js';
+import type { ChildOperationTarget } from './SessionContext.js';
 import { publishedStreamFidelity } from './childStreamFidelity.js';
 import type {
   Autonomy,
@@ -10,6 +14,31 @@ import type {
   StreamFidelity,
 } from './protocol.js';
 import { normalizeAutonomy, reasoningValue, type SessionInitResult } from './sessionHelpers.js';
+
+export type PersistedChildRole = 'worker' | 'validator';
+export type PersistedChildStatus = 'pending' | 'running' | 'paused' | 'completed';
+
+export interface PersistedChildSpawnLink {
+  kind: 'tool-use' | 'spawn';
+  id: string;
+}
+
+export interface PersistedChildSession {
+  parentAppSessionId: string;
+  childSessionId: string;
+  providerSessionId?: string;
+  previousProviderSessionIds?: string[];
+  role: PersistedChildRole;
+  label?: string;
+  prompt?: string;
+  status: PersistedChildStatus;
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  spawnLink?: PersistedChildSpawnLink;
+  transcriptAvailable: boolean;
+  startedAt?: number;
+  updatedAt: number;
+}
 /* eslint-disable @typescript-eslint/no-unused-vars -- persisted-only fields are intentionally omitted. */
 export interface ChildIdentity {
   parentAppSessionId: string;
@@ -40,12 +69,15 @@ export interface ChildSpawnObservation {
 }
 export interface ChildParentLease {
   summary: SessionSummary;
-  session: FactorySession;
-  mcpConfigs: McpServerConfig[];
+  session: { initResult?: SessionInitResult };
+  provider: ProviderSession;
+  binding: ProviderBinding;
+  mcpConfigs: unknown[];
   closeMode?: 'discard-pending' | 'preserve-pending';
 }
 export interface ChildRuntimeState {
   session: FactorySession;
+  droid: DroidSessionExtension;
   generation: number;
   lastUsedAt: number;
   unsubscribe?: () => void;
@@ -117,6 +149,24 @@ export interface ChildRuntimeTarget {
 }
 export function childIdentity(parentAppSessionId: string, childSessionId: string): ChildIdentity {
   return { parentAppSessionId, childSessionId };
+}
+
+export function childContextTarget(
+  parent: ParentChildSessions,
+  child: ChildSessionState,
+  runtime: ChildRuntimeState,
+  isCurrent: () => boolean,
+): ChildOperationTarget {
+  return {
+    ...child.identity,
+    appSessionId: parent.parentAppSessionId,
+    providerSessionId: runtime.session.sessionId,
+    sourceSessionId: child.identity.childSessionId,
+    session: runtime.session,
+    droid: runtime.droid,
+    role: child.role,
+    isCurrent,
+  };
 }
 
 export function childSettingsFromInit(init: SessionInitResult): ChildSettings {

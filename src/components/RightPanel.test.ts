@@ -4,21 +4,24 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { initialState, StaticStoreProvider, type AppState } from '../hooks/useStore.js';
-import type { ModelInfo, ReasoningEffort, SessionSummary } from '../types/bridge.js';
+import type { Autonomy, ModelInfo, ReasoningEffort, SessionSummary } from '../types/bridge.js';
 import RightPanel from './RightPanel.js';
 import { EnvironmentSection } from './environment/EnvironmentSection.js';
 import type { GithubAvailability, GitEnvironment, PullRequest } from '../types/vcs.js';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
-const session = (overrides: Partial<SessionSummary>): SessionSummary => ({
+const session = (overrides: Partial<SessionSummary> = {}): SessionSummary => ({
   appSessionId: 's1',
-  providerSessionId: 'provider-s1',
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: 's1',
   goal: 's1',
   cwd: '/workspace',
-  autonomy: 'medium',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'medium',
+  }),
   phase: 'paused',
   features: [],
   tokensIn: 0,
@@ -37,11 +40,22 @@ const model = (overrides: Partial<ModelInfo>): ModelInfo => ({
 });
 
 function renderPanel(
-  sessionOverrides: Partial<SessionSummary>,
+  config: {
+    modelId: string;
+    reasoningEffort?: ReasoningEffort;
+    autonomy?: Autonomy;
+  },
   models: ModelInfo[],
   globalReasoning: ReasoningEffort = 'high',
 ): string {
-  const active = session(sessionOverrides);
+  const active = session({
+    configuration: droidSessionConfiguration({
+      modelId: config.modelId,
+      interactionMode: 'auto',
+      autonomy: config.autonomy ?? 'medium',
+      ...(config.reasoningEffort !== undefined ? { reasoningEffort: config.reasoningEffort } : {}),
+    }),
+  });
   const state: AppState = {
     ...initialState,
     sessions: { [active.appSessionId]: active },

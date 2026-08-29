@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { wrapDroidInvocation } from './Environment.js';
 import type { ModelInfo, ReasoningEffort } from './protocol.js';
+import type { ProviderModel } from './providers/providerTypes.js';
 
 const execFileAsync = promisify(execFile);
 const CACHE_PATH = join(homedir(), '.factory', 'droidex', 'model-catalog.json');
@@ -237,4 +238,14 @@ function readCustomModelBaseIds(): Map<string, string> {
     return map;
   }
   return map;
+}
+
+export function toProviderModels(models: readonly ModelInfo[]): ProviderModel[] {
+  return models.map((model) => ({
+    id: model.id,
+    displayName: model.displayName,
+    isDefault: model.isDefault === true,
+    supportedReasoningEfforts: model.supportedReasoningEfforts ?? [],
+    serviceTiers: [],
+  }));
 }

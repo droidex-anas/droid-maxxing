@@ -2,17 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState, reducer, type AppState } from './useStore';
 import type { ContextStatsSnapshot, SessionSummary, TranscriptEvent } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 const session = (autoCompactions = 0): SessionSummary => ({
   appSessionId: 'm1',
-  providerSessionId: 'provider-1',
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: 'Context test',
   goal: '',
   cwd: '/tmp',
-  autonomy: 'off',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'off',
+  }),
   phase: 'running',
   features: [],
   tokensIn: 0,
@@ -65,7 +68,6 @@ test('SESSION_UPDATED invalidates stale context stats when compaction generation
       m2: {
         ...session(),
         appSessionId: 'm2',
-        providerSessionId: 'provider-2',
       },
     },
     contextStats: {

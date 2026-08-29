@@ -8,7 +8,7 @@ import {
   AutoCompactionWatchdogs,
   POST_TURN_AUTO_COMPACTION_WATCHDOG_MS,
 } from './autoCompactionWatchdog.js';
-import { extractCompactionNotification } from './normalize.js';
+import { extractCompactionNotification } from './providers/droid/DroidEventAdapter.js';
 import type {
   FactoryDefaultSettings,
   SessionInteractionMode,
@@ -21,14 +21,17 @@ import type {
   ProviderOperationTarget,
 } from './SessionContext.js';
 import type { LiveSession } from './SessionLifecycle.js';
-import { defaultsModeForSummary, errMsg, modelDefaultForMode } from './sessionHelpers.js';
+import { errMsg, modelDefaultForMode } from './sessionHelpers.js';
 import {
+  livePrimaryAutomaticTarget,
+  livePrimaryRetuneTarget,
   SessionCompactionExecution,
   type CompactionExecutionResult,
   type SessionCompactionExecutionDependencies,
 } from './sessionCompactionExecution.js';
 
 export type { CompactionExecutionResult } from './sessionCompactionExecution.js';
+export type { CompactionArmInput } from './providers/droid/droidSessionAccess.js';
 
 export interface CompactionLimitRequest {
   modelId?: string;
@@ -118,14 +121,14 @@ export interface SessionCompactionDependencies extends SessionCompactionExecutio
 }
 
 export function childCompactionModelId(
-  summary: Pick<SessionSummary, 'modelId' | 'workerModelId' | 'validatorModelId'>,
+  summary: Pick<SessionSummary, 'configuration' | 'droidMissionConfiguration'>,
   settings: { modelId?: string } | undefined,
   role: SessionRole,
 ): string | undefined {
   let roleModelId: string | undefined;
-  if (role === 'worker') roleModelId = summary.workerModelId;
-  else if (role === 'validator') roleModelId = summary.validatorModelId;
-  return settings?.modelId ?? roleModelId ?? summary.modelId;
+  if (role === 'worker') roleModelId = summary.droidMissionConfiguration?.worker.modelId;
+  else if (role === 'validator') roleModelId = summary.droidMissionConfiguration?.validator.modelId;
+  return settings?.modelId ?? roleModelId ?? summary.configuration.providerSelection.modelId;
 }
 
 export class SessionCompaction {
@@ -148,10 +151,10 @@ export class SessionCompaction {
     );
     this.execution = new SessionCompactionExecution(dependencies, {
       subscribePrimary: (liveSession) => {
-        this.subscribePrimary(this.primaryAutomaticTarget(liveSession));
+        this.subscribePrimary(this.automaticTarget(liveSession));
       },
-      rearmPrimary: (liveSession) => this.rearmPrimary(this.primaryRetuneTarget(liveSession)),
-      primaryTarget: (liveSession) => this.primaryAutomaticTarget(liveSession),
+      rearmPrimary: (liveSession) => this.rearmPrimary(this.retuneTarget(liveSession)),
+      primaryTarget: (liveSession) => this.automaticTarget(liveSession),
     });
   }
 
@@ -173,7 +176,7 @@ export class SessionCompaction {
     const epoch = this.epoch;
     if (!this.isCurrent(target, epoch)) return false;
     try {
-      await target.session.updateSettings(daemonCompactionSettings(limit) as never);
+      await target.droid.updateSettings(daemonCompactionSettings(limit) as never);
       return this.isCurrent(target, epoch);
     } catch (error) {
       // An unarmed session silently grows past its window and wedges once the
@@ -181,7 +184,6 @@ export class SessionCompaction {
       if (this.isCurrent(target, epoch))
         this.dependencies.emitError({
           ...(target.appSessionId === undefined ? {} : { appSessionId: target.appSessionId }),
-          providerSessionId: target.session.sessionId,
           message: `Could not arm auto-compaction: ${errMsg(error)}. This session will not compact automatically until its settings are reapplied.`,
           recoverable: true,
         });
@@ -414,37 +416,20 @@ export class SessionCompaction {
     this.setAutoCompacting(target, false);
   }
 
-  private primaryAutomaticTarget(liveSession: LiveSession): PrimaryAutomaticCompactionTarget {
-    const session = liveSession.session;
-    const appSessionId = liveSession.summary.appSessionId;
-    return {
-      kind: 'primary',
-      appSessionId,
-      providerSessionId: session.sessionId,
-      sourceSessionId: appSessionId,
-      session,
+  private automaticTarget(liveSession: LiveSession): PrimaryAutomaticCompactionTarget {
+    return livePrimaryAutomaticTarget(
       liveSession,
-      isCurrent: () =>
-        !this.dependencies.isShutdownStarted() &&
-        this.dependencies.registry.getLive(appSessionId) === liveSession &&
-        !liveSession.closeMode &&
-        liveSession.session === session,
-    };
+      () => this.dependencies.isShutdownStarted(),
+      (id) => this.dependencies.registry.getLive(id),
+    );
   }
 
-  private primaryRetuneTarget(liveSession: LiveSession): PrimaryCompactionTarget {
-    const target = this.primaryAutomaticTarget(liveSession);
-    const configuredModelId = liveSession.summary.modelId;
-    const defaultsMode = defaultsModeForSummary(liveSession.summary);
-    return {
-      ...target,
-      configuredModelId,
-      defaultsMode,
-      isCurrent: () =>
-        target.isCurrent() &&
-        liveSession.summary.modelId === configuredModelId &&
-        defaultsModeForSummary(liveSession.summary) === defaultsMode,
-    };
+  private retuneTarget(liveSession: LiveSession): PrimaryCompactionTarget {
+    return livePrimaryRetuneTarget(
+      liveSession,
+      () => this.dependencies.isShutdownStarted(),
+      (id) => this.dependencies.registry.getLive(id),
+    );
   }
 
   private isRetuneCurrent(

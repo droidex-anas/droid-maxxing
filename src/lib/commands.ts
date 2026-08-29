@@ -1,19 +1,19 @@
 import { bridge } from './bridge';
 import { isAppUpdateInstalling } from './appUpdate';
 import type {
-  Autonomy,
   BrowserNativeResult,
   BrowserScrollDirection,
   BrowserViewport,
   BrowserViewportMode,
   ConfigurableSessionRole,
   DesignReference,
+  DroidMissionConfiguration,
   InstallChannel,
   McpServerInput,
   PermissionOutcome,
   ReasoningEffort,
   ResponseFormat,
-  SessionInteractionMode,
+  SessionConfiguration,
   SessionPurpose,
 } from '../types/bridge';
 
@@ -37,17 +37,11 @@ export const createSession = (input: {
   title: string;
   goal: string;
   sessionPurpose: SessionPurpose;
-  interactionMode?: SessionInteractionMode;
-  modelId?: string;
-  reasoningEffort?: ReasoningEffort;
+  configuration: SessionConfiguration;
+  droidMissionConfiguration?: DroidMissionConfiguration;
   compactionModel?: string;
   compactionTokenLimit?: number | null;
   compactionTokenLimitPerModel?: Record<string, number>;
-  autonomy: Autonomy;
-  workerModel?: string;
-  workerReasoning?: ReasoningEffort;
-  validatorModel?: string;
-  validatorReasoning?: ReasoningEffort;
   responseFormat?: ResponseFormat;
 }) => {
   requireAgentWorkAvailable();
@@ -56,10 +50,7 @@ export const createSession = (input: {
 
 export const updateSessionSettings = (input: {
   appSessionId: string;
-  modelId?: string | null;
-  reasoningEffort?: ReasoningEffort;
-  autonomy?: Autonomy;
-  interactionMode?: SessionInteractionMode;
+  configuration: SessionConfiguration;
 }) => {
   bridge.send({ type: 'session.updateSettings', ...input });
 };
@@ -80,8 +71,8 @@ export const requestRuntimeStatus = () => {
 export const listModels = () => {
   bridge.send({ type: 'catalog.models' });
 };
-export const listSkills = (providerSessionId?: string) => {
-  bridge.send({ type: 'catalog.skills', providerSessionId });
+export const listSkills = (appSessionId?: string) => {
+  bridge.send({ type: 'catalog.skills', appSessionId });
 };
 export const listMcpServers = (requestId: string, cwd?: string) => {
   bridge.send({ type: 'mcp.list', requestId, ...(cwd ? { cwd } : {}) });
@@ -179,9 +170,24 @@ export const respondQuestion = (
   appSessionId: string,
   requestId: string,
   cancelled: boolean,
-  answers: { index: number; question: string; answer: string }[],
+  answers: Record<string, string[]>,
 ) => {
   bridge.send({ type: 'question.respond', appSessionId, requestId, cancelled, answers });
+};
+
+export const respondPlanReview = (
+  appSessionId: string,
+  requestId: string,
+  decision: 'implement' | 'iterate' | 'cancel',
+  feedback?: string,
+) => {
+  bridge.send({
+    type: 'plan_review.respond',
+    appSessionId,
+    requestId,
+    decision,
+    ...(feedback !== undefined ? { feedback } : {}),
+  });
 };
 
 export const interruptSession = (appSessionId: string) => {
@@ -225,6 +231,15 @@ export const openChild = (
 
 export const closeSession = (appSessionId: string) => {
   bridge.send({ type: 'session.close', appSessionId });
+};
+
+export const retryFailedSession = (appSessionId: string) => {
+  requireAgentWorkAvailable();
+  bridge.send({ type: 'session.retryStart', appSessionId });
+};
+
+export const removeFailedSession = (appSessionId: string) => {
+  bridge.send({ type: 'session.removeFailed', appSessionId });
 };
 
 // Best-effort sync of a chat rename to the harness's own session title. The

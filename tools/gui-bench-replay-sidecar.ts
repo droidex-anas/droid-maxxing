@@ -4,12 +4,11 @@ import { BrowserSessionManager } from '../sidecar/src/browser/BrowserSessionMana
 import { startBridgeServer } from '../sidecar/src/bridgeServer.ts';
 import { DroidMcpConfiguration } from '../sidecar/src/DroidMcpConfiguration.ts';
 import { loadFactoryMcpServers } from '../sidecar/src/FactoryMcpConfig.ts';
-import { HistoryPersistence } from '../sidecar/src/HistoryPersistence.ts';
 import { buildReplayPlan, resolveScenario, type ReplayTurnPlan } from '../sidecar/src/perf/scenario.ts';
 import { ReplayFactoryRuntime, ReplayFactorySession } from '../sidecar/src/perf/replayRuntime.ts';
-import type { FactoryRuntime, RuntimeHandlers } from '../sidecar/src/DroidRuntime.ts';
+import type { RuntimeHandlers } from '../sidecar/src/providers/droid/DroidModeMapping.ts';
+import type { FactoryRuntime } from '../sidecar/src/providers/droid/DroidProviderAdapter.ts';
 import { SessionManager, type SessionManagerDependencies } from '../sidecar/src/SessionManager.ts';
-import { startSessionFileWatcher } from '../sidecar/src/sessionFileWatcher.ts';
 import { hotPathMetrics } from '../sidecar/src/telemetry/hotPathMetrics.ts';
 
 const REQUESTED_PORT = bridgePort(process.env.BRIDGE_PORT ?? '0');
@@ -61,7 +60,6 @@ const server = startBridgeServer({
   getSnapshot: () => manager.runtimeSnapshot(),
 });
 
-const history = new HistoryPersistence();
 const browsers = new BrowserSessionManager({
   assetUrlFor: (filePath) => server.browserAssetUrl(filePath),
   emit: (event) => {
@@ -71,12 +69,10 @@ const browsers = new BrowserSessionManager({
 
 const dependencies: SessionManagerDependencies = {
   runtime,
-  history,
   browsers,
   createLocalMcpResource: () => stubMcpResource(),
   mcpConfiguration: new DroidMcpConfiguration(),
   loadConfiguredMcpServers: loadFactoryMcpServers,
-  startSessionFileWatcher,
   streamingCoalesceMs: spec.coalesceMs,
 };
 

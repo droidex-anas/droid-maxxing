@@ -6,19 +6,22 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { SidebarSessionList, type SidebarSessionListProps } from './SidebarSessionList.js';
 import { SIDEBAR_VISIBLE_SESSION_LIMIT } from '../lib/workspaces.js';
 import type { SessionSummary } from '../types/bridge.js';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
 function session(appSessionId: string, updatedAt: number): SessionSummary {
   return {
     appSessionId,
-    providerSessionId: appSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: appSessionId,
     cwd: '/repo/app',
     workspaceKind: 'folder',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

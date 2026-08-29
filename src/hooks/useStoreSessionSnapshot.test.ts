@@ -3,17 +3,23 @@ import assert from 'node:assert/strict';
 import { reducer, initialState } from './useStore';
 import type { AppState } from './useStore';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
+import { loadSessionSnapshot } from '../lib/sessionSnapshot';
+import { withLocalStorageMap } from '../test/localStorage';
 
 function summary(id: string, updatedAt = 1): SessionSummary {
   return {
     appSessionId: id,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Chat ${id}`,
     goal: `Chat ${id}`,
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -113,4 +119,34 @@ test('rows never confirmed by a list survive lists that omit them', () => {
   };
   const next = reducer(state, { type: 'SESSION_LIST', sessions: [summary('server', 2)] });
   assert.deepEqual(Object.keys(next.sessions).sort(), ['local', 'server']);
+});
+
+test('a valid bounded v2 snapshot paints then yields to the sidecar list', () => {
+  withLocalStorageMap(
+    {
+      'droid-session-snapshot-v2': JSON.stringify({
+        sessions: [summary('stale', 1), summary('kept', 2)],
+      }),
+      'droid-session-snapshot-v1': JSON.stringify({
+        sessions: [summary('legacy-v1', 9)],
+      }),
+    },
+    () => {
+      const snapshot = loadSessionSnapshot();
+      assert.deepEqual(snapshot?.sessionOrder, ['stale', 'kept']);
+      assert.equal(snapshot?.sessions['legacy-v1'], undefined);
+      const painted: AppState = {
+        ...(initialState as unknown as AppState),
+        sessions: snapshot?.sessions ?? {},
+        sessionOrder: snapshot?.sessionOrder ?? [],
+        listConfirmedSessionIds: snapshot?.sessionOrder ?? null,
+      };
+      const next = reducer(painted, {
+        type: 'SESSION_LIST',
+        sessions: [summary('kept', 3), summary('fresh', 4)],
+      });
+      assert.deepEqual(Object.keys(next.sessions).sort(), ['fresh', 'kept']);
+      assert.deepEqual(next.sessionOrder, ['fresh', 'kept']);
+    },
+  );
 });

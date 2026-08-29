@@ -9,6 +9,7 @@ import type {
   ServerWireMessage,
   StreamFidelity,
 } from '../types/bridge';
+import { isSessionConfiguration } from './sessionConfiguration';
 
 export function serverWireMessage(value: unknown): ServerWireMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
@@ -135,6 +136,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'session.updated':
       return isSessionSummary(value.session);
     case 'session.closed':
+    case 'session.removed':
     case 'browser.closed':
       return typeof value.appSessionId === 'string';
     case 'sessions.cwdReanchored':
@@ -168,6 +170,8 @@ function isServerEvent(value: unknown): value is ServerEvent {
       return isPermissionRequest(value.request);
     case 'question.requested':
       return isSessionQuestion(value.question);
+    case 'plan_review.requested':
+      return isPlanReviewRequest(value.request);
     case 'context.updated':
       return hasStrings(value, ['appSessionId', 'sourceSessionId']) && isContextStats(value.stats);
     case 'catalog.updated':
@@ -220,8 +224,6 @@ function isServerEvent(value: unknown): value is ServerEvent {
       );
     case 'history.persistenceRecovered':
       return true;
-    case 'history.list':
-      return Array.isArray(value.sessions) && value.sessions.every(isSessionHistoryEntry);
     case 'browser.updated':
       return isBrowserState(value.state);
     case 'browser.native.request':
@@ -251,14 +253,13 @@ function isSessionSummary(value: unknown): boolean {
     hasStrings(value, [
       'appSessionId',
       'sessionPurpose',
-      'interactionMode',
       'role',
       'title',
       'goal',
       'cwd',
-      'autonomy',
       'phase',
     ]) &&
+    isSessionConfiguration(value.configuration) &&
     Array.isArray(value.features) &&
     value.features.every(isBridgeFeature) &&
     hasNumbers(value, ['tokensIn', 'tokensOut', 'contextTokens', 'createdAt', 'updatedAt']) &&
@@ -291,8 +292,7 @@ function isPermissionRequest(value: unknown): boolean {
   return (
     isRecord(value) &&
     hasStrings(value, ['appSessionId', 'requestId', 'kind', 'title', 'detail']) &&
-    isPermissionKind(value.kind) &&
-    'raw' in value
+    isPermissionKind(value.kind)
   );
 }
 
@@ -333,11 +333,16 @@ function isSessionQuestion(value: unknown): boolean {
     value.questions.every(
       (question) =>
         isRecord(question) &&
-        typeof question.index === 'number' &&
-        typeof question.question === 'string' &&
+        typeof question.id === 'string' &&
+        typeof question.prompt === 'string' &&
+        typeof question.multiSelect === 'boolean' &&
         stringArray(question.options),
     )
   );
+}
+
+function isPlanReviewRequest(value: unknown): boolean {
+  return isRecord(value) && hasStrings(value, ['appSessionId', 'requestId', 'plan']);
 }
 
 function isContextStats(value: unknown): boolean {
@@ -373,14 +378,6 @@ function isEnvironmentReport(value: unknown): boolean {
     isRecord(value.packageManagers) &&
     isRecord(value.auth) &&
     stringArray(value.availableChannels)
-  );
-}
-
-function isSessionHistoryEntry(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    hasStrings(value, ['providerSessionId', 'title']) &&
-    hasNumbers(value, ['modifiedTime', 'createdTime', 'messageCount'])
   );
 }
 

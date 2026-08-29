@@ -2,18 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer, initialState, type AppState } from './useStore';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from '../lib/sessionConfiguration';
 
-function session(providerSessionId: string): SessionSummary {
+function session(): SessionSummary {
   return {
     appSessionId: 'app-1',
-    providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Browser identity',
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'running',
     features: [],
     tokensIn: 0,
@@ -40,10 +43,10 @@ test('SESSION_LIST keeps browser state keyed by stable app session identity', ()
     browserOpenKeys: { 'app-1': true },
   };
 
-  const next = reducer(start, { type: 'SESSION_LIST', sessions: [session('provider-2')] });
+  const next = reducer(start, { type: 'SESSION_LIST', sessions: [session()] });
 
   assert.equal(next.browsers, start.browsers);
   assert.equal(next.browserOpenKeys, start.browserOpenKeys);
   assert.equal(next.browsers['app-1'].browserSessionId, 'browser-1');
-  assert.equal(next.sessions['app-1'].providerSessionId, 'provider-2');
+  assert.equal(next.sessions['app-1'].appSessionId, 'app-1');
 });

@@ -8,6 +8,7 @@ import type { NormalizedSideEffects } from './SessionEventFlow.js';
 import type { ProgressEntry, ServerEvent } from './protocol.js';
 import type { SessionRegistry } from './SessionRegistry.js';
 import { phaseFromState } from './sessionHelpers.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
 
 interface MissionCorrelation {
   providerSessionId?: string;
@@ -37,6 +38,7 @@ export class MissionControlPolicy {
   apply(parentAppSessionId: string, effects: NormalizedSideEffects): void {
     const live = this.d.registry.getLive(parentAppSessionId);
     if (live?.summary.sessionPurpose !== 'mission-control') return;
+    requireDroidCapability(live, 'missionControl', 'applyMissionControl');
 
     if (effects.features) {
       this.d.registry.updateSummary(parentAppSessionId, { features: effects.features });
@@ -73,14 +75,16 @@ export class MissionControlPolicy {
   resolveDefaultSettings(parentAppSessionId: string, role: 'worker' | 'validator'): ChildSettings {
     const live = this.d.registry.getLive(parentAppSessionId);
     if (!live) throw new Error(`Mission Control parent ${parentAppSessionId} is not live.`);
-    const parent = childSettingsFromInit(live.session.initResult);
+    const parent = childSettingsFromInit(live.session.initResult ?? {});
     const catalog = this.d.resolveCatalogDefaultSettings();
     const roleModelId =
-      role === 'validator' ? live.summary.validatorModelId : live.summary.workerModelId;
+      role === 'validator'
+        ? live.summary.droidMissionConfiguration?.validator.modelId
+        : live.summary.droidMissionConfiguration?.worker.modelId;
     const roleReasoningEffort =
       role === 'validator'
-        ? live.summary.validatorReasoningEffort
-        : live.summary.workerReasoningEffort;
+        ? live.summary.droidMissionConfiguration?.validator.reasoningEffort
+        : live.summary.droidMissionConfiguration?.worker.reasoningEffort;
     return {
       modelId: roleModelId ?? parent.modelId ?? catalog.modelId,
       reasoningEffort: roleReasoningEffort ?? parent.reasoningEffort ?? catalog.reasoningEffort,

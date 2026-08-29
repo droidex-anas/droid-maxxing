@@ -6,18 +6,21 @@ import {
   nativeBrowserRequestTargetsVisibleSurface,
 } from './browserSessionIdentity';
 import type { SessionSummary } from '../types/bridge';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
-const session = (appSessionId: string, providerSessionId?: string): SessionSummary => ({
+const session = (appSessionId: string): SessionSummary => ({
   appSessionId,
-  providerSessionId,
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: appSessionId,
   goal: appSessionId,
   cwd: '',
   workspaceKind: 'none',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'running',
   features: [],
   tokensIn: 0,
@@ -30,7 +33,7 @@ const session = (appSessionId: string, providerSessionId?: string): SessionSumma
 test('browserKeyForSession uses the stable app session id through compaction', () => {
   // The provider session id changes on compaction; the browser
   // key must stay the app id so browser tools keep targeting the visible chat.
-  assert.equal(browserKeyForSession(session('app-1', 'provider-after-compaction')), 'app-1');
+  assert.equal(browserKeyForSession(session('app-1')), 'app-1');
   assert.equal(browserKeyForSession(session('app-2')), 'app-2');
 });
 

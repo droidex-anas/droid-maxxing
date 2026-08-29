@@ -1,5 +1,9 @@
 # Multi-Provider Runtime v1 Implementation Plan
 
+> **Scope note (2026-08-28):** The v1 provider union is now five: `droid`,
+> `codex`, `claude`, `cursor`, and `grok`. Any statement of "three providers"
+> or "the three exact v1 pairs" across this plan set should be read as five.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development to implement this plan task-by-task.
 > Steps use checkbox syntax for tracking.

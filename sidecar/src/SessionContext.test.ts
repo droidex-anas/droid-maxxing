@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { ContextStatsAccuracy, ReasoningEffort } from '@factory/droid-sdk';
 
-import { DroidRuntime } from './DroidRuntime.js';
+import { DroidRuntime } from './providers/droid/DroidProviderAdapter.js';
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import {
   SessionContext,
@@ -10,50 +13,97 @@ import {
   type LiveOperationTarget,
 } from './SessionContext.js';
 import type { LiveSession } from './SessionLifecycle.js';
-import { SessionRegistry } from './SessionRegistry.js';
+import { liveBindingFromSummary, SessionRegistry } from './SessionRegistry.js';
 import {
   FakeFactoryRuntime,
   FakeFactorySession,
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
-import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
+  assertUnsupportedCapability,
+  cursorSessionConfiguration,
+  droidExtensionForFactory,
+  stubDroidProvider,
+} from './testing/droidProviderTestSupport.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
 
 interface Harness {
   calls: RecordedCall[];
   events: ServerEvent[];
   runtime: FakeFactoryRuntime;
-  history: FakeHistoryIndex;
+  store: SessionStore;
   registry: SessionRegistry<LiveSession>;
   context: SessionContext;
   contextWindowNotes: [string, number][];
+  persistedSummary(appSessionId: string): SessionSummary | undefined;
+  failNextPersist(error: Error): void;
 }
+
+const ownedStores: Array<{ db: DroidexDatabase; dir: string }> = [];
+
+test.after(() => {
+  for (const { db, dir } of ownedStores) {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function createHarness(): Harness {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
   const contextWindowNotes: [string, number][] = [];
   const runtime = new FakeFactoryRuntime(calls);
-  const history = new FakeHistoryIndex(calls);
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-context-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  ownedStores.push({ db, dir });
+  const store = new SessionStore(db);
+  let nextUpdateError: Error | undefined;
   const registry = new SessionRegistry<LiveSession>({
-    history,
-    loadOrdinarySessions: () => [],
-    loadMissionControlSessions: () => [],
     projectSummary: (value) => ({ ...value }),
     onSummaryUpdated: (session) => {
       events.push({ type: 'session.updated', session });
     },
     now: () => 10,
+    sessionStore: {
+      get: store.get.bind(store),
+      list: store.list.bind(store),
+      replaceProviderRuntime: store.replaceProviderRuntime.bind(store),
+      updateSummary: (appSessionId, patch, options) => {
+        if (nextUpdateError) {
+          const error = nextUpdateError;
+          nextUpdateError = undefined;
+          throw error;
+        }
+        return store.updateSummary(appSessionId, patch, options);
+      },
+    },
   });
   const context = new SessionContext({
     registry,
-    runtime,
     emit: (event) => events.push(event),
     maxContextTokensForSummary: (value) => value.maxContextTokens,
     noteContextWindow: (modelId, contextWindowTokens) => {
       contextWindowNotes.push([modelId, contextWindowTokens]);
     },
   });
-  return { calls, events, runtime, history, registry, context, contextWindowNotes };
+  return {
+    calls,
+    events,
+    runtime,
+    store,
+    registry,
+    context,
+    contextWindowNotes,
+    persistedSummary: (appSessionId) => store.get(appSessionId)?.summary,
+    failNextPersist(error: Error) {
+      nextUpdateError = error;
+    },
+  };
 }
 
 function registerLive(
@@ -62,9 +112,13 @@ function registerLive(
   providerSessionId = appSessionId,
 ): { live: LiveSession; session: FakeFactorySession } {
   const session = new FakeFactorySession(providerSessionId, {}, h.calls);
+  const liveSummary = summary(appSessionId, providerSessionId);
+  seedStoredSession(h, liveSummary);
   const live: LiveSession = {
-    summary: summary(appSessionId, providerSessionId),
+    summary: liveSummary,
+    binding: liveBindingFromSummary(liveSummary),
     session,
+    provider: stubDroidProvider(session),
     streaming: false,
     autoCompacting: false,
     pendingSends: [],
@@ -100,6 +154,7 @@ function addChild(
     providerSessionId,
     sourceSessionId: childSessionId,
     session,
+    droid: droidExtensionForFactory(session),
     role: 'worker',
     isCurrent: () =>
       !parent.closeMode &&
@@ -112,6 +167,15 @@ function addChild(
 
 const childRuntimes = new WeakMap<LiveSession, Map<string, { session: FakeFactorySession }>>();
 
+function attachContextBreakdown(session: FakeFactorySession, value?: unknown, error?: Error): void {
+  session.nextContextBreakdown = value;
+  session.nextContextBreakdownError = error;
+  Reflect.set(session, 'getContextBreakdown', async () => {
+    if (session.nextContextBreakdownError) throw session.nextContextBreakdownError;
+    return session.nextContextBreakdown;
+  });
+}
+
 function primaryTarget(h: Harness, live: LiveSession): LiveOperationTarget {
   const session = live.session;
   return {
@@ -119,6 +183,7 @@ function primaryTarget(h: Harness, live: LiveSession): LiveOperationTarget {
     providerSessionId: session.sessionId,
     sourceSessionId: live.summary.appSessionId,
     session,
+    droid: droidExtensionForFactory(session as FakeFactorySession),
     isCurrent: () =>
       !live.closeMode &&
       h.registry.getLive(live.summary.appSessionId) === live &&
@@ -140,7 +205,7 @@ test('primary refresh normalizes breakdown and persists estimated context', asyn
     accuracy: ContextStatsAccuracy.Estimated,
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
-  h.runtime.contextBreakdowns.set('backend-1', {
+  attachContextBreakdown(session, {
     modelId: 'model-default',
     contextBudget: 1_000,
     categories: [
@@ -180,9 +245,9 @@ test('plausible exact primary usage wins while child usage changes totals only',
   assert.equal(live.summary.tokensIn, 20);
   assert.equal(live.summary.tokensOut, 5);
   assert.equal(live.summary.contextTokens, 800);
-  const patches = h.history.summaryPatchesAndHidden().patches;
-  assert.equal(patches.get('app-1')?.tokensIn, 20);
-  assert.equal(patches.get('app-1')?.contextTokens, 800);
+  const persisted = h.persistedSummary('app-1');
+  assert.equal(persisted?.tokensIn, 20);
+  assert.equal(persisted?.contextTokens, 800);
 
   session.nextContextStats = {
     used: 100,
@@ -241,7 +306,7 @@ test('unchanged in-turn poll readings emit context once until the reading change
   // even when the provider reading has not moved.
   await h.context.refresh(target);
   assert.equal(contextEvents(h).length, 3);
-  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 260);
+  assert.equal(h.persistedSummary('app-1')?.contextTokens, 260);
 });
 test('deduplicated in-turn polls still synchronize exact context summary fields', async () => {
   const h = createHarness();
@@ -307,7 +372,7 @@ test('cumulative provider estimates rebase after restored in-place compactions',
     accuracy: ContextStatsAccuracy.Estimated,
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
-  h.runtime.contextBreakdowns.set('app-1', {
+  attachContextBreakdown(session, {
     modelId: 'model-default',
     contextBudget: 100_000,
     usedTokens: 397_000,
@@ -424,8 +489,8 @@ test('usage without current-context telemetry updates totals only', () => {
 test('usage persistence failure keeps live telemetry and retries an identical reading', () => {
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
-  const persistedBefore = h.history.summaryPatchesAndHidden().patches.get('app-1');
-  h.history.nextSyncError = new Error('disk unavailable');
+  const persistedBefore = h.persistedSummary('app-1');
+  h.failNextPersist(new Error('disk unavailable'));
   const usage = {
     tokensIn: 12,
     tokensOut: 4,
@@ -436,12 +501,12 @@ test('usage persistence failure keeps live telemetry and retries an identical re
   assert.equal(live.summary.tokensIn, 12);
   assert.equal(live.summary.contextTokens, 80);
   assert.equal(h.events.at(-1)?.type, 'session.updated');
-  assert.deepEqual(h.history.summaryPatchesAndHidden().patches.get('app-1'), persistedBefore);
+  assert.deepEqual(h.persistedSummary('app-1'), persistedBefore);
 
   h.context.recordUsage('app-1', 'app-1', usage);
 
-  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.tokensIn, 12);
-  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 80);
+  assert.equal(h.persistedSummary('app-1')?.tokensIn, 12);
+  assert.equal(h.persistedSummary('app-1')?.contextTokens, 80);
 });
 
 test('child refresh never inherits the parent exact context reading', async () => {
@@ -511,7 +576,7 @@ test('primary and child resource keys cannot alias', async (t) => {
     accuracy: ContextStatsAccuracy.Estimated,
     updatedAt: '2026-07-30T00:00:00.000Z',
   };
-  h.runtime.contextBreakdowns.set('child-provider', {
+  attachContextBreakdown(child.session, {
     usedTokens: 100,
     contextBudget: 1_000,
     categories: [{ name: 'Child tools', tokens: 100 }],
@@ -567,7 +632,7 @@ test('compaction bookkeeping survives persistence failure without double increme
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
   live.summary.contextTokens = 900;
-  h.history.nextSyncError = new Error('disk unavailable');
+  h.failNextPersist(new Error('disk unavailable'));
 
   assert.throws(
     () => h.context.recordCompaction(primaryTarget(h, live), 'summary-1'),
@@ -583,7 +648,7 @@ test('compaction bookkeeping survives persistence failure without double increme
 test('an older compaction retry cannot roll back a newer generation', () => {
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
-  h.history.nextSyncError = new Error('disk unavailable');
+  h.failNextPersist(new Error('disk unavailable'));
 
   assert.throws(
     () => h.context.recordCompaction(primaryTarget(h, live), 'summary-1'),
@@ -784,12 +849,11 @@ test('late refreshes after close or clearAll are inert', async () => {
 test('breakdown failures and malformed values keep valid context stats', async () => {
   const h = createHarness();
   const { live, session } = registerLive(h, 'app-1');
-  h.runtime.contextBreakdownErrors.set('app-1', new Error('private RPC failed'));
+  attachContextBreakdown(session, undefined, new Error('private RPC failed'));
   await h.context.refresh(primaryTarget(h, live));
   assert.equal(contextEvents(h).at(-1)?.stats.used, 0);
 
-  h.runtime.contextBreakdownErrors.delete('app-1');
-  h.runtime.contextBreakdowns.set('app-1', { categories: 'invalid' });
+  attachContextBreakdown(session, { categories: 'invalid' });
   const beforeMalformed = contextEvents(h).length;
   await h.context.refresh(primaryTarget(h, live));
   assert.equal(contextEvents(h).length, beforeMalformed + 1);
@@ -831,7 +895,6 @@ test('hidden background work pauses context pollers and still refreshes on deman
   const h = createHarness();
   const injected = new SessionContext({
     registry: h.registry,
-    runtime: h.runtime,
     emit: (event) => h.events.push(event),
     maxContextTokensForSummary: (value) => value.maxContextTokens,
     noteContextWindow: () => undefined,
@@ -873,20 +936,63 @@ test('hidden background work pauses context pollers and still refreshes on deman
   assert.ok(session.contextStatsCalls > before);
 });
 
+test('context capability fails for a non-droid session before stats are read', async () => {
+  const h = createHarness();
+  const { live, session } = registerLive(h, 'app-cursor');
+  live.summary.configuration = cursorSessionConfiguration({ modelId: 'cursor-model' });
+  live.binding = { ...live.binding, providerInstanceId: 'cursor' };
+  live.provider = new StubProviderSession(session.sessionId);
+  session.contextStatsCalls = 0;
+  assert.throws(
+    () =>
+      requireDroidCapability(live, 'context', 'refreshContext', {
+        ...UNAVAILABLE_PROVIDER_CAPABILITIES,
+      }),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'refreshContext',
+        capability: 'context',
+      });
+      return true;
+    },
+  );
+  assert.equal(session.contextStatsCalls, 0);
+});
+
+function seedStoredSession(h: Harness, liveSummary: SessionSummary): void {
+  if (h.store.get(liveSummary.appSessionId)) return;
+  h.store.createProvisional({
+    appSessionId: liveSummary.appSessionId,
+    clientRef: `seed-${liveSummary.appSessionId}`,
+    summary: liveSummary,
+  });
+  if (liveSummary.providerSessionId) {
+    h.store.bindInitialProviderRuntime(
+      liveSummary.appSessionId,
+      0,
+      liveSummary.providerSessionId,
+    );
+  }
+  h.store.markStarted(liveSummary.appSessionId);
+}
+
 function summary(appSessionId: string, providerSessionId: string): SessionSummary {
   return {
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'user',
     title: appSessionId,
     goal: 'test',
     cwd: '/workspace',
     workspaceKind: 'folder',
-    modelId: 'model-default',
-    reasoningEffort: ReasoningEffort.Low,
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      reasoningEffort: ReasoningEffort.Low,
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

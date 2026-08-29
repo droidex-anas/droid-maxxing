@@ -12,6 +12,13 @@ import {
 import type { LiveSession } from './SessionLifecycle.js';
 import { createCompactionTestLiveSession } from './testing/compactionTestSupport.js';
 import {
+  assertUnsupportedCapability,
+  droidExtensionForFactory,
+} from './testing/droidProviderTestSupport.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
+import {
   FakeFactoryRuntime,
   FakeFactorySession,
   type RecordedCall,
@@ -138,6 +145,7 @@ function addPrimary(
     providerSessionId: session.sessionId,
     sourceSessionId: appSessionId,
     session,
+    droid: droidExtensionForFactory(session),
     liveSession: live,
     isCurrent: () => current && !live.closeMode && live.session === session,
   };
@@ -183,6 +191,7 @@ function addChild(
     providerSessionId: session.sessionId,
     sourceSessionId: session.sessionId,
     session,
+    droid: droidExtensionForFactory(session),
     role: 'worker',
     ...snapshot,
     isAutoCompacting: () => child.autoCompacting,
@@ -582,3 +591,24 @@ function idleNotification(): Record<string, unknown> {
     },
   };
 }
+
+test('automatic compaction target construction fails for a non-droid provider', () => {
+  const h = createHarness();
+  const { live, session } = addPrimary(h, 'app-cursor');
+  live.provider = new StubProviderSession(session.sessionId);
+  live.binding = { ...live.binding, providerInstanceId: 'cursor' };
+  assert.throws(
+    () =>
+      requireDroidCapability(live, 'compaction', 'armAutoCompaction', {
+        ...UNAVAILABLE_PROVIDER_CAPABILITIES,
+      }),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'armAutoCompaction',
+        capability: 'compaction',
+      });
+      return true;
+    },
+  );
+});

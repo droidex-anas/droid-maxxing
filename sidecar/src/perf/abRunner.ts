@@ -173,8 +173,7 @@ function ensureViteBuild(treeRoot: string): void {
 
 function ensureSidecarBuild(treeRoot: string): void {
   const entry = join(treeRoot, 'sidecar/dist/sidecar.mjs');
-  const worker = join(treeRoot, 'sidecar/dist/historyPersistenceWorker.mjs');
-  if (existsSync(entry) && existsSync(worker)) return;
+  if (existsSync(entry)) return;
   execFileSync('npm', ['run', 'build', '--prefix', join(treeRoot, 'sidecar')], {
     cwd: treeRoot,
     stdio: 'inherit',

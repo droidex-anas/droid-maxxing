@@ -13,18 +13,22 @@ import {
   notificationSnippet,
   saveFinishNotificationSettings,
 } from './finishNotifications';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 const session = (over: Partial<SessionSummary> = {}): SessionSummary =>
   ({
     appSessionId: 's1',
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: 'Refactor notifications',
     goal: '',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,

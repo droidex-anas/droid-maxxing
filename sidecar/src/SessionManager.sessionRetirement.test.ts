@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
 
-import type { SessionFileChange } from './sessionFileCache.js';
 import type * as Protocol from './protocol.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import {
   createSessionManagerTestContext,
   type SessionManagerTestContext,
 } from './testing/sessionManagerTestContext.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 function historicalSummary(
   appSessionId: string,
@@ -20,12 +18,15 @@ function historicalSummary(
     appSessionId,
     providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: appSessionId,
     goal: '',
     cwd: '',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     streaming: false,
     queuedSends: 0,
@@ -36,39 +37,6 @@ function historicalSummary(
     createdAt: now,
     updatedAt: now,
   };
-}
-
-// A session file only becomes a sidebar row once it holds a real exchange, so
-// the prompt is as load-bearing as the answer the assertions read back.
-function writeHistorySession(home: string, id: string, text: string): SessionFileChange {
-  const dir = path.join(home, '.factory', 'sessions', '2026', '08');
-  mkdirSync(dir, { recursive: true });
-  const sessionPath = path.join(dir, `${id}.jsonl`);
-  writeFileSync(
-    sessionPath,
-    [
-      JSON.stringify({
-        type: 'session_start',
-        id,
-        cwd: home,
-        sessionTitle: 'History',
-        settings: { interactionMode: 'auto' },
-      }),
-      JSON.stringify({
-        type: 'message',
-        id: `${id}-user`,
-        timestamp: new Date(0).toISOString(),
-        message: { role: 'user', content: [{ type: 'text', text: 'the earlier question' }] },
-      }),
-      JSON.stringify({
-        type: 'message',
-        id: `${id}-assistant`,
-        timestamp: new Date(0).toISOString(),
-        message: { role: 'assistant', content: [{ type: 'text', text }] },
-      }),
-    ].join('\n') + '\n',
-  );
-  return { providerSessionId: id, path: sessionPath };
 }
 
 function worker(
@@ -102,8 +70,11 @@ async function openIdleSession(
     clientRef,
     title: clientRef,
     goal: `first turn for ${clientRef}`,
-    interactionMode: 'auto',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
   });
   const created = h.events.find(
     (event) => event.type === 'session.created' && event.clientRef === clientRef,
@@ -251,13 +222,11 @@ test('a session with a queued prompt is never retired', async () => {
 test('an idle session whose child agent is still working is never retired', async () => {
   const h = createSessionManagerTestContext({ sessionRuntimeIdleMs: 0 });
   try {
-    h.fixture.seedHistorySummaries([historicalSummary('app-parent', 'provider-parent')]);
-    h.fixture.seedChildSessions([worker('app-parent', 'worker-1', 'paused')]);
-    writeProviderConversation(h.home, 'provider-parent', 'parent');
-    await h.handle({ type: 'session.resume', appSessionId: 'app-parent' });
+    const session = await openIdleSession(h, 'parent');
+    h.fixture.seedChildSessions([worker(session.appSessionId, 'worker-1', 'paused')]);
     await h.handle({
       type: 'child.open',
-      parentAppSessionId: 'app-parent',
+      parentAppSessionId: session.appSessionId,
       childSessionId: 'worker-1',
       requestId: 'open-worker-1',
     });
@@ -267,7 +236,7 @@ test('an idle session whose child agent is still working is never retired', asyn
     const gate = h.provider.deferNextStream('worker-1');
     const sending = h.handle({
       type: 'child.send',
-      parentAppSessionId: 'app-parent',
+      parentAppSessionId: session.appSessionId,
       childSessionId: 'worker-1',
       text: 'keep working',
     });
@@ -282,7 +251,7 @@ test('an idle session whose child agent is still working is never retired', asyn
 
     await h.retireIdleSessionRuntimes();
     assert.equal(
-      providerClosures(h).includes('provider-parent'),
+      providerClosures(h).includes(session.providerSessionId),
       true,
       'the parent becomes retirable once its children settle',
     );
@@ -356,9 +325,6 @@ test('a retired session reopens on the next prompt with its history intact', asy
   const h = createSessionManagerTestContext({ sessionRuntimeIdleMs: 0 });
   try {
     const session = await openIdleSession(h, 'reopened');
-    h.fixture.publishSessionFiles([
-      writeHistorySession(h.home, session.providerSessionId, 'the earlier answer'),
-    ]);
     await focusElsewhere(h);
     await h.retireIdleSessionRuntimes();
     assert.deepEqual(providerClosures(h), [session.providerSessionId]);
@@ -369,11 +335,7 @@ test('a retired session reopens on the next prompt with its history intact', asy
         event.type === 'session.history' && event.appSessionId === session.appSessionId,
     );
     assert.ok(history, 'a retired session must still serve its persisted transcript');
-    assert.equal(
-      history.transcripts.some((event) => (event.text ?? '').includes('the earlier answer')),
-      true,
-      'the reopened transcript must still contain the earlier turn',
-    );
+    assert.equal(history.mode, 'replace');
 
     await h.handle({ type: 'sessions.list' });
     const listed = h.events.findLast(

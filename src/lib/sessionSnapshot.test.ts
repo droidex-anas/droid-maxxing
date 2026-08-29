@@ -11,8 +11,10 @@ import {
   MAX_SNAPSHOT_TRANSCRIPT_EVENTS,
   MAX_SNAPSHOT_TRANSCRIPT_BYTES,
 } from './sessionSnapshot';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
-const SNAPSHOT_KEY = 'droid-session-snapshot-v1';
+const SNAPSHOT_KEY = 'droid-session-snapshot-v2';
+const LEGACY_SNAPSHOT_KEY = 'droid-session-snapshot-v1';
 
 function feature(id: string, overrides: Partial<BridgeFeature> = {}): BridgeFeature {
   return {
@@ -31,12 +33,15 @@ function summary(id: string, updatedAt = 1): SessionSummary {
   return {
     appSessionId: id,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Chat ${id}`,
     goal: `Chat ${id}`,
     cwd: '/repo',
-    autonomy: 'low',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
     phase: 'paused',
     features: [],
     tokensIn: 0,
@@ -96,6 +101,109 @@ test('missing or corrupt payloads degrade to no snapshot', () => {
       assert.equal(loadSessionSnapshot(), undefined, raw);
     });
   }
+});
+
+test('a valid v1 snapshot is ignored and left in place', () => {
+  const v1 = JSON.stringify({ sessions: [summary('legacy')] });
+  withLocalStorageMap({ [LEGACY_SNAPSHOT_KEY]: v1 }, () => {
+    assert.equal(loadSessionSnapshot(), undefined);
+    assert.equal(globalThis.localStorage.getItem(LEGACY_SNAPSHOT_KEY), v1);
+    assert.equal(globalThis.localStorage.getItem(SNAPSHOT_KEY), null);
+  });
+});
+
+test('a summary without a complete configuration is dropped rather than coerced to droid', () => {
+  const incomplete = {
+    appSessionId: 'legacy',
+    sessionPurpose: 'chat',
+    role: 'primary',
+    title: 'Legacy',
+    goal: 'Legacy',
+    cwd: '/repo',
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+    phase: 'paused',
+    features: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    contextTokens: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  withLocalStorageMap(
+    {
+      [SNAPSHOT_KEY]: JSON.stringify({
+        sessions: [incomplete, summary('good')],
+      }),
+    },
+    () => {
+      const snapshot = loadSessionSnapshot();
+      assert.deepEqual(snapshot?.sessionOrder, ['good']);
+      assert.equal(snapshot?.sessions.legacy, undefined);
+      assert.equal(
+        snapshot?.sessions.good?.configuration.providerSelection.providerInstanceId,
+        'droid',
+      );
+    },
+  );
+});
+
+test('a v2 summary with top-level duplicate configuration fields is dropped', () => {
+  const duplicated = {
+    ...summary('dup'),
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  };
+  withLocalStorageMap(
+    {
+      [SNAPSHOT_KEY]: JSON.stringify({
+        sessions: [duplicated, summary('good')],
+      }),
+    },
+    () => {
+      const snapshot = loadSessionSnapshot();
+      assert.deepEqual(snapshot?.sessionOrder, ['good']);
+      assert.equal(snapshot?.sessions.dup, undefined);
+    },
+  );
+});
+
+test('a v2 summary with an unknown provider instance is dropped', () => {
+  const unknown = {
+    ...summary('unknown'),
+    configuration: {
+      ...summary('unknown').configuration,
+      providerSelection: {
+        ...summary('unknown').configuration.providerSelection,
+        providerInstanceId: 'mystery',
+      },
+    },
+  };
+  withLocalStorageMap({ [SNAPSHOT_KEY]: JSON.stringify({ sessions: [unknown, summary('good')] }) }, () => {
+    const snapshot = loadSessionSnapshot();
+    assert.deepEqual(snapshot?.sessionOrder, ['good']);
+    assert.equal(snapshot?.sessions.unknown, undefined);
+  });
+});
+
+test('a v2 summary with a non-scalar provider option is dropped', () => {
+  const nested = {
+    ...summary('nested'),
+    configuration: {
+      ...summary('nested').configuration,
+      providerSelection: {
+        ...summary('nested').configuration.providerSelection,
+        options: { reasoningEffort: { level: 'high' } },
+      },
+    },
+  };
+  withLocalStorageMap({ [SNAPSHOT_KEY]: JSON.stringify({ sessions: [nested, summary('good')] }) }, () => {
+    const snapshot = loadSessionSnapshot();
+    assert.deepEqual(snapshot?.sessionOrder, ['good']);
+    assert.equal(snapshot?.sessions.nested, undefined);
+  });
 });
 
 test('entries missing identity fields are dropped, valid ones survive', () => {

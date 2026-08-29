@@ -106,7 +106,7 @@ test(
       await h.handle({ type: 'sessions.list' });
       assert.equal(
         latestSessionList(h.events).find((session) => session.appSessionId === 'provider-1')
-          ?.workerModelId,
+          ?.droidMissionConfiguration?.worker.modelId,
         'worker-accepted',
       );
     } finally {

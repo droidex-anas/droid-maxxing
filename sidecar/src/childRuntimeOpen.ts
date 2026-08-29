@@ -1,5 +1,9 @@
-import type { FactorySession } from './DroidRuntime.js';
-import type { PersistedChildSession } from './history.js';
+import {
+  createDroidSessionExtension,
+  type FactorySession,
+} from './providers/droid/DroidFactorySession.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
+import type { PersistedChildSession } from './ChildSessionState.js';
 import type { ServerEvent } from './protocol.js';
 import { errMsg } from './sessionHelpers.js';
 import type { ChildAutomaticCompactionTarget } from './SessionCompaction.js';
@@ -187,6 +191,7 @@ export async function installChildRuntime(input: {
   host: ChildRuntimeInstallHost;
 }): Promise<void> {
   const { parent, child, identity, requestId, operation, host } = input;
+  requireDroidCapability(parent.lease, 'addressableChildren', `child.${operation}`);
   const providerSessionId = child.providerSessionId;
   if (!providerSessionId) return;
   const childSessionId = identity.childSessionId;
@@ -217,7 +222,8 @@ export async function installChildRuntime(input: {
       permissionHandler: host.d.interactions.makePermissionHandler(ref),
       askUserHandler: host.d.interactions.makeAskUserHandler(ref),
       cwd: parent.lease.summary.cwd,
-      mcpServers: parent.lease.mcpConfigs,
+      mcpServers: parent.lease
+        .mcpConfigs as import('./providers/droid/DroidModeMapping.js').McpServerConfig[],
     });
     const result = await awaitOpenStep(attempt, load, (late) => late.close().catch(ignoreError));
     if (result === CHILD_OPEN_CANCELLED) return;
@@ -264,7 +270,7 @@ async function bindLoadedChildRuntime(input: {
   const actual = childSettingsFromInit(loaded.initResult);
   const defaults = host.d.resolveDefaultSettings(
     parent.lease.summary,
-    parent.lease.session.initResult,
+    parent.lease.session.initResult ?? {},
     child.role,
   );
   const settings = {
@@ -272,6 +278,12 @@ async function bindLoadedChildRuntime(input: {
     reasoningEffort: actual.reasoningEffort ?? child.reasoningEffort ?? defaults.reasoningEffort,
   };
   if (!settings.modelId) throw new Error(`No accepted model is available for ${child.role}.`);
+  const droid = createDroidSessionExtension(
+    () => loaded,
+    () => {
+      throw new Error('child runtime cannot replace native session');
+    },
+  );
   const limit = await awaitOpenStep(
     attempt,
     host.d.compaction.resolveLimit({ modelId: settings.modelId }),
@@ -283,6 +295,7 @@ async function bindLoadedChildRuntime(input: {
       {
         appSessionId: identity.parentAppSessionId,
         session: loaded,
+        droid,
         isCurrent: () => attempt.provisionalSession === loaded && isCurrentAttempt(),
       },
       limit,
@@ -291,6 +304,7 @@ async function bindLoadedChildRuntime(input: {
   if (armed === CHILD_OPEN_CANCELLED || !isCurrentAttempt()) return;
   const runtime: ChildRuntimeState = {
     session: loaded,
+    droid,
     generation: ++child.runtimeGeneration,
     lastUsedAt: host.d.now(),
   };

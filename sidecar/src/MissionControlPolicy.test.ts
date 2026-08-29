@@ -9,21 +9,30 @@ import type {
   ChildSpawnObservation,
 } from './ChildSessionState.js';
 import type { NormalizedSideEffects } from './SessionEventFlow.js';
-import type { ServerEvent, SessionSummary } from './protocol.js';
+import type { ServerEvent, SessionInteractionMode, SessionSummary } from './protocol.js';
 import { FakeFactorySession, type RecordedCall } from './testing/fakeFactoryRuntime.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
+  assertUnsupportedCapability,
+  cursorSessionConfiguration,
+  stubDroidProvider,
+} from './testing/droidProviderTestSupport.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { ProviderContractError } from './providers/providerTypes.js';
 
 interface Harness {
   policy: MissionControlPolicy;
   admissions: ChildSpawnObservation[];
   events: ServerEvent[];
   summary: SessionSummary;
+  live: ChildParentLease;
   apply(effects: NormalizedSideEffects): void;
   rejectProvider(providerSessionId: string): void;
 }
 
 function createHarness(
   sessionPurpose: SessionSummary['sessionPurpose'] = 'mission-control',
-  interactionMode: SessionSummary['interactionMode'] = 'agi',
+  interactionMode: SessionInteractionMode = 'agi',
 ): Harness {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
@@ -31,14 +40,22 @@ function createHarness(
   const childrenBySpawn = new Map<string, ChildIdentity>();
   const rejectedProviders = new Set<string>();
   const summary = missionSummary(sessionPurpose, interactionMode);
+  const session = new FakeFactorySession('parent-provider', {}, calls, {
+    settings: {
+      modelId: 'accepted-parent-model',
+      reasoningEffort: ReasoningEffort.Medium,
+    },
+  });
   const live: ChildParentLease = {
     summary,
-    session: new FakeFactorySession('parent-provider', {}, calls, {
-      settings: {
-        modelId: 'accepted-parent-model',
-        reasoningEffort: ReasoningEffort.Medium,
-      },
-    }),
+    session,
+    provider: stubDroidProvider(session),
+    binding: {
+      providerDriverKind: 'droid',
+      providerInstanceId: 'droid',
+      previousProviderSessionIds: [],
+      runtimeGeneration: 1,
+    },
     mcpConfigs: [],
   };
   const policy = new MissionControlPolicy({
@@ -76,6 +93,7 @@ function createHarness(
     admissions,
     events,
     summary,
+    live,
     apply: (effects) => policy.apply(summary.appSessionId, effects),
     rejectProvider: (providerSessionId) => {
       rejectedProviders.add(providerSessionId);
@@ -251,8 +269,10 @@ test('ignores Mission effects for ordinary auto, spec, and agi chat sessions', (
 
 test('owns Mission defaults, features, phase, and teardown-only correlation state', () => {
   const h = createHarness();
-  h.summary.workerModelId = 'worker-model';
-  h.summary.workerReasoningEffort = ReasoningEffort.High;
+  h.summary.droidMissionConfiguration = {
+    worker: { modelId: 'worker-model', reasoningEffort: ReasoningEffort.High },
+    validator: { modelId: 'accepted-parent-model' },
+  };
   assert.deepEqual(h.policy.resolveDefaultSettings('parent-app', 'worker'), {
     modelId: 'worker-model',
     reasoningEffort: ReasoningEffort.High,
@@ -297,20 +317,23 @@ function progressEntries(events: ServerEvent[]) {
 
 function missionSummary(
   sessionPurpose: SessionSummary['sessionPurpose'],
-  interactionMode: SessionSummary['interactionMode'],
+  interactionMode: SessionInteractionMode,
 ): SessionSummary {
   return {
     appSessionId: 'parent-app',
     providerSessionId: 'parent-provider',
     missionId: 'mission-1',
     sessionPurpose,
-    interactionMode,
     role: 'primary',
     title: 'Mission',
     goal: 'Ship',
     cwd: '',
     workspaceKind: 'none',
-    autonomy: 'medium',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode,
+      autonomy: 'medium',
+    }),
     phase: 'running',
     features: [],
     tokensIn: 0,
@@ -320,3 +343,33 @@ function missionSummary(
     updatedAt: 1,
   };
 }
+
+test('apply fails for a cursor parent before mutating mission features', () => {
+  const h = createHarness();
+  h.live.provider = new StubProviderSession('cursor-parent');
+  h.live.binding = {
+    providerDriverKind: 'cursor',
+    providerInstanceId: 'cursor',
+    previousProviderSessionIds: [],
+    runtimeGeneration: 1,
+  };
+  h.live.summary.configuration = cursorSessionConfiguration({
+    modelId: 'cursor-model',
+    interactionMode: 'agi',
+  });
+  const before = h.summary.features.slice();
+  assert.throws(
+    () => h.apply({ features: [] }),
+    (error: unknown) => {
+      assert.ok(error instanceof ProviderContractError);
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'applyMissionControl',
+        capability: 'missionControl',
+      });
+      return true;
+    },
+  );
+  assert.deepEqual(h.summary.features, before);
+  assert.equal(h.events.length, 0);
+});

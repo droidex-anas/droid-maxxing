@@ -12,18 +12,21 @@ import {
   uniqueRepositoryWorkspaceCwds,
   repositoryRootCwd,
 } from './workspaces';
+import { droidSessionConfiguration } from './sessionConfiguration';
 
 const session = (appSessionId: string, cwd: string, updatedAt: number): SessionSummary => ({
   appSessionId,
-  providerSessionId: `provider-${appSessionId}`,
   sessionPurpose: 'chat',
-  interactionMode: 'auto',
   role: 'primary',
   title: appSessionId,
   goal: appSessionId,
   cwd,
   workspaceKind: cwd ? 'folder' : 'none',
-  autonomy: 'low',
+  configuration: droidSessionConfiguration({
+    modelId: 'model-default',
+    interactionMode: 'auto',
+    autonomy: 'low',
+  }),
   phase: 'paused',
   features: [],
   tokensIn: 0,

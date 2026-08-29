@@ -4,6 +4,7 @@ import type {
   LiveSessionIdentity,
 } from './liveRuntimeJournal.js';
 import type { InterruptedSessionRecord, SessionPhase, SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 import { errMsg } from './sessionHelpers.js';
 import type { SessionLifecycle } from './SessionLifecycle.js';
 import { adoptedSessionFacts, isDueForRetirement } from './sessionRuntimeRetirement.js';
@@ -24,7 +25,10 @@ const ACTIVE_PHASES = new Set<SessionPhase>([
 export interface SessionAdoptionDependencies {
   journal: LiveRuntimeJournal;
   registry: {
-    liveSessionsSnapshot(): readonly { summary: SessionSummary }[];
+    liveSessionsSnapshot(): readonly {
+      summary: SessionSummary;
+      binding?: { providerSessionId?: string };
+    }[];
     getCanonicalSummary(id: string): SessionSummary | undefined;
     getLive(id: string): { summary: SessionSummary } | undefined;
   };
@@ -59,7 +63,7 @@ export class SessionAdoption {
     const sessions: LiveSessionIdentity[] = this.dependencies.registry
       .liveSessionsSnapshot()
       .flatMap((live) => {
-        const providerSessionId = live.summary.providerSessionId;
+        const providerSessionId = live.binding?.providerSessionId ?? live.summary.providerSessionId;
         if (!providerSessionId) return [];
         return [
           {
@@ -191,12 +195,15 @@ function syntheticSummary(identity: LiveSessionIdentity): SessionSummary {
     appSessionId: identity.appSessionId,
     providerSessionId: identity.providerSessionId,
     sessionPurpose: 'chat',
-    interactionMode: 'auto',
     role: 'primary',
     title: `Session ${identity.providerSessionId.slice(0, 8)}`,
     goal: '',
     cwd: '',
-    autonomy: 'off',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'off',
+    }),
     phase: 'paused',
     streaming: false,
     features: [],

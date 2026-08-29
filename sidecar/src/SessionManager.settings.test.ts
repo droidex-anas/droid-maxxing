@@ -7,6 +7,13 @@ import {
   validateFactoryDefaults,
 } from './SessionManager.js';
 import type { ModelInfo } from './protocol.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { FakeFactorySession } from './testing/fakeFactoryRuntime.js';
+import { assertUnsupportedCapability } from './testing/droidProviderTestSupport.js';
+import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
+import { liveBindingFromSummary } from './SessionRegistry.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 
 const models: ModelInfo[] = [
   {
@@ -140,4 +147,51 @@ test('saved model defaults remain intact while the catalog is unavailable', () =
       compactionTokenLimitPerModel: { 'saved-model': 150_000 },
     },
   );
+});
+
+test('modelChange fails on a cursor stub before updateSettings', () => {
+  const session = new FakeFactorySession('settings-cursor', {}, []);
+  const summary = {
+    appSessionId: 'app-cursor',
+    providerSessionId: session.sessionId,
+    sessionPurpose: 'chat' as const,
+    role: 'user' as const,
+    title: 'cursor',
+    goal: '',
+    cwd: '',
+    workspaceKind: 'none' as const,
+    configuration: droidSessionConfiguration({
+      modelId: 'model-a',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
+    phase: 'paused' as const,
+    features: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    contextTokens: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const live = {
+    summary,
+    binding: { ...liveBindingFromSummary(summary), providerInstanceId: 'cursor' as const },
+    provider: new StubProviderSession(session.sessionId),
+  };
+  const writes = session.settings.length;
+  assert.throws(
+    () =>
+      requireDroidCapability(live, 'modelChange', 'updateSettings', {
+        ...UNAVAILABLE_PROVIDER_CAPABILITIES,
+      }),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'updateSettings',
+        capability: 'modelChange',
+      });
+      return true;
+    },
+  );
+  assert.equal(session.settings.length, writes);
 });
