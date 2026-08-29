@@ -174,8 +174,7 @@ function createHarness(
   }
   const attachStoreToLifecycle =
     Boolean(options.sessionStore) ||
-    Boolean(options.attachSessionStore) ||
-    ordinarySummaries.length > 0;
+    (options.attachSessionStore ?? ordinarySummaries.length > 0);
   const recordEvent = (event: ServerEvent): void => {
     if (nextEmitFailure?.type === event.type) {
       const error = nextEmitFailure.error;
@@ -999,8 +998,8 @@ test('create and resume abandon in-flight opens when shutdown admission closes',
   );
 
   const historical = summary('resume-stable', 'resume-provider');
-  const resuming = createHarness([historical]);
-  const provider = queueLoad(resuming, 'resume-provider');
+  const resuming = createHarness([historical], { attachSessionStore: false });
+  const provider = queueLoad(resuming, 'resume-stable');
   let releaseResumeLimit: (limit: number) => void = () => undefined;
   resuming.setCompactionLimit(
     () =>

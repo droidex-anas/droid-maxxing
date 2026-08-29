@@ -376,22 +376,22 @@ test('reanchorHistoricalCwd moves idle sessions and preserves nested directories
   const updated = registry.reanchorHistoricalCwd('/repo/.worktrees/feature', '/repo');
 
   assert.deepEqual(
-    updated.map((session) => [session.appSessionId, session.cwd, session.updatedAt]),
-    [
-      ['at-root', '/repo', 7],
-      ['nested', '/repo/packages/app', 8],
-    ],
+    new Map(updated.map((session) => [session.appSessionId, [session.cwd, session.updatedAt]])),
+    new Map<string, [string, number]>([
+      ['at-root', ['/repo', 7]],
+      ['nested', ['/repo/packages/app', 8]],
+    ]),
   );
   assert.equal(registry.resolveSummary('at-root')?.cwd, '/repo');
   assert.equal(registry.resolveSummary('nested')?.cwd, '/repo/packages/app');
   assert.equal(registry.resolveSummary('sibling')?.cwd, '/repo/.worktrees/feature-next');
   assert.deepEqual(published, updated);
   assert.deepEqual(
-    persisted.map((session) => [session.appSessionId, session.cwd, session.updatedAt]),
-    [
-      ['at-root', '/repo', 7],
-      ['nested', '/repo/packages/app', 8],
-    ],
+    new Map(persisted.map((session) => [session.appSessionId, [session.cwd, session.updatedAt]])),
+    new Map<string, [string, number]>([
+      ['at-root', ['/repo', 7]],
+      ['nested', ['/repo/packages/app', 8]],
+    ]),
   );
   assert.equal(store.get('at-root')?.summary.cwd, '/repo');
   assert.equal(store.get('nested')?.summary.cwd, '/repo/packages/app');
