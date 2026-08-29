@@ -500,6 +500,46 @@ test('child upsert and read round-trip a private binding', async () => {
   });
 });
 
+test('child replacement keeps the logical child and persists previous native ids', async () => {
+  await withStore((store) => {
+    create(store, 'app-1');
+    const summary = {
+      parentAppSessionId: 'app-1',
+      childSessionId: 'child-1',
+      role: 'worker' as const,
+      status: 'running' as const,
+      modelId: 'model-default',
+      transcriptAvailable: true,
+      streamFidelity: 'state' as const,
+    };
+    store.upsertChild({
+      parentAppSessionId: 'app-1',
+      childSessionId: 'child-1',
+      summary,
+      binding: {
+        providerDriverKind: 'droid',
+        providerInstanceId: 'droid',
+        providerSessionId: 'native-old',
+      },
+    });
+    const replaced = store.upsertChild({
+      parentAppSessionId: 'app-1',
+      childSessionId: 'child-1',
+      summary,
+      binding: {
+        providerDriverKind: 'droid',
+        providerInstanceId: 'droid',
+        providerSessionId: 'native-new',
+        previousProviderSessionIds: ['native-old'],
+      },
+    });
+    assert.equal(replaced.summary.childSessionId, 'child-1');
+    assert.equal(replaced.binding.providerSessionId, 'native-new');
+    assert.deepEqual(replaced.binding.previousProviderSessionIds, ['native-old']);
+    assert.equal(store.listChildren('app-1').length, 1);
+  });
+});
+
 test('beginRetryStart CAS-clears a failed row and increments generation', async () => {
   await withStore((store) => {
     create(store, 'app-1');

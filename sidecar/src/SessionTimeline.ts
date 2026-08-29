@@ -83,12 +83,6 @@ export function isReportedStreamingTranscriptError(
   return error instanceof StreamingTranscriptPersistenceError && error.isReported;
 }
 
-const DEFAULT_CANONICAL_IDENTITY: CanonicalIdentity = {
-  providerDriverKind: 'droid',
-  providerInstanceId: 'droid',
-  runtimeGeneration: 1,
-};
-
 function streamingSourceKey(appSessionId: string, sourceSessionId: string): string {
   return `${appSessionId}\u0000${sourceSessionId}`;
 }
@@ -269,8 +263,9 @@ export class SessionTimeline {
   private recordAndEmit(event: TranscriptEvent): void {
     const store = this.dependencies.transcriptStore;
     if (store) {
-      const identity = this.dependencies.canonicalIdentity ?? DEFAULT_CANONICAL_IDENTITY;
-      const persisted = store.append(liftRendererTranscriptEvent(event, identity));
+      const persisted = store.append(
+        liftRendererTranscriptEvent(event, this.canonicalIdentityFor(event)),
+      );
       const projected = projectTranscriptEvent(persisted);
       if (!projected) return;
       this.emitRecordedEvent(projected);
@@ -330,6 +325,19 @@ export class SessionTimeline {
       removedCount,
       compactType: 'auto',
     });
+  }
+
+  private canonicalIdentityFor(event: TranscriptEvent): CanonicalIdentity {
+    if (this.dependencies.canonicalIdentity) return this.dependencies.canonicalIdentity;
+    const stored = this.dependencies.sessionStore?.get(event.appSessionId);
+    if (!stored) {
+      throw new Error('canonicalIdentity is required when transcriptStore is set.');
+    }
+    return {
+      providerDriverKind: stored.binding.providerDriverKind,
+      providerInstanceId: stored.binding.providerInstanceId,
+      runtimeGeneration: stored.binding.runtimeGeneration,
+    };
   }
 
   private emitHistoryError(appSessionId: string, message: string, childSessionId?: string): void {
