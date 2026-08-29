@@ -27,12 +27,13 @@ export function bindCanonicalStoresForManager(
   dependencies: CanonicalStoreDependencies | undefined,
   owned: { browsers: { closeAll(): Promise<unknown> } },
 ): ReturnType<typeof bindCanonicalStores> {
+  const ownsDatabase = !dependencies?.database;
   try {
     return bindCanonicalStores(dependencies, {
-      createIfMissing: !dependencies?.database,
+      createIfMissing: ownsDatabase,
     });
   } catch (error) {
-    if (!dependencies) {
+    if (ownsDatabase) {
       abandonOwnedSidecarResources(
         {
           closeBrowsers: () => owned.browsers.closeAll(),
