@@ -12,6 +12,8 @@ import {
 import { PERMISSION_OUTCOMES, type ServerEvent, type SessionSummary } from '../../protocol.js';
 import { SessionInteractions } from '../../SessionInteractions.js';
 import { droidSessionConfiguration } from '../providerIdentity.js';
+import { stubDroidProvider } from '../../testing/droidProviderTestSupport.js';
+import { FakeFactorySession } from '../../testing/fakeFactoryRuntime.js';
 import {
   createDroidNativeHandlers,
   DroidInteractions,
@@ -104,17 +106,18 @@ function createHarness(
     },
   });
   const addLiveSession = (appSessionId: string) => {
+    const factory = new FakeFactorySession(appSessionId, {}, []);
+    factory.updateSettings = async (settings) => {
+      trace.push(`provider:${String(settings.interactionMode ?? '')}`);
+      if (options.rejectProviderUpdate) throw new Error('provider rejected');
+      return {};
+    };
     const liveSession: DroidInteractionLiveSession = {
       summary: summary(appSessionId),
+      provider: stubDroidProvider(factory),
+      binding: { providerInstanceId: 'droid' },
       runtimeGeneration: 1,
-      session: {
-        updateSettings: (settings: Partial<UpdateSessionSettingsRequestParams>) => {
-          trace.push(`provider:${String(settings.interactionMode ?? '')}`);
-          return options.rejectProviderUpdate
-            ? Promise.reject(new Error('provider rejected'))
-            : Promise.resolve({});
-        },
-      },
+      session: factory,
     };
     liveSessions.set(appSessionId, liveSession);
     return liveSession;

@@ -12,12 +12,20 @@ import type { NormalizedSideEffects } from './SessionEventFlow.js';
 import type { ServerEvent, SessionInteractionMode, SessionSummary } from './protocol.js';
 import { FakeFactorySession, type RecordedCall } from './testing/fakeFactoryRuntime.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
+  assertUnsupportedCapability,
+  cursorSessionConfiguration,
+  stubDroidProvider,
+} from './testing/droidProviderTestSupport.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { ProviderContractError } from './providers/providerTypes.js';
 
 interface Harness {
   policy: MissionControlPolicy;
   admissions: ChildSpawnObservation[];
   events: ServerEvent[];
   summary: SessionSummary;
+  live: ChildParentLease;
   apply(effects: NormalizedSideEffects): void;
   rejectProvider(providerSessionId: string): void;
 }
@@ -32,14 +40,22 @@ function createHarness(
   const childrenBySpawn = new Map<string, ChildIdentity>();
   const rejectedProviders = new Set<string>();
   const summary = missionSummary(sessionPurpose, interactionMode);
+  const session = new FakeFactorySession('parent-provider', {}, calls, {
+    settings: {
+      modelId: 'accepted-parent-model',
+      reasoningEffort: ReasoningEffort.Medium,
+    },
+  });
   const live: ChildParentLease = {
     summary,
-    session: new FakeFactorySession('parent-provider', {}, calls, {
-      settings: {
-        modelId: 'accepted-parent-model',
-        reasoningEffort: ReasoningEffort.Medium,
-      },
-    }),
+    session,
+    provider: stubDroidProvider(session),
+    binding: {
+      providerDriverKind: 'droid',
+      providerInstanceId: 'droid',
+      previousProviderSessionIds: [],
+      runtimeGeneration: 1,
+    },
     mcpConfigs: [],
   };
   const policy = new MissionControlPolicy({
@@ -77,6 +93,7 @@ function createHarness(
     admissions,
     events,
     summary,
+    live,
     apply: (effects) => policy.apply(summary.appSessionId, effects),
     rejectProvider: (providerSessionId) => {
       rejectedProviders.add(providerSessionId);
@@ -326,3 +343,33 @@ function missionSummary(
     updatedAt: 1,
   };
 }
+
+test('apply fails for a cursor parent before mutating mission features', () => {
+  const h = createHarness();
+  h.live.provider = new StubProviderSession('cursor-parent');
+  h.live.binding = {
+    providerDriverKind: 'cursor',
+    providerInstanceId: 'cursor',
+    previousProviderSessionIds: [],
+    runtimeGeneration: 1,
+  };
+  h.live.summary.configuration = cursorSessionConfiguration({
+    modelId: 'cursor-model',
+    interactionMode: 'agi',
+  });
+  const before = h.summary.features.slice();
+  assert.throws(
+    () => h.apply({ features: [] }),
+    (error: unknown) => {
+      assert.ok(error instanceof ProviderContractError);
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'applyMissionControl',
+        capability: 'missionControl',
+      });
+      return true;
+    },
+  );
+  assert.deepEqual(h.summary.features, before);
+  assert.equal(h.events.length, 0);
+});

@@ -13,6 +13,11 @@ import {
   createSessionManagerTestContext,
 } from './testing/sessionManagerTestContext.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { requireLiveBrowserCapability } from './providers/droid/droidSessionAccess.js';
+import { assertUnsupportedCapability } from './testing/droidProviderTestSupport.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
+import { liveBindingFromSummary } from './SessionRegistry.js';
 
 type NativeBrowserRequestEvent = Extract<ServerEvent, { type: 'browser.native.request' }>;
 
@@ -337,4 +342,48 @@ test('[B3] Browser continuity across compaction', { concurrency: false }, async 
   } finally {
     if (!shutdownDisposed) await shutdown.dispose();
   }
+});
+
+test('browser.open fails for a live cursor session before opening a tab', () => {
+  const summary = {
+    appSessionId: 'app-cursor',
+    providerSessionId: 'provider-cursor',
+    sessionPurpose: 'chat' as const,
+    role: 'primary' as const,
+    title: 'Cursor',
+    goal: '',
+    cwd: '',
+    workspaceKind: 'none' as const,
+    configuration: droidSessionConfiguration({
+      modelId: 'cursor-model',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
+    phase: 'paused' as const,
+    features: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    contextTokens: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const live = {
+    summary,
+    binding: { ...liveBindingFromSummary(summary), providerInstanceId: 'cursor' as const },
+    provider: new StubProviderSession('provider-cursor'),
+  };
+  assert.throws(
+    () =>
+      requireLiveBrowserCapability(live, 'browser.open', () => ({
+        ...UNAVAILABLE_PROVIDER_CAPABILITIES,
+      })),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'browser.open',
+        capability: 'browser',
+      });
+      return true;
+    },
+  );
 });

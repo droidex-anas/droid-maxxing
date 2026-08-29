@@ -7,6 +7,10 @@ import { SessionCompaction } from './SessionCompaction.js';
 import type { LiveSession } from './SessionLifecycle.js';
 import type { SessionSummaryPatch } from './SessionRegistry.js';
 import { createCompactionTestLiveSession } from './testing/compactionTestSupport.js';
+import { assertUnsupportedCapability } from './testing/droidProviderTestSupport.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
+import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
+import { ProviderContractError } from './providers/providerTypes.js';
 import {
   FakeFactoryRuntime,
   FakeFactorySession,
@@ -424,4 +428,34 @@ test('historical compaction failure is recoverable and closes the temporary prov
     true,
   );
   assert.equal(closeCount(h.calls, 'provider-history'), 1);
+});
+
+test('manual compaction fails a cursor live session before compactSession', async () => {
+  const h = createHarness();
+  const { live, session } = addLive(h, 'app-cursor', 'provider-cursor');
+  live.provider = new StubProviderSession(session.sessionId);
+  live.binding = { ...live.binding, providerInstanceId: 'cursor' };
+  live.summary.configuration = {
+    ...live.summary.configuration,
+    providerSelection: {
+      ...live.summary.configuration.providerSelection,
+      providerInstanceId: 'cursor',
+    },
+  };
+  const before = session.settings.length;
+  await assert.rejects(
+    () => h.compaction.compact('app-cursor'),
+    (error: unknown) => {
+      assert.ok(error instanceof ProviderContractError);
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'compactSession',
+        capability: 'compaction',
+      });
+      return true;
+    },
+  );
+  assert.equal(live.compacting, undefined);
+  assert.equal(session.settings.length, before);
+  void UNAVAILABLE_PROVIDER_CAPABILITIES;
 });

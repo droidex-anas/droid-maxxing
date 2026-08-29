@@ -30,7 +30,10 @@ import type {
 export interface SessionOpenHost {
   readonly dependencies: SessionLifecycleDependencies;
   discardedOpens: Set<string>;
-  handleProviderEvent(liveSession: LiveSession, event: import('./providers/providerEvents.js').ProviderRuntimeEvent): void;
+  handleProviderEvent(
+    liveSession: LiveSession,
+    event: import('./providers/providerEvents.js').ProviderRuntimeEvent,
+  ): void;
   nextId(): string;
   driveInBackground(appSessionId: string, prompt: string): void;
   cleanupFailedOpen(
@@ -102,6 +105,7 @@ export async function createAppSession(
     const autoCompactionArmed = await d.compaction.arm(
       {
         session: native,
+        provider,
         isCurrent: () => !d.isShutdownStarted() && pendingProvider === provider,
       },
       compactionTokenLimit,
@@ -225,6 +229,7 @@ export async function resumeAppSession(
         {
           appSessionId,
           session,
+          provider,
           isCurrent: () => !d.isShutdownStarted() && pendingProvider === provider,
         },
         limit,

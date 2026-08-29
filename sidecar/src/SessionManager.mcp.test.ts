@@ -7,6 +7,8 @@ import { McpSettings } from './McpSettings.js';
 import type { ClientCommand, ServerEvent } from './protocol.js';
 import { FakeFactorySession } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { assertUnsupportedCapability } from './testing/droidProviderTestSupport.js';
+import { ProviderContractError } from './providers/providerTypes.js';
 
 function command(value: unknown): ClientCommand {
   return value as ClientCommand;
@@ -166,4 +168,37 @@ test('MCP catalog publishes tools after a connecting server settles', async () =
   assert.equal(catalogs[0]?.summary.connecting, 1);
   assert.equal(catalogs[1]?.summary.connected, 1);
   assert.equal(catalogs[1]?.tools[0]?.name, 'echo');
+});
+
+test('MCP and skill catalogs fail for cursor before creating a Droid session', async () => {
+  const h = createSessionManagerTestContext();
+  try {
+    await assert.rejects(
+      () => h.handle({ type: 'catalog.tools', providerInstanceId: 'cursor' }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProviderContractError);
+        assertUnsupportedCapability(error, {
+          providerInstanceId: 'cursor',
+          operation: 'listTools',
+          capability: 'skills',
+        });
+        return true;
+      },
+    );
+    await assert.rejects(
+      () => h.handle({ type: 'catalog.skills', providerInstanceId: 'cursor' }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProviderContractError);
+        assertUnsupportedCapability(error, {
+          providerInstanceId: 'cursor',
+          operation: 'listSkills',
+          capability: 'skills',
+        });
+        return true;
+      },
+    );
+    assert.equal(h.runtime.createCalls.length, 0);
+  } finally {
+    await h.dispose();
+  }
 });

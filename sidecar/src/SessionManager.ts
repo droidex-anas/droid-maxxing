@@ -42,7 +42,17 @@ import {
   takeDroidOpenedMcp,
   type FactoryRuntime,
 } from './providers/droid/DroidProviderAdapter.js';
-import type { FactorySession } from './providers/droid/DroidProviderSession.js';
+import {
+  attachCompactionArmDroid,
+  emitHostDroidCatalogUpdate,
+  managerPrimaryTargets,
+  requireLiveBrowserCapability,
+  requireLiveDroidCapability,
+  requireMcpManagementCapability,
+  snapshotProviderCapabilities,
+  withHostDroidSession,
+  type SessionDroidHost,
+} from './providers/droid/droidSessionAccess.js';
 import { detectEnvironment } from './Environment.js';
 import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInstaller.js';
 import {
@@ -78,15 +88,13 @@ import { DroidEventFlow } from './providers/droid/DroidEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
 import { DroidInteractions } from './providers/droid/DroidInteractions.js';
 import { isReportedStreamingTranscriptError, SessionTimeline } from './SessionTimeline.js';
-import { SessionContext, type LiveOperationTarget } from './SessionContext.js';
+import { SessionContext } from './SessionContext.js';
 import {
   SessionCompaction,
   type AutoCompactionSettlement,
   type AutomaticCompactionTarget,
   type CompactionResourceKey,
   type CompactionRetuneTarget,
-  type PrimaryAutomaticCompactionTarget,
-  type PrimaryCompactionTarget,
 } from './SessionCompaction.js';
 import {
   SessionLifecycle,
@@ -256,6 +264,7 @@ export class SessionManager {
   private readonly factoryDefaultsOverride: SessionManagerDependencies['getFactoryDefaults'];
   private readonly nextChildSessionId: () => string;
   private readonly providerRegistry: ProviderRegistry;
+  private readonly droid: SessionDroidHost;
   private readonly database?: Pick<DroidexDatabase, 'close'>;
 
   constructor(
@@ -351,6 +360,19 @@ export class SessionManager {
       },
       now: Date.now,
     });
+    this.droid = {
+      getLive: (id) => this.registry.getLive(id),
+      resolveSummary: (id) => this.registry.resolveSummary(id),
+      firstLive: () => this.registry.liveSessionsSnapshot().at(0),
+      snapshotCapabilities: (id) => snapshotProviderCapabilities(this.providerRegistry, id),
+      loadSession: (id) => this.runtime.loadSession(id),
+      createCatalogSession: () =>
+        this.runtime.createSession({
+          cwd: tmpdir(),
+          interactionMode: 'auto',
+          autonomyLevel: 'low',
+        }),
+    };
     this.historyQueries = new SessionHistoryQueries({
       searchSessions: (query, isStale) => this.history.searchSessions(query, isStale),
       resolveSummary: (id) => this.registry.resolveSummary(id),
@@ -360,7 +382,6 @@ export class SessionManager {
     });
     this.context = new SessionContext({
       registry: this.registry,
-      runtime: this.runtime,
       emit: (event) => {
         this.emit(event);
       },
@@ -399,6 +420,8 @@ export class SessionManager {
         if (!live) return undefined;
         return {
           summary: live.summary,
+          provider: live.provider,
+          binding: live.binding,
           session: live.session,
           runtimeGeneration: live.binding.runtimeGeneration,
           markConfigurationApplied: () => {
@@ -524,13 +547,19 @@ export class SessionManager {
       compaction: {
         resolveLimit: (request) => this.compaction.resolveLimit(request),
         arm: (target, limit) =>
-          this.compaction.arm({ ...target, session: target.session as FactorySession }, limit),
+          this.compaction.arm(
+            attachCompactionArmDroid({
+              ...target,
+              live: target.appSessionId ? this.registry.getLive(target.appSessionId) : undefined,
+              snapshotCapabilities: this.droid.snapshotCapabilities,
+            }),
+            limit,
+          ),
         subscribePrimary: (liveSession) =>
-          this.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession)),
+          this.compaction.subscribePrimary(this.primaryTargets(liveSession).automatic),
         afterTurn: (liveSession) =>
-          this.compaction.afterTurn(this.primaryAutomaticCompactionTarget(liveSession)),
-        cancel: (liveSession) =>
-          this.compaction.cancel(this.primaryAutomaticCompactionTarget(liveSession)),
+          this.compaction.afterTurn(this.primaryTargets(liveSession).automatic),
+        cancel: (liveSession) => this.compaction.cancel(this.primaryTargets(liveSession).automatic),
         forgetSession: (appSessionId) => this.compaction.forgetSession(appSessionId),
       },
       isShutdownStarted: () => this.shutdownPromise !== undefined,
@@ -540,7 +569,7 @@ export class SessionManager {
       preparePrimaryTurn: (liveSession, prompt) => this.preparePrimaryTurn(liveSession, prompt),
       finishPrimaryTurn: (liveSession, error) => this.finishPrimaryTurn(liveSession, error),
       context: {
-        refresh: (liveSession) => this.context.refresh(this.primaryContextTarget(liveSession)),
+        refresh: (liveSession) => this.context.refresh(this.primaryTargets(liveSession).context),
         stopSession: (liveSession) => this.context.stopSession(liveSession),
         forgetSession: (liveSession) => this.context.forgetSession(liveSession),
       },
@@ -709,10 +738,22 @@ export class SessionManager {
         return;
       }
       case 'catalog.tools':
-        await this.emitToolCatalog(cmd.appSessionId);
+        await emitHostDroidCatalogUpdate(
+          this.droid,
+          (event) => this.emit(event),
+          'listTools',
+          cmd.appSessionId,
+          cmd.providerInstanceId,
+        );
         return;
       case 'catalog.skills':
-        await this.emitSkillCatalog(cmd.appSessionId);
+        await emitHostDroidCatalogUpdate(
+          this.droid,
+          (event) => this.emit(event),
+          'listSkills',
+          cmd.appSessionId,
+          cmd.providerInstanceId,
+        );
         return;
       case 'mcp.list':
       case 'mcp.add':
@@ -720,6 +761,10 @@ export class SessionManager {
       case 'mcp.toggle':
       case 'mcp.authenticate':
         if (!this.ready) this.connect();
+        requireMcpManagementCapability(
+          this.registry.liveSessionsSnapshot().at(0),
+          this.droid.snapshotCapabilities,
+        );
         await this.mcpSettings.handle(cmd);
         return;
       case 'settings.defaults':
@@ -792,7 +837,9 @@ export class SessionManager {
         return;
       }
       case 'session.fork':
-        await this.withSession(cmd.appSessionId, (session) => session.forkSession());
+        await withHostDroidSession(this.droid, cmd.appSessionId, 'fork', 'forkSession', (droid) =>
+          droid.forkSession(),
+        );
         return;
       case 'session.rename':
         await this.renameSession(cmd.appSessionId, cmd.title);
@@ -820,11 +867,21 @@ export class SessionManager {
         }
         return;
       case 'session.rewindInfo':
-        await this.withSession(cmd.appSessionId, (session) => session.getRewindInfo({} as never));
+        await withHostDroidSession(
+          this.droid,
+          cmd.appSessionId,
+          'rewind',
+          'getRewindInfo',
+          (droid) => droid.getRewindInfo({} as never),
+        );
         return;
       case 'session.rewind':
-        await this.withSession(cmd.appSessionId, (session) =>
-          session.executeRewind({ rewindId: cmd.rewindId } as never),
+        await withHostDroidSession(
+          this.droid,
+          cmd.appSessionId,
+          'rewind',
+          'executeRewind',
+          (droid) => droid.executeRewind({ rewindId: cmd.rewindId } as never),
         );
         return;
       case 'session.resume':
@@ -859,6 +916,11 @@ export class SessionManager {
         await this.compaction.updateLimits(cmd, this.compactionRetuneTargets());
         return;
       case 'browser.open':
+        requireLiveBrowserCapability(
+          cmd.appSessionId ? this.registry.getLive(cmd.appSessionId) : undefined,
+          'browser.open',
+          this.droid.snapshotCapabilities,
+        );
         await this.sessionBrowser.open(cmd);
         return;
       case 'browser.close':
@@ -1113,8 +1175,8 @@ export class SessionManager {
             this.registry.getLive(appSessionId) === session &&
             !hasSessionCloseStarted(session);
           if (cmd.modelId !== undefined)
-            await this.compaction.rearmPrimary(this.primaryCompactionTarget(session));
-          if (stillCurrent()) await this.context.refresh(this.primaryContextTarget(session));
+            await this.compaction.rearmPrimary(this.primaryTargets(session).retune);
+          if (stillCurrent()) await this.context.refresh(this.primaryTargets(session).context);
         }
       }
     } catch (err) {
@@ -1213,13 +1275,20 @@ export class SessionManager {
     settings: AgentSettingPatch,
   ): Promise<void> {
     const next = createSessionSettingsForAgent(agent, settings);
-    if (Object.keys(next).length > 0) await liveSession.session.updateSettings(next);
+    if (Object.keys(next).length > 0) {
+      await requireLiveDroidCapability(
+        liveSession,
+        'modelChange',
+        'updateSettings',
+        this.droid.snapshotCapabilities,
+      ).updateSettings(next);
+    }
   }
 
   private compactionRetuneTargets(): CompactionRetuneTarget[] {
     const targets: CompactionRetuneTarget[] = [...this.childSessions.compactionRetuneTargets()];
     for (const liveSession of this.registry.liveSessionsSnapshot()) {
-      targets.push(this.primaryCompactionTarget(liveSession));
+      targets.push(this.primaryTargets(liveSession).retune);
     }
     return targets;
   }
@@ -1263,7 +1332,7 @@ export class SessionManager {
       if (pending.primary?.modelId !== undefined) {
         // A pending primary model applied before send changes the
         // auto-compaction threshold; recompute it to match the new model.
-        await this.compaction.rearmPrimary(this.primaryCompactionTarget(liveSession));
+        await this.compaction.rearmPrimary(this.primaryTargets(liveSession).retune);
       }
       return stillCurrent();
     } catch (err) {
@@ -1278,7 +1347,7 @@ export class SessionManager {
 
   private async preparePrimaryTurn(liveSession: LiveSession, prompt: string): Promise<boolean> {
     const appSessionId = liveSession.summary.appSessionId;
-    const contextTarget = this.primaryContextTarget(liveSession);
+    const contextTarget = this.primaryTargets(liveSession).context;
     if (!this.isCurrentPrimarySession(liveSession)) return false;
     this.eventFlow.beginTurn(appSessionId, appSessionId);
     this.context.beginTurn(appSessionId);
@@ -1293,7 +1362,7 @@ export class SessionManager {
 
   private async finishPrimaryTurn(liveSession: LiveSession, turnError?: unknown): Promise<void> {
     const appSessionId = liveSession.summary.appSessionId;
-    const contextTarget = this.primaryContextTarget(liveSession);
+    const contextTarget = this.primaryTargets(liveSession).context;
     try {
       this.timeline.settleStreaming(appSessionId, appSessionId);
     } catch (err) {
@@ -1322,7 +1391,7 @@ export class SessionManager {
         (previous.providerSelection.modelId !== next.providerSelection.modelId ||
           previous.interactionMode !== next.interactionMode)
       ) {
-        await this.compaction.rearmPrimary(this.primaryCompactionTarget(liveSession));
+        await this.compaction.rearmPrimary(this.primaryTargets(liveSession).retune);
       }
     }
     await this.context.refresh(contextTarget);
@@ -1336,40 +1405,10 @@ export class SessionManager {
     );
   }
 
-  private primaryContextTarget(liveSession: LiveSession): LiveOperationTarget {
-    const session = liveSession.session as FactorySession;
-    return {
-      appSessionId: liveSession.summary.appSessionId,
-      providerSessionId: session.sessionId,
-      sourceSessionId: liveSession.summary.appSessionId,
-      session,
-      isCurrent: () => this.isCurrentPrimarySession(liveSession) && liveSession.session === session,
-    };
-  }
-
-  private primaryAutomaticCompactionTarget(
-    liveSession: LiveSession,
-  ): PrimaryAutomaticCompactionTarget {
-    return {
-      ...this.primaryContextTarget(liveSession),
-      kind: 'primary',
-      liveSession,
-    };
-  }
-
-  private primaryCompactionTarget(liveSession: LiveSession): PrimaryCompactionTarget {
-    const target = this.primaryAutomaticCompactionTarget(liveSession);
-    const configuredModelId = liveSession.summary.configuration.providerSelection.modelId;
-    const defaultsMode = defaultsModeForSummary(liveSession.summary);
-    return {
-      ...target,
-      configuredModelId,
-      defaultsMode,
-      isCurrent: () =>
-        target.isCurrent() &&
-        liveSession.summary.configuration.providerSelection.modelId === configuredModelId &&
-        defaultsModeForSummary(liveSession.summary) === defaultsMode,
-    };
+  private primaryTargets(liveSession: LiveSession) {
+    return managerPrimaryTargets(liveSession, this.droid.snapshotCapabilities, () =>
+      this.isCurrentPrimarySession(liveSession),
+    );
   }
 
   // Design turns are a single focused task (extra prompts queue), so the model
@@ -1387,7 +1426,14 @@ export class SessionManager {
       return;
     if (!this.isCurrentPrimarySession(liveSession)) return;
     try {
-      await liveSession.session.updateSettings({ disabledToolIds: design ? ['TodoWrite'] : [] });
+      await requireLiveDroidCapability(
+        liveSession,
+        'skills',
+        'applyDesignToolPolicy',
+        this.droid.snapshotCapabilities,
+      ).updateSettings({
+        disabledToolIds: design ? ['TodoWrite'] : [],
+      });
       if (!this.isCurrentPrimarySession(liveSession)) return;
       liveSession.todoDisabledForDesign = design;
     } catch (err) {
@@ -1457,7 +1503,7 @@ export class SessionManager {
     if (key.kind === 'child') return this.childSessions.resolveAutomaticTarget(key);
     const parent = this.registry.getLive(key.appSessionId);
     if (!parent || hasSessionCloseStarted(parent)) return undefined;
-    return this.primaryAutomaticCompactionTarget(parent);
+    return this.primaryTargets(parent).automatic;
   }
 
   private settleAutomaticCompaction(settlement: AutoCompactionSettlement): void {
@@ -1473,6 +1519,14 @@ export class SessionManager {
     customInstructions?: string,
   ): Promise<void> {
     const previousLiveSession = this.registry.getLive(requestedAppSessionId);
+    if (previousLiveSession) {
+      requireLiveDroidCapability(
+        previousLiveSession,
+        'compaction',
+        'compactSession',
+        this.droid.snapshotCapabilities,
+      );
+    }
     const appSessionId =
       previousLiveSession?.summary.appSessionId ??
       this.registry.resolveSummary(requestedAppSessionId)?.appSessionId ??
@@ -1586,69 +1640,17 @@ export class SessionManager {
     // bridge is the trusted boundary, so clamp here too before forwarding to
     // the harness.
     const safeTitle = title.trim().slice(0, 200);
-    await this.withSession(requestedAppSessionId, (session) =>
-      session.renameSession({ title: safeTitle }),
+    await withHostDroidSession(
+      this.droid,
+      requestedAppSessionId,
+      undefined,
+      'renameSession',
+      (droid) => droid.renameSession({ title: safeTitle }),
     );
     const appSessionId =
       this.registry.getLive(requestedAppSessionId)?.summary.appSessionId ??
       this.registry.resolveSummary(requestedAppSessionId)?.appSessionId;
     if (appSessionId) this.registry.updateSummary(appSessionId, { title: safeTitle });
-  }
-
-  private async withSession<T>(
-    appSessionId: string,
-    fn: (session: FactorySession) => Promise<T>,
-  ): Promise<T | undefined> {
-    const liveSession = this.registry.getLive(appSessionId);
-    const live = liveSession?.session;
-    if (live) return fn(live as FactorySession);
-    const providerSessionId =
-      this.registry.resolveSummary(appSessionId)?.providerSessionId ?? appSessionId;
-    const session = await this.runtime.loadSession(providerSessionId);
-    try {
-      return await fn(session);
-    } finally {
-      await session.close();
-    }
-  }
-
-  private async catalogSession(
-    appSessionId?: string,
-  ): Promise<{ session: FactorySession; close: () => Promise<void> }> {
-    const first = this.registry.liveSessionsSnapshot().at(0);
-    const live = appSessionId ? this.registry.getLive(appSessionId)?.session : first?.session;
-    if (live) return { session: live as FactorySession, close: () => Promise.resolve() };
-    const session = await this.runtime.createSession({
-      cwd: tmpdir(),
-      interactionMode: 'auto',
-      autonomyLevel: 'low',
-    });
-    return { session, close: () => session.close() };
-  }
-
-  private async emitToolCatalog(appSessionId?: string): Promise<void> {
-    const { session, close } = await this.catalogSession(appSessionId);
-    try {
-      const result = await session.listTools();
-      this.emit({ type: 'catalog.updated', catalog: 'tools', items: arrayItems(result, 'tools') });
-    } finally {
-      await close();
-    }
-  }
-
-  private async emitSkillCatalog(appSessionId?: string): Promise<void> {
-    const { session, close } = await this.catalogSession(appSessionId);
-    try {
-      const result = await session.listSkills();
-      this.emit({
-        type: 'catalog.updated',
-        catalog: 'skills',
-        items: arrayItems(result, 'skills'),
-        appSessionId: appSessionId ?? null,
-      });
-    } finally {
-      await close();
-    }
   }
 
   private emitError(error: {
@@ -1744,13 +1746,6 @@ function childSessionSettingsFromInit(init: SessionInitResult): ChildSettings {
     modelId: init.settings?.modelId,
     reasoningEffort: reasoningValue(init.settings?.reasoningEffort),
   };
-}
-
-function arrayItems(result: unknown, key: string): unknown[] {
-  const record = result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
-  const value = record[key];
-  if (Array.isArray(value)) return value;
-  return [result];
 }
 
 export function createSessionSettingsForAgent(

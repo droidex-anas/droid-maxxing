@@ -6,6 +6,7 @@ import { ContextStatsAccuracy } from '@factory/droid-sdk';
 import { FakeFactorySession, type RecordedCall } from './testing/fakeFactoryRuntime.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import { withDroidSession } from './providers/droid/droidSessionAccess.js';
 import type { ServerEvent } from './protocol.js';
 import {
   contextUpdateCount,
@@ -16,6 +17,8 @@ import {
   seedInitModel,
 } from './testing/compactionCharacterizationScenarios.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { cursorSessionConfiguration } from './testing/droidProviderTestSupport.js';
+import { ProviderContractError } from './providers/providerTypes.js';
 
 type SessionUpdatedEvent = Extract<ServerEvent, { type: 'session.updated' }>;
 type TranscriptEventAppended = Extract<ServerEvent, { type: 'event.appended' }>;
@@ -383,7 +386,7 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
       load.handlers.mcpServers?.map((server) => server.name),
       ['test-cli', 'test-browser'],
     );
-    assert.equal(callCount(h.calls, 'provider', 'onNotification', 'provider-2'), 1);
+    assert.equal(callCount(h.calls, 'provider', 'onNotification', 'provider-2'), 2);
     assert.equal(callCount(h.calls, 'cleanup', 'unsubscribe', 'provider-1'), 1);
     assert.equal(
       h.provider
@@ -967,3 +970,48 @@ test(
     }
   },
 );
+
+test('compact fails for a historical cursor session before load', async () => {
+  let loads = 0;
+  await assert.rejects(
+    () =>
+      withDroidSession({
+        live: undefined,
+        summary: {
+          appSessionId: 'app-cursor',
+          providerSessionId: 'provider-cursor',
+          sessionPurpose: 'chat',
+          role: 'primary',
+          title: 'Cursor',
+          goal: '',
+          cwd: '',
+          workspaceKind: 'none',
+          configuration: cursorSessionConfiguration({ modelId: 'cursor-model' }),
+          phase: 'paused',
+          features: [],
+          tokensIn: 0,
+          tokensOut: 0,
+          contextTokens: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        appSessionId: 'app-cursor',
+        capability: 'compaction',
+        operation: 'compactSession',
+        snapshotCapabilities: () => undefined,
+        loadSession: async () => {
+          loads += 1;
+          throw new Error('should not load a cursor session');
+        },
+        fn: async () => undefined,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof ProviderContractError);
+      assert.equal(error.code, 'unsupported_capability');
+      assert.equal(error.providerInstanceId, 'cursor');
+      assert.match(error.message, /compactSession/);
+      return true;
+    },
+  );
+  assert.equal(loads, 0);
+});

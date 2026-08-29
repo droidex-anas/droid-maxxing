@@ -12,17 +12,21 @@ import {
 import { isApprovalOutcome, normalizePermissionOutcome } from '../../permissionOutcomes.js';
 import type { ServerEvent, SessionSummary } from '../../protocol.js';
 import { errMsg } from '../../sessionHelpers.js';
-import type { SessionTarget } from '../providerIdentity.js';
+import type { ProviderInstanceId, SessionTarget } from '../providerIdentity.js';
 import type {
   ProviderApprovalDecision,
   ProviderInteractionSink,
   ProviderQuestionAnswer,
+  ProviderSession,
 } from '../providerTypes.js';
+import { requireDroidExtension } from './droidCapabilityGate.js';
 import { APPROVAL_DECISION_TO_OUTCOME } from './DroidModeMapping.js';
 import { classifyPermission, confirmationType, permissionSignature } from './DroidPermissions.js';
 
 export interface DroidInteractionLiveSession {
   summary: SessionSummary;
+  provider: ProviderSession;
+  binding: { providerInstanceId: ProviderInstanceId };
   session: {
     updateSettings: (settings: Partial<UpdateSessionSettingsRequestParams>) => Promise<unknown>;
   };
@@ -177,7 +181,11 @@ export class DroidInteractions {
         phase: 'running',
       });
       liveSession.markConfigurationApplied?.();
-      await liveSession.session.updateSettings({
+      await requireDroidExtension(
+        liveSession.provider,
+        'updateSettings',
+        liveSession.binding.providerInstanceId,
+      ).updateSettings({
         interactionMode: DroidInteractionMode.Auto,
       });
     } catch (error) {

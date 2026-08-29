@@ -107,7 +107,7 @@ test('isCurrentOpenAttempt is false once cancelled, completed, or replaced', () 
   assert.equal(isCurrentOpenAttempt(parent, state, attempt, current), false);
   attempt.isCancelled = false;
 
-  state.runtime = { session: {} as never, generation: 1, lastUsedAt: 0 };
+  state.runtime = { session: {} as never, droid: {} as never, generation: 1, lastUsedAt: 0 };
   assert.equal(isCurrentOpenAttempt(parent, state, attempt, current), false);
   state.runtime = undefined;
 

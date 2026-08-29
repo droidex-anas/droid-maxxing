@@ -23,9 +23,16 @@ import {
 } from './testing/fakeFactoryRuntime.js';
 import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
+  assertUnsupportedCapability,
+  cursorSessionConfiguration,
+  droidParentLease,
+} from './testing/droidProviderTestSupport.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
 import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 
 interface Harness {
+  lease: ChildParentLease;
   calls: RecordedCall[];
   events: ServerEvent[];
   sequence: string[];
@@ -188,6 +195,7 @@ function createHarness(
   const owner = new ChildSessions(dependencies);
   owner.attachParent(parentId);
   const harness: Harness = {
+    lease: parent,
     calls,
     events,
     sequence,
@@ -229,11 +237,8 @@ function createHarness(
 }
 
 function parentLease(appSessionId: string, calls: RecordedCall[]): ChildParentLease {
-  return {
-    summary: summary(appSessionId),
-    session: new FakeFactorySession(`${appSessionId}-provider`, {}, calls),
-    mcpConfigs: [],
-  };
+  const session = new FakeFactorySession(`${appSessionId}-provider`, {}, calls);
+  return droidParentLease(summary(appSessionId), session);
 }
 
 function summary(appSessionId: string): SessionSummary {
@@ -1990,4 +1995,30 @@ test('shutdown passes the shared deadline to child provider close', async () => 
   );
   assert.equal(closeCall?.args[0], 'provider');
   assert.equal(closeCall?.args[1], deadline);
+});
+
+test('child.open fails for a cursor parent before loading a runtime', async () => {
+  const record = childRecord('child', 'provider-cursor');
+  const h = createHarness([record]);
+  h.lease.binding = {
+    providerDriverKind: 'cursor',
+    providerInstanceId: 'cursor',
+    previousProviderSessionIds: [],
+    runtimeGeneration: 1,
+  };
+  h.lease.provider = new StubProviderSession('cursor-parent');
+  h.lease.summary.configuration = cursorSessionConfiguration({ modelId: 'cursor-model' });
+  const loads = h.runtime.loadCalls.length;
+  await assert.rejects(
+    () => h.open(record),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'child.open',
+        capability: 'addressableChildren',
+      });
+      return true;
+    },
+  );
+  assert.equal(h.runtime.loadCalls.length, loads);
 });

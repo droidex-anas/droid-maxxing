@@ -70,6 +70,8 @@ export class FakeFactorySession implements FactorySession {
   nextCloseError?: Error;
   nextContextStats?: Awaited<ReturnType<FactorySession['getContextStats']>>;
   nextContextStatsError?: Error;
+  nextContextBreakdown?: unknown;
+  nextContextBreakdownError?: Error;
   nextMcpServers: Awaited<ReturnType<FactorySession['listMcpServers']>> = {
     servers: [],
     summary: { total: 0, connected: 0, connecting: 0, failed: 0, disabled: 0 },

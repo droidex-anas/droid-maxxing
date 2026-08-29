@@ -8,6 +8,9 @@ import { createSessionManagerTestContext } from './testing/sessionManagerTestCon
 import { persistTestSummaries } from './testing/historyPersistenceFixture.js';
 import type { ChildSessionSummary, SessionSummary, ServerEvent } from './protocol.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { cursorSessionConfiguration } from './testing/droidProviderTestSupport.js';
+import { withDroidSession } from './providers/droid/droidSessionAccess.js';
+import { ProviderContractError } from './providers/providerTypes.js';
 
 type SessionHistoryEvent = Extract<ServerEvent, { type: 'session.history' }>;
 type SessionUpdatedEvent = Extract<ServerEvent, { type: 'session.updated' }>;
@@ -980,4 +983,43 @@ test('[A4] Opening a child for a non-live historical session settles honestly', 
   } finally {
     await h.dispose();
   }
+});
+
+test('fork, rewind, and rename fail for a cursor summary before loadSession', async () => {
+  const historical = {
+    ...summary('app-cursor', 'provider-cursor'),
+    configuration: cursorSessionConfiguration({ modelId: 'cursor-model' }),
+  };
+  let loads = 0;
+  for (const { capability, operation } of [
+    { capability: 'fork' as const, operation: 'forkSession' },
+    { capability: 'rewind' as const, operation: 'getRewindInfo' },
+    { capability: 'rewind' as const, operation: 'executeRewind' },
+    { capability: undefined, operation: 'renameSession' },
+  ]) {
+    await assert.rejects(
+      () =>
+        withDroidSession({
+          live: undefined,
+          summary: historical,
+          appSessionId: 'app-cursor',
+          ...(capability === undefined ? {} : { capability }),
+          operation,
+          snapshotCapabilities: () => undefined,
+          loadSession: async () => {
+            loads += 1;
+            throw new Error('should not load a cursor session');
+          },
+          fn: async () => undefined,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProviderContractError);
+        assert.equal(error.code, 'unsupported_capability');
+        assert.equal(error.providerInstanceId, 'cursor');
+        assert.match(error.message, new RegExp(operation));
+        return true;
+      },
+    );
+  }
+  assert.equal(loads, 0);
 });

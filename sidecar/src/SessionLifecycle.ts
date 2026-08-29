@@ -10,7 +10,7 @@ import type {
   SessionSummary,
 } from './protocol.js';
 import type { SessionRegistry } from './SessionRegistry.js';
-import type { SessionCompaction } from './SessionCompaction.js';
+import type { CompactionArmInput, SessionCompaction } from './SessionCompaction.js';
 import type { ChildSessions } from './ChildSessions.js';
 import { errMsg, type SessionInitResult } from './sessionHelpers.js';
 import type { DroidMissionConfiguration } from './providers/providerIdentity.js';
@@ -19,11 +19,12 @@ import {
   type ProviderPrompt,
   type ProviderSession,
 } from './providers/providerTypes.js';
-import type { ProviderRuntimeEvent } from './providers/providerEvents.js';
 import type { ProviderEventAdmissionLive } from './providers/providerEvents.js';
+import type { ProviderRuntimeEvent } from './providers/providerEvents.js';
 import type { ProviderRegistry } from './providers/ProviderRegistry.js';
 import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 import type { SessionEventFlow } from './SessionEventFlow.js';
+import { interruptIdleDroidSession } from './providers/droid/droidCapabilityGate.js';
 import {
   createAppSession,
   resumeAppSession,
@@ -115,10 +116,7 @@ export interface SessionLifecycleDependencies {
   nextId?: () => string;
   compaction: {
     resolveLimit: SessionCompaction['resolveLimit'];
-    arm: (
-      target: { session: LiveNativeSession; isCurrent(): boolean; appSessionId?: string },
-      limit: number,
-    ) => Promise<boolean>;
+    arm: (target: CompactionArmInput, limit: number) => Promise<boolean>;
     subscribePrimary: (liveSession: LiveSession) => void;
     afterTurn: (liveSession: LiveSession) => void;
     cancel: (liveSession: LiveSession) => void;
@@ -253,7 +251,10 @@ export class SessionLifecycle {
         liveSession.interrupting = false;
         throw error;
       }
-      if (this.dependencies.registry.getLive(appSessionId) !== liveSession || liveSession.closeMode) {
+      if (
+        this.dependencies.registry.getLive(appSessionId) !== liveSession ||
+        liveSession.closeMode
+      ) {
         liveSession.interrupting = false;
         return;
       }
@@ -627,7 +628,6 @@ export class SessionLifecycle {
       }
     }
   }
-
   private async interruptCaptured(liveSession: LiveSession): Promise<void> {
     const captured = liveSession.activeTurn;
     if (captured) {
@@ -640,7 +640,7 @@ export class SessionLifecycle {
       });
       return;
     }
-    await liveSession.session.interrupt();
+    await interruptIdleDroidSession(liveSession);
   }
 
   private settleCapturedTurn(

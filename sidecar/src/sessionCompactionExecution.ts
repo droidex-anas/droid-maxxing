@@ -4,15 +4,69 @@ import { runCompaction } from './compaction.js';
 import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
 import type { McpServerConfig } from './providers/droid/DroidModeMapping.js';
 import {
-  DroidProviderSession,
+  createDroidSessionExtension,
   type FactorySession,
-} from './providers/droid/DroidProviderSession.js';
+} from './providers/droid/DroidFactorySession.js';
+import {
+  capabilityEnabled,
+  requireDroidCapability,
+  requireDroidExtension,
+  resolveDroidCapabilities,
+  unsupportedDroidCapabilityError,
+} from './providers/droid/droidCapabilityGate.js';
+import { requireNativeHandle } from './sessionLifecycleOpen.js';
 import type { ServerEvent } from './protocol.js';
 import type { LiveOperationTarget, SessionContext, UsageOffset } from './SessionContext.js';
 import type { LiveSession } from './SessionLifecycle.js';
 import type { SessionRegistry } from './SessionRegistry.js';
-import { errMsg } from './sessionHelpers.js';
+import { defaultsModeForSummary, errMsg } from './sessionHelpers.js';
 import type { SessionTimeline } from './SessionTimeline.js';
+import type {
+  PrimaryAutomaticCompactionTarget,
+  PrimaryCompactionTarget,
+} from './SessionCompaction.js';
+
+export function livePrimaryAutomaticTarget(
+  liveSession: LiveSession,
+  isShutdownStarted: () => boolean,
+  getLive: (id: string) => LiveSession | undefined,
+): PrimaryAutomaticCompactionTarget {
+  const session = liveSession.session;
+  const appSessionId = liveSession.summary.appSessionId;
+  return {
+    kind: 'primary',
+    appSessionId,
+    providerSessionId: session.sessionId,
+    sourceSessionId: appSessionId,
+    session,
+    droid: requireDroidCapability(liveSession, 'compaction', 'armAutoCompaction'),
+    liveSession,
+    isCurrent: () =>
+      !isShutdownStarted() &&
+      getLive(appSessionId) === liveSession &&
+      !liveSession.closeMode &&
+      liveSession.session === session,
+  };
+}
+
+export function livePrimaryRetuneTarget(
+  liveSession: LiveSession,
+  isShutdownStarted: () => boolean,
+  getLive: (id: string) => LiveSession | undefined,
+): PrimaryCompactionTarget {
+  const target = livePrimaryAutomaticTarget(liveSession, isShutdownStarted, getLive);
+  const configuredModelId = liveSession.summary.configuration.providerSelection.modelId;
+  const defaultsMode = defaultsModeForSummary(liveSession.summary);
+  return {
+    ...target,
+    configuredModelId,
+    defaultsMode,
+    isCurrent: () =>
+      target.isCurrent() &&
+      liveSession.summary.configuration.providerSelection.modelId === configuredModelId &&
+      defaultsModeForSummary(liveSession.summary) === defaultsMode,
+  };
+}
 
 export type CompactionExecutionResult =
   | { kind: 'ready-to-settle' }
@@ -70,10 +124,14 @@ export class SessionCompactionExecution {
       tokensOut: liveSession.summary.tokensOut,
     };
     let swapTarget: string | undefined;
+    const droid = requireDroidCapability(liveSession, 'compaction', 'compactSession');
     liveSession.compacting = true;
     try {
       const outcome = await runCompaction(
-        liveSession.session as FactorySession,
+        {
+          sessionId: liveSession.session.sessionId,
+          compactSession: (params) => droid.compactSession(params),
+        },
         {
           status: (text, compactType) => {
             this.dependencies.timeline.appendStatus(appSessionId, text, compactType);
@@ -135,10 +193,12 @@ export class SessionCompactionExecution {
       cwd: liveSession.summary.cwd,
       mcpServers: liveSession.mcpConfigs as McpServerConfig[],
     });
-    liveSession.session = replacement;
-    if (liveSession.provider instanceof DroidProviderSession) {
-      liveSession.provider.attachFactory(replacement);
-    }
+    requireDroidExtension(
+      liveSession.provider,
+      'replaceNativeSession',
+      liveSession.binding.providerInstanceId,
+    ).replaceNativeSession(replacement, 'native_replacement');
+    liveSession.session = requireNativeHandle(liveSession.provider);
     let oldSessionRetired = false;
     const retireOldSession = async (): Promise<void> => {
       if (oldSessionRetired) return;
@@ -198,10 +258,22 @@ export class SessionCompactionExecution {
     const historical = this.dependencies.registry.resolveSummary(requestedAppSessionId);
     const appSessionId = historical?.appSessionId ?? requestedAppSessionId;
     const oldProviderSessionId = historical?.providerSessionId ?? requestedAppSessionId;
+    const providerInstanceId =
+      historical?.configuration.providerSelection.providerInstanceId ?? 'droid';
+    const capabilities = resolveDroidCapabilities(providerInstanceId, undefined, undefined);
+    if (!capabilityEnabled(capabilities, 'compaction') || providerInstanceId !== 'droid') {
+      throw unsupportedDroidCapabilityError(providerInstanceId, 'compactSession', 'compaction');
+    }
     let session: FactorySession | undefined;
     try {
       session = await this.dependencies.runtime.loadSession(oldProviderSessionId);
-      const result: unknown = await session.compactSession(
+      const droid = createDroidSessionExtension(
+        () => session!,
+        () => {
+          throw new Error('historical session cannot replace native handle');
+        },
+      );
+      const result: unknown = await droid.compactSession(
         customInstructions ? { customInstructions } : {},
       );
       const providerSessionId =

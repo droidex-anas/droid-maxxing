@@ -18,7 +18,15 @@ import {
 } from './testing/fakeFactoryRuntime.js';
 import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import {
+  assertUnsupportedCapability,
+  cursorSessionConfiguration,
+  droidExtensionForFactory,
+  stubDroidProvider,
+} from './testing/droidProviderTestSupport.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
 import { StubProviderSession } from './testing/stubProviderSession.js';
+import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
 
 interface Harness {
   calls: RecordedCall[];
@@ -48,7 +56,6 @@ function createHarness(): Harness {
   });
   const context = new SessionContext({
     registry,
-    runtime,
     emit: (event) => events.push(event),
     maxContextTokensForSummary: (value) => value.maxContextTokens,
     noteContextWindow: (modelId, contextWindowTokens) => {
@@ -68,7 +75,7 @@ function registerLive(
     summary: summary(appSessionId, providerSessionId),
     binding: liveBindingFromSummary(summary(appSessionId, providerSessionId)),
     session,
-    provider: new StubProviderSession(session.sessionId),
+    provider: stubDroidProvider(session),
     streaming: false,
     autoCompacting: false,
     pendingSends: [],
@@ -104,6 +111,7 @@ function addChild(
     providerSessionId,
     sourceSessionId: childSessionId,
     session,
+    droid: droidExtensionForFactory(session),
     role: 'worker',
     isCurrent: () =>
       !parent.closeMode &&
@@ -116,13 +124,23 @@ function addChild(
 
 const childRuntimes = new WeakMap<LiveSession, Map<string, { session: FakeFactorySession }>>();
 
+function attachContextBreakdown(session: FakeFactorySession, value?: unknown, error?: Error): void {
+  session.nextContextBreakdown = value;
+  session.nextContextBreakdownError = error;
+  Reflect.set(session, 'getContextBreakdown', async () => {
+    if (session.nextContextBreakdownError) throw session.nextContextBreakdownError;
+    return session.nextContextBreakdown;
+  });
+}
+
 function primaryTarget(h: Harness, live: LiveSession): LiveOperationTarget {
   const session = live.session;
   return {
     appSessionId: live.summary.appSessionId,
     providerSessionId: session.sessionId,
     sourceSessionId: live.summary.appSessionId,
-    session: session as import('./providers/droid/DroidProviderSession.js').FactorySession,
+    session,
+    droid: droidExtensionForFactory(session as FakeFactorySession),
     isCurrent: () =>
       !live.closeMode &&
       h.registry.getLive(live.summary.appSessionId) === live &&
@@ -144,7 +162,7 @@ test('primary refresh normalizes breakdown and persists estimated context', asyn
     accuracy: ContextStatsAccuracy.Estimated,
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
-  h.runtime.contextBreakdowns.set('backend-1', {
+  attachContextBreakdown(session, {
     modelId: 'model-default',
     contextBudget: 1_000,
     categories: [
@@ -311,7 +329,7 @@ test('cumulative provider estimates rebase after restored in-place compactions',
     accuracy: ContextStatsAccuracy.Estimated,
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
-  h.runtime.contextBreakdowns.set('app-1', {
+  attachContextBreakdown(session, {
     modelId: 'model-default',
     contextBudget: 100_000,
     usedTokens: 397_000,
@@ -515,7 +533,7 @@ test('primary and child resource keys cannot alias', async (t) => {
     accuracy: ContextStatsAccuracy.Estimated,
     updatedAt: '2026-07-30T00:00:00.000Z',
   };
-  h.runtime.contextBreakdowns.set('child-provider', {
+  attachContextBreakdown(child.session, {
     usedTokens: 100,
     contextBudget: 1_000,
     categories: [{ name: 'Child tools', tokens: 100 }],
@@ -788,12 +806,11 @@ test('late refreshes after close or clearAll are inert', async () => {
 test('breakdown failures and malformed values keep valid context stats', async () => {
   const h = createHarness();
   const { live, session } = registerLive(h, 'app-1');
-  h.runtime.contextBreakdownErrors.set('app-1', new Error('private RPC failed'));
+  attachContextBreakdown(session, undefined, new Error('private RPC failed'));
   await h.context.refresh(primaryTarget(h, live));
   assert.equal(contextEvents(h).at(-1)?.stats.used, 0);
 
-  h.runtime.contextBreakdownErrors.delete('app-1');
-  h.runtime.contextBreakdowns.set('app-1', { categories: 'invalid' });
+  attachContextBreakdown(session, { categories: 'invalid' });
   const beforeMalformed = contextEvents(h).length;
   await h.context.refresh(primaryTarget(h, live));
   assert.equal(contextEvents(h).length, beforeMalformed + 1);
@@ -835,7 +852,6 @@ test('hidden background work pauses context pollers and still refreshes on deman
   const h = createHarness();
   const injected = new SessionContext({
     registry: h.registry,
-    runtime: h.runtime,
     emit: (event) => h.events.push(event),
     maxContextTokensForSummary: (value) => value.maxContextTokens,
     noteContextWindow: () => undefined,
@@ -875,6 +891,30 @@ test('hidden background work pauses context pollers and still refreshes on deman
   await Promise.resolve();
   assert.equal(injected.pollerCounts().active, 1);
   assert.ok(session.contextStatsCalls > before);
+});
+
+test('context capability fails for a non-droid session before stats are read', async () => {
+  const h = createHarness();
+  const { live, session } = registerLive(h, 'app-cursor');
+  live.summary.configuration = cursorSessionConfiguration({ modelId: 'cursor-model' });
+  live.binding = { ...live.binding, providerInstanceId: 'cursor' };
+  live.provider = new StubProviderSession(session.sessionId);
+  session.contextStatsCalls = 0;
+  assert.throws(
+    () =>
+      requireDroidCapability(live, 'context', 'refreshContext', {
+        ...UNAVAILABLE_PROVIDER_CAPABILITIES,
+      }),
+    (error: unknown) => {
+      assertUnsupportedCapability(error, {
+        providerInstanceId: 'cursor',
+        operation: 'refreshContext',
+        capability: 'context',
+      });
+      return true;
+    },
+  );
+  assert.equal(session.contextStatsCalls, 0);
 });
 
 function summary(appSessionId: string, providerSessionId: string): SessionSummary {

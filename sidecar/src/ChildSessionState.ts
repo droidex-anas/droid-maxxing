@@ -1,4 +1,10 @@
-import type { FactorySession } from './providers/droid/DroidProviderSession.js';
+import type { ProviderBinding } from './persistence/SessionStore.js';
+import type {
+  DroidSessionExtension,
+  FactorySession,
+} from './providers/droid/DroidProviderSession.js';
+import type { ProviderSession } from './providers/providerTypes.js';
+import type { ChildOperationTarget } from './SessionContext.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
 import { publishedStreamFidelity } from './childStreamFidelity.js';
 import type {
@@ -40,11 +46,14 @@ export interface ChildSpawnObservation {
 export interface ChildParentLease {
   summary: SessionSummary;
   session: { initResult?: SessionInitResult };
+  provider: ProviderSession;
+  binding: ProviderBinding;
   mcpConfigs: unknown[];
   closeMode?: 'discard-pending' | 'preserve-pending';
 }
 export interface ChildRuntimeState {
   session: FactorySession;
+  droid: DroidSessionExtension;
   generation: number;
   lastUsedAt: number;
   unsubscribe?: () => void;
@@ -116,6 +125,24 @@ export interface ChildRuntimeTarget {
 }
 export function childIdentity(parentAppSessionId: string, childSessionId: string): ChildIdentity {
   return { parentAppSessionId, childSessionId };
+}
+
+export function childContextTarget(
+  parent: ParentChildSessions,
+  child: ChildSessionState,
+  runtime: ChildRuntimeState,
+  isCurrent: () => boolean,
+): ChildOperationTarget {
+  return {
+    ...child.identity,
+    appSessionId: parent.parentAppSessionId,
+    providerSessionId: runtime.session.sessionId,
+    sourceSessionId: child.identity.childSessionId,
+    session: runtime.session,
+    droid: runtime.droid,
+    role: child.role,
+    isCurrent,
+  };
 }
 
 export function childSettingsFromInit(init: SessionInitResult): ChildSettings {

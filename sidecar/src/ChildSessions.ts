@@ -1,7 +1,7 @@
 import { factoryReasoningEffort } from './providers/droid/DroidModeMapping.js';
+import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
 import type { ChildSessionSummary, ClientCommand } from './protocol.js';
-import type { ChildOperationTarget } from './SessionContext.js';
 import {
   matchesChildGenerationSnapshot,
   type AutoCompactionSettlement,
@@ -26,6 +26,7 @@ import {
   findPendingChildObservation,
   forgetPendingChildObservation,
   mergeChildObservations,
+  childContextTarget,
   newChildState,
   persistedChild,
   rememberPendingChildObservation,
@@ -431,6 +432,7 @@ export class ChildSessions {
 
   async updateSettings(command: ChildSettingsCommand): Promise<void> {
     const parent = this.parents.get(command.parentAppSessionId);
+    if (parent) requireDroidCapability(parent.lease, 'modelChange', 'child.updateSettings');
     const child = parent?.children.get(command.childSessionId);
     if (
       !parent ||
@@ -629,6 +631,7 @@ export class ChildSessions {
       parent.children.set(childSessionId, child);
     }
     if (!this.isCurrentParent(parent)) return;
+    requireDroidCapability(parent.lease, 'addressableChildren', `child.${operation}`);
     if (child.mutationTail) {
       await child.mutationTail;
       if (!this.isCurrentParent(parent)) return;
@@ -860,7 +863,7 @@ export class ChildSessions {
         ).modelId;
       if (!modelId) throw new Error(`No Factory default is available for ${child.role}.`);
       if (!this.isSettingsTransaction(target)) return;
-      await runtime.session.updateSettings({
+      await runtime.droid.updateSettings({
         modelId,
         ...(command.reasoningEffort === undefined
           ? {}
@@ -1044,16 +1047,10 @@ export class ChildSessions {
     parent: ParentChildSessions,
     child: ChildSessionState,
     runtime: ChildRuntimeState,
-  ): ChildOperationTarget {
-    return {
-      ...child.identity,
-      appSessionId: parent.parentAppSessionId,
-      providerSessionId: runtime.session.sessionId,
-      sourceSessionId: child.identity.childSessionId,
-      session: runtime.session,
-      role: child.role,
-      isCurrent: () => this.isCurrentRuntime(parent, child, runtime),
-    };
+  ) {
+    return childContextTarget(parent, child, runtime, () =>
+      this.isCurrentRuntime(parent, child, runtime),
+    );
   }
 
   private automaticTarget(
