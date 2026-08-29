@@ -912,6 +912,7 @@ export class SessionManager {
         await this.sessionFiles.list(cmd);
         return;
       case 'session.loadHistory':
+        await this.sessionFiles.whenBootReconciled();
         this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
       case 'sessions.search':

@@ -7,3 +7,4 @@ reviews:
       - cursor/multi-provider-integration-330f
       - cursor/multi-provider-runtime-spec-f09f
       - cursor/mp-.*
+      - integration/multi-provider-.*
