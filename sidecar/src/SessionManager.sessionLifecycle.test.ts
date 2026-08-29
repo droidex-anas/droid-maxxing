@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -10,6 +11,9 @@ import { writeProviderConversation } from './testing/historyCharacterizationSupp
 import { assistantTextDelta, FakeFactorySession } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
+import { TranscriptStore } from './persistence/TranscriptStore.js';
 
 class DeferredDesignPolicySession extends FakeFactorySession {
   private rejectDesignPolicyUpdate?: (error: Error) => void;
@@ -855,8 +859,7 @@ test(
       await h.provider.waitForPrompts('provider-2', 1);
 
       const created = h.events.filter((event) => event.type === 'session.created');
-      // Surprise: session.create does not dedupe clientRef. TODO: provider seam
-      // must preserve two independent sessions or deliberately reject the second.
+      // No-store characterization: durable clientRef replay is F7's store path.
       assert.equal(created.length, 2);
       assert.equal(created[0]?.clientRef, 'shared-ref');
       assert.equal(created[1]?.clientRef, 'shared-ref');
@@ -1039,6 +1042,82 @@ test(
     }
   },
 );
+
+test('F7 create persists a distinct app id before native startup', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'droidex-f7-mgr-'));
+  const db = new DroidexDatabase(path.join(dir, 'state', 'droidex.sqlite'));
+  const store = new SessionStore(db);
+  const transcript = new TranscriptStore(db);
+  const boundaries: string[] = [];
+  const h = createSessionManagerTestContext({
+    database: db,
+    nextAppSessionId: () => 'app-f7',
+    nextTurnId: () => 'turn-f7',
+    onCreateBoundary: (boundary) => {
+      boundaries.push(boundary);
+      if (boundary === 'before-provider-open') {
+        assert.equal(h.runtime.createCalls.length, 0);
+        assert.equal(store.get('app-f7')?.lifecycleStatus, 'initializing');
+      }
+    },
+  });
+
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'f7-create',
+      title: 'F7',
+      goal: 'hello',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    const created = h.events.find((event) => event.type === 'session.created');
+    assert.equal(created?.type, 'session.created');
+    if (created?.type === 'session.created') {
+      assert.equal(created.session.appSessionId, 'app-f7');
+      assert.notEqual(created.session.appSessionId, 'provider-1');
+    }
+    const persisted = boundaries.indexOf('provisional-persisted');
+    const beforeOpen = boundaries.indexOf('before-provider-open');
+    const bound = boundaries.indexOf('binding-persisted');
+    const activated = boundaries.indexOf('activated');
+    assert.notEqual(persisted, -1, 'missing create boundary: provisional-persisted');
+    assert.notEqual(beforeOpen, -1, 'missing create boundary: before-provider-open');
+    assert.notEqual(bound, -1, 'missing create boundary: binding-persisted');
+    assert.notEqual(activated, -1, 'missing create boundary: activated');
+    assert.ok(persisted < beforeOpen);
+    assert.ok(bound < activated);
+    assert.equal(store.get('app-f7')?.binding.providerSessionId, 'provider-1');
+    assert.equal(store.get('app-f7')?.lifecycleStatus, 'running');
+    assert.equal(store.findByClientRef('f7-create')?.summary.appSessionId, 'app-f7');
+    await h.provider.waitForPrompts('provider-1', 1);
+
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'f7-create',
+      title: 'F7 replay',
+      goal: 'again',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    assert.equal(h.runtime.createCalls.length, 1);
+    assert.equal(transcript.page({ kind: 'session', appSessionId: 'app-f7' }).events.length, 0);
+  } finally {
+    await h.dispose();
+    try {
+      db.close();
+    } catch {
+      // SessionManager shutdown already closed the shared database.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function summary(appSessionId: string, providerSessionId: string): SessionSummary {
   const now = Date.now();

@@ -45,6 +45,12 @@ export function assertValidResponseFormat(
   throw new Error(`Unsupported response format: ${description}`);
 }
 
+export function formatResponsePrompt(text: string, responseFormat?: ResponseFormat): string {
+  assertValidResponseFormat(responseFormat);
+  if (!responseFormat) return text;
+  return formatAppPrompt(text, responseFormat === 'app-create' ? 'create' : 'followup');
+}
+
 // Opens a fence whose info word is `app`, accepting any mix of the blockquote
 // and list prefixes the renderer's fence scanner strips, either line ending,
 // and any info-string suffix. This only decides how much of a message replays,

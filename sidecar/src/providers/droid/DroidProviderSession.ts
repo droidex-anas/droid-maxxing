@@ -1,6 +1,6 @@
 import { DroidInteractionMode, type DroidStreamEvent } from '@factory/droid-sdk';
 
-import { AcpPreActivationBuffer } from '../acp/acpPreActivation.js';
+import { SessionPreActivationBuffer } from '../../sessionPreActivationBuffer.js';
 import { admitProviderRuntimeEvent, type ProviderRuntimeEvent } from '../providerEvents.js';
 import {
   configurationsEqual,
@@ -41,7 +41,7 @@ export type { DroidSessionExtension, FactorySession };
 export { readContextBreakdown } from './DroidFactorySession.js';
 
 type SessionPhase =
-  | { kind: 'pending'; buffer: AcpPreActivationBuffer }
+  | { kind: 'pending'; buffer: SessionPreActivationBuffer }
   | { kind: 'active' }
   | { kind: 'closed'; reason: 'overflow' | 'close' };
 
@@ -65,7 +65,7 @@ export class DroidProviderSession implements ProviderSession {
     'retry_session',
   );
 
-  #phase: SessionPhase = { kind: 'pending', buffer: new AcpPreActivationBuffer() };
+  #phase: SessionPhase = { kind: 'pending', buffer: new SessionPreActivationBuffer() };
   #factory: FactorySession | undefined;
   #unsubscribe: (() => void) | undefined;
   #activeTurn: ActiveTurn | undefined;
