@@ -313,7 +313,10 @@ export class SessionManager {
       this.nextChildSessionId = nextChildSessionId;
       startWatcher = startSessionFileWatcher;
     }
-    const canonical = bindCanonicalStoresForManager(options.dependencies, this);
+    const canonical = bindCanonicalStoresForManager(options.dependencies, {
+      history: this.history,
+      browsers: this.browsers,
+    });
     this.database = canonical.database;
     this.providerRegistry =
       options.dependencies?.providerRegistry ??
