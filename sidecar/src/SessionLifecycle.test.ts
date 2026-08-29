@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +10,6 @@ import {
   type AskUserResult,
   type RequestPermissionHandlerResult,
 } from '@factory/droid-sdk';
-import type { HistoricalSession } from './history.js';
 import type { FactoryDefaultSettings, ServerEvent, SessionSummary } from './protocol.js';
 import {
   SessionLifecycle,
@@ -22,7 +22,8 @@ import {
   FakeFactorySession,
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
-import { droidSessionConfiguration, withProviderSelection } from './providers/providerIdentity.js';
+import { encodeDroidResumeState } from './providers/droid/DroidModeMapping.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
 import { ShutdownDeadline } from './providers/shutdownDeadline.js';
 import {
   DroidProviderAdapter,
@@ -34,26 +35,68 @@ import { SessionStore } from './persistence/SessionStore.js';
 import { TranscriptStore } from './persistence/TranscriptStore.js';
 import type { SessionCreateBoundary } from './sessionCreateIdentity.js';
 
-class TestHistory {
-  readonly persisted: SessionSummary[] = [];
-  readonly patches = new Map<string, Partial<SessionSummary>>();
-  readonly hidden = new Set<string>();
-  nextSyncError?: Error;
-  constructor(private readonly calls: RecordedCall[]) {}
-  syncSummaries(summaries: SessionSummary[]): boolean | undefined {
-    const error = this.nextSyncError;
-    delete this.nextSyncError;
-    if (error) throw error;
-    this.persisted.push(...summaries.map((summary) => ({ ...summary })));
-    this.calls.push({ target: 'history', method: 'syncSummaries', args: summaries });
-    return undefined;
+const ownedStores: Array<{ db: DroidexDatabase; dir: string }> = [];
+
+test.after(() => {
+  for (const { db, dir } of ownedStores) {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
   }
-  summaryPatchesAndHidden(): {
-    patches: Map<string, Partial<SessionSummary>>;
-    hiddenProviderSessionIds: Set<string>;
-  } {
-    return { patches: this.patches, hiddenProviderSessionIds: this.hidden };
+});
+
+function seedStoredSession(store: SessionStore, summary: SessionSummary): void {
+  store.createProvisional(
+    {
+      appSessionId: summary.appSessionId,
+      clientRef: `ref-${summary.appSessionId}`,
+      summary,
+    },
+    summary.updatedAt,
+  );
+  if (summary.providerSessionId) {
+    store.bindInitialProviderRuntime(
+      summary.appSessionId,
+      0,
+      summary.providerSessionId,
+      encodeDroidResumeState(summary.providerSessionId),
+    );
   }
+  store.markStarted(summary.appSessionId, summary.updatedAt);
+}
+
+function wrapSessionStore(store: SessionStore, calls: RecordedCall[]) {
+  const persisted: SessionSummary[] = [];
+  let nextUpdateError: Error | undefined;
+  return {
+    persisted,
+    failNextUpdate(error: Error) {
+      nextUpdateError = error;
+    },
+    store: {
+      createProvisional: store.createProvisional.bind(store),
+      findByClientRef: store.findByClientRef.bind(store),
+      bindInitialProviderRuntime: store.bindInitialProviderRuntime.bind(store),
+      markStarted: store.markStarted.bind(store),
+      markFailed: store.markFailed.bind(store),
+      beginRetryStart: store.beginRetryStart.bind(store),
+      removeFailed: store.removeFailed.bind(store),
+      get: store.get.bind(store),
+      list: store.list.bind(store),
+      updateResumeState: store.updateResumeState.bind(store),
+      replaceProviderRuntime: store.replaceProviderRuntime.bind(store),
+      updateSummary: (...args: Parameters<SessionStore['updateSummary']>) => {
+        if (nextUpdateError) {
+          const error = nextUpdateError;
+          nextUpdateError = undefined;
+          throw error;
+        }
+        const result = store.updateSummary(...args);
+        persisted.push({ ...result.summary });
+        calls.push({ target: 'store', method: 'updateSummary', args: [result.summary] });
+        return result;
+      },
+    },
+  };
 }
 
 class RejectingInterruptSession extends FakeFactorySession {
@@ -96,6 +139,7 @@ function createHarness(
     nextTurnId?: () => string;
     nextId?: () => string;
     onCreateBoundary?: ConstructorParameters<typeof SessionLifecycle>[0]['onCreateBoundary'];
+    attachSessionStore?: boolean;
   } = {},
 ) {
   const calls: RecordedCall[] = [];
@@ -105,7 +149,6 @@ function createHarness(
   const forgettingAfterUnregister: boolean[] = [];
   const eventFlowForgettingAfterUnregister: boolean[] = [];
   const missionForgettingAfterUnregister: boolean[] = [];
-  const history = new TestHistory(calls);
   const runtime = new FakeFactoryRuntime(calls);
   let projection: Partial<SessionSummary> = {};
   let applyPending: (appSessionId: string) => Promise<boolean> = () => Promise.resolve(true);
@@ -118,8 +161,21 @@ function createHarness(
   let nextEmitFailure: { type: ServerEvent['type']; error: Error } | undefined;
   let now = 10_000;
   let mcpId = 0;
-  const historical = (): HistoricalSession[] =>
-    ordinarySummaries.map((item) => ({ summary: { ...item }, progress: [] }));
+  let rawStore = options.sessionStore;
+  if (!rawStore) {
+    const dir = mkdtempSync(join(tmpdir(), 'droidex-lifecycle-'));
+    const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+    ownedStores.push({ db, dir });
+    rawStore = new SessionStore(db);
+  }
+  const wrapped = wrapSessionStore(rawStore as SessionStore, calls);
+  for (const row of ordinarySummaries) {
+    seedStoredSession(rawStore as SessionStore, row);
+  }
+  const attachStoreToLifecycle =
+    Boolean(options.sessionStore) ||
+    Boolean(options.attachSessionStore) ||
+    ordinarySummaries.length > 0;
   const recordEvent = (event: ServerEvent): void => {
     if (nextEmitFailure?.type === event.type) {
       const error = nextEmitFailure.error;
@@ -133,15 +189,13 @@ function createHarness(
     }
   };
   const registry = new SessionRegistry<LiveSession>({
-    history,
-    loadOrdinarySessions: historical,
-    loadMissionControlSessions: () => [],
     projectSummary: (item) => ({ ...item, ...projection }),
     onSummaryUpdated: (session) => recordEvent({ type: 'session.updated', session }),
     now: () => {
       now += 1;
       return now;
     },
+    sessionStore: wrapped.store,
   });
   const defaults: FactoryDefaultSettings = {
     modelId: 'model-default',
@@ -205,7 +259,7 @@ function createHarness(
       },
       beginTurn: () => undefined,
     },
-    ...(options.sessionStore ? { sessionStore: options.sessionStore } : {}),
+    ...(attachStoreToLifecycle ? { sessionStore: wrapped.store } : {}),
     ...(options.transcriptStore ? { transcriptStore: options.transcriptStore } : {}),
     ...(options.atomic ? { atomic: options.atomic } : {}),
     ...(options.nextId ? { nextId: options.nextId } : {}),
@@ -321,7 +375,9 @@ function createHarness(
     calls,
     events,
     appliedProviderEvents,
-    history,
+    store: wrapped.store,
+    persisted: wrapped.persisted,
+    failNextPersist: wrapped.failNextUpdate,
     runtime,
     registry,
     lifecycle,
@@ -438,9 +494,8 @@ test('create and cold resume publish only after registration', async () => {
   await created.lifecycle.create(createCommand());
   await createdProvider.waitForPrompts(1);
   const createTrace = created.calls.map((call) => call.method);
-  const createPersist = createTrace.indexOf('syncSummaries');
   const createPublished = createTrace.indexOf('session.created');
-  assert.ok(createPersist >= 0 && createPersist < createPublished);
+  assert.ok(createPublished >= 0);
   assert.ok(createPublished < createTrace.indexOf('stream'));
   assert.equal(created.registry.getCanonicalSummary('created-1')?.appSessionId, 'created-1');
   assert.equal(created.runtime.createCalls[0]?.cwd, '/workspace');
@@ -452,9 +507,9 @@ test('create and cold resume publish only after registration', async () => {
   const resumeTrace = resumed.calls.map((call) => call.method);
   assert.deepEqual(
     resumeTrace.filter((method) =>
-      ['loadSession', 'autoCompaction.arm', 'onNotification', 'syncSummaries'].includes(method),
+      ['loadSession', 'autoCompaction.arm', 'onNotification', 'updateSummary'].includes(method),
     ),
-    ['loadSession', 'autoCompaction.arm', 'onNotification', 'syncSummaries'],
+    ['loadSession', 'autoCompaction.arm', 'onNotification', 'updateSummary'],
   );
   assert.deepEqual(
     resumed.events.slice(-2).map((event) => event.type),
@@ -539,7 +594,7 @@ test('create failure closes started MCP resources without publishing', async () 
   harness.runtime.createQueue.push(new Error('create failed'));
   await harness.lifecycle.create(createCommand());
   assert.equal(harness.calls.filter((call) => call.method === 'mcp.close').length, 1);
-  assert.equal(harness.history.persisted.length, 0);
+  assert.equal(harness.persisted.length, 0);
   assert.equal(
     harness.events.some((event) => event.type === 'session.created'),
     false,
@@ -589,9 +644,9 @@ test('post-open create and resume failures close provider and MCP resources', as
 });
 
 test('registration failure closes resources without indexing the failed session', async () => {
-  const harness = createHarness();
+  const harness = createHarness([], { attachSessionStore: true });
   queueCreate(harness, 'failed-registration');
-  harness.history.nextSyncError = new Error('persist failed');
+  harness.failNextPersist(new Error('persist failed'));
 
   await harness.lifecycle.create(createCommand());
 
@@ -709,12 +764,12 @@ test('failed lazy resume emits only the original load error', async () => {
 });
 
 test('failed turn setup clears streaming so the next send can run', async () => {
-  const harness = createHarness();
+  const harness = createHarness([], { attachSessionStore: true });
   const provider = queueCreate(harness, 'setup-recovery');
   await harness.lifecycle.create(createCommand());
   await provider.waitForPrompts(1);
   await new Promise<void>((resolve) => setImmediate(resolve));
-  harness.history.nextSyncError = new Error('persist failed');
+  harness.failNextPersist(new Error('persist failed'));
 
   await assert.rejects(harness.lifecycle.send('setup-recovery', 'failed setup'), /persist failed/);
 
@@ -896,10 +951,10 @@ test('resuming an already-live session does not reload or persist it', async () 
   await new Promise<void>((resolve) => setImmediate(resolve));
   harness.calls.length = 0;
   harness.events.length = 0;
-  harness.history.persisted.length = 0;
+  harness.persisted.length = 0;
   await harness.lifecycle.resume('live');
   assert.equal(harness.runtime.loadCalls.length, 0);
-  assert.equal(harness.history.persisted.length, 0);
+  assert.equal(harness.persisted.length, 0);
   assert.deepEqual(
     harness.events.map((event) => event.type),
     ['session.created'],
@@ -913,7 +968,7 @@ test('resuming an already-live session does not reload or persist it', async () 
           'loadSession',
           'autoCompaction.arm',
           'onNotification',
-          'syncSummaries',
+          'updateSummary',
         ].includes(call.method),
       )
       .map((call) => call.method),
@@ -1248,7 +1303,7 @@ test('pending settings stay projected until successful first-send application', 
     ReasoningEffort.High,
   );
   assert.equal(
-    harness.history.persisted.at(-1)?.configuration.providerSelection.modelId,
+    harness.store.get('app-pending')?.summary.configuration.providerSelection.modelId,
     'model-saved',
   );
   assert.equal(
@@ -1259,7 +1314,7 @@ test('pending settings stay projected until successful first-send application', 
   const replaced = harness.registry.replaceProvider('app-pending', 'provider-next');
   assert.equal(replaced?.configuration.providerSelection.modelId, 'model-saved');
   assert.equal(
-    harness.history.persisted.at(-1)?.configuration.providerSelection.modelId,
+    harness.store.get('app-pending')?.summary.configuration.providerSelection.modelId,
     'model-saved',
   );
   harness.setPendingApply(async (appSessionId) => {
@@ -1280,7 +1335,8 @@ test('pending settings stay projected until successful first-send application', 
     'model-pending',
   );
   assert.equal(
-    harness.history.persisted.at(-1)?.configuration.providerSelection.options.reasoningEffort,
+    harness.store.get('app-pending')?.summary.configuration.providerSelection.options
+      .reasoningEffort,
     ReasoningEffort.High,
   );
 
