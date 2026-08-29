@@ -161,7 +161,9 @@ export function createSessionManagerTestContext(
     // coalescing behavior is covered by SessionTimeline unit tests.
     streamingCoalesceMs: options.streamingCoalesceMs ?? 0,
     ...(options.getFactoryDefaults ? { getFactoryDefaults: options.getFactoryDefaults } : {}),
-    readLaunchSettings: (providerSessionId) => history.sessionLaunchSettings(providerSessionId),
+    readLaunchSettings:
+      options.readLaunchSettings ??
+      ((providerSessionId) => history.sessionLaunchSettings(providerSessionId)),
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.database ? { database: options.database } : {}),
   };
