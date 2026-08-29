@@ -96,21 +96,23 @@ The ad-hoc-signed first-launch recovery is: open System Settings, choose Privacy
 Security, find the blocked DROIDEX notice, choose Open Anyway, and confirm. Do
 not advise users to disable Gatekeeper globally.
 
-## Local child-session index has an incompatible schema
+## Canonical database schema mismatch
 
-The local index uses one canonical schema and has no migration or compatibility fallback. If startup reports an incompatible child-session index:
+The canonical store is `$DROIDEX_USER_DATA_DIR/state/droidex.sqlite` (default `~/Library/Application Support/DROIDEX/state/droidex.sqlite`). Schema `user_version` is `1`. There is no migration, Factory-history import, or compatibility fallback.
+
+If startup reports that the canonical database does not match schema version 1, or that WAL is unavailable:
 
 1. Quit DROIDEX.
-2. Remove only the local derived index files:
+2. Move the file aside so it can be inspected later. Also move the WAL and SHM siblings if they exist:
    ```bash
-   rm -f "$HOME/.factory/droidex/session-index.sqlite"
-   rm -f "$HOME/.factory/droidex/session-index.sqlite-wal"
-   rm -f "$HOME/.factory/droidex/session-index.sqlite-shm"
+   DB="${DROIDEX_USER_DATA_DIR:-$HOME/Library/Application Support/DROIDEX}/state/droidex.sqlite"
+   mv "$DB" "$DB.mismatch"
+   mv "$DB-wal" "$DB-wal.mismatch" 2>/dev/null || true
+   mv "$DB-shm" "$DB-shm.mismatch" 2>/dev/null || true
    ```
-3. Restart DROIDEX. The sidecar rebuilds the index from current local Factory session history.
+3. Restart DROIDEX. It creates a new empty canonical database. Previous DROIDEX chats in the mismatched file are not imported. Provider-native files under `~/.factory/sessions` are left untouched and are not application history.
 
-These commands do not remove raw Factory session history. Do not delete the broader `~/.factory` directory.
-Do not remove `index.sqlite`; that filename remains reserved for older app/worktree schemas.
+Do not delete `~/.factory`. Do not treat `session-index.sqlite` or `index.sqlite` as the current store; those names are obsolete.
 
 ## Verify child navigation without Factory authentication
 

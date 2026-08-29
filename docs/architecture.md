@@ -1,6 +1,6 @@
 # Architecture
 
-DROIDEX is split into three runtime surfaces: the React renderer, the Electron host, and the Node sidecar. Dedicated Node worker threads isolate high-frequency history persistence, provider-file reconciliation, transcript parsing, and full-text indexing from agent orchestration.
+DROIDEX is split into three runtime surfaces: the React renderer, the Electron host, and the Node sidecar. Session list, restore, search, and transcript paging are served from one canonical SQLite database in the sidecar process.
 
 ## Runtime flow
 
@@ -12,12 +12,8 @@ flowchart LR
   Main --> Sidecar[Node sidecar WebSocket bridge]
   Sidecar --> DroidSDK[Factory Droid SDK]
   Sidecar --> DroidCLI[Droid CLI child processes]
-  Sidecar --> HistoryWriter[History persistence worker]
-  Sidecar --> HistorySearch[History search worker]
-  HistoryWriter --> CanonicalHistory[(Canonical SQLite history)]
-  HistorySearch --> SessionFiles[(Provider transcript files)]
-  HistorySearch --> CanonicalHistory
-  HistorySearch --> SearchCache[(Derived SQLite FTS5 cache)]
+  Sidecar --> CanonicalStore[(Canonical SQLite droidex.sqlite)]
+  Sidecar --> ProviderNative[Provider-native resume files]
   Main --> Updater[Download and update endpoints]
 ```
 
@@ -29,24 +25,24 @@ flowchart LR
 | Electron main | `electron/main.cjs` | Window lifecycle, bridge process management, native browser lifecycle, downloads, update checks |
 | Electron preload | `electron/preload.cjs` | Narrow API boundary between renderer and Electron main process |
 | Native browser preload | `electron/nativeBrowserPreload.cjs` | Browser automation bridge for embedded native browser flows |
-| Sidecar | `sidecar/src/` | Local WebSocket bridge, Droid SDK session lifecycle, Mission Control integration, CLI discovery |
-| History worker threads | `sidecar/src/historyPersistenceWorker.ts` | Independently supervised writer and index workers for batched durability, file reconciliation, transcript extraction, and SQLite FTS away from the sidecar event loop |
+| Sidecar | `sidecar/src/` | Local WebSocket bridge, provider session lifecycle, Mission Control integration, CLI discovery |
+| Canonical database | `sidecar/src/persistence/` | `DroidexDatabase` owns the SQLite connection and schema. `SessionStore` owns summaries, private bindings, children, and restart state. `TranscriptStore` owns turns, canonical events, paging, and bounded search |
 
 ## Data and control boundaries
 
 - The renderer does not call the Droid SDK directly. It communicates through preload APIs and the sidecar bridge.
 - The Electron main process owns local process lifecycle and injects bridge configuration into the sidecar.
 - The sidecar owns Droid SDK calls and child process environment shaping. It removes `FACTORY_API_KEY` unless a key is explicitly configured.
-- Live canonical session state stays in the sidecar. A bounded write-behind queue sends lossless event rows and latest-wins summary/child snapshots to the history worker in ordered transactions.
+- Live canonical session state stays in the sidecar. `SessionStore` and `TranscriptStore` share one `DroidexDatabase` connection and persist on the sidecar event loop. There is no history-worker thread and no Factory JSONL import.
 - Packaged builds require a bridge token. Development builds may allow local no-token access with `BRIDGE_ALLOW_LOCAL_NO_TOKEN=1`.
 
 ### Sidecar session core
 
-- `appSessionId` is the stable top-level application identity. `childSessionId` is the stable logical child identity within its `parentAppSessionId`; `providerSessionId` is reserved for the backing Factory session.
+- `appSessionId` is the stable top-level DROIDEX identity. `childSessionId` is the stable logical child identity within its `parentAppSessionId`. `providerSessionId` is the replaceable provider-native identity; it is private to the sidecar binding and never a renderer or bridge lookup key.
 - `SessionManager` is the composition root and public command coordinator. It retains public dispatch, cross-module routing, and shutdown ordering.
 - `FactoryRuntime` is the narrow SDK seam; `DroidRuntime` is its production adapter.
-- `SessionRegistry` owns top-level sessions only: the live parent map, stable application identity, provider aliases, canonical parent summary persistence, and projected summary reads. Children never enter `SessionRegistry` or `sessions.list`.
-- Ordinary chats enter durable `sessions.list` history only after the provider file contains both a user message and an assistant response. In-progress first turns remain visible through the live registry; abandoned or unanswered provider files never become permanent sidebar rows.
+- `SessionRegistry` owns top-level sessions only: the live parent map, stable application identity, canonical parent summary persistence, and projected summary reads. Children never enter `SessionRegistry` or `sessions.list`.
+- `sessions.list`, `session.loadHistory`, search, and markdown export read the canonical store plus live overlays. A session is durable from provisional create; DROIDEX does not wait on a provider transcript file before listing it.
 - `ChildSessions` is the one stateful generic owner of parent-child membership, canonical child identity, provider replacement, admission, capacity, queues, turns, settings, cleanup, exact context/compaction targets, and child persistence/hydration.
 - `MissionControlPolicy` owns only AGI Mission Control policy and projection: features, progress, worker/validator decisions, spawn correlation, Mission phase, and Mission completion. It may call `ChildSessions`; `ChildSessions` does not import Mission Control.
 - `SessionTimeline` owns history listing and restore, child replay, status entries, and the canonical record-before-emit path for live transcript events.
@@ -75,18 +71,19 @@ flowchart LR
 - Viewing a released session costs nothing: the transcript is served from persisted history in under 10 milliseconds regardless of its length, and only a prompt reloads the provider session, which measures about 0.7 seconds. The budget is six times the child budget despite that reload being the cheaper of the two, because of where the cost lands: a child pays behind its own loading state, a session pays after the user has typed a prompt and pressed enter.
 - A sidecar restart applies the same rules before spending anything. `SessionAdoption` resurrects the sessions recorded in `live-runtime.json`, which spawns a provider process each, so it asks `sessionRuntimeRetirement` first and leaves any session already past the budget closed and reopenable rather than spawning a process for the first sweep to release. A restart takes every provider process, browser, and pending edit with it, so the journal records when each session was last active and adoption reads the exit phase and journalled child statuses alongside it. Sessions interrupted mid-turn, waiting on the user, or holding unsettled children are resurrected as before.
 
-### History persistence
+### Canonical session storage
 
-- `HistoryPersistence` is the sidecar-facing history seam. It keeps canonical live summary and child overlays immediately readable while persistence is pending.
-- `HistoryPersistenceQueue` retains transcript metadata losslessly, collapses pending summaries and child records by stable identity, and enforces explicit row and byte ceilings.
-- Ordinary writes flush on a short debounce or batch limit with SQLite WAL `synchronous=NORMAL`. Reconciliation drains pending transactions for read consistency without forcing a durability checkpoint. Session creation, turn settlement, provider replacement, compaction, child settlement, unregister, and shutdown additionally force a `synchronous=FULL` WAL checkpoint before the corresponding completed state is published.
-- One writer worker thread owns the SQLite connection and executes each batch inside one `BEGIN IMMEDIATE` transaction. A transactional writer-generation lease rejects work from a timed-out worker after its replacement starts, so late termination cannot overwrite recovered state or cross a durability checkpoint. Failed transactions roll back completely, the queue retains the batch, and the supervised client recreates a failed worker with bounded exponential retry. Live output continues while bounded queue capacity remains; durability boundaries fail visibly until recovery.
-- A separate index worker owns provider-file tree reconciliation, targeted watcher reconciliation, search-text extraction, and SQLite FTS5 updates. It returns revisioned cache deltas; a missed delta triggers an authoritative snapshot before the sidecar changes its in-memory historical summaries or provider-path index. The orchestration thread never walks the provider-file tree or rebuilds the derived cache; explicit history page loads still parse only the indexed provider paths needed for that page. The first session list and a post-close list publish only after their reconciliation result is applied.
-- Full-text content indexing is incremental and restartable. Each transaction advances a persisted byte cursor and indexed-tail fingerprint, so appends index only new JSONL records and a restart resumes at the last committed boundary. File replacement, truncation, or a changed indexed tail rebuilds only that provider's derived rows; deletion removes rows through an indexed provider-to-row mapping.
-- Upgrade backfill is deliberately resource-light. Chats updated during the last seven days are processed first in 256 KiB target slices, paced at one slice every two seconds while the desktop is active. After Electron reports at least 60 seconds of operating-system idle time, that recent lane also uses the five-second idle cadence so a quiet machine is not ground by search backfill. An individual JSONL record that exceeds the slice ceiling is skipped so malformed or unbounded lines cannot grow worker memory without limit. Older chats stay unarmed until that same idle sample and then advance one slice every five seconds. Live transcript, streaming-session, running-child, and interactive search work pause the idle lane; the next desktop activity sample resumes it only if the machine remains idle. Large archives may therefore take days to finish without delaying active agent work.
-- Renderer search commands carry a `requestId` and query. Queries of at least three characters run against the persisted FTS5 trigram index, preserve case-insensitive substring/snippet behavior, resolve provider and compaction aliases to canonical app sessions, and discard superseded request results. Results remain useful while backfill is partial and grow as older slices commit.
-- Canonical durability uses `session-index.sqlite`; rebuildable file-summary and FTS5 state uses the separate `session-search.sqlite`. The canonical schema version and user-data rows are unchanged. An absent, old, or corrupt derived database is rebuilt from provider JSONL without modifying canonical sessions, children, or event rows; deleting `session-search.sqlite` plus its WAL/SHM files is the explicit recovery step for derived-index corruption. The worker bundle ships beside `sidecar.mjs` in packaged updates.
-- The worker bundle carries no third-party runtime: both worker isolates compile it, so a value import of the Droid SDK from the history graph costs the sidecar tens of MiB of resident memory for code the workers never call. `historyWorkerBundle.test.ts` gates this.
+- The sole application database is `$DROIDEX_USER_DATA_DIR/state/droidex.sqlite`. When that environment variable is unset, the default directory is `~/Library/Application Support/DROIDEX`. Electron may set `DROIDEX_USER_DATA_DIR` so a second local profile can run beside the main one.
+- `PRAGMA user_version` is exactly `1`. The file uses WAL journal mode, foreign keys, and an exact match of tables, columns, indexes, and triggers. There is no schema migration and no compatibility reader.
+- `DroidexDatabase` is the only connection owner and the only module that closes it. `SessionStore` persists summaries, immutable provider bindings, opaque resume state, children, lifecycle/failure, and restart state. `TranscriptStore` persists turns, canonical transcript events, bounded pages, and bounded search.
+- `summary_json` holds non-authoritative display fields. Application identity, provider instance/kind, native binding, lifecycle/failure, generation, and timestamps are projected from normalized columns on read.
+- Create allocates `appSessionId` and the first `turnId` before any provider await, then inserts the provisional row and turn in one transaction. Wire summaries pass through `projectWireSessionSummary`, which omits `providerSessionId` and previous native ids. The renderer addresses sessions only by `appSessionId` or `parentAppSessionId` + `childSessionId`.
+- Provider-native files (`~/.factory/sessions` for Droid, and the equivalent native store for other adapters) exist only so that provider can resume. DROIDEX never imports, migrates, watches, or treats those files as application history. Factory `settings.json` remains a defaults reader; Task launch-settings reads stay inside the sessions root.
+- Resume uses the stored opaque `resumeState` for the exact persisted instance. A missing binding, missing native history, or rejected native resume stays a visible failure. It never creates an empty replacement conversation and never falls back to a native-id lookup.
+- Transcript pages default to 400 events and cap at 1,600. Older pages use an opaque `olderCursor`. Search scans at most 150 sessions, 40 MB of text, 25 result sessions, and three snippets per session, yields cooperatively, and reports `indexingIncomplete: false`. Markdown export reads at most 100,000 stored events for one chat.
+- Workspace filtering keeps every canonical DROIDEX session for the requested folders. DROIDEX does not list Factory CLI chats that were never created in this app.
+- Renderer localStorage snapshots use the `droid-session-snapshot-v2` key only. A valid v1 payload is ignored and left in place. Hydration requires one complete nested `configuration`; the sidecar `sessions.list` remains authoritative after paint.
+- Shutdown closes children, then parents, then SQLite. A mismatched, corrupt, or non-WAL database fails fast with its path and the recovery action `move or remove this file, then restart DROIDEX`. Moving the file aside preserves it; DROIDEX does not delete it automatically.
 
 ### Renderer child navigation
 
@@ -187,7 +184,7 @@ transcript.
 ### Replay harness
 
 `npm run perf:replay -- --scenario <name>` boots the real sidecar pipeline
-(SessionManager, SessionEventFlow, SessionTimeline, SQLite history, bridge
+(SessionManager, SessionEventFlow, SessionTimeline, canonical SQLite, bridge
 WebSocket) against a scripted provider and writes JSON + Markdown artifacts
 to `reports/perf/`. Headless scenarios: `smoke`, `idle`, `streaming`,
 `multi-agent`, `agents-4`, `agents-16`, `agents-27`, `long-history`,
@@ -207,7 +204,7 @@ and warned, not failed, on shared runners. Bundle bytes stay gated by
 
 ## Build path
 
-`npm run build` runs frontend typecheck and Vite build, builds the sidecar bundles, and syntax-checks Electron CommonJS entrypoints. The sidecar build emits `sidecar/dist/sidecar.mjs` plus `sidecar/dist/historyPersistenceWorker.mjs`; Electron uses the former unless `SIDECAR_ENTRY` is set and packages both from `sidecar/dist`.
+`npm run build` runs frontend typecheck and Vite build, builds the sidecar bundle, and syntax-checks Electron CommonJS entrypoints. The sidecar build emits `sidecar/dist/sidecar.mjs`. Electron uses that entry unless `SIDECAR_ENTRY` is set and packages `sidecar/dist` from the build.
 
 ## Update path
 
