@@ -47,7 +47,7 @@ export interface SessionRegistryDependencies {
   onLiveProviderReplaced?: (providerSessionId: string) => void;
   onLiveSetChanged?: () => void;
   now: () => number;
-  sessionStore?: Pick<SessionStore, 'get' | 'updateSummary' | 'replaceProviderRuntime'>;
+  sessionStore?: Pick<SessionStore, 'get' | 'list' | 'updateSummary' | 'replaceProviderRuntime'>;
 }
 
 export class SessionRegistry<TLive extends RegisteredSession> {
@@ -312,13 +312,20 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     string,
     { summary: SessionSummary; binding?: ProviderBinding }
   > {
-    this.ensureHistoricalSummaries();
     const summaries = new Map<string, { summary: SessionSummary; binding?: ProviderBinding }>();
-    for (const summary of this.historicalSummaries.values()) {
-      summaries.set(summary.appSessionId, {
-        summary,
-        binding: liveBindingFromSummary(summary),
-      });
+    const store = this.dependencies.sessionStore;
+    if (store && 'list' in store) {
+      for (const row of store.list()) {
+        summaries.set(row.summary.appSessionId, { summary: row.summary, binding: row.binding });
+      }
+    } else {
+      this.ensureHistoricalSummaries();
+      for (const summary of this.historicalSummaries.values()) {
+        summaries.set(summary.appSessionId, {
+          summary,
+          binding: liveBindingFromSummary(summary),
+        });
+      }
     }
     for (const liveSession of this.sessions.values()) {
       const appSessionId = liveSession.summary.appSessionId;

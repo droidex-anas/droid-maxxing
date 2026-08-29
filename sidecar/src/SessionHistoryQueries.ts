@@ -1,7 +1,10 @@
 import type { ClientCommand, HistorySearchReply, ServerEvent, SessionSummary } from './protocol.js';
 import { loadSessionTranscriptWindow, resolveSessionChain } from './history.js';
+import type { SessionStore } from './persistence/SessionStore.js';
+import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import { isHistorySearchUnavailableError } from './historySearchSchema.js';
 import { errMsg } from './sessionHelpers.js';
+import { exportMarkdownFromStore, requireStoredSession } from './sessionCanonicalServing.js';
 import { transcriptToMarkdown } from './sessionMarkdown.js';
 
 type Emit = (event: ServerEvent) => void;
@@ -10,6 +13,8 @@ export interface SessionHistoryQueriesDependencies {
   searchSessions: (query: string, isStale?: () => boolean) => Promise<HistorySearchReply>;
   resolveSummary: (appSessionId: string) => SessionSummary | undefined;
   emit: Emit;
+  sessionStore?: Pick<SessionStore, 'get'>;
+  transcriptStore?: Pick<TranscriptStore, 'page'>;
 }
 
 export class SessionHistoryQueries {
@@ -55,6 +60,17 @@ export class SessionHistoryQueries {
   // silently vanish from the export.
   exportMarkdown(cmd: { appSessionId: string; requestId: string; title?: string }): void {
     try {
+      if (this.d.sessionStore && this.d.transcriptStore) {
+        const stored = requireStoredSession(this.d.sessionStore, cmd.appSessionId);
+        const markdown = exportMarkdownFromStore(this.d.transcriptStore, stored, cmd.title);
+        this.d.emit({
+          type: 'session.markdownExported',
+          requestId: cmd.requestId,
+          ok: true,
+          markdown,
+        });
+        return;
+      }
       const summary = this.d.resolveSummary(cmd.appSessionId);
       const providerSessionId = summary?.providerSessionId ?? cmd.appSessionId;
       const appSessionId = summary?.appSessionId ?? cmd.appSessionId;

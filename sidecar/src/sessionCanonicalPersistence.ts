@@ -42,6 +42,16 @@ export function bindCanonicalStores(
   };
 }
 
+export function canonicalReadBindings(lifecycle: SessionCreatePersistence): {
+  sessionStore?: SessionCreatePersistence['sessionStore'];
+  transcriptStore?: SessionCreatePersistence['transcriptStore'];
+} {
+  return {
+    ...(lifecycle.sessionStore ? { sessionStore: lifecycle.sessionStore } : {}),
+    ...(lifecycle.transcriptStore ? { transcriptStore: lifecycle.transcriptStore } : {}),
+  };
+}
+
 function identityHooks(
   dependencies: CanonicalStoreDependencies | undefined,
 ): SessionCreatePersistence {

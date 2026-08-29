@@ -13,6 +13,7 @@ import type {
   TranscriptEvent,
 } from './protocol.js';
 import type { CompactType } from './compaction.js';
+import type { SessionStore } from './persistence/SessionStore.js';
 import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import { errMsg } from './sessionHelpers.js';
 import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
@@ -21,6 +22,7 @@ import {
   projectTranscriptEvent,
   type CanonicalIdentity,
 } from './sessionEvents.js';
+import { historyPageFromStore, requireStoredSession } from './sessionCanonicalServing.js';
 import { StreamingDeltaCoalescer, streamingEventOwner } from './streamingDeltaCoalescer.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
@@ -50,7 +52,8 @@ export interface SessionTimelineDependencies {
   emitError: (error: TimelineError) => void;
   now?: () => number;
   loaders?: SessionTimelineLoaders;
-  transcriptStore?: Pick<TranscriptStore, 'append'>;
+  transcriptStore?: Pick<TranscriptStore, 'append'> & Partial<Pick<TranscriptStore, 'page'>>;
+  sessionStore?: Pick<SessionStore, 'get'>;
   canonicalIdentity?: CanonicalIdentity;
   // Streaming deltas buffered longer than this are flushed as one event.
   // 0 disables coalescing (every delta records and emits immediately).
@@ -144,6 +147,46 @@ export class SessionTimeline {
   }
 
   load(appSessionIdOrProviderSessionId: string, cursor?: string, limit?: number): void {
+    const store = this.dependencies.sessionStore;
+    const transcript = this.dependencies.transcriptStore;
+    const transcriptPage = transcript?.page?.bind(transcript);
+    if (store && transcriptPage) {
+      try {
+        const stored = requireStoredSession(store, appSessionIdOrProviderSessionId);
+        const page = historyPageFromStore(
+          { page: transcriptPage },
+          stored.summary.appSessionId,
+          cursor,
+          limit,
+        );
+        this.record(page.transcripts);
+        this.emitHistory({
+          appSessionId: stored.summary.appSessionId,
+          progress: [],
+          transcripts: page.transcripts,
+          ...(cursor
+            ? { mode: 'prepend' as const }
+            : {
+                mode: 'replace' as const,
+                childSessions: this.dependencies.getChildSessions(stored.summary.appSessionId),
+              }),
+          ...(page.olderCursor !== undefined ? { olderCursor: page.olderCursor } : {}),
+        });
+      } catch (error) {
+        const message = errMsg(error);
+        this.dependencies.emit({
+          type: 'session.history.error',
+          appSessionId: appSessionIdOrProviderSessionId,
+          message,
+        });
+        this.dependencies.emitError({
+          appSessionId: appSessionIdOrProviderSessionId,
+          message,
+          recoverable: true,
+        });
+      }
+      return;
+    }
     const summary =
       this.dependencies.registry.getCanonicalSummary(appSessionIdOrProviderSessionId) ??
       this.dependencies.registry.resolveSummary(appSessionIdOrProviderSessionId);

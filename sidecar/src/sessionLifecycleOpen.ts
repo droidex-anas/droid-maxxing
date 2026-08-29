@@ -14,12 +14,14 @@ import {
   allocateCreateIdentity,
   initializingCreateSummary,
   markFailedOpen,
+  markFailedResume,
   noteCreateBoundary,
   persistInitialBinding,
   persistProvisionalIdentity,
   providerFailedOpen,
   type AllocatedCreateIdentity,
 } from './sessionCreateIdentity.js';
+import { requireStoredSession, UnknownAppSessionError } from './sessionCanonicalServing.js';
 import {
   droidReasoningEffortFromSelection,
   droidSessionConfiguration,
@@ -196,9 +198,36 @@ export async function resumeAppSession(
 ): Promise<boolean> {
   const d = host.dependencies;
   d.ensureConnected();
-  const historical = d.registry.getCanonicalSummary(requestedAppSessionId);
-  const appSessionId = historical?.appSessionId ?? requestedAppSessionId;
-  const providerSessionId = historical?.providerSessionId ?? requestedAppSessionId;
+  let stored;
+  try {
+    stored = d.sessionStore
+      ? requireStoredSession(d.sessionStore, requestedAppSessionId)
+      : undefined;
+  } catch (error) {
+    if (error instanceof UnknownAppSessionError) {
+      d.emitError({
+        appSessionId: requestedAppSessionId,
+        code: 'session.resume_failed',
+        message: error.message,
+      });
+      return false;
+    }
+    throw error;
+  }
+  const historical = stored?.summary ?? d.registry.getCanonicalSummary(requestedAppSessionId);
+  const appSessionId = stored?.summary.appSessionId ?? requestedAppSessionId;
+  const providerSessionId =
+    stored?.binding.providerSessionId ??
+    (d.sessionStore ? undefined : (historical?.providerSessionId ?? requestedAppSessionId));
+  if (
+    d.sessionStore &&
+    (providerSessionId === undefined || stored?.binding.resumeState === undefined)
+  ) {
+    const error = new Error('Stored session has no provider binding to resume.');
+    markFailedResume(d, appSessionId, error);
+    d.emitError({ appSessionId, code: 'session.resume_failed', message: error.message });
+    return false;
+  }
   const existing = d.registry.getLive(appSessionId);
   if (existing) {
     d.emit({
@@ -222,11 +251,10 @@ export async function resumeAppSession(
       });
     const adapter = d.providers.resolve(configuration.providerSelection.providerInstanceId);
     assertConfigurationMatchesAdapter(adapter.definition, configuration);
-    const stored = d.sessionStore?.get(appSessionId);
     const expectedGeneration = stored?.binding.runtimeGeneration ?? 1;
     const resumeState = stored?.binding.resumeState ?? {
       schemaVersion: 1 as const,
-      sessionId: providerSessionId,
+      sessionId: providerSessionId ?? requestedAppSessionId,
     };
     const provider = await adapter.resume({
       ...providerOpenInput(host, {
@@ -244,7 +272,7 @@ export async function resumeAppSession(
       init: session.initResult ?? {},
       historical,
       appSessionId,
-      providerSessionId,
+      providerSessionId: providerSessionId ?? requestedAppSessionId,
       defaults,
       maxContextTokensForModel: d.maxContextTokensForModel,
       now: Date.now(),
@@ -301,6 +329,7 @@ export async function resumeAppSession(
     void d.context.refresh(liveSession);
     return true;
   } catch (error) {
+    markFailedResume(d, appSessionId, error);
     await host.cleanupFailedOpen(pendingProvider, pendingLiveSession);
     if (!isOpenAdmissionClosed(error)) d.emitError({ appSessionId, message: errMsg(error) });
     return false;

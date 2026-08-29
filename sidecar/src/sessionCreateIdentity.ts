@@ -36,10 +36,12 @@ export interface SessionCreatePersistence {
     | 'markStarted'
     | 'markFailed'
     | 'get'
+    | 'list'
+    | 'updateSummary'
     | 'updateResumeState'
     | 'replaceProviderRuntime'
   >;
-  transcriptStore?: Pick<TranscriptStore, 'beginTurn' | 'settleTurn' | 'append'>;
+  transcriptStore?: Pick<TranscriptStore, 'beginTurn' | 'settleTurn' | 'append' | 'page' | 'search'>;
   atomic?: <T>(work: () => T) => T;
   nextAppSessionId?: () => string;
   nextTurnId?: () => string;
@@ -155,6 +157,28 @@ export function markFailedOpen(
       // The turn may already be settled or missing if persist never completed.
     }
     persistStartupDiagnostic(persistence, stored.summary.appSessionId, allocated?.turnId, failed);
+  };
+  try {
+    if (persistence.atomic) persistence.atomic(fail);
+    else fail();
+  } catch {
+    // Cleanup continues; the failed row is still visible if markFailed committed.
+  }
+}
+
+export function markFailedResume(
+  persistence: SessionCreatePersistence,
+  appSessionId: string,
+  error: unknown,
+): void {
+  const store = persistence.sessionStore;
+  if (!store) return;
+  const stored = store.get(appSessionId);
+  if (!stored) return;
+  const failed = startupFailure(stored.binding.providerInstanceId, error);
+  const fail = () => {
+    store.markFailed(stored.summary.appSessionId, failed);
+    persistStartupDiagnostic(persistence, stored.summary.appSessionId, undefined, failed);
   };
   try {
     if (persistence.atomic) persistence.atomic(fail);
