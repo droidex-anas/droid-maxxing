@@ -162,7 +162,9 @@ test('replaceNativeSession resume-state-only omits providerSessionId', async () 
     assert.equal('providerSessionId' in latest.binding, false);
   }
   const nativeReplacement = new FakeFactorySession('native-c', {}, []);
+  const generationBeforeReplacement = session.runtimeGeneration;
   session.droid.replaceNativeSession(nativeReplacement, 'native_replacement');
+  assert.equal(session.runtimeGeneration, generationBeforeReplacement + 1);
   const after = recorded.events.filter((event) => event.type === 'binding.updated').at(-1);
   assert.equal(after?.type, 'binding.updated');
   if (after?.type === 'binding.updated') {

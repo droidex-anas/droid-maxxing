@@ -1,23 +1,63 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import type { PersistedChildSession } from './history.js';
-import { persistTestChild } from './testing/historyPersistenceFixture.js';
 
-const originalHome = process.env.HOME;
-const home = mkdtempSync(join(tmpdir(), 'droid-child-session-persistence-'));
-process.env.HOME = home;
+import {
+  childPersistenceFromStore,
+  persistedChildFromStored,
+} from './childCanonicalPersistence.js';
+import type { PersistedChildSession } from './ChildSessionState.js';
+import type { SessionSummary } from './protocol.js';
+import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
 
-const { HistoryIndex, SESSION_INDEX_FILENAME } = await import('./history.js');
+function withStore(run: (store: SessionStore) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-child-persist-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  try {
+    run(new SessionStore(db));
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
-test.after(() => {
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  rmSync(home, { recursive: true, force: true });
-});
+function parentSummary(appSessionId: string): SessionSummary {
+  return {
+    appSessionId,
+    sessionPurpose: 'chat',
+    role: 'primary',
+    title: appSessionId,
+    goal: 'goal',
+    cwd: '/workspace',
+    workspaceKind: 'folder',
+    configuration: droidSessionConfiguration({
+      modelId: 'model-default',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    }),
+    phase: 'intake',
+    features: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    contextTokens: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+function createParent(store: SessionStore, appSessionId: string): void {
+  store.createProvisional({
+    appSessionId,
+    clientRef: `ref-${appSessionId}`,
+    summary: parentSummary(appSessionId),
+  });
+  store.bindInitialProviderRuntime(appSessionId, 0, `native-${appSessionId}`);
+  store.markStarted(appSessionId);
+}
 
 function child(
   parentAppSessionId: string,
@@ -43,488 +83,74 @@ function child(
 }
 
 test('child persistence preserves exact identity, settings, role, and hierarchy across reopen', () => {
-  const index = new HistoryIndex();
-  persistTestChild(child('parent-a', 'child-a', { label: 'Same-role worker' }));
-  persistTestChild(child('parent-a', 'child-b', { label: 'Same-role worker' }));
-  persistTestChild(
-    child('parent-b', 'child-a', {
-      role: 'validator',
-      label: 'Validator',
-      modelId: 'claude-opus-4-1',
-      reasoningEffort: 'max',
-      spawnLink: { kind: 'spawn', id: 'spawn-validator' },
-      transcriptAvailable: false,
-      status: 'pending',
-    }),
-  );
-  index.close();
+  withStore((store) => {
+    createParent(store, 'parent-a');
+    createParent(store, 'parent-b');
+    const persistence = childPersistenceFromStore(store);
+    const binding = store.get('parent-a')!.binding;
+    persistence.upsert(child('parent-a', 'child-a', { label: 'Same-role worker' }), binding);
+    persistence.upsert(child('parent-a', 'child-b', { label: 'Same-role worker' }), binding);
+    persistence.upsert(
+      child('parent-b', 'child-a', {
+        role: 'validator',
+        label: 'Validator',
+        modelId: 'claude-opus-4-1',
+        reasoningEffort: 'max',
+        spawnLink: { kind: 'spawn', id: 'spawn-validator' },
+        transcriptAvailable: false,
+        status: 'pending',
+      }),
+      store.get('parent-b')!.binding,
+    );
 
-  const reopened = new HistoryIndex();
-  const parentA = reopened.childSessions('parent-a');
-  const parentBChild = reopened.childSession('parent-b', 'child-a');
-  reopened.close();
-
-  assert.deepEqual(
-    parentA.map(({ childSessionId, role, label }) => ({ childSessionId, role, label })),
-    [
-      { childSessionId: 'child-a', role: 'worker', label: 'Same-role worker' },
-      { childSessionId: 'child-b', role: 'worker', label: 'Same-role worker' },
-    ],
-  );
-  assert.deepEqual(parentBChild, {
-    parentAppSessionId: 'parent-b',
-    childSessionId: 'child-a',
-    providerSessionId: 'provider-parent-b-child-a',
-    role: 'validator',
-    label: 'Validator',
-    prompt: 'Prompt for child-a',
-    status: 'pending',
-    modelId: 'claude-opus-4-1',
-    reasoningEffort: 'max',
-    spawnLink: { kind: 'spawn', id: 'spawn-validator' },
-    transcriptAvailable: false,
-    startedAt: 100,
-    updatedAt: 200,
+    const parentA = persistence.list('parent-a');
+    const parentBChild = persistence.get('parent-b', 'child-a');
+    assert.deepEqual(
+      parentA.map(({ childSessionId, role, label }) => ({ childSessionId, role, label })),
+      [
+        { childSessionId: 'child-a', role: 'worker', label: 'Same-role worker' },
+        { childSessionId: 'child-b', role: 'worker', label: 'Same-role worker' },
+      ],
+    );
+    assert.equal(parentBChild?.role, 'validator');
+    assert.equal(parentBChild?.label, 'Validator');
+    assert.equal(parentBChild?.modelId, 'claude-opus-4-1');
+    assert.equal(parentBChild?.reasoningEffort, 'max');
+    assert.deepEqual(parentBChild?.spawnLink, { kind: 'spawn', id: 'spawn-validator' });
+    assert.equal(parentBChild?.transcriptAvailable, false);
+    assert.equal(parentBChild?.status, 'pending');
+    assert.equal(parentBChild?.childSessionId, 'child-a');
+    assert.equal(store.list().some((row) => row.summary.appSessionId === 'child-a'), false);
   });
 });
 
 test('provider replacement updates runtime identity without changing logical child identity', () => {
-  const index = new HistoryIndex();
-  const original = child('parent-rekey', 'stable-child', {
-    providerSessionId: 'provider-old',
-    status: 'paused',
+  withStore((store) => {
+    createParent(store, 'parent-rekey');
+    const persistence = childPersistenceFromStore(store);
+    const binding = store.get('parent-rekey')!.binding;
+    const original = child('parent-rekey', 'stable-child', {
+      providerSessionId: 'provider-old',
+      status: 'paused',
+    });
+    persistence.upsert(original, binding);
+    persistence.upsert(
+      {
+        ...original,
+        providerSessionId: 'provider-new',
+        previousProviderSessionIds: ['provider-old'],
+        status: 'running',
+        updatedAt: 300,
+      },
+      binding,
+    );
+
+    const restored = persistence.list('parent-rekey');
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0].childSessionId, 'stable-child');
+    assert.equal(restored[0].providerSessionId, 'provider-new');
+    assert.deepEqual(restored[0].previousProviderSessionIds, ['provider-old']);
+    assert.equal(restored[0].status, 'running');
+    assert.equal(persistedChildFromStored(store.getChild('parent-rekey', 'stable-child')!).childSessionId, 'stable-child');
   });
-  persistTestChild(original);
-  persistTestChild({
-    ...original,
-    providerSessionId: 'provider-new',
-    previousProviderSessionIds: ['provider-old'],
-    status: 'running',
-    updatedAt: 300,
-  });
-
-  const restored = index.childSessions('parent-rekey');
-  index.close();
-
-  assert.equal(restored.length, 1);
-  assert.equal(restored[0].childSessionId, 'stable-child');
-  assert.equal(restored[0].providerSessionId, 'provider-new');
-  assert.deepEqual(restored[0].previousProviderSessionIds, ['provider-old']);
-  assert.equal(restored[0].status, 'running');
-});
-
-test('malformed replacement chains fail with hard-cut index recovery guidance', () => {
-  const parentAppSessionId = 'malformed-chain-parent';
-  const childSessionId = 'malformed-chain-child';
-  const index = new HistoryIndex();
-  persistTestChild(child(parentAppSessionId, childSessionId));
-  index.close();
-
-  const indexPath = join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME);
-  const db = new DatabaseSync(indexPath);
-  db.prepare(
-    `UPDATE child_sessions
-     SET previous_provider_session_ids = ?
-     WHERE parent_app_session_id = ? AND child_session_id = ?`,
-  ).run('{"not":"an array"}', parentAppSessionId, childSessionId);
-  db.close();
-
-  const reopened = new HistoryIndex();
-  try {
-    assert.throws(
-      () => reopened.childSession(parentAppSessionId, childSessionId),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
-    );
-  } finally {
-    reopened.close();
-    const cleanup = new DatabaseSync(indexPath);
-    cleanup
-      .prepare(
-        'DELETE FROM child_sessions WHERE parent_app_session_id = ? AND child_session_id = ?',
-      )
-      .run(parentAppSessionId, childSessionId);
-    cleanup.close();
-  }
-});
-
-test('canonical indexes reject duplicate provider and spawn ownership within one parent', () => {
-  const index = new HistoryIndex();
-  persistTestChild(
-    child('identity-parent', 'child-one', {
-      providerSessionId: 'shared-provider',
-      spawnLink: { kind: 'tool-use', id: 'spawn-one' },
-    }),
-  );
-
-  assert.throws(
-    () =>
-      persistTestChild(
-        child('identity-parent', 'child-two', {
-          providerSessionId: 'shared-provider',
-          spawnLink: { kind: 'tool-use', id: 'spawn-two' },
-        }),
-      ),
-    /UNIQUE constraint failed/,
-  );
-  assert.throws(
-    () =>
-      persistTestChild(
-        child('identity-parent', 'child-three', {
-          providerSessionId: 'other-provider',
-          spawnLink: { kind: 'tool-use', id: 'spawn-one' },
-        }),
-      ),
-    /UNIQUE constraint failed/,
-  );
-  assert.doesNotThrow(() =>
-    persistTestChild(
-      child('other-parent', 'child-one', {
-        providerSessionId: 'shared-provider',
-        spawnLink: { kind: 'tool-use', id: 'spawn-one' },
-      }),
-    ),
-  );
-  index.close();
-});
-
-test('fresh history index uses only the canonical child schema', () => {
-  const index = new HistoryIndex();
-  index.close();
-  const db = new DatabaseSync(join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME));
-
-  const version = db.prepare('PRAGMA user_version').get() as { user_version: number };
-  const tables = (
-    db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all() as {
-      name: string;
-    }[]
-  ).map(({ name }) => name);
-  const childColumns = (
-    db.prepare('PRAGMA table_info(child_sessions)').all() as { name: string }[]
-  ).map(({ name }) => name);
-  db.close();
-
-  assert.equal(version.user_version, 2);
-  assert.ok(tables.includes('child_sessions'));
-  assert.ok(!tables.includes('child_session_links'));
-  assert.ok(!tables.includes('linked_child_sessions'));
-  assert.deepEqual(childColumns, [
-    'parent_app_session_id',
-    'child_session_id',
-    'provider_session_id',
-    'previous_provider_session_ids',
-    'role',
-    'label',
-    'prompt',
-    'status',
-    'model_id',
-    'reasoning_effort',
-    'spawn_link_kind',
-    'spawn_link_id',
-    'transcript_available',
-    'started_at',
-    'updated_at',
-  ]);
-});
-
-test('v1.1.0 history index upgrades in place without losing existing chats or children', () => {
-  const releasedHome = mkdtempSync(join(tmpdir(), 'droid-history-v1-upgrade-'));
-  process.env.HOME = releasedHome;
-  try {
-    const initial = new HistoryIndex();
-    initial.close();
-    const indexPath = join(releasedHome, '.factory', 'droidex', SESSION_INDEX_FILENAME);
-    const released = new DatabaseSync(indexPath);
-    released.exec(`
-      ALTER TABLE child_sessions DROP COLUMN previous_provider_session_ids;
-      DROP INDEX child_sessions_provider_identity;
-      DROP INDEX child_sessions_spawn_identity;
-      CREATE UNIQUE INDEX child_sessions_provider_identity
-        ON child_sessions (parent_app_session_id, provider_session_id)
-        WHERE provider_session_id IS NOT NULL;
-      CREATE UNIQUE INDEX child_sessions_spawn_identity
-        ON child_sessions (parent_app_session_id, spawn_link_kind, spawn_link_id)
-        WHERE spawn_link_id IS NOT NULL;
-      PRAGMA user_version = 1;
-    `);
-    released
-      .prepare(
-        `INSERT INTO app_sessions (
-          app_session_id,
-          provider_session_id,
-          compacted_from_provider_session_ids,
-          session_purpose,
-          interaction_mode,
-          title,
-          updated_at
-        ) VALUES (?, ?, '[]', 'chat', 'auto', ?, ?)`,
-      )
-      .run('existing-chat', 'existing-provider', 'Existing chat', 123);
-    released
-      .prepare(
-        `INSERT INTO child_sessions (
-          parent_app_session_id,
-          child_session_id,
-          provider_session_id,
-          role,
-          label,
-          prompt,
-          status,
-          model_id,
-          spawn_link_kind,
-          spawn_link_id,
-          transcript_available,
-          updated_at
-        ) VALUES (?, ?, ?, 'worker', ?, ?, 'paused', ?, 'tool-use', ?, 1, ?)`,
-      )
-      .run(
-        'existing-chat',
-        'existing-child',
-        'existing-child-provider',
-        'Existing worker',
-        'Continue the existing chat',
-        'claude-sonnet-4-5',
-        'existing-tool',
-        124,
-      );
-    released.close();
-
-    const upgraded = new HistoryIndex();
-    const restoredChild = upgraded.childSession('existing-chat', 'existing-child');
-    upgraded.close();
-
-    const verified = new DatabaseSync(indexPath);
-    const version = verified.prepare('PRAGMA user_version').get() as { user_version: number };
-    const summary = verified
-      .prepare('SELECT title, provider_session_id FROM app_sessions WHERE app_session_id = ?')
-      .get('existing-chat') as { title: string; provider_session_id: string };
-    const replacementChain = verified
-      .prepare(
-        `SELECT previous_provider_session_ids
-         FROM child_sessions
-         WHERE parent_app_session_id = ? AND child_session_id = ?`,
-      )
-      .get('existing-chat', 'existing-child') as { previous_provider_session_ids: string };
-    verified.close();
-
-    assert.equal(version.user_version, 2);
-    assert.equal(summary.title, 'Existing chat');
-    assert.equal(summary.provider_session_id, 'existing-provider');
-    assert.equal(replacementChain.previous_provider_session_ids, '[]');
-    assert.equal(restoredChild?.childSessionId, 'existing-child');
-    assert.equal(restoredChild?.providerSessionId, 'existing-child-provider');
-    assert.equal(restoredChild?.prompt, 'Continue the existing chat');
-  } finally {
-    process.env.HOME = home;
-    rmSync(releasedHome, { recursive: true, force: true });
-  }
-});
-
-test('canonical session index remains isolated from the legacy droid index', () => {
-  const isolatedHome = mkdtempSync(join(tmpdir(), 'droid-session-index-isolation-'));
-  const indexDir = join(isolatedHome, '.factory', 'droidex');
-  const legacyPath = join(indexDir, 'index.sqlite');
-  const canonicalPath = join(indexDir, SESSION_INDEX_FILENAME);
-  mkdirSync(indexDir, { recursive: true });
-  const legacy = new DatabaseSync(legacyPath);
-  legacy.exec(
-    'CREATE TABLE app_sessions (app_session_id TEXT PRIMARY KEY, droid_session_id TEXT NOT NULL);',
-  );
-  legacy
-    .prepare('INSERT INTO app_sessions (app_session_id, droid_session_id) VALUES (?, ?)')
-    .run('legacy-app', 'legacy-droid');
-  legacy.close();
-
-  process.env.HOME = isolatedHome;
-  try {
-    const index = new HistoryIndex();
-    index.close();
-
-    const reopenedLegacy = new DatabaseSync(legacyPath);
-    const legacyColumns = (
-      reopenedLegacy.prepare('PRAGMA table_info(app_sessions)').all() as { name: string }[]
-    ).map(({ name }) => name);
-    const legacyRow = reopenedLegacy.prepare('SELECT * FROM app_sessions').get() as Record<
-      string,
-      unknown
-    >;
-    reopenedLegacy.close();
-
-    const canonical = new DatabaseSync(canonicalPath);
-    const canonicalColumns = (
-      canonical.prepare('PRAGMA table_info(app_sessions)').all() as { name: string }[]
-    ).map(({ name }) => name);
-    canonical.close();
-
-    assert.deepEqual(legacyColumns, ['app_session_id', 'droid_session_id']);
-    assert.equal(legacyRow.droid_session_id, 'legacy-droid');
-    assert.ok(canonicalColumns.includes('provider_session_id'));
-    assert.ok(!canonicalColumns.includes('droid_session_id'));
-  } finally {
-    process.env.HOME = home;
-    rmSync(isolatedHome, { recursive: true, force: true });
-  }
-});
-
-test('current index missing a canonical identity constraint uses hard-cut recovery', () => {
-  const malformedHome = mkdtempSync(join(tmpdir(), 'droid-child-schema-v1-malformed-'));
-  process.env.HOME = malformedHome;
-  try {
-    const index = new HistoryIndex();
-    index.close();
-    const indexPath = join(malformedHome, '.factory', 'droidex', SESSION_INDEX_FILENAME);
-    const db = new DatabaseSync(indexPath);
-    db.exec('DROP INDEX child_sessions_provider_identity;');
-    db.close();
-
-    assert.throws(
-      () => new HistoryIndex(),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
-    );
-  } finally {
-    process.env.HOME = home;
-    rmSync(malformedHome, { recursive: true, force: true });
-  }
-});
-
-test('current index missing the canonical spawn-kind check uses hard-cut recovery', () => {
-  const malformedHome = mkdtempSync(join(tmpdir(), 'droid-child-schema-v1-check-'));
-  process.env.HOME = malformedHome;
-  try {
-    const index = new HistoryIndex();
-    index.close();
-    const indexPath = join(malformedHome, '.factory', 'droidex', SESSION_INDEX_FILENAME);
-    const db = new DatabaseSync(indexPath);
-    db.exec(`
-      BEGIN;
-      DROP INDEX child_sessions_provider_identity;
-      DROP INDEX child_sessions_spawn_identity;
-      ALTER TABLE child_sessions RENAME TO malformed_child_sessions;
-      CREATE TABLE child_sessions (
-        parent_app_session_id TEXT NOT NULL,
-        child_session_id TEXT NOT NULL,
-        provider_session_id TEXT,
-        previous_provider_session_ids TEXT NOT NULL DEFAULT '[]',
-        role TEXT NOT NULL CHECK (role IN ('worker', 'validator')),
-        label TEXT,
-        prompt TEXT,
-        status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'paused', 'completed')),
-        model_id TEXT NOT NULL,
-        reasoning_effort TEXT,
-        spawn_link_kind TEXT,
-        spawn_link_id TEXT,
-        transcript_available INTEGER NOT NULL CHECK (transcript_available IN (0, 1)),
-        started_at INTEGER,
-        updated_at INTEGER NOT NULL,
-        CHECK (
-          (spawn_link_kind IS NULL AND spawn_link_id IS NULL) OR
-          (spawn_link_kind IS NOT NULL AND spawn_link_id IS NOT NULL)
-        ),
-        PRIMARY KEY (parent_app_session_id, child_session_id)
-      );
-      INSERT INTO child_sessions SELECT * FROM malformed_child_sessions;
-      DROP TABLE malformed_child_sessions;
-      CREATE UNIQUE INDEX child_sessions_provider_identity
-        ON child_sessions (parent_app_session_id, provider_session_id)
-        WHERE provider_session_id IS NOT NULL;
-      CREATE UNIQUE INDEX child_sessions_spawn_identity
-        ON child_sessions (parent_app_session_id, spawn_link_kind, spawn_link_id)
-        WHERE spawn_link_id IS NOT NULL;
-      COMMIT;
-    `);
-    db.close();
-
-    assert.throws(
-      () => new HistoryIndex(),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
-    );
-  } finally {
-    process.env.HOME = home;
-    rmSync(malformedHome, { recursive: true, force: true });
-  }
-});
-
-test('current indexes with incompatible partial definitions use hard-cut recovery', () => {
-  const cases = [
-    {
-      name: 'child_sessions_provider_identity',
-      columns: 'parent_app_session_id, provider_session_id',
-      predicate: 'provider_session_id IS NULL',
-    },
-    {
-      name: 'child_sessions_spawn_identity',
-      columns: 'parent_app_session_id, spawn_link_kind, spawn_link_id',
-      predicate: 'spawn_link_id IS NULL',
-    },
-    {
-      name: 'child_sessions_provider_identity',
-      columns: 'parent_app_session_id COLLATE NOCASE, provider_session_id DESC',
-      predicate: 'provider_session_id IS NOT NULL',
-    },
-  ];
-
-  for (const malformed of cases) {
-    const malformedHome = mkdtempSync(join(tmpdir(), 'droid-child-schema-v1-predicate-'));
-    process.env.HOME = malformedHome;
-    try {
-      const index = new HistoryIndex();
-      index.close();
-      const indexPath = join(malformedHome, '.factory', 'droidex', SESSION_INDEX_FILENAME);
-      const db = new DatabaseSync(indexPath);
-      db.exec(`
-        DROP INDEX ${malformed.name};
-        CREATE UNIQUE INDEX ${malformed.name}
-          ON child_sessions (${malformed.columns})
-          WHERE ${malformed.predicate};
-      `);
-      db.close();
-
-      assert.throws(
-        () => new HistoryIndex(),
-        /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
-        malformed.name,
-      );
-    } finally {
-      process.env.HOME = home;
-      rmSync(malformedHome, { recursive: true, force: true });
-    }
-  }
-});
-
-test('incompatible local index fails fast with explicit recovery and leaves raw history intact', () => {
-  const incompatibleHome = mkdtempSync(join(tmpdir(), 'droid-child-schema-recovery-'));
-  const indexDir = join(incompatibleHome, '.factory', 'droidex');
-  const rawDir = join(incompatibleHome, '.factory', 'sessions', '2026', '07');
-  mkdirSync(indexDir, { recursive: true });
-  mkdirSync(rawDir, { recursive: true });
-  const rawPath = join(rawDir, 'raw-session.jsonl');
-  const raw = '{"type":"session_start","id":"raw-session"}\n';
-  writeFileSync(rawPath, raw);
-  const incompatiblePath = join(indexDir, SESSION_INDEX_FILENAME);
-  const db = new DatabaseSync(incompatiblePath);
-  db.exec('CREATE TABLE child_session_links (app_session_id TEXT, provider_session_id TEXT);');
-  db.close();
-
-  process.env.HOME = incompatibleHome;
-  try {
-    assert.throws(
-      () => new HistoryIndex(),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
-    );
-    assert.equal(readFileSync(rawPath, 'utf8'), raw);
-    const reopened = new DatabaseSync(incompatiblePath);
-    const legacyTable = reopened
-      .prepare(
-        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'child_session_links'",
-      )
-      .get();
-    const canonicalTable = reopened
-      .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'child_sessions'")
-      .get();
-    reopened.close();
-    assert.ok(legacyTable);
-    assert.equal(canonicalTable, undefined);
-  } finally {
-    process.env.HOME = home;
-    rmSync(incompatibleHome, { recursive: true, force: true });
-  }
 });

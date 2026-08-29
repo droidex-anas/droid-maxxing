@@ -74,7 +74,7 @@ export class DroidProviderSession implements ProviderSession {
   #appliedConfiguration: SessionConfiguration;
   readonly #settledTurns = new Set<string>();
   readonly #input: ProviderSessionCreateInput;
-  readonly #runtimeGeneration: number;
+  #runtimeGeneration: number;
 
   constructor(
     input: ProviderSessionCreateInput,
@@ -167,6 +167,7 @@ export class DroidProviderSession implements ProviderSession {
           ? { providerSessionId: this.providerSessionId, resumeState }
           : { resumeState },
     });
+    if (kind === 'native_replacement') this.#runtimeGeneration += 1;
   }
 
   activate(): void {

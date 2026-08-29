@@ -1,6 +1,6 @@
 import { factoryReasoningEffort } from './providers/droid/DroidModeMapping.js';
 import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
-import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
+import type { PersistedChildSession, PersistedChildSpawnLink } from './ChildSessionState.js';
 import type { ChildSessionSummary, ClientCommand } from './protocol.js';
 import {
   matchesChildGenerationSnapshot,
@@ -106,7 +106,7 @@ export class ChildSessions {
       runtimeQueue: [],
       closing: false,
     };
-    for (const record of this.d.history.childSessions(parentAppSessionId))
+    for (const record of this.d.childPersistence.list(parentAppSessionId))
       parent.children.set(record.childSessionId, childStateFromRecord(record));
     this.parents.set(parentAppSessionId, parent);
   }
@@ -114,8 +114,8 @@ export class ChildSessions {
   list(parentAppSessionId: string): ChildSessionSummary[] {
     const parent = this.parents.get(parentAppSessionId);
     if (parent) return [...parent.children.values()].map(childSummary);
-    return this.d.history
-      .childSessions(parentAppSessionId)
+    return this.d.childPersistence
+      .list(parentAppSessionId)
       .map((record) => childSummary({ ...record, status: restoredChildStatus(record.status) }));
   }
 
@@ -316,7 +316,7 @@ export class ChildSessions {
       return;
     }
 
-    const record = this.d.history.childSession(command.parentAppSessionId, command.childSessionId);
+    const record = this.d.childPersistence.get(command.parentAppSessionId, command.childSessionId);
     if (!record) {
       this.emitError(
         identity,
@@ -599,7 +599,7 @@ export class ChildSessions {
     const identity = childIdentity(parentAppSessionId, childSessionId);
     const liveParent = this.d.registry.getLive(parentAppSessionId);
     if (liveParent?.closeMode) return;
-    const record = this.d.history.childSession(parentAppSessionId, childSessionId);
+    const record = this.d.childPersistence.get(parentAppSessionId, childSessionId);
     if (!record) {
       this.emitError(
         identity,
@@ -944,7 +944,7 @@ export class ChildSessions {
 
   private readLaunchSettings(providerSessionId: string): ChildSettings | undefined {
     try {
-      return this.d.history.sessionLaunchSettings(providerSessionId);
+      return this.d.readLaunchSettings(providerSessionId);
     } catch (error) {
       console.error(
         `Could not read Task launch settings for ${providerSessionId}: ${errMsg(error)}`,
@@ -1197,10 +1197,19 @@ export class ChildSessions {
   }
 
   private persist(child: ChildSessionState): boolean | undefined {
-    return this.d.history.upsertChildSession({
-      ...persistedChild(child),
-      updatedAt: this.d.now(),
-    });
+    const parent = this.parents.get(child.identity.parentAppSessionId);
+    if (!parent) {
+      throw new Error(
+        `Cannot persist child ${child.identity.childSessionId} without attached parent ${child.identity.parentAppSessionId}.`,
+      );
+    }
+    return this.d.childPersistence.upsert(
+      {
+        ...persistedChild(child),
+        updatedAt: this.d.now(),
+      },
+      parent.lease.binding,
+    );
   }
 
   private commit(child: ChildSessionState): boolean {

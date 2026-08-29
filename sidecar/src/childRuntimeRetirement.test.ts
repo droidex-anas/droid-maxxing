@@ -6,7 +6,7 @@ import {
   type ChildSessionState,
   type ParentChildSessions,
 } from './ChildSessionState.js';
-import type { PersistedChildSession } from './history.js';
+import type { PersistedChildSession } from './ChildSessionState.js';
 import {
   nextChildRuntimeRetirementAt,
   parentHasUnsettledChildren,

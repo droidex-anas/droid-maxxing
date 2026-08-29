@@ -347,7 +347,6 @@ test('shutdown marks later parents before blocked earlier cleanup', async () => 
 test('shutdown is single-flight and finalizers continue after failure', async () => {
   const h = createSessionManagerTestContext();
   h.browsers.nextCloseAllError = new Error('browser closeAll failed');
-  h.history.nextCloseError = new Error('history close failed');
 
   const results = await Promise.allSettled([h.shutdown(), h.shutdown()]);
   assert.deepEqual(
@@ -357,10 +356,6 @@ test('shutdown is single-flight and finalizers continue after failure', async ()
   assert.equal(
     h.calls.filter((call) => call.target === 'cleanup' && call.method === 'browser.closeAll')
       .length,
-    1,
-  );
-  assert.equal(
-    h.calls.filter((call) => call.target === 'cleanup' && call.method === 'history.close').length,
     1,
   );
   assert.match(

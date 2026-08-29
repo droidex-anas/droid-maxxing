@@ -3,7 +3,7 @@ import {
   type FactorySession,
 } from './providers/droid/DroidFactorySession.js';
 import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
-import type { PersistedChildSession } from './history.js';
+import type { PersistedChildSession } from './ChildSessionState.js';
 import type { ServerEvent } from './protocol.js';
 import { errMsg } from './sessionHelpers.js';
 import type { ChildAutomaticCompactionTarget } from './SessionCompaction.js';

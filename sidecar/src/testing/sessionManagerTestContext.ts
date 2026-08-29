@@ -1,18 +1,21 @@
-import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { McpServerConfigSchema, type McpServerConfig } from '@factory/droid-sdk';
 
+import { childPersistenceFromStore } from '../childCanonicalPersistence.js';
+import type { PersistedChildSession } from '../ChildSessionState.js';
 import type { ShutdownDeadline } from '../providers/shutdownDeadline.js';
 import {
   SessionManager,
   type SessionManagerDependencies,
   type StartableLocalMcpResource,
 } from '../SessionManager.js';
-import { HistoryIndex } from '../history.js';
 import type * as Protocol from '../protocol.js';
-import type { SessionFileChange } from '../sessionFileCache.js';
+import { DroidexDatabase } from '../persistence/DroidexDatabase.js';
+import { SessionStore, type StoredSession } from '../persistence/SessionStore.js';
+import { TranscriptStore } from '../persistence/TranscriptStore.js';
 import { FakeBrowserSessionManager } from './browserCharacterizationSupport.js';
 import {
   FakeFactoryRuntime,
@@ -62,7 +65,13 @@ export interface SessionManagerTestContext {
   readonly fixture: {
     seedHistorySummaries(summaries: Protocol.SessionSummary[]): void;
     seedChildSessions(children: Protocol.ChildSessionSummary[]): void;
-    publishSessionFiles(changes: SessionFileChange[]): void;
+    childRecords(parentAppSessionId: string): PersistedChildSession[];
+    childRecord(
+      parentAppSessionId: string,
+      childSessionId: string,
+    ): PersistedChildSession | undefined;
+    storedSession(appSessionId: string): StoredSession | undefined;
+    publishSessionFiles(): void;
   };
   readonly browsers: FakeBrowserSessionManager;
   readonly home: string;
@@ -87,7 +96,7 @@ export function createSessionManagerTestContext(
   options: {
     defaults?: Protocol.FactoryDefaultSettings;
     getFactoryDefaults?: () => Promise<Protocol.FactoryDefaultSettings>;
-    startSessionFileWatcher?: SessionManagerDependencies['startSessionFileWatcher'];
+    readLaunchSettings?: SessionManagerDependencies['readLaunchSettings'];
     streamingCoalesceMs?: number;
     childRuntimeIdleMs?: number;
     sessionRuntimeIdleMs?: number;
@@ -111,7 +120,6 @@ export function createSessionManagerTestContext(
   let childSequence = 0;
   const dependencies: SessionManagerDependencies = {
     runtime,
-    history,
     browsers,
     createLocalMcpResource: () => new FakeLocalMcpResource(calls),
     loadConfiguredMcpServers: () => [CLI_MCP_CONFIG],
@@ -153,9 +161,9 @@ export function createSessionManagerTestContext(
     // coalescing behavior is covered by SessionTimeline unit tests.
     streamingCoalesceMs: options.streamingCoalesceMs ?? 0,
     ...(options.getFactoryDefaults ? { getFactoryDefaults: options.getFactoryDefaults } : {}),
-    ...(options.startSessionFileWatcher
-      ? { startSessionFileWatcher: options.startSessionFileWatcher }
-      : {}),
+    readLaunchSettings:
+      options.readLaunchSettings ??
+      ((providerSessionId) => history.sessionLaunchSettings(providerSessionId)),
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.database ? { database: options.database } : {}),
   };
@@ -166,20 +174,69 @@ export function createSessionManagerTestContext(
     rmSync(home, { recursive: true, force: true });
     throw error;
   }
-  let sessionFileMirror: HistoryIndex;
-  try {
-    sessionFileMirror = new HistoryIndex();
-  } catch (error) {
-    unpinTestHome();
-    rmSync(home, { recursive: true, force: true });
-    throw error;
+  const database =
+    options.database ??
+    new DroidexDatabase(
+      path.join(home, 'Library', 'Application Support', 'DROIDEX', 'state', 'droidex.sqlite'),
+    );
+  const sessionStore = database instanceof DroidexDatabase ? new SessionStore(database) : undefined;
+  const rawTranscript =
+    database instanceof DroidexDatabase ? new TranscriptStore(database) : undefined;
+  dependencies.database = database;
+  if (rawTranscript) {
+    dependencies.transcriptStore = {
+      beginTurn: (input) => rawTranscript.beginTurn(input),
+      settleTurn: (turnId, input) => rawTranscript.settleTurn(turnId, input),
+      page: (input) => rawTranscript.page(input),
+      search: (query, isStale) =>
+        history.searchImpl
+          ? history.searchImpl(query, isStale)
+          : rawTranscript.search(query, isStale),
+      append: (event) => {
+        const failure = history.recordEventErrorForText;
+        if (failure && JSON.stringify(event).includes(failure.text)) {
+          delete history.recordEventErrorForText;
+          throw failure.error;
+        }
+        const persisted = rawTranscript.append(event);
+        calls.push({ target: 'store', method: 'append', args: [event] });
+        return persisted;
+      },
+    };
   }
-  let sessionFileRevision = 0;
+  if (sessionStore) {
+    const replaceProviderRuntime = sessionStore.replaceProviderRuntime.bind(sessionStore);
+    sessionStore.replaceProviderRuntime = (
+      appSessionId,
+      expectedGeneration,
+      providerSessionId,
+      resumeState,
+    ) => {
+      const error = history.nextSyncError;
+      if (error) {
+        delete history.nextSyncError;
+        throw error;
+      }
+      return replaceProviderRuntime(
+        appSessionId,
+        expectedGeneration,
+        providerSessionId,
+        resumeState,
+      );
+    };
+    dependencies.sessionStore = sessionStore;
+    const persistence = childPersistenceFromStore(sessionStore);
+    history.persistChildSession = (child) => {
+      const parent = sessionStore.get(child.parentAppSessionId);
+      if (!parent) return;
+      persistence.upsert(child, parent.binding);
+    };
+  }
   let manager: SessionManager;
   try {
     manager = new SessionManager(recordEvent, { dependencies, initialModels: INITIAL_MODELS });
   } catch (error) {
-    sessionFileMirror.close();
+    if (!options.database && database instanceof DroidexDatabase) database.close();
     unpinTestHome();
     rmSync(home, { recursive: true, force: true });
     throw error;
@@ -216,46 +273,46 @@ export function createSessionManagerTestContext(
     fixture: {
       seedHistorySummaries: (summaries) => {
         history.seedSummaries(summaries);
+        if (!sessionStore) return;
+        for (const summary of summaries) {
+          if (sessionStore.get(summary.appSessionId)) continue;
+          sessionStore.createProvisional({
+            appSessionId: summary.appSessionId,
+            clientRef: `seed-${summary.appSessionId}`,
+            summary,
+          });
+          if (summary.providerSessionId) {
+            sessionStore.bindInitialProviderRuntime(
+              summary.appSessionId,
+              0,
+              summary.providerSessionId,
+              { schemaVersion: 1, sessionId: summary.providerSessionId },
+            );
+          }
+          sessionStore.markStarted(summary.appSessionId);
+        }
       },
       seedChildSessions: (children) => {
-        history.seedChildSessions(
-          children.map((child) => ({
+        const records = children.map((child) => {
+          const seeded = child as Protocol.ChildSessionSummary & {
+            providerSessionId?: string;
+          };
+          return {
             ...child,
-            providerSessionId: child.childSessionId,
+            providerSessionId: seeded.providerSessionId ?? child.childSessionId,
             updatedAt: Date.now(),
-          })),
-        );
-      },
-      publishSessionFiles: (changes) => {
-        const upserts = changes.flatMap(({ providerSessionId, path: sessionPath }) => {
-          if (!existsSync(sessionPath)) return [];
-          const stat = statSync(sessionPath);
-          return [
-            {
-              providerSessionId,
-              path: sessionPath,
-              birthtimeMs: stat.birthtimeMs,
-              mtimeMs: stat.mtimeMs,
-              sizeBytes: stat.size,
-              settingsMtimeMs: null,
-              summary: null,
-            },
-          ];
+          };
         });
-        const removedProviderSessionIds = changes
-          .filter(({ path: sessionPath }) => !existsSync(sessionPath))
-          .map(({ providerSessionId }) => providerSessionId);
-        const previousRevision = sessionFileRevision;
-        sessionFileRevision += 1;
-        const applied = sessionFileMirror.applySessionFileReconciliation({
-          previousRevision,
-          revision: sessionFileRevision,
-          changed: upserts.length + removedProviderSessionIds.length,
-          upserts,
-          removedProviderSessionIds,
-        });
-        if (!applied) throw new Error('Test session-file mirror revision diverged.');
+        history.seedChildSessions(records);
       },
+      childRecords: (parentAppSessionId: string) =>
+        sessionStore ? childPersistenceFromStore(sessionStore).list(parentAppSessionId) : [],
+      childRecord: (parentAppSessionId: string, childSessionId: string) =>
+        sessionStore
+          ? childPersistenceFromStore(sessionStore).get(parentAppSessionId, childSessionId)
+          : undefined,
+      storedSession: (appSessionId: string) => sessionStore?.get(appSessionId),
+      publishSessionFiles: () => undefined,
     },
     browsers,
     home,
@@ -277,7 +334,6 @@ export function createSessionManagerTestContext(
         // A prior failed shutdown already reported to the caller. Dispose must
         // still unpin HOME and must not rethrow the shared rejected promise.
       } finally {
-        sessionFileMirror.close();
         unpinTestHome();
         rmSync(home, { recursive: true, force: true });
       }

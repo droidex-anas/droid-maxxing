@@ -53,15 +53,47 @@ export function historyPageFromStore(
   cursor?: string,
   limit?: number,
 ): { transcripts: TranscriptEvent[]; olderCursor?: string } {
-  const page = transcriptStore.page({
-    kind: 'session',
+  return projectStoredPage(
+    transcriptStore.page({
+      kind: 'session',
+      appSessionId,
+      ...(cursor !== undefined ? { before: cursor } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    }),
     appSessionId,
-    ...(cursor !== undefined ? { before: cursor } : {}),
-    ...(limit !== undefined ? { limit } : {}),
-  });
+  );
+}
+
+export function childHistoryPageFromStore(
+  transcriptStore: Pick<TranscriptStore, 'page'>,
+  parentAppSessionId: string,
+  childSessionId: string,
+  cursor?: string,
+  limit?: number,
+): { transcripts: TranscriptEvent[]; olderCursor?: string } {
+  return projectStoredPage(
+    transcriptStore.page({
+      kind: 'child',
+      parentAppSessionId,
+      childSessionId,
+      ...(cursor !== undefined ? { before: cursor } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    }),
+    parentAppSessionId,
+    childSessionId,
+  );
+}
+
+function projectStoredPage(
+  page: ReturnType<TranscriptStore['page']>,
+  appSessionId: string,
+  childSessionId?: string,
+): { transcripts: TranscriptEvent[]; olderCursor?: string } {
   const transcripts = page.events.flatMap((event) => {
     const projected = projectTranscriptEvent(event);
-    return projected ? [{ ...projected, appSessionId }] : [];
+    return projected
+      ? [{ ...projected, appSessionId, ...(childSessionId ? { sourceSessionId: childSessionId } : {}) }]
+      : [];
   });
   return {
     transcripts,

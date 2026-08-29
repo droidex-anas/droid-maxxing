@@ -24,7 +24,7 @@ import type { FactorySession } from '../providers/droid/DroidProviderSession.js'
 import type { ShutdownDeadline } from '../providers/shutdownDeadline.js';
 
 export interface RecordedCall {
-  target: 'runtime' | 'provider' | 'history' | 'browser' | 'cleanup' | 'protocol';
+  target: 'runtime' | 'provider' | 'history' | 'browser' | 'cleanup' | 'protocol' | 'store';
   method: string;
   args: unknown[];
 }

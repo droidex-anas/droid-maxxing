@@ -5,6 +5,8 @@ import type { SessionCreatePersistence } from './sessionCreateIdentity.js';
 
 export interface CanonicalStoreDependencies {
   database?: Pick<DroidexDatabase, 'close'>;
+  sessionStore?: SessionCreatePersistence['sessionStore'];
+  transcriptStore?: SessionCreatePersistence['transcriptStore'];
   nextAppSessionId?: SessionCreatePersistence['nextAppSessionId'];
   nextTurnId?: SessionCreatePersistence['nextTurnId'];
   onCreateBoundary?: SessionCreatePersistence['onCreateBoundary'];
@@ -13,31 +15,27 @@ export interface CanonicalStoreDependencies {
 
 export function abandonOwnedSidecarResources(
   resources: {
-    closeHistory: () => void;
     closeBrowsers: () => Promise<unknown>;
   },
   bindError: unknown,
 ): never {
-  try {
-    resources.closeHistory();
-  } catch {
-    // Keep the canonical bind failure as the constructor error.
-  }
   void resources.closeBrowsers();
   throw bindError;
 }
 
 export function bindCanonicalStoresForManager(
   dependencies: CanonicalStoreDependencies | undefined,
-  owned: { history: { close(): void }; browsers: { closeAll(): Promise<unknown> } },
+  owned: { browsers: { closeAll(): Promise<unknown> } },
 ): ReturnType<typeof bindCanonicalStores> {
+  const ownsDatabase = !dependencies?.database;
   try {
-    return bindCanonicalStores(dependencies, { createIfMissing: !dependencies });
+    return bindCanonicalStores(dependencies, {
+      createIfMissing: ownsDatabase,
+    });
   } catch (error) {
-    if (!dependencies) {
+    if (ownsDatabase) {
       abandonOwnedSidecarResources(
         {
-          closeHistory: () => owned.history.close(),
           closeBrowsers: () => owned.browsers.closeAll(),
         },
         error,
@@ -70,8 +68,8 @@ export function bindCanonicalStores(
   return {
     database: db,
     lifecycle: {
-      sessionStore: new SessionStore(db),
-      transcriptStore: new TranscriptStore(db),
+      sessionStore: dependencies?.sessionStore ?? new SessionStore(db),
+      transcriptStore: dependencies?.transcriptStore ?? new TranscriptStore(db),
       atomic: (work) => db.atomic(work),
       ...identityHooks(dependencies),
     },

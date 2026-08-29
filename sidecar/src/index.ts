@@ -33,10 +33,9 @@ server.ready
     hotPathMetrics.setGaugeProvider(() => manager.resourceCounts());
     // Stdout line consumed by the desktop supervisor to confirm readiness.
     process.stdout.write(`SIDECAR_READY ${String(server.port)}\n`);
-    // Yield so the supervisor observes ready before the search isolate starts.
+    // Yield so the supervisor observes ready before follow-up work starts.
     setImmediate(() => {
       if (shuttingDown) return;
-      manager.startSessionFileServing();
     });
   })
   .catch((error: unknown) => {

@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 
-import type { HistoricalSession } from './history.js';
 import type { BridgeFeature, SessionSummary } from './protocol.js';
 import {
   SessionRegistry,
@@ -12,98 +11,132 @@ import {
   type RegisteredSession,
   type SessionRegistryDependencies,
 } from './SessionRegistry.js';
-import type { ProviderBinding } from './persistence/SessionStore.js';
+import type {
+  ProviderBinding,
+  SessionStore as SessionStoreApi,
+} from './persistence/SessionStore.js';
+import { encodeDroidResumeState } from './providers/droid/DroidModeMapping.js';
 import { droidSessionConfiguration, withProviderSelection } from './providers/providerIdentity.js';
 import { DroidexDatabase } from './persistence/DroidexDatabase.js';
 import { SessionStore } from './persistence/SessionStore.js';
+import { FAMILIAR_PREEXISTING_SESSIONS_PER_WORKSPACE } from './sessionListFilter.js';
 
 interface TestLiveSession extends RegisteredSession {
   name: string;
   binding: ProviderBinding;
 }
 
-class FakeHistory {
-  readonly persisted: SessionSummary[] = [];
-  readonly hiddenProviderIds = new Set<string>();
-  readonly trace: string[] = [];
-  summaryReadCount = 0;
-  nextSyncError?: Error;
-  nextDurabilityPending = false;
-  private readonly patches = new Map<string, Partial<SessionSummary>>();
-
-  syncSummaries(summaries: SessionSummary[]): boolean | undefined {
-    const error = this.nextSyncError;
-    delete this.nextSyncError;
-    if (error) throw error;
-    this.trace.push('persist');
-    for (const summary of summaries) {
-      const copy = copySummary(summary);
-      this.persisted.push(copy);
-      this.patches.set(summary.appSessionId, copy);
-      if (summary.providerSessionId) this.patches.set(summary.providerSessionId, copy);
-    }
-    if (this.nextDurabilityPending) {
-      this.nextDurabilityPending = false;
-      return false;
-    }
-    return undefined;
-  }
-
-  summaryPatchesAndHidden(): {
-    patches: Map<string, Partial<SessionSummary>>;
-    hiddenProviderSessionIds: Set<string>;
-  } {
-    this.summaryReadCount += 1;
-    return {
-      patches: new Map(this.patches),
-      hiddenProviderSessionIds: new Set(this.hiddenProviderIds),
-    };
-  }
-
-  clearPatches(): void {
-    this.patches.clear();
-  }
-}
+type RegistryStore = Pick<
+  SessionStoreApi,
+  'get' | 'list' | 'updateSummary' | 'replaceProviderRuntime'
+>;
 
 interface HarnessOptions {
   ordinary?: SessionSummary[];
   missionControl?: SessionSummary[];
-  loadOrdinarySessions?: SessionRegistryDependencies['loadOrdinarySessions'];
-  loadMissionControlSessions?: SessionRegistryDependencies['loadMissionControlSessions'];
   projectSummary?: SessionRegistryDependencies['projectSummary'];
   now?: () => number;
   onLiveProviderReplaced?: (providerSessionId: string) => void;
 }
 
-function createHarness(options: HarnessOptions = {}) {
-  const history = new FakeHistory();
+function createHarness(t: TestContext, options: HarnessOptions = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-registry-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  const store = new SessionStore(db);
+  t.after(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const persisted: SessionSummary[] = [];
   const published: SessionSummary[] = [];
+  const persistTrace: string[] = [];
+  let nextUpdateError: Error | undefined;
+
+  const sessionStore: RegistryStore = {
+    get: (appSessionId) => store.get(appSessionId),
+    list: () => store.list(),
+    updateSummary: (appSessionId, patch, updateOptions) => {
+      if (nextUpdateError) {
+        const error = nextUpdateError;
+        nextUpdateError = undefined;
+        throw error;
+      }
+      const result = store.updateSummary(appSessionId, patch, updateOptions);
+      persistTrace.push('persist');
+      persisted.push(copySummary(result.summary));
+      return result;
+    },
+    replaceProviderRuntime: (appSessionId, expectedGeneration, providerSessionId, resumeState) =>
+      store.replaceProviderRuntime(
+        appSessionId,
+        expectedGeneration,
+        providerSessionId,
+        resumeState,
+      ),
+  };
+
+  for (const row of [...(options.ordinary ?? []), ...(options.missionControl ?? [])]) {
+    seedStoredSession(store, row);
+  }
+
   const dependencies: SessionRegistryDependencies = {
-    history,
-    loadOrdinarySessions:
-      options.loadOrdinarySessions ?? (() => historicalRows(options.ordinary ?? [])),
-    loadMissionControlSessions:
-      options.loadMissionControlSessions ?? (() => historicalRows(options.missionControl ?? [])),
     projectSummary: options.projectSummary ?? ((summary) => copySummary(summary)),
     onSummaryUpdated: (summary) => {
-      history.trace.push('publish');
+      persistTrace.push('publish');
       published.push(copySummary(summary));
     },
     ...(options.onLiveProviderReplaced
       ? { onLiveProviderReplaced: options.onLiveProviderReplaced }
       : {}),
     now: options.now ?? (() => 100),
+    sessionStore,
   };
 
   return {
-    history,
+    store,
+    persisted,
     published,
+    persistTrace,
     registry: new SessionRegistry<TestLiveSession>(dependencies),
+    failNextPersist(error: Error) {
+      nextUpdateError = error;
+    },
+    resetPersistTrace() {
+      persisted.length = 0;
+      persistTrace.length = 0;
+    },
   };
 }
 
-function historicalRows(summaries: SessionSummary[]): HistoricalSession[] {
-  return summaries.map((summary) => ({ summary, progress: [] }));
+function seedStoredSession(store: SessionStore, summary: SessionSummary): void {
+  store.createProvisional(
+    {
+      appSessionId: summary.appSessionId,
+      clientRef: `ref-${summary.appSessionId}`,
+      summary,
+    },
+    summary.updatedAt,
+  );
+  const previous = summary.compactedFromProviderSessionIds ?? [];
+  const chain = summary.providerSessionId
+    ? [...previous, summary.providerSessionId]
+    : [...previous];
+  if (chain.length > 0) {
+    const [first, ...rest] = chain;
+    store.bindInitialProviderRuntime(summary.appSessionId, 0, first, encodeDroidResumeState(first));
+    let generation = 1;
+    for (const next of rest) {
+      store.replaceProviderRuntime(
+        summary.appSessionId,
+        generation,
+        next,
+        encodeDroidResumeState(next),
+      );
+      generation += 1;
+    }
+  }
+  store.markStarted(summary.appSessionId, summary.updatedAt);
 }
 
 function live(summary: SessionSummary): TestLiveSession {
@@ -146,10 +179,6 @@ function copySummary(value: Readonly<SessionSummary>): SessionSummary {
   };
 }
 
-function streamingStates(summaries: readonly SessionSummary[]): Array<boolean | undefined> {
-  return summaries.map((value) => value.streaming);
-}
-
 function copyFeature(feature: BridgeFeature): BridgeFeature {
   return {
     ...feature,
@@ -173,15 +202,17 @@ function feature(id: string): BridgeFeature {
   };
 }
 
-test('register persists once and live lookup is app-id only', () => {
-  const { history, published, registry } = createHarness();
-  const first = live(
-    summary('app-a', {
-      providerSessionId: 'provider-a',
-      compactedFromProviderSessionIds: ['provider-a-old'],
-    }),
-  );
-  const directAppId = live(summary('provider-a', { providerSessionId: 'provider-b' }));
+test('register persists once and live lookup is app-id only', (t) => {
+  const firstSummary = summary('app-a', {
+    providerSessionId: 'provider-a',
+    compactedFromProviderSessionIds: ['provider-a-old'],
+  });
+  const directSummary = summary('provider-a', { providerSessionId: 'provider-b' });
+  const { persisted, registry, store } = createHarness(t, {
+    ordinary: [firstSummary, directSummary],
+  });
+  const first = live(firstSummary);
+  const directAppId = live(directSummary);
 
   registry.register(first);
   registry.register(directAppId);
@@ -191,24 +222,32 @@ test('register persists once and live lookup is app-id only', () => {
   assert.equal(registry.getLive('provider-a'), directAppId);
   assert.equal(registry.resolveSummary('provider-a-old')?.appSessionId, 'app-a');
   assert.deepEqual(
-    history.persisted.map((persisted) => persisted.appSessionId),
+    persisted.map((row) => row.appSessionId),
     ['app-a', 'provider-a'],
   );
-  assert.equal(published.length, 0);
+  assert.equal(store.get('app-a')?.summary.appSessionId, 'app-a');
+  assert.equal(store.get('provider-a')?.summary.appSessionId, 'provider-a');
 });
 
-test('register rejects a runtime child shape at the top-level boundary', () => {
-  const { history, registry } = createHarness();
+test('register rejects a runtime child shape at the top-level boundary', (t) => {
+  const { persisted, registry } = createHarness(t);
   const child = live(summary('child-shape'));
   Reflect.set(child.summary, 'role', 'worker');
 
   assert.throws(() => registry.register(child), /top-level sessions only/);
-  assert.deepEqual(history.persisted, []);
+  assert.deepEqual(persisted, []);
   assert.equal(registry.getLive('child-shape'), undefined);
 });
 
-test('failed registration leaves the previous live identity intact', () => {
-  const { history, registry } = createHarness();
+test('failed registration leaves the previous live identity intact', (t) => {
+  const { failNextPersist, registry } = createHarness(t, {
+    ordinary: [
+      summary('stable', {
+        providerSessionId: 'provider-previous',
+        compactedFromProviderSessionIds: ['provider-old'],
+      }),
+    ],
+  });
   const previous = live(
     summary('stable', {
       providerSessionId: 'provider-previous',
@@ -217,7 +256,7 @@ test('failed registration leaves the previous live identity intact', () => {
   );
   registry.register(previous);
 
-  history.nextSyncError = new Error('persist failed');
+  failNextPersist(new Error('persist failed'));
   assert.throws(
     () => registry.register(live(summary('stable', { providerSessionId: 'provider-replacement' }))),
     /persist failed/,
@@ -229,8 +268,17 @@ test('failed registration leaves the previous live identity intact', () => {
   assert.equal(registry.getLive('provider-replacement'), undefined);
 });
 
-test('updateSummary persists canonical state before one publication and protects identity', () => {
-  const { history, published, registry } = createHarness({ now: () => 42 });
+test('updateSummary persists canonical state before one publication and protects identity', (t) => {
+  const { persistTrace, published, registry, resetPersistTrace, store } = createHarness(t, {
+    now: () => 42,
+    ordinary: [
+      summary('stable-app', {
+        providerSessionId: 'provider-current',
+        compactedFromProviderSessionIds: ['provider-old'],
+        missionId: 'mission-stable',
+      }),
+    ],
+  });
   const session = live(
     summary('stable-app', {
       providerSessionId: 'provider-current',
@@ -239,8 +287,7 @@ test('updateSummary persists canonical state before one publication and protects
     }),
   );
   registry.register(session);
-  history.persisted.length = 0;
-  history.trace.length = 0;
+  resetPersistTrace();
 
   const unsafePatch: Partial<SessionSummary> = {
     appSessionId: 'changed-app',
@@ -261,8 +308,9 @@ test('updateSummary persists canonical state before one publication and protects
   assert.equal(updated?.missionId, 'mission-stable');
   assert.equal(updated?.title, 'Updated title');
   assert.equal(updated?.updatedAt, 42);
-  assert.deepEqual(history.trace, ['persist', 'publish']);
-  assert.equal(history.persisted[0]?.providerSessionId, 'provider-current');
+  assert.deepEqual(persistTrace, ['persist', 'publish']);
+  assert.equal(store.get('stable-app')?.binding.providerSessionId, 'provider-current');
+  assert.equal(store.get('stable-app')?.summary.title, 'Updated title');
   assert.equal(published[0]?.sessionWebUrl, 'https://app.factory.ai/sessions/provider-current');
   assert.equal(published[0] && 'providerSessionId' in published[0], false);
   assert.equal(registry.getLive('changed-app'), undefined);
@@ -270,12 +318,14 @@ test('updateSummary persists canonical state before one publication and protects
   assert.equal(registry.getLive('stable-app'), session);
 });
 
-test('updateSummary with touchActivity false keeps the activity timestamp', () => {
-  const { history, published, registry } = createHarness({ now: () => 42 });
+test('updateSummary with touchActivity false keeps the activity timestamp', (t) => {
+  const { persistTrace, published, registry, resetPersistTrace, store } = createHarness(t, {
+    now: () => 42,
+    ordinary: [summary('stable-app', { updatedAt: 7, tokensIn: 1 })],
+  });
   const session = live(summary('stable-app', { updatedAt: 7, tokensIn: 1 }));
   registry.register(session);
-  history.persisted.length = 0;
-  history.trace.length = 0;
+  resetPersistTrace();
 
   const updated = registry.updateSummary(
     'stable-app',
@@ -289,16 +339,19 @@ test('updateSummary with touchActivity false keeps the activity timestamp', () =
   assert.equal(updated?.tokensIn, 500);
   assert.equal(updated?.contextTokens, 128);
   assert.equal(updated?.updatedAt, 7);
-  assert.deepEqual(history.trace, ['persist', 'publish']);
-  assert.equal(history.persisted[0]?.tokensIn, 500);
+  assert.deepEqual(persistTrace, ['persist', 'publish']);
+  assert.equal(store.get('stable-app')?.summary.tokensIn, 500);
   assert.equal(published[0]?.tokensIn, 500);
 });
 
-test('failed summary persistence leaves live state unchanged and unpublished', () => {
-  const { history, published, registry } = createHarness({ now: () => 42 });
+test('failed summary persistence leaves live state unchanged and unpublished', (t) => {
+  const { failNextPersist, published, registry } = createHarness(t, {
+    now: () => 42,
+    ordinary: [summary('stable-app', { title: 'Original title' })],
+  });
   const session = live(summary('stable-app', { title: 'Original title' }));
   registry.register(session);
-  history.nextSyncError = new Error('persist failed');
+  failNextPersist(new Error('persist failed'));
 
   assert.throws(
     () => registry.updateSummary('stable-app', { title: 'Uncommitted title' }),
@@ -311,102 +364,71 @@ test('failed summary persistence leaves live state unchanged and unpublished', (
   assert.deepEqual(published, []);
 });
 
-test('a retained settlement publishes only after durability recovery', () => {
-  const { history, published, registry } = createHarness();
-  const session = live(summary('durable-app', { streaming: true, phase: 'running' }));
-  registry.register(session);
-  history.trace.length = 0;
-  published.length = 0;
-  history.nextDurabilityPending = true;
-
-  const pending = registry.updateSummary('durable-app', {
-    streaming: false,
-    phase: 'paused',
-  });
-
-  assert.equal(pending?.streaming, false);
-  assert.equal(session.summary.streaming, false, 'the owner advances its internal state');
-  assert.equal(
-    registry.listSummaries().sessions[0]?.streaming,
-    true,
-    'renderer list stays durable',
-  );
-  assert.deepEqual(published, []);
-
-  registry.retryPendingDurability();
-  assert.equal(registry.listSummaries().sessions[0]?.streaming, false);
-  assert.deepEqual(streamingStates(published), [false]);
-});
-
-test('new live state supersedes a held settlement without replaying it later', () => {
-  const { history, published, registry } = createHarness();
-  const session = live(summary('continued-app', { streaming: true, phase: 'running' }));
-  registry.register(session);
-  published.length = 0;
-  history.nextDurabilityPending = true;
-  registry.updateSummary('continued-app', { streaming: false, phase: 'paused' });
-
-  registry.updateSummary('continued-app', { streaming: true, phase: 'running' });
-  registry.retryPendingDurability();
-
-  assert.deepEqual(streamingStates(published), [true]);
-  assert.equal(registry.listSummaries().sessions[0]?.streaming, true);
-});
-
-test('reanchorHistoricalCwd moves idle sessions and preserves nested directories', () => {
+test('reanchorHistoricalCwd moves idle sessions and preserves nested directories', (t) => {
   const historical = [
     summary('at-root', { cwd: '/repo/.worktrees/feature', updatedAt: 7 }),
     summary('nested', { cwd: '/repo/.worktrees/feature/packages/app', updatedAt: 8 }),
     summary('sibling', { cwd: '/repo/.worktrees/feature-next', updatedAt: 9 }),
   ];
-  const { history, published, registry } = createHarness({ ordinary: historical });
+  const { persisted, published, registry, store } = createHarness(t, { ordinary: historical });
 
   const updated = registry.reanchorHistoricalCwd('/repo/.worktrees/feature', '/repo');
 
   assert.deepEqual(
-    updated.map((session) => [session.appSessionId, session.cwd, session.updatedAt]),
-    [
-      ['at-root', '/repo', 7],
-      ['nested', '/repo/packages/app', 8],
-    ],
+    new Map(updated.map((session) => [session.appSessionId, [session.cwd, session.updatedAt]])),
+    new Map<string, [string, number]>([
+      ['at-root', ['/repo', 7]],
+      ['nested', ['/repo/packages/app', 8]],
+    ]),
   );
   assert.equal(registry.resolveSummary('at-root')?.cwd, '/repo');
   assert.equal(registry.resolveSummary('nested')?.cwd, '/repo/packages/app');
   assert.equal(registry.resolveSummary('sibling')?.cwd, '/repo/.worktrees/feature-next');
   assert.deepEqual(published, updated);
   assert.deepEqual(
-    history.persisted.map((session) => [session.appSessionId, session.cwd, session.updatedAt]),
-    [
-      ['at-root', '/repo', 7],
-      ['nested', '/repo/packages/app', 8],
-    ],
+    new Map(persisted.map((session) => [session.appSessionId, [session.cwd, session.updatedAt]])),
+    new Map<string, [string, number]>([
+      ['at-root', ['/repo', 7]],
+      ['nested', ['/repo/packages/app', 8]],
+    ]),
   );
+  assert.equal(store.get('at-root')?.summary.cwd, '/repo');
+  assert.equal(store.get('nested')?.summary.cwd, '/repo/packages/app');
+  assert.equal(store.get('sibling')?.summary.cwd, '/repo/.worktrees/feature-next');
 });
 
-test('reanchorHistoricalCwd refuses to move a worktree used by a live session', () => {
+test('reanchorHistoricalCwd refuses to move a worktree used by a live session', (t) => {
   const historical = summary('historical', { cwd: '/repo/.worktrees/feature' });
-  const { history, published, registry } = createHarness({ ordinary: [historical] });
+  const { persisted, published, registry, resetPersistTrace } = createHarness(t, {
+    ordinary: [historical],
+  });
   registry.register(live(summary('live', { cwd: '/repo/.worktrees/feature/subdir' })));
-  history.persisted.length = 0;
+  resetPersistTrace();
 
   assert.throws(
     () => registry.reanchorHistoricalCwd('/repo/.worktrees/feature', '/repo'),
     /live session is still using/i,
   );
-  assert.deepEqual(history.persisted, []);
+  assert.deepEqual(persisted, []);
   assert.deepEqual(published, []);
   assert.equal(registry.resolveSummary('historical')?.cwd, '/repo/.worktrees/feature');
 });
 
-test('replaceProvider retains the alias chain and supports live and historical sessions', () => {
+test('replaceProvider retains the alias chain and supports live and stored sessions', (t) => {
   let timestamp = 10;
   const retiredProviders: string[] = [];
   const historical = summary('historical-app', {
     providerSessionId: 'historical-provider',
     compactedFromProviderSessionIds: ['historical-provider-old'],
   });
-  const { history, published, registry } = createHarness({
-    ordinary: [historical],
+  const { persistTrace, published, registry, resetPersistTrace, store } = createHarness(t, {
+    ordinary: [
+      historical,
+      summary('live-app', {
+        providerSessionId: 'live-provider',
+        compactedFromProviderSessionIds: ['live-provider-old'],
+      }),
+    ],
     now: () => timestamp++,
     onLiveProviderReplaced: (providerSessionId) => {
       retiredProviders.push(providerSessionId);
@@ -419,12 +441,12 @@ test('replaceProvider retains the alias chain and supports live and historical s
     }),
   );
   registry.register(session);
-  history.trace.length = 0;
+  resetPersistTrace();
 
   const unchanged = registry.replaceProvider('live-app', 'live-provider');
 
   assert.equal(unchanged, session.summary);
-  assert.deepEqual(history.trace, []);
+  assert.deepEqual(persistTrace, []);
   assert.equal(published.length, 0);
 
   const liveUpdated = registry.replaceProvider('live-app', 'live-provider-next', {
@@ -457,24 +479,25 @@ test('replaceProvider retains the alias chain and supports live and historical s
 
   assert.equal(historicalUpdated?.appSessionId, 'historical-app');
   assert.equal(historicalUpdated?.providerSessionId, 'historical-provider-next');
-  assert.deepEqual(historicalUpdated?.compactedFromProviderSessionIds, [
-    'historical-provider-old',
-    'historical-provider',
-  ]);
   assert.equal(historicalUpdated?.updatedAt, 1);
   assert.equal(registry.getLive('historical-provider-next'), undefined);
-  assert.equal(registry.resolveSummary('historical-provider-next')?.appSessionId, 'historical-app');
-  assert.deepEqual(
-    retiredProviders,
-    ['live-provider'],
-    'historical swaps do not retire live files',
-  );
-  assert.deepEqual(history.trace, ['persist', 'publish', 'persist', 'publish']);
+  assert.equal(registry.resolveSummary('historical-app')?.appSessionId, 'historical-app');
+  assert.equal(store.get('historical-app')?.binding.providerSessionId, 'historical-provider-next');
+  assert.deepEqual(retiredProviders, ['live-provider'], 'stored swaps do not retire live files');
+  assert.deepEqual(persistTrace, ['persist', 'publish', 'persist', 'persist', 'publish']);
   assert.equal(published.length, 2);
 });
 
-test('failed provider replacement preserves the live summary and aliases', () => {
-  const { history, published, registry } = createHarness({ now: () => 42 });
+test('failed provider replacement preserves the live summary and aliases', (t) => {
+  const { failNextPersist, published, registry } = createHarness(t, {
+    now: () => 42,
+    ordinary: [
+      summary('stable-app', {
+        providerSessionId: 'provider-current',
+        compactedFromProviderSessionIds: ['provider-old'],
+      }),
+    ],
+  });
   const session = live(
     summary('stable-app', {
       providerSessionId: 'provider-current',
@@ -482,7 +505,7 @@ test('failed provider replacement preserves the live summary and aliases', () =>
     }),
   );
   registry.register(session);
-  history.nextSyncError = new Error('persist failed');
+  failNextPersist(new Error('persist failed'));
 
   assert.throws(
     () => registry.replaceProvider('stable-app', 'provider-next', { title: 'Uncommitted' }),
@@ -498,43 +521,9 @@ test('failed provider replacement preserves the live summary and aliases', () =>
   assert.deepEqual(published, []);
 });
 
-test('historical provider replacement is applied before hidden-provider filtering', () => {
-  const mission = summary('historical-mission', {
-    providerSessionId: 'mission-provider-old',
-    sessionPurpose: 'mission-control',
-    configuration: droidSessionConfiguration({
-      modelId: 'model-default',
-      interactionMode: 'agi',
-      autonomy: 'low',
-    }),
-  });
-  const { history, registry } = createHarness({ missionControl: [mission] });
-
-  registry.replaceProvider('mission-provider-old', 'mission-provider-current');
-  history.hiddenProviderIds.add('mission-provider-old');
-
-  const listed = registry.listSummaries().sessions;
-  assert.equal(listed.length, 1);
-  assert.equal(listed[0]?.appSessionId, 'historical-mission');
-  assert.equal(listed[0] && 'providerSessionId' in listed[0], false);
-  assert.equal(
-    listed[0]?.sessionWebUrl,
-    'https://app.factory.ai/sessions/mission-provider-current',
-  );
-});
-
-test('resolve and list project copies after ordinary, Mission Control, and live merging', () => {
+test('resolve and list project copies after store and live merging', (t) => {
   const ordinary = [
     summary('ordinary-only', { title: 'ordinary', updatedAt: 10 }),
-    summary('mission-wins', { title: 'ordinary shadowed', updatedAt: 20 }),
-    summary('live-wins', {
-      providerSessionId: 'live-provider-old',
-      title: 'ordinary live shadow',
-      updatedAt: 30,
-    }),
-    summary('hidden-row', { providerSessionId: 'hidden-provider', updatedAt: 40 }),
-  ];
-  const missionControl = [
     summary('mission-wins', {
       providerSessionId: 'mission-provider',
       sessionPurpose: 'mission-control',
@@ -547,20 +536,13 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
       }),
     }),
     summary('live-wins', {
-      providerSessionId: 'mission-live-provider',
-      sessionPurpose: 'mission-control',
-      title: 'mission live shadow',
-      updatedAt: 60,
-      configuration: droidSessionConfiguration({
-        modelId: 'model-default',
-        interactionMode: 'agi',
-        autonomy: 'low',
-      }),
+      providerSessionId: 'live-provider-old',
+      title: 'ordinary live shadow',
+      updatedAt: 30,
     }),
   ];
-  const { history, published, registry } = createHarness({
+  const { persisted, published, registry } = createHarness(t, {
     ordinary,
-    missionControl,
     projectSummary: (canonical) => ({
       ...canonical,
       appSessionId: 'projected-app-id',
@@ -577,7 +559,6 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
       },
     }),
   });
-  history.hiddenProviderIds.add('hidden-provider');
   const liveSession = live(
     summary('live-wins', {
       providerSessionId: 'live-provider',
@@ -587,7 +568,6 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
     }),
   );
   registry.register(liveSession);
-  history.clearPatches();
 
   const listed = registry.listSummaries().sessions;
   const firstListed = listed[0];
@@ -628,16 +608,16 @@ test('resolve and list project copies after ordinary, Mission Control, and live 
   );
 
   registry.updateSummary('live-wins', { title: 'canonical update' });
-  assert.equal(history.persisted.at(-1)?.configuration.providerSelection.modelId, 'model-default');
-  assert.equal(history.persisted.at(-1)?.title, 'canonical update');
+  assert.equal(persisted.at(-1)?.title, 'canonical update');
+  assert.equal(persisted.at(-1)?.configuration.providerSelection.modelId, 'model-default');
   assert.equal(published.at(-1)?.configuration.providerSelection.modelId, 'projected-model');
   assert.equal(published.at(-1)?.title, 'projected: canonical update');
   assert.equal(registry.resolveSummary('live-wins')?.title, 'projected: canonical update');
 });
 
-test('projected and caller-owned feature state cannot mutate canonical summaries', () => {
+test('projected and caller-owned feature state cannot mutate canonical summaries', (t) => {
   const sourceFeature = feature('feature-a');
-  const { registry } = createHarness({
+  const { registry } = createHarness(t, {
     projectSummary: (canonical) => {
       const projectedFeature = canonical.features[0];
       assert.ok(projectedFeature);
@@ -673,8 +653,8 @@ test('projected and caller-owned feature state cannot mutate canonical summaries
   assert.deepEqual(registry.getCanonicalSummary('isolated')?.features, [sourceFeature]);
 });
 
-test('summary patches copy caller-owned feature state', () => {
-  const { registry } = createHarness();
+test('summary patches copy caller-owned feature state', (t) => {
+  const { registry } = createHarness(t);
   registry.register(live(summary('patched')));
 
   const updatedFeature = feature('updated');
@@ -692,15 +672,11 @@ test('summary patches copy caller-owned feature state', () => {
   ]);
 });
 
-test('workspace scoping applies after canonical source precedence', () => {
-  const { registry } = createHarness({
-    ordinary: [summary('shared', { title: 'ordinary', updatedAt: 100 })],
-    missionControl: [
-      summary('shared', {
-        title: 'mission control',
-        sessionPurpose: 'mission-control',
-        updatedAt: 50,
-      }),
+test('workspace scoping lists only the requested folder', (t) => {
+  const { registry } = createHarness(t, {
+    ordinary: [
+      summary('here', { title: 'in workspace', updatedAt: 20 }),
+      summary('elsewhere', { cwd: '/other', title: 'other folder', updatedAt: 30 }),
     ],
   });
 
@@ -708,37 +684,32 @@ test('workspace scoping applies after canonical source precedence', () => {
     registry
       .listSummaries({ workspaceCwds: ['/workspace'] })
       .sessions.map((item) => [item.appSessionId, item.title]),
-    [['shared', 'mission control']],
+    [['here', 'in workspace']],
   );
 });
 
-test('a persisted app-session row keeps an old session listed past the pre-existing bound', () => {
-  const preexisting = Array.from({ length: 8 }, (_, index) =>
-    summary(`preexisting-${String(index)}`, { updatedAt: 100 + index }),
+test('workspace filter keeps every store-only DROIDEX session past the preexisting bound', (t) => {
+  const count = FAMILIAR_PREEXISTING_SESSIONS_PER_WORKSPACE + 2;
+  const ordinary = Array.from({ length: count }, (_, index) =>
+    summary(`store-${String(index)}`, {
+      title: `store ${String(index)}`,
+      updatedAt: index + 1,
+    }),
   );
-  const { history, registry } = createHarness({
-    ordinary: [summary('ours', { updatedAt: 1 }), ...preexisting],
-  });
-
-  const bounded = registry.listSummaries({ workspaceCwds: ['/workspace'] });
-  assert.ok(!bounded.sessions.some((item) => item.appSessionId === 'ours'));
-  assert.deepEqual(bounded.earlierSessionsByCwd, { '/workspace': 4 });
-
-  history.syncSummaries([summary('ours', { updatedAt: 1 })]);
-  const owned = registry.listSummaries({ workspaceCwds: ['/workspace'] });
-  assert.ok(owned.sessions.some((item) => item.appSessionId === 'ours'));
-  assert.deepEqual(owned.earlierSessionsByCwd, { '/workspace': 3 });
-
-  const revealed = registry.listSummaries({
-    workspaceCwds: ['/workspace'],
-    revealEarlierCwds: ['/workspace'],
-  });
-  assert.equal(revealed.sessions.length, 9);
-  assert.deepEqual(revealed.earlierSessionsByCwd, {});
+  const { registry } = createHarness(t, { ordinary });
+  const page = registry.listSummaries({ workspaceCwds: ['/workspace'] });
+  assert.deepEqual(
+    page.sessions.map((item) => item.appSessionId),
+    ordinary
+      .slice()
+      .reverse()
+      .map((item) => item.appSessionId),
+  );
+  assert.deepEqual(page.earlierSessionsByCwd, {});
 });
 
-test('snapshot permits sequential unregister without skipping sessions', () => {
-  const { registry } = createHarness();
+test('snapshot permits sequential unregister without skipping sessions', (t) => {
+  const { registry } = createHarness(t);
   const first = live(summary('first', { providerSessionId: 'provider-first' }));
   const second = live(
     summary('second', {
@@ -760,16 +731,8 @@ test('snapshot permits sequential unregister without skipping sessions', () => {
   assert.equal(registry.unregister('missing'), undefined);
 });
 
-test('listSummaries reads patches and hidden ids through a single history call', () => {
-  const { history, registry } = createHarness({ ordinary: [summary('ordinary')] });
-
-  registry.listSummaries();
-
-  assert.equal(history.summaryReadCount, 1);
-});
-
-test('published summaries include a Droid web URL and sessionRef and omit native-id keys', () => {
-  const { published, registry } = createHarness();
+test('published summaries include a Droid web URL and sessionRef and omit native-id keys', (t) => {
+  const { published, registry } = createHarness(t);
   registry.register(live(summary('app-droid', { providerSessionId: 'native-1' })));
   registry.updateSummary('app-droid', { title: 'Named' });
   const wire = published.at(-1);
@@ -779,8 +742,8 @@ test('published summaries include a Droid web URL and sessionRef and omit native
   assert.equal(wire && 'compactedFromProviderSessionIds' in wire, false);
 });
 
-test('published summaries omit sessionWebUrl and sessionRef for non-Droid providers', () => {
-  const { published, registry } = createHarness();
+test('published summaries omit sessionWebUrl and sessionRef for non-Droid providers', (t) => {
+  const { published, registry } = createHarness(t);
   registry.register(
     live(
       summary('app-cursor', {
@@ -804,8 +767,8 @@ test('published summaries omit sessionWebUrl and sessionRef for non-Droid provid
   assert.equal(JSON.stringify(wire).includes('native-1'), false);
 });
 
-test('two live instances may share native id native-1 without colliding', () => {
-  const { registry } = createHarness();
+test('two live instances may share native id native-1 without colliding', (t) => {
+  const { registry } = createHarness(t);
   const droid = live(summary('droid-app', { providerSessionId: 'native-1' }));
   const cursor = live(
     summary('cursor-app', {
@@ -829,73 +792,36 @@ test('two live instances may share native id native-1 without colliding', () => 
   assert.equal(cursor.binding.providerSessionId, 'native-1');
 });
 
-test('registry dual-writes summary updates through SessionStore when a row exists', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'droidex-registry-store-'));
-  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
-  const store = new SessionStore(db);
-  try {
-    store.createProvisional({
-      appSessionId: 'app-store',
-      clientRef: 'ref-store',
-      summary: summary('app-store'),
-    });
-    const { history } = createHarness();
-    const withStore = new SessionRegistry<TestLiveSession>({
-      history,
-      loadOrdinarySessions: () => [],
-      loadMissionControlSessions: () => [],
-      projectSummary: (value) => copySummary(value),
-      onSummaryUpdated: () => undefined,
-      now: () => 50,
-      sessionStore: store,
-    });
-    withStore.register(live(summary('app-store', { providerSessionId: 'native-store' })));
-    withStore.updateSummary('app-store', { title: 'Stored title' });
-    assert.equal(store.get('app-store')?.summary.title, 'Stored title');
-    withStore.replaceProvider('app-store', 'native-next');
-    assert.equal(store.get('app-store')?.binding.providerSessionId, 'native-next');
-    assert.equal(store.get('app-store')?.binding.runtimeGeneration, 1);
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
+test('registry dual-writes summary updates through SessionStore when a row exists', (t) => {
+  const { registry, store } = createHarness(t);
+  store.createProvisional({
+    appSessionId: 'app-store',
+    clientRef: 'ref-store',
+    summary: summary('app-store'),
+  });
+  registry.register(live(summary('app-store', { providerSessionId: 'native-store' })));
+  registry.updateSummary('app-store', { title: 'Stored title' });
+  assert.equal(store.get('app-store')?.summary.title, 'Stored title');
+  registry.replaceProvider('app-store', 'native-next');
+  assert.equal(store.get('app-store')?.binding.providerSessionId, 'native-next');
+  assert.equal(store.get('app-store')?.binding.runtimeGeneration, 1);
 });
 
-test('reanchorHistoricalCwd writes the new cwd through SessionStore', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'droidex-registry-reanchor-'));
-  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
-  const store = new SessionStore(db);
-  try {
-    store.createProvisional({
-      appSessionId: 'app-reanchor',
-      clientRef: 'ref-reanchor',
-      summary: summary('app-reanchor', { cwd: '/repo/.worktrees/feature' }),
-    });
-    const { history } = createHarness();
-    const registry = new SessionRegistry<TestLiveSession>({
-      history,
-      loadOrdinarySessions: () => [],
-      loadMissionControlSessions: () => [],
-      projectSummary: (value) => copySummary(value),
-      onSummaryUpdated: () => undefined,
-      now: () => 50,
-      sessionStore: store,
-    });
-    const updated = registry.reanchorHistoricalCwd('/repo/.worktrees/feature', '/repo');
-    assert.deepEqual(
-      updated.map((session) => [session.appSessionId, session.cwd]),
-      [['app-reanchor', '/repo']],
-    );
-    assert.equal(store.get('app-reanchor')?.summary.cwd, '/repo');
-    assert.equal(store.list()[0]?.summary.cwd, '/repo');
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
+test('reanchorHistoricalCwd writes the new cwd through SessionStore', (t) => {
+  const { registry, store } = createHarness(t, {
+    ordinary: [summary('app-reanchor', { cwd: '/repo/.worktrees/feature' })],
+  });
+  const updated = registry.reanchorHistoricalCwd('/repo/.worktrees/feature', '/repo');
+  assert.deepEqual(
+    updated.map((session) => [session.appSessionId, session.cwd]),
+    [['app-reanchor', '/repo']],
+  );
+  assert.equal(store.get('app-reanchor')?.summary.cwd, '/repo');
+  assert.equal(store.list()[0]?.summary.cwd, '/repo');
 });
 
-test('invalidateAndUnregisterLive bumps generations and removes live sessions before awaits', () => {
-  const { registry } = createHarness();
+test('invalidateAndUnregisterLive bumps generations and removes live sessions before awaits', (t) => {
+  const { registry } = createHarness(t);
   const first = live(summary('first'));
   const second = live(summary('second'));
   const firstGeneration = first.binding.runtimeGeneration;

@@ -1,7 +1,3 @@
-import {
-  MAX_PERSISTENCE_QUEUE_BYTES,
-  MAX_PERSISTENCE_QUEUE_ROWS,
-} from '../historyPersistenceQueueValues.js';
 import type { HotPathMetricsSnapshot } from '../telemetry/hotPathMetrics.js';
 import type { ReplayClientStats } from './report.js';
 import type { PerfScenarioSpec } from './scenario.js';
@@ -110,7 +106,8 @@ export function evaluateReplayGates(
       unit: 'count',
       actual: sidecar.counters.persistenceFailures,
       budget: 0,
-      justification: `Write-behind is capped at ${String(MAX_PERSISTENCE_QUEUE_ROWS)} rows / ${String(MAX_PERSISTENCE_QUEUE_BYTES)} bytes. A normal replay must not overflow that bound.`,
+      justification:
+        'Canonical SessionStore has no history write-behind queue. Persistence overflow gates are not applicable; a normal replay must still report zero degraded transitions.',
     }),
     warn({
       id: 'sidecar.rssBytes',
