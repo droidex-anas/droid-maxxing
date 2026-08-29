@@ -25,6 +25,7 @@ import {
   resumeAppSession,
   type SessionOpenHost,
 } from './sessionLifecycleOpen.js';
+import { removeFailedAppSession, retryFailedAppSession } from './sessionFailedRecovery.js';
 import {
   beginFollowUpTurn,
   consumeReservedTurnId,
@@ -166,6 +167,14 @@ export class SessionLifecycle {
     });
     this.resumeOperations.set(appSessionId, operation);
     return operation;
+  }
+
+  async retryStart(appSessionId: string): Promise<void> {
+    return retryFailedAppSession(this.openHost(), appSessionId);
+  }
+
+  async removeFailed(appSessionId: string): Promise<void> {
+    return removeFailedAppSession(this.openHost(), appSessionId);
   }
 
   async send(requestedAppSessionId: string, text: string): Promise<void> {

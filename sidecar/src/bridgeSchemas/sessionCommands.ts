@@ -134,6 +134,12 @@ export const sessionCommandSchemas = {
   'session.close': strictCommand('session.close', {
     appSessionId: idStringSchema,
   }),
+  'session.retryStart': strictCommand('session.retryStart', {
+    appSessionId: idStringSchema,
+  }),
+  'session.removeFailed': strictCommand('session.removeFailed', {
+    appSessionId: idStringSchema,
+  }),
   'sessions.list': strictCommand('sessions.list', {
     workspaceCwds: boundedArray(pathStringSchema).optional(),
     includePlainChats: z.boolean().optional(),
@@ -224,6 +230,8 @@ export const sessionCommandSchemas = {
     | 'session.rewindInfo'
     | 'session.rewind'
     | 'session.close'
+    | 'session.retryStart'
+    | 'session.removeFailed'
     | 'sessions.list'
     | 'session.loadHistory'
     | 'sessions.search'

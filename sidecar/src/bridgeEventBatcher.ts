@@ -11,6 +11,7 @@ const IMMEDIATE_EVENT_TYPES = new Set<ServerEvent['type']>([
   'runtime.updated',
   'session.created',
   'session.closed',
+  'session.removed',
   'sessions.cwdReanchored',
   'session.markdownExported',
   'child.updated',

@@ -97,6 +97,8 @@ const validCommands = {
   'session.rewindInfo': { type: 'session.rewindInfo', appSessionId: 'app-1' },
   'session.rewind': { type: 'session.rewind', appSessionId: 'app-1' },
   'session.close': { type: 'session.close', appSessionId: 'app-1' },
+  'session.retryStart': { type: 'session.retryStart', appSessionId: 'app-1' },
+  'session.removeFailed': { type: 'session.removeFailed', appSessionId: 'app-1' },
   'sessions.list': { type: 'sessions.list' },
   'session.loadHistory': { type: 'session.loadHistory', appSessionId: 'app-1' },
   'sessions.search': { type: 'sessions.search', requestId: 'req-1', query: 'hello' },
@@ -223,7 +225,7 @@ function bytesOf(count: number, char = 'a'): string {
 }
 
 test('every ClientCommand discriminant has exactly one valid fixture', () => {
-  assert.equal(CLIENT_COMMAND_TYPES.length, 59);
+  assert.equal(CLIENT_COMMAND_TYPES.length, 61);
   for (const type of CLIENT_COMMAND_TYPES) {
     const result = parseObject(validCommands[type]);
     assert.equal(result.ok, true, type);
