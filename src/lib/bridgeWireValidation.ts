@@ -136,6 +136,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'session.updated':
       return isSessionSummary(value.session);
     case 'session.closed':
+    case 'session.removed':
     case 'browser.closed':
       return typeof value.appSessionId === 'string';
     case 'sessions.cwdReanchored':

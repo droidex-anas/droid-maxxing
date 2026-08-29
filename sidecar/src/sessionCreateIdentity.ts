@@ -35,6 +35,8 @@ export interface SessionCreatePersistence {
     | 'bindInitialProviderRuntime'
     | 'markStarted'
     | 'markFailed'
+    | 'beginRetryStart'
+    | 'removeFailed'
     | 'get'
     | 'list'
     | 'updateSummary'

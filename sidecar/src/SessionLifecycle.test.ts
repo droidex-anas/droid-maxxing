@@ -1654,3 +1654,91 @@ test('a failed open stays visible and is never rebound', async () => {
     assert.equal(store.get('app-failed-rebind'), undefined);
   });
 });
+
+test('retryStart after a failed unbound create starts native work on the same app id', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const harness = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-retry',
+      nextTurnId: () => 'turn-retry-1',
+    });
+    harness.runtime.createQueue.push(new Error('native exploded'));
+    await harness.lifecycle.create(createCommand());
+    assert.equal(store.get('app-retry')?.lifecycleStatus, 'failed');
+
+    const retry = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextTurnId: () => 'turn-retry-2',
+    });
+    queueCreate(retry, 'native-retry');
+    await retry.lifecycle.retryStart('app-retry');
+    await retry.runtime.sessions.get('native-retry')?.waitForPrompts(1);
+    await waitForAppliedTurn(retry);
+    assert.equal(retry.runtime.createCalls.length, 1);
+    assert.equal(store.get('app-retry')?.lifecycleStatus, 'running');
+    assert.equal(store.get('app-retry')?.binding.providerSessionId, 'native-retry');
+    assert.equal(
+      retry.events.some((event) => event.type === 'session.created'),
+      false,
+    );
+    assert.equal(
+      retry.events.some(
+        (event) => event.type === 'session.updated' && event.session.appSessionId === 'app-retry',
+      ),
+      true,
+    );
+  });
+});
+
+test('retryStart rejects a live session and removeFailed deletes only a failed row', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const live = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-live',
+      nextTurnId: () => 'turn-live',
+    });
+    queueCreate(live, 'native-live');
+    await live.lifecycle.create(createCommand('live'));
+    await live.lifecycle.retryStart('app-live');
+    assert.equal(live.runtime.createCalls.length, 1);
+    assert.equal(
+      live.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.code === 'session.retry_start_failed' &&
+          event.appSessionId === 'app-live',
+      ),
+      true,
+    );
+
+    const failed = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-remove',
+      nextTurnId: () => 'turn-remove',
+    });
+    failed.runtime.createQueue.push(new Error('native exploded'));
+    await failed.lifecycle.create({ ...createCommand('remove'), clientRef: 'ref-remove' });
+    await live.lifecycle.removeFailed('app-live');
+    assert.equal(store.get('app-live')?.lifecycleStatus, 'running');
+    assert.equal(
+      live.events.some((event) => event.type === 'session.removed'),
+      false,
+    );
+    await failed.lifecycle.removeFailed('app-remove');
+    assert.equal(store.get('app-remove'), undefined);
+    assert.equal(
+      failed.events.some(
+        (event) => event.type === 'session.removed' && event.appSessionId === 'app-remove',
+      ),
+      true,
+    );
+  });
+});

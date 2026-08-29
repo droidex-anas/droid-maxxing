@@ -233,6 +233,15 @@ export const closeSession = (appSessionId: string) => {
   bridge.send({ type: 'session.close', appSessionId });
 };
 
+export const retryFailedSession = (appSessionId: string) => {
+  requireAgentWorkAvailable();
+  bridge.send({ type: 'session.retryStart', appSessionId });
+};
+
+export const removeFailedSession = (appSessionId: string) => {
+  bridge.send({ type: 'session.removeFailed', appSessionId });
+};
+
 // Best-effort sync of a chat rename to the harness's own session title. The
 // app-level displayTitle (lib/chatMetadata) stays the UI source of truth, so
 // a failure here only means other clients keep the generated title.

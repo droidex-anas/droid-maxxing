@@ -2117,6 +2117,7 @@ export function adaptEvent(ev: ServerEvent): Action | null {
     case 'session.updated':
       return { type: 'SESSION_UPDATED', session: ev.session };
     case 'session.closed':
+    case 'session.removed':
       return { type: 'SESSION_CLOSED', appSessionId: ev.appSessionId };
     case 'mission.features':
       return { type: 'SESSION_FEATURES', appSessionId: ev.appSessionId, features: ev.features };

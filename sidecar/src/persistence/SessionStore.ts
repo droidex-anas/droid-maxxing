@@ -76,6 +76,8 @@ export class SessionStore {
   private readonly updateResumeStatement: StatementSync;
   private readonly replaceRuntimeStatement: StatementSync;
   private readonly updateHidden: StatementSync;
+  private readonly beginRetryStatement: StatementSync;
+  private readonly deleteFailedStatement: StatementSync;
   private readonly upsertChildStatement: StatementSync;
   private readonly selectChild: StatementSync;
   private readonly selectChildren: StatementSync;
@@ -127,6 +129,19 @@ export class SessionStore {
     `);
     this.updateHidden = db.prepare(`
       UPDATE sessions SET hidden = ?, updated_at = ? WHERE app_session_id = ?
+    `);
+    this.beginRetryStatement = db.prepare(`
+      UPDATE sessions
+      SET lifecycle_status = 'initializing',
+          failure_code = NULL,
+          failure_message = NULL,
+          failure_recovery_action = NULL,
+          runtime_generation = runtime_generation + 1,
+          updated_at = ?
+      WHERE app_session_id = ? AND lifecycle_status = 'failed'
+    `);
+    this.deleteFailedStatement = db.prepare(`
+      DELETE FROM sessions WHERE app_session_id = ? AND lifecycle_status = 'failed'
     `);
     this.upsertChildStatement = db.prepare(`
       INSERT INTO child_sessions (
@@ -330,6 +345,51 @@ export class SessionStore {
         );
       }
       return this.requireSession(appSessionId);
+    });
+  }
+
+  beginRetryStart(appSessionId: string, now = Date.now()): StoredSession {
+    return this.db.atomic(() => {
+      const current = this.requireSession(appSessionId);
+      if (current.lifecycleStatus !== 'failed') {
+        throw new Error(
+          `Session ${appSessionId} lifecycle ${current.lifecycleStatus} cannot retry start.`,
+        );
+      }
+      const result = this.beginRetryStatement.run(now, appSessionId);
+      if (result.changes !== 1) {
+        throw new Error(
+          `Session ${appSessionId} lifecycle ${current.lifecycleStatus} cannot retry start.`,
+        );
+      }
+      const updated = this.requireSession(appSessionId);
+      if (updated.lifecycleStatus !== 'initializing' || updated.failure !== undefined) {
+        throw new Error(`Session ${appSessionId} retry start did not clear the stored failure.`);
+      }
+      if (updated.binding.runtimeGeneration !== current.binding.runtimeGeneration + 1) {
+        throw new Error(`Session ${appSessionId} retry start did not increment generation.`);
+      }
+      if (updated.binding.providerSessionId !== current.binding.providerSessionId) {
+        throw new Error(`Session ${appSessionId} retry start must not change the provider binding.`);
+      }
+      return updated;
+    });
+  }
+
+  removeFailed(appSessionId: string): void {
+    this.db.atomic(() => {
+      const current = this.requireSession(appSessionId);
+      if (current.lifecycleStatus !== 'failed') {
+        throw new Error(
+          `Session ${appSessionId} lifecycle ${current.lifecycleStatus} cannot be removed.`,
+        );
+      }
+      const result = this.deleteFailedStatement.run(appSessionId);
+      if (result.changes !== 1) {
+        throw new Error(
+          `Session ${appSessionId} lifecycle ${current.lifecycleStatus} cannot be removed.`,
+        );
+      }
     });
   }
 

@@ -499,3 +499,81 @@ test('child upsert and read round-trip a private binding', async () => {
     assert.equal(store.getChild('app-1', 'child-1')?.binding.providerSessionId, 'native-child');
   });
 });
+
+test('beginRetryStart CAS-clears a failed row and increments generation', async () => {
+  await withStore((store) => {
+    create(store, 'app-1');
+    store.bindInitialProviderRuntime('app-1', 0, 'native-1');
+    store.markFailed('app-1', droidError());
+    const retried = store.beginRetryStart('app-1', 50);
+    assert.equal(retried.lifecycleStatus, 'initializing');
+    assert.equal(retried.failure, undefined);
+    assert.equal(retried.binding.runtimeGeneration, 2);
+    assert.equal(retried.binding.providerSessionId, 'native-1');
+    assert.equal(retried.summary.configuration.providerSelection.providerInstanceId, 'droid');
+    assert.throws(() => store.beginRetryStart('app-1'), /lifecycle initializing cannot retry start/);
+  });
+});
+
+test('beginRetryStart rejects missing and non-failed sessions', async () => {
+  await withStore((store) => {
+    assert.throws(() => store.beginRetryStart('missing'), /Session missing is not in the canonical store/);
+    create(store, 'app-1');
+    assert.throws(() => store.beginRetryStart('app-1'), /lifecycle initializing cannot retry start/);
+    store.markStarted('app-1');
+    assert.throws(() => store.beginRetryStart('app-1'), /lifecycle running cannot retry start/);
+  });
+});
+
+test('removeFailed deletes only that failed session and cascades canonical rows', async () => {
+  await withStore((store, db) => {
+    const transcript = new TranscriptStore(db);
+    create(store, 'keep');
+    create(store, 'drop');
+    store.upsertChild({
+      parentAppSessionId: 'drop',
+      childSessionId: 'child-drop',
+      summary: {
+        parentAppSessionId: 'drop',
+        childSessionId: 'child-drop',
+        role: 'worker',
+        status: 'running',
+        modelId: 'model-default',
+        transcriptAvailable: false,
+        streamFidelity: 'token',
+      },
+      binding: { providerDriverKind: 'droid', providerInstanceId: 'droid' },
+    });
+    transcript.beginTurn({
+      turnId: 'turn-drop',
+      target: { kind: 'session', appSessionId: 'drop' },
+      runtimeGeneration: 1,
+      startedAt: '1000',
+    });
+    transcript.append({
+      eventId: 'evt-drop',
+      target: { kind: 'session', appSessionId: 'drop' },
+      providerDriverKind: 'droid',
+      providerInstanceId: 'droid',
+      runtimeGeneration: 1,
+      createdAt: 1,
+      turnId: 'turn-drop',
+      payload: {
+        type: 'error',
+        error: droidError(),
+      },
+    });
+    store.markFailed('drop', droidError());
+    store.removeFailed('drop');
+    assert.equal(store.get('drop'), undefined);
+    assert.equal(store.getChild('drop', 'child-drop'), undefined);
+    assert.equal(store.get('keep')?.summary.appSessionId, 'keep');
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM turns').get() as { n: number }).n, 0);
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM transcript_events').get() as { n: number }).n,
+      0,
+    );
+    assert.throws(() => store.removeFailed('keep'), /lifecycle initializing cannot be removed/);
+    assert.throws(() => store.removeFailed('drop'), /Session drop is not in the canonical store/);
+  });
+});

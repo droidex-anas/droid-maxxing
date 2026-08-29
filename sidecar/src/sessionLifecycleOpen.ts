@@ -77,105 +77,17 @@ export async function createAppSession(
     noteCreateBoundary(d, 'summary-initialized');
     persistProvisionalIdentity(d, command, initializing, allocated.turnId);
     noteCreateBoundary(d, 'provisional-persisted');
-    const defaults = await d.getFactoryDefaults();
-    const defaultsMode = createDefaultsModeForCommand(command, configuration.interactionMode);
-    const primary = {
-      modelId: configuration.providerSelection.modelId,
-      reasoningEffort: droidReasoningEffortFromSelection(configuration.providerSelection),
-    };
-    const mission = createMissionConfigurationForMode(defaultsMode, command, defaults);
-    const compactionModel = command.compactionModel ?? defaults.compactionModel ?? 'current-model';
-    const compactionTokenLimit = await d.compaction.resolveLimit({
-      modelId: primary.modelId,
-      uiOverride: {
-        ...(command.compactionTokenLimit !== undefined
-          ? { compactionTokenLimit: command.compactionTokenLimit }
-          : {}),
-        ...(command.compactionTokenLimitPerModel !== undefined
-          ? { compactionTokenLimitPerModel: command.compactionTokenLimitPerModel }
-          : {}),
-      },
-      defaults,
-    });
-    const runtimeCwd = await sessionRuntimeCwd(command.cwd ?? '');
-    requireOpenAdmission(d);
-    const adapter = d.providers.resolve(configuration.providerSelection.providerInstanceId);
-    assertConfigurationMatchesAdapter(adapter.definition, configuration);
-    requireOpenAdmission(d);
-    const expectedGeneration = 1;
-    const appSessionId = allocated.appSessionId;
-    const openInput = providerOpenInput(host, {
-      appSessionId,
-      configuration,
-      expectedGeneration,
-      cwd: runtimeCwd,
-    });
-    d.prepareProviderOpen?.({
+    const opened = await activatePersistedCreate(host, {
       command,
-      appSessionId,
+      allocated,
       configuration,
-      defaults,
-      compactionModel,
-      compactionTokenLimit,
-      sessionPurpose: command.sessionPurpose,
-      ...(mission !== undefined ? { mission } : {}),
+      expectedGeneration: 1,
+      publish: 'created',
+      startGoal: true,
+      pending: { setProvider: (provider) => { pendingProvider = provider; }, setLive: (live) => { pendingLiveSession = live; } },
     });
-    noteCreateBoundary(d, 'before-provider-open');
-    const provider = await adapter.create(openInput);
-    pendingProvider = provider;
-    noteCreateBoundary(d, 'provider-opened');
-    requireOpenAdmission(d);
-    const overflow = providerFailedOpen(provider);
-    if (overflow) throw overflow;
-    if (host.discardedOpens.has(appSessionId)) {
-      await provider.close(zeroDeadline());
-      throw new OpenAdmissionClosedError();
-    }
-    const native = requireNativeHandle(provider);
-    const autoCompactionArmed = await d.compaction.arm(
-      {
-        session: native,
-        provider,
-        isCurrent: () => !d.isShutdownStarted() && pendingProvider === provider,
-      },
-      compactionTokenLimit,
-    );
-    requireOpenAdmission(d);
-    if (host.discardedOpens.has(appSessionId)) {
-      await provider.close(zeroDeadline());
-      throw new OpenAdmissionClosedError();
-    }
-    const overflowAfterArm = providerFailedOpen(provider);
-    if (overflowAfterArm) throw overflowAfterArm;
-    const maxContextTokens = d.maxContextTokensForModel(primary.modelId);
-    const summary = buildCreatedSessionSummary({
-      command,
-      appSessionId,
-      configuration,
-      compactionModel,
-      ...(mission !== undefined ? { mission } : {}),
-      ...(maxContextTokens !== undefined ? { maxContextTokens } : {}),
-      ...(autoCompactionArmed ? { compactionTokenLimit } : {}),
-      now: Date.now(),
-    });
-    persistInitialBinding(d, appSessionId, provider, expectedGeneration);
-    noteCreateBoundary(d, 'binding-persisted');
-    const liveSession = createLiveSession(d, summary, native, provider);
-    liveSession.reservedTurnId = allocated.turnId;
-    liveSession.appliedNativeConfiguration = configuration;
-    pendingLiveSession = liveSession;
-    d.compaction.subscribePrimary(liveSession);
-    d.registry.register(liveSession);
-    d.childSessions.attachParent(appSessionId);
-    liveSession.acceptProviderEvents = true;
-    provider.activate();
-    d.emit({
-      type: 'session.created',
-      clientRef: command.clientRef,
-      session: publishedSummary(d, appSessionId),
-    });
-    noteCreateBoundary(d, 'activated');
-    host.driveInBackground(appSessionId, command.goal);
+    pendingProvider = opened.provider;
+    pendingLiveSession = opened.liveSession;
   } catch (error) {
     markFailedOpen(d, command, allocated, error);
     await host.cleanupFailedOpen(pendingProvider, pendingLiveSession);
@@ -189,9 +101,133 @@ export async function createAppSession(
   }
 }
 
+export async function activatePersistedCreate(
+  host: SessionOpenHost,
+  input: {
+    command: SessionCreateCommand;
+    allocated: AllocatedCreateIdentity;
+    configuration: import('./protocol.js').SessionConfiguration;
+    expectedGeneration: number;
+    publish: 'created' | 'updated';
+    startGoal: boolean;
+    pending: {
+      setProvider: (provider: ProviderSession) => void;
+      setLive: (live: LiveSession) => void;
+    };
+  },
+): Promise<{ provider: ProviderSession; liveSession: LiveSession }> {
+  const d = host.dependencies;
+  const { command, allocated, configuration } = input;
+  const defaults = await d.getFactoryDefaults();
+  const defaultsMode = createDefaultsModeForCommand(command, configuration.interactionMode);
+  const primary = {
+    modelId: configuration.providerSelection.modelId,
+    reasoningEffort: droidReasoningEffortFromSelection(configuration.providerSelection),
+  };
+  const mission = createMissionConfigurationForMode(defaultsMode, command, defaults);
+  const compactionModel = command.compactionModel ?? defaults.compactionModel ?? 'current-model';
+  const compactionTokenLimit = await d.compaction.resolveLimit({
+    modelId: primary.modelId,
+    uiOverride: {
+      ...(command.compactionTokenLimit !== undefined
+        ? { compactionTokenLimit: command.compactionTokenLimit }
+        : {}),
+      ...(command.compactionTokenLimitPerModel !== undefined
+        ? { compactionTokenLimitPerModel: command.compactionTokenLimitPerModel }
+        : {}),
+    },
+    defaults,
+  });
+  const runtimeCwd = await sessionRuntimeCwd(command.cwd ?? '');
+  requireOpenAdmission(d);
+  const adapter = d.providers.resolve(configuration.providerSelection.providerInstanceId);
+  assertConfigurationMatchesAdapter(adapter.definition, configuration);
+  requireOpenAdmission(d);
+  const expectedGeneration = input.expectedGeneration;
+  const appSessionId = allocated.appSessionId;
+  const openInput = providerOpenInput(host, {
+    appSessionId,
+    configuration,
+    expectedGeneration,
+    cwd: runtimeCwd,
+  });
+  d.prepareProviderOpen?.({
+    command,
+    appSessionId,
+    configuration,
+    defaults,
+    compactionModel,
+    compactionTokenLimit,
+    sessionPurpose: command.sessionPurpose,
+    ...(mission !== undefined ? { mission } : {}),
+  });
+  noteCreateBoundary(d, 'before-provider-open');
+  const provider = await adapter.create(openInput);
+  input.pending.setProvider(provider);
+  noteCreateBoundary(d, 'provider-opened');
+  requireOpenAdmission(d);
+  const overflow = providerFailedOpen(provider);
+  if (overflow) throw overflow;
+  if (host.discardedOpens.has(appSessionId)) {
+    await provider.close(zeroDeadline());
+    throw new OpenAdmissionClosedError();
+  }
+  const native = requireNativeHandle(provider);
+  const autoCompactionArmed = await d.compaction.arm(
+    {
+      session: native,
+      provider,
+      isCurrent: () => !d.isShutdownStarted(),
+    },
+    compactionTokenLimit,
+  );
+  requireOpenAdmission(d);
+  if (host.discardedOpens.has(appSessionId)) {
+    await provider.close(zeroDeadline());
+    throw new OpenAdmissionClosedError();
+  }
+  const overflowAfterArm = providerFailedOpen(provider);
+  if (overflowAfterArm) throw overflowAfterArm;
+  const maxContextTokens = d.maxContextTokensForModel(primary.modelId);
+  const summary = buildCreatedSessionSummary({
+    command,
+    appSessionId,
+    configuration,
+    compactionModel,
+    ...(mission !== undefined ? { mission } : {}),
+    ...(maxContextTokens !== undefined ? { maxContextTokens } : {}),
+    ...(autoCompactionArmed ? { compactionTokenLimit } : {}),
+    now: Date.now(),
+  });
+  persistInitialBinding(d, appSessionId, provider, expectedGeneration);
+  noteCreateBoundary(d, 'binding-persisted');
+  const liveSession = createLiveSession(d, summary, native, provider);
+  liveSession.reservedTurnId = allocated.turnId;
+  liveSession.appliedNativeConfiguration = configuration;
+  input.pending.setLive(liveSession);
+  d.compaction.subscribePrimary(liveSession);
+  d.registry.register(liveSession);
+  d.childSessions.attachParent(appSessionId);
+  liveSession.acceptProviderEvents = true;
+  provider.activate();
+  if (input.publish === 'created') {
+    d.emit({
+      type: 'session.created',
+      clientRef: command.clientRef,
+      session: publishedSummary(d, appSessionId),
+    });
+  } else {
+    d.emit({ type: 'session.updated', session: publishedSummary(d, appSessionId) });
+  }
+  noteCreateBoundary(d, 'activated');
+  if (input.startGoal) host.driveInBackground(appSessionId, command.goal);
+  return { provider, liveSession };
+}
+
 export async function resumeAppSession(
   host: SessionOpenHost,
   requestedAppSessionId: string,
+  options: { publishCreated?: boolean } = {},
 ): Promise<boolean> {
   const d = host.dependencies;
   d.ensureConnected();
@@ -308,11 +344,13 @@ export async function resumeAppSession(
     d.childSessions.attachParent(appSessionId);
     provider.activate();
     const published = publishedSummary(d, appSessionId);
-    d.emit({
-      type: 'session.created',
-      clientRef: `resume:${appSessionId}`,
-      session: published,
-    });
+    if (options.publishCreated !== false) {
+      d.emit({
+        type: 'session.created',
+        clientRef: `resume:${appSessionId}`,
+        session: published,
+      });
+    }
     liveSession.acceptProviderEvents = true;
     d.emit({ type: 'session.updated', session: published });
     if (published.sessionPurpose === 'mission-control' && published.features.length > 0) {

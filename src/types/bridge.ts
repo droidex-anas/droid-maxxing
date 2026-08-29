@@ -638,6 +638,8 @@ export type ClientCommand =
   | { type: 'session.rewindInfo'; appSessionId: string }
   | { type: 'session.rewind'; appSessionId: string; rewindId?: string }
   | { type: 'session.close'; appSessionId: string }
+  | { type: 'session.retryStart'; appSessionId: string }
+  | { type: 'session.removeFailed'; appSessionId: string }
   | {
       type: 'sessions.list';
       workspaceCwds?: string[];
@@ -828,6 +830,7 @@ export type ServerEvent =
   | { type: 'session.created'; clientRef: string; session: SessionSummary }
   | { type: 'session.updated'; session: SessionSummary }
   | { type: 'session.closed'; appSessionId: string }
+  | { type: 'session.removed'; appSessionId: string }
   | {
       type: 'sessions.cwdReanchored';
       requestId: string;

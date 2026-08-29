@@ -899,6 +899,12 @@ export class SessionManager {
       case 'session.resume':
         await this.lifecycle.resume(cmd.appSessionId);
         return;
+      case 'session.retryStart':
+        await this.lifecycle.retryStart(cmd.appSessionId);
+        return;
+      case 'session.removeFailed':
+        await this.lifecycle.removeFailed(cmd.appSessionId);
+        return;
       case 'session.close':
         await this.lifecycle.close(cmd.appSessionId);
         return;
