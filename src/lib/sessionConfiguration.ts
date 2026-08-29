@@ -114,5 +114,12 @@ export function isSessionConfiguration(value: unknown): value is SessionConfigur
   if (typeof configuration.autonomy !== 'string' || !AUTONOMY_LEVELS.has(configuration.autonomy)) {
     return false;
   }
+  for (const option of Object.values(selection.options)) {
+    if (typeof option === 'number') {
+      if (!Number.isFinite(option)) return false;
+      continue;
+    }
+    if (typeof option !== 'string' && typeof option !== 'boolean') return false;
+  }
   return true;
 }
