@@ -7,6 +7,8 @@ import test from 'node:test';
 import type { CanonicalEvent, CanonicalEventPayload } from '../sessionEvents.js';
 import { parseCanonicalEvent } from '../sessionEvents.js';
 import { DroidexDatabase } from './DroidexDatabase.js';
+import { SessionStore } from './SessionStore.js';
+import { droidSessionConfiguration } from '../providers/providerIdentity.js';
 import {
   CanonicalEventCollisionError,
   DEFAULT_PAGE_LIMIT,
@@ -514,4 +516,48 @@ test('stale search cancels before and after a batch', async () => {
     },
     { searchBatchSize: 1 },
   );
+});
+
+test('beginTurn participates in an outer identity transaction', async () => {
+  await withStore((store, db) => {
+    const sessions = new SessionStore(db);
+    sessions.createProvisional({
+      appSessionId: 'app-1',
+      clientRef: 'ref-1',
+      summary: {
+        appSessionId: 'app-1',
+        sessionPurpose: 'chat',
+        role: 'primary',
+        title: 'app-1',
+        goal: 'goal',
+        cwd: '/workspace',
+        workspaceKind: 'folder',
+        configuration: droidSessionConfiguration({
+          modelId: 'model-default',
+          interactionMode: 'auto',
+          autonomy: 'low',
+        }),
+        phase: 'initializing',
+        features: [],
+        tokensIn: 0,
+        tokensOut: 0,
+        contextTokens: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    });
+    db.transaction(() => {
+      store.beginTurn({
+        turnId: 'turn-shared',
+        target: { kind: 'session', appSessionId: 'app-1' },
+        runtimeGeneration: 1,
+        startedAt: '1000',
+      });
+    });
+    store.settleTurn('turn-shared', {
+      runtimeGeneration: 1,
+      status: 'failed',
+      settledAt: '2000',
+    });
+  });
 });

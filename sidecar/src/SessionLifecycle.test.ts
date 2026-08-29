@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -28,6 +29,10 @@ import {
   takeDroidOpenedMcp,
 } from './providers/droid/DroidProviderAdapter.js';
 import { createDefaultProviderRegistry } from './providers/ProviderRegistry.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
+import { TranscriptStore } from './persistence/TranscriptStore.js';
+import type { SessionCreateBoundary } from './sessionCreateIdentity.js';
 
 class TestHistory {
   readonly persisted: SessionSummary[] = [];
@@ -85,6 +90,12 @@ function createHarness(
   ordinarySummaries: SessionSummary[] = [],
   options: {
     sessionStore?: ConstructorParameters<typeof SessionLifecycle>[0]['sessionStore'];
+    transcriptStore?: ConstructorParameters<typeof SessionLifecycle>[0]['transcriptStore'];
+    atomic?: ConstructorParameters<typeof SessionLifecycle>[0]['atomic'];
+    nextAppSessionId?: () => string;
+    nextTurnId?: () => string;
+    nextId?: () => string;
+    onCreateBoundary?: ConstructorParameters<typeof SessionLifecycle>[0]['onCreateBoundary'];
   } = {},
 ) {
   const calls: RecordedCall[] = [];
@@ -138,7 +149,9 @@ function createHarness(
     autonomy: 'low',
     interactionMode: 'auto',
   };
-  const startLocalMcpServers = () => {
+  const mcpRefs: string[] = [];
+  const startLocalMcpServers = (ref?: { id: string }) => {
+    if (ref) mcpRefs.push(ref.id);
     const resourceId = ++mcpId;
     calls.push({ target: 'runtime', method: 'mcp.start', args: [resourceId] });
     return Promise.resolve({
@@ -193,6 +206,17 @@ function createHarness(
       beginTurn: () => undefined,
     },
     ...(options.sessionStore ? { sessionStore: options.sessionStore } : {}),
+    ...(options.transcriptStore ? { transcriptStore: options.transcriptStore } : {}),
+    ...(options.atomic ? { atomic: options.atomic } : {}),
+    ...(options.nextId ? { nextId: options.nextId } : {}),
+    ...(options.onCreateBoundary ? { onCreateBoundary: options.onCreateBoundary } : {}),
+    nextAppSessionId:
+      options.nextAppSessionId ??
+      (() => {
+        const queued = runtime.createQueue[0];
+        return queued instanceof FakeFactorySession ? queued.sessionId : randomUUID();
+      }),
+    ...(options.nextTurnId ? { nextTurnId: options.nextTurnId } : {}),
     compaction: {
       resolveLimit: () => compactionLimit(),
       arm: async (target, limit) => {
@@ -301,6 +325,7 @@ function createHarness(
     runtime,
     registry,
     lifecycle,
+    mcpRefs,
     publicationRegistration,
     forgettingAfterUnregister,
     eventFlowForgettingAfterUnregister,
@@ -437,6 +462,21 @@ test('create and cold resume publish only after registration', async () => {
   );
   assert.equal(resumed.runtime.loadCalls[0]?.handlers.cwd, '/workspace');
   assert.equal(resumed.publicationRegistration.every(Boolean), true);
+});
+
+test('create persists a canonical app id that is not the native session id', async () => {
+  const created = createHarness([], { nextAppSessionId: () => 'app-canonical-1' });
+  const createdProvider = queueCreate(created, 'native-9');
+  await created.lifecycle.create(createCommand());
+  await createdProvider.waitForPrompts(1);
+  const published = created.events.find((event) => event.type === 'session.created');
+  assert.equal(published?.type, 'session.created');
+  if (published?.type === 'session.created') {
+    assert.equal(published.session.appSessionId, 'app-canonical-1');
+    assert.notEqual(published.session.appSessionId, 'native-9');
+  }
+  assert.equal(created.registry.getLive('app-canonical-1')?.provider.providerSessionId, 'native-9');
+  assert.equal(created.runtime.createCalls.length, 1);
 });
 
 test('folder-less chats run in the DROIDEX chats directory', async (t) => {
@@ -1354,4 +1394,210 @@ test('a close racing an unactivated open discards the buffer and cannot resurrec
   assert.equal(await harness.lifecycle.resume('race-open'), false);
   await harness.lifecycle.send('race-open', 'must not resurrect');
   assert.equal(harness.registry.getLive('race-open'), undefined);
+});
+
+async function waitForAppliedTurn(harness: Harness): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (
+      harness.appliedProviderEvents.some(
+        (event) =>
+          typeof event === 'object' &&
+          event !== null &&
+          'type' in event &&
+          event.type === 'turn.settled',
+      )
+    ) {
+      return;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+async function withCanonicalStores(
+  run: (input: {
+    store: SessionStore;
+    transcript: TranscriptStore;
+    db: DroidexDatabase;
+  }) => Promise<void>,
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'droidex-f7-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  try {
+    await run({ store: new SessionStore(db), transcript: new TranscriptStore(db), db });
+  } finally {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('create allocates identity before native work and never uses the native id', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const boundaries: SessionCreateBoundary[] = [];
+    const created = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-canonical-1',
+      nextTurnId: () => 'turn-canonical-1',
+      nextId: () => 'evt-diag-1',
+      onCreateBoundary: (boundary) => {
+        boundaries.push(boundary);
+      },
+    });
+    const createdProvider = queueCreate(created, 'native-9');
+    await created.lifecycle.create(createCommand());
+    await createdProvider.waitForPrompts(1);
+    await waitForAppliedTurn(created);
+    const published = created.events.find((event) => event.type === 'session.created');
+    assert.equal(published?.type, 'session.created');
+    if (published?.type === 'session.created') {
+      assert.equal(published.session.appSessionId, 'app-canonical-1');
+      assert.notEqual(published.session.appSessionId, 'native-9');
+    }
+    assert.deepEqual(created.mcpRefs, ['app-canonical-1']);
+    assert.equal(store.get('app-canonical-1')?.binding.providerSessionId, 'native-9');
+    assert.equal(store.findByClientRef('client-1')?.summary.appSessionId, 'app-canonical-1');
+    assert.ok(
+      boundaries.indexOf('provisional-persisted') < boundaries.indexOf('before-provider-open'),
+    );
+    assert.ok(boundaries.indexOf('binding-persisted') < boundaries.indexOf('activated'));
+    const createdIndex = created.events.findIndex((event) => event.type === 'session.created');
+    assert.equal(
+      created.events.slice(0, createdIndex).some((event) => event.type === 'event.appended'),
+      false,
+    );
+    assert.equal(store.get('app-canonical-1')?.binding.runtimeGeneration, 1);
+    assert.equal(store.get('app-canonical-1')?.lifecycleStatus, 'running');
+    assert.equal(
+      transcript.page({ kind: 'session', appSessionId: 'app-canonical-1' }).events.length,
+      0,
+    );
+  });
+});
+
+test('injected failures at each create boundary stay deterministic', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const failAt = async (boundary: SessionCreateBoundary) => {
+      const harness = createHarness([], {
+        sessionStore: store,
+        transcriptStore: transcript,
+        atomic: (work) => db.atomic(work),
+        nextAppSessionId: () => `app-${boundary}`,
+        nextTurnId: () => `turn-${boundary}`,
+        onCreateBoundary: (reached) => {
+          if (reached === boundary) throw new Error(`crash:${boundary}`);
+        },
+      });
+      queueCreate(harness, `native-${boundary}`);
+      await harness.lifecycle.create({
+        ...createCommand(`${boundary}-goal`),
+        clientRef: `ref-${boundary}`,
+      });
+      return harness;
+    };
+
+    const beforePersist = await failAt('identity-allocated');
+    assert.equal(beforePersist.runtime.createCalls.length, 0);
+    assert.equal(store.get('app-identity-allocated'), undefined);
+
+    const beforeNative = await failAt('provisional-persisted');
+    assert.equal(beforeNative.runtime.createCalls.length, 0);
+    assert.equal(store.get('app-provisional-persisted')?.lifecycleStatus, 'failed');
+
+    const beforeOpen = await failAt('before-provider-open');
+    assert.equal(beforeOpen.runtime.createCalls.length, 0);
+    assert.equal(store.get('app-before-provider-open')?.lifecycleStatus, 'failed');
+
+    const afterNative = await failAt('provider-opened');
+    assert.equal(afterNative.runtime.createCalls.length, 1);
+    assert.equal(
+      afterNative.calls.some(
+        (call) => call.method === 'session.close' && call.args[0] === 'native-provider-opened',
+      ),
+      true,
+    );
+    assert.equal(store.get('app-provider-opened')?.lifecycleStatus, 'failed');
+    assert.equal(
+      transcript
+        .page({ kind: 'session', appSessionId: 'app-provider-opened' })
+        .events.some((event) => event.payload.type === 'error'),
+      true,
+    );
+
+    const afterBind = await failAt('binding-persisted');
+    assert.equal(
+      afterBind.events.some((event) => event.type === 'session.created'),
+      false,
+    );
+    assert.equal(
+      store.get('app-binding-persisted')?.binding.providerSessionId,
+      'native-binding-persisted',
+    );
+  });
+});
+
+test('replaying the same clientRef never starts a second native session', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const first = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-replay',
+      nextTurnId: () => 'turn-replay',
+    });
+    queueCreate(first, 'native-replay');
+    await first.lifecycle.create(createCommand());
+    await first.runtime.sessions.get('native-replay')?.waitForPrompts(1);
+    await waitForAppliedTurn(first);
+
+    const second = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-replay-2',
+      nextTurnId: () => 'turn-replay-2',
+    });
+    queueCreate(second, 'native-replay-2');
+    await second.lifecycle.create(createCommand());
+    assert.equal(second.runtime.createCalls.length, 0);
+    const created = second.events.find((event) => event.type === 'session.created');
+    assert.equal(created?.type, 'session.created');
+    if (created?.type === 'session.created') {
+      assert.equal(created.session.appSessionId, 'app-replay');
+    }
+    assert.equal(store.findByClientRef('client-1')?.summary.appSessionId, 'app-replay');
+  });
+});
+
+test('a failed open stays visible and is never rebound', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const harness = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-failed-open',
+      nextTurnId: () => 'turn-failed-open',
+    });
+    harness.runtime.createQueue.push(new Error('native exploded'));
+    await harness.lifecycle.create(createCommand());
+    const failed = store.get('app-failed-open');
+    assert.equal(failed?.lifecycleStatus, 'failed');
+    assert.equal(failed?.binding.providerSessionId, undefined);
+    assert.equal(
+      store.list().some((row) => row.summary.appSessionId === 'app-failed-open'),
+      true,
+    );
+
+    const retry = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-failed-rebind',
+    });
+    queueCreate(retry, 'native-rebind');
+    await retry.lifecycle.create(createCommand());
+    assert.equal(retry.runtime.createCalls.length, 0);
+    assert.equal(store.get('app-failed-open')?.binding.providerSessionId, undefined);
+    assert.equal(store.get('app-failed-rebind'), undefined);
+  });
 });

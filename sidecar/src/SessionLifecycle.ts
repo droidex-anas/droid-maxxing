@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ProviderBinding, SessionStore } from './persistence/SessionStore.js';
 import { persistBindingUpdated } from './providerBinding.js';
-import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import type {
   ClientCommand,
   FactoryDefaultSettings,
@@ -14,11 +13,7 @@ import type { CompactionArmInput, SessionCompaction } from './SessionCompaction.
 import type { ChildSessions } from './ChildSessions.js';
 import { errMsg, type SessionInitResult } from './sessionHelpers.js';
 import type { DroidMissionConfiguration } from './providers/providerIdentity.js';
-import {
-  type ProviderInteractionSink,
-  type ProviderPrompt,
-  type ProviderSession,
-} from './providers/providerTypes.js';
+import { type ProviderInteractionSink, type ProviderSession } from './providers/providerTypes.js';
 import type { ProviderEventAdmissionLive } from './providers/providerEvents.js';
 import type { ProviderRuntimeEvent } from './providers/providerEvents.js';
 import type { ProviderRegistry } from './providers/ProviderRegistry.js';
@@ -30,6 +25,12 @@ import {
   resumeAppSession,
   type SessionOpenHost,
 } from './sessionLifecycleOpen.js';
+import {
+  beginFollowUpTurn,
+  consumeReservedTurnId,
+  EMPTY_PROMPT_PARTS,
+  type SessionCreatePersistence,
+} from './sessionCreateIdentity.js';
 
 export type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
 
@@ -81,11 +82,13 @@ export interface LiveSession extends LiveTurnState {
   unsubscribe?: () => void;
   appliedNativeConfiguration?: SessionSummary['configuration'];
   acceptProviderEvents?: boolean;
+  reservedTurnId?: string;
 }
 type LifecycleError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
 export interface ProviderOpenHint {
   command?: SessionCreateCommand;
+  appSessionId: string;
   configuration: SessionConfiguration;
   defaults: FactoryDefaultSettings;
   compactionModel: string;
@@ -94,7 +97,7 @@ export interface ProviderOpenHint {
   mission?: DroidMissionConfiguration;
 }
 
-export interface SessionLifecycleDependencies {
+export interface SessionLifecycleDependencies extends SessionCreatePersistence {
   providers: ProviderRegistry;
   registry: SessionRegistry<LiveSession>;
   ensureConnected: () => void;
@@ -104,16 +107,8 @@ export interface SessionLifecycleDependencies {
   prepareProviderOpen?: (hint: ProviderOpenHint) => void;
   interactionSink: ProviderInteractionSink;
   eventFlow: Pick<SessionEventFlow, 'apply' | 'beginTurn'>;
-  sessionStore?: Pick<
-    SessionStore,
-    | 'createProvisional'
-    | 'bindInitialProviderRuntime'
-    | 'updateResumeState'
-    | 'replaceProviderRuntime'
-    | 'get'
-  >;
-  transcriptStore?: Pick<TranscriptStore, 'beginTurn' | 'settleTurn'>;
-  nextId?: () => string;
+  sessionStore?: SessionCreatePersistence['sessionStore'] &
+    Pick<SessionStore, 'updateResumeState' | 'replaceProviderRuntime'>;
   compaction: {
     resolveLimit: SessionCompaction['resolveLimit'];
     arm: (target: CompactionArmInput, limit: number) => Promise<boolean>;
@@ -143,12 +138,6 @@ export interface SessionLifecycleDependencies {
   emitStatus: (appSessionId: string, text: string) => void;
   emitSessionList: (closedProviderSessionId: string) => void | Promise<void>;
 }
-
-const EMPTY_PROMPT_PARTS: Pick<ProviderPrompt, 'skills' | 'files' | 'browserRefs'> = {
-  skills: [],
-  files: [],
-  browserRefs: [],
-};
 
 export class SessionLifecycle {
   private readonly deferredCloses = new WeakMap<LiveSession, DeferredClose>();
@@ -290,9 +279,14 @@ export class SessionLifecycle {
   }
 
   async close(appSessionId: string, mode: SessionCloseMode = 'discard-pending'): Promise<void> {
-    if (mode === 'discard-pending') this.discardedOpens.add(appSessionId);
+    const resolved =
+      this.dependencies.registry.getCanonicalSummary(appSessionId)?.appSessionId ?? appSessionId;
+    if (mode === 'discard-pending') {
+      this.discardedOpens.add(resolved);
+      this.discardedOpens.add(appSessionId);
+    }
     const liveSession =
-      this.dependencies.registry.getLive(appSessionId) ?? this.closesById.get(appSessionId);
+      this.dependencies.registry.getLive(resolved) ?? this.closesById.get(resolved);
     if (!liveSession) return;
     const operation = this.beginClose(liveSession, mode);
     if (operation.created) await this.finishClose(liveSession);
@@ -548,14 +542,15 @@ export class SessionLifecycle {
       try {
         const prepared = await d.preparePrimaryTurn(liveSession, prompt);
         if (!prepared || d.registry.getLive(stableAppSessionId) !== liveSession) return;
-        const turnId = this.nextId();
+        const reserved = consumeReservedTurnId(liveSession);
+        const turnId = reserved ?? this.nextId();
         const runtimeGeneration = liveSession.binding.runtimeGeneration;
         liveSession.activeTurn = { turnId, runtimeGeneration };
-        d.transcriptStore?.beginTurn({
+        beginFollowUpTurn(d.transcriptStore, {
+          reserved: reserved !== undefined,
           turnId,
-          target: { kind: 'session', appSessionId: stableAppSessionId },
+          appSessionId: stableAppSessionId,
           runtimeGeneration,
-          startedAt: new Date().toISOString(),
         });
         const settled = this.armTurnWaiter(stableAppSessionId, turnId);
         await liveSession.provider.startTurn({

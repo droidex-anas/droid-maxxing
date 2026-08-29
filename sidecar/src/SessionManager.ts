@@ -12,7 +12,6 @@ import type {
   SessionSummary,
   ModelInfo,
   ReasoningEffort,
-  ResponseFormat,
   ServerEvent,
   SessionInteractionMode,
   TranscriptEvent,
@@ -101,6 +100,7 @@ import {
   type LiveSession,
   type StartedLocalMcpResources,
 } from './SessionLifecycle.js';
+import { hasSessionCloseStarted } from './sessionLifecycleOpen.js';
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSettings } from './ChildSessionState.js';
 import { CHILD_RUNTIME_IDLE_RETIREMENT_MS } from './childRuntimeRetirement.js';
@@ -114,21 +114,17 @@ import type { HotPathResourceCounts } from './telemetry/hotPathMetrics.js';
 import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfiguration.js';
 import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
-import { assertValidResponseFormat, formatAppPrompt } from './appPrompt.js';
+import { formatResponsePrompt } from './appPrompt.js';
 import { SIDECAR_SHUTDOWN_BUDGET_MS, ShutdownDeadline } from './providers/shutdownDeadline.js';
 import {
   createDefaultProviderRegistry,
   type ProviderRegistry,
 } from './providers/ProviderRegistry.js';
 import type { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { bindCanonicalStores } from './sessionCanonicalPersistence.js';
+import type { SessionCreatePersistence } from './sessionCreateIdentity.js';
 
 type Emit = (event: ServerEvent) => void;
-
-function formatResponsePrompt(text: string, responseFormat?: ResponseFormat): string {
-  assertValidResponseFormat(responseFormat);
-  if (!responseFormat) return text;
-  return formatAppPrompt(text, responseFormat === 'app-create' ? 'create' : 'followup');
-}
 
 type SessionHistoryBase = Pick<
   HistoryIndex,
@@ -158,7 +154,7 @@ export interface StartableLocalMcpResource {
   close(): Promise<void>;
 }
 
-export interface SessionManagerDependencies {
+export interface SessionManagerDependencies extends SessionCreatePersistence {
   runtime: FactoryRuntime;
   history: SessionHistory;
   browsers: SessionBrowsers;
@@ -181,6 +177,9 @@ export interface SessionManagerDependencies {
   sessionRuntimeIdleMs?: number;
   providerRegistry?: ProviderRegistry;
   database?: Pick<DroidexDatabase, 'close'>;
+  nextAppSessionId?: SessionCreatePersistence['nextAppSessionId'];
+  nextTurnId?: SessionCreatePersistence['nextTurnId'];
+  onCreateBoundary?: SessionCreatePersistence['onCreateBoundary'];
 }
 
 export interface SessionManagerOptions {
@@ -285,7 +284,6 @@ export class SessionManager {
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
       this.nextChildSessionId = options.dependencies.nextChildSessionId ?? nextChildSessionId;
       startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
-      this.database = options.dependencies.database;
     } else {
       this.runtime = new DroidRuntime();
       this.history = new HistoryPersistence({
@@ -315,6 +313,10 @@ export class SessionManager {
       this.nextChildSessionId = nextChildSessionId;
       startWatcher = startSessionFileWatcher;
     }
+    const canonical = bindCanonicalStores(options.dependencies, {
+      createIfMissing: !options.dependencies,
+    });
+    this.database = canonical.database;
     this.providerRegistry =
       options.dependencies?.providerRegistry ??
       createDefaultProviderRegistry({
@@ -534,16 +536,15 @@ export class SessionManager {
       takeOpenedResources: (provider) =>
         takeDroidOpenedMcp(provider) ?? { servers: [], configs: [] },
       prepareProviderOpen: (hint) => {
-        const clientRef = hint.command?.clientRef;
-        if (!clientRef) return;
         queueDroidOpenFromHint(
           this.providerRegistry.resolve(hint.configuration.providerSelection.providerInstanceId),
-          `pending:${clientRef}`,
+          hint.appSessionId,
           hint,
         );
       },
       interactionSink: this.interactions,
       eventFlow: this.eventFlow,
+      ...canonical.lifecycle,
       compaction: {
         resolveLimit: (request) => this.compaction.resolveLimit(request),
         arm: (target, limit) =>
@@ -1596,7 +1597,10 @@ export class SessionManager {
       });
       return;
     }
-    const liveSession = this.registry.getLive(requestedAppSessionId);
+    const appSessionId =
+      this.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+      requestedAppSessionId;
+    const liveSession = this.registry.getLive(appSessionId);
     if (!liveSession) {
       this.emitError({
         appSessionId: requestedAppSessionId,
@@ -1735,10 +1739,6 @@ export class SessionManager {
     if (firstError !== undefined)
       throw firstError instanceof Error ? firstError : new Error(errMsg(firstError));
   }
-}
-
-function hasSessionCloseStarted(liveSession: LiveSession): boolean {
-  return liveSession.closeMode !== undefined;
 }
 
 function childSessionSettingsFromInit(init: SessionInitResult): ChildSettings {

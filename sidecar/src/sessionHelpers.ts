@@ -250,6 +250,7 @@ export function buildCreatedSessionSummary(input: {
   mission?: DroidMissionConfiguration;
   maxContextTokens?: number;
   compactionTokenLimit?: number;
+  phase?: SessionPhase;
   now: number;
 }): SessionSummary {
   const { command, appSessionId } = input;
@@ -266,7 +267,7 @@ export function buildCreatedSessionSummary(input: {
     configuration: input.configuration,
     ...(input.mission !== undefined ? { droidMissionConfiguration: input.mission } : {}),
     compactionModel: input.compactionModel,
-    phase: 'intake',
+    phase: input.phase ?? 'intake',
     streaming: false,
     queuedSends: 0,
     features: [],

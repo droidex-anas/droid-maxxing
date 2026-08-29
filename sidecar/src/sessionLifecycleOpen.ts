@@ -11,6 +11,16 @@ import {
   requireCreateConfiguration,
 } from './sessionHelpers.js';
 import {
+  allocateCreateIdentity,
+  initializingCreateSummary,
+  markFailedOpen,
+  noteCreateBoundary,
+  persistInitialBinding,
+  persistProvisionalIdentity,
+  providerFailedOpen,
+  type AllocatedCreateIdentity,
+} from './sessionCreateIdentity.js';
+import {
   droidReasoningEffortFromSelection,
   droidSessionConfiguration,
 } from './providers/providerIdentity.js';
@@ -50,8 +60,24 @@ export async function createAppSession(
   d.ensureConnected();
   let pendingProvider: ProviderSession | undefined;
   let pendingLiveSession: LiveSession | undefined;
+  let allocated: AllocatedCreateIdentity | undefined;
   try {
     const configuration = requireCreateConfiguration(command);
+    const existing = d.sessionStore?.findByClientRef(command.clientRef);
+    if (existing) {
+      d.emit({
+        type: 'session.created',
+        clientRef: command.clientRef,
+        session: d.registry.resolveSummary(existing.summary.appSessionId) ?? existing.summary,
+      });
+      return;
+    }
+    allocated = allocateCreateIdentity(d, () => host.nextId());
+    noteCreateBoundary(d, 'identity-allocated');
+    const initializing = initializingCreateSummary(command, allocated.appSessionId, configuration);
+    noteCreateBoundary(d, 'summary-initialized');
+    persistProvisionalIdentity(d, command, initializing, allocated.turnId);
+    noteCreateBoundary(d, 'provisional-persisted');
     const defaults = await d.getFactoryDefaults();
     const defaultsMode = createDefaultsModeForCommand(command, configuration.interactionMode);
     const primary = {
@@ -78,14 +104,16 @@ export async function createAppSession(
     assertConfigurationMatchesAdapter(adapter.definition, configuration);
     requireOpenAdmission(d);
     const expectedGeneration = 1;
+    const appSessionId = allocated.appSessionId;
     const openInput = providerOpenInput(host, {
-      appSessionId: `pending:${command.clientRef}`,
+      appSessionId,
       configuration,
       expectedGeneration,
       cwd: runtimeCwd,
     });
     d.prepareProviderOpen?.({
       command,
+      appSessionId,
       configuration,
       defaults,
       compactionModel,
@@ -93,13 +121,16 @@ export async function createAppSession(
       sessionPurpose: command.sessionPurpose,
       ...(mission !== undefined ? { mission } : {}),
     });
+    noteCreateBoundary(d, 'before-provider-open');
     const provider = await adapter.create(openInput);
     pendingProvider = provider;
+    noteCreateBoundary(d, 'provider-opened');
     requireOpenAdmission(d);
-    const appSessionId = provider.providerSessionId;
+    const overflow = providerFailedOpen(provider);
+    if (overflow) throw overflow;
     if (host.discardedOpens.has(appSessionId)) {
       await provider.close(zeroDeadline());
-      return;
+      throw new OpenAdmissionClosedError();
     }
     const native = requireNativeHandle(provider);
     const autoCompactionArmed = await d.compaction.arm(
@@ -113,8 +144,10 @@ export async function createAppSession(
     requireOpenAdmission(d);
     if (host.discardedOpens.has(appSessionId)) {
       await provider.close(zeroDeadline());
-      return;
+      throw new OpenAdmissionClosedError();
     }
+    const overflowAfterArm = providerFailedOpen(provider);
+    if (overflowAfterArm) throw overflowAfterArm;
     const maxContextTokens = d.maxContextTokensForModel(primary.modelId);
     const summary = buildCreatedSessionSummary({
       command,
@@ -126,22 +159,26 @@ export async function createAppSession(
       ...(autoCompactionArmed ? { compactionTokenLimit } : {}),
       now: Date.now(),
     });
-    persistInitialBinding(d, command, summary, provider, expectedGeneration);
+    persistInitialBinding(d, appSessionId, provider, expectedGeneration);
+    noteCreateBoundary(d, 'binding-persisted');
     const liveSession = createLiveSession(d, summary, native, provider);
+    liveSession.reservedTurnId = allocated.turnId;
     liveSession.appliedNativeConfiguration = configuration;
     pendingLiveSession = liveSession;
     d.compaction.subscribePrimary(liveSession);
     d.registry.register(liveSession);
     d.childSessions.attachParent(appSessionId);
+    liveSession.acceptProviderEvents = true;
     provider.activate();
     d.emit({
       type: 'session.created',
       clientRef: command.clientRef,
       session: publishedSummary(d, appSessionId),
     });
-    liveSession.acceptProviderEvents = true;
+    noteCreateBoundary(d, 'activated');
     host.driveInBackground(appSessionId, command.goal);
   } catch (error) {
+    markFailedOpen(d, command, allocated, error);
     await host.cleanupFailedOpen(pendingProvider, pendingLiveSession);
     if (!isOpenAdmissionClosed(error)) {
       d.emitError({
@@ -281,6 +318,10 @@ export function requireNativeHandle(provider: ProviderSession): LiveNativeSessio
   return native as LiveNativeSession;
 }
 
+export function hasSessionCloseStarted(liveSession: { closeMode?: string }): boolean {
+  return liveSession.closeMode !== undefined;
+}
+
 export class OpenAdmissionClosedError extends Error {}
 
 export function isOpenAdmissionClosed(error: unknown): boolean {
@@ -296,28 +337,6 @@ async function sessionRuntimeCwd(appCwd: string): Promise<string> {
   const chatCwd = join(droidexUserDataDir(), 'chats');
   await mkdir(chatCwd, { recursive: true });
   return chatCwd;
-}
-
-function persistInitialBinding(
-  d: SessionLifecycleDependencies,
-  command: SessionCreateCommand,
-  summary: import('./protocol.js').SessionSummary,
-  provider: ProviderSession,
-  expectedGeneration: number,
-): void {
-  const store = d.sessionStore;
-  if (!store) return;
-  store.createProvisional({
-    appSessionId: summary.appSessionId,
-    clientRef: command.clientRef,
-    summary,
-  });
-  store.bindInitialProviderRuntime(
-    summary.appSessionId,
-    expectedGeneration - 1,
-    provider.providerSessionId,
-    provider.initialResumeState,
-  );
 }
 
 function createLiveSession(

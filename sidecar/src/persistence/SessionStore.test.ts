@@ -10,6 +10,7 @@ import { droidSessionConfiguration } from '../providers/providerIdentity.js';
 import { DroidexDatabase } from './DroidexDatabase.js';
 import { failureFromColumns, SUMMARY_JSON_KEYS } from './sessionSummaryJson.js';
 import { SessionStore } from './SessionStore.js';
+import { TranscriptStore } from './TranscriptStore.js';
 
 const RECOVERY = 'move or remove this file, then restart DROIDEX';
 
@@ -449,6 +450,26 @@ test('SessionStore has no close and does not own turns', async () => {
     create(store, 'app-1');
     const turns = db.prepare('SELECT COUNT(*) AS n FROM turns').get() as { n: number };
     assert.equal(turns.n, 0);
+  });
+});
+
+test('createProvisional and beginTurn share one transaction and roll back together', async () => {
+  await withStore((store, db) => {
+    const transcript = new TranscriptStore(db);
+    assert.throws(() =>
+      db.transaction(() => {
+        create(store, 'app-tx', { clientRef: 'ref-tx' });
+        transcript.beginTurn({
+          turnId: 'turn-tx',
+          target: { kind: 'session', appSessionId: 'app-tx' },
+          runtimeGeneration: 1,
+          startedAt: '1000',
+        });
+        throw new Error('force rollback');
+      }),
+    );
+    assert.equal(store.get('app-tx'), undefined);
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM turns').get() as { n: number }).n, 0);
   });
 });
 

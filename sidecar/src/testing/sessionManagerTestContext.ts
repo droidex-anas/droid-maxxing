@@ -93,6 +93,9 @@ export function createSessionManagerTestContext(
     sessionRuntimeIdleMs?: number;
     providerRegistry?: SessionManagerDependencies['providerRegistry'];
     database?: SessionManagerDependencies['database'];
+    nextAppSessionId?: SessionManagerDependencies['nextAppSessionId'];
+    nextTurnId?: SessionManagerDependencies['nextTurnId'];
+    onCreateBoundary?: SessionManagerDependencies['onCreateBoundary'];
   } = {},
 ): SessionManagerTestContext {
   const calls: RecordedCall[] = [];
@@ -123,6 +126,17 @@ export function createSessionManagerTestContext(
       },
     },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
+    nextAppSessionId:
+      options.nextAppSessionId ??
+      (() => {
+        const queued = runtime.createQueue[0];
+        if (queued && typeof queued === 'object' && 'sessionId' in queued) {
+          return queued.sessionId;
+        }
+        return `provider-${String(runtime.createCalls.length + 1)}`;
+      }),
+    ...(options.nextTurnId ? { nextTurnId: options.nextTurnId } : {}),
+    ...(options.onCreateBoundary ? { onCreateBoundary: options.onCreateBoundary } : {}),
     // Pin live runtimes at the hard-open maximum so eviction races stay valid
     // even if a host lowers DROID_CONTROL_MAX_LIVE_CHILD_RUNTIMES.
     maxLiveRuntimes: 4,
