@@ -1116,6 +1116,55 @@ test('F7 create persists a distinct app id before native startup', async () => {
   }
 });
 
+test('F8 resume rejects a native id and does not start a second runtime', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'droidex-f8-resume-'));
+  const db = new DroidexDatabase(path.join(dir, 'state', 'droidex.sqlite'));
+  const store = new SessionStore(db);
+  const h = createSessionManagerTestContext({
+    database: db,
+    nextAppSessionId: () => 'app-f8',
+    nextTurnId: () => 'turn-f8',
+  });
+  try {
+    await h.create({
+      sessionPurpose: 'chat',
+      clientRef: 'f8-resume',
+      title: 'F8',
+      goal: 'hello',
+      configuration: droidSessionConfiguration({
+        modelId: 'model-default',
+        interactionMode: 'auto',
+        autonomy: 'low',
+      }),
+    });
+    await h.provider.waitForPrompts('provider-1', 1);
+    const loadsBefore = h.runtime.loadCalls.length;
+    await h.handle({ type: 'session.resume', appSessionId: 'native-1' });
+    assert.equal(h.runtime.loadCalls.length, loadsBefore);
+    assert.equal(store.get('native-1'), undefined);
+    assert.equal(store.get('app-f8')?.lifecycleStatus, 'running');
+    assert.equal(
+      h.events.some((event) => event.type === 'error' && event.appSessionId === 'native-1'),
+      true,
+    );
+    await h.handle({ type: 'session.loadHistory', appSessionId: 'native-1' });
+    assert.equal(
+      h.events.some(
+        (event) => event.type === 'session.history.error' && event.appSessionId === 'native-1',
+      ),
+      true,
+    );
+  } finally {
+    await h.dispose();
+    try {
+      db.close();
+    } catch {
+      // SessionManager shutdown already closed the shared database.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function summary(appSessionId: string, providerSessionId: string): SessionSummary {
   const now = Date.now();
   return {

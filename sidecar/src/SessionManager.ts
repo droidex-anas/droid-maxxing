@@ -121,8 +121,9 @@ import {
   type ProviderRegistry,
 } from './providers/ProviderRegistry.js';
 import type { DroidexDatabase } from './persistence/DroidexDatabase.js';
-import { bindCanonicalStores } from './sessionCanonicalPersistence.js';
+import { bindCanonicalStores, canonicalReadBindings } from './sessionCanonicalPersistence.js';
 import type { SessionCreatePersistence } from './sessionCreateIdentity.js';
+import { searchFromStore } from './sessionCanonicalServing.js';
 
 type Emit = (event: ServerEvent) => void;
 
@@ -361,6 +362,7 @@ export class SessionManager {
         this.runtimeRetirement.arm();
       },
       now: Date.now,
+      ...canonicalReadBindings(canonical.lifecycle),
     });
     this.droid = {
       getLive: (id) => this.registry.getLive(id),
@@ -376,11 +378,15 @@ export class SessionManager {
         }),
     };
     this.historyQueries = new SessionHistoryQueries({
-      searchSessions: (query, isStale) => this.history.searchSessions(query, isStale),
+      searchSessions: (query, isStale) =>
+        canonical.lifecycle.transcriptStore
+          ? searchFromStore(canonical.lifecycle.transcriptStore, query, isStale)
+          : this.history.searchSessions(query, isStale),
       resolveSummary: (id) => this.registry.resolveSummary(id),
       emit: (event) => {
         this.emit(event);
       },
+      ...canonicalReadBindings(canonical.lifecycle),
     });
     this.context = new SessionContext({
       registry: this.registry,
@@ -406,6 +412,7 @@ export class SessionManager {
       ...(options.dependencies?.streamingCoalesceMs !== undefined
         ? { streamingCoalesceMs: options.dependencies.streamingCoalesceMs }
         : {}),
+      ...canonicalReadBindings(canonical.lifecycle),
     });
     this.interactions = new SessionInteractions({
       emit: (event) => {
@@ -895,7 +902,6 @@ export class SessionManager {
         await this.sessionFiles.list(cmd);
         return;
       case 'session.loadHistory':
-        await this.sessionFiles.whenBootReconciled();
         this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
       case 'sessions.search':

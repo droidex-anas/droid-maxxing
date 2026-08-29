@@ -459,9 +459,10 @@ export class SessionLifecycle {
   }
 
   private async prepareToSend(requestedAppSessionId: string): Promise<LiveSession | undefined> {
-    const appSessionId =
-      this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
-      requestedAppSessionId;
+    const appSessionId = this.dependencies.sessionStore
+      ? requestedAppSessionId
+      : (this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+        requestedAppSessionId);
     let liveSession = this.dependencies.registry.getLive(appSessionId);
     if (liveSession?.closeMode) {
       await liveSession.closePromise;
