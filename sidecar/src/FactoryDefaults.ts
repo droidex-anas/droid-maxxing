@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
@@ -70,9 +70,7 @@ function findFactorySessionSettingsPath(providerSessionId: string): string | und
   if (!isSafeSessionFileToken(providerSessionId)) return undefined;
   const root = FACTORY_SESSIONS_ROOT();
   const fileName = `${providerSessionId}.settings.json`;
-  const direct = join(root, fileName);
-  if (isInside(root, direct) && existsSync(direct)) return direct;
-  return walkSettingsPath(root, fileName, 0);
+  return containedPath(root, join(root, fileName)) ?? walkSettingsPath(root, root, fileName, 0);
 }
 
 function isSafeSessionFileToken(value: string): boolean {
@@ -81,14 +79,29 @@ function isSafeSessionFileToken(value: string): boolean {
   return value !== '.' && value !== '..';
 }
 
+function containedPath(root: string, candidate: string): string | undefined {
+  try {
+    const resolvedRoot = realpathSync(root);
+    const resolvedCandidate = realpathSync(candidate);
+    return isInside(resolvedRoot, resolvedCandidate) ? resolvedCandidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function isInside(parent: string, candidate: string): boolean {
   const root = resolve(parent);
   const path = relative(root, resolve(candidate));
   return path === '' || (!path.startsWith('..') && !isAbsolute(path));
 }
 
-function walkSettingsPath(dir: string, fileName: string, depth: number): string | undefined {
-  if (depth > MAX_SETTINGS_WALK_DEPTH || !existsSync(dir)) return undefined;
+function walkSettingsPath(
+  root: string,
+  dir: string,
+  fileName: string,
+  depth: number,
+): string | undefined {
+  if (depth > MAX_SETTINGS_WALK_DEPTH || !containedPath(root, dir)) return undefined;
   let names: string[];
   try {
     names = readdirSync(dir);
@@ -103,11 +116,9 @@ function walkSettingsPath(dir: string, fileName: string, depth: number): string 
     } catch {
       continue;
     }
-    if (name === fileName && !isDirectory) {
-      return isInside(FACTORY_SESSIONS_ROOT(), path) ? path : undefined;
-    }
+    if (name === fileName && !isDirectory) return containedPath(root, path);
     if (isDirectory) {
-      const nested = walkSettingsPath(path, fileName, depth + 1);
+      const nested = walkSettingsPath(root, path, fileName, depth + 1);
       if (nested) return nested;
     }
   }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -100,5 +100,43 @@ test('readFactorySessionLaunchSettings ignores path separators and traversal tok
     assert.equal(readFactorySessionLaunchSettings('nested/secret'), undefined);
     assert.equal(readFactorySessionLaunchSettings('.'), undefined);
     assert.equal(readFactorySessionLaunchSettings('..'), undefined);
+  });
+});
+
+test('readFactorySessionLaunchSettings ignores settings files that symlink outside the sessions root', () => {
+  withHome((home) => {
+    const sessions = join(home, '.factory', 'sessions');
+    mkdirSync(sessions, { recursive: true });
+    const outside = join(home, '.factory', 'secret.settings.json');
+    writeFileSync(outside, JSON.stringify({ model: 'stolen-model' }));
+    symlinkSync(outside, join(sessions, 'linked.settings.json'));
+    assert.equal(readFactorySessionLaunchSettings('linked'), undefined);
+
+    const nested = join(sessions, '2026-08-29');
+    mkdirSync(nested, { recursive: true });
+    symlinkSync(outside, join(nested, 'nested-link.settings.json'));
+    assert.equal(readFactorySessionLaunchSettings('nested-link'), undefined);
+
+    const outsideDir = join(home, 'outside');
+    mkdirSync(outsideDir);
+    writeFileSync(
+      join(outsideDir, 'dir-link.settings.json'),
+      JSON.stringify({ model: 'stolen-model' }),
+    );
+    symlinkSync(outsideDir, join(sessions, 'escaped'));
+    assert.equal(readFactorySessionLaunchSettings('dir-link'), undefined);
+  });
+});
+
+test('readFactorySessionLaunchSettings follows a symlink that stays inside the sessions root', () => {
+  withHome((home) => {
+    const nested = join(home, '.factory', 'sessions', '2026-08-29');
+    mkdirSync(nested, { recursive: true });
+    const real = join(nested, 'real.settings.json');
+    writeFileSync(real, JSON.stringify({ model: 'claude-opus-4-1' }));
+    symlinkSync(real, join(home, '.factory', 'sessions', 'alias.settings.json'));
+    assert.deepEqual(readFactorySessionLaunchSettings('alias'), {
+      modelId: 'claude-opus-4-1',
+    });
   });
 });
