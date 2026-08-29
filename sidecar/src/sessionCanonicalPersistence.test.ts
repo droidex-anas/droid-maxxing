@@ -90,6 +90,41 @@ test('production bind failure closes already constructed sidecar resources', asy
   }
 });
 
+test('owned-database bind failure closes browsers when other dependencies are present', async () => {
+  const previous = process.env.DROIDEX_USER_DATA_DIR;
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-canonical-partial-fail-'));
+  process.env.DROIDEX_USER_DATA_DIR = dir;
+  mkdirSync(join(dir, 'state'), { recursive: true });
+  const bad = new DatabaseSync(join(dir, 'state', 'droidex.sqlite'));
+  try {
+    bad.exec('CREATE TABLE dummy (id INTEGER)');
+    bad.exec('PRAGMA user_version = 99');
+  } finally {
+    bad.close();
+  }
+  let browsersClosed = 0;
+  try {
+    assert.throws(() =>
+      bindCanonicalStoresForManager(
+        { nextAppSessionId: () => 'app-test' },
+        {
+          browsers: {
+            closeAll: async () => {
+              browsersClosed += 1;
+            },
+          },
+        },
+      ),
+    );
+    await Promise.resolve();
+    assert.equal(browsersClosed, 1);
+  } finally {
+    if (previous === undefined) delete process.env.DROIDEX_USER_DATA_DIR;
+    else process.env.DROIDEX_USER_DATA_DIR = previous;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('an injected DroidexDatabase is reused', () => {
   const dir = mkdtempSync(join(tmpdir(), 'droidex-canonical-injected-'));
   const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
