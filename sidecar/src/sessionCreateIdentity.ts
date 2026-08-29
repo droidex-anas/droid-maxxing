@@ -36,6 +36,8 @@ export interface SessionCreatePersistence {
     | 'markStarted'
     | 'markFailed'
     | 'get'
+    | 'updateResumeState'
+    | 'replaceProviderRuntime'
   >;
   transcriptStore?: Pick<TranscriptStore, 'beginTurn' | 'settleTurn' | 'append'>;
   atomic?: <T>(work: () => T) => T;

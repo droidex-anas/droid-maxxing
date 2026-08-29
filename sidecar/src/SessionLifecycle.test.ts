@@ -1569,6 +1569,34 @@ test('replaying the same clientRef never starts a second native session', async 
   });
 });
 
+test('overlapping creates with the same clientRef start only one native session', async () => {
+  await withCanonicalStores(async ({ store, transcript, db }) => {
+    const harness = createHarness([], {
+      sessionStore: store,
+      transcriptStore: transcript,
+      atomic: (work) => db.atomic(work),
+      nextAppSessionId: () => 'app-overlap',
+      nextTurnId: () => 'turn-overlap',
+    });
+    queueCreate(harness, 'native-overlap');
+    const first = harness.lifecycle.create(createCommand());
+    const second = harness.lifecycle.create(createCommand());
+    await Promise.all([first, second]);
+    await harness.runtime.sessions.get('native-overlap')?.waitForPrompts(1);
+    await waitForAppliedTurn(harness);
+    assert.equal(harness.runtime.createCalls.length, 1);
+    assert.equal(store.findByClientRef('client-1')?.summary.appSessionId, 'app-overlap');
+    const created = harness.events.filter((event) => event.type === 'session.created');
+    assert.ok(created.length >= 1);
+    assert.equal(
+      created.every(
+        (event) => event.type === 'session.created' && event.session.appSessionId === 'app-overlap',
+      ),
+      true,
+    );
+  });
+});
+
 test('a failed open stays visible and is never rebound', async () => {
   await withCanonicalStores(async ({ store, transcript, db }) => {
     const harness = createHarness([], {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ProviderBinding, SessionStore } from './persistence/SessionStore.js';
+import type { ProviderBinding } from './persistence/SessionStore.js';
 import { persistBindingUpdated } from './providerBinding.js';
 import type {
   ClientCommand,
@@ -107,8 +107,6 @@ export interface SessionLifecycleDependencies extends SessionCreatePersistence {
   prepareProviderOpen?: (hint: ProviderOpenHint) => void;
   interactionSink: ProviderInteractionSink;
   eventFlow: Pick<SessionEventFlow, 'apply' | 'beginTurn'>;
-  sessionStore?: SessionCreatePersistence['sessionStore'] &
-    Pick<SessionStore, 'updateResumeState' | 'replaceProviderRuntime'>;
   compaction: {
     resolveLimit: SessionCompaction['resolveLimit'];
     arm: (target: CompactionArmInput, limit: number) => Promise<boolean>;
