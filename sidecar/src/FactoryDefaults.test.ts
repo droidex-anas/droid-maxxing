@@ -57,6 +57,7 @@ test('readFactoryDefaults maps session and mission defaults from Factory setting
       reasoningEffort: 'high',
       compactionModel: 'current-model',
       compactionTokenLimit: 8000,
+      compactionTokenLimitPerModel: undefined,
       autonomy: 'low',
       interactionMode: 'spec',
       specModelId: 'claude-opus-4-1',

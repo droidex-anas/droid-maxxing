@@ -83,6 +83,12 @@ export function isReportedStreamingTranscriptError(
   return error instanceof StreamingTranscriptPersistenceError && error.isReported;
 }
 
+const DEFAULT_CANONICAL_IDENTITY: CanonicalIdentity = {
+  providerDriverKind: 'droid',
+  providerInstanceId: 'droid',
+  runtimeGeneration: 1,
+};
+
 function streamingSourceKey(appSessionId: string, sourceSessionId: string): string {
   return `${appSessionId}\u0000${sourceSessionId}`;
 }
@@ -104,15 +110,16 @@ export class SessionTimeline {
 
   load(appSessionIdOrProviderSessionId: string, cursor?: string, limit?: number): void {
     const store = this.dependencies.sessionStore;
-    const transcriptPage = this.dependencies.transcriptStore?.page;
-    if (!store || !transcriptPage) {
+    const transcriptStore = this.dependencies.transcriptStore;
+    const pageFn = transcriptStore?.page;
+    if (!store || !transcriptStore || !pageFn) {
       this.emitHistoryError(appSessionIdOrProviderSessionId, 'Canonical transcript store is required.');
       return;
     }
     try {
       const stored = requireStoredSession(store, appSessionIdOrProviderSessionId);
       const page = historyPageFromStore(
-        { page: transcriptPage },
+        { page: pageFn.bind(transcriptStore) },
         stored.summary.appSessionId,
         cursor,
         limit,
@@ -148,25 +155,26 @@ export class SessionTimeline {
     cursor?: string;
     limit?: number;
   }): void {
-    const transcriptPage = this.dependencies.transcriptStore?.page;
-    if (!transcriptPage) {
+    const transcriptStore = this.dependencies.transcriptStore;
+    const pageFn = transcriptStore?.page;
+    if (!transcriptStore || !pageFn) {
       this.emitHistoryError(appSessionId, 'Canonical transcript store is required.', childSessionId);
       return;
     }
     try {
       const page = childHistoryPageFromStore(
-        { page: transcriptPage },
+        { page: pageFn.bind(transcriptStore) },
         appSessionId,
         childSessionId,
         cursor,
         limit,
       );
-      const transcripts = page.transcripts.map((event) => ({ ...event, role }));
+      const events = page.transcripts.map((event) => ({ ...event, role }));
       this.emitHistory({
         appSessionId,
         childSessionId,
         progress: [],
-        transcripts,
+        transcripts: events,
         mode: cursor ? 'prepend' : 'replace',
         ...(page.olderCursor ? { olderCursor: page.olderCursor } : {}),
       });
@@ -261,10 +269,7 @@ export class SessionTimeline {
   private recordAndEmit(event: TranscriptEvent): void {
     const store = this.dependencies.transcriptStore;
     if (store) {
-      const identity = this.dependencies.canonicalIdentity;
-      if (!identity) {
-        throw new Error('canonicalIdentity is required when transcriptStore is set.');
-      }
+      const identity = this.dependencies.canonicalIdentity ?? DEFAULT_CANONICAL_IDENTITY;
       const persisted = store.append(liftRendererTranscriptEvent(event, identity));
       const projected = projectTranscriptEvent(persisted);
       if (!projected) return;

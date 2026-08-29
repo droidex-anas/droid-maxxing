@@ -222,13 +222,11 @@ test('a session with a queued prompt is never retired', async () => {
 test('an idle session whose child agent is still working is never retired', async () => {
   const h = createSessionManagerTestContext({ sessionRuntimeIdleMs: 0 });
   try {
-    h.fixture.seedHistorySummaries([historicalSummary('app-parent', 'provider-parent')]);
-    h.fixture.seedChildSessions([worker('app-parent', 'worker-1', 'paused')]);
-    writeProviderConversation(h.home, 'provider-parent', 'parent');
-    await h.handle({ type: 'session.resume', appSessionId: 'app-parent' });
+    const session = await openIdleSession(h, 'parent');
+    h.fixture.seedChildSessions([worker(session.appSessionId, 'worker-1', 'paused')]);
     await h.handle({
       type: 'child.open',
-      parentAppSessionId: 'app-parent',
+      parentAppSessionId: session.appSessionId,
       childSessionId: 'worker-1',
       requestId: 'open-worker-1',
     });
@@ -238,7 +236,7 @@ test('an idle session whose child agent is still working is never retired', asyn
     const gate = h.provider.deferNextStream('worker-1');
     const sending = h.handle({
       type: 'child.send',
-      parentAppSessionId: 'app-parent',
+      parentAppSessionId: session.appSessionId,
       childSessionId: 'worker-1',
       text: 'keep working',
     });
@@ -253,7 +251,7 @@ test('an idle session whose child agent is still working is never retired', asyn
 
     await h.retireIdleSessionRuntimes();
     assert.equal(
-      providerClosures(h).includes('provider-parent'),
+      providerClosures(h).includes(session.providerSessionId),
       true,
       'the parent becomes retirable once its children settle',
     );
