@@ -7,14 +7,12 @@ import type {
   ConfigurableSessionRole,
   FactoryDefaultSettings,
   InstallChannel,
-  HistorySearchReply,
   PersistenceRecovery,
   SessionSummary,
   ModelInfo,
   ReasoningEffort,
   ServerEvent,
   SessionInteractionMode,
-  TranscriptEvent,
 } from './protocol.js';
 import {
   defaultsModeForSummary,
@@ -54,27 +52,13 @@ import {
 } from './providers/droid/droidSessionAccess.js';
 import { detectEnvironment } from './Environment.js';
 import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInstaller.js';
-import {
-  type HistoryIndex,
-  type PersistedChildSession,
-  loadMissionControlSessions,
-  readFactoryDefaults,
-} from './history.js';
-import { HistoryPersistence } from './HistoryPersistence.js';
-import { serverEventForHistoryStatus } from './historyStatusEvents.js';
+import { readFactoryDefaults, readFactorySessionLaunchSettings } from './FactoryDefaults.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
 import { SessionAdoption } from './sessionAdoption.js';
 import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
 import { droidexUserDataDir } from './droidexPaths.js';
-import type { SessionFileChange } from './sessionFileCache.js';
 import { SessionBrowser, type SessionBrowsers } from './SessionBrowser.js';
 import { SessionHistoryQueries } from './SessionHistoryQueries.js';
-import {
-  startSessionFileWatcher,
-  type SessionFileWatcher,
-  type SessionFileWatcherOptions,
-} from './sessionFileWatcher.js';
-import { SessionFileServing } from './SessionFileServing.js';
 import { mergeModelCatalog } from './modelCatalog.js';
 import { readDroidCliModelCatalog, readDroidCliModelCatalogCache } from './DroidCliCatalog.js';
 import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
@@ -126,32 +110,10 @@ import {
   canonicalReadBindings,
 } from './sessionCanonicalPersistence.js';
 import type { SessionCreatePersistence } from './sessionCreateIdentity.js';
+import { childPersistenceFromStore, type ChildPersistence } from './childCanonicalPersistence.js';
 import { searchFromStore } from './sessionCanonicalServing.js';
 
 type Emit = (event: ServerEvent) => void;
-
-type SessionHistoryBase = Pick<
-  HistoryIndex,
-  | 'summaryPatchesAndHidden'
-  | 'listHistoricalSessions'
-  | 'sessionFileCacheSize'
-  | 'sessionLaunchSettings'
-  | 'childSessions'
-  | 'childSession'
-  | 'close'
-> & {
-  syncSummaries(summaries: SessionSummary[]): boolean | undefined;
-  upsertChildSession(child: PersistedChildSession): boolean | undefined;
-  recordEvent(event: TranscriptEvent): void;
-  persistenceRecovery?(): PersistenceRecovery;
-};
-
-type SessionHistory = SessionHistoryBase & {
-  searchSessions(query: string, isStale?: () => boolean): Promise<HistorySearchReply>;
-  setIndexingIdle(isIdle: boolean): Promise<void>;
-  reconcileSessionFiles(): Promise<number>;
-  reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number>;
-};
 
 export interface StartableLocalMcpResource {
   start(): Promise<McpServerConfig>;
@@ -160,17 +122,14 @@ export interface StartableLocalMcpResource {
 
 export interface SessionManagerDependencies extends SessionCreatePersistence {
   runtime: FactoryRuntime;
-  history: SessionHistory;
   browsers: SessionBrowsers;
   createLocalMcpResource: (appSessionId: () => string) => StartableLocalMcpResource;
   mcpConfiguration: McpConfiguration;
   loadConfiguredMcpServers: (cwd: string) => McpServerConfig[];
   getFactoryDefaults?: () => Promise<FactoryDefaultSettings>;
   nextChildSessionId?: () => string;
-  // Injectable so tests can capture the republish callback instead of
-  // watching the real sessions directory. Defaults to a no-op when other
-  // dependencies are faked.
-  startSessionFileWatcher?: (options: SessionFileWatcherOptions) => SessionFileWatcher | null;
+  readLaunchSettings?: (providerSessionId: string) => ChildSettings | undefined;
+  childPersistence?: ChildPersistence;
   // Injectable so integration tests can disable (0) the timer-based streaming
   // delta coalescing and assert appended events synchronously; the merge
   // behavior itself is covered by SessionTimeline unit tests.
@@ -237,7 +196,6 @@ export class SessionManager {
   // Context windows observed from provider stats for catalog-missing models.
   private readonly learnedModelContextWindows = new Map<string, number>();
   private readonly runtime: FactoryRuntime;
-  private readonly history: SessionHistory;
   private readonly registry: SessionRegistry<LiveSession>;
   private readonly timeline: SessionTimeline;
   private readonly interactions: SessionInteractions;
@@ -251,7 +209,6 @@ export class SessionManager {
   private readonly lifecycle: SessionLifecycle;
   private readonly runtimeRetirement: SessionRuntimeRetirement;
   private readonly adoption: SessionAdoption;
-  private readonly sessionFiles: SessionFileServing;
   private readonly sessionBrowser: SessionBrowser;
   private readonly historyQueries: SessionHistoryQueries;
   private readonly pendingAgentSettings = new Map<
@@ -275,31 +232,16 @@ export class SessionManager {
     options: SessionManagerOptions = {},
   ) {
     const limits = runtimeLimits(options.dependencies);
-    let startWatcher: (
-      options: SessionFileWatcherOptions,
-    ) => ReturnType<typeof startSessionFileWatcher>;
     if (options.dependencies) {
       this.runtime = options.dependencies.runtime;
-      this.history = options.dependencies.history;
       this.browsers = options.dependencies.browsers;
       this.createLocalMcpResource = options.dependencies.createLocalMcpResource;
       this.mcpConfiguration = options.dependencies.mcpConfiguration;
       this.loadConfiguredMcpServers = options.dependencies.loadConfiguredMcpServers;
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
       this.nextChildSessionId = options.dependencies.nextChildSessionId ?? nextChildSessionId;
-      startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
     } else {
       this.runtime = new DroidRuntime();
-      this.history = new HistoryPersistence({
-        onStatusChanged: (status) => {
-          this.emit(serverEventForHistoryStatus(status));
-        },
-        onDurabilityRecovered: () => {
-          if (this.shutdownPromise) return;
-          this.registry.retryPendingDurability();
-          this.childSessions.retryPendingDurability();
-        },
-      });
       const browsers = new BrowserSessionManager({
         assetUrlFor: options.assetUrlFor,
         emit: (event) => {
@@ -315,10 +257,8 @@ export class SessionManager {
       this.loadConfiguredMcpServers = loadFactoryMcpServers;
       this.factoryDefaultsOverride = undefined;
       this.nextChildSessionId = nextChildSessionId;
-      startWatcher = startSessionFileWatcher;
     }
     const canonical = bindCanonicalStoresForManager(options.dependencies, {
-      history: this.history,
       browsers: this.browsers,
     });
     this.database = canonical.database;
@@ -350,16 +290,10 @@ export class SessionManager {
       },
     );
     this.registry = new SessionRegistry({
-      history: this.history,
-      loadOrdinarySessions: (options) => this.history.listHistoricalSessions(options),
-      loadMissionControlSessions,
       projectSummary: (summary) => this.applyPendingSettingsToSummary({ ...summary }),
       onSummaryUpdated: (summary) => {
         this.emit({ type: 'session.updated', session: summary });
         this.runtimeRetirement.arm();
-      },
-      onLiveProviderReplaced: (providerSessionId) => {
-        this.sessionFiles.finalizeReplacedProvider(providerSessionId);
       },
       onLiveSetChanged: () => {
         this.adoption.persistLiveSet();
@@ -382,10 +316,12 @@ export class SessionManager {
         }),
     };
     this.historyQueries = new SessionHistoryQueries({
-      searchSessions: (query, isStale) =>
-        canonical.lifecycle.transcriptStore
-          ? searchFromStore(canonical.lifecycle.transcriptStore, query, isStale)
-          : this.history.searchSessions(query, isStale),
+      searchSessions: (query, isStale) => {
+        if (!canonical.lifecycle.transcriptStore) {
+          return Promise.reject(new Error('Canonical transcript store is required.'));
+        }
+        return searchFromStore(canonical.lifecycle.transcriptStore, query, isStale);
+      },
       resolveSummary: (id) => this.registry.resolveSummary(id),
       emit: (event) => {
         this.emit(event);
@@ -404,7 +340,6 @@ export class SessionManager {
     });
     this.timeline = new SessionTimeline({
       registry: this.registry,
-      history: this.history,
       getChildSessions: (appSessionId) => this.childSessions.list(appSessionId),
       emit: (event) => {
         this.emit(event);
@@ -493,7 +428,19 @@ export class SessionManager {
     this.childSessions = new ChildSessions({
       runtime: this.runtime,
       registry: this.registry,
-      history: this.history,
+      childPersistence:
+        options.dependencies?.childPersistence ??
+        (canonical.lifecycle.sessionStore
+          ? childPersistenceFromStore(canonical.lifecycle.sessionStore)
+          : {
+              list: () => [],
+              get: () => undefined,
+              upsert() {
+                throw new Error('Canonical session store is required.');
+              },
+            }),
+      readLaunchSettings:
+        options.dependencies?.readLaunchSettings ?? readFactorySessionLaunchSettings,
       timeline: this.timeline,
       eventFlow: this.droidEventFlow,
       interactions: this.droidInteractions,
@@ -514,19 +461,6 @@ export class SessionManager {
       maxQueuedRuntimes: limits.maxQueuedRuntimes,
       childRuntimeIdleMs: limits.childRuntimeIdleMs,
       now: Date.now,
-    });
-    this.sessionFiles = new SessionFileServing({
-      history: this.history,
-      startWatcher,
-      isLiveSession: (providerSessionId) => this.registry.isCurrentLiveProvider(providerSessionId),
-      isShutdownStarted: () => this.shutdownPromise !== undefined,
-      retryPendingLaunchSettings: (providerSessionIds) => {
-        this.childSessions.retryPendingLaunchSettings(providerSessionIds);
-      },
-      listSummaries: (listOptions) => this.registry.listSummaries(listOptions),
-      emitList: ({ sessions, earlierSessionsByCwd }) => {
-        this.emit({ type: 'sessions.list', sessions, earlierSessionsByCwd });
-      },
     });
     this.missionControlPolicy = new MissionControlPolicy({
       registry: this.registry,
@@ -608,9 +542,7 @@ export class SessionManager {
       emitStatus: (appSessionId, text) => {
         this.timeline.appendStatus(appSessionId, text);
       },
-      emitSessionList: async (closedProviderSessionId) => {
-        await this.sessionFiles.finalizeClosedProvider(closedProviderSessionId);
-      },
+      emitSessionList: async () => undefined,
     });
     this.runtimeRetirement = new SessionRuntimeRetirement({
       liveSessions: () => this.registry.liveSessionsSnapshot(),
@@ -639,7 +571,6 @@ export class SessionManager {
           status: child.status,
         })),
       persistSummaries: (summaries) => {
-        this.history.syncSummaries(summaries);
         for (const session of summaries) {
           this.emit({
             type: 'session.updated',
@@ -664,32 +595,17 @@ export class SessionManager {
     });
   }
 
-  startSessionFileServing(): void {
-    this.sessionFiles.start();
-  }
-
   connect(apiKey?: string): void {
     this.runtime.connect(apiKey);
     this.ready = true;
     void this.adoption.adopt();
     this.emit({ type: 'connection', status: 'connected' });
     this.emit({ type: 'runtime.updated', status: this.runtime.status() });
-    const recovery = this.history.persistenceRecovery?.();
-    if (recovery?.hadUnflushedWork) {
-      this.emit({
-        type: 'error',
-        code: 'history.unflushed_work',
-        message:
-          recovery.message ??
-          'The previous agent runtime exited with unflushed history. Restored sessions use the last durable snapshot.',
-        recoverable: true,
-      });
-    }
   }
 
   async runtimeSnapshot(): Promise<BridgeRuntimeSnapshot> {
     await this.adoption.adopt();
-    const persistence = this.history.persistenceRecovery?.() ?? {
+    const persistence: PersistenceRecovery = {
       durable: true,
       hadUnflushedWork: false,
     };
@@ -719,7 +635,7 @@ export class SessionManager {
       contextPollers: pollers.total,
       contextPollersActive: pollers.active,
       autoCompactionWatchdogs: this.compaction.watchdogCount(),
-      sessionFileWatchers: this.sessionFiles.watcherCount(),
+      sessionFileWatchers: 0,
     };
   }
 
@@ -835,7 +751,6 @@ export class SessionManager {
         await this.childSessions.interrupt(cmd);
         return;
       case 'child.loadHistory':
-        await this.sessionFiles.whenBootReconciled();
         await this.childSessions.loadHistory(cmd);
         return;
       case 'child.updateSettings':
@@ -908,18 +823,22 @@ export class SessionManager {
       case 'session.close':
         await this.lifecycle.close(cmd.appSessionId);
         return;
-      case 'sessions.list':
-        await this.sessionFiles.list(cmd);
+      case 'sessions.list': {
+        const page = this.registry.listSummaries(cmd);
+        this.emit({
+          type: 'sessions.list',
+          sessions: page.sessions,
+          earlierSessionsByCwd: page.earlierSessionsByCwd,
+        });
         return;
+      }
       case 'session.loadHistory':
-        await this.sessionFiles.whenBootReconciled();
         this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
       case 'sessions.search':
         await this.historyQueries.search(cmd);
         return;
       case 'history.indexingIdle':
-        await this.history.setIndexingIdle(cmd.isIdle);
         return;
       case 'app.backgroundWork': {
         const previouslyFocused = this.context.focusedSession();
@@ -1715,7 +1634,6 @@ export class SessionManager {
     await run(() => {
       this.providerRegistry?.abortDiscovery();
     });
-    await run(() => this.sessionFiles.close());
     // 3. Invalidate live generations and unregister before provider awaits.
     await run(() => {
       this.lifecycle.invalidateLiveSessions();
@@ -1745,9 +1663,6 @@ export class SessionManager {
     // 8. Flush timeline and persistence queues.
     await run(() => {
       this.timeline.flushStreaming(deadline);
-    });
-    await run(() => {
-      this.history.close();
     });
     // 9. Close SQLite last.
     await run(() => {

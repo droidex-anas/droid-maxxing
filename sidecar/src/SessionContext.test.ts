@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { ContextStatsAccuracy, ReasoningEffort } from '@factory/droid-sdk';
 
@@ -16,7 +19,6 @@ import {
   FakeFactorySession,
   type RecordedCall,
 } from './testing/fakeFactoryRuntime.js';
-import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
 import {
   assertUnsupportedCapability,
@@ -27,32 +29,59 @@ import {
 import { requireDroidCapability } from './providers/droid/droidCapabilityGate.js';
 import { StubProviderSession } from './testing/stubProviderSession.js';
 import { UNAVAILABLE_PROVIDER_CAPABILITIES } from './providers/unavailableProvider.js';
+import { DroidexDatabase } from './persistence/DroidexDatabase.js';
+import { SessionStore } from './persistence/SessionStore.js';
 
 interface Harness {
   calls: RecordedCall[];
   events: ServerEvent[];
   runtime: FakeFactoryRuntime;
-  history: FakeHistoryIndex;
+  store: SessionStore;
   registry: SessionRegistry<LiveSession>;
   context: SessionContext;
   contextWindowNotes: [string, number][];
+  persistedSummary(appSessionId: string): SessionSummary | undefined;
+  failNextPersist(error: Error): void;
 }
+
+const ownedStores: Array<{ db: DroidexDatabase; dir: string }> = [];
+
+test.after(() => {
+  for (const { db, dir } of ownedStores) {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function createHarness(): Harness {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
   const contextWindowNotes: [string, number][] = [];
   const runtime = new FakeFactoryRuntime(calls);
-  const history = new FakeHistoryIndex(calls);
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-context-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  ownedStores.push({ db, dir });
+  const store = new SessionStore(db);
+  let nextUpdateError: Error | undefined;
   const registry = new SessionRegistry<LiveSession>({
-    history,
-    loadOrdinarySessions: () => [],
-    loadMissionControlSessions: () => [],
     projectSummary: (value) => ({ ...value }),
     onSummaryUpdated: (session) => {
       events.push({ type: 'session.updated', session });
     },
     now: () => 10,
+    sessionStore: {
+      get: store.get.bind(store),
+      list: store.list.bind(store),
+      replaceProviderRuntime: store.replaceProviderRuntime.bind(store),
+      updateSummary: (appSessionId, patch, options) => {
+        if (nextUpdateError) {
+          const error = nextUpdateError;
+          nextUpdateError = undefined;
+          throw error;
+        }
+        return store.updateSummary(appSessionId, patch, options);
+      },
+    },
   });
   const context = new SessionContext({
     registry,
@@ -62,7 +91,19 @@ function createHarness(): Harness {
       contextWindowNotes.push([modelId, contextWindowTokens]);
     },
   });
-  return { calls, events, runtime, history, registry, context, contextWindowNotes };
+  return {
+    calls,
+    events,
+    runtime,
+    store,
+    registry,
+    context,
+    contextWindowNotes,
+    persistedSummary: (appSessionId) => store.get(appSessionId)?.summary,
+    failNextPersist(error: Error) {
+      nextUpdateError = error;
+    },
+  };
 }
 
 function registerLive(
@@ -71,9 +112,11 @@ function registerLive(
   providerSessionId = appSessionId,
 ): { live: LiveSession; session: FakeFactorySession } {
   const session = new FakeFactorySession(providerSessionId, {}, h.calls);
+  const liveSummary = summary(appSessionId, providerSessionId);
+  seedStoredSession(h, liveSummary);
   const live: LiveSession = {
-    summary: summary(appSessionId, providerSessionId),
-    binding: liveBindingFromSummary(summary(appSessionId, providerSessionId)),
+    summary: liveSummary,
+    binding: liveBindingFromSummary(liveSummary),
     session,
     provider: stubDroidProvider(session),
     streaming: false,
@@ -202,9 +245,9 @@ test('plausible exact primary usage wins while child usage changes totals only',
   assert.equal(live.summary.tokensIn, 20);
   assert.equal(live.summary.tokensOut, 5);
   assert.equal(live.summary.contextTokens, 800);
-  const patches = h.history.summaryPatchesAndHidden().patches;
-  assert.equal(patches.get('app-1')?.tokensIn, 20);
-  assert.equal(patches.get('app-1')?.contextTokens, 800);
+  const persisted = h.persistedSummary('app-1');
+  assert.equal(persisted?.tokensIn, 20);
+  assert.equal(persisted?.contextTokens, 800);
 
   session.nextContextStats = {
     used: 100,
@@ -263,7 +306,7 @@ test('unchanged in-turn poll readings emit context once until the reading change
   // even when the provider reading has not moved.
   await h.context.refresh(target);
   assert.equal(contextEvents(h).length, 3);
-  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 260);
+  assert.equal(h.persistedSummary('app-1')?.contextTokens, 260);
 });
 test('deduplicated in-turn polls still synchronize exact context summary fields', async () => {
   const h = createHarness();
@@ -446,8 +489,8 @@ test('usage without current-context telemetry updates totals only', () => {
 test('usage persistence failure keeps live telemetry and retries an identical reading', () => {
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
-  const persistedBefore = h.history.summaryPatchesAndHidden().patches.get('app-1');
-  h.history.nextSyncError = new Error('disk unavailable');
+  const persistedBefore = h.persistedSummary('app-1');
+  h.failNextPersist(new Error('disk unavailable'));
   const usage = {
     tokensIn: 12,
     tokensOut: 4,
@@ -458,12 +501,12 @@ test('usage persistence failure keeps live telemetry and retries an identical re
   assert.equal(live.summary.tokensIn, 12);
   assert.equal(live.summary.contextTokens, 80);
   assert.equal(h.events.at(-1)?.type, 'session.updated');
-  assert.deepEqual(h.history.summaryPatchesAndHidden().patches.get('app-1'), persistedBefore);
+  assert.deepEqual(h.persistedSummary('app-1'), persistedBefore);
 
   h.context.recordUsage('app-1', 'app-1', usage);
 
-  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.tokensIn, 12);
-  assert.equal(h.history.summaryPatchesAndHidden().patches.get('app-1')?.contextTokens, 80);
+  assert.equal(h.persistedSummary('app-1')?.tokensIn, 12);
+  assert.equal(h.persistedSummary('app-1')?.contextTokens, 80);
 });
 
 test('child refresh never inherits the parent exact context reading', async () => {
@@ -589,7 +632,7 @@ test('compaction bookkeeping survives persistence failure without double increme
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
   live.summary.contextTokens = 900;
-  h.history.nextSyncError = new Error('disk unavailable');
+  h.failNextPersist(new Error('disk unavailable'));
 
   assert.throws(
     () => h.context.recordCompaction(primaryTarget(h, live), 'summary-1'),
@@ -605,7 +648,7 @@ test('compaction bookkeeping survives persistence failure without double increme
 test('an older compaction retry cannot roll back a newer generation', () => {
   const h = createHarness();
   const { live } = registerLive(h, 'app-1');
-  h.history.nextSyncError = new Error('disk unavailable');
+  h.failNextPersist(new Error('disk unavailable'));
 
   assert.throws(
     () => h.context.recordCompaction(primaryTarget(h, live), 'summary-1'),
@@ -916,6 +959,23 @@ test('context capability fails for a non-droid session before stats are read', a
   );
   assert.equal(session.contextStatsCalls, 0);
 });
+
+function seedStoredSession(h: Harness, liveSummary: SessionSummary): void {
+  if (h.store.get(liveSummary.appSessionId)) return;
+  h.store.createProvisional({
+    appSessionId: liveSummary.appSessionId,
+    clientRef: `seed-${liveSummary.appSessionId}`,
+    summary: liveSummary,
+  });
+  if (liveSummary.providerSessionId) {
+    h.store.bindInitialProviderRuntime(
+      liveSummary.appSessionId,
+      0,
+      liveSummary.providerSessionId,
+    );
+  }
+  h.store.markStarted(liveSummary.appSessionId);
+}
 
 function summary(appSessionId: string, providerSessionId: string): SessionSummary {
   return {

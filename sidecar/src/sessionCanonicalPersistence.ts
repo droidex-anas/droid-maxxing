@@ -13,23 +13,17 @@ export interface CanonicalStoreDependencies {
 
 export function abandonOwnedSidecarResources(
   resources: {
-    closeHistory: () => void;
     closeBrowsers: () => Promise<unknown>;
   },
   bindError: unknown,
 ): never {
-  try {
-    resources.closeHistory();
-  } catch {
-    // Keep the canonical bind failure as the constructor error.
-  }
   void resources.closeBrowsers();
   throw bindError;
 }
 
 export function bindCanonicalStoresForManager(
   dependencies: CanonicalStoreDependencies | undefined,
-  owned: { history: { close(): void }; browsers: { closeAll(): Promise<unknown> } },
+  owned: { browsers: { closeAll(): Promise<unknown> } },
 ): ReturnType<typeof bindCanonicalStores> {
   try {
     return bindCanonicalStores(dependencies, { createIfMissing: !dependencies });
@@ -37,7 +31,6 @@ export function bindCanonicalStoresForManager(
     if (!dependencies) {
       abandonOwnedSidecarResources(
         {
-          closeHistory: () => owned.history.close(),
           closeBrowsers: () => owned.browsers.closeAll(),
         },
         error,

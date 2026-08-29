@@ -2,7 +2,7 @@ import type { StatementSync } from 'node:sqlite';
 
 import type { SessionSearchMatch, SessionSearchResult } from '../protocol.js';
 import type { SessionTarget } from '../providers/providerIdentity.js';
-import { buildSessionSearchSnippet } from '../sessionSearch.js';
+import { buildSessionSearchSnippet } from '../sessionSearchSnippet.js';
 import {
   canonicalPayloadJson,
   childSessionId,

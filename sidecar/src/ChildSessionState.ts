@@ -5,7 +5,6 @@ import type {
 } from './providers/droid/DroidProviderSession.js';
 import type { ProviderSession } from './providers/providerTypes.js';
 import type { ChildOperationTarget } from './SessionContext.js';
-import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
 import { publishedStreamFidelity } from './childStreamFidelity.js';
 import type {
   Autonomy,
@@ -15,6 +14,31 @@ import type {
   StreamFidelity,
 } from './protocol.js';
 import { normalizeAutonomy, reasoningValue, type SessionInitResult } from './sessionHelpers.js';
+
+export type PersistedChildRole = 'worker' | 'validator';
+export type PersistedChildStatus = 'pending' | 'running' | 'paused' | 'completed';
+
+export interface PersistedChildSpawnLink {
+  kind: 'tool-use' | 'spawn';
+  id: string;
+}
+
+export interface PersistedChildSession {
+  parentAppSessionId: string;
+  childSessionId: string;
+  providerSessionId?: string;
+  previousProviderSessionIds?: string[];
+  role: PersistedChildRole;
+  label?: string;
+  prompt?: string;
+  status: PersistedChildStatus;
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  spawnLink?: PersistedChildSpawnLink;
+  transcriptAvailable: boolean;
+  startedAt?: number;
+  updatedAt: number;
+}
 /* eslint-disable @typescript-eslint/no-unused-vars -- persisted-only fields are intentionally omitted. */
 export interface ChildIdentity {
   parentAppSessionId: string;

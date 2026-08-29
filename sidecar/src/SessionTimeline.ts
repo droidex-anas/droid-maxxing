@@ -1,9 +1,3 @@
-import {
-  hydrateHistoricalSession,
-  loadSessionPage,
-  loadSessionTranscriptWindow,
-  resolveSessionChain,
-} from './history.js';
 import type {
   ChildSessionSummary,
   ProgressEntry,
@@ -22,21 +16,15 @@ import {
   projectTranscriptEvent,
   type CanonicalIdentity,
 } from './sessionEvents.js';
-import { historyPageFromStore, requireStoredSession } from './sessionCanonicalServing.js';
+import {
+  childHistoryPageFromStore,
+  historyPageFromStore,
+  requireStoredSession,
+} from './sessionCanonicalServing.js';
 import { StreamingDeltaCoalescer, streamingEventOwner } from './streamingDeltaCoalescer.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
-interface TimelineHistory {
-  recordEvent(event: TranscriptEvent): void;
-}
 type TimelineError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
-
-export interface SessionTimelineLoaders {
-  page: typeof loadSessionPage;
-  hydrateMission: typeof hydrateHistoricalSession;
-  resolveChain: typeof resolveSessionChain;
-  transcriptWindow: typeof loadSessionTranscriptWindow;
-}
 
 export interface SessionTimelineRegistry {
   resolveSummary(id: string): SessionSummary | undefined;
@@ -46,12 +34,10 @@ export interface SessionTimelineRegistry {
 
 export interface SessionTimelineDependencies {
   registry: SessionTimelineRegistry;
-  history: TimelineHistory;
   getChildSessions: (appSessionId: string) => ChildSessionSummary[];
   emit: (event: ServerEvent) => void;
   emitError: (error: TimelineError) => void;
   now?: () => number;
-  loaders?: SessionTimelineLoaders;
   transcriptStore?: Pick<TranscriptStore, 'append'> & Partial<Pick<TranscriptStore, 'page'>>;
   sessionStore?: Pick<SessionStore, 'get'>;
   canonicalIdentity?: CanonicalIdentity;
@@ -75,31 +61,8 @@ interface SessionHistoryPage {
 
 // Protocol mirror of src/lib/transcriptStoreMemory.ts. Scroll pages are smaller;
 // this ceiling also permits one bounded recent-tail repair after local release.
-const MAX_HISTORY_PAGE_EVENTS = 1_600;
-
-// Preserve the existing enumerable `cursor: undefined` loader boundary while
-// keeping the extracted module clean under exactOptionalPropertyTypes. Limits
-// tune only local disk/bridge page size; they never change provider traffic.
-function historyWindowOptions(
-  cursor: string | undefined,
-  limit: number | undefined,
-  role?: SessionRole,
-): { cursor?: string; limit?: number; role?: SessionRole } {
-  const options: { cursor?: string; limit?: number; role?: SessionRole } = {};
-  Object.defineProperty(options, 'cursor', { enumerable: true, value: cursor });
-  if (limit !== undefined && Number.isFinite(limit)) {
-    options.limit = Math.min(MAX_HISTORY_PAGE_EVENTS, Math.max(1, Math.floor(limit)));
-  }
-  if (role !== undefined) options.role = role;
-  return options;
-}
-
 const DEFAULT_STREAMING_COALESCE_MS = 40;
 const DEFAULT_STREAMING_COALESCE_MAX_BYTES = 64 * 1024;
-
-function dedupeProviderSessionIds(providerSessionIds: readonly string[]): string[] {
-  return [...new Set(providerSessionIds.filter(Boolean))];
-}
 
 export class StreamingTranscriptPersistenceError extends Error {
   readonly isReported = true;
@@ -126,17 +89,10 @@ function streamingSourceKey(appSessionId: string, sourceSessionId: string): stri
 
 export class SessionTimeline {
   private statusSeq = 0;
-  private readonly loaders: SessionTimelineLoaders;
   private readonly streaming: StreamingDeltaCoalescer;
   private readonly streamingFlushFailures = new Map<string, StreamingTranscriptPersistenceError>();
 
   constructor(private readonly dependencies: SessionTimelineDependencies) {
-    this.loaders = dependencies.loaders ?? {
-      page: loadSessionPage,
-      hydrateMission: hydrateHistoricalSession,
-      resolveChain: resolveSessionChain,
-      transcriptWindow: loadSessionTranscriptWindow,
-    };
     this.streaming = new StreamingDeltaCoalescer({
       windowMs: dependencies.streamingCoalesceMs ?? DEFAULT_STREAMING_COALESCE_MS,
       maxBytes: dependencies.streamingCoalesceMaxBytes ?? DEFAULT_STREAMING_COALESCE_MAX_BYTES,
@@ -148,109 +104,39 @@ export class SessionTimeline {
 
   load(appSessionIdOrProviderSessionId: string, cursor?: string, limit?: number): void {
     const store = this.dependencies.sessionStore;
-    const transcript = this.dependencies.transcriptStore;
-    const transcriptPage = transcript?.page?.bind(transcript);
-    if (store && transcriptPage) {
-      try {
-        const stored = requireStoredSession(store, appSessionIdOrProviderSessionId);
-        const page = historyPageFromStore(
-          { page: transcriptPage },
-          stored.summary.appSessionId,
-          cursor,
-          limit,
-        );
-        this.record(page.transcripts);
-        this.emitHistory({
-          appSessionId: stored.summary.appSessionId,
-          progress: [],
-          transcripts: page.transcripts,
-          ...(cursor
-            ? { mode: 'prepend' as const }
-            : {
-                mode: 'replace' as const,
-                childSessions: this.dependencies.getChildSessions(stored.summary.appSessionId),
-              }),
-          ...(page.olderCursor !== undefined ? { olderCursor: page.olderCursor } : {}),
-        });
-      } catch (error) {
-        const message = errMsg(error);
-        this.dependencies.emit({
-          type: 'session.history.error',
-          appSessionId: appSessionIdOrProviderSessionId,
-          message,
-        });
-        this.dependencies.emitError({
-          appSessionId: appSessionIdOrProviderSessionId,
-          message,
-          recoverable: true,
-        });
-      }
+    const transcriptPage = this.dependencies.transcriptStore?.page;
+    if (!store || !transcriptPage) {
+      this.emitHistoryError(appSessionIdOrProviderSessionId, 'Canonical transcript store is required.');
       return;
     }
-    const summary =
-      this.dependencies.registry.getCanonicalSummary(appSessionIdOrProviderSessionId) ??
-      this.dependencies.registry.resolveSummary(appSessionIdOrProviderSessionId);
-    const appSessionId = summary?.appSessionId ?? appSessionIdOrProviderSessionId;
-    const providerSessionId = summary?.providerSessionId ?? appSessionIdOrProviderSessionId;
     try {
-      const history =
-        summary?.sessionPurpose === 'mission-control'
-          ? this.loaders.hydrateMission(appSessionId, historyWindowOptions(cursor, limit))
-          : this.loadStandard(appSessionId, providerSessionId, cursor, limit);
-      const transcripts = history.transcripts.map((event) => ({ ...event, appSessionId }));
-      this.record(transcripts);
-      if (cursor) {
-        this.emitHistory({
-          appSessionId,
-          progress: [],
-          transcripts,
-          mode: 'prepend',
-          ...(history.olderCursor ? { olderCursor: history.olderCursor } : {}),
-        });
-        return;
-      }
+      const stored = requireStoredSession(store, appSessionIdOrProviderSessionId);
+      const page = historyPageFromStore(
+        { page: transcriptPage },
+        stored.summary.appSessionId,
+        cursor,
+        limit,
+      );
       this.emitHistory({
-        appSessionId,
-        progress: history.progress,
-        transcripts,
-        childSessions: this.dependencies.getChildSessions(appSessionId),
-        mode: 'replace',
-        ...(history.olderCursor ? { olderCursor: history.olderCursor } : {}),
+        appSessionId: stored.summary.appSessionId,
+        progress: [],
+        transcripts: page.transcripts,
+        ...(cursor
+          ? { mode: 'prepend' as const }
+          : {
+              mode: 'replace' as const,
+              childSessions: this.dependencies.getChildSessions(stored.summary.appSessionId),
+            }),
+        ...(page.olderCursor !== undefined ? { olderCursor: page.olderCursor } : {}),
       });
     } catch (error) {
-      if (cursor) {
-        this.emitHistory({
-          appSessionId,
-          progress: [],
-          transcripts: [],
-          mode: 'prepend',
-        });
-        return;
-      }
-      if (this.dependencies.registry.getLive(appSessionId)) {
-        this.emitHistory({
-          appSessionId,
-          progress: [],
-          transcripts: [],
-          childSessions: this.dependencies.getChildSessions(appSessionId),
-          mode: 'replace',
-        });
-        return;
-      }
-      const message = errMsg(error);
-      this.dependencies.emit({ type: 'session.history.error', appSessionId, message });
-      this.dependencies.emitError({
-        appSessionId,
-        message,
-        recoverable: true,
-      });
+      this.emitHistoryError(appSessionIdOrProviderSessionId, errMsg(error));
     }
   }
 
   loadChildHistory({
     appSessionId,
     childSessionId,
-    childProviderSessionIds,
     role,
     cursor,
     limit,
@@ -262,46 +148,30 @@ export class SessionTimeline {
     cursor?: string;
     limit?: number;
   }): void {
+    const transcriptPage = this.dependencies.transcriptStore?.page;
+    if (!transcriptPage) {
+      this.emitHistoryError(appSessionId, 'Canonical transcript store is required.', childSessionId);
+      return;
+    }
     try {
-      const currentProviderSessionId = childProviderSessionIds.at(-1) ?? childSessionId;
-      const discoveredChain = this.loaders.resolveChain(childSessionId, currentProviderSessionId);
-      const chain = dedupeProviderSessionIds([
-        ...childProviderSessionIds.slice(0, -1),
-        ...discoveredChain.filter((id) => id !== currentProviderSessionId),
-        currentProviderSessionId,
-      ]);
-      const window = this.loaders.transcriptWindow(
+      const page = childHistoryPageFromStore(
+        { page: transcriptPage },
         appSessionId,
-        chain,
-        historyWindowOptions(cursor, limit, role),
+        childSessionId,
+        cursor,
+        limit,
       );
-      const transcripts = window.events.map((event) => ({
-        ...event,
-        appSessionId,
-        sourceSessionId: childSessionId,
-        role,
-      }));
+      const transcripts = page.transcripts.map((event) => ({ ...event, role }));
       this.emitHistory({
         appSessionId,
         childSessionId,
         progress: [],
         transcripts,
         mode: cursor ? 'prepend' : 'replace',
-        ...(window.olderCursor ? { olderCursor: window.olderCursor } : {}),
+        ...(page.olderCursor ? { olderCursor: page.olderCursor } : {}),
       });
     } catch (error) {
-      const message = errMsg(error);
-      this.dependencies.emit({
-        type: 'session.history.error',
-        appSessionId,
-        childSessionId,
-        message,
-      });
-      this.dependencies.emitError({
-        appSessionId,
-        message,
-        recoverable: true,
-      });
+      this.emitHistoryError(appSessionId, errMsg(error), childSessionId);
     }
   }
 
@@ -401,7 +271,6 @@ export class SessionTimeline {
       this.emitRecordedEvent(projected);
       return;
     }
-    this.dependencies.history.recordEvent(event);
     this.emitRecordedEvent(event);
   }
 
@@ -458,24 +327,18 @@ export class SessionTimeline {
     });
   }
 
-  private loadStandard(
-    appSessionId: string,
-    providerSessionId: string,
-    cursor?: string,
-    limit?: number,
-  ): ReturnType<typeof hydrateHistoricalSession> {
-    const chain = this.loaders.resolveChain(appSessionId, providerSessionId);
-    if (chain.length === 0) throw new Error(`Session history not found for ${providerSessionId}`);
-    const window = this.loaders.transcriptWindow(
+  private emitHistoryError(appSessionId: string, message: string, childSessionId?: string): void {
+    this.dependencies.emit({
+      type: 'session.history.error',
       appSessionId,
-      chain,
-      historyWindowOptions(cursor, limit),
-    );
-    return {
-      progress: [],
-      transcripts: window.events,
-      ...(window.olderCursor ? { olderCursor: window.olderCursor } : {}),
-    };
+      ...(childSessionId ? { childSessionId } : {}),
+      message,
+    });
+    this.dependencies.emitError({
+      appSessionId,
+      message,
+      recoverable: true,
+    });
   }
 
   private emitHistory(page: SessionHistoryPage): void {
@@ -491,9 +354,5 @@ export class SessionTimeline {
       loadedCount: page.transcripts.length,
       hasMore: Boolean(page.olderCursor),
     });
-  }
-
-  private record(events: TranscriptEvent[]): void {
-    for (const event of events) this.dependencies.history.recordEvent(event);
   }
 }

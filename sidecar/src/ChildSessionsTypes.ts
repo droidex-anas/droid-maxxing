@@ -1,5 +1,5 @@
+import type { ChildPersistence } from './childCanonicalPersistence.js';
 import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
-import type { HistoryIndex, PersistedChildSession } from './history.js';
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import type { SessionRegistry } from './SessionRegistry.js';
 import type { SessionTimeline } from './SessionTimeline.js';
@@ -8,7 +8,12 @@ import type { DroidInteractions } from './providers/droid/DroidInteractions.js';
 import type { SessionContext } from './SessionContext.js';
 import type { SessionCompaction } from './SessionCompaction.js';
 import type { SessionInitResult } from './sessionHelpers.js';
-import type { ChildParentLease, ChildRuntimeTarget, ChildSettings } from './ChildSessionState.js';
+import type {
+  ChildParentLease,
+  ChildRuntimeTarget,
+  ChildSettings,
+  PersistedChildSession,
+} from './ChildSessionState.js';
 
 export type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 
@@ -21,12 +26,8 @@ export type ChildSettingsTarget = ChildRuntimeTarget & {
 export interface ChildSessionsDependencies {
   runtime: Pick<FactoryRuntime, 'loadSession'>;
   registry: Pick<SessionRegistry<ChildParentLease>, 'getLive'>;
-  history: Pick<HistoryIndex, 'childSessions' | 'childSession' | 'sessionLaunchSettings'> & {
-    // Mirrors HistoryIndex.upsertChildSession: false means the child update is
-    // queued behind durability and must not be published yet; true/undefined
-    // both mean the update is safe to publish immediately.
-    upsertChildSession(child: PersistedChildSession): boolean | undefined;
-  };
+  childPersistence: ChildPersistence;
+  readLaunchSettings(providerSessionId: string): ChildSettings | undefined;
   timeline: Pick<
     SessionTimeline,
     'append' | 'appendStatus' | 'loadChildHistory' | 'flushStreamingFor' | 'settleStreaming'

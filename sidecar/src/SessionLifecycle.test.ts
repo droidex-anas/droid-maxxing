@@ -84,6 +84,9 @@ function wrapSessionStore(store: SessionStore, calls: RecordedCall[]) {
       list: store.list.bind(store),
       updateResumeState: store.updateResumeState.bind(store),
       replaceProviderRuntime: store.replaceProviderRuntime.bind(store),
+      upsertChild: store.upsertChild.bind(store),
+      getChild: store.getChild.bind(store),
+      listChildren: store.listChildren.bind(store),
       updateSummary: (...args: Parameters<SessionStore['updateSummary']>) => {
         if (nextUpdateError) {
           const error = nextUpdateError;

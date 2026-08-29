@@ -9,7 +9,8 @@ import {
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSessionsDependencies } from './ChildSessionsTypes.js';
 import type { ChildParentLease } from './ChildSessionState.js';
-import type { PersistedChildSession } from './history.js';
+import { memoryChildPersistence } from './childCanonicalPersistence.js';
+import type { PersistedChildSession } from './ChildSessionState.js';
 import type {
   AutoCompactionSettlement,
   ChildAutomaticCompactionTarget,
@@ -21,7 +22,6 @@ import {
   type RecordedCall,
   type StreamGate,
 } from './testing/fakeFactoryRuntime.js';
-import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
 import {
   assertUnsupportedCapability,
@@ -36,7 +36,18 @@ interface Harness {
   calls: RecordedCall[];
   events: ServerEvent[];
   sequence: string[];
-  history: FakeHistoryIndex;
+  history: {
+    childSession(
+      parentAppSessionId: string,
+      childSessionId: string,
+    ): PersistedChildSession | undefined;
+    childSessions(parentAppSessionId: string): PersistedChildSession[];
+    seedSessionLaunchSettings(
+      providerSessionId: string,
+      settings: { modelId?: string; reasoningEffort?: ReasoningEffort },
+    ): void;
+    upsertChildSession(child: PersistedChildSession): boolean | undefined;
+  };
   runtime: FakeFactoryRuntime;
   owner: ChildSessions;
   parentId: string;
@@ -64,7 +75,11 @@ function createHarness(
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
   const sequence: string[] = [];
-  const history = new FakeHistoryIndex(calls);
+  const store = memoryChildPersistence();
+  const launchSettings = new Map<
+    string,
+    { modelId?: string; reasoningEffort?: ReasoningEffort }
+  >();
   const runtime = new FakeFactoryRuntime(calls);
   const parentId = 'parent';
   let missReplayChildOnce = options.missReplayChildOnce;
@@ -78,22 +93,40 @@ function createHarness(
     failDriveSetup = undefined;
     throw new Error(`${stage} failed`);
   };
-  const upsertChildSession = history.upsertChildSession.bind(history);
-  history.upsertChildSession = (child) => {
-    if (child.status === 'running') throwDriveSetup('commit');
-    const durable = upsertChildSession(child);
-    if (child.status === deferDurabilityForStatus) {
-      deferDurabilityForStatus = undefined;
-      return false;
-    }
-    return durable;
-  };
-  history.seedChildSessions(records);
   let parent = parentLease(parentId, calls);
+  const history = {
+    childSession(parentAppSessionId: string, childSessionId: string) {
+      return store.get(parentAppSessionId, childSessionId);
+    },
+    childSessions(parentAppSessionId: string) {
+      return store.list(parentAppSessionId);
+    },
+    seedSessionLaunchSettings(
+      providerSessionId: string,
+      settings: { modelId?: string; reasoningEffort?: ReasoningEffort },
+    ) {
+      launchSettings.set(providerSessionId, settings);
+    },
+    upsertChildSession(child: PersistedChildSession): boolean | undefined {
+      if (child.status === 'running') throwDriveSetup('commit');
+      calls.push({ target: 'history', method: 'upsertChildSession', args: [child] });
+      if (child.status === deferDurabilityForStatus) {
+        deferDurabilityForStatus = undefined;
+        return false;
+      }
+      return store.upsert(child, parent.binding);
+    },
+  };
+  for (const record of records) store.upsert(record, parent.binding);
   const dependencies: ChildSessionsDependencies = {
     runtime,
     registry: { getLive: (id) => (id === parentId ? parent : undefined) },
-    history,
+    childPersistence: {
+      list: (id) => store.list(id),
+      get: (parentId, childId) => store.get(parentId, childId),
+      upsert: (child) => history.upsertChildSession(child),
+    },
+    readLaunchSettings: (providerSessionId) => launchSettings.get(providerSessionId),
     timeline: {
       append: (event) => {
         calls.push({ target: 'protocol', method: 'timeline.append', args: [event] });

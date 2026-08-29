@@ -39,40 +39,13 @@ test('production construction opens SessionStore and TranscriptStore', () => {
   }
 });
 
-test('abandonOwnedSidecarResources closes history and browsers then rethrows', async () => {
-  let historyClosed = 0;
+test('abandonOwnedSidecarResources closes browsers then rethrows', async () => {
   let browsersClosed = 0;
   const bindError = new Error('schema mismatch');
   assert.throws(
     () =>
       abandonOwnedSidecarResources(
         {
-          closeHistory: () => {
-            historyClosed += 1;
-          },
-          closeBrowsers: async () => {
-            browsersClosed += 1;
-          },
-        },
-        bindError,
-      ),
-    (error: unknown) => error === bindError,
-  );
-  assert.equal(historyClosed, 1);
-  await Promise.resolve();
-  assert.equal(browsersClosed, 1);
-});
-
-test('abandonOwnedSidecarResources still closes browsers if history.close throws', async () => {
-  let browsersClosed = 0;
-  const bindError = new Error('wal failed');
-  assert.throws(
-    () =>
-      abandonOwnedSidecarResources(
-        {
-          closeHistory: () => {
-            throw new Error('history close failed');
-          },
           closeBrowsers: async () => {
             browsersClosed += 1;
           },
@@ -97,16 +70,10 @@ test('production bind failure closes already constructed sidecar resources', asy
   } finally {
     bad.close();
   }
-  let historyClosed = 0;
   let browsersClosed = 0;
   try {
     assert.throws(() =>
       bindCanonicalStoresForManager(undefined, {
-        history: {
-          close: () => {
-            historyClosed += 1;
-          },
-        },
         browsers: {
           closeAll: async () => {
             browsersClosed += 1;
@@ -114,7 +81,6 @@ test('production bind failure closes already constructed sidecar resources', asy
         },
       }),
     );
-    assert.equal(historyClosed, 1);
     await Promise.resolve();
     assert.equal(browsersClosed, 1);
   } finally {

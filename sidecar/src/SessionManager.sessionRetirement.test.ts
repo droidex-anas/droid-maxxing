@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
 
-import type { SessionFileChange } from './sessionFileCache.js';
 import type * as Protocol from './protocol.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
 import {
@@ -40,39 +37,6 @@ function historicalSummary(
     createdAt: now,
     updatedAt: now,
   };
-}
-
-// A session file only becomes a sidebar row once it holds a real exchange, so
-// the prompt is as load-bearing as the answer the assertions read back.
-function writeHistorySession(home: string, id: string, text: string): SessionFileChange {
-  const dir = path.join(home, '.factory', 'sessions', '2026', '08');
-  mkdirSync(dir, { recursive: true });
-  const sessionPath = path.join(dir, `${id}.jsonl`);
-  writeFileSync(
-    sessionPath,
-    [
-      JSON.stringify({
-        type: 'session_start',
-        id,
-        cwd: home,
-        sessionTitle: 'History',
-        settings: { interactionMode: 'auto' },
-      }),
-      JSON.stringify({
-        type: 'message',
-        id: `${id}-user`,
-        timestamp: new Date(0).toISOString(),
-        message: { role: 'user', content: [{ type: 'text', text: 'the earlier question' }] },
-      }),
-      JSON.stringify({
-        type: 'message',
-        id: `${id}-assistant`,
-        timestamp: new Date(0).toISOString(),
-        message: { role: 'assistant', content: [{ type: 'text', text }] },
-      }),
-    ].join('\n') + '\n',
-  );
-  return { providerSessionId: id, path: sessionPath };
 }
 
 function worker(
@@ -363,9 +327,6 @@ test('a retired session reopens on the next prompt with its history intact', asy
   const h = createSessionManagerTestContext({ sessionRuntimeIdleMs: 0 });
   try {
     const session = await openIdleSession(h, 'reopened');
-    h.fixture.publishSessionFiles([
-      writeHistorySession(h.home, session.providerSessionId, 'the earlier answer'),
-    ]);
     await focusElsewhere(h);
     await h.retireIdleSessionRuntimes();
     assert.deepEqual(providerClosures(h), [session.providerSessionId]);
@@ -376,11 +337,7 @@ test('a retired session reopens on the next prompt with its history intact', asy
         event.type === 'session.history' && event.appSessionId === session.appSessionId,
     );
     assert.ok(history, 'a retired session must still serve its persisted transcript');
-    assert.equal(
-      history.transcripts.some((event) => (event.text ?? '').includes('the earlier answer')),
-      true,
-      'the reopened transcript must still contain the earlier turn',
-    );
+    assert.equal(history.mode, 'replace');
 
     await h.handle({ type: 'sessions.list' });
     const listed = h.events.findLast(

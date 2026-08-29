@@ -42,6 +42,9 @@ export interface SessionCreatePersistence {
     | 'updateSummary'
     | 'updateResumeState'
     | 'replaceProviderRuntime'
+    | 'upsertChild'
+    | 'getChild'
+    | 'listChildren'
   >;
   transcriptStore?: Pick<TranscriptStore, 'beginTurn' | 'settleTurn' | 'append' | 'page' | 'search'>;
   atomic?: <T>(work: () => T) => T;

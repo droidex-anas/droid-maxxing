@@ -61,7 +61,7 @@ export interface UpsertChildInput {
   childSessionId: string;
   summary: ChildSessionSummary;
   binding: Pick<ProviderBinding, 'providerDriverKind' | 'providerInstanceId'> &
-    Partial<Pick<ProviderBinding, 'providerSessionId' | 'resumeState'>>;
+    Partial<Pick<ProviderBinding, 'providerSessionId' | 'resumeState' | 'previousProviderSessionIds'>>;
 }
 
 export class SessionStore {
@@ -148,9 +148,10 @@ export class SessionStore {
         parent_app_session_id, child_session_id, provider_driver_kind, provider_instance_id,
         provider_session_id, previous_provider_session_ids_json, resume_state_json,
         runtime_generation, summary_json, lifecycle_status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, '[]', ?, 0, ?, 'running', ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'running', ?, ?)
       ON CONFLICT (parent_app_session_id, child_session_id) DO UPDATE SET
         provider_session_id = excluded.provider_session_id,
+        previous_provider_session_ids_json = excluded.previous_provider_session_ids_json,
         resume_state_json = excluded.resume_state_json,
         summary_json = excluded.summary_json,
         lifecycle_status = excluded.lifecycle_status,
@@ -163,7 +164,7 @@ export class SessionStore {
     this.selectChildren = db.prepare(`
       SELECT * FROM child_sessions
       WHERE parent_app_session_id = ?
-      ORDER BY updated_at DESC, child_session_id DESC
+      ORDER BY updated_at ASC, child_session_id ASC
     `);
   }
 
@@ -411,6 +412,7 @@ export class SessionStore {
         input.binding.providerDriverKind,
         input.binding.providerInstanceId,
         input.binding.providerSessionId ?? null,
+        encodePreviousProviderSessionIds(input.binding.previousProviderSessionIds ?? []),
         encodeResumeState(input.binding.resumeState),
         summaryJson,
         now,
