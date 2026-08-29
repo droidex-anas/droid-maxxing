@@ -40,6 +40,8 @@ export class FakeHistoryIndex {
     Pick<Protocol.FactoryDefaultSettings, 'modelId' | 'reasoningEffort'>
   >();
 
+  persistChildSession?: (child: PersistedChildSession) => void;
+
   constructor(private readonly calls: RecordedCall[]) {}
 
   syncSummaries(summaries: Protocol.SessionSummary[]): boolean | undefined {
@@ -93,21 +95,12 @@ export class FakeHistoryIndex {
     return { patches, hiddenProviderSessionIds };
   }
 
-  // The fake does not scan transcripts; tests that exercise the
-  // sessions.search command seed the results they expect back.
-  nextSearchResults: Protocol.SessionSearchResult[] = [];
-  nextIndexingIncomplete = false;
-  lastSearchQuery: string | null = null;
-
-  // Mirrors the production contract: records the query for assertions and
-  // returns nothing once the scan has been superseded.
-  searchSessions(query?: string, isStale?: () => boolean): Promise<Protocol.HistorySearchReply> {
-    this.lastSearchQuery = query ?? null;
-    return Promise.resolve({
-      results: isStale?.() ? [] : this.nextSearchResults,
-      indexingIncomplete: this.nextIndexingIncomplete,
-    });
-  }
+  // Optional store-search stand-in so tests can gate or supersede a scan
+  // without going through Factory history.
+  searchImpl?: (
+    query: string,
+    isStale?: () => boolean,
+  ) => Promise<Protocol.SessionSearchResult[]>;
 
   readonly indexingIdleStates: boolean[] = [];
 
@@ -127,6 +120,7 @@ export class FakeHistoryIndex {
       method: 'upsertChildSession',
       args: [child],
     });
+    this.persistChildSession?.(child);
     return undefined;
   }
 

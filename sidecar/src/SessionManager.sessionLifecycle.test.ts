@@ -402,7 +402,7 @@ test('[L6] Send lazily resumes a historical session', { concurrency: false }, as
 });
 
 test(
-  'mixed stable and provider identities preserve output across turns',
+  'resumed session output stays on the app identity across turns',
   { concurrency: false },
   async () => {
     const h = createSessionManagerTestContext();
@@ -416,7 +416,7 @@ test(
       h.runtime.loadQueue.set('provider-alias', [provider]);
 
       await h.handle({ type: 'session.send', appSessionId: 'app-alias', text: 'first' });
-      await h.handle({ type: 'session.send', appSessionId: 'provider-alias', text: 'second' });
+      await h.handle({ type: 'session.send', appSessionId: 'app-alias', text: 'second' });
 
       const textEvents = h.events.flatMap((event) =>
         event.type === 'event.appended' && event.event.kind === 'text' ? [event.event] : [],
@@ -457,7 +457,7 @@ test(
       writeProviderConversation(h.home, providerSessionId, 'Pending alias');
       await h.handle({
         type: 'settings.agent.update',
-        appSessionId: providerSessionId,
+        appSessionId: 'app-pending-alias',
         agent: 'primary',
         modelId: 'model-default',
       });
@@ -468,7 +468,7 @@ test(
 
       await h.handle({
         type: 'session.send',
-        appSessionId: providerSessionId,
+        appSessionId: 'app-pending-alias',
         text: 'apply pending model',
       });
 
@@ -827,7 +827,7 @@ test(
 );
 
 test(
-  'two creates with the same clientRef open two independent sessions',
+  'two creates with the same clientRef replay the stored session',
   { concurrency: false },
   async () => {
     const h = createSessionManagerTestContext();
@@ -856,24 +856,13 @@ test(
           autonomy: 'low',
         }),
       });
-      await h.provider.waitForPrompts('provider-2', 1);
 
       const created = h.events.filter((event) => event.type === 'session.created');
-      // No-store characterization: durable clientRef replay is F7's store path.
-      assert.equal(created.length, 2);
-      assert.equal(created[0]?.clientRef, 'shared-ref');
-      assert.equal(created[1]?.clientRef, 'shared-ref');
-      assert.equal(created[0]?.session.appSessionId, 'provider-1');
-      assert.equal(created[1]?.session.appSessionId, 'provider-2');
-      assert.equal(created[0]?.session.title, 'First');
-      assert.equal(created[1]?.session.title, 'Second');
-      assert.equal(h.runtime.createCalls.length, 2);
+      assert.equal(h.runtime.createCalls.length, 1);
+      assert.equal(created.at(-1)?.session.appSessionId, 'provider-1');
+      assert.equal(created.at(-1)?.session.title, 'First');
       assert.deepEqual(h.provider.session('provider-1').prompts, ['one']);
-      assert.deepEqual(h.provider.session('provider-2').prompts, ['two']);
-      assert.equal(
-        h.events.some((event) => event.type === 'error'),
-        false,
-      );
+      assert.equal(h.fixture.storedSession('provider-1')?.summary.title, 'First');
     } finally {
       await h.dispose();
     }
@@ -911,9 +900,6 @@ test('Summary patches preserve existing provider transcripts', { concurrency: fa
     writeFileSync(file, transcript);
 
     await h.waitForIdle();
-    const syncSummariesBefore = h.calls.filter(
-      (call) => call.target === 'history' && call.method === 'syncSummaries',
-    ).length;
 
     await h.handle({
       type: 'session.updateSettings',
@@ -926,18 +912,11 @@ test('Summary patches preserve existing provider transcripts', { concurrency: fa
     });
 
     assert.equal(
-      h.calls.filter((call) => call.target === 'history' && call.method === 'syncSummaries').length,
-      syncSummariesBefore + 1,
-    );
-    assert.equal(
       h.events.filter((event) => event.type === 'session.updated').at(-1)?.session.configuration
         .autonomy,
       'high',
     );
-    assert.equal(
-      h.history.summaryPatchesAndHidden().patches.get('provider-1')?.configuration?.autonomy,
-      'high',
-    );
+    assert.equal(h.fixture.storedSession('provider-1')?.summary.configuration.autonomy, 'high');
     assert.equal(readFileSync(file, 'utf8'), transcript);
   } finally {
     await h.dispose();

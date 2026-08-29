@@ -262,23 +262,32 @@ export class SessionTimeline {
 
   private recordAndEmit(event: TranscriptEvent): void {
     const store = this.dependencies.transcriptStore;
-    if (store) {
-      const persisted = store.append(
-        liftRendererTranscriptEvent(event, this.canonicalIdentityFor(event)),
-      );
-      const projected = projectTranscriptEvent(persisted);
-      if (!projected) return;
-      this.emitRecordedEvent(projected);
+    if (!store) {
+      this.emitRecordedEvent(event);
       return;
     }
-    this.emitRecordedEvent(event);
+    const persistStartedAt = performance.now();
+    let persisted;
+    try {
+      persisted = store.append(
+        liftRendererTranscriptEvent(event, this.canonicalIdentityFor(event)),
+      );
+    } catch (error) {
+      hotPathMetrics.recordPersistenceFailure();
+      throw error;
+    }
+    hotPathMetrics.recordPersist(performance.now() - persistStartedAt);
+    const projected = projectTranscriptEvent(persisted);
+    if (!projected) return;
+    this.emitRecordedEvent(projected);
   }
 
   private emitRecordedEvent(event: TranscriptEvent): void {
     // Emit timing covers handoff into the ordered bridge queue. Priority or
     // size-boundary events can synchronously trigger a flush inside that call;
-    // transportMs isolates the serialization + fan-out slice. Persistence is
-    // measured independently by the worker-backed persistence queue.
+    // transportMs isolates the serialization + fan-out slice. Persist timing is
+    // recorded around the in-process TranscriptStore append.
+
     const emitStartedAt = performance.now();
     this.dependencies.emit({ type: 'event.appended', event });
     hotPathMetrics.recordEmit(performance.now() - emitStartedAt);

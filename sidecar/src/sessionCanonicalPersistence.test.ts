@@ -103,3 +103,39 @@ test('an injected DroidexDatabase is reused', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('an injected SessionStore is reused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-canonical-store-'));
+  const db = new DroidexDatabase(join(dir, 'state', 'droidex.sqlite'));
+  try {
+    const first = bindCanonicalStores({ database: db }, { createIfMissing: false });
+    const bound = bindCanonicalStores(
+      { database: db, sessionStore: first.lifecycle.sessionStore },
+      { createIfMissing: false },
+    );
+    assert.equal(bound.lifecycle.sessionStore, first.lifecycle.sessionStore);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('manager bind opens a canonical database when runtime dependencies omit one', () => {
+  const previous = process.env.DROIDEX_USER_DATA_DIR;
+  const dir = mkdtempSync(join(tmpdir(), 'droidex-canonical-manager-'));
+  process.env.DROIDEX_USER_DATA_DIR = dir;
+  try {
+    const bound = bindCanonicalStoresForManager(
+      { nextAppSessionId: () => 'app-test' },
+      { browsers: { closeAll: async () => undefined } },
+    );
+    assert.ok(bound.database instanceof DroidexDatabase);
+    assert.ok(bound.lifecycle.sessionStore);
+    assert.ok(bound.lifecycle.transcriptStore);
+    bound.database.close();
+  } finally {
+    if (previous === undefined) delete process.env.DROIDEX_USER_DATA_DIR;
+    else process.env.DROIDEX_USER_DATA_DIR = previous;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

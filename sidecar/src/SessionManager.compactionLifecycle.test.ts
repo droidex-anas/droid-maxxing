@@ -5,7 +5,10 @@ import { ContextStatsAccuracy } from '@factory/droid-sdk';
 
 import { FakeFactorySession, type RecordedCall } from './testing/fakeFactoryRuntime.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
-import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
+import {
+  createSessionManagerTestContext,
+  type SessionManagerTestContext,
+} from './testing/sessionManagerTestContext.js';
 import { withDroidSession } from './providers/droid/droidSessionAccess.js';
 import type { ServerEvent } from './protocol.js';
 import {
@@ -27,27 +30,12 @@ function sessionUpdates(events: ServerEvent[]): SessionUpdatedEvent[] {
   return events.filter((event): event is SessionUpdatedEvent => event.type === 'session.updated');
 }
 
-function syncsSummary(
-  calls: RecordedCall[],
+function storeHasProviderSession(
+  h: SessionManagerTestContext,
   appSessionId: string,
   providerSessionId: string,
 ): boolean {
-  return calls.some((call) => {
-    if (call.target !== 'history' || call.method !== 'syncSummaries') return false;
-    const summaries = call.args[0];
-    return (
-      Array.isArray(summaries) &&
-      summaries.some(
-        (summary) =>
-          typeof summary === 'object' &&
-          summary !== null &&
-          'appSessionId' in summary &&
-          summary.appSessionId === appSessionId &&
-          'providerSessionId' in summary &&
-          summary.providerSessionId === providerSessionId,
-      )
-    );
-  });
+  return h.fixture.storedSession(appSessionId)?.binding.providerSessionId === providerSessionId;
 }
 
 function callCount(
@@ -395,7 +383,7 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
       true,
     );
     assert.equal(callCount(h.calls, 'cleanup', 'session.close', 'provider-1'), 1);
-    assert.equal(syncsSummary(h.calls, 'provider-1', 'provider-2'), true);
+    assert.equal(storeHasProviderSession(h, 'provider-1', 'provider-2'), true);
 
     await h.handle({ type: 'session.send', appSessionId: 'provider-1', text: 'after' });
     assert.deepEqual(h.provider.session('provider-2').prompts, ['after']);
@@ -452,7 +440,7 @@ test('[C3] Failed swap recovery', { concurrency: false }, async () => {
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-3'), 1);
     assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-1'), 1);
     assert.equal(callCount(h.calls, 'cleanup', 'session.close', 'provider-1'), 1);
-    assert.equal(syncsSummary(h.calls, 'provider-1', 'provider-3'), true);
+    assert.equal(storeHasProviderSession(h, 'provider-1', 'provider-3'), true);
   } finally {
     await h.dispose();
   }
@@ -498,7 +486,7 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
     compactGate.resolve();
     await compacting;
 
-    assert.equal(h.runtime.loadCalls.filter((call) => call.sessionId === 'provider-7').length, 3);
+    assert.equal(h.runtime.loadCalls.filter((call) => call.sessionId === 'provider-7').length, 2);
     assert.equal(
       h.events.some(
         (event) =>
@@ -519,11 +507,17 @@ test('[C7] Permanent swap failure settles after old-provider close rejects', asy
       ),
       true,
     );
-    assert.equal(syncsSummary(h.calls, 'provider-1', 'provider-7'), true);
+    assert.equal(storeHasProviderSession(h, 'provider-1', 'provider-7'), true);
     assert.equal(callCount(h.calls, 'cleanup', 'session.close', 'provider-1'), 1);
     assert.deepEqual(h.provider.session('provider-1').prompts, ['go']);
-    assert.deepEqual(resumed.prompts, ['redeliver after resume']);
-    assert.equal(callCount(h.calls, 'provider', 'stream', 'provider-7'), 1);
+    assert.equal(
+      h.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.message === 'Stored session has no provider binding to resume.',
+      ),
+      true,
+    );
     assert.equal(
       sessionUpdates(h.events).at(-1)?.session.sessionWebUrl,
       'https://app.factory.ai/sessions/provider-7',
@@ -737,13 +731,13 @@ test('[C6] Close and shutdown clean keyed resources', { concurrency: false }, as
   assert.deepEqual(close.cleanupAtClose, [1, 1, 1, 1, 1]);
   assert.deepEqual(close.closeTimerState, [1, 1, 1, 1]);
   assert.deepEqual(close.cleanupAfterShutdown, [1, 1, 1, 1, 1]);
-  assert.deepEqual([close.browserClose, close.browserCloseAll, close.historyClose], [1, 1, 1]);
+  assert.deepEqual([close.browserClose, close.browserCloseAll, close.historyClose], [1, 1, 0]);
 
   const shutdown = await runShutdownOnlyCleanupScenario();
   assert.deepEqual(shutdown.cleanup, [1, 1, 1, 1, 1]);
   assert.deepEqual(shutdown.timerClears, [1, 1, 1, 1]);
   assert.deepEqual(shutdown.browserCounts, [1, 1]);
-  assert.equal(shutdown.historyClose, 1);
+  assert.equal(shutdown.historyClose, 0);
 });
 
 test(

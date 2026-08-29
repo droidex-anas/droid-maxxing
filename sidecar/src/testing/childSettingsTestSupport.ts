@@ -11,6 +11,8 @@ import { FakeFactorySession } from './fakeFactoryRuntime.js';
 import type { SessionManagerTestContext } from './sessionManagerTestContext.js';
 import { droidSessionConfiguration } from '../providers/providerIdentity.js';
 
+let missionCreateCount = 0;
+
 export function latestSessionList(events: ServerEvent[]): SessionSummary[] {
   return events.filter((event) => event.type === 'sessions.list').at(-1)?.sessions ?? [];
 }
@@ -18,13 +20,14 @@ export function latestSessionList(events: ServerEvent[]): SessionSummary[] {
 export async function createMission(
   h: SessionManagerTestContext,
   options: {
+    clientRef?: string;
     workerModel?: string;
     validatorModel?: string;
   } = {},
 ): Promise<void> {
   await h.create({
     sessionPurpose: 'mission-control',
-    clientRef: 'child-settings',
+    clientRef: options.clientRef ?? `child-settings-${++missionCreateCount}`,
     title: 'Child settings',
     goal: 'go',
     configuration: droidSessionConfiguration({

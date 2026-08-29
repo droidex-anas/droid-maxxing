@@ -14,7 +14,8 @@ import {
 } from '../SessionManager.js';
 import type * as Protocol from '../protocol.js';
 import { DroidexDatabase } from '../persistence/DroidexDatabase.js';
-import { SessionStore } from '../persistence/SessionStore.js';
+import { SessionStore, type StoredSession } from '../persistence/SessionStore.js';
+import { TranscriptStore } from '../persistence/TranscriptStore.js';
 import { FakeBrowserSessionManager } from './browserCharacterizationSupport.js';
 import {
   FakeFactoryRuntime,
@@ -69,6 +70,7 @@ export interface SessionManagerTestContext {
       parentAppSessionId: string,
       childSessionId: string,
     ): PersistedChildSession | undefined;
+    storedSession(appSessionId: string): StoredSession | undefined;
     publishSessionFiles(): void;
   };
   readonly browsers: FakeBrowserSessionManager;
@@ -176,7 +178,58 @@ export function createSessionManagerTestContext(
       path.join(home, 'Library', 'Application Support', 'DROIDEX', 'state', 'droidex.sqlite'),
     );
   const sessionStore = database instanceof DroidexDatabase ? new SessionStore(database) : undefined;
+  const rawTranscript =
+    database instanceof DroidexDatabase ? new TranscriptStore(database) : undefined;
   dependencies.database = database;
+  if (rawTranscript) {
+    dependencies.transcriptStore = {
+      beginTurn: (input) => rawTranscript.beginTurn(input),
+      settleTurn: (turnId, input) => rawTranscript.settleTurn(turnId, input),
+      page: (input) => rawTranscript.page(input),
+      search: (query, isStale) =>
+        history.searchImpl
+          ? history.searchImpl(query, isStale)
+          : rawTranscript.search(query, isStale),
+      append: (event) => {
+        const failure = history.recordEventErrorForText;
+        if (failure && JSON.stringify(event).includes(failure.text)) {
+          delete history.recordEventErrorForText;
+          throw failure.error;
+        }
+        const persisted = rawTranscript.append(event);
+        calls.push({ target: 'store', method: 'append', args: [event] });
+        return persisted;
+      },
+    };
+  }
+  if (sessionStore) {
+    const replaceProviderRuntime = sessionStore.replaceProviderRuntime.bind(sessionStore);
+    sessionStore.replaceProviderRuntime = (
+      appSessionId,
+      expectedGeneration,
+      providerSessionId,
+      resumeState,
+    ) => {
+      const error = history.nextSyncError;
+      if (error) {
+        delete history.nextSyncError;
+        throw error;
+      }
+      return replaceProviderRuntime(
+        appSessionId,
+        expectedGeneration,
+        providerSessionId,
+        resumeState,
+      );
+    };
+    dependencies.sessionStore = sessionStore;
+    const persistence = childPersistenceFromStore(sessionStore);
+    history.persistChildSession = (child) => {
+      const parent = sessionStore.get(child.parentAppSessionId);
+      if (!parent) return;
+      persistence.upsert(child, parent.binding);
+    };
+  }
   let manager: SessionManager;
   try {
     manager = new SessionManager(recordEvent, { dependencies, initialModels: INITIAL_MODELS });
@@ -227,25 +280,28 @@ export function createSessionManagerTestContext(
             summary,
           });
           if (summary.providerSessionId) {
-            sessionStore.bindInitialProviderRuntime(summary.appSessionId, 0, summary.providerSessionId);
+            sessionStore.bindInitialProviderRuntime(
+              summary.appSessionId,
+              0,
+              summary.providerSessionId,
+              { schemaVersion: 1, sessionId: summary.providerSessionId },
+            );
           }
           sessionStore.markStarted(summary.appSessionId);
         }
       },
       seedChildSessions: (children) => {
-        const records = children.map((child) => ({
-          ...child,
-          providerSessionId: child.childSessionId,
-          updatedAt: Date.now(),
-        }));
+        const records = children.map((child) => {
+          const seeded = child as Protocol.ChildSessionSummary & {
+            providerSessionId?: string;
+          };
+          return {
+            ...child,
+            providerSessionId: seeded.providerSessionId ?? child.childSessionId,
+            updatedAt: Date.now(),
+          };
+        });
         history.seedChildSessions(records);
-        if (!sessionStore) return;
-        const persistence = childPersistenceFromStore(sessionStore);
-        for (const record of records) {
-          const parent = sessionStore.get(record.parentAppSessionId);
-          if (!parent) continue;
-          persistence.upsert(record, parent.binding);
-        }
       },
       childRecords: (parentAppSessionId: string) =>
         sessionStore ? childPersistenceFromStore(sessionStore).list(parentAppSessionId) : [],
@@ -253,6 +309,7 @@ export function createSessionManagerTestContext(
         sessionStore
           ? childPersistenceFromStore(sessionStore).get(parentAppSessionId, childSessionId)
           : undefined,
+      storedSession: (appSessionId: string) => sessionStore?.get(appSessionId),
       publishSessionFiles: () => undefined,
     },
     browsers,

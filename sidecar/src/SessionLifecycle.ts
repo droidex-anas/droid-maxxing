@@ -650,13 +650,26 @@ export class SessionLifecycle {
     liveSession: LiveSession,
     event: Extract<ProviderRuntimeEvent, { type: 'turn.settled' }>,
   ): void {
-    const turnId = event.turnId ?? liveSession.activeTurn?.turnId;
+    const active = liveSession.activeTurn;
+    const turnId =
+      event.turnId ??
+      (active && active.runtimeGeneration === event.runtimeGeneration ? active.turnId : undefined);
     if (turnId === undefined) return;
-    this.dependencies.transcriptStore?.settleTurn(turnId, {
-      runtimeGeneration: event.runtimeGeneration,
-      status: event.settlement.status,
-      settledAt: new Date(event.createdAt).toISOString(),
-    });
+    try {
+      this.dependencies.transcriptStore?.settleTurn(turnId, {
+        runtimeGeneration: event.runtimeGeneration,
+        status: event.settlement.status,
+        settledAt: new Date(event.createdAt).toISOString(),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes('does not match settlement generation')
+      ) {
+        return;
+      }
+      throw error;
+    }
     const waiter = this.turnWaiters.get(turnKey(liveSession.summary.appSessionId, turnId));
     if (waiter && !waiter.settled) {
       waiter.settled = true;

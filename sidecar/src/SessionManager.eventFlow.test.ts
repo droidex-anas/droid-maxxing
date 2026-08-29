@@ -35,14 +35,10 @@ function latestSessionUpdate(events: ServerEvent[]) {
 }
 
 function isRecordedTranscript(call: RecordedCall, text: string): boolean {
-  const event = call.args[0];
   return (
-    call.target === 'history' &&
-    call.method === 'recordEvent' &&
-    typeof event === 'object' &&
-    event !== null &&
-    'text' in event &&
-    event.text === text
+    call.target === 'store' &&
+    call.method === 'append' &&
+    JSON.stringify(call.args[0] ?? {}).includes(text)
   );
 }
 
@@ -502,7 +498,7 @@ test('current SDK Task result persists and opens the exact completed child', asy
       text: 'spawn worker',
     });
 
-    const child = context.history.childSessions('provider-1')[0];
+    const child = context.fixture.childRecords('provider-1')[0];
     assert.equal(child?.parentAppSessionId, 'provider-1');
     assert.equal(child?.childSessionId, 'child-1');
     assert.equal(child?.providerSessionId, 'provider-child-current');
@@ -580,7 +576,7 @@ test('background Task completion notification settles a child without TaskOutput
       text: 'launch background worker',
     });
 
-    const launched = context.history.childSessions('provider-1')[0];
+    const launched = context.fixture.childRecords('provider-1')[0];
     assert.equal(launched?.status, 'running');
     assert.equal(launched?.label, 'worker-2');
     assert.equal(launched?.modelId, 'custom:glm-5.2');
@@ -608,7 +604,7 @@ test('background Task completion notification settles a child without TaskOutput
       },
     });
 
-    assert.equal(context.history.childSessions('provider-1')[0]?.status, 'completed');
+    assert.equal(context.fixture.childRecords('provider-1')[0]?.status, 'completed');
     assert.equal(
       context.events.some(
         (event) =>

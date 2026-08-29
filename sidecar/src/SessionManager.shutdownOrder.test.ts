@@ -62,7 +62,7 @@ test(
 );
 
 test(
-  'timeline flush precedes history close and SQLite closes last',
+  'timeline flush precedes SQLite close',
   { concurrency: false },
   async () => {
     const order: string[] = [];
@@ -78,14 +78,9 @@ test(
       },
     };
     const harness = createSessionManagerTestContext({ database });
-    const historyClose = harness.history.close.bind(harness.history);
-    harness.history.close = () => {
-      order.push('history.close');
-      historyClose();
-    };
     try {
       await harness.shutdown();
-      assert.deepEqual(order, ['timeline.flushStreaming', 'history.close', 'database.close']);
+      assert.deepEqual(order, ['timeline.flushStreaming', 'database.close']);
     } finally {
       SessionTimeline.prototype.flushStreaming = flushStreaming;
       await harness.dispose();

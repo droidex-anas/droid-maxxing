@@ -5,6 +5,8 @@ import type { SessionCreatePersistence } from './sessionCreateIdentity.js';
 
 export interface CanonicalStoreDependencies {
   database?: Pick<DroidexDatabase, 'close'>;
+  sessionStore?: SessionCreatePersistence['sessionStore'];
+  transcriptStore?: SessionCreatePersistence['transcriptStore'];
   nextAppSessionId?: SessionCreatePersistence['nextAppSessionId'];
   nextTurnId?: SessionCreatePersistence['nextTurnId'];
   onCreateBoundary?: SessionCreatePersistence['onCreateBoundary'];
@@ -26,7 +28,9 @@ export function bindCanonicalStoresForManager(
   owned: { browsers: { closeAll(): Promise<unknown> } },
 ): ReturnType<typeof bindCanonicalStores> {
   try {
-    return bindCanonicalStores(dependencies, { createIfMissing: !dependencies });
+    return bindCanonicalStores(dependencies, {
+      createIfMissing: !dependencies?.database,
+    });
   } catch (error) {
     if (!dependencies) {
       abandonOwnedSidecarResources(
@@ -63,8 +67,8 @@ export function bindCanonicalStores(
   return {
     database: db,
     lifecycle: {
-      sessionStore: new SessionStore(db),
-      transcriptStore: new TranscriptStore(db),
+      sessionStore: dependencies?.sessionStore ?? new SessionStore(db),
+      transcriptStore: dependencies?.transcriptStore ?? new TranscriptStore(db),
       atomic: (work) => db.atomic(work),
       ...identityHooks(dependencies),
     },
