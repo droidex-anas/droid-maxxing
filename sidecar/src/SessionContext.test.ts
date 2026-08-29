@@ -18,6 +18,7 @@ import {
 } from './testing/fakeFactoryRuntime.js';
 import { FakeHistoryIndex } from './testing/historyCharacterizationSupport.js';
 import { droidSessionConfiguration } from './providers/providerIdentity.js';
+import { StubProviderSession } from './testing/stubProviderSession.js';
 
 interface Harness {
   calls: RecordedCall[];
@@ -67,6 +68,7 @@ function registerLive(
     summary: summary(appSessionId, providerSessionId),
     binding: liveBindingFromSummary(summary(appSessionId, providerSessionId)),
     session,
+    provider: new StubProviderSession(session.sessionId),
     streaming: false,
     autoCompacting: false,
     pendingSends: [],
@@ -120,7 +122,7 @@ function primaryTarget(h: Harness, live: LiveSession): LiveOperationTarget {
     appSessionId: live.summary.appSessionId,
     providerSessionId: session.sessionId,
     sourceSessionId: live.summary.appSessionId,
-    session,
+    session: session as import('./providers/droid/DroidProviderSession.js').FactorySession,
     isCurrent: () =>
       !live.closeMode &&
       h.registry.getLive(live.summary.appSessionId) === live &&

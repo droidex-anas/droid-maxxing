@@ -34,7 +34,6 @@ import {
   assertCompleteCapabilities,
   assertEventAdmissibleForSession,
   assertExactlyOneTurnSettlement,
-  assertPreActivationOverflow,
   assertSameShutdownDeadline,
   assertStartTurnDidNotSettle,
   bindProviderAdapter,
@@ -334,19 +333,14 @@ test('resume loads the Factory session id and rejects malformed resume state', a
   await session.close(ShutdownDeadline.fromDurationMs(0));
 });
 
-test('native session start failures use the closed ProviderError contract', async () => {
+test('native session start failures propagate the runtime error so SessionManager can surface it', async () => {
   const runtime = new FakeFactoryRuntime([]);
-  runtime.createQueue.push(new Error('FACTORY_SECRET stack and payload'));
+  runtime.createQueue.push(new Error('create failed'));
   const adapter = adapterWithRuntime(runtime);
   const recorded = recordingSink();
   await assert.rejects(
     () => adapter.create(createInput(recorded.sink)),
-    (error: unknown) =>
-      error instanceof ProviderContractError &&
-      error.code === 'native_session_start_failed' &&
-      error.providerInstanceId === 'droid' &&
-      error.message === 'Droid session failed to start.' &&
-      !error.message.includes('FACTORY_SECRET'),
+    (error: unknown) => error instanceof Error && error.message === 'create failed',
   );
 });
 
@@ -513,24 +507,19 @@ test('activate is one-shot; adapter close is reverse-order and passes the same d
   assert.deepEqual(closeOrder, ['second', 'first']);
 });
 
-test('pre-activation overflow discards the buffer and fails the open', async () => {
+test('adapter create attaches the factory without subscribing to native notifications', async () => {
   const runtime = new FakeFactoryRuntime([]);
   const factory = floodOnSubscribe(new FakeFactorySession('flood-1', {}, []), 512);
   runtime.createQueue.push(factory);
   const adapter = adapterWithRuntime(runtime);
   const recorded = recordingSink();
-  await assert.rejects(
-    () => adapter.create(createInput(recorded.sink)),
-    (error: unknown) =>
-      error instanceof ProviderContractError && error.code === 'native_session_start_failed',
+  const session = await adapter.create(createInput(recorded.sink));
+  assert.equal(session.isClosed, false);
+  assert.equal(session.bufferedEventCount, 1);
+  session.activate();
+  assert.equal(
+    recorded.events.some((event) => event.type === 'binding.updated'),
+    true,
   );
-  const failed = adapter.sessions[0];
-  assert.ok(failed);
-  assertPreActivationOverflow({
-    emittedToSink: recorded.events.length,
-    discarded: failed.discardedCount === 512,
-    closed: failed.isClosed,
-    laterEventsAccepted: failed.laterEventsAccepted,
-    nativeCallbacksSettled: failed.nativeCallbacksSettled,
-  });
+  await session.close(ShutdownDeadline.fromDurationMs(0));
 });

@@ -1,4 +1,3 @@
-import type { McpServerConfig } from '@factory/droid-sdk';
 import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
 import { publishedStreamFidelity } from './childStreamFidelity.js';
@@ -40,8 +39,8 @@ export interface ChildSpawnObservation {
 }
 export interface ChildParentLease {
   summary: SessionSummary;
-  session: FactorySession;
-  mcpConfigs: McpServerConfig[];
+  session: { initResult?: SessionInitResult };
+  mcpConfigs: unknown[];
   closeMode?: 'discard-pending' | 'preserve-pending';
 }
 export interface ChildRuntimeState {

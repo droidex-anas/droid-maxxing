@@ -855,7 +855,7 @@ export class ChildSessions {
       if (command.modelId === null)
         modelId = this.d.resolveDefaultSettings(
           parent.lease.summary,
-          parent.lease.session.initResult,
+          parent.lease.session.initResult ?? {},
           child.role,
         ).modelId;
       if (!modelId) throw new Error(`No Factory default is available for ${child.role}.`);
@@ -920,7 +920,7 @@ export class ChildSessions {
       : {
           ...this.d.resolveDefaultSettings(
             parent.lease.summary,
-            parent.lease.session.initResult,
+            parent.lease.session.initResult ?? {},
             role,
           ),
           ...launchSettings,

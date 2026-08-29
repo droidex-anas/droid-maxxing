@@ -3,15 +3,25 @@ import {
   DroidInteractionMode,
   ReasoningEffort as SdkReasoningEffort,
   type AskUserHandler,
-  type DecompSessionType,
+  DecompSessionType,
   type InitializeSessionRequestParams,
   type McpServerConfig,
   type PermissionHandler,
 } from '@factory/droid-sdk';
 
-import type { Autonomy, ReasoningEffort, SessionInteractionMode } from '../../protocol.js';
+import type {
+  Autonomy,
+  ClientCommand,
+  DroidMissionConfiguration,
+  FactoryDefaultSettings,
+  ReasoningEffort,
+  SessionConfiguration,
+  SessionInteractionMode,
+} from '../../protocol.js';
 import { defineProviderCapabilities, type ProviderCapabilities } from '../providerTypes.js';
 import type { ProviderDefinition } from '../providerTypes.js';
+
+export type { McpServerConfig };
 
 export const DROID_DEFINITION: ProviderDefinition = {
   providerDriverKind: 'droid',
@@ -140,6 +150,60 @@ export interface CreateRuntimeSessionOptions extends RuntimeHandlers {
   workerReasoningEffort?: ReasoningEffort;
   validatorModelId?: string;
   validatorReasoningEffort?: ReasoningEffort;
+}
+
+type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
+
+export function buildCreateRuntimeOptions(input: {
+  command: SessionCreateCommand;
+  runtimeCwd: string;
+  configuration: SessionConfiguration;
+  primary: { modelId: string; reasoningEffort?: ReasoningEffort };
+  mission?: DroidMissionConfiguration;
+  defaults: FactoryDefaultSettings;
+  compactionModel: string;
+  compactionTokenLimit: number;
+  mcpServers: McpServerConfig[];
+  permissionHandler: PermissionHandler;
+  askUserHandler: AskUserHandler;
+}): CreateRuntimeSessionOptions {
+  const usePrimaryForSpec = input.configuration.interactionMode === 'spec';
+  const specModeModelId = usePrimaryForSpec ? input.primary.modelId : input.defaults.specModelId;
+  const specModeReasoningEffort = usePrimaryForSpec
+    ? input.primary.reasoningEffort
+    : input.defaults.specReasoningEffort;
+  return {
+    cwd: input.runtimeCwd,
+    interactionMode: input.configuration.interactionMode,
+    modelId: input.primary.modelId,
+    autonomyLevel: input.configuration.autonomy,
+    ...(input.primary.reasoningEffort !== undefined
+      ? { reasoningEffort: input.primary.reasoningEffort }
+      : {}),
+    ...(specModeModelId !== undefined ? { specModeModelId } : {}),
+    ...(specModeReasoningEffort !== undefined ? { specModeReasoningEffort } : {}),
+    ...(input.command.sessionPurpose === 'mission-control'
+      ? { decompSessionType: DecompSessionType.Orchestrator }
+      : {}),
+    ...(input.mission
+      ? {
+          workerModelId: input.mission.worker.modelId,
+          ...(input.mission.worker.reasoningEffort !== undefined
+            ? { workerReasoningEffort: input.mission.worker.reasoningEffort }
+            : {}),
+          validatorModelId: input.mission.validator.modelId,
+          ...(input.mission.validator.reasoningEffort !== undefined
+            ? { validatorReasoningEffort: input.mission.validator.reasoningEffort }
+            : {}),
+        }
+      : {}),
+    compactionModel: input.compactionModel,
+    compactionTokenLimit: input.compactionTokenLimit,
+    compactionThresholdCheckEnabled: true,
+    mcpServers: input.mcpServers,
+    permissionHandler: input.permissionHandler,
+    askUserHandler: input.askUserHandler,
+  };
 }
 
 export function createInitializeSessionParams(

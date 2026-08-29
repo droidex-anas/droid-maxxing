@@ -1,4 +1,5 @@
 import {
+  DecompSessionType,
   DroidClient,
   DroidSession,
   type DroidClientTransport,
@@ -38,10 +39,63 @@ import {
   droidCapabilities,
   parseDroidResumeState,
   type CreateRuntimeSessionOptions,
+  type McpServerConfig,
   type RuntimeHandlers,
 } from './DroidModeMapping.js';
 import { readContextBreakdown, type FactorySession } from './DroidFactorySession.js';
 import { DroidProviderSession } from './DroidProviderSession.js';
+
+export interface DroidOpenedMcp {
+  servers: Array<{ close(): Promise<void> }>;
+  configs: unknown[];
+}
+
+const openedMcp = new WeakMap<DroidProviderSession, DroidOpenedMcp>();
+
+export function takeDroidOpenedMcp(session: object): DroidOpenedMcp | undefined {
+  if (!(session instanceof DroidProviderSession)) return undefined;
+  const resources = openedMcp.get(session);
+  if (resources) openedMcp.delete(session);
+  return resources;
+}
+
+export function queueDroidOpenFromHint(
+  adapter: ProviderAdapter,
+  hint: {
+    sessionPurpose?: string;
+    mission?: {
+      worker: { modelId: string; reasoningEffort?: CreateRuntimeSessionOptions['reasoningEffort'] };
+      validator: {
+        modelId: string;
+        reasoningEffort?: CreateRuntimeSessionOptions['reasoningEffort'];
+      };
+    };
+    compactionModel: string;
+    compactionTokenLimit: number;
+  },
+): void {
+  if (!(adapter instanceof DroidProviderAdapter)) return;
+  adapter.queueNativeOpen({
+    ...(hint.sessionPurpose === 'mission-control'
+      ? { decompSessionType: DecompSessionType.Orchestrator }
+      : {}),
+    ...(hint.mission
+      ? {
+          workerModelId: hint.mission.worker.modelId,
+          ...(hint.mission.worker.reasoningEffort !== undefined
+            ? { workerReasoningEffort: hint.mission.worker.reasoningEffort }
+            : {}),
+          validatorModelId: hint.mission.validator.modelId,
+          ...(hint.mission.validator.reasoningEffort !== undefined
+            ? { validatorReasoningEffort: hint.mission.validator.reasoningEffort }
+            : {}),
+        }
+      : {}),
+    compactionModel: hint.compactionModel,
+    compactionTokenLimit: hint.compactionTokenLimit,
+    compactionThresholdCheckEnabled: true,
+  });
+}
 
 const EXEC_ARGS = ['exec', '--input-format', 'stream-jsonrpc', '--output-format', 'stream-jsonrpc'];
 const SESSION_INIT_TIMEOUT_MS = 20_000;
@@ -73,6 +127,9 @@ export interface DroidAdapterOptions {
     cli: { present: boolean; path: string; version?: string };
     auth: { apiKeyConfigured: boolean; loginPresent: boolean };
   }>;
+  startLocalMcpServers?: (ref: { id: string }, cwd?: string) => Promise<DroidOpenedMcp>;
+  makePermissionHandler?: (ref: { id: string }) => PermissionHandler;
+  makeAskUserHandler?: (ref: { id: string }) => AskUserHandler;
 }
 
 export class DroidRuntime implements FactoryRuntime {
@@ -163,11 +220,16 @@ export class DroidProviderAdapter implements ProviderAdapter {
   #revision = 0;
   readonly #runtime: FactoryRuntime;
   readonly #options: DroidAdapterOptions;
+  #queuedNativeOpen?: Partial<CreateRuntimeSessionOptions>;
 
   constructor(options: DroidAdapterOptions = {}) {
     assertDefinitionConsistency(DROID_DEFINITION);
     this.#options = options;
     this.#runtime = options.runtime ?? new DroidRuntime();
+  }
+
+  queueNativeOpen(options: Partial<CreateRuntimeSessionOptions>): void {
+    this.#queuedNativeOpen = options;
   }
 
   async probe(signal: AbortSignal): Promise<ProviderSnapshot> {
@@ -233,6 +295,17 @@ export class DroidProviderAdapter implements ProviderAdapter {
     input: ProviderSessionCreateInput,
     resumeSessionId?: string,
   ): Promise<DroidProviderSession> {
+    const extras = this.#queuedNativeOpen;
+    this.#queuedNativeOpen = undefined;
+    const ref = {
+      id:
+        input.target.kind === 'session' && !input.target.appSessionId.startsWith('pending:')
+          ? input.target.appSessionId
+          : '',
+    };
+    const mcp = this.#options.startLocalMcpServers
+      ? await this.#options.startLocalMcpServers(ref, extras?.cwd ?? input.cwd)
+      : { servers: [], configs: extras?.mcpServers ?? [] };
     const session = new DroidProviderSession(input, {
       providerSessionId: input.ids.nextProviderSessionId(),
       ...(resumeSessionId
@@ -240,36 +313,43 @@ export class DroidProviderAdapter implements ProviderAdapter {
         : {}),
     });
     this.sessions.push(session);
-    const handlers = createDroidNativeHandlers(session);
+    const native = createDroidNativeHandlers(session);
+    const permissionHandler =
+      this.#options.makePermissionHandler?.(ref) ?? native.permissionHandler;
+    const askUserHandler = this.#options.makeAskUserHandler?.(ref) ?? native.askUserHandler;
     try {
       const factory = resumeSessionId
         ? await this.#runtime.loadSession(resumeSessionId, {
-            cwd: input.cwd,
-            permissionHandler: handlers.permissionHandler,
-            askUserHandler: handlers.askUserHandler,
+            cwd: extras?.cwd ?? input.cwd,
+            permissionHandler,
+            askUserHandler,
+            ...(mcp.configs.length > 0 ? { mcpServers: mcp.configs as McpServerConfig[] } : {}),
           })
-        : await this.#runtime.createSession(createOptionsFromInput(input, handlers));
+        : await this.#runtime.createSession(
+            createOptionsFromInput(input, { permissionHandler, askUserHandler }, {
+              ...extras,
+              cwd: extras?.cwd ?? input.cwd,
+              ...(mcp.configs.length > 0 ? { mcpServers: mcp.configs as McpServerConfig[] } : {}),
+            }),
+          );
       if (session.failedOpen) {
         await factory.close();
         throw session.openError;
       }
-      session.bindFactorySession(factory);
+      session.attachFactory(factory);
+      if (!ref.id) ref.id = session.providerSessionId;
       if (session.failedOpen) {
         await session.close(ShutdownDeadline.fromDurationMs(0));
         throw session.openError;
       }
+      openedMcp.set(session, mcp);
       return session;
     } catch (error) {
+      await Promise.all(mcp.servers.map((server) => server.close().catch(ignoreError)));
       if (!session.isClosed) {
         await session.close(ShutdownDeadline.fromDurationMs(0));
       }
-      if (error instanceof ProviderContractError) throw error;
-      throw createProviderContractError(
-        'droid',
-        'native_session_start_failed',
-        'Droid session failed to start.',
-        'retry_session',
-      );
+      throw error;
     }
   }
 
@@ -289,16 +369,28 @@ export class DroidProviderAdapter implements ProviderAdapter {
 function createOptionsFromInput(
   input: ProviderSessionCreateInput,
   handlers: { permissionHandler: PermissionHandler; askUserHandler: AskUserHandler },
+  extras?: Partial<CreateRuntimeSessionOptions>,
 ): CreateRuntimeSessionOptions {
-  const reasoning = droidReasoningEffortFromSelection(input.configuration.providerSelection);
+  const reasoning =
+    extras?.reasoningEffort ??
+    droidReasoningEffortFromSelection(input.configuration.providerSelection);
+  const interactionMode = extras?.interactionMode ?? input.configuration.interactionMode;
+  const modelId = extras?.modelId ?? input.configuration.providerSelection.modelId;
+  const specModeModelId =
+    extras?.specModeModelId ?? (interactionMode === 'spec' ? modelId : undefined);
+  const specModeReasoningEffort =
+    extras?.specModeReasoningEffort ?? (interactionMode === 'spec' ? reasoning : undefined);
   return {
-    cwd: input.cwd,
-    interactionMode: input.configuration.interactionMode,
-    modelId: input.configuration.providerSelection.modelId,
-    autonomyLevel: input.configuration.autonomy,
+    ...extras,
+    cwd: extras?.cwd ?? input.cwd,
+    interactionMode,
+    modelId,
+    autonomyLevel: extras?.autonomyLevel ?? input.configuration.autonomy,
     permissionHandler: handlers.permissionHandler,
     askUserHandler: handlers.askUserHandler,
     ...(reasoning === undefined ? {} : { reasoningEffort: reasoning }),
+    ...(specModeModelId === undefined ? {} : { specModeModelId }),
+    ...(specModeReasoningEffort === undefined ? {} : { specModeReasoningEffort }),
   };
 }
 

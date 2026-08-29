@@ -217,7 +217,7 @@ export async function installChildRuntime(input: {
       permissionHandler: host.d.interactions.makePermissionHandler(ref),
       askUserHandler: host.d.interactions.makeAskUserHandler(ref),
       cwd: parent.lease.summary.cwd,
-      mcpServers: parent.lease.mcpConfigs,
+      mcpServers: parent.lease.mcpConfigs as import('./providers/droid/DroidModeMapping.js').McpServerConfig[],
     });
     const result = await awaitOpenStep(attempt, load, (late) => late.close().catch(ignoreError));
     if (result === CHILD_OPEN_CANCELLED) return;
@@ -264,7 +264,7 @@ async function bindLoadedChildRuntime(input: {
   const actual = childSettingsFromInit(loaded.initResult);
   const defaults = host.d.resolveDefaultSettings(
     parent.lease.summary,
-    parent.lease.session.initResult,
+    parent.lease.session.initResult ?? {},
     child.role,
   );
   const settings = {

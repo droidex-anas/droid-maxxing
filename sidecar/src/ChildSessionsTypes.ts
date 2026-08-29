@@ -3,7 +3,7 @@ import type { HistoryIndex, PersistedChildSession } from './history.js';
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import type { SessionRegistry } from './SessionRegistry.js';
 import type { SessionTimeline } from './SessionTimeline.js';
-import type { SessionEventFlow } from './SessionEventFlow.js';
+import type { DroidEventFlow } from './providers/droid/DroidEventFlow.js';
 import type { DroidInteractions } from './providers/droid/DroidInteractions.js';
 import type { SessionContext } from './SessionContext.js';
 import type { SessionCompaction } from './SessionCompaction.js';
@@ -31,7 +31,7 @@ export interface ChildSessionsDependencies {
     SessionTimeline,
     'append' | 'appendStatus' | 'loadChildHistory' | 'flushStreamingFor' | 'settleStreaming'
   >;
-  eventFlow: Pick<SessionEventFlow, 'beginTurn' | 'applyNotification' | 'applyStreamEvent'>;
+  eventFlow: Pick<DroidEventFlow, 'beginTurn' | 'applyNotification' | 'applyStreamEvent'>;
   interactions: Pick<DroidInteractions, 'makePermissionHandler' | 'makeAskUserHandler'>;
   context: Pick<SessionContext, 'forgetChild' | 'refresh' | 'startPolling' | 'stopPolling'>;
   compaction: Pick<

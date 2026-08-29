@@ -73,7 +73,7 @@ export class MissionControlPolicy {
   resolveDefaultSettings(parentAppSessionId: string, role: 'worker' | 'validator'): ChildSettings {
     const live = this.d.registry.getLive(parentAppSessionId);
     if (!live) throw new Error(`Mission Control parent ${parentAppSessionId} is not live.`);
-    const parent = childSettingsFromInit(live.session.initResult);
+    const parent = childSettingsFromInit(live.session.initResult ?? {});
     const catalog = this.d.resolveCatalogDefaultSettings();
     const roleModelId =
       role === 'validator'

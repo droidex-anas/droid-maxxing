@@ -1,14 +1,13 @@
 import { DroidInteractionMode, type DroidStreamEvent } from '@factory/droid-sdk';
 
 import { AcpPreActivationBuffer } from '../acp/acpPreActivation.js';
-import type { ProviderError } from '../providerErrors.js';
 import { admitProviderRuntimeEvent, type ProviderRuntimeEvent } from '../providerEvents.js';
 import {
+  configurationsEqual,
   droidReasoningEffortFromSelection,
   type SessionConfiguration,
 } from '../providerIdentity.js';
 import {
-  ProviderContractError,
   createProviderContractError,
   type ProviderSession,
   type ProviderSessionCreateInput,
@@ -16,7 +15,9 @@ import {
   type ProviderTurnInput,
   type ProviderTurnSettlement,
 } from '../providerTypes.js';
+import { droidError, mapSessionError } from './droidSessionErrors.js';
 import type { ShutdownDeadline } from '../shutdownDeadline.js';
+import { hotPathMetrics } from '../../telemetry/hotPathMetrics.js';
 import {
   extractCompactionNotification,
   normalizeNotification,
@@ -52,7 +53,7 @@ type ActiveTurn = {
 };
 
 export class DroidProviderSession implements ProviderSession {
-  readonly providerSessionId: string;
+  #allocatedProviderSessionId: string;
   readonly droid: DroidSessionExtension;
   discardedCount = 0;
   nativeCallbacksSettled = false;
@@ -70,6 +71,7 @@ export class DroidProviderSession implements ProviderSession {
   #activeTurn: ActiveTurn | undefined;
   #storedResumeState: unknown;
   #pending: Array<{ settle: () => void }> = [];
+  #appliedConfiguration: SessionConfiguration;
   readonly #settledTurns = new Set<string>();
   readonly #input: ProviderSessionCreateInput;
   readonly #runtimeGeneration: number;
@@ -80,12 +82,17 @@ export class DroidProviderSession implements ProviderSession {
   ) {
     this.#input = input;
     this.#runtimeGeneration = input.expectedGeneration;
-    this.providerSessionId = options.providerSessionId;
+    this.#appliedConfiguration = input.configuration;
+    this.#allocatedProviderSessionId = options.providerSessionId;
     this.#storedResumeState = options.resumeState;
     this.droid = createDroidSessionExtension(
       () => this.#requireFactory(),
       (session, kind) => this.replaceNativeSession(session, kind),
     );
+  }
+
+  get providerSessionId(): string {
+    return this.#factory?.sessionId ?? this.#allocatedProviderSessionId;
   }
 
   get initialResumeState(): unknown {
@@ -114,6 +121,30 @@ export class DroidProviderSession implements ProviderSession {
 
   get runtimeGeneration(): number {
     return this.#runtimeGeneration;
+  }
+
+  get nativeSession(): FactorySession | undefined {
+    return this.#factory;
+  }
+
+  attachFactory(session: FactorySession): void {
+    this.#factory = session;
+    const resumeState = encodeDroidResumeState(session.sessionId);
+    this.#storedResumeState = resumeState;
+    this.#emit({
+      ...this.#baseEvent(),
+      type: 'binding.updated',
+      binding: { providerSessionId: this.providerSessionId, resumeState },
+    });
+  }
+
+  subscribeNativeNotifications(): void {
+    const factory = this.#factory;
+    if (!factory) return;
+    this.#unsubscribe?.();
+    this.#unsubscribe = factory.onNotification((notification) => {
+      this.#onNativeNotification(notification as Record<string, unknown>);
+    });
   }
 
   bindFactorySession(session: FactorySession): void {
@@ -161,9 +192,7 @@ export class DroidProviderSession implements ProviderSession {
     this.#revalidate(runtimeGeneration);
     this.#activeTurn = { turnId, runtimeGeneration, interrupting: false, settled: false };
     const stream = factory.stream(input.prompt.text, { includePartialMessages: true });
-    queueMicrotask(() => {
-      void this.#consumeStream(turnId, runtimeGeneration, stream);
-    });
+    void this.#consumeStream(turnId, runtimeGeneration, stream);
   }
 
   async steer(_input: ProviderSteerInput): Promise<void> {
@@ -208,7 +237,7 @@ export class DroidProviderSession implements ProviderSession {
       this.#settleTurn(active.turnId, this.#runtimeGeneration, { status: 'cancelled' });
     }
     this.#phase = { kind: 'closed', reason: 'close' };
-    await this.#closeFactory();
+    await this.#closeFactory(deadline);
   }
 
   runNativeCallback<T>(work: () => Promise<T>): Promise<T> {
@@ -234,8 +263,22 @@ export class DroidProviderSession implements ProviderSession {
   ): Promise<void> {
     try {
       for await (const event of stream) {
-        if (!this.#isLiveTurn(turnId, runtimeGeneration)) return;
-        this.#emitNormalized(normalizeStreamEvent(...this.#normalizeArgs(), event), turnId);
+        if (this.#phase.kind === 'closed' || runtimeGeneration !== this.#runtimeGeneration) return;
+        const normalizeStartedAt = performance.now();
+        const normalized = normalizeStreamEvent(...this.#normalizeArgs(), event);
+        hotPathMetrics.recordNormalize(performance.now() - normalizeStartedAt);
+        if (normalized?.done) {
+          if (this.#isLiveTurn(turnId, runtimeGeneration)) {
+            this.#settleTurn(
+              turnId,
+              runtimeGeneration,
+              this.#activeTurn?.interrupting ? { status: 'interrupted' } : { status: 'completed' },
+            );
+          }
+          continue;
+        }
+        const emitTurnId = this.#activeTurn?.settled ? undefined : turnId;
+        this.#emitNormalized(normalized, emitTurnId);
       }
       const active = this.#activeTurn;
       if (!active || active.turnId !== turnId || active.settled) return;
@@ -280,20 +323,19 @@ export class DroidProviderSession implements ProviderSession {
 
   #emitNormalized(normalized: ReturnType<typeof normalizeStreamEvent>, turnId?: string): void {
     if (!normalized || normalized.done) return;
-    for (const event of providerEventsFromNormalized(normalized, this.#baseEvent(turnId))) {
-      this.#emit(event);
+    const base = this.#baseEvent(turnId);
+    for (const event of providerEventsFromNormalized(normalized, base)) {
+      this.#emit({ ...event, eventId: this.#input.ids.nextEventId() });
     }
   }
 
   #normalizeArgs(): [string, string, 'primary'] {
-    const appSessionId =
-      this.#input.target.kind === 'session'
-        ? this.#input.target.appSessionId
-        : this.#input.target.parentAppSessionId;
+    const appSessionId = this.#appSessionId();
     return [appSessionId, this.#factory?.sessionId ?? this.providerSessionId, 'primary'];
   }
 
   async #applyConfiguration(configuration: SessionConfiguration): Promise<void> {
+    if (configurationsEqual(this.#appliedConfiguration, configuration)) return;
     const factory = this.#requireFactory();
     const modelId = configuration.providerSelection.modelId;
     const reasoningEffort = droidReasoningEffortFromSelection(configuration.providerSelection);
@@ -306,13 +348,20 @@ export class DroidProviderSession implements ProviderSession {
       native.reasoningEffort = factoryReasoningEffort(reasoningEffort);
       native.specModeReasoningEffort = factoryReasoningEffort(reasoningEffort);
     }
-    if (configuration.interactionMode === 'spec') await factory.enterSpecMode();
-    else
-      native.interactionMode =
-        configuration.interactionMode === 'agi'
-          ? DroidInteractionMode.AGI
-          : DroidInteractionMode.Auto;
-    await factory.updateSettings(native);
+    try {
+      if (configuration.interactionMode === 'spec') await factory.enterSpecMode();
+      else
+        native.interactionMode =
+          configuration.interactionMode === 'agi'
+            ? DroidInteractionMode.AGI
+            : DroidInteractionMode.Auto;
+      await factory.updateSettings(native);
+      this.#appliedConfiguration = configuration;
+    } catch (error) {
+      throw new Error(
+        `Could not apply session configuration: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   #settlePendingInteractions(): void {
@@ -364,13 +413,13 @@ export class DroidProviderSession implements ProviderSession {
     }
   }
 
-  async #closeFactory(): Promise<void> {
+  async #closeFactory(deadline?: ShutdownDeadline): Promise<void> {
     this.#settlePendingInteractions();
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     const factory = this.#factory;
     this.#factory = undefined;
-    if (factory) await factory.close();
+    if (factory) await factory.close(deadline);
     this.nativeCallbacksSettled = true;
   }
 
@@ -420,7 +469,7 @@ export class DroidProviderSession implements ProviderSession {
 
   #live() {
     return {
-      target: this.#input.target,
+      target: this.#eventTarget(),
       providerDriverKind: DROID_DEFINITION.providerDriverKind,
       providerInstanceId: DROID_DEFINITION.providerInstanceId,
       runtimeGeneration: this.#runtimeGeneration,
@@ -428,10 +477,26 @@ export class DroidProviderSession implements ProviderSession {
     };
   }
 
+  #appSessionId(): string {
+    if (this.#input.target.kind === 'session') {
+      const requested = this.#input.target.appSessionId;
+      if (!requested.startsWith('pending:')) return requested;
+    }
+    if (this.#factory) return this.#factory.sessionId;
+    return this.#input.target.kind === 'session'
+      ? this.#input.target.appSessionId
+      : this.#input.target.parentAppSessionId;
+  }
+
+  #eventTarget(): ProviderSessionCreateInput['target'] {
+    if (this.#input.target.kind === 'child') return this.#input.target;
+    return { kind: 'session', appSessionId: this.#appSessionId() };
+  }
+
   #baseEvent(turnId?: string) {
     return {
       eventId: this.#input.ids.nextEventId(),
-      target: this.#input.target,
+      target: this.#eventTarget(),
       providerDriverKind: DROID_DEFINITION.providerDriverKind,
       providerInstanceId: DROID_DEFINITION.providerInstanceId,
       runtimeGeneration: this.#runtimeGeneration,
@@ -439,21 +504,4 @@ export class DroidProviderSession implements ProviderSession {
       ...(turnId === undefined ? {} : { turnId }),
     };
   }
-}
-
-function droidError(
-  code: ProviderError['code'],
-  message: string,
-  recoveryAction: ProviderError['recoveryAction'],
-): ProviderContractError {
-  return createProviderContractError('droid', code, message, recoveryAction);
-}
-
-function mapSessionError(error: unknown): ProviderError {
-  if (error instanceof ProviderContractError) return error.toProviderError();
-  return droidError(
-    'incompatible_provider_protocol',
-    'Droid turn failed.',
-    'retry_session',
-  ).toProviderError();
 }

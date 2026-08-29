@@ -1,3 +1,4 @@
+import type { ShutdownDeadline } from '../shutdownDeadline.js';
 import {
   ContextBreakdownResultSchema,
   DroidSession,
@@ -30,7 +31,8 @@ type FactorySessionMethods = Pick<
   | 'authenticateMcpServer'
 >;
 
-export type FactorySession = FactorySessionMethods & {
+export type FactorySession = Omit<FactorySessionMethods, 'close'> & {
+  close(deadline?: ShutdownDeadline): Promise<void>;
   stream(
     prompt: string,
     options: MessageOptions & { includePartialMessages: true },

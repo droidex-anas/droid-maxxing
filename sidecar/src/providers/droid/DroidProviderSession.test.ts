@@ -81,6 +81,7 @@ async function openSession(
   runtime.createQueue.push(factory);
   const adapter = new DroidProviderAdapter({ runtime });
   const session = await adapter.create(createInput(recorded.sink));
+  session.subscribeNativeNotifications();
   return { runtime, adapter, session, recorded, factory };
 }
 

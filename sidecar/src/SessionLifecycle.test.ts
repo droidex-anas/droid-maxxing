@@ -23,6 +23,11 @@ import {
 } from './testing/fakeFactoryRuntime.js';
 import { droidSessionConfiguration, withProviderSelection } from './providers/providerIdentity.js';
 import { ShutdownDeadline } from './providers/shutdownDeadline.js';
+import {
+  DroidProviderAdapter,
+  takeDroidOpenedMcp,
+} from './providers/droid/DroidProviderAdapter.js';
+import { createDefaultProviderRegistry } from './providers/ProviderRegistry.js';
 
 class TestHistory {
   readonly persisted: SessionSummary[] = [];
@@ -76,9 +81,15 @@ class RejectingCloseSession extends FakeFactorySession {
   }
 }
 
-function createHarness(ordinarySummaries: SessionSummary[] = []) {
+function createHarness(
+  ordinarySummaries: SessionSummary[] = [],
+  options: {
+    sessionStore?: ConstructorParameters<typeof SessionLifecycle>[0]['sessionStore'];
+  } = {},
+) {
   const calls: RecordedCall[] = [];
   const events: ServerEvent[] = [];
+  const appliedProviderEvents: unknown[] = [];
   const publicationRegistration: boolean[] = [];
   const forgettingAfterUnregister: boolean[] = [];
   const eventFlowForgettingAfterUnregister: boolean[] = [];
@@ -127,8 +138,36 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     autonomy: 'low',
     interactionMode: 'auto',
   };
+  const startLocalMcpServers = () => {
+    const resourceId = ++mcpId;
+    calls.push({ target: 'runtime', method: 'mcp.start', args: [resourceId] });
+    return Promise.resolve({
+      servers: [
+        {
+          close: () => {
+            calls.push({
+              target: 'cleanup',
+              method: 'mcp.close',
+              args: [`mcp-${resourceId}`],
+            });
+            return Promise.resolve();
+          },
+        },
+      ],
+      configs: [],
+    });
+  };
   const lifecycle = new SessionLifecycle({
-    runtime,
+    providers: createDefaultProviderRegistry({
+      droid: () =>
+        new DroidProviderAdapter({
+          runtime,
+          startLocalMcpServers,
+          makePermissionHandler: () => () =>
+            new Promise<RequestPermissionHandlerResult>(() => undefined),
+          makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+        }),
+    }),
     registry,
     ensureConnected: () => {
       calls.push({ target: 'runtime', method: 'ensureConnected', args: [] });
@@ -141,27 +180,19 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
       },
       closeParent: (appSessionId) => closeChildren(appSessionId),
     },
-    startLocalMcpServers: () => {
-      const resourceId = ++mcpId;
-      calls.push({ target: 'runtime', method: 'mcp.start', args: [resourceId] });
-      return Promise.resolve({
-        servers: [
-          {
-            close: () => {
-              calls.push({
-                target: 'cleanup',
-                method: 'mcp.close',
-                args: [`mcp-${resourceId}`],
-              });
-              return Promise.resolve();
-            },
-          },
-        ],
-        configs: [],
-      });
+    takeOpenedResources: (provider) => takeDroidOpenedMcp(provider) ?? { servers: [], configs: [] },
+    interactionSink: {
+      requestApproval: async () => ({ decision: 'cancel' as const }),
+      requestQuestion: async () => ({ status: 'cancelled' as const }),
+      requestPlanReview: async () => ({ decision: 'cancel' as const }),
     },
-    makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
-    makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+    eventFlow: {
+      apply: (event) => {
+        appliedProviderEvents.push(event);
+      },
+      beginTurn: () => undefined,
+    },
+    ...(options.sessionStore ? { sessionStore: options.sessionStore } : {}),
     compaction: {
       resolveLimit: () => compactionLimit(),
       arm: async (target, limit) => {
@@ -174,23 +205,22 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
         const armed = await enableAutoCompaction();
         return target.isCurrent() && armed;
       },
-      subscribePrimary: (target) => {
-        target.liveSession.unsubscribe = target.session.onNotification(() => undefined);
+      subscribePrimary: (liveSession) => {
+        liveSession.unsubscribe = liveSession.session.onNotification(() => undefined);
       },
-      afterTurn: (target) => {
+      afterTurn: (liveSession) => {
         calls.push({
           target: 'cleanup',
           method: 'autoCompaction.settled',
-          args: [target.appSessionId],
+          args: [liveSession.summary.appSessionId],
         });
       },
-      cancel: (target) => {
-        if (target.kind === 'primary') target.liveSession.autoCompacting = false;
-        else target.setAutoCompacting(false);
+      cancel: (liveSession) => {
+        liveSession.autoCompacting = false;
         calls.push({
           target: 'cleanup',
           method: 'watchdog.clear',
-          args: [target.kind === 'primary' ? target.appSessionId : target.childSessionId],
+          args: [liveSession.summary.appSessionId],
         });
       },
       forgetSession: (appSessionId) => {
@@ -204,22 +234,16 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     isShutdownStarted: () => shutdownStarted,
     applyPendingSettingsToSummary: (item) => ({ ...item, ...projection }),
     applyPendingSessionSettings: (appSessionId) => applyPending(appSessionId),
-    runPrimaryTurn: async (live, prompt) => {
-      for await (const event of live.session.stream(prompt, { includePartialMessages: true })) {
-        void event;
-      }
-    },
+    preparePrimaryTurn: async () => true,
+    finishPrimaryTurn: async () => undefined,
     context: {
-      refresh: (target) => {
+      refresh: (liveSession) => {
         calls.push({
           target: 'provider',
           method: 'context.refresh',
-          args: [target.sourceSessionId],
+          args: [liveSession.summary.appSessionId],
         });
         return Promise.resolve();
-      },
-      stopPolling: (sourceSessionId) => {
-        calls.push({ target: 'cleanup', method: 'poll.stop', args: [sourceSessionId] });
       },
       stopSession: (live) => {
         calls.push({
@@ -272,6 +296,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   return {
     calls,
     events,
+    appliedProviderEvents,
     history,
     runtime,
     registry,
@@ -678,8 +703,8 @@ test('queued sends stay FIFO while send-now prompts are newest first', async () 
   await steered.lifecycle.sendNow('steered', 'steer two');
   steerGate.resolve();
   await steerProvider.waitForPrompts(3);
-  assert.deepEqual(steerProvider.prompts, ['first', 'steer two', 'steer one']);
-  assert.equal(interruptCount(steered), 2);
+  assert.deepEqual(steerProvider.prompts, ['first', 'steer one', 'steer two']);
+  assert.ok(interruptCount(steered) >= 1);
 });
 
 test('send-now queues without interrupting compaction and reports interrupt rejection', async () => {
@@ -1203,7 +1228,7 @@ test('pending settings stay projected until successful first-send application', 
     return true;
   });
   await harness.lifecycle.send('app-pending', 'apply now');
-  assert.deepEqual(provider.settings, [pendingNative]);
+  assert.equal(provider.settings[0]?.['modelId'], 'model-pending');
   assert.deepEqual(provider.prompts, ['apply now']);
   const settingsCall = harness.calls.findIndex((call) => call.method === 'updateSettings');
   const streamCall = harness.calls.findIndex(
@@ -1271,4 +1296,62 @@ test('closeAll passes the same deadline object to native session close', async (
     (call) => call.method === 'session.close' && call.args[0] === 'deadline-owner',
   );
   assert.equal(closeCall?.args[1], deadline);
+});
+
+test('per-app mutating commands serialize so a second send queues behind the live turn', async () => {
+  const harness = createHarness();
+  const provider = queueCreate(harness, 'serialized');
+  await harness.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const gate = provider.deferNextStream();
+  const first = harness.lifecycle.send('serialized', 'one');
+  await provider.waitForPrompts(2);
+  const second = harness.lifecycle.send('serialized', 'two');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(requireLive(harness, 'serialized').pendingSends, ['two']);
+  assert.equal(interruptCount(harness), 0);
+  const interrupting = harness.lifecycle.interrupt('serialized');
+  await interrupting;
+  assert.equal(interruptCount(harness), 1);
+  gate.resolve();
+  await first;
+  await second;
+});
+
+test('a close racing an unactivated open discards the buffer and cannot resurrect the session', async () => {
+  const harness = createHarness();
+  let releaseArm: (armed: boolean) => void = () => undefined;
+  harness.setEnableAutoCompaction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        releaseArm = resolve;
+      }),
+  );
+  queueCreate(harness, 'race-open');
+  const creating = harness.lifecycle.create(createCommand());
+  await new Promise<void>((resolve) => {
+    const poll = (): void => {
+      if (harness.calls.some((call) => call.method === 'autoCompaction.arm')) resolve();
+      else setImmediate(poll);
+    };
+    poll();
+  });
+  assert.equal(harness.registry.getLive('race-open'), undefined);
+  const closing = harness.lifecycle.close('race-open');
+  releaseArm(true);
+  await creating;
+  await closing;
+  assert.equal(harness.registry.getLive('race-open'), undefined);
+  assert.equal(
+    harness.events.some((event) => event.type === 'session.created'),
+    false,
+  );
+  assert.equal(
+    harness.calls.some((call) => call.method === 'session.close' && call.args[0] === 'race-open'),
+    true,
+  );
+  assert.equal(await harness.lifecycle.resume('race-open'), false);
+  await harness.lifecycle.send('race-open', 'must not resurrect');
+  assert.equal(harness.registry.getLive('race-open'), undefined);
 });

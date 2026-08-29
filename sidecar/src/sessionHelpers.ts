@@ -1,11 +1,3 @@
-import {
-  DecompSessionType,
-  type AskUserHandler,
-  type McpServerConfig,
-  type MissionFeature,
-  type PermissionHandler,
-} from '@factory/droid-sdk';
-import type { CreateRuntimeSessionOptions } from './providers/droid/DroidModeMapping.js';
 import type {
   Autonomy,
   ClientCommand,
@@ -50,7 +42,7 @@ export interface SessionInitResult {
         autonomyLevel?: string | undefined;
       }
     | undefined;
-  mission?: { state?: string | undefined; features?: MissionFeature[] | undefined } | undefined;
+  mission?: { state?: string | undefined; features?: unknown[] | undefined } | undefined;
 }
 
 const STATE_TO_PHASE: Record<string, SessionPhase> = {
@@ -248,58 +240,6 @@ export function createDefaultsModeForCommand(
 ): SessionInteractionMode {
   if (command.sessionPurpose === 'mission-control') return 'agi';
   return interactionMode === 'spec' ? 'spec' : 'auto';
-}
-
-export function buildCreateRuntimeOptions(input: {
-  command: SessionCreateCommand;
-  runtimeCwd: string;
-  configuration: SessionConfiguration;
-  primary: { modelId: string; reasoningEffort?: ReasoningEffort };
-  mission?: DroidMissionConfiguration;
-  defaults: FactoryDefaultSettings;
-  compactionModel: string;
-  compactionTokenLimit: number;
-  mcpServers: McpServerConfig[];
-  permissionHandler: PermissionHandler;
-  askUserHandler: AskUserHandler;
-}): CreateRuntimeSessionOptions {
-  const usePrimaryForSpec = input.configuration.interactionMode === 'spec';
-  const specModeModelId = usePrimaryForSpec ? input.primary.modelId : input.defaults.specModelId;
-  const specModeReasoningEffort = usePrimaryForSpec
-    ? input.primary.reasoningEffort
-    : input.defaults.specReasoningEffort;
-  return {
-    cwd: input.runtimeCwd,
-    interactionMode: input.configuration.interactionMode,
-    modelId: input.primary.modelId,
-    autonomyLevel: input.configuration.autonomy,
-    ...(input.primary.reasoningEffort !== undefined
-      ? { reasoningEffort: input.primary.reasoningEffort }
-      : {}),
-    ...(specModeModelId !== undefined ? { specModeModelId } : {}),
-    ...(specModeReasoningEffort !== undefined ? { specModeReasoningEffort } : {}),
-    ...(input.command.sessionPurpose === 'mission-control'
-      ? { decompSessionType: DecompSessionType.Orchestrator }
-      : {}),
-    ...(input.mission
-      ? {
-          workerModelId: input.mission.worker.modelId,
-          ...(input.mission.worker.reasoningEffort !== undefined
-            ? { workerReasoningEffort: input.mission.worker.reasoningEffort }
-            : {}),
-          validatorModelId: input.mission.validator.modelId,
-          ...(input.mission.validator.reasoningEffort !== undefined
-            ? { validatorReasoningEffort: input.mission.validator.reasoningEffort }
-            : {}),
-        }
-      : {}),
-    compactionModel: input.compactionModel,
-    compactionTokenLimit: input.compactionTokenLimit,
-    compactionThresholdCheckEnabled: true,
-    mcpServers: input.mcpServers,
-    permissionHandler: input.permissionHandler,
-    askUserHandler: input.askUserHandler,
-  };
 }
 
 export function buildCreatedSessionSummary(input: {

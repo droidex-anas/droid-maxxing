@@ -1,6 +1,8 @@
 import type { DroidStreamEvent } from '@factory/droid-sdk';
 import { convertNotificationToStreamMessage } from '@factory/droid-sdk';
 
+export type { DroidStreamEvent };
+
 import type { BridgeFeature, SessionRole, TranscriptEvent } from '../../protocol.js';
 import { parseSkillActivation, type SkillActivation } from '../../skillSignals.js';
 import {
@@ -314,33 +316,64 @@ export function providerEventsFromNormalized(
         : { contextTokens: normalized.tokens.contextTokens }),
     });
   }
-  const observational = observationalEffect(normalized);
-  if (observational) {
-    events.push({ ...base, type: 'session.effect', effect: observational });
+  for (const effect of observationalEffects(normalized)) {
+    events.push({ ...base, type: 'session.effect', effect });
   }
   return events;
 }
 
-function observationalEffect(
+function observationalEffects(
   normalized: NormalizedEvent,
-): Extract<ProviderRuntimeEvent, { type: 'session.effect' }>['effect'] | undefined {
+): Extract<ProviderRuntimeEvent, { type: 'session.effect' }>['effect'][] {
+  const effects: Extract<ProviderRuntimeEvent, { type: 'session.effect' }>['effect'][] = [];
+  if (normalized.features) {
+    effects.push({
+      kind: 'observational_task',
+      taskId: 'mission-features',
+      label: 'mission-features',
+      status: 'running',
+      preview: JSON.stringify(normalized.features),
+    });
+  }
+  if (normalized.progress) {
+    effects.push({
+      kind: 'observational_task',
+      taskId: 'mission-progress',
+      label: 'mission-progress',
+      status: 'running',
+      preview: JSON.stringify(normalized.progress),
+    });
+  }
+  if (normalized.missionState) {
+    effects.push({
+      kind: 'observational_task',
+      taskId: 'mission-state',
+      label: 'mission-state',
+      status: 'running',
+      preview: normalized.missionState,
+    });
+  }
   if (normalized.missionChild) {
-    return {
+    effects.push({
       kind: 'observational_task',
       taskId: normalized.missionChild.providerSessionId,
       label: 'mission-worker',
       status: normalized.missionChild.event === 'completed' ? 'completed' : 'running',
-    };
+    });
   }
   const child = normalized.childSession;
-  if (!child?.providerSessionId) return undefined;
-  return {
-    kind: 'observational_task',
-    taskId: child.providerSessionId,
-    label: child.label ?? 'task',
-    status: child.done ? 'completed' : 'running',
-    ...(child.activity?.preview ? { preview: child.activity.preview } : {}),
-  };
+  const taskId = child?.providerSessionId ?? child?.toolUseId;
+  if (child && taskId) {
+    effects.push({
+      kind: 'observational_task',
+      taskId,
+      label: child.label ?? child.toolUseId ?? 'task',
+      status: child.done ? 'completed' : 'running',
+      ...(child.toolUseId ? { preview: child.toolUseId } : {}),
+      ...(child.activity?.preview && !child.toolUseId ? { preview: child.activity.preview } : {}),
+    });
+  }
+  return effects;
 }
 
 function skillActivationFromNotification(raw: unknown): SkillActivation | undefined {

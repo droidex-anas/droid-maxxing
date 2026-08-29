@@ -1,48 +1,37 @@
-import {
-  type AskUserHandler,
-  type McpServerConfig,
-  type PermissionHandler,
-} from '@factory/droid-sdk';
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
-import type { FactorySession } from './providers/droid/DroidProviderSession.js';
-import { droidexUserDataDir } from './droidexPaths.js';
-import type { ProviderBinding } from './persistence/SessionStore.js';
+import { randomUUID } from 'node:crypto';
+import type { ProviderBinding, SessionStore } from './persistence/SessionStore.js';
+import { persistBindingUpdated } from './providerBinding.js';
+import type { TranscriptStore } from './persistence/TranscriptStore.js';
 import type {
   ClientCommand,
   FactoryDefaultSettings,
   ServerEvent,
+  SessionConfiguration,
   SessionSummary,
 } from './protocol.js';
-import { liveBindingFromSummary, type SessionRegistry } from './SessionRegistry.js';
-import type { PrimaryAutomaticCompactionTarget, SessionCompaction } from './SessionCompaction.js';
-import type { LiveOperationTarget, SessionContext } from './SessionContext.js';
+import type { SessionRegistry } from './SessionRegistry.js';
+import type { SessionCompaction } from './SessionCompaction.js';
 import type { ChildSessions } from './ChildSessions.js';
+import { errMsg, type SessionInitResult } from './sessionHelpers.js';
+import type { DroidMissionConfiguration } from './providers/providerIdentity.js';
 import {
-  buildCreatedSessionSummary,
-  buildCreateRuntimeOptions,
-  buildResumedSession,
-  createDefaultsModeForCommand,
-  createMissionConfigurationForMode,
-  errMsg,
-  requireCreateConfiguration,
-} from './sessionHelpers.js';
-import { droidReasoningEffortFromSelection } from './providers/providerIdentity.js';
-import type { ShutdownDeadline } from './providers/shutdownDeadline.js';
+  type ProviderInteractionSink,
+  type ProviderPrompt,
+  type ProviderSession,
+} from './providers/providerTypes.js';
+import type { ProviderRuntimeEvent } from './providers/providerEvents.js';
+import type { ProviderEventAdmissionLive } from './providers/providerEvents.js';
+import type { ProviderRegistry } from './providers/ProviderRegistry.js';
+import { ShutdownDeadline } from './providers/shutdownDeadline.js';
+import type { SessionEventFlow } from './SessionEventFlow.js';
+import {
+  createAppSession,
+  resumeAppSession,
+  type SessionOpenHost,
+} from './sessionLifecycleOpen.js';
 
 export type SessionCreateCommand = Extract<ClientCommand, { type: 'session.create' }>;
 
-async function sessionRuntimeCwd(appCwd: string): Promise<string> {
-  if (appCwd) return appCwd;
-  const chatCwd = join(droidexUserDataDir(), 'chats');
-  await mkdir(chatCwd, { recursive: true });
-  return chatCwd;
-}
-
-interface LocalMcpResource {
-  close(): Promise<void>;
-}
 interface DeferredClose {
   promise: Promise<void>;
   resolve: () => void;
@@ -53,53 +42,99 @@ interface CloseOperation {
   deferred: DeferredClose;
   created: boolean;
 }
+
 export interface StartedLocalMcpResources {
-  servers: LocalMcpResource[];
-  configs: McpServerConfig[];
+  servers: Array<{ close(): Promise<void> }>;
+  configs: unknown[];
 }
+
+export interface LiveNativeSession {
+  readonly sessionId: string;
+  readonly initResult?: SessionInitResult;
+  interrupt(): Promise<void>;
+  close(): Promise<unknown>;
+  onNotification(handler: (notification: Record<string, unknown>) => void): () => void;
+  updateSettings(settings: Record<string, unknown>): Promise<unknown>;
+}
+
 interface LiveTurnState {
   streaming: boolean;
   autoCompacting: boolean;
   pendingSends: string[];
   interruptingForSteer?: boolean;
-  interrupting?: boolean; // Marks user Stop so the resulting stream abort settles quietly.
+  interrupting?: boolean;
+  activeTurn?: { turnId: string; runtimeGeneration: number };
 }
 type SessionCloseMode = 'discard-pending' | 'preserve-pending';
 export interface LiveSession extends LiveTurnState {
   summary: SessionSummary;
   binding: ProviderBinding;
-  session: FactorySession;
+  session: LiveNativeSession;
+  provider: ProviderSession;
   closeMode?: SessionCloseMode;
   closePromise?: Promise<void>;
-  mcpServers: LocalMcpResource[];
-  // Running MCP handles reused when compaction swaps the provider session.
-  mcpConfigs: McpServerConfig[];
+  mcpServers: Array<{ close(): Promise<void> }>;
+  mcpConfigs: unknown[];
   todoDisabledForDesign?: boolean;
-  compacting?: boolean; // Manual-compaction overlap guard; auto-compaction is separate.
-  unsubscribe?: () => void; // Primary provider notification subscription, replaced on swap.
+  compacting?: boolean;
+  unsubscribe?: () => void;
   appliedNativeConfiguration?: SessionSummary['configuration'];
+  acceptProviderEvents?: boolean;
 }
 type LifecycleError = Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>;
 
+export interface ProviderOpenHint {
+  command?: SessionCreateCommand;
+  configuration: SessionConfiguration;
+  defaults: FactoryDefaultSettings;
+  compactionModel: string;
+  compactionTokenLimit: number;
+  sessionPurpose?: SessionSummary['sessionPurpose'];
+  mission?: DroidMissionConfiguration;
+}
+
 export interface SessionLifecycleDependencies {
-  runtime: FactoryRuntime;
+  providers: ProviderRegistry;
   registry: SessionRegistry<LiveSession>;
   ensureConnected: () => void;
   getFactoryDefaults: () => Promise<FactoryDefaultSettings>;
   maxContextTokensForModel: (modelId?: string) => number | undefined;
-  startLocalMcpServers: (ref: { id: string }, cwd?: string) => Promise<StartedLocalMcpResources>;
-  makePermissionHandler: (ref: { id: string }) => PermissionHandler;
-  makeAskUserHandler: (ref: { id: string }) => AskUserHandler;
-  compaction: Pick<
-    SessionCompaction,
-    'resolveLimit' | 'arm' | 'subscribePrimary' | 'afterTurn' | 'cancel' | 'forgetSession'
+  takeOpenedResources?: (provider: ProviderSession) => StartedLocalMcpResources;
+  prepareProviderOpen?: (hint: ProviderOpenHint) => void;
+  interactionSink: ProviderInteractionSink;
+  eventFlow: Pick<SessionEventFlow, 'apply' | 'beginTurn'>;
+  sessionStore?: Pick<
+    SessionStore,
+    | 'createProvisional'
+    | 'bindInitialProviderRuntime'
+    | 'updateResumeState'
+    | 'replaceProviderRuntime'
+    | 'get'
   >;
+  transcriptStore?: Pick<TranscriptStore, 'beginTurn' | 'settleTurn'>;
+  nextId?: () => string;
+  compaction: {
+    resolveLimit: SessionCompaction['resolveLimit'];
+    arm: (
+      target: { session: LiveNativeSession; isCurrent(): boolean; appSessionId?: string },
+      limit: number,
+    ) => Promise<boolean>;
+    subscribePrimary: (liveSession: LiveSession) => void;
+    afterTurn: (liveSession: LiveSession) => void;
+    cancel: (liveSession: LiveSession) => void;
+    forgetSession: (appSessionId: string) => void;
+  };
   isShutdownStarted: () => boolean;
   childSessions: Pick<ChildSessions, 'attachParent' | 'closeParent'>;
   applyPendingSettingsToSummary: (summary: SessionSummary) => SessionSummary;
   applyPendingSessionSettings: (appSessionId: string) => Promise<boolean>;
-  runPrimaryTurn: (liveSession: LiveSession, prompt: string) => Promise<void>;
-  context: Pick<SessionContext, 'refresh' | 'stopPolling' | 'stopSession' | 'forgetSession'>;
+  preparePrimaryTurn: (liveSession: LiveSession, prompt: string) => Promise<boolean>;
+  finishPrimaryTurn: (liveSession: LiveSession, error?: unknown) => Promise<void>;
+  context: {
+    refresh: (liveSession: LiveSession) => void | Promise<void>;
+    stopSession: (liveSession: LiveSession) => void;
+    forgetSession: (liveSession: LiveSession) => void;
+  };
   forgetInteractions: (appSessionId: string) => void;
   forgetEventFlow: (appSessionId: string) => void;
   forgetMissionControl: (appSessionId: string) => void;
@@ -110,120 +145,37 @@ export interface SessionLifecycleDependencies {
   emitStatus: (appSessionId: string, text: string) => void;
   emitSessionList: (closedProviderSessionId: string) => void | Promise<void>;
 }
+
+const EMPTY_PROMPT_PARTS: Pick<ProviderPrompt, 'skills' | 'files' | 'browserRefs'> = {
+  skills: [],
+  files: [],
+  browserRefs: [],
+};
+
 export class SessionLifecycle {
   private readonly deferredCloses = new WeakMap<LiveSession, DeferredClose>();
   private readonly closesById = new Map<string, LiveSession>();
   private readonly resumeOperations = new Map<string, Promise<boolean>>();
+  private readonly appCommands = new Map<string, Promise<unknown>>();
+  private readonly turnWaiters = new Map<
+    string,
+    { resolve: (error?: unknown) => void; settled: boolean }
+  >();
+  private readonly discardedOpens = new Set<string>();
   private pendingShutdownCloses?: Array<{ liveSession: LiveSession; close: CloseOperation }>;
 
   constructor(private readonly dependencies: SessionLifecycleDependencies) {}
+
   async create(command: SessionCreateCommand): Promise<void> {
-    const d = this.dependencies;
-    d.ensureConnected();
-    const appCwd = command.cwd ?? '';
-    const ref = { id: '' };
-    let pendingMcpServers: LocalMcpResource[] = [];
-    let pendingSession: FactorySession | undefined;
-    let pendingLiveSession: LiveSession | undefined;
-
-    try {
-      const configuration = requireCreateConfiguration(command);
-      const defaults = await d.getFactoryDefaults();
-      const interactionMode = configuration.interactionMode;
-      const defaultsMode = createDefaultsModeForCommand(command, interactionMode);
-      const primary = {
-        modelId: configuration.providerSelection.modelId,
-        reasoningEffort: droidReasoningEffortFromSelection(configuration.providerSelection),
-      };
-      const mission = createMissionConfigurationForMode(defaultsMode, command, defaults);
-      const compactionModel =
-        command.compactionModel ?? defaults.compactionModel ?? 'current-model';
-      const compactionTokenLimit = await d.compaction.resolveLimit({
-        modelId: primary.modelId,
-        uiOverride: {
-          ...(command.compactionTokenLimit !== undefined
-            ? { compactionTokenLimit: command.compactionTokenLimit }
-            : {}),
-          ...(command.compactionTokenLimitPerModel !== undefined
-            ? { compactionTokenLimitPerModel: command.compactionTokenLimitPerModel }
-            : {}),
-        },
-        defaults,
-      });
-      const runtimeCwd = await sessionRuntimeCwd(appCwd);
-      this.requireOpenAdmission();
-      const mcp = await d.startLocalMcpServers(ref, appCwd);
-      pendingMcpServers = mcp.servers;
-      const runtimeOptions = buildCreateRuntimeOptions({
-        command,
-        runtimeCwd,
-        configuration,
-        primary,
-        ...(mission !== undefined ? { mission } : {}),
-        defaults,
-        compactionModel,
-        compactionTokenLimit,
-        mcpServers: mcp.configs,
-        permissionHandler: d.makePermissionHandler(ref),
-        askUserHandler: d.makeAskUserHandler(ref),
-      });
-      const session = await d.runtime.createSession(runtimeOptions);
-      pendingSession = session;
-      this.requireOpenAdmission();
-      const autoCompactionArmed = await d.compaction.arm(
-        {
-          session,
-          isCurrent: () => !d.isShutdownStarted() && pendingSession === session,
-        },
-        compactionTokenLimit,
-      );
-      this.requireOpenAdmission();
-
-      const appSessionId = session.sessionId;
-      const maxContextTokens = d.maxContextTokensForModel(primary.modelId);
-      const summary = buildCreatedSessionSummary({
-        command,
-        appSessionId,
-        configuration,
-        compactionModel,
-        ...(mission !== undefined ? { mission } : {}),
-        ...(maxContextTokens !== undefined ? { maxContextTokens } : {}),
-        ...(autoCompactionArmed ? { compactionTokenLimit } : {}),
-        now: Date.now(),
-      });
-      ref.id = appSessionId;
-      const liveSession = createLiveSession(summary, session, mcp);
-      liveSession.appliedNativeConfiguration = configuration;
-      pendingLiveSession = liveSession;
-      d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
-      d.registry.register(liveSession);
-      d.childSessions.attachParent(appSessionId);
-      d.emit({
-        type: 'session.created',
-        clientRef: command.clientRef,
-        session: publishedSummary(d.registry, appSessionId),
-      });
-      this.driveInBackground(appSessionId, command.goal);
-    } catch (error) {
-      await this.cleanupFailedOpen(pendingMcpServers, pendingSession, pendingLiveSession);
-      if (!isOpenAdmissionClosed(error)) {
-        d.emitError({
-          code: 'session.create_failed',
-          clientRef: command.clientRef,
-          message: errMsg(error),
-        });
-      }
-    }
+    return createAppSession(this.openHost(), command);
   }
 
   async resume(requestedAppSessionId: string): Promise<boolean> {
-    const d = this.dependencies;
-    const historical = d.registry.getCanonicalSummary(requestedAppSessionId);
+    const historical = this.dependencies.registry.getCanonicalSummary(requestedAppSessionId);
     const appSessionId = historical?.appSessionId ?? requestedAppSessionId;
     const pending = this.resumeOperations.get(appSessionId);
     if (pending) return pending;
-
-    const operation = this.resumeOnce(requestedAppSessionId).finally(() => {
+    const operation = resumeAppSession(this.openHost(), requestedAppSessionId).finally(() => {
       if (this.resumeOperations.get(appSessionId) === operation)
         this.resumeOperations.delete(appSessionId);
     });
@@ -231,170 +183,87 @@ export class SessionLifecycle {
     return operation;
   }
 
-  private async resumeOnce(requestedAppSessionId: string): Promise<boolean> {
-    const d = this.dependencies;
-    d.ensureConnected();
-    const historical = d.registry.getCanonicalSummary(requestedAppSessionId);
-    const appSessionId = historical?.appSessionId ?? requestedAppSessionId;
-    const providerSessionId = historical?.providerSessionId ?? requestedAppSessionId;
-    const existing = d.registry.getLive(appSessionId);
-    if (existing) {
-      d.emit({
-        type: 'session.created',
-        clientRef: `resume:${appSessionId}`,
-        session: publishedSummary(d.registry, appSessionId),
-      });
-      void d.context.refresh(this.primaryContextTarget(existing));
-      return true;
-    }
-
-    const ref = { id: appSessionId };
-    let pendingMcpServers: LocalMcpResource[] = [];
-    let pendingSession: FactorySession | undefined;
-    let pendingLiveSession: LiveSession | undefined;
-    try {
-      const mcp = await d.startLocalMcpServers(ref, historical?.cwd);
-      pendingMcpServers = mcp.servers;
-      const session = await d.runtime.loadSession(providerSessionId, {
-        permissionHandler: d.makePermissionHandler(ref),
-        askUserHandler: d.makeAskUserHandler(ref),
-        cwd: historical?.cwd,
-        mcpServers: mcp.configs,
-      });
-      pendingSession = session;
-      const defaults = await d.getFactoryDefaults();
-      const resumed = buildResumedSession({
-        init: session.initResult,
-        historical,
-        appSessionId,
-        providerSessionId,
-        defaults,
-        maxContextTokensForModel: d.maxContextTokensForModel,
-        now: Date.now(),
-      });
-      const summary = resumed.summary;
-      const projectedModel = d.applyPendingSettingsToSummary({ ...summary }).configuration
-        .providerSelection.modelId;
-      const limit = await d.compaction.resolveLimit({
-        modelId: projectedModel,
-        exposed: resumed.exposedCompaction,
-      });
-      this.requireOpenAdmission();
-      if (
-        await d.compaction.arm(
-          {
-            appSessionId,
-            session,
-            isCurrent: () => !d.isShutdownStarted() && pendingSession === session,
-          },
-          limit,
-        )
-      ) {
-        summary.compactionTokenLimit = limit;
+  async send(requestedAppSessionId: string, text: string): Promise<void> {
+    let turn: Promise<void> | undefined;
+    await this.enqueueApp(requestedAppSessionId, async () => {
+      const liveSession = await this.prepareToSend(requestedAppSessionId);
+      if (!liveSession) return;
+      if (liveSession.streaming || liveSession.compacting || liveSession.autoCompacting) {
+        liveSession.pendingSends.push(text);
+        this.updateQueuedSends(liveSession);
+        return;
       }
-      this.requireOpenAdmission();
-      const liveSession = createLiveSession(summary, session, mcp);
-      liveSession.appliedNativeConfiguration = summary.configuration;
-      pendingLiveSession = liveSession;
-      d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
-      d.registry.register(liveSession);
-      d.childSessions.attachParent(appSessionId);
-      const published = publishedSummary(d.registry, appSessionId);
-      d.emit({
-        type: 'session.created',
-        clientRef: `resume:${appSessionId}`,
-        session: published,
-      });
-      d.emit({ type: 'session.updated', session: published });
-      if (published.sessionPurpose === 'mission-control' && published.features.length > 0) {
-        d.emit({
-          type: 'mission.features',
-          appSessionId,
-          ...(published.missionId !== undefined ? { missionId: published.missionId } : {}),
-          features: published.features,
+      liveSession.streaming = true;
+      turn = this.drive(liveSession.summary.appSessionId, text);
+    });
+    if (turn) await turn;
+  }
+
+  async sendNow(requestedAppSessionId: string, text: string): Promise<void> {
+    let turn: Promise<void> | undefined;
+    await this.enqueueApp(requestedAppSessionId, async () => {
+      const liveSession = await this.prepareToSend(requestedAppSessionId);
+      if (!liveSession) return;
+      if (!liveSession.streaming && !liveSession.compacting && !liveSession.autoCompacting) {
+        liveSession.streaming = true;
+        turn = this.drive(liveSession.summary.appSessionId, text);
+        return;
+      }
+      liveSession.pendingSends.unshift(text);
+      this.updateQueuedSends(liveSession);
+      if (liveSession.compacting || liveSession.autoCompacting) return;
+      liveSession.interruptingForSteer = true;
+      this.dependencies.emitStatus(liveSession.summary.appSessionId, 'Steering now...');
+      try {
+        await this.interruptCaptured(liveSession);
+      } catch (error) {
+        liveSession.interruptingForSteer = false;
+        this.dependencies.emitError({
+          code: 'session.send_now_failed',
+          appSessionId: liveSession.summary.appSessionId,
+          message: `Could not interrupt session for steering: ${errMsg(error)}`,
         });
       }
-      void d.context.refresh(this.primaryContextTarget(liveSession));
-      return true;
-    } catch (error) {
-      await this.cleanupFailedOpen(pendingMcpServers, pendingSession, pendingLiveSession);
-      if (!isOpenAdmissionClosed(error)) d.emitError({ appSessionId, message: errMsg(error) });
-      return false;
-    }
-  }
-
-  async send(requestedAppSessionId: string, text: string): Promise<void> {
-    const liveSession = await this.prepareToSend(requestedAppSessionId);
-    if (!liveSession) return;
-    if (liveSession.streaming || liveSession.compacting || liveSession.autoCompacting) {
-      liveSession.pendingSends.push(text);
-      this.updateQueuedSends(liveSession);
-      return;
-    }
-    await this.drive(liveSession.summary.appSessionId, text);
-  }
-  async sendNow(requestedAppSessionId: string, text: string): Promise<void> {
-    const liveSession = await this.prepareToSend(requestedAppSessionId);
-    if (!liveSession) return;
-    if (!liveSession.streaming && !liveSession.compacting && !liveSession.autoCompacting) {
-      await this.drive(liveSession.summary.appSessionId, text);
-      return;
-    }
-    liveSession.pendingSends.unshift(text);
-    this.updateQueuedSends(liveSession);
-    if (liveSession.compacting || liveSession.autoCompacting) return;
-    liveSession.interruptingForSteer = true;
-    this.dependencies.emitStatus(liveSession.summary.appSessionId, 'Steering now...');
-    try {
-      await liveSession.session.interrupt();
-    } catch (error) {
-      liveSession.interruptingForSteer = false;
-      this.dependencies.emitError({
-        code: 'session.send_now_failed',
-        appSessionId: liveSession.summary.appSessionId,
-        message: `Could not interrupt session for steering: ${errMsg(error)}`,
-      });
-    }
+    });
+    if (turn) await turn;
   }
 
   async interrupt(requestedAppSessionId: string): Promise<void> {
-    const resolvedAppSessionId =
-      this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
-      requestedAppSessionId;
-    const liveSession = this.dependencies.registry.getLive(resolvedAppSessionId);
-    if (!liveSession) return;
-    const appSessionId = liveSession.summary.appSessionId;
-    liveSession.pendingSends = [];
-    if (liveSession.compacting) {
-      // Clearing the queue mid-compaction is bookkeeping, not activity.
-      this.dependencies.registry.updateSummary(
-        appSessionId,
-        { queuedSends: 0 },
-        { touchActivity: false },
-      );
-      return;
-    }
-    const wasAutoCompacting = liveSession.autoCompacting;
-    const compactionTarget = this.primaryAutomaticCompactionTarget(liveSession);
-    liveSession.interrupting = true;
-    try {
-      await liveSession.session.interrupt();
-    } catch (error) {
-      liveSession.interrupting = false;
-      throw error;
-    }
-    if (!compactionTarget.isCurrent()) {
-      liveSession.interrupting = false;
-      return;
-    }
-    if (wasAutoCompacting) {
-      this.dependencies.compaction.cancel(compactionTarget);
-    }
-    if (!liveSession.streaming) liveSession.interrupting = false;
-    this.dependencies.registry.updateSummary(appSessionId, {
-      phase: 'paused',
-      streaming: false,
-      queuedSends: 0,
+    return this.enqueueApp(requestedAppSessionId, async () => {
+      const resolvedAppSessionId =
+        this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+        requestedAppSessionId;
+      const liveSession = this.dependencies.registry.getLive(resolvedAppSessionId);
+      if (!liveSession) return;
+      const appSessionId = liveSession.summary.appSessionId;
+      liveSession.pendingSends = [];
+      if (liveSession.compacting) {
+        this.dependencies.registry.updateSummary(
+          appSessionId,
+          { queuedSends: 0 },
+          { touchActivity: false },
+        );
+        return;
+      }
+      const wasAutoCompacting = liveSession.autoCompacting;
+      liveSession.interrupting = true;
+      try {
+        await this.interruptCaptured(liveSession);
+      } catch (error) {
+        liveSession.interrupting = false;
+        throw error;
+      }
+      if (this.dependencies.registry.getLive(appSessionId) !== liveSession || liveSession.closeMode) {
+        liveSession.interrupting = false;
+        return;
+      }
+      if (wasAutoCompacting) this.dependencies.compaction.cancel(liveSession);
+      if (!liveSession.streaming) liveSession.interrupting = false;
+      this.dependencies.registry.updateSummary(appSessionId, {
+        phase: 'paused',
+        streaming: false,
+        queuedSends: 0,
+      });
     });
   }
 
@@ -420,6 +289,7 @@ export class SessionLifecycle {
   }
 
   async close(appSessionId: string, mode: SessionCloseMode = 'discard-pending'): Promise<void> {
+    if (mode === 'discard-pending') this.discardedOpens.add(appSessionId);
     const liveSession =
       this.dependencies.registry.getLive(appSessionId) ?? this.closesById.get(appSessionId);
     if (!liveSession) return;
@@ -428,10 +298,6 @@ export class SessionLifecycle {
     await operation.deferred.promise;
   }
 
-  /**
-   * Invalidate generations, mark every live session closing, and unregister
-   * them before any provider await. `closeAll` finishes the captured batch.
-   */
   invalidateLiveSessions(): readonly LiveSession[] {
     if (this.pendingShutdownCloses) {
       return this.pendingShutdownCloses.map((entry) => entry.liveSession);
@@ -454,7 +320,6 @@ export class SessionLifecycle {
     }
     const existing = this.deferredCloses.get(liveSession);
     if (existing) return { deferred: existing, created: false };
-
     let resolve = (): void => undefined;
     let reject = (error: unknown): void => {
       void error;
@@ -492,7 +357,10 @@ export class SessionLifecycle {
     deadline?: ShutdownDeadline,
   ): Promise<void> {
     const d = this.dependencies;
-    const closedProviderSessionId = liveSession.session.sessionId;
+    const closedProviderSessionId = liveSession.provider.providerSessionId;
+    if (d.registry.getLive(liveSession.summary.appSessionId) === liveSession) {
+      this.invalidateGeneration(liveSession);
+    }
     let firstError: unknown;
     const run = async (action: () => void | Promise<void>): Promise<void> => {
       try {
@@ -502,13 +370,12 @@ export class SessionLifecycle {
         firstError ??= error;
       }
     };
-
     await run(() => d.childSessions.closeParent(liveSession.summary.appSessionId, deadline));
     await run(() => {
       d.context.stopSession(liveSession);
     });
     await run(() => {
-      d.compaction.cancel(this.primaryAutomaticCompactionTarget(liveSession));
+      d.compaction.cancel(liveSession);
     });
     await run(() => {
       d.compaction.forgetSession(liveSession.summary.appSessionId);
@@ -519,11 +386,8 @@ export class SessionLifecycle {
     for (const server of liveSession.mcpServers) {
       await run(() => server.close());
     }
-    // Shutdown already unregistered via invalidateLiveSessions. Individual
-    // close keeps the live mapping until after the native await so in-flight
-    // interaction callbacks can still settle against the same session.
     const stillRegistered = d.registry.getLive(liveSession.summary.appSessionId) === liveSession;
-    await run(() => closeNativeSession(liveSession.session, deadline));
+    await run(() => liveSession.provider.close(deadline ?? zeroDeadline()));
     await run(() => d.closeBrowserSession(liveSession.summary.appSessionId));
     await run(() => {
       d.context.forgetSession(liveSession);
@@ -574,34 +438,30 @@ export class SessionLifecycle {
     if (firstError !== undefined) throw errorFromUnknown(firstError);
   }
 
-  private requireOpenAdmission(): void {
-    if (this.dependencies.isShutdownStarted()) throw new OpenAdmissionClosedError();
+  handleProviderEvent(liveSession: LiveSession, event: ProviderRuntimeEvent): void {
+    if (event.type === 'binding.updated') {
+      const next = persistBindingUpdated(
+        this.dependencies.sessionStore,
+        event,
+        liveSession.binding,
+      );
+      if (!next) return;
+      liveSession.binding = next;
+      return;
+    }
+    if (!liveSession.acceptProviderEvents) return;
+    if (event.type === 'turn.settled') this.settleCapturedTurn(liveSession, event);
+    this.dependencies.eventFlow.apply(event, this.admissionLive(liveSession));
   }
 
-  private primaryContextTarget(liveSession: LiveSession): LiveOperationTarget {
-    const d = this.dependencies;
-    const appSessionId = liveSession.summary.appSessionId;
-    const session = liveSession.session;
+  private openHost(): SessionOpenHost {
     return {
-      appSessionId,
-      providerSessionId: session.sessionId,
-      sourceSessionId: appSessionId,
-      session,
-      isCurrent: () =>
-        !d.isShutdownStarted() &&
-        d.registry.getLive(appSessionId) === liveSession &&
-        !liveSession.closeMode &&
-        liveSession.session === session,
-    };
-  }
-
-  private primaryAutomaticCompactionTarget(
-    liveSession: LiveSession,
-  ): PrimaryAutomaticCompactionTarget {
-    return {
-      ...this.primaryContextTarget(liveSession),
-      kind: 'primary',
-      liveSession,
+      dependencies: this.dependencies,
+      discardedOpens: this.discardedOpens,
+      handleProviderEvent: (liveSession, event) => this.handleProviderEvent(liveSession, event),
+      nextId: () => this.nextId(),
+      driveInBackground: (appSessionId, prompt) => this.driveInBackground(appSessionId, prompt),
+      cleanupFailedOpen: (provider, liveSession) => this.cleanupFailedOpen(provider, liveSession),
     };
   }
 
@@ -610,8 +470,6 @@ export class SessionLifecycle {
       this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
       requestedAppSessionId;
     let liveSession = this.dependencies.registry.getLive(appSessionId);
-    // A send that lands while the runtime is being released must wait for that
-    // close and reopen, not vanish. Retirement makes this window reachable.
     if (liveSession?.closeMode) {
       await liveSession.closePromise;
       if (this.dependencies.isShutdownStarted()) return undefined;
@@ -624,8 +482,10 @@ export class SessionLifecycle {
     }
     if (liveSession?.closeMode) return undefined;
     if (!liveSession) {
-      const message = `Session ${appSessionId} is not resumable`;
-      this.dependencies.emitError({ appSessionId, message });
+      this.dependencies.emitError({
+        appSessionId,
+        message: `Session ${appSessionId} is not resumable`,
+      });
       return undefined;
     }
     const settingsApplied = await this.dependencies.applyPendingSessionSettings(
@@ -635,8 +495,7 @@ export class SessionLifecycle {
   }
 
   private async cleanupFailedOpen(
-    mcpServers: LocalMcpResource[],
-    session: FactorySession | undefined,
+    provider: ProviderSession | undefined,
     liveSession: LiveSession | undefined,
   ): Promise<void> {
     liveSession?.unsubscribe?.();
@@ -645,8 +504,10 @@ export class SessionLifecycle {
         this.dependencies.childSessions.closeParent(liveSession.summary.appSessionId),
       );
     if (liveSession) this.dependencies.compaction.forgetSession(liveSession.summary.appSessionId);
-    await Promise.all(mcpServers.map((server) => runBestEffortAsync(() => server.close())));
-    if (session) await runBestEffortAsync(() => session.close());
+    await Promise.all(
+      (liveSession?.mcpServers ?? []).map((server) => runBestEffortAsync(() => server.close())),
+    );
+    if (provider) await runBestEffortAsync(() => provider.close(zeroDeadline()));
     if (
       liveSession &&
       this.dependencies.registry.getLive(liveSession.summary.appSessionId) === liveSession
@@ -666,11 +527,9 @@ export class SessionLifecycle {
     const liveSession = d.registry.getLive(appSessionId);
     if (!liveSession || liveSession.closeMode || d.isShutdownStarted()) return;
     const stableAppSessionId = liveSession.summary.appSessionId;
+    let turnError: unknown;
+    liveSession.streaming = true;
     try {
-      liveSession.streaming = true;
-      // Turn start is not user-visible activity: updatedAt (sidebar order and
-      // the renderer's unread marker) must not move until the turn settles,
-      // otherwise background sessions read as unread while the model works.
       d.registry.updateSummary(
         stableAppSessionId,
         {
@@ -680,18 +539,41 @@ export class SessionLifecycle {
         },
         { touchActivity: false },
       );
-      await d.runPrimaryTurn(liveSession, prompt);
+      try {
+        const prepared = await d.preparePrimaryTurn(liveSession, prompt);
+        if (!prepared || d.registry.getLive(stableAppSessionId) !== liveSession) return;
+        const turnId = this.nextId();
+        const runtimeGeneration = liveSession.binding.runtimeGeneration;
+        liveSession.activeTurn = { turnId, runtimeGeneration };
+        d.transcriptStore?.beginTurn({
+          turnId,
+          target: { kind: 'session', appSessionId: stableAppSessionId },
+          runtimeGeneration,
+          startedAt: new Date().toISOString(),
+        });
+        const settled = this.armTurnWaiter(stableAppSessionId, turnId);
+        await liveSession.provider.startTurn({
+          turnId,
+          prompt: { text: prompt, ...EMPTY_PROMPT_PARTS },
+          configuration: liveSession.summary.configuration,
+        });
+        turnError = await settled;
+      } catch (error) {
+        turnError = error;
+      }
     } finally {
       liveSession.interruptingForSteer = false;
       liveSession.interrupting = false;
       liveSession.streaming = false;
-      if (d.isShutdownStarted() || this.shouldDiscardPendingSends(liveSession)) {
+      liveSession.activeTurn = undefined;
+      await d.finishPrimaryTurn(liveSession, turnError);
+      if (d.isShutdownStarted() || liveSession.closeMode === 'discard-pending') {
         liveSession.pendingSends = [];
       } else if (!d.registry.getLive(stableAppSessionId)) {
         const queued = liveSession.pendingSends.splice(0);
         if (queued.length > 0) void this.redeliverQueuedSends(stableAppSessionId, queued);
       } else if (liveSession.autoCompacting) {
-        d.compaction.afterTurn(this.primaryAutomaticCompactionTarget(liveSession));
+        d.compaction.afterTurn(liveSession);
         this.publishTurnSettled(liveSession);
       } else {
         const next = liveSession.pendingSends.shift();
@@ -708,13 +590,10 @@ export class SessionLifecycle {
     });
   }
 
-  // Queue/steer bookkeeping: never moves updatedAt on its own.
   private updateQueuedSends(liveSession: LiveSession): void {
     this.publishTurnState(liveSession, false);
   }
 
-  // The turn ended (completed, failed, or stopped): this is the "model has
-  // finally responded" moment, so the summary's updatedAt moves now.
   private publishTurnSettled(liveSession: LiveSession): void {
     this.publishTurnState(liveSession, true);
   }
@@ -730,10 +609,6 @@ export class SessionLifecycle {
     );
   }
 
-  private shouldDiscardPendingSends(liveSession: LiveSession): boolean {
-    return liveSession.closeMode === 'discard-pending';
-  }
-
   private async redeliverQueuedSends(appSessionId: string, queued: string[]): Promise<void> {
     for (const text of queued) {
       if (this.dependencies.isShutdownStarted()) return;
@@ -747,36 +622,93 @@ export class SessionLifecycle {
       }
     }
   }
-}
-function closeNativeSession(
-  session: { close: (...args: never[]) => Promise<void> },
-  deadline?: ShutdownDeadline,
-): Promise<void> {
-  // ProviderSession.close takes the shared deadline; FactorySession.close
-  // ignores the extra argument. Keep the call site one path.
-  return (session.close as (deadline?: ShutdownDeadline) => Promise<void>)(deadline);
+
+  private async interruptCaptured(liveSession: LiveSession): Promise<void> {
+    const captured = liveSession.activeTurn;
+    if (captured) {
+      if (captured.runtimeGeneration !== liveSession.binding.runtimeGeneration) {
+        throw new Error('interrupt generation does not match the live session');
+      }
+      await liveSession.provider.interrupt({
+        turnId: captured.turnId,
+        runtimeGeneration: captured.runtimeGeneration,
+      });
+      return;
+    }
+    await liveSession.session.interrupt();
+  }
+
+  private settleCapturedTurn(
+    liveSession: LiveSession,
+    event: Extract<ProviderRuntimeEvent, { type: 'turn.settled' }>,
+  ): void {
+    const turnId = event.turnId ?? liveSession.activeTurn?.turnId;
+    if (turnId === undefined) return;
+    this.dependencies.transcriptStore?.settleTurn(turnId, {
+      runtimeGeneration: event.runtimeGeneration,
+      status: event.settlement.status,
+      settledAt: new Date(event.createdAt).toISOString(),
+    });
+    const waiter = this.turnWaiters.get(turnKey(liveSession.summary.appSessionId, turnId));
+    if (waiter && !waiter.settled) {
+      waiter.settled = true;
+      waiter.resolve(
+        event.settlement.status === 'failed'
+          ? new Error(event.settlement.error.message)
+          : undefined,
+      );
+    }
+  }
+
+  private armTurnWaiter(appSessionId: string, turnId: string): Promise<unknown> {
+    const key = turnKey(appSessionId, turnId);
+    return new Promise((resolve) => {
+      this.turnWaiters.set(key, { resolve, settled: false });
+    }).finally(() => {
+      this.turnWaiters.delete(key);
+    });
+  }
+
+  private admissionLive(liveSession: LiveSession): ProviderEventAdmissionLive {
+    return {
+      target: { kind: 'session', appSessionId: liveSession.summary.appSessionId },
+      providerDriverKind: liveSession.binding.providerDriverKind,
+      providerInstanceId: liveSession.binding.providerInstanceId,
+      runtimeGeneration: liveSession.binding.runtimeGeneration,
+      settledTurnIds: new Set<string>(),
+    };
+  }
+
+  private enqueueApp<T>(requestedAppSessionId: string, work: () => Promise<T>): Promise<T> {
+    const appSessionId =
+      this.dependencies.registry.getCanonicalSummary(requestedAppSessionId)?.appSessionId ??
+      requestedAppSessionId;
+    const previous = this.appCommands.get(appSessionId) ?? Promise.resolve();
+    const next = previous.then(work, work);
+    this.appCommands.set(appSessionId, next);
+    return next.finally(() => {
+      if (this.appCommands.get(appSessionId) === next) this.appCommands.delete(appSessionId);
+    });
+  }
+
+  private invalidateGeneration(liveSession: LiveSession): void {
+    liveSession.binding = {
+      ...liveSession.binding,
+      runtimeGeneration: liveSession.binding.runtimeGeneration + 1,
+    };
+  }
+
+  private nextId(): string {
+    return this.dependencies.nextId?.() ?? randomUUID();
+  }
 }
 
-function createLiveSession(
-  summary: SessionSummary,
-  session: FactorySession,
-  mcp: StartedLocalMcpResources,
-): LiveSession {
-  const base = liveBindingFromSummary(summary);
-  return {
-    summary,
-    binding: {
-      ...base,
-      providerSessionId: session.sessionId,
-      runtimeGeneration: base.runtimeGeneration === 0 ? 1 : base.runtimeGeneration,
-    },
-    session,
-    streaming: false,
-    pendingSends: [],
-    mcpServers: mcp.servers,
-    mcpConfigs: mcp.configs,
-    autoCompacting: false,
-  };
+function zeroDeadline(): ShutdownDeadline {
+  return ShutdownDeadline.fromDurationMs(0);
+}
+
+function turnKey(appSessionId: string, turnId: string): string {
+  return `${appSessionId}:${turnId}`;
 }
 
 async function runBestEffortAsync(action: () => Promise<void>): Promise<void> {
@@ -787,21 +719,6 @@ async function runBestEffortAsync(action: () => Promise<void>): Promise<void> {
   }
 }
 
-class OpenAdmissionClosedError extends Error {}
-
-function isOpenAdmissionClosed(error: unknown): boolean {
-  return error instanceof OpenAdmissionClosedError;
-}
-
 function errorFromUnknown(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
-}
-
-function publishedSummary(
-  registry: SessionRegistry<LiveSession>,
-  appSessionId: string,
-): SessionSummary {
-  const summary = registry.resolveSummary(appSessionId);
-  if (!summary) throw new Error(`Session ${appSessionId} has no published summary.`);
-  return summary;
 }

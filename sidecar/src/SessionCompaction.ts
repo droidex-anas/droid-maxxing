@@ -421,7 +421,7 @@ export class SessionCompaction {
       appSessionId,
       providerSessionId: session.sessionId,
       sourceSessionId: appSessionId,
-      session,
+      session: session as import('./providers/droid/DroidProviderSession.js').FactorySession,
       liveSession,
       isCurrent: () =>
         !this.dependencies.isShutdownStarted() &&

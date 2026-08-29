@@ -1,4 +1,3 @@
-import { DroidInteractionMode, type McpServerConfig } from '@factory/droid-sdk';
 import { randomUUID } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import type {
@@ -29,15 +28,20 @@ import {
 } from './sessionHelpers.js';
 import {
   assertDroidMissionConfigurationAllowed,
-  configurationsEqual,
   droidReasoningEffortFromSelection,
   parseSessionConfiguration,
   withProviderSelection,
   type SessionConfiguration,
 } from './providers/providerIdentity.js';
 import { boundedInt } from './values.js';
-import { mapAutonomy } from './providers/droid/DroidModeMapping.js';
-import { DroidRuntime, type FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
+import { type McpServerConfig } from './providers/droid/DroidModeMapping.js';
+import {
+  DroidProviderAdapter,
+  DroidRuntime,
+  queueDroidOpenFromHint,
+  takeDroidOpenedMcp,
+  type FactoryRuntime,
+} from './providers/droid/DroidProviderAdapter.js';
 import type { FactorySession } from './providers/droid/DroidProviderSession.js';
 import { detectEnvironment } from './Environment.js';
 import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInstaller.js';
@@ -70,6 +74,7 @@ import { isDesignPrompt } from './browser/designPromptPacks.js';
 import { SessionRegistry } from './SessionRegistry.js';
 import { projectWireSessionSummary } from './sessionRegistryProjection.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
+import { DroidEventFlow } from './providers/droid/DroidEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
 import { DroidInteractions } from './providers/droid/DroidInteractions.js';
 import { isReportedStreamingTranscriptError, SessionTimeline } from './SessionTimeline.js';
@@ -103,7 +108,10 @@ import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 import { assertValidResponseFormat, formatAppPrompt } from './appPrompt.js';
 import { SIDECAR_SHUTDOWN_BUDGET_MS, ShutdownDeadline } from './providers/shutdownDeadline.js';
-import type { ProviderRegistry } from './providers/ProviderRegistry.js';
+import {
+  createDefaultProviderRegistry,
+  type ProviderRegistry,
+} from './providers/ProviderRegistry.js';
 import type { DroidexDatabase } from './persistence/DroidexDatabase.js';
 
 type Emit = (event: ServerEvent) => void;
@@ -224,6 +232,7 @@ export class SessionManager {
   private readonly interactions: SessionInteractions;
   private readonly droidInteractions: DroidInteractions;
   private readonly eventFlow: SessionEventFlow;
+  private readonly droidEventFlow: DroidEventFlow;
   private readonly context: SessionContext;
   private readonly compaction: SessionCompaction;
   private readonly childSessions: ChildSessions;
@@ -246,7 +255,7 @@ export class SessionManager {
   private readonly mcpSettings: McpSettings;
   private readonly factoryDefaultsOverride: SessionManagerDependencies['getFactoryDefaults'];
   private readonly nextChildSessionId: () => string;
-  private readonly providerRegistry?: ProviderRegistry;
+  private readonly providerRegistry: ProviderRegistry;
   private readonly database?: Pick<DroidexDatabase, 'close'>;
 
   constructor(
@@ -267,7 +276,6 @@ export class SessionManager {
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
       this.nextChildSessionId = options.dependencies.nextChildSessionId ?? nextChildSessionId;
       startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
-      this.providerRegistry = options.dependencies.providerRegistry;
       this.database = options.dependencies.database;
     } else {
       this.runtime = new DroidRuntime();
@@ -298,6 +306,17 @@ export class SessionManager {
       this.nextChildSessionId = nextChildSessionId;
       startWatcher = startSessionFileWatcher;
     }
+    this.providerRegistry =
+      options.dependencies?.providerRegistry ??
+      createDefaultProviderRegistry({
+        droid: () =>
+          new DroidProviderAdapter({
+            runtime: this.runtime,
+            startLocalMcpServers: (ref, cwd) => this.startLocalMcpServers(ref, cwd),
+            makePermissionHandler: (ref) => this.droidInteractions.makePermissionHandler(ref),
+            makeAskUserHandler: (ref) => this.droidInteractions.makeAskUserHandler(ref),
+          }),
+      });
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
     this.mcpSettings = new McpSettings(
       (cwd) => {
@@ -409,7 +428,7 @@ export class SessionManager {
         this.settleAutomaticCompaction(settlement);
       },
       onPrimaryNotification: (target, notification) => {
-        this.eventFlow.applyNotification(
+        this.droidEventFlow.applyNotification(
           target.appSessionId,
           target.providerSessionId,
           'primary',
@@ -431,12 +450,13 @@ export class SessionManager {
         this.context.recordUsage(appSessionId, sourceProviderSessionId, usage);
       },
     });
+    this.droidEventFlow = new DroidEventFlow(this.eventFlow);
     this.childSessions = new ChildSessions({
       runtime: this.runtime,
       registry: this.registry,
       history: this.history,
       timeline: this.timeline,
-      eventFlow: this.eventFlow,
+      eventFlow: this.droidEventFlow,
       interactions: this.droidInteractions,
       context: this.context,
       compaction: this.compaction,
@@ -478,23 +498,46 @@ export class SessionManager {
       },
     });
     this.lifecycle = new SessionLifecycle({
-      runtime: this.runtime,
+      providers: this.providerRegistry,
       registry: this.registry,
       ensureConnected: () => {
         if (!this.ready) this.connect();
       },
       getFactoryDefaults: () => this.getFactoryDefaults(),
       maxContextTokensForModel: (modelId) => this.maxContextTokensForModel(modelId),
-      startLocalMcpServers: (ref, cwd) => this.startLocalMcpServers(ref, cwd),
-      makePermissionHandler: (ref) => this.droidInteractions.makePermissionHandler(ref),
-      makeAskUserHandler: (ref) => this.droidInteractions.makeAskUserHandler(ref),
-      compaction: this.compaction,
+      takeOpenedResources: (provider) =>
+        takeDroidOpenedMcp(provider) ?? { servers: [], configs: [] },
+      prepareProviderOpen: (hint) => {
+        queueDroidOpenFromHint(
+          this.providerRegistry.resolve(hint.configuration.providerSelection.providerInstanceId),
+          hint,
+        );
+      },
+      interactionSink: this.interactions,
+      eventFlow: this.eventFlow,
+      compaction: {
+        resolveLimit: (request) => this.compaction.resolveLimit(request),
+        arm: (target, limit) =>
+          this.compaction.arm({ ...target, session: target.session as FactorySession }, limit),
+        subscribePrimary: (liveSession) =>
+          this.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession)),
+        afterTurn: (liveSession) =>
+          this.compaction.afterTurn(this.primaryAutomaticCompactionTarget(liveSession)),
+        cancel: (liveSession) =>
+          this.compaction.cancel(this.primaryAutomaticCompactionTarget(liveSession)),
+        forgetSession: (appSessionId) => this.compaction.forgetSession(appSessionId),
+      },
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       childSessions: this.childSessions,
       applyPendingSettingsToSummary: (summary) => this.applyPendingSettingsToSummary(summary),
       applyPendingSessionSettings: (appSessionId) => this.applyPendingSessionSettings(appSessionId),
-      runPrimaryTurn: (liveSession, prompt) => this.runPrimaryTurn(liveSession, prompt),
-      context: this.context,
+      preparePrimaryTurn: (liveSession, prompt) => this.preparePrimaryTurn(liveSession, prompt),
+      finishPrimaryTurn: (liveSession, error) => this.finishPrimaryTurn(liveSession, error),
+      context: {
+        refresh: (liveSession) => this.context.refresh(this.primaryContextTarget(liveSession)),
+        stopSession: (liveSession) => this.context.stopSession(liveSession),
+        forgetSession: (liveSession) => this.context.forgetSession(liveSession),
+      },
       forgetInteractions: (appSessionId) => {
         this.interactions.forgetSession(appSessionId);
         this.droidInteractions.forgetSession(appSessionId);
@@ -1227,31 +1270,25 @@ export class SessionManager {
     }
   }
 
-  private async runPrimaryTurn(liveSession: LiveSession, prompt: string): Promise<void> {
+  private async preparePrimaryTurn(liveSession: LiveSession, prompt: string): Promise<boolean> {
     const appSessionId = liveSession.summary.appSessionId;
     const contextTarget = this.primaryContextTarget(liveSession);
-    if (!this.isCurrentPrimarySession(liveSession)) return;
-    if (!(await this.applyNativeSessionConfiguration(liveSession))) return;
+    if (!this.isCurrentPrimarySession(liveSession)) return false;
     this.eventFlow.beginTurn(appSessionId, appSessionId);
     this.context.beginTurn(appSessionId);
     this.context.startPolling(contextTarget);
-    let turnError: unknown;
-    try {
-      await this.applyDesignToolPolicy(liveSession, isDesignPrompt(prompt));
-      if (!this.isCurrentPrimarySession(liveSession)) {
-        this.context.stopPolling(contextTarget);
-        return;
-      }
-      const stream = liveSession.session.stream(prompt, { includePartialMessages: true });
-      for await (const ev of stream) {
-        if (!this.isCurrentPrimarySession(liveSession)) break;
-        this.eventFlow.applyStreamEvent(appSessionId, appSessionId, 'primary', ev);
-      }
-    } catch (err) {
-      turnError = err;
+    await this.applyDesignToolPolicy(liveSession, isDesignPrompt(prompt));
+    if (!this.isCurrentPrimarySession(liveSession)) {
+      this.context.stopPolling(contextTarget);
+      return false;
     }
+    return true;
+  }
+
+  private async finishPrimaryTurn(liveSession: LiveSession, turnError?: unknown): Promise<void> {
+    const appSessionId = liveSession.summary.appSessionId;
+    const contextTarget = this.primaryContextTarget(liveSession);
     try {
-      // Deliver any buffered streaming tail before the turn reads as settled.
       this.timeline.settleStreaming(appSessionId, appSessionId);
     } catch (err) {
       turnError ??= err;
@@ -1263,8 +1300,6 @@ export class SessionManager {
       if (liveSession.interruptingForSteer) {
         this.timeline.appendStatus(appSessionId, 'Current turn interrupted for steering.');
       } else if (liveSession.interrupting && isUserCancellation(turnError)) {
-        // The user pressed Stop; interrupt() already set the paused phase, so
-        // settle quietly without surfacing an error.
         this.registry.updateSummary(appSessionId, { phase: 'paused' });
       } else {
         if (!isReportedStreamingTranscriptError(turnError)) {
@@ -1272,9 +1307,18 @@ export class SessionManager {
         }
         this.registry.updateSummary(appSessionId, { phase: 'failed' });
       }
+    } else {
+      const previous = liveSession.appliedNativeConfiguration;
+      const next = liveSession.summary.configuration;
+      liveSession.appliedNativeConfiguration = next;
+      if (
+        previous &&
+        (previous.providerSelection.modelId !== next.providerSelection.modelId ||
+          previous.interactionMode !== next.interactionMode)
+      ) {
+        await this.compaction.rearmPrimary(this.primaryCompactionTarget(liveSession));
+      }
     }
-    // Keep streaming=true while the context refresh is in flight so concurrent
-    // sends queue instead of racing a second lifecycle turn.
     await this.context.refresh(contextTarget);
   }
 
@@ -1287,7 +1331,7 @@ export class SessionManager {
   }
 
   private primaryContextTarget(liveSession: LiveSession): LiveOperationTarget {
-    const session = liveSession.session;
+    const session = liveSession.session as FactorySession;
     return {
       appSessionId: liveSession.summary.appSessionId,
       providerSessionId: session.sessionId,
@@ -1531,53 +1575,6 @@ export class SessionManager {
     });
   }
 
-  private async applyNativeSessionConfiguration(liveSession: LiveSession): Promise<boolean> {
-    const next = liveSession.summary.configuration;
-    const applied = liveSession.appliedNativeConfiguration;
-    if (applied && configurationsEqual(applied, next)) return true;
-    const stillCurrent = () => this.isCurrentPrimarySession(liveSession);
-    const modelId = next.providerSelection.modelId;
-    const reasoningEffort = droidReasoningEffortFromSelection(next.providerSelection);
-    const native: Record<string, unknown> = {
-      modelId,
-      specModeModelId: modelId,
-      autonomyLevel: mapAutonomy(next.autonomy),
-    };
-    if (reasoningEffort !== undefined) {
-      native.reasoningEffort = reasoningEffort;
-      native.specModeReasoningEffort = reasoningEffort;
-    }
-    try {
-      if (next.interactionMode === 'spec' && applied?.interactionMode !== 'spec') {
-        await liveSession.session.enterSpecMode();
-        if (!stillCurrent()) return false;
-      } else if (next.interactionMode !== 'spec') {
-        native.interactionMode =
-          next.interactionMode === 'agi' ? DroidInteractionMode.AGI : DroidInteractionMode.Auto;
-      }
-      await liveSession.session.updateSettings(native);
-      if (!stillCurrent()) return false;
-      liveSession.appliedNativeConfiguration = next;
-      if (
-        applied?.providerSelection.modelId !== modelId ||
-        applied?.interactionMode !== next.interactionMode
-      ) {
-        await this.compaction.rearmPrimary(this.primaryCompactionTarget(liveSession));
-      }
-      if (stillCurrent()) await this.context.refresh(this.primaryContextTarget(liveSession));
-      return stillCurrent();
-    } catch (err) {
-      if (!stillCurrent()) return false;
-      this.emitError({
-        appSessionId: liveSession.summary.appSessionId,
-        code: 'session.configuration_update_failed',
-        message: `Could not apply session configuration: ${errMsg(err)}`,
-        recoverable: true,
-      });
-      return false;
-    }
-  }
-
   private async renameSession(requestedAppSessionId: string, title: string): Promise<void> {
     // Renderer metadata caps titles at 200 chars (MAX_CHAT_TITLE_LENGTH); the
     // bridge is the trusted boundary, so clamp here too before forwarding to
@@ -1598,7 +1595,7 @@ export class SessionManager {
   ): Promise<T | undefined> {
     const liveSession = this.registry.getLive(appSessionId);
     const live = liveSession?.session;
-    if (live) return fn(live);
+    if (live) return fn(live as FactorySession);
     const providerSessionId =
       this.registry.resolveSummary(appSessionId)?.providerSessionId ?? appSessionId;
     const session = await this.runtime.loadSession(providerSessionId);
@@ -1614,7 +1611,7 @@ export class SessionManager {
   ): Promise<{ session: FactorySession; close: () => Promise<void> }> {
     const first = this.registry.liveSessionsSnapshot().at(0);
     const live = appSessionId ? this.registry.getLive(appSessionId)?.session : first?.session;
-    if (live) return { session: live, close: () => Promise.resolve() };
+    if (live) return { session: live as FactorySession, close: () => Promise.resolve() };
     const session = await this.runtime.createSession({
       cwd: tmpdir(),
       interactionMode: 'auto',

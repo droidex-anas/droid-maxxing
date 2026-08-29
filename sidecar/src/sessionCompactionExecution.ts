@@ -2,7 +2,11 @@ import type { AskUserHandler, PermissionHandler } from '@factory/droid-sdk';
 
 import { runCompaction } from './compaction.js';
 import type { FactoryRuntime } from './providers/droid/DroidProviderAdapter.js';
-import type { FactorySession } from './providers/droid/DroidProviderSession.js';
+import type { McpServerConfig } from './providers/droid/DroidModeMapping.js';
+import {
+  DroidProviderSession,
+  type FactorySession,
+} from './providers/droid/DroidProviderSession.js';
 import type { ServerEvent } from './protocol.js';
 import type { LiveOperationTarget, SessionContext, UsageOffset } from './SessionContext.js';
 import type { LiveSession } from './SessionLifecycle.js';
@@ -69,7 +73,7 @@ export class SessionCompactionExecution {
     liveSession.compacting = true;
     try {
       const outcome = await runCompaction(
-        liveSession.session,
+        liveSession.session as FactorySession,
         {
           status: (text, compactType) => {
             this.dependencies.timeline.appendStatus(appSessionId, text, compactType);
@@ -129,9 +133,12 @@ export class SessionCompactionExecution {
       permissionHandler: this.dependencies.makePermissionHandler(ref),
       askUserHandler: this.dependencies.makeAskUserHandler(ref),
       cwd: liveSession.summary.cwd,
-      mcpServers: liveSession.mcpConfigs,
+      mcpServers: liveSession.mcpConfigs as McpServerConfig[],
     });
     liveSession.session = replacement;
+    if (liveSession.provider instanceof DroidProviderSession) {
+      liveSession.provider.attachFactory(replacement);
+    }
     let oldSessionRetired = false;
     const retireOldSession = async (): Promise<void> => {
       if (oldSessionRetired) return;
