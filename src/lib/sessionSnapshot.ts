@@ -12,7 +12,7 @@
 import type { BridgeFeature, SessionSummary, TranscriptEvent } from '../types/bridge';
 import { isSessionConfiguration } from './sessionConfiguration';
 
-const SESSION_SNAPSHOT_STORAGE_KEY = 'droid-session-snapshot-v1';
+const SESSION_SNAPSHOT_STORAGE_KEY = 'droid-session-snapshot-v2';
 export const MAX_SNAPSHOT_SESSIONS = 200;
 export const MAX_SNAPSHOT_SUMMARY_BYTES = 512 * 1024;
 export const MAX_SNAPSHOT_TRANSCRIPT_EVENTS = 40;
@@ -78,10 +78,29 @@ function sanitizeFeature(value: unknown): BridgeFeature | null {
   };
 }
 
+const FORBIDDEN_TOP_LEVEL_CONFIGURATION_KEYS = new Set([
+  'provider',
+  'providerInstanceId',
+  'modelId',
+  'model',
+  'interactionMode',
+  'mode',
+  'autonomy',
+  'reasoningEffort',
+]);
+
+function hasForbiddenTopLevelConfiguration(value: object): boolean {
+  for (const key of Object.keys(value)) {
+    if (FORBIDDEN_TOP_LEVEL_CONFIGURATION_KEYS.has(key)) return true;
+  }
+  return false;
+}
+
 // The sidebar rows and unread markers render from these fields; require the
 // identity/display ones and pass the rest through once they check out.
 function sanitizeSummary(value: unknown): SessionSummary | null {
   if (typeof value !== 'object' || value === null) return null;
+  if (hasForbiddenTopLevelConfiguration(value)) return null;
   const summary = value as Partial<SessionSummary>;
   if (typeof summary.appSessionId !== 'string' || summary.appSessionId.length === 0) return null;
   if (typeof summary.title !== 'string') return null;
