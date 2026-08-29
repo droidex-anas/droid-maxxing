@@ -61,6 +61,7 @@ export function takeDroidOpenedMcp(session: object): DroidOpenedMcp | undefined 
 
 export function queueDroidOpenFromHint(
   adapter: ProviderAdapter,
+  pendingAppSessionId: string,
   hint: {
     sessionPurpose?: string;
     mission?: {
@@ -75,7 +76,7 @@ export function queueDroidOpenFromHint(
   },
 ): void {
   if (!(adapter instanceof DroidProviderAdapter)) return;
-  adapter.queueNativeOpen({
+  adapter.queueNativeOpen(pendingAppSessionId, {
     ...(hint.sessionPurpose === 'mission-control'
       ? { decompSessionType: DecompSessionType.Orchestrator }
       : {}),
@@ -220,7 +221,7 @@ export class DroidProviderAdapter implements ProviderAdapter {
   #revision = 0;
   readonly #runtime: FactoryRuntime;
   readonly #options: DroidAdapterOptions;
-  #queuedNativeOpen?: Partial<CreateRuntimeSessionOptions>;
+  readonly #queuedNativeOpen = new Map<string, Partial<CreateRuntimeSessionOptions>>();
 
   constructor(options: DroidAdapterOptions = {}) {
     assertDefinitionConsistency(DROID_DEFINITION);
@@ -228,8 +229,11 @@ export class DroidProviderAdapter implements ProviderAdapter {
     this.#runtime = options.runtime ?? new DroidRuntime();
   }
 
-  queueNativeOpen(options: Partial<CreateRuntimeSessionOptions>): void {
-    this.#queuedNativeOpen = options;
+  queueNativeOpen(
+    pendingAppSessionId: string,
+    options: Partial<CreateRuntimeSessionOptions>,
+  ): void {
+    this.#queuedNativeOpen.set(pendingAppSessionId, options);
   }
 
   async probe(signal: AbortSignal): Promise<ProviderSnapshot> {
@@ -295,8 +299,9 @@ export class DroidProviderAdapter implements ProviderAdapter {
     input: ProviderSessionCreateInput,
     resumeSessionId?: string,
   ): Promise<DroidProviderSession> {
-    const extras = this.#queuedNativeOpen;
-    this.#queuedNativeOpen = undefined;
+    const pendingKey = input.target.kind === 'session' ? input.target.appSessionId : undefined;
+    const extras = pendingKey ? this.#queuedNativeOpen.get(pendingKey) : undefined;
+    if (pendingKey) this.#queuedNativeOpen.delete(pendingKey);
     const ref = {
       id:
         input.target.kind === 'session' && !input.target.appSessionId.startsWith('pending:')
@@ -326,11 +331,15 @@ export class DroidProviderAdapter implements ProviderAdapter {
             ...(mcp.configs.length > 0 ? { mcpServers: mcp.configs as McpServerConfig[] } : {}),
           })
         : await this.#runtime.createSession(
-            createOptionsFromInput(input, { permissionHandler, askUserHandler }, {
-              ...extras,
-              cwd: extras?.cwd ?? input.cwd,
-              ...(mcp.configs.length > 0 ? { mcpServers: mcp.configs as McpServerConfig[] } : {}),
-            }),
+            createOptionsFromInput(
+              input,
+              { permissionHandler, askUserHandler },
+              {
+                ...extras,
+                cwd: extras?.cwd ?? input.cwd,
+                ...(mcp.configs.length > 0 ? { mcpServers: mcp.configs as McpServerConfig[] } : {}),
+              },
+            ),
           );
       if (session.failedOpen) {
         await factory.close();

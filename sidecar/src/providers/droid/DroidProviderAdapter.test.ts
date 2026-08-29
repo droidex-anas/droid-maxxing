@@ -38,7 +38,7 @@ import {
   assertStartTurnDidNotSettle,
   bindProviderAdapter,
 } from '../testing/ProviderContractHarness.js';
-import { DroidProviderAdapter } from './DroidProviderAdapter.js';
+import { DroidProviderAdapter, queueDroidOpenFromHint } from './DroidProviderAdapter.js';
 import { DROID_DEFINITION, droidCapabilities } from './DroidModeMapping.js';
 
 void START_TURN_ACCEPTANCE_ONLY;
@@ -89,10 +89,11 @@ function createInput(
     interactionSink?: ProviderInteractionSink;
     options?: Record<string, string | number | boolean>;
     cwd?: string;
+    appSessionId?: string;
   } = {},
 ): ProviderSessionCreateInput {
   return {
-    target: { kind: 'session', appSessionId: 'app-1' },
+    target: { kind: 'session', appSessionId: overrides.appSessionId ?? 'app-1' },
     configuration: {
       providerSelection: {
         providerInstanceId: 'droid',
@@ -301,6 +302,61 @@ test('create passes cwd, mode, autonomy, model, and native handlers', async () =
     });
   }
   await session.close(ShutdownDeadline.fromDurationMs(0));
+});
+
+test('queued native open hints stay keyed to the pending create', async () => {
+  const runtime = new FakeFactoryRuntime([]);
+  const adapter = adapterWithRuntime(runtime);
+  const recorded = recordingSink();
+  queueDroidOpenFromHint(adapter, 'pending:chat', {
+    compactionModel: 'chat-model',
+    compactionTokenLimit: 1_000,
+  });
+  queueDroidOpenFromHint(adapter, 'pending:mission', {
+    sessionPurpose: 'mission-control',
+    compactionModel: 'mission-model',
+    compactionTokenLimit: 8_000,
+  });
+
+  let releaseFirstCreate: (() => void) | undefined;
+  let resolveFirstCreateStarted: (() => void) | undefined;
+  const firstCreateStarted = new Promise<void>((resolve) => {
+    resolveFirstCreateStarted = resolve;
+  });
+  let firstCreateEntered = false;
+  const originalCreate = runtime.createSession.bind(runtime);
+  runtime.createSession = async (options) => {
+    if (!firstCreateEntered) {
+      firstCreateEntered = true;
+      resolveFirstCreateStarted?.();
+      await new Promise<void>((resolve) => {
+        releaseFirstCreate = resolve;
+      });
+    }
+    return originalCreate(options);
+  };
+
+  const first = adapter.create(
+    createInput(recorded.sink, { appSessionId: 'pending:chat', modelId: 'chat' }),
+  );
+  await firstCreateStarted;
+  const second = await adapter.create(
+    createInput(recorded.sink, { appSessionId: 'pending:mission', modelId: 'mission' }),
+  );
+  releaseFirstCreate?.();
+  const opened = await first;
+
+  assert.equal(runtime.createCalls.length, 2);
+  const chatCreate = runtime.createCalls.find((call) => call.modelId === 'chat');
+  const missionCreate = runtime.createCalls.find((call) => call.modelId === 'mission');
+  assert.equal(chatCreate?.compactionModel, 'chat-model');
+  assert.equal(chatCreate?.compactionTokenLimit, 1_000);
+  assert.equal(chatCreate?.decompSessionType, undefined);
+  assert.equal(missionCreate?.compactionModel, 'mission-model');
+  assert.equal(missionCreate?.compactionTokenLimit, 8_000);
+  assert.ok(missionCreate?.decompSessionType);
+  await opened.close(ShutdownDeadline.fromDurationMs(0));
+  await second.close(ShutdownDeadline.fromDurationMs(0));
 });
 
 test('resume loads the Factory session id and rejects malformed resume state', async () => {

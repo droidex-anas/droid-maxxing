@@ -511,8 +511,11 @@ export class SessionManager {
       takeOpenedResources: (provider) =>
         takeDroidOpenedMcp(provider) ?? { servers: [], configs: [] },
       prepareProviderOpen: (hint) => {
+        const clientRef = hint.command?.clientRef;
+        if (!clientRef) return;
         queueDroidOpenFromHint(
           this.providerRegistry.resolve(hint.configuration.providerSelection.providerInstanceId),
+          `pending:${clientRef}`,
           hint,
         );
       },
