@@ -433,6 +433,15 @@ export class AutomationRuns {
   private async applySessionClosed(appSessionId: string): Promise<void> {
     const run = this.runForSession(appSessionId);
     if (!run || !isActiveRunStatus(run.status)) return;
+    const failure = this.runFailures.get(run.id);
+    if (failure) {
+      await this.finish(run.id, 'failed', failure);
+      return;
+    }
+    if (this.streamingSeen.has(run.id)) {
+      await this.finish(run.id, 'completed', null);
+      return;
+    }
     await this.finish(
       run.id,
       'failed',
