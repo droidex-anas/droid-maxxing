@@ -1442,6 +1442,59 @@ test('three consecutive failed runs pause the automation', async () => {
   }
 });
 
+test('a due once schedule does not launch a second chat while a run is already open', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  let clock = Date.UTC(2026, 0, 1, 8, 0, 0);
+  const dueAt = clock + 60_000;
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+    now: () => clock,
+    schedulerRecheckMs: 5,
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Once report',
+      prompt: 'Run once.',
+      enabled: true,
+      schedule: { kind: 'once', runAt: dueAt },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected a manual automation launch.');
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-once' },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-once', streaming: true },
+    } as ServerEvent);
+
+    clock = dueAt + 1_000;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const snapshot = await manager.snapshot();
+    assert.equal(launches.length, 1);
+    assert.equal(snapshot.queuedRunCount, 0);
+    assert.equal(snapshot.automations[0]?.enabled, false);
+    assert.equal(snapshot.automations[0]?.nextRunAt, null);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('unknown automations commands fail instead of succeeding empty', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const results: Array<{ ok: boolean; error?: string }> = [];

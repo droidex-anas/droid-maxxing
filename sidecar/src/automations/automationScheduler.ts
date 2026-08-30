@@ -69,6 +69,8 @@ export class AutomationScheduler {
       if (automation.nextRunAt === null || automation.nextRunAt > now) continue;
       const scheduledAt = automation.nextRunAt;
       this.options.runs.queueScheduled(automation, scheduledAt);
+      // Advance even when queueing was skipped: a due `once` is consumed by the
+      // in-flight run instead of launching a second chat when that run settles.
       this.advance(automation, scheduledAt, now);
       changed = true;
     }
