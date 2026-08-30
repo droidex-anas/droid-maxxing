@@ -92,6 +92,10 @@ const sharedInput = {
     .nullable()
     .optional()
     .describe('Omit to inherit the reasoning level used by this chat.'),
+  autonomy: z
+    .enum(['off', 'low', 'medium', 'high'])
+    .optional()
+    .describe("Omit to inherit this chat's autonomy. Defaults to low for unattended runs."),
 };
 
 type ConversationalAutomationInput = Omit<AutomationInput, 'title'> & { title?: string };
@@ -104,7 +108,7 @@ export function createAutomationMcpTools(options: { appSessionId: () => string }
         'Prepare one DROIDEX automation proposal and show its native review card inside this chat.',
         'Tool path: user request → automation_propose → DROIDEX review card → user edits or confirms.',
         'Use this once for normal conversational scheduling requests. Do not retry after an ok result.',
-        'Only prompt and schedule are essential. Omit title to let DROIDEX derive it, and omit workspace, model, reasoning, or timezone to inherit the current chat and device settings.',
+        'Only prompt and schedule are essential. Omit title to let DROIDEX derive it, and omit workspace, model, reasoning, autonomy, or timezone to inherit the current chat and device settings.',
         'The proposal is not active until the user presses Confirm automation.',
         'Never use browser control, app control, shell cron, or launchd as a substitute.',
         'After an ok result, briefly tell the user the card is ready and wait for their confirmation.',
@@ -141,6 +145,7 @@ export function createAutomationMcpTools(options: { appSessionId: () => string }
             timezone: automation.timezone,
             modelId: automation.modelId,
             reasoningEffort: automation.reasoningEffort,
+            autonomy: automation.autonomy,
             nextRunAt: automation.nextRunAt,
             lastRunStatus: automation.lastRunStatus,
             lastRunError: automation.lastRunError,
@@ -164,7 +169,7 @@ export function createAutomationMcpTools(options: { appSessionId: () => string }
         'Create a DROIDEX automation immediately without a review card.',
         'Use only when this chat is in High autonomy and the user clearly requested direct creation or already confirmed every detail.',
         'Otherwise use automation_propose. Do not call both tools for the same request.',
-        'Omitted title, workspace, model, reasoning, and timezone inherit or derive from this chat.',
+        'Omitted title, workspace, model, reasoning, autonomy, and timezone inherit or derive from this chat.',
       ].join(' '),
       sharedInput,
       safeTool(async (input: ConversationalAutomationInput) => {
@@ -204,6 +209,7 @@ export function createAutomationMcpTools(options: { appSessionId: () => string }
         timezone: sharedInput.timezone,
         modelId: z.string().min(1).nullable().optional(),
         reasoningEffort: reasoningSchema.nullable().optional(),
+        autonomy: z.enum(['off', 'low', 'medium', 'high']).optional(),
       },
       safeTool(async ({ id, ...patch }: { id: string } & AutomationPatch) => {
         const automation = await getAutomationManager().update(id, patch);

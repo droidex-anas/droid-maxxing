@@ -5,6 +5,7 @@ import type { ModelInfo } from '../../types/bridge';
 import { AutomationModelPicker } from './AutomationModelPicker';
 import { SelectMenu } from './SelectMenu';
 import {
+  AUTOMATION_AUTONOMY_OPTIONS,
   convertOnceRunAt,
   epochFromZonedInput,
   supportedTimeZones,
@@ -143,6 +144,16 @@ export function AutomationEditor({
                     reasoningEffort: selection.reasoningEffort,
                   });
                 }}
+              />
+            </EditorRow>
+            <EditorRow label="Autonomy">
+              <SelectMenu
+                value={draft.autonomy}
+                ariaLabel="Automation autonomy"
+                onChange={(value) => {
+                  update('autonomy', value as AutomationDraft['autonomy']);
+                }}
+                options={AUTOMATION_AUTONOMY_OPTIONS}
               />
             </EditorRow>
             <EditorRow label="Workspace">

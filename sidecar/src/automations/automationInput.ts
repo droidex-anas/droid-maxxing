@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { assertTimeZone, nextAutomationRun, validateSchedule } from './schedule.js';
 import type {
   Automation,
+  AutomationAutonomy,
   AutomationInput,
   AutomationProposalMissingField,
   AutomationReasoningEffort,
@@ -9,6 +10,10 @@ import type {
 
 export const MODEL_SELECTION_REQUIRED =
   'Choose a model and reasoning level from the DROIDEX model selector before running this automation.';
+
+export const DEFAULT_AUTONOMY: AutomationAutonomy = 'low';
+export const PAUSED_AFTER_FAILURES =
+  'Paused after 3 consecutive failed runs. Turn it back on after fixing the issue.';
 
 const MAX_TITLE_LENGTH = 120;
 const MAX_PROMPT_LENGTH = 20_000;
@@ -40,6 +45,10 @@ export function normalizeAutomationInput(input: AutomationInput): NormalizedAuto
   if (!isReasoningEffort(reasoningEffort)) {
     throw new Error('Choose a reasoning level supported by DROIDEX.');
   }
+  const autonomy = input.autonomy ?? DEFAULT_AUTONOMY;
+  if (!isAutonomy(autonomy)) {
+    throw new Error('Choose an autonomy level supported by DROIDEX.');
+  }
   return {
     title,
     prompt,
@@ -50,6 +59,7 @@ export function normalizeAutomationInput(input: AutomationInput): NormalizedAuto
     timezone,
     modelId: trimmedOrNull(input.modelId),
     reasoningEffort,
+    autonomy,
   };
 }
 
@@ -109,6 +119,10 @@ export function isReasoningEffort(value: unknown): value is AutomationReasoningE
     value === 'dynamic' ||
     value === null
   );
+}
+
+export function isAutonomy(value: unknown): value is AutomationAutonomy {
+  return value === 'off' || value === 'low' || value === 'medium' || value === 'high';
 }
 
 export function trimmedOrNull(value: string | null | undefined): string | null {

@@ -103,6 +103,7 @@ export function draftPreviewFromToolArgs(value: unknown): AutomationDraft | null
         : deviceTimeZone(),
     modelId: typeof raw.modelId === 'string' ? raw.modelId : null,
     reasoningEffort: isReasoning(raw.reasoningEffort) ? raw.reasoningEffort : null,
+    autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : 'low',
   };
 }
 
@@ -169,6 +170,10 @@ function isReasoning(value: unknown): value is NonNullable<AutomationDraft['reas
     value === 'max' ||
     value === 'dynamic'
   );
+}
+
+function isAutonomy(value: unknown): value is NonNullable<AutomationDraft['autonomy']> {
+  return value === 'off' || value === 'low' || value === 'medium' || value === 'high';
 }
 
 export function compactError(value: string | undefined): string {

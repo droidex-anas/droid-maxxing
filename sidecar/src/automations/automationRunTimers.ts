@@ -54,6 +54,11 @@ export class RunTimers {
     });
   }
 
+  /** The turn picked back up, so the grace period no longer applies. */
+  clearTurnSettle(runId: string): void {
+    this.clear(this.turnSettle, runId);
+  }
+
   /** Drops every timer watching a run that has settled. */
   clearRun(runId: string): void {
     this.clear(this.sessionCreate, runId);

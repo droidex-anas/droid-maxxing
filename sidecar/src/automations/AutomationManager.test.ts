@@ -39,6 +39,7 @@ test('run now starts a real session and settles only after streaming ends', asyn
     if (!launch) throw new Error('Expected an automation session launch.');
     assert.equal(launch.modelId, 'model-a');
     assert.equal(launch.reasoningEffort, 'high');
+    assert.equal(launch.autonomy, 'low');
     await manager.observeSessionEvent({
       type: 'session.created',
       clientRef: launch.clientRef,
@@ -66,6 +67,82 @@ test('run now starts a real session and settles only after streaming ends', asyn
     assert.equal(snapshot.runs[0]?.appSessionId, 'session-a');
     assert.equal(snapshot.runs[0]?.status, 'completed');
     assert.equal(snapshot.sessionOrigins['session-a']?.automationTitle, 'Repository brief');
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a pause between tool calls does not settle the run while streaming resumes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+  });
+
+  try {
+    const first = await manager.create({
+      title: 'Multi-step run',
+      prompt: 'Work across tool calls.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    const second = await manager.create({
+      title: 'Queued next',
+      prompt: 'Wait until the first run finishes.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:58' },
+      timezone: 'UTC',
+      modelId: 'model-b',
+      reasoningEffort: 'medium',
+    });
+    await manager.runNow(first.id);
+    await manager.runNow(second.id);
+    await waitFor(() => launches.length === 1);
+
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected the first automation session launch.');
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-tools' },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-tools', streaming: true },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-tools', streaming: false },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-tools', streaming: true },
+    } as ServerEvent);
+
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const paused = await manager.snapshot();
+    assert.equal(
+      paused.runs.find((run) => run.automation.title === 'Multi-step run')?.status,
+      'running',
+    );
+    assert.equal(paused.activeRunCount, 1);
+    assert.equal(launches.length, 1);
+
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-tools', streaming: false },
+    } as ServerEvent);
+    await waitFor(() => launches.length === 2);
+    assert.equal(launches[1]?.title, 'Queued next');
   } finally {
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });
@@ -421,6 +498,7 @@ test('automation proposals inherit the calling chat workspace, model, and reason
         cwd: '/workspace/project',
         modelId: 'custom:chat-model',
         reasoningEffort: 'xhigh',
+        autonomy: 'high',
       },
     } as ServerEvent);
 
@@ -437,6 +515,7 @@ test('automation proposals inherit the calling chat workspace, model, and reason
     assert.equal(proposal.draft.workspaceCwd, '/workspace/project');
     assert.equal(proposal.draft.modelId, 'custom:chat-model');
     assert.equal(proposal.draft.reasoningEffort, 'xhigh');
+    assert.equal(proposal.draft.autonomy, 'high');
     assert.deepEqual(proposal.missingFields, []);
     assert.equal((await manager.snapshot()).proposals[0]?.id, proposal.id);
   } finally {
@@ -1141,6 +1220,169 @@ test('a run whose time passed while the machine slept starts on the next wake', 
     // The occurrence that was missed, not a fresh one invented on waking.
     assert.equal(snapshot.runs[0]?.scheduledAt, dueAt);
     assert.equal(snapshot.runs[0]?.trigger, 'schedule');
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a selected autonomy is passed to the launched chat', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'High autonomy brief',
+      prompt: 'Run with high autonomy.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+      autonomy: 'high',
+    });
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    assert.equal(launches[0]?.autonomy, 'high');
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a running automation does not queue extra sessions for later due times', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  let clock = Date.UTC(2026, 0, 1, 8, 0, 0);
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+    now: () => clock,
+    schedulerRecheckMs: 5,
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Hourly brief',
+      prompt: 'Do not stack sessions.',
+      enabled: true,
+      schedule: { kind: 'hourly', minute: 0 },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected an automation session launch.');
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-hourly' },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-hourly', streaming: true },
+    } as ServerEvent);
+
+    clock += 5 * 60 * 60 * 1_000;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const snapshot = await manager.snapshot();
+    assert.equal(launches.length, 1);
+    assert.equal(snapshot.activeRunCount, 1);
+    assert.equal(snapshot.queuedRunCount, 0);
+    assert.equal(snapshot.automations[0]?.id, automation.id);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a failed launch retries a capped number of times then stops', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchRetryMs: 5,
+    launchSession: async (command) => {
+      launches.push(command);
+      throw new Error('provider unavailable');
+    },
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Retry cap',
+      prompt: 'Fail the launch.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    await manager.runNow(automation.id);
+    await waitFor(
+      async () => (await manager.snapshot()).automations[0]?.lastRunStatus === 'failed',
+    );
+    assert.equal(launches.length, 3);
+    assert.equal((await manager.snapshot()).automations[0]?.enabled, true);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(launches.length, 3);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('three consecutive failed runs pause the automation', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchRetryMs: 0,
+    launchSession: async () => {
+      throw new Error('provider unavailable');
+    },
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Circuit breaker',
+      prompt: 'Fail until paused.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    for (let index = 0; index < 3; index += 1) {
+      await manager.runNow(automation.id);
+      await waitFor(async () => {
+        const snapshot = await manager.snapshot();
+        return snapshot.activeRunCount === 0 && snapshot.automations[0]?.lastRunStatus === 'failed';
+      });
+    }
+    const snapshot = await manager.snapshot();
+    assert.equal(snapshot.automations[0]?.enabled, false);
+    assert.match(
+      snapshot.automations[0]?.lastRunError ?? '',
+      /Paused after 3 consecutive failed runs/,
+    );
   } finally {
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });

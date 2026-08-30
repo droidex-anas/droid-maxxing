@@ -30,6 +30,7 @@ test('automation defaults store an actual model and reasoning selection', () => 
   assert.equal(draft.executionMode, 'worktree');
   assert.equal(draft.modelId, 'model-a');
   assert.equal(draft.reasoningEffort, 'high');
+  assert.equal(draft.autonomy, 'low');
   assert.ok(draft.timezone.length > 0);
 });
 

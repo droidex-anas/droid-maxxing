@@ -1,4 +1,5 @@
 import type { ModelInfo, ReasoningEffort } from '../../types/bridge';
+import { AUTONOMY_DESCRIPTIONS, AUTONOMY_LABELS, AUTONOMY_LEVELS } from '../../lib/autonomy';
 import { reasoningForModel, validateAutomationModelSelection } from './modelSelection';
 import type { Automation, AutomationDraft, AutomationRun, AutomationSchedule } from './types';
 
@@ -12,7 +13,13 @@ export const WEEKDAYS = [
   'Saturday',
 ] as const;
 
-export const AUTOMATION_SETUP_PROMPT = `Let's set up a DROIDEX automation together. Ask me what task should run, which workspace it should use, whether code-changing work needs an isolated worktree, the timezone, and exactly when it should run. The current chat's model and reasoning should be inherited unless I explicitly choose different ones.
+export const AUTOMATION_AUTONOMY_OPTIONS = AUTONOMY_LEVELS.map((level) => ({
+  value: level,
+  label: AUTONOMY_LABELS[level],
+  detail: AUTONOMY_DESCRIPTIONS[level],
+}));
+
+export const AUTOMATION_SETUP_PROMPT = `Let's set up a DROIDEX automation together. Ask me what task should run, which workspace it should use, whether code-changing work needs an isolated worktree, the timezone, and exactly when it should run. The current chat's model, reasoning, and autonomy should be inherited unless I explicitly choose different ones.
 
 After I confirm the important details, call automation_propose. DROIDEX will render a native review card inside this chat with the complete schedule and Edit details / Confirm automation actions. Do not use browser tools, app control, shell cron, or launchd. Do not claim the automation is active until I confirm the card. Use automation_create only when I explicitly ask to skip review and this chat is already in High autonomy; otherwise use automation_propose. Use automation_list, automation_update, automation_set_enabled, automation_run_now, or automation_delete for later changes. Each real run opens as a DROIDEX chat and is tracked as queued, starting, running, completed, or failed.`;
 
@@ -31,6 +38,7 @@ export function defaultAutomationDraft(
     timezone: deviceTimeZone(),
     modelId,
     reasoningEffort,
+    autonomy: 'low',
   };
 }
 
@@ -61,6 +69,7 @@ export function automationToDraft(automation: Automation): AutomationDraft {
     timezone: automation.timezone,
     modelId: automation.modelId,
     reasoningEffort: automation.reasoningEffort,
+    autonomy: automation.autonomy,
   };
 }
 

@@ -1,7 +1,5 @@
-import { isReasoningEffort, trimmedOrNull } from './automationInput.js';
-import type { AutomationReasoningEffort } from './types.js';
-
-type AutomationAutonomy = 'off' | 'low' | 'medium' | 'high';
+import { isAutonomy, isReasoningEffort, trimmedOrNull } from './automationInput.js';
+import type { AutomationAutonomy, AutomationReasoningEffort } from './types.js';
 
 export interface AutomationSessionContext {
   cwd: string | null;
@@ -38,7 +36,7 @@ export class SessionContextCache {
         (isReasoningEffort(session.reasoningEffort) ? session.reasoningEffort : null) ??
         previous?.reasoningEffort ??
         null,
-      autonomy: isAutonomy(session.autonomy) ? session.autonomy : (previous?.autonomy ?? 'off'),
+      autonomy: isAutonomy(session.autonomy) ? session.autonomy : (previous?.autonomy ?? 'low'),
     };
     this.contexts.delete(session.appSessionId);
     this.contexts.set(session.appSessionId, next);
@@ -71,10 +69,6 @@ export function mergeSessionContext(
     cwd: resolved?.cwd ?? observed?.cwd ?? null,
     modelId: resolved?.modelId ?? observed?.modelId ?? null,
     reasoningEffort: resolved?.reasoningEffort ?? observed?.reasoningEffort ?? null,
-    autonomy: resolved?.autonomy ?? observed?.autonomy ?? 'off',
+    autonomy: resolved?.autonomy ?? observed?.autonomy ?? 'low',
   };
-}
-
-function isAutonomy(value: unknown): value is AutomationAutonomy {
-  return value === 'off' || value === 'low' || value === 'medium' || value === 'high';
 }
