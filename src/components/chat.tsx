@@ -1,5 +1,6 @@
-import { memo } from 'react';
+import { lazy, memo, Suspense } from 'react';
 import { hasAppBlock } from './appBlockRuntime';
+import { isAutomationProposalCall } from '../features/automations/toolNames';
 import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
 import { copyTextForMessage } from '../features/transcript-reach/transcriptCopy';
@@ -10,6 +11,7 @@ import {
   type ChildSessionTarget,
 } from '../lib/childSessions';
 import { DEFAULT_TOOL_ACTIVITY, type ToolActivityDensity } from '../lib/toolActivity';
+import type { TranscriptEvent } from '../types/bridge';
 import { MessageBody } from './MessageBody';
 import { DiffCard } from './DiffView';
 import type { SubagentsDockData } from './SubagentsDock';
@@ -17,7 +19,7 @@ import TurnChangesPanel from './TurnChangesPanel';
 import { StreamingCaret } from './StreamingCaret';
 import { isCompactionCompleteStatus, sameFeedEvents, type FeedItem } from './chatFeed';
 import { CompactingIndicator, CompactionDivider, CopyButton } from './transcript/primitives';
-import { ErrorLine, ThinkingItem } from './transcript/rows';
+import { correlateResults, ErrorLine, ThinkingItem } from './transcript/rows';
 import { DiffGroup, ToolGroupItem, WorkedGroup } from './transcript/groups';
 import { UserBubble } from './transcript/UserBubble';
 import { ChildSessionLine, ChildSessionsWave } from './transcript/ChildSessionLine';
@@ -31,6 +33,64 @@ export { WebFetchBody, fetchSizeBadge } from './transcript/webCards';
 export { UserBubble } from './transcript/UserBubble';
 export { childSessionLineIsRunning } from './transcript/ChildSessionLine';
 export { sameFeedEvents } from './chatFeed';
+
+const AutomationProposalCard = lazy(async () => {
+  const module = await import('../features/automations/AutomationProposalCard');
+  return { default: module.AutomationProposalCard };
+});
+
+export function splitAutomationProposals(events: TranscriptEvent[]): {
+  proposals: { call: TranscriptEvent; result?: TranscriptEvent }[];
+  remaining: TranscriptEvent[];
+} {
+  const calls = events.filter(isAutomationProposalCall);
+  if (calls.length === 0) return { proposals: [], remaining: events };
+  const { resultByCall } = correlateResults(events);
+  const shown = new Set<TranscriptEvent>();
+  const proposals = calls.map((call) => {
+    const result = resultByCall.get(call);
+    shown.add(call);
+    if (result) shown.add(result);
+    return { call, result };
+  });
+  return { proposals, remaining: events.filter((event) => !shown.has(event)) };
+}
+
+function AutomationToolGroup({
+  events,
+  active,
+  density,
+}: {
+  events: TranscriptEvent[];
+  active: boolean;
+  density: ToolActivityDensity;
+}) {
+  const { proposals, remaining } = splitAutomationProposals(events);
+  if (proposals.length === 0)
+    return <ToolGroupItem events={events} active={active} density={density} />;
+  return (
+    <div className="space-y-2.5">
+      {proposals.map(({ call, result }) => (
+        <Suspense
+          key={call.id}
+          fallback={
+            <div
+              className="rounded-2xl border border-droid-border bg-droid-surface/35 px-4 py-3 text-[11px] text-droid-text-muted"
+              aria-busy="true"
+            >
+              Loading automation proposal…
+            </div>
+          }
+        >
+          <AutomationProposalCard call={call} result={result} running={active && !result} />
+        </Suspense>
+      ))}
+      {remaining.length > 0 ? (
+        <ToolGroupItem events={remaining} active={active} density={density} />
+      ) : null}
+    </div>
+  );
+}
 
 export interface FeedItemViewProps {
   item: FeedItem;
@@ -285,7 +345,7 @@ export const FeedItemView = memo(function FeedItemView({
         />
       );
     case 'tools':
-      return <ToolGroupItem events={item.events} active={live} density={density} />;
+      return <AutomationToolGroup events={item.events} active={live} density={density} />;
     case 'turnChanges':
       return <TurnChangesPanel item={item} cwd={cwd} onOpenFile={onOpenReviewFile} />;
     case 'worked':

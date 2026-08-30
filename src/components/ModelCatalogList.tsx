@@ -37,6 +37,7 @@ function ModelCatalogList({
   onSelectReasoning,
   disabled,
   reasoningLocked,
+  showDefault = true,
 }: {
   models: ModelInfo[];
   defaultModel: ModelInfo | undefined;
@@ -48,16 +49,23 @@ function ModelCatalogList({
   onSelectReasoning: (reasoning: ReasoningEffort) => void;
   disabled: boolean;
   reasoningLocked: boolean;
+  showDefault?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rows = hasRealModels ? models : [];
+  const firstModelIndex = showDefault ? 1 : 0;
   // -1 when the active model is filtered out: nothing is highlighted then.
   const selectedIndex = selectedModelId
-    ? rows.findIndex((m) => m.id === selectedModelId) + 1 || -1
-    : 0;
+    ? (() => {
+        const index = rows.findIndex((model) => model.id === selectedModelId);
+        return index < 0 ? -1 : index + firstModelIndex;
+      })()
+    : showDefault
+      ? 0
+      : -1;
 
   const virtualizer = useVirtualizer({
-    count: rows.length + 1,
+    count: rows.length + firstModelIndex,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_H,
     overscan: 4,
@@ -98,7 +106,8 @@ function ModelCatalogList({
           }}
         />
         {virtualizer.getVirtualItems().map((item) => {
-          const model = item.index === 0 ? undefined : rows[item.index - 1];
+          const isDefaultRow = showDefault && item.index === 0;
+          const model = isDefaultRow ? undefined : rows[item.index - firstModelIndex];
           const selected = item.index === selectedIndex;
           return (
             <div
@@ -106,7 +115,7 @@ function ModelCatalogList({
               className="absolute inset-x-0 top-0"
               style={{ transform: `translateY(${String(item.start)}px)` }}
             >
-              {item.index === 0 ? (
+              {isDefaultRow ? (
                 <ModelRow
                   label={defaultModel ? `Default · ${defaultModel.displayName}` : 'Default'}
                   model={defaultModel}

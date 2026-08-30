@@ -10,6 +10,7 @@ import {
 
 import type { FactorySession } from './DroidRuntime.js';
 import { classifyPermission, confirmationType, permissionSignature } from './normalize.js';
+import { shouldAutoApproveAutomationPermission } from './automations/permissionPolicy.js';
 import {
   isAlwaysOutcome,
   isApprovalOutcome,
@@ -57,6 +58,10 @@ export class SessionInteractions {
     return (params: RequestPermissionRequestParams) =>
       new Promise<RequestPermissionHandlerResult>((resolve) => {
         const liveSession = this.dependencies.getLiveSession(ref.id);
+        if (shouldAutoApproveAutomationPermission(params, liveSession?.summary.autonomy)) {
+          resolve(normalizePermissionOutcome('proceed_once'));
+          return;
+        }
         const requestId = defaultNextRequestId();
         const type = confirmationType(params);
         const request = classifyPermission(ref.id, requestId, params);

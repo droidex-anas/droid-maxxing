@@ -9,7 +9,7 @@ import { bindLazySurfaceIntent } from '../lib/chunkPreloader';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
-import { CirclePlus, Search, Settings, SquarePen } from 'lucide-react';
+import { CirclePlus, Clock, Search, Settings, SquarePen } from 'lucide-react';
 import { GitPullRequestIcon } from './environment/GithubIcons';
 import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { UnreadFilterActions } from './UnreadFilterActions';
@@ -20,6 +20,7 @@ import { SidebarActivity } from './SidebarActivity';
 import { useSidebarActivity } from '../hooks/useSidebarActivity';
 import { compareSidebarSessions, matchesActivityFilter } from '../lib/sidebarActivity';
 import { SidebarWorkspaceList } from './SidebarWorkspaceList';
+import { useAutomationSnapshot } from '../features/automations/client';
 import {
   chatDisplayTitle,
   isChatHidden,
@@ -66,6 +67,11 @@ export default function Sidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const automationSnapshot = useAutomationSnapshot();
+  const automationRunsById = useMemo(
+    () => new Map(automationSnapshot.runs.map((run) => [run.id, run] as const)),
+    [automationSnapshot.runs],
+  );
 
   useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
 
@@ -223,6 +229,8 @@ export default function Sidebar({
   const renderRow = (m: SessionSummary) => {
     const status = statusFor(m);
     const inbox = view === 'activity';
+    const origin = automationSnapshot.sessionOrigins[m.appSessionId];
+    const automationRun = origin ? automationRunsById.get(origin.runId) : undefined;
     return (
       <SessionRow
         key={m.appSessionId}
@@ -240,6 +248,8 @@ export default function Sidebar({
           state.pendingPermissions,
           state.pendingQuestions,
         )}
+        automationTitle={origin?.automationTitle}
+        automationStatus={automationRun?.status}
         renaming={renamingId === m.appSessionId}
         now={now}
         onSelect={handleSelectSession}
@@ -345,6 +355,28 @@ export default function Sidebar({
             <GitPullRequestIcon size={15} />
           </span>
           Pull requests
+        </button>
+        <button
+          data-testid="automations-nav"
+          onClick={() => {
+            dispatch({ type: 'OPEN_AUTOMATIONS' });
+          }}
+          aria-current={state.mainView === 'automations' ? 'page' : undefined}
+          className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            state.mainView === 'automations'
+              ? 'bg-droid-active text-droid-text'
+              : 'text-droid-text hover:bg-droid-elevated'
+          }`}
+        >
+          <Clock
+            className={`h-4 w-4 shrink-0 transition-colors ${
+              state.mainView === 'automations'
+                ? 'text-droid-text'
+                : 'text-droid-text-secondary group-hover:text-droid-text'
+            }`}
+            strokeWidth={1.75}
+          />
+          Automations
         </button>
       </div>
 

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { composerTextAfterSeed, resetComposerAfterSubmit } from './composerReset';
+import {
+  composerTextAfterSeed,
+  createComposerSeed,
+  resetComposerAfterSubmit,
+} from './composerReset';
 
 test('a fresh-chat composer seed replaces stale mounted input', () => {
   assert.equal(
@@ -39,4 +43,10 @@ test('resetComposerAfterSubmit keeps draft edits made while images encoded', () 
     resetDraft: () => calls.push('draft'),
   });
   assert.deepEqual(calls, ['images']);
+});
+
+test('composer seeds get distinct ids even when created in the same millisecond', () => {
+  const first = createComposerSeed('one');
+  const second = createComposerSeed('two');
+  assert.notEqual(first.id, second.id);
 });

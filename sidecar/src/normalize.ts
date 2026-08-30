@@ -5,6 +5,11 @@ import type {
   RequestPermissionRequestParams,
 } from '@factory/droid-sdk';
 import { convertNotificationToStreamMessage } from '@factory/droid-sdk';
+import { createHash } from 'node:crypto';
+import {
+  automationToolDisplayTitle,
+  isAutomationMutationPermission,
+} from './automations/permissionPolicy.js';
 import { bridgeFeature } from './missionFeatures.js';
 import type {
   SessionRole,
@@ -41,16 +46,16 @@ export function mapProgress(entries: ProgressLogEntry[]): NormalizedProgressEntr
       typeof any.workerSessionId === 'string' ? any.workerSessionId : undefined;
     const spawnId = typeof any.spawnId === 'string' ? any.spawnId : undefined;
     return {
-      type: String(any.type ?? 'entry'),
-      timestamp: String(any.timestamp ?? new Date().toISOString()),
+      type: typeof any.type === 'string' ? any.type : 'entry',
+      timestamp: typeof any.timestamp === 'string' ? any.timestamp : new Date().toISOString(),
       title: typeof any.title === 'string' ? any.title : undefined,
       message:
         typeof any.message === 'string'
           ? any.message
           : typeof any.summary === 'string'
-            ? (any.summary as string)
+            ? any.summary
             : undefined,
-      featureId: typeof any.featureId === 'string' ? (any.featureId as string) : undefined,
+      featureId: typeof any.featureId === 'string' ? any.featureId : undefined,
       ...(workerProviderSessionId ? { workerProviderSessionId } : {}),
       ...(spawnId ? { spawnId } : {}),
     };
@@ -351,7 +356,7 @@ function skillActivationFromNotification(raw: unknown): SkillActivation | undefi
   if (record.role !== 'user' || record.visibility !== 'user_only') return undefined;
   const content = record.content;
   if (!Array.isArray(content) || content.length !== 1) return undefined;
-  const block = content[0];
+  const block: unknown = content[0];
   if (!block || typeof block !== 'object' || Array.isArray(block)) return undefined;
   const text = (block as Record<string, unknown>).text;
   return typeof text === 'string' ? parseSkillActivation(text) : undefined;
@@ -410,24 +415,32 @@ interface ConfirmationDetail {
 // bare `confirmation`, which we still fall back to defensively.
 function primaryConfirmation(params: RequestPermissionRequestParams): ConfirmationDetail {
   const p = params as unknown as Record<string, unknown>;
-  const toolUses = p.toolUses as Array<Record<string, unknown>> | undefined;
+  const toolUses = p.toolUses as Record<string, unknown>[] | undefined;
   if (Array.isArray(toolUses) && toolUses.length > 0) {
     const details = toolUses[0].details as ConfirmationDetail | undefined;
     if (details) return details;
   }
-  const list = p.confirmations as Array<Record<string, unknown>> | undefined;
+  const list = p.confirmations as Record<string, unknown>[] | undefined;
   if (Array.isArray(list) && list.length > 0) {
     const item = list[0];
-    return (item.confirmation as ConfirmationDetail) ?? (item as ConfirmationDetail);
+    const nested = item.confirmation;
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      return nested as ConfirmationDetail;
+    }
+    return item;
   }
-  return (p.confirmation as ConfirmationDetail) ?? {};
+  const confirmation = p.confirmation;
+  if (confirmation && typeof confirmation === 'object' && !Array.isArray(confirmation)) {
+    return confirmation as ConfirmationDetail;
+  }
+  return {};
 }
 
 // The tool's actual call arguments live on the tool-use block, not the
 // confirmation detail.
 function primaryToolInput(params: RequestPermissionRequestParams): Record<string, unknown> {
   const p = params as unknown as Record<string, unknown>;
-  const toolUses = p.toolUses as Array<Record<string, unknown>> | undefined;
+  const toolUses = p.toolUses as Record<string, unknown>[] | undefined;
   if (Array.isArray(toolUses) && toolUses.length > 0) {
     const toolUse = toolUses[0].toolUse as Record<string, unknown> | undefined;
     const input = toolUse?.input;
@@ -443,10 +456,12 @@ function mcpToolDetail(c: ConfirmationDetail, input: Record<string, unknown>): s
   const lines: string[] = [];
   for (const [key, value] of Object.entries(input)) {
     const rendered = typeof value === 'string' ? value : JSON.stringify(value);
-    if (rendered === undefined || rendered === '' || rendered === '{}') continue;
+    if (!rendered || rendered === '{}') continue;
     lines.push(`${key}: ${rendered}`);
   }
-  if (c.impactLevel) lines.push(`Impact: ${c.impactLevel}`);
+  if (typeof c.impactLevel === 'string' && c.impactLevel) {
+    lines.push(`Impact: ${c.impactLevel}`);
+  }
   return lines.join('\n');
 }
 
@@ -456,7 +471,7 @@ export function classifyPermission(
   params: RequestPermissionRequestParams,
 ): PermissionRequest {
   const c = primaryConfirmation(params);
-  const type = String(c.type ?? 'other');
+  const type = typeof c.type === 'string' ? c.type : 'other';
   let title = 'Permission required';
   let detail = '';
   let plan: string | undefined;
@@ -465,21 +480,23 @@ export function classifyPermission(
 
   switch (type) {
     case 'exit_spec_mode':
-      title = (c.title as string) ?? 'Plan ready for review';
-      plan = (c.plan as string) ?? '';
+      title = typeof c.title === 'string' ? c.title : 'Plan ready for review';
+      plan = typeof c.plan === 'string' ? c.plan : '';
       detail = plan;
-      options = Array.isArray(c.optionNames) ? (c.optionNames as string[]) : undefined;
+      options = Array.isArray(c.optionNames)
+        ? c.optionNames.filter((name): name is string => typeof name === 'string')
+        : undefined;
       kind = 'spec';
       break;
     case 'propose_mission':
-      title = (c.title as string) ?? 'Mission plan proposed';
-      plan = (c.proposal as string) ?? '';
+      title = typeof c.title === 'string' ? c.title : 'Mission plan proposed';
+      plan = typeof c.proposal === 'string' ? c.proposal : '';
       detail = plan;
       kind = 'mission_plan';
       break;
     case 'start_mission_run':
       title = 'Start mission run';
-      detail = `Running missions: ${c.runningMissionCount ?? 0}`;
+      detail = `Running missions: ${typeof c.runningMissionCount === 'number' ? String(c.runningMissionCount) : '0'}`;
       kind = 'other';
       break;
     case 'exec': {
@@ -492,11 +509,15 @@ export function classifyPermission(
     case 'edit':
     case 'create':
       title = type === 'create' ? 'Create file' : 'Edit file';
-      detail = (c.filePath as string) ?? (c.fileName as string) ?? '';
+      detail =
+        (typeof c.filePath === 'string' ? c.filePath : '') ||
+        (typeof c.fileName === 'string' ? c.fileName : '');
       break;
     case 'apply_patch':
       title = 'Apply patch';
-      detail = (c.fileName as string) ?? (c.filePath as string) ?? '';
+      detail =
+        (typeof c.fileName === 'string' ? c.fileName : '') ||
+        (typeof c.filePath === 'string' ? c.filePath : '');
       break;
     case 'mcp_tool': {
       const rawTool = typeof c.toolName === 'string' ? c.toolName : '';
@@ -507,13 +528,12 @@ export function classifyPermission(
       const serverName =
         typeof c.serverName === 'string' && c.serverName ? c.serverName : splitServer;
       const toolName = splitTool;
-      title = toolName
-        ? serverName
-          ? `${serverName} · ${toolName}`
-          : toolName
-        : serverName
-          ? `${serverName} tool`
-          : 'External tool';
+      const droidexAutomationTitle = automationToolDisplayTitle(serverName, toolName);
+      if (droidexAutomationTitle) title = droidexAutomationTitle;
+      else if (toolName && serverName) title = `${serverName} · ${toolName}`;
+      else if (toolName) title = toolName;
+      else if (serverName) title = `${serverName} tool`;
+      else title = 'External tool';
       detail = mcpToolDetail(c, primaryToolInput(params));
       break;
     }
@@ -525,7 +545,39 @@ export function classifyPermission(
 }
 
 export function confirmationType(params: RequestPermissionRequestParams): string {
-  return String(primaryConfirmation(params).type ?? 'other');
+  const type = primaryConfirmation(params).type;
+  return typeof type === 'string' ? type : 'other';
+}
+
+const MAX_DIGESTED_ARGUMENT_CHARS = 8_192;
+
+// Hashing keeps the signature bounded and keeps argument values (which may hold
+// secrets) out of the stored grant key. An empty result means the arguments
+// could not be serialized, so the request stays ineligible for always-allow.
+function toolArgumentDigest(input: Record<string, unknown>): string {
+  let serialized: string;
+  try {
+    serialized = stableJson(input);
+  } catch {
+    return '';
+  }
+  const bounded =
+    serialized.length > MAX_DIGESTED_ARGUMENT_CHARS
+      ? `${serialized.slice(0, MAX_DIGESTED_ARGUMENT_CHARS)}#${String(serialized.length)}`
+      : serialized;
+  return createHash('sha256').update(bounded).digest('hex').slice(0, 32);
+}
+
+function stableJson(value: unknown): string {
+  if (value === undefined) return 'null';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJson(entryValue)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 // Stable key identifying "the same action" so an app-level allowlist can honor
@@ -533,15 +585,21 @@ export function confirmationType(params: RequestPermissionRequestParams): string
 // An empty string means the request is not eligible for always-allow caching.
 export function permissionSignature(params: RequestPermissionRequestParams): string {
   const c = primaryConfirmation(params);
-  const type = String(c.type ?? 'other');
+  const type = typeof c.type === 'string' ? c.type : 'other';
   switch (type) {
     case 'exec': {
       const fullCommand = typeof c.fullCommand === 'string' ? c.fullCommand : '';
       const command = typeof c.command === 'string' ? c.command : '';
       return `exec::${fullCommand || command}`;
     }
-    case 'mcp_tool':
-      return `mcp::${String(c.serverName ?? '')}::${String(c.toolName ?? '')}`;
+    case 'mcp_tool': {
+      const serverName = typeof c.serverName === 'string' ? c.serverName : '';
+      const toolName = typeof c.toolName === 'string' ? c.toolName : '';
+      const key = `mcp::${serverName}::${toolName}`;
+      if (!isAutomationMutationPermission(params)) return key;
+      const args = toolArgumentDigest(primaryToolInput(params));
+      return args ? `${key}::${args}` : '';
+    }
     case 'edit':
     case 'create':
     case 'apply_patch': {
