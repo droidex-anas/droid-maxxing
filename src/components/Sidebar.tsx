@@ -1,14 +1,15 @@
 // File-size exception (AGENTS.md): this file is the sidebar's single
 // composition root — brand header, tool buttons, workspace/chat/pinned section
 // wiring, unread/search chrome, update prompt, and the row menu/rename glue
-// handlers. ~730 lines after the Pull requests nav row. The interactive row
-// (SessionRow, marquee, inline rename) already lives in SidebarSessionRow.tsx;
-// further splitting was rejected because the remaining handlers are composition
-// glue that fail the deletion test (extracting them would only forward store
-// state), and Expand is too small to justify its own module. The workspace
-// heading (collapse, new chat, context-menu remove) lives in
-// SidebarWorkspaceRow.tsx. Reviewed ceiling: ~750 lines; extract the
-// workspace section if it grows past that.
+// handlers. ~800 lines with the Pull requests and Automations nav rows. The
+// interactive row (SessionRow, marquee, inline rename) already lives in
+// SidebarSessionRow.tsx; further splitting was rejected because the remaining
+// handlers are composition glue that fail the deletion test (extracting them
+// would only forward store state), and Expand is too small to justify its own
+// module. The workspace heading lives in SidebarWorkspaceRow.tsx. Both
+// full-content routes are store-owned (`mainView`) and rendered by App.
+// Reviewed ceiling: 820 lines; extract the workspace section if it grows past
+// that.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
@@ -21,6 +22,7 @@ import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import {
   CirclePlus,
+  Clock,
   FolderOpen,
   Plus,
   Search,
@@ -38,6 +40,7 @@ import {
   type WorkspaceScope,
 } from '../lib/workspaces';
 import { SidebarSessionList } from './SidebarSessionList';
+import { useAutomationSnapshot } from '../features/automations/client';
 import { chatDisplayTitle, isChatHidden, isChatPinned, pinnedChats } from '../lib/chatMetadata';
 import { exportSessionMarkdown, renameSession } from '../lib/commands';
 import { toast } from '../lib/toast';
@@ -146,6 +149,11 @@ export default function Sidebar({
   );
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const automationSnapshot = useAutomationSnapshot();
+  const automationRunsById = useMemo(
+    () => new Map(automationSnapshot.runs.map((run) => [run.id, run] as const)),
+    [automationSnapshot.runs],
+  );
 
   useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
 
@@ -365,23 +373,33 @@ export default function Sidebar({
     [state.sessions, chatMetadata],
   );
 
-  const renderRow = (m: SessionSummary) => (
-    <SessionRow
-      key={m.appSessionId}
-      session={m}
-      title={chatDisplayTitle(m, chatMetadata[m.appSessionId])}
-      active={state.activeAppSessionId === m.appSessionId}
-      unread={isUnread(m)}
-      running={sessionIsLive(m)}
-      attention={sessionAttention(m.appSessionId, state.pendingPermissions, state.pendingQuestions)}
-      renaming={renamingId === m.appSessionId}
-      now={now}
-      onSelect={handleSelectSession}
-      onMenu={handleRowMenu}
-      onRenameCommit={handleRenameCommit}
-      onRenameCancel={handleRenameCancel}
-    />
-  );
+  const renderRow = (m: SessionSummary) => {
+    const origin = automationSnapshot.sessionOrigins[m.appSessionId];
+    const automationRun = origin ? automationRunsById.get(origin.runId) : undefined;
+    return (
+      <SessionRow
+        key={m.appSessionId}
+        session={m}
+        title={chatDisplayTitle(m, chatMetadata[m.appSessionId])}
+        active={state.activeAppSessionId === m.appSessionId}
+        unread={isUnread(m)}
+        running={sessionIsLive(m)}
+        attention={sessionAttention(
+          m.appSessionId,
+          state.pendingPermissions,
+          state.pendingQuestions,
+        )}
+        automationTitle={origin?.automationTitle}
+        automationStatus={automationRun?.status}
+        renaming={renamingId === m.appSessionId}
+        now={now}
+        onSelect={handleSelectSession}
+        onMenu={handleRowMenu}
+        onRenameCommit={handleRenameCommit}
+        onRenameCancel={handleRenameCancel}
+      />
+    );
+  };
 
   const renderSessionList = (
     sectionKey: string,
@@ -499,6 +517,28 @@ export default function Sidebar({
             <GitPullRequestIcon size={15} />
           </span>
           Pull requests
+        </button>
+        <button
+          data-testid="automations-nav"
+          onClick={() => {
+            dispatch({ type: 'OPEN_AUTOMATIONS' });
+          }}
+          aria-current={state.mainView === 'automations' ? 'page' : undefined}
+          className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            state.mainView === 'automations'
+              ? 'bg-droid-active text-droid-text'
+              : 'text-droid-text hover:bg-droid-elevated'
+          }`}
+        >
+          <Clock
+            className={`h-4 w-4 shrink-0 transition-colors ${
+              state.mainView === 'automations'
+                ? 'text-droid-text'
+                : 'text-droid-text-secondary group-hover:text-droid-text'
+            }`}
+            strokeWidth={1.75}
+          />
+          Automations
         </button>
       </div>
 

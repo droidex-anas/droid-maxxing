@@ -45,6 +45,7 @@ import {
   type AgentKind,
   type DiffViewMode,
   type LiveEnterBehavior,
+  type MainView,
 } from './persistedUiPreferences';
 import {
   clearDesignMode,
@@ -269,7 +270,8 @@ export interface AppState {
   reviewFocusRequestId: number;
   diffView: DiffViewMode;
   sidebarCollapsed: boolean;
-  mainView: 'session' | 'pull-requests';
+  mainView: MainView;
+  automationEditorRequest: AutomationEditorRequest | null;
   prWorkspaceCwd: string | null;
   prWorkspaceNumber: number | null;
   prBacklogIds: string[];
@@ -538,6 +540,8 @@ type Action =
     }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
+  | { type: 'OPEN_AUTOMATIONS'; automationId?: string }
+  | { type: 'AUTOMATION_EDITOR_REQUEST_HANDLED'; requestId: number }
   | PrInboxAction
   | {
       type: 'START_CHAT';
@@ -614,6 +618,18 @@ const initialCustomThemes = loadCustomThemes();
 const persistedUiState = loadPersistedUiState();
 const sessionSnapshot = loadSessionSnapshot();
 
+export interface AutomationEditorRequest {
+  automationId: string;
+  requestId: number;
+}
+
+let automationEditorRequestSequence = 0;
+
+function createAutomationEditorRequest(automationId: string): AutomationEditorRequest {
+  automationEditorRequestSequence += 1;
+  return { automationId, requestId: automationEditorRequestSequence };
+}
+
 export const initialState: AppState = {
   connection: 'idle',
   sessions: sessionSnapshot?.sessions ?? {},
@@ -656,6 +672,7 @@ export const initialState: AppState = {
   utilityPanels: persistedUiState.utilityPanels ?? {},
   sidebarCollapsed: persistedUiState.sidebarCollapsed ?? false,
   mainView: persistedUiState.mainView ?? 'session',
+  automationEditorRequest: null,
   prWorkspaceCwd: persistedUiState.prWorkspaceCwd ?? null,
   prWorkspaceNumber: persistedUiState.prWorkspaceNumber ?? null,
   prBacklogIds: persistedUiState.prBacklogIds ?? [],
@@ -1409,6 +1426,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         // it; never let it fire in another session's panel after a switch.
         reviewFocusPath: action.id === state.activeAppSessionId ? state.reviewFocusPath : null,
         mainView: 'session',
+        automationEditorRequest: null,
       };
     }
 
@@ -1641,8 +1659,27 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'OPEN_PULL_REQUESTS':
     case 'CLOSE_PULL_REQUESTS':
     case 'MOVE_PR_TO_BACKLOG':
-    case 'RESTORE_PR_FROM_BACKLOG':
-      return reducePrInbox(state, action);
+    case 'RESTORE_PR_FROM_BACKLOG': {
+      const next = reducePrInbox(state, action);
+      return next.mainView === 'automations' || !state.automationEditorRequest
+        ? next
+        : { ...next, automationEditorRequest: null };
+    }
+
+    case 'OPEN_AUTOMATIONS':
+      return {
+        ...state,
+        mainView: 'automations',
+        automationEditorRequest: action.automationId
+          ? createAutomationEditorRequest(action.automationId)
+          : null,
+        rightPanelOpen: false,
+      };
+
+    case 'AUTOMATION_EDITOR_REQUEST_HANDLED':
+      return state.automationEditorRequest?.requestId === action.requestId
+        ? { ...state, automationEditorRequest: null }
+        : state;
 
     case 'START_CHAT': {
       // Stamp the session being left so model output produced while it was
@@ -1667,6 +1704,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         reviewFocusPath: null,
         sessionLastSeen,
         mainView: 'session',
+        automationEditorRequest: null,
       };
     }
 

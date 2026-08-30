@@ -237,6 +237,10 @@ function isServerEvent(value: unknown): value is ServerEvent {
       );
     case 'mcp.error':
       return hasStrings(value, ['requestId', 'message']);
+    case 'automations.snapshot':
+      return isRecord(value.snapshot);
+    case 'automations.result':
+      return typeof value.requestId === 'string' && typeof value.ok === 'boolean';
     default: {
       const unexpected: never = type;
       void unexpected;

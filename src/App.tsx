@@ -24,6 +24,7 @@ import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import PromptInput from './components/PromptInput';
 import RightPanel from './components/RightPanel';
+import { AutomationsRoute } from './features/automations/AutomationsRoute';
 import EditorOpenMenu from './components/EditorOpenMenu';
 import Toaster from './components/Toaster';
 import { useRepoStatus } from './hooks/useRepoStatus';
@@ -177,17 +178,19 @@ export default function App() {
   const activeUtilityTab =
     utilityPanel.tabs.find((tab) => tab.id === utilityPanel.activeTabId) ?? null;
   const showUtilityPane = !embedded && !!activeSession && utilityPanel.open && !showWizard;
-  // The pull request workspace owns the whole content area and the top-right
-  // corner of its own toolbar, so the session-scoped overlays (Context panel)
-  // and floating window buttons stay out of it instead of covering its header.
-  const prWorkspaceView = !embedded && state.mainView === 'pull-requests';
+  // The pull request and Automations workspaces own the whole content area and
+  // the top-right corner of their own toolbar, so the session-scoped overlays
+  // (Context panel) and floating window buttons stay out of them instead of
+  // covering their header.
+  const fullContentRoute =
+    !embedded && (state.mainView === 'pull-requests' || state.mainView === 'automations');
   // An expanded browser covers the full content row, which would leave the pull
   // request workspace hidden and non-interactive behind it. The expansion stays
   // owned by the browser pane; this view simply does not take part in it.
   const browserExpanded =
     !!activeSession &&
     showUtilityPane &&
-    !prWorkspaceView &&
+    !fullContentRoute &&
     activeUtilityTab?.tool === 'browser' &&
     expandedBrowserAppSessionId === activeSession.appSessionId;
   const focused = isMissionControlView;
@@ -201,7 +204,7 @@ export default function App() {
   // the main scroll area), so the page scrollbar stays pinned to the window's
   // right edge instead of sliding inward and looking like a divider.
   const rightPanelVisible =
-    !focused && !prWorkspaceView && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
+    !focused && !fullContentRoute && !showUtilityPane && state.rightPanelOpen && hasSessionContent;
   const requestedHistory = useRef(new Set<string>());
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
@@ -226,10 +229,10 @@ export default function App() {
 
   useEffect(() => {
     if (composerStartupResolved.current) return;
-    if (!isMissionControlView && !prWorkspaceView) return;
+    if (!isMissionControlView && !fullContentRoute) return;
     composerStartupResolved.current = true;
     noteComposerNotApplicable();
-  }, [isMissionControlView, prWorkspaceView]);
+  }, [isMissionControlView, fullContentRoute]);
 
   useEffect(() => {
     const toggle = utilityPaneToggleRef.current;
@@ -567,6 +570,11 @@ export default function App() {
                 <Suspense fallback={<PullRequestsSkeleton />}>
                   <LazyPullRequestsView />
                 </Suspense>
+              ) : !embedded && state.mainView === 'automations' ? (
+                <AutomationsRoute
+                  workspaceScopes={workspaceScopes}
+                  workspaceScopesReady={workspaceScopesReady}
+                />
               ) : isMissionControlView ? (
                 <motion.div
                   key="mission-control"
@@ -754,7 +762,7 @@ export default function App() {
         </button>
       </div>
 
-      {!showUtilityPane && !prWorkspaceView && (
+      {!showUtilityPane && !fullContentRoute && (
         <div
           data-electron-drag-region
           className="absolute top-0 right-0 h-9 z-40 flex items-center gap-1 pr-3"

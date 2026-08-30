@@ -12,6 +12,7 @@ function ModelCatalogList({
   query,
   onSelectModel,
   disabled,
+  showDefault = true,
 }: {
   models: ModelInfo[];
   hasRealModels: boolean;
@@ -19,18 +20,21 @@ function ModelCatalogList({
   query: string;
   onSelectModel: (modelId?: string) => void;
   disabled: boolean;
+  showDefault?: boolean;
 }) {
   return (
     <div className="mt-2 max-h-[180px] overflow-y-auto -mx-1 px-1 space-y-0.5">
-      <ModelRow
-        label="Default"
-        sub="Use Factory CLI default"
-        selected={!selectedModelId}
-        onClick={() => {
-          onSelectModel(undefined);
-        }}
-        disabled={disabled}
-      />
+      {showDefault && (
+        <ModelRow
+          label="Default"
+          sub="Use Factory CLI default"
+          selected={!selectedModelId}
+          onClick={() => {
+            onSelectModel(undefined);
+          }}
+          disabled={disabled}
+        />
+      )}
       {hasRealModels ? (
         <>
           {models.map((model) => (

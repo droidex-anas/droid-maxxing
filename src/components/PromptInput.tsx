@@ -315,6 +315,7 @@ export default function PromptInput({
   const turnStartingClientRef = useRef<string | null>(null);
   const turnStartingPendingRegisteredRef = useRef(false);
   const pendingCaret = useRef<number | null>(null);
+  const consumedComposerSeedId = useRef<number | null>(null);
   const prevLive = useRef<{ appSessionId: string | null; live: boolean }>({
     appSessionId: null,
     live: false,
@@ -656,7 +657,8 @@ export default function PromptInput({
   // effect below focuses the field and moves the caret to the end of the text.
   const composerSeed = state.composerSeed;
   useEffect(() => {
-    if (!composerSeed) return;
+    if (!composerSeed || consumedComposerSeedId.current === composerSeed.id) return;
+    consumedComposerSeedId.current = composerSeed.id;
     setHistoryIndex(null);
     // Notes and suggestion cards append to an in-progress draft. A surface
     // that explicitly starts a fresh chat can replace stale mounted input.
@@ -665,7 +667,8 @@ export default function PromptInput({
     pendingCaret.current = text.length;
     setVisualizeSelected(false);
     // Consume the seed so a later remount (e.g. toggling Mission Control, which
-    // unmounts this input) does not re-apply stale text over the user's edits.
+    // unmounts this input) does not re-apply stale text over the user's edits,
+    // and guard by seed id so a double-invoked effect cannot duplicate the text.
     dispatch({ type: 'CLEAR_COMPOSER_SEED' });
   }, [composerSeed, input, dispatch, setVisualizeSelected]);
 

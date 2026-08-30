@@ -29,6 +29,8 @@ const IMMEDIATE_EVENT_TYPES = new Set<ServerEvent['type']>([
   'mcp.authRequested',
   'mcp.error',
   'cli.install.done',
+  'automations.snapshot',
+  'automations.result',
 ]);
 
 interface PendingEvent extends SequencedServerEvent {

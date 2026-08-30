@@ -1,5 +1,10 @@
+import {
+  configureAutomationManager,
+  type AutomationManager,
+} from './automations/AutomationManager.js';
 import { SessionManager } from './SessionManager.js';
 import { startBridgeServer } from './bridgeServer.js';
+import { droidexUserDataDir } from './droidexPaths.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 const REQUESTED_PORT = bridgePort(process.env.BRIDGE_PORT ?? '0');
@@ -7,11 +12,14 @@ const TOKEN = requiredSecret('BRIDGE_TOKEN');
 const ASSET_TOKEN = requiredSecret('BROWSER_ASSET_TOKEN');
 const EXIT_ON_STDIN_CLOSE = process.env.BRIDGE_EXIT_ON_STDIN_CLOSE !== '0';
 
+let automationManager: AutomationManager | null = null;
+
 const server = startBridgeServer({
   requestedPort: REQUESTED_PORT,
   token: TOKEN,
   assetToken: ASSET_TOKEN,
   onCommand: async (command) => {
+    if (automationManager && (await automationManager.handleBridgeCommand(command))) return;
     await manager.handle(command);
   },
   getSnapshot: () => manager.runtimeSnapshot(),
@@ -19,12 +27,29 @@ const server = startBridgeServer({
 
 const manager = new SessionManager(
   (event) => {
+    if (automationManager) {
+      void automationManager.observeSessionEvent(event).catch((error: unknown) => {
+        console.error('Automation lifecycle observer failed', error);
+      });
+    }
     server.broadcast(event);
   },
   {
     assetUrlFor: (filePath) => server.browserAssetUrl(filePath),
   },
 );
+
+automationManager = configureAutomationManager({
+  dataDir: droidexUserDataDir(),
+  emit: (event) => {
+    server.broadcast(event);
+  },
+  launchSession: (command) => manager.handle(command),
+  closeSession: (appSessionId) => manager.handle({ type: 'session.close', appSessionId }),
+  resolveSessionContext: (appSessionId) => manager.automationSessionContext(appSessionId),
+  validateSelection: (modelId, reasoningEffort) =>
+    manager.validateAutomationSelection(modelId, reasoningEffort),
+});
 
 let shuttingDown = false;
 
@@ -53,9 +78,11 @@ async function shutdown(): Promise<void> {
   const forceExit = setTimeout(() => process.exit(1), 5_000);
   forceExit.unref();
   try {
-    // Keep the bridge available while manager cleanup emits final state.
-    // Bridge close is bounded and flushes its ordered queue after shutdown.
+    // Sessions close first so the automation store records their final run state
+    // before it flushes. Bridge close is bounded and flushes its ordered queue
+    // after shutdown.
     await manager.shutdown();
+    await automationManager?.shutdown();
     hotPathMetrics.disable();
     await server.close();
   } catch (error) {

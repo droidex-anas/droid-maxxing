@@ -66,6 +66,8 @@ import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
 import { asChunkedSequence } from '../lib/chunkedSequence';
 import { ConversationList, type ConversationListHandle } from './ConversationList';
+import { AutomationProposalCard } from '../features/automations/AutomationProposalCard';
+import { isAutomationProposalCall } from '../features/automations/toolNames';
 import { takeFeedRowEntrance } from './conversationListState';
 import { MessageBody } from './MessageBody';
 import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
@@ -1030,6 +1032,26 @@ export function correlateResults(events: TranscriptEvent[]): {
   return { resultByCall, consumed };
 }
 
+// Every automation_propose call in a group gets its own review card, so a turn
+// that proposed two automations cannot silently hide one of them. Whatever is
+// left over stays in the collapsed activity group.
+export function splitAutomationProposals(events: TranscriptEvent[]): {
+  proposals: { call: TranscriptEvent; result?: TranscriptEvent }[];
+  remaining: TranscriptEvent[];
+} {
+  const calls = events.filter(isAutomationProposalCall);
+  if (calls.length === 0) return { proposals: [], remaining: events };
+  const { resultByCall } = correlateResults(events);
+  const shown = new Set<TranscriptEvent>();
+  const proposals = calls.map((call) => {
+    const result = resultByCall.get(call);
+    shown.add(call);
+    if (result) shown.add(result);
+    return { call, result };
+  });
+  return { proposals, remaining: events.filter((event) => !shown.has(event)) };
+}
+
 function renderToolEvents(events: TranscriptEvent[], live = false): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const { resultByCall, consumed } = correlateResults(events);
@@ -1115,6 +1137,36 @@ function renderToolEvents(events: TranscriptEvent[], live = false): React.ReactN
 }
 
 function ToolGroupItem({
+  events,
+  active,
+  defaultOpen = false,
+}: {
+  events: TranscriptEvent[];
+  active?: boolean;
+  defaultOpen?: boolean;
+}) {
+  const { proposals, remaining } = splitAutomationProposals(events);
+  if (proposals.length > 0) {
+    return (
+      <div className="space-y-2.5">
+        {proposals.map(({ call, result }) => (
+          <AutomationProposalCard
+            key={call.id}
+            call={call}
+            result={result}
+            running={Boolean(active && !result)}
+          />
+        ))}
+        {remaining.length > 0 && (
+          <GenericToolGroupItem events={remaining} active={active} defaultOpen={defaultOpen} />
+        )}
+      </div>
+    );
+  }
+  return <GenericToolGroupItem events={events} active={active} defaultOpen={defaultOpen} />;
+}
+
+function GenericToolGroupItem({
   events,
   active,
   defaultOpen = false,

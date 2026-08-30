@@ -9,6 +9,7 @@ import {
   correlateResults,
   fetchSizeBadge,
   sameFeedEvents,
+  splitAutomationProposals,
   MessageFeed,
   StreamingCaret,
   UserBubble,
@@ -314,6 +315,63 @@ test('#20 a batched replay (calls before results) correlates each result by tool
   // Both results are accounted for, so neither leaks as raw activity.
   assert.equal(consumed.has(todoResult), true);
   assert.equal(consumed.has(grepResult), true);
+});
+
+test('every automation proposal in one tool group gets its own card', () => {
+  const propose = (id: string) =>
+    ev({
+      kind: 'tool_call',
+      toolName: 'mcp__droidex-automations__automation_propose',
+      toolArgs: { prompt: id },
+      toolUseId: id,
+    });
+  const proposeResult = (id: string) =>
+    ev({ kind: 'tool_result', toolName: '', toolUseId: id, text: `{"proposalId":"${id}"}` });
+  const firstCall = propose('p1');
+  const firstResult = proposeResult('p1');
+  const secondCall = propose('p2');
+  const grepCall = ev({ kind: 'tool_call', toolName: 'Grep', toolArgs: { pattern: 'x' } });
+
+  const { proposals, remaining } = splitAutomationProposals([
+    firstCall,
+    firstResult,
+    secondCall,
+    grepCall,
+  ]);
+  assert.deepEqual(
+    proposals.map(({ call, result }) => [call.toolUseId, result?.toolUseId ?? null]),
+    [
+      ['p1', 'p1'],
+      ['p2', null],
+    ],
+  );
+  // The unrelated call still shows as collapsed activity; nothing is duplicated.
+  assert.deepEqual(remaining, [grepCall]);
+  assert.deepEqual(splitAutomationProposals([grepCall]), { proposals: [], remaining: [grepCall] });
+});
+
+test('an automation proposal stays at conversation level after the turn settles', () => {
+  const propose = ev({
+    kind: 'tool_call',
+    toolName: 'mcp__droidex-automations__automation_propose',
+    toolArgs: { prompt: 'Summarize the repo every morning' },
+    toolUseId: 'p1',
+  });
+  const grepCall = ev({ kind: 'tool_call', toolName: 'Grep', toolArgs: { pattern: 'x' } });
+  const grouped = groupTurns(
+    buildFeed([userMsg('schedule this'), grepCall, propose, asst('done')]),
+    false,
+  );
+  assert.equal(
+    grouped.some((it) => it.type === 'tools' && it.events.some((e) => e.toolUseId === 'p1')),
+    true,
+  );
+  assert.equal(
+    workedChildren(grouped).some(
+      (it) => it.type === 'tools' && it.events.some((e) => e.toolUseId === 'p1'),
+    ),
+    false,
+  );
 });
 
 test('#20 a failed plan result in a batched group is not consumed (it must surface)', () => {
