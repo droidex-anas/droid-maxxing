@@ -289,6 +289,10 @@ export class AutomationManager {
       case 'automations.confirmProposal':
         await this.confirmProposal(command.id, command.input);
         return;
+      default: {
+        const type = (command as { type: string }).type;
+        throw new Error(`Unknown automations command: ${type}`);
+      }
     }
   }
 
