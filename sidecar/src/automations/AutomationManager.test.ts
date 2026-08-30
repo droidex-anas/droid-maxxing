@@ -149,6 +149,59 @@ test('a pause between tool calls does not settle the run while streaming resumes
   }
 });
 
+test('closing a chat that already streamed completes the run instead of failing it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Close after work',
+      prompt: 'Finish then close.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected an automation session launch.');
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-close' },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-close', streaming: true },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-close', streaming: false },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.closed',
+      appSessionId: 'session-close',
+    } as ServerEvent);
+    await waitFor(async () => (await manager.snapshot()).runs[0]?.status === 'completed');
+    const snapshot = await manager.snapshot();
+    assert.equal(snapshot.runs[0]?.status, 'completed');
+    assert.equal(snapshot.runs[0]?.error, null);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('a due schedule launches without a renderer run pump', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];
