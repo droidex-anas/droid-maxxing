@@ -444,6 +444,7 @@ export default function ModelSelectorPopover({
               snapshot?.error?.message ??
               (state.providerSnapshots.length === 0 ? undefined : 'No models advertised')
             }
+            catalogHarness={harnessId}
           />
         </div>
       </div>

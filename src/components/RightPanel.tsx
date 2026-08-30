@@ -6,10 +6,15 @@ import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory'
 import { usePullRequest } from '../hooks/usePullRequest';
 import { useGithubSetup } from '../hooks/useGithubSetup';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
-import { sessionModelId, sessionReasoningEffort } from '../lib/sessionConfiguration';
+import {
+  sessionModelId,
+  sessionProviderInstanceId,
+  sessionReasoningEffort,
+} from '../lib/sessionConfiguration';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Loader2, ChevronRight, FileText } from 'lucide-react';
-import { ModelIcon, providerOf } from './ModelIcon';
+import { HarnessIcon } from '../features/providers/HarnessIcon';
+import { modelsForHarness } from '../features/providers/providerCatalog';
 import NotesSection from './NotesSection';
 import { SubagentsSection } from './SubagentsPanel';
 import { Row, SectionHeader, Divider } from './environment/primitives';
@@ -36,6 +41,7 @@ export default function RightPanel() {
       childRuntime: current.childRuntime,
       childSessions: current.childSessions,
       models: current.models,
+      providerSnapshots: current.providerSnapshots,
       selectedChild: current.selectedChild,
       selectedFeatureId: current.selectedFeatureId,
       sessionSpecs: current.sessionSpecs,
@@ -94,8 +100,14 @@ export default function RightPanel() {
     ),
   );
 
+  const harnessId = activeSession ? sessionProviderInstanceId(activeSession) : 'droid';
+  const catalog = modelsForHarness({
+    harnessId,
+    droidModels: state.models,
+    snapshots: state.providerSnapshots,
+  });
   const modelId = activeSession ? sessionModelId(activeSession) : undefined;
-  const modelInfo = modelId ? state.models.find((m) => m.id === modelId) : undefined;
+  const modelInfo = modelId ? catalog.find((m) => m.id === modelId) : undefined;
   const modelLabel = activeSession ? (modelInfo?.displayName ?? modelId ?? 'default') : 'default';
   // The pill next to the model carries the session's reasoning effort, resolved
   // the same way as the composer badge: the session's own pinned effort, falling
@@ -161,7 +173,7 @@ export default function RightPanel() {
                 onPrCreated={pr.refresh}
               />
               <Row
-                icon={<ModelIcon provider={providerOf(modelInfo, modelId)} size={16} />}
+                icon={<HarnessIcon harness={harnessId} size={16} />}
                 label={modelLabel}
                 meta={reasoningEffort}
               />

@@ -107,6 +107,53 @@ test('model row keeps the pill while the model list has not loaded', () => {
   assert.match(html, />xhigh</);
 });
 
+test('a Grok session uses the harness icon and hides Droid reasoning', () => {
+  const active = session({
+    configuration: {
+      providerSelection: { providerInstanceId: 'grok', modelId: 'grok-build', options: {} },
+      interactionMode: 'auto',
+      autonomy: 'off',
+    },
+  });
+  const grokSnapshot = {
+    definition: { providerDriverKind: 'grok', providerInstanceId: 'grok', displayName: 'Grok' },
+    revision: 1,
+    readiness: 'ready' as const,
+    models: [
+      {
+        id: 'grok-build',
+        displayName: 'Grok Build',
+        isDefault: true,
+        supportedReasoningEfforts: [],
+      },
+    ],
+    capabilities: {
+      modes: ['auto' as const],
+      autonomyLevels: ['off' as const],
+    },
+  };
+  const state: AppState = {
+    ...initialState,
+    sessions: { [active.appSessionId]: active },
+    sessionOrder: [active.appSessionId],
+    activeAppSessionId: active.appSessionId,
+    providerSnapshots: [grokSnapshot],
+    agentConfig: {
+      ...initialState.agentConfig,
+      primary: { ...initialState.agentConfig.primary, reasoning: 'high' },
+    },
+  };
+  const html = renderToStaticMarkup(
+    createElement(
+      StaticStoreProvider,
+      { state, dispatch: () => undefined },
+      createElement(RightPanel),
+    ),
+  );
+  assert.match(html, /Grok Build/);
+  assert.doesNotMatch(html, />high</);
+});
+
 test('PR detection and Context setup share authenticated GitHub readiness', () => {
   const action = () => undefined;
   const env: GitEnvironment = {
