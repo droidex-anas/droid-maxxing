@@ -1147,6 +1147,33 @@ test('a run whose time passed while the machine slept starts on the next wake', 
   }
 });
 
+test('unknown automations commands fail instead of succeeding empty', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const results: Array<{ ok: boolean; error?: string }> = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: (event) => {
+      if (event.type === 'automations.result') results.push(event);
+    },
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async () => undefined,
+  });
+
+  try {
+    const handled = await manager.handleBridgeCommand({
+      type: 'automations.dismissProposal',
+      requestId: 'req-unknown',
+      id: 'proposal-1',
+    });
+    assert.equal(handled, true);
+    assert.equal(results[0]?.ok, false);
+    assert.match(results[0]?.error ?? '', /Unknown automations command/);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function savedAutomation(id: string, title: string, nextRunAt: number) {
   return {
     id,
