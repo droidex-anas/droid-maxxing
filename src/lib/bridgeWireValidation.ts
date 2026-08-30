@@ -179,6 +179,8 @@ function isServerEvent(value: unknown): value is ServerEvent {
         (value.catalog === 'models' || value.catalog === 'tools' || value.catalog === 'skills') &&
         Array.isArray(value.items)
       );
+    case 'providers.updated':
+      return Array.isArray(value.snapshots) && value.snapshots.every(isProviderWireSnapshot);
     case 'settings.defaults':
       return isRecord(value.defaults);
     case 'error':
@@ -245,6 +247,40 @@ function isServerEvent(value: unknown): value is ServerEvent {
       return false;
     }
   }
+}
+
+function isProviderWireSnapshot(value: unknown): boolean {
+  if (!isRecord(value) || !isRecord(value.definition) || !isRecord(value.capabilities))
+    return false;
+  const instanceId = value.definition.providerInstanceId;
+  const readiness = value.readiness;
+  return (
+    typeof value.definition.providerDriverKind === 'string' &&
+    typeof value.definition.displayName === 'string' &&
+    (instanceId === 'droid' ||
+      instanceId === 'codex' ||
+      instanceId === 'claude' ||
+      instanceId === 'cursor' ||
+      instanceId === 'grok') &&
+    typeof value.revision === 'number' &&
+    (readiness === 'ready' ||
+      readiness === 'missing' ||
+      readiness === 'unauthenticated' ||
+      readiness === 'unsupported' ||
+      readiness === 'unavailable' ||
+      readiness === 'error') &&
+    Array.isArray(value.models) &&
+    value.models.every(
+      (model) =>
+        isRecord(model) &&
+        typeof model.id === 'string' &&
+        typeof model.displayName === 'string' &&
+        typeof model.isDefault === 'boolean' &&
+        Array.isArray(model.supportedReasoningEfforts),
+    ) &&
+    Array.isArray(value.capabilities.modes) &&
+    Array.isArray(value.capabilities.autonomyLevels)
+  );
 }
 
 function isSessionSummary(value: unknown): boolean {

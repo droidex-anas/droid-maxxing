@@ -11,6 +11,7 @@ export interface AcpProcessSpawnRequest {
   args: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
 }
 
 export interface SpawnedAcpProcess {
@@ -97,6 +98,10 @@ export function resolveAcpExecutable(command: string): string | undefined {
 }
 
 export function spawnAcpProcess(request: AcpProcessSpawnRequest): SpawnedAcpProcess {
+  if (request.signal?.aborted) {
+    throw new AcpProcessSpawnFailure('spawn_failed', 'ACP spawn aborted');
+  }
+
   const resolved = resolveAcpExecutable(request.command);
   if (resolved === undefined) {
     throw new AcpProcessSpawnFailure('missing_executable', 'ACP peer executable was not found');
@@ -116,6 +121,16 @@ export function spawnAcpProcess(request: AcpProcessSpawnRequest): SpawnedAcpProc
     stderrTail.push(chunk);
   });
   child.stderr.on('error', () => undefined);
+
+  if (request.signal) {
+    const onAbort = () => {
+      void terminateProcessTree(child, ShutdownDeadline.fromDurationMs(0));
+    };
+    request.signal.addEventListener('abort', onAbort, { once: true });
+    child.once('exit', () => {
+      request.signal?.removeEventListener('abort', onAbort);
+    });
+  }
 
   return { child, stderrTail };
 }

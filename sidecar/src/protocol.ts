@@ -4,6 +4,7 @@
 import type { McpClientCommand, McpServerEvent } from './mcpProtocol.js';
 import type {
   DroidMissionConfiguration,
+  ProviderDriverKind,
   ProviderInstanceId,
   SessionConfiguration,
 } from './providers/providerIdentity.js';
@@ -54,6 +55,59 @@ export type ReasoningEffort =
   | 'xhigh'
   | 'max'
   | 'dynamic';
+
+export type ProviderReadiness =
+  | 'ready'
+  | 'missing'
+  | 'unauthenticated'
+  | 'unsupported'
+  | 'unavailable'
+  | 'error';
+
+export interface ProviderCapabilitySnapshot {
+  modes: SessionInteractionMode[];
+  autonomyLevels: Autonomy[];
+  modelChange: 'before_turn' | 'idle_only' | 'unsupported';
+  resume: boolean;
+  steer: boolean;
+  interrupt: boolean;
+  approvals: boolean;
+  questions: boolean;
+  planReview: boolean;
+  context: boolean;
+  compaction: boolean;
+  skills: boolean;
+  slashCommands: boolean;
+  mcpUse: boolean;
+  mcpManagement: boolean;
+  rewind: boolean;
+  fork: boolean;
+  observationalTasks: boolean;
+  addressableChildren: boolean;
+  missionControl: boolean;
+  browser: boolean;
+  usageReporting: boolean;
+  reasoningStream: boolean;
+}
+
+export interface ProviderWireSnapshot {
+  definition: {
+    providerDriverKind: ProviderDriverKind;
+    providerInstanceId: ProviderInstanceId;
+    displayName: string;
+  };
+  revision: number;
+  readiness: ProviderReadiness;
+  executable?: { name: string; version: string };
+  models: Array<{
+    id: string;
+    displayName: string;
+    isDefault: boolean;
+    supportedReasoningEfforts: ReasoningEffort[];
+  }>;
+  capabilities: ProviderCapabilitySnapshot;
+  error?: { code: string; message: string; recoveryAction: string };
+}
 
 export interface BridgeFeature {
   id: string;
@@ -704,6 +758,7 @@ export type ClientCommand =
   | { type: 'cli.install'; channel: InstallChannel }
   | { type: 'cli.update'; channel?: InstallChannel }
   | { type: 'catalog.models' }
+  | { type: 'providers.refresh' }
   | { type: 'catalog.tools'; appSessionId?: string; providerInstanceId?: ProviderInstanceId }
   | { type: 'catalog.skills'; appSessionId?: string; providerInstanceId?: ProviderInstanceId }
   | { type: 'settings.defaults' }
@@ -980,6 +1035,7 @@ export type ServerEvent =
       appSessionId?: string | null;
       providerInstanceId?: ProviderInstanceId | null;
     }
+  | { type: 'providers.updated'; snapshots: ProviderWireSnapshot[] }
   | { type: 'settings.defaults'; defaults: FactoryDefaultSettings }
   | {
       type: 'error';

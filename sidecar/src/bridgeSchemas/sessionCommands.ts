@@ -51,6 +51,7 @@ const planReviewDecisionSchema = z.enum(['implement', 'iterate', 'cancel']);
 
 export const sessionCommandSchemas = {
   'catalog.models': strictCommand('catalog.models', {}),
+  'providers.refresh': strictCommand('providers.refresh', {}),
   'catalog.tools': strictCommand('catalog.tools', {
     appSessionId: optionalIdStringSchema,
     providerInstanceId: providerInstanceIdSchema.optional(),
@@ -211,6 +212,7 @@ export const sessionCommandSchemas = {
   [K in Extract<
     ClientCommand['type'],
     | 'catalog.models'
+    | 'providers.refresh'
     | 'catalog.tools'
     | 'catalog.skills'
     | 'settings.defaults'

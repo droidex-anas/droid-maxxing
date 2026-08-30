@@ -12,6 +12,8 @@ function ModelCatalogList({
   query,
   onSelectModel,
   disabled,
+  showFactoryDefault = true,
+  emptyMessage,
 }: {
   models: ModelInfo[];
   hasRealModels: boolean;
@@ -19,18 +21,22 @@ function ModelCatalogList({
   query: string;
   onSelectModel: (modelId?: string) => void;
   disabled: boolean;
+  showFactoryDefault?: boolean;
+  emptyMessage?: string;
 }) {
   return (
     <div className="mt-2 max-h-[180px] overflow-y-auto -mx-1 px-1 space-y-0.5">
-      <ModelRow
-        label="Default"
-        sub="Use Factory CLI default"
-        selected={!selectedModelId}
-        onClick={() => {
-          onSelectModel(undefined);
-        }}
-        disabled={disabled}
-      />
+      {showFactoryDefault && (
+        <ModelRow
+          label="Default"
+          sub="Use Factory CLI default"
+          selected={!selectedModelId}
+          onClick={() => {
+            onSelectModel(undefined);
+          }}
+          disabled={disabled}
+        />
+      )}
       {hasRealModels ? (
         <>
           {models.map((model) => (
@@ -54,7 +60,7 @@ function ModelCatalogList({
         </>
       ) : (
         <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
-          Loading models…
+          {emptyMessage ?? 'Loading models…'}
         </div>
       )}
     </div>

@@ -202,12 +202,16 @@ export class GrokProviderAdapter implements ProviderAdapter {
         env,
       });
     const timeoutMs = this.#options.modelDiscoveryTimeoutMs ?? GROK_MODEL_DISCOVERY_TIMEOUT_MS;
+    const spawnRequest: AcpProcessSpawnRequest = {
+      ...spawn,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    };
     let connection: GrokAcpClient | undefined;
     try {
       connection = await withTimeout(
         this.#connectAcp({
           providerInstanceId: 'grok',
-          spawn,
+          spawn: spawnRequest,
           handshake: buildGrokHandshake({ cwd: process.cwd(), env }),
         }),
         timeoutMs,
