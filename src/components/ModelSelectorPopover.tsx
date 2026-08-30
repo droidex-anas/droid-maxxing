@@ -1,39 +1,52 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Search, Check, SlidersHorizontal } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Search } from 'lucide-react';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import type { AgentKind } from '../hooks/persistedUiPreferences';
-import type { ReasoningEffort, ModelInfo } from '../types/bridge';
-import { updateAgentSettings, updateChildSettings, listModels } from '../lib/commands';
-import { sessionModelId, sessionReasoningEffort } from '../lib/sessionConfiguration';
+import type {
+  ProviderInstanceId,
+  ReasoningEffort,
+  ModelInfo,
+  SessionConfiguration,
+} from '../types/bridge';
+import {
+  updateAgentSettings,
+  updateChildSettings,
+  updateSessionSettings,
+  listModels,
+  refreshProviders,
+} from '../lib/commands';
+import {
+  sessionModelId,
+  sessionReasoningEffort,
+  withProviderSelection,
+} from '../lib/sessionConfiguration';
 import {
   childSettingsReadinessLabel,
   planChildModelUpdate,
   type ExactChildSettingsTarget,
 } from '../lib/exactChildSettings';
 import ModelCatalogList from './ModelCatalogList';
+import ModelCategoryFilter, { categoryOf, type ModelCategory } from './ModelCategoryFilter';
+import HarnessStrip from '../features/providers/HarnessStrip';
+import {
+  activeHarnessId,
+  defaultModelId,
+  modelsForHarness,
+  snapshotForHarness,
+} from '../features/providers/providerCatalog';
+import { composerCapabilities } from '../features/providers/providerCapabilities';
+import {
+  loadProviderDraft,
+  persistDraftHarness,
+  persistHarnessSelection,
+} from '../features/providers/providerDraft';
 
 export type { ExactChildSettingsTarget } from '../lib/exactChildSettings';
 
 const ACCENT = 'var(--droid-accent)';
 const accentMix = (pct: number) =>
   `color-mix(in srgb, var(--droid-accent) ${String(pct)}%, transparent)`;
-
-type ModelCategory = 'core' | 'factory' | 'custom';
-
-const CATEGORY_LABEL: Record<ModelCategory, string> = {
-  core: 'Droid core',
-  factory: 'Factory',
-  custom: 'Custom',
-};
-
-function categoryOf(model: ModelInfo): ModelCategory {
-  if (model.isCustom || model.id.startsWith('custom:')) return 'custom';
-  const provider = (model.provider ?? '').toLowerCase();
-  if (provider === 'droid-core' || model.displayName.toLowerCase().startsWith('droid core'))
-    return 'core';
-  return 'factory';
-}
 
 const AGENTS: { kind: AgentKind; label: string; hint: string }[] = [
   { kind: 'primary', label: 'Primary', hint: 'Runs the session' },
@@ -72,17 +85,29 @@ export default function ModelSelectorPopover({
       activeSessionAppSessionId: activeSession?.appSessionId,
       activeSessionModelId: activeSession ? sessionModelId(activeSession) : undefined,
       activeSessionReasoning: activeSession ? sessionReasoningEffort(activeSession) : undefined,
+      activeSessionConfiguration: activeSession?.configuration,
       agentConfig: current.agentConfig,
       models: current.models,
+      providerSnapshots: current.providerSnapshots,
+      draftProviderInstanceId: current.draftProviderInstanceId,
     };
   }, shallowEqual);
   const [agent, setAgent] = useState<AgentKind>('primary');
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState<ModelCategory | 'all'>('all');
-  const [filterOpen, setFilterOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const filterRef = useRef<HTMLDivElement>(null);
   const childMode = childTarget !== undefined;
+  const harnessId = activeHarnessId({
+    activeSession: state.activeSessionConfiguration
+      ? { configuration: state.activeSessionConfiguration }
+      : null,
+    draftProviderInstanceId: state.draftProviderInstanceId,
+  });
+  const snapshot = snapshotForHarness(state.providerSnapshots, harnessId);
+  const capabilities = composerCapabilities(state.providerSnapshots, harnessId);
+  const locked = Boolean(singleAgent && state.activeSessionAppSessionId);
+  const showMissionTabs =
+    !singleAgent && !childTarget && harnessId === 'droid' && capabilities.missionControl;
 
   const selectedAgent = childTarget?.role ?? agent;
   const active = AGENTS.find((a) => a.kind === selectedAgent) ?? {
@@ -92,8 +117,12 @@ export default function ModelSelectorPopover({
   };
   const cfg = state.agentConfig[selectedAgent];
 
-  // For a single chat, the model/reasoning belong to that session, not the global default.
   const scopedAppSessionId = singleAgent ? state.activeSessionAppSessionId : undefined;
+  const source = modelsForHarness({
+    harnessId,
+    droidModels: state.models,
+    snapshots: state.providerSnapshots,
+  });
   const effModelId =
     childTarget?.modelId ?? (scopedAppSessionId ? state.activeSessionModelId : cfg.modelId);
   const effReasoning =
@@ -103,47 +132,21 @@ export default function ModelSelectorPopover({
   const effReasoningRef = useRef(effReasoning);
   effReasoningRef.current = effReasoning;
   const childReady = childTarget?.readiness === 'ready';
+  const hasRealModels = source.length > 0;
 
-  const hasRealModels = state.models.length > 0;
-  const source = state.models;
-
-  // The catalog is Droid CLI's source of truth; if it hasn't arrived yet, fetch it.
   useEffect(() => {
-    if (!hasRealModels) listModels();
-  }, [hasRealModels]);
-
-  const catCounts = useMemo(() => {
-    const counts: Record<ModelCategory, number> = { core: 0, factory: 0, custom: 0 };
-    source.forEach((m) => {
-      counts[categoryOf(m)] += 1;
-    });
-    return counts;
-  }, [source]);
+    refreshProviders();
+    listModels();
+  }, []);
 
   const models = useMemo(() => {
     const q = query.trim().toLowerCase();
     return source.filter((m) => {
-      if (cat !== 'all' && categoryOf(m) !== cat) return false;
+      if (harnessId === 'droid' && cat !== 'all' && categoryOf(m) !== cat) return false;
       if (!q) return true;
       return m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
     });
-  }, [source, query, cat]);
-
-  const selectCat = (next: ModelCategory | 'all') => {
-    setCat(next);
-    setFilterOpen(false);
-  };
-
-  useEffect(() => {
-    if (!filterOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
-    };
-    window.addEventListener('mousedown', onDown);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-    };
-  }, [filterOpen]);
+  }, [source, query, cat, harnessId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -167,15 +170,18 @@ export default function ModelSelectorPopover({
   })();
   const selectedConfigModel = effModelId ? source.find((x) => x.id === effModelId) : undefined;
   const selectedSupportedReasoning = selectedConfigModel?.supportedReasoningEfforts;
-  const reasoningOptions = selectedConfigModel
-    ? selectedSupportedReasoning?.length
-      ? selectedSupportedReasoning
-      : [selectedConfigModel.defaultReasoningEffort ?? effReasoning]
-    : BASE_REASONING;
+  const reasoningOptions = reasoningChoices(
+    selectedConfigModel,
+    selectedSupportedReasoning,
+    harnessId,
+    effReasoning,
+  );
 
   const updateReasoning = useCallback(
     (reasoning: ReasoningEffort) => {
       if (childTarget) return;
+      if (effModelId)
+        persistHarnessSelection(harnessId, { modelId: effModelId, reasoningEffort: reasoning });
       if (scopedAppSessionId)
         dispatch({
           type: 'SESSION_SET_REASONING',
@@ -183,13 +189,25 @@ export default function ModelSelectorPopover({
           reasoning,
         });
       else dispatch({ type: 'SET_AGENT_REASONING', agent, reasoning });
-      updateAgentSettings({
-        appSessionId: state.activeAppSessionId ?? undefined,
+      persistLiveOrDraft({
+        harnessId,
+        scopedAppSessionId,
+        activeAppSessionId: state.activeAppSessionId,
+        configuration: state.activeSessionConfiguration,
         agent,
-        reasoningEffort: reasoning,
+        patch: { reasoning },
       });
     },
-    [agent, childTarget, dispatch, scopedAppSessionId, state.activeAppSessionId],
+    [
+      agent,
+      childTarget,
+      dispatch,
+      effModelId,
+      harnessId,
+      scopedAppSessionId,
+      state.activeAppSessionId,
+      state.activeSessionConfiguration,
+    ],
   );
 
   const updateModel = useCallback(
@@ -200,6 +218,8 @@ export default function ModelSelectorPopover({
         if (update) updateChildSettings(update);
         return;
       }
+      if (modelId)
+        persistHarnessSelection(harnessId, { modelId, reasoningEffort: currentReasoning });
       if (scopedAppSessionId)
         dispatch({
           type: 'SESSION_SET_MODEL',
@@ -207,13 +227,15 @@ export default function ModelSelectorPopover({
           modelId,
         });
       else dispatch({ type: 'SET_AGENT_MODEL', agent, modelId });
-      updateAgentSettings({
-        appSessionId: state.activeAppSessionId ?? undefined,
+      persistLiveOrDraft({
+        harnessId,
+        scopedAppSessionId,
+        activeAppSessionId: state.activeAppSessionId,
+        configuration: state.activeSessionConfiguration,
         agent,
-        modelId: modelId ?? null,
+        patch: { modelId },
       });
 
-      // Snap reasoning to a value the new model actually supports.
       const next = modelId ? source.find((x) => x.id === modelId) : undefined;
       const supported = next?.supportedReasoningEfforts;
       if (supported?.length && !supported.includes(currentReasoning)) {
@@ -230,15 +252,15 @@ export default function ModelSelectorPopover({
       agent,
       childTarget,
       dispatch,
+      harnessId,
       scopedAppSessionId,
       source,
       state.activeAppSessionId,
+      state.activeSessionConfiguration,
       updateReasoning,
     ],
   );
 
-  // Keep the displayed reasoning valid if the model's supported set changes
-  // (e.g. real catalog arrives after a mock placeholder was selected).
   useEffect(() => {
     if (childMode) return;
     const supported = selectedSupportedReasoning;
@@ -246,12 +268,6 @@ export default function ModelSelectorPopover({
       updateReasoning(
         selectedConfigModel?.defaultReasoningEffort ?? supported[supported.length - 1],
       );
-    } else if (
-      !supported?.length &&
-      selectedConfigModel?.defaultReasoningEffort &&
-      effReasoning !== selectedConfigModel.defaultReasoningEffort
-    ) {
-      updateReasoning(selectedConfigModel.defaultReasoningEffort);
     }
   }, [
     childMode,
@@ -261,6 +277,33 @@ export default function ModelSelectorPopover({
     selectedSupportedReasoning,
     updateReasoning,
   ]);
+
+  const selectHarness = (next: ProviderInstanceId) => {
+    if (locked || childTarget) return;
+    if (effModelId) {
+      persistHarnessSelection(harnessId, {
+        modelId: effModelId,
+        reasoningEffort: effReasoning,
+      });
+    }
+    persistDraftHarness(next);
+    const nextSource = modelsForHarness({
+      harnessId: next,
+      droidModels: state.models,
+      snapshots: state.providerSnapshots,
+    });
+    const remembered = loadProviderDraft().selections[next]?.modelId;
+    const restored =
+      remembered && nextSource.some((model) => model.id === remembered)
+        ? remembered
+        : defaultModelId(nextSource);
+    dispatch({
+      type: 'SET_DRAFT_PROVIDER',
+      providerInstanceId: next,
+      modelId: restored,
+      reasoning: nextSource.find((model) => model.id === restored)?.defaultReasoningEffort,
+    });
+  };
 
   return (
     <motion.div
@@ -272,7 +315,6 @@ export default function ModelSelectorPopover({
       className="absolute bottom-full left-0 mb-3 w-[380px] z-50"
     >
       <div className="rounded-2xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/50 overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-4 pt-3 pb-2">
           <span className="text-[11px] font-medium text-droid-text-secondary tracking-wide">
             {childTarget ? childTarget.label : singleAgent ? 'Model' : 'Models'}
@@ -288,8 +330,16 @@ export default function ModelSelectorPopover({
           </span>
         </div>
 
-        {/* Agent tabs */}
-        {!singleAgent && !childTarget && (
+        {singleAgent && !childTarget && (
+          <HarnessStrip
+            selected={harnessId}
+            locked={locked}
+            snapshots={state.providerSnapshots}
+            onSelect={selectHarness}
+          />
+        )}
+
+        {showMissionTabs && (
           <div className="px-3">
             <div className="flex gap-1 p-0.5 rounded-xl bg-droid-bg/60 border border-droid-border">
               {AGENTS.map((a) => {
@@ -315,54 +365,54 @@ export default function ModelSelectorPopover({
           </div>
         )}
 
-        {/* Reasoning selector */}
-        <div className="px-4 pt-3.5 pb-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] text-droid-text-muted uppercase tracking-wider">
-              Reasoning
-            </span>
-            <span className="text-[10px] font-medium capitalize" style={{ color: ACCENT }}>
-              {effReasoning}
-            </span>
+        {reasoningOptions.length > 0 && (
+          <div className="px-4 pt-3.5 pb-1">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-droid-text-muted uppercase tracking-wider">
+                Reasoning
+              </span>
+              <span className="text-[10px] font-medium capitalize" style={{ color: ACCENT }}>
+                {effReasoning}
+              </span>
+            </div>
+            <div className="relative flex p-0.5 rounded-lg bg-droid-bg/60 border border-droid-border">
+              {reasoningOptions.map((r) => {
+                const on = effReasoning === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => {
+                      updateReasoning(r);
+                    }}
+                    disabled={Boolean(childTarget)}
+                    title={childTarget ? 'Change the child model to adjust reasoning.' : undefined}
+                    className={`relative flex-1 py-1.5 rounded-md text-[10px] capitalize transition-colors ${
+                      on
+                        ? 'text-droid-text'
+                        : childTarget
+                          ? 'text-droid-text-muted/50 cursor-not-allowed'
+                          : 'text-droid-text-muted hover:text-droid-text-secondary'
+                    }`}
+                  >
+                    {on && (
+                      <motion.span
+                        layoutId="reasoning-pill"
+                        className="absolute inset-0 rounded-md"
+                        style={{
+                          backgroundColor: accentMix(13),
+                          boxShadow: `inset 0 0 0 1px ${accentMix(33)}`,
+                        }}
+                        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                      />
+                    )}
+                    <span className="relative">{r}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div className="relative flex p-0.5 rounded-lg bg-droid-bg/60 border border-droid-border">
-            {reasoningOptions.map((r) => {
-              const on = effReasoning === r;
-              return (
-                <button
-                  key={r}
-                  onClick={() => {
-                    updateReasoning(r);
-                  }}
-                  disabled={Boolean(childTarget)}
-                  title={childTarget ? 'Change the child model to adjust reasoning.' : undefined}
-                  className={`relative flex-1 py-1.5 rounded-md text-[10px] capitalize transition-colors ${
-                    on
-                      ? 'text-droid-text'
-                      : childTarget
-                        ? 'text-droid-text-muted/50 cursor-not-allowed'
-                        : 'text-droid-text-muted hover:text-droid-text-secondary'
-                  }`}
-                >
-                  {on && (
-                    <motion.span
-                      layoutId="reasoning-pill"
-                      className="absolute inset-0 rounded-md"
-                      style={{
-                        backgroundColor: accentMix(13),
-                        boxShadow: `inset 0 0 0 1px ${accentMix(33)}`,
-                      }}
-                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                    />
-                  )}
-                  <span className="relative">{r}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        )}
 
-        {/* Model search + list */}
         <div className="px-4 pt-3 pb-3">
           <div className="flex items-center gap-2">
             <div className="flex flex-1 items-center gap-2 px-3 h-9 rounded-lg bg-droid-bg/60 border border-droid-border focus-within:border-droid-border-hover transition-colors">
@@ -377,84 +427,9 @@ export default function ModelSelectorPopover({
                 className="flex-1 bg-transparent text-[12px] text-droid-text placeholder-droid-text-muted/70 focus:outline-none"
               />
             </div>
-
-            <div className="relative shrink-0" ref={filterRef}>
-              <button
-                onClick={() => {
-                  setFilterOpen((v) => !v);
-                }}
-                title="Filter models by category"
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
-                  filterOpen || cat !== 'all'
-                    ? 'text-droid-text border-transparent'
-                    : 'text-droid-text-muted border-droid-border hover:text-droid-text hover:border-droid-border-hover bg-droid-bg/60'
-                }`}
-                style={
-                  filterOpen || cat !== 'all'
-                    ? {
-                        backgroundColor: accentMix(13),
-                        boxShadow: `inset 0 0 0 1px ${accentMix(40)}`,
-                      }
-                    : undefined
-                }
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-              </button>
-
-              <AnimatePresence>
-                {filterOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                    transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute right-0 top-full mt-1.5 w-44 z-50 rounded-xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/50 overflow-hidden p-1"
-                  >
-                    {[
-                      { value: 'all' as const, label: 'All models', count: source.length },
-                      { value: 'core' as const, label: CATEGORY_LABEL.core, count: catCounts.core },
-                      {
-                        value: 'factory' as const,
-                        label: CATEGORY_LABEL.factory,
-                        count: catCounts.factory,
-                      },
-                      {
-                        value: 'custom' as const,
-                        label: CATEGORY_LABEL.custom,
-                        count: catCounts.custom,
-                      },
-                    ].map((opt) => {
-                      const on = cat === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          onClick={() => {
-                            selectCat(opt.value);
-                          }}
-                          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-[12px] transition-colors ${
-                            on
-                              ? 'bg-droid-surface text-droid-text'
-                              : 'text-droid-text-secondary hover:bg-droid-surface/60'
-                          }`}
-                        >
-                          <span className="w-3.5 h-3.5 shrink-0 flex items-center justify-center">
-                            {on && (
-                              <Check
-                                className="w-3 h-3"
-                                style={{ color: ACCENT }}
-                                strokeWidth={3.5}
-                              />
-                            )}
-                          </span>
-                          <span className="flex-1">{opt.label}</span>
-                          <span className="text-[10px] text-droid-text-muted">{opt.count}</span>
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            {harnessId === 'droid' && (
+              <ModelCategoryFilter source={source} cat={cat} onSelect={setCat} />
+            )}
           </div>
 
           <ModelCatalogList
@@ -464,12 +439,58 @@ export default function ModelSelectorPopover({
             query={query}
             onSelectModel={updateModel}
             disabled={Boolean(childTarget && !childReady)}
+            showFactoryDefault={harnessId === 'droid'}
+            emptyMessage={
+              snapshot?.error?.message ??
+              (state.providerSnapshots.length === 0 ? undefined : 'No models advertised')
+            }
+            catalogHarness={harnessId}
           />
         </div>
       </div>
 
-      {/* Tail */}
       <div className="absolute -bottom-1.5 left-7 w-3 h-3 rotate-45 bg-droid-elevated border-r border-b border-droid-border" />
     </motion.div>
   );
+}
+
+function reasoningChoices(
+  selectedConfigModel: ModelInfo | undefined,
+  selectedSupportedReasoning: ReasoningEffort[] | undefined,
+  harnessId: ProviderInstanceId,
+  effReasoning: ReasoningEffort,
+): ReasoningEffort[] {
+  if (!selectedConfigModel) return harnessId === 'droid' ? BASE_REASONING : [];
+  if (selectedSupportedReasoning?.length) return selectedSupportedReasoning;
+  if (harnessId !== 'droid') return [];
+  return [selectedConfigModel.defaultReasoningEffort ?? effReasoning];
+}
+
+function persistLiveOrDraft(input: {
+  harnessId: ProviderInstanceId;
+  scopedAppSessionId?: string;
+  activeAppSessionId: string | null;
+  configuration?: SessionConfiguration;
+  agent: AgentKind;
+  patch: { modelId?: string; reasoning?: ReasoningEffort };
+}): void {
+  if (input.harnessId !== 'droid') {
+    if (!input.scopedAppSessionId || !input.configuration) return;
+    const options = { ...input.configuration.providerSelection.options };
+    if (input.patch.reasoning !== undefined) options.reasoningEffort = input.patch.reasoning;
+    updateSessionSettings({
+      appSessionId: input.scopedAppSessionId,
+      configuration: withProviderSelection(input.configuration, {
+        ...(input.patch.modelId ? { modelId: input.patch.modelId } : {}),
+        options,
+      }),
+    });
+    return;
+  }
+  updateAgentSettings({
+    appSessionId: input.activeAppSessionId ?? undefined,
+    agent: input.agent,
+    ...('modelId' in input.patch ? { modelId: input.patch.modelId ?? null } : {}),
+    ...('reasoning' in input.patch ? { reasoningEffort: input.patch.reasoning } : {}),
+  });
 }

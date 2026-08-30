@@ -60,6 +60,7 @@ const validCommands = {
   'cli.install': { type: 'cli.install', channel: 'npm' },
   'cli.update': { type: 'cli.update' },
   'catalog.models': { type: 'catalog.models' },
+  'providers.refresh': { type: 'providers.refresh' },
   'catalog.tools': { type: 'catalog.tools' },
   'catalog.skills': { type: 'catalog.skills' },
   'settings.defaults': { type: 'settings.defaults' },
@@ -225,7 +226,7 @@ function bytesOf(count: number, char = 'a'): string {
 }
 
 test('every ClientCommand discriminant has exactly one valid fixture', () => {
-  assert.equal(CLIENT_COMMAND_TYPES.length, 61);
+  assert.equal(CLIENT_COMMAND_TYPES.length, 62);
   for (const type of CLIENT_COMMAND_TYPES) {
     const result = parseObject(validCommands[type]);
     assert.equal(result.ok, true, type);

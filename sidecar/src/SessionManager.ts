@@ -101,6 +101,7 @@ import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
 import { formatResponsePrompt } from './appPrompt.js';
 import { SIDECAR_SHUTDOWN_BUDGET_MS, ShutdownDeadline } from './providers/shutdownDeadline.js';
 import { createHostProviderRegistry } from './providers/hostProviderRegistry.js';
+import { publishProviderSnapshots } from './providers/publishProviderSnapshots.js';
 import type { ProviderRegistry } from './providers/ProviderRegistry.js';
 import type { DroidexDatabase } from './persistence/DroidexDatabase.js';
 import {
@@ -661,8 +662,12 @@ export class SessionManager {
         const models = await this.getModels();
         this.emit({ type: 'catalog.updated', catalog: 'models', items: models });
         void this.refreshModelCatalog(true);
+        this.publishProviders();
         return;
       }
+      case 'providers.refresh':
+        this.publishProviders();
+        return;
       case 'catalog.tools':
         await emitHostDroidCatalogUpdate(
           this.droid,
@@ -919,6 +924,15 @@ export class SessionManager {
         return;
       }
     }
+  }
+
+  private publishProviders(): void {
+    void publishProviderSnapshots({
+      registry: this.providerRegistry,
+      emit: (event) => {
+        this.emit(event);
+      },
+    });
   }
 
   private async getModels(): Promise<ModelInfo[]> {

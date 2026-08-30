@@ -207,11 +207,15 @@ export class CursorProviderAdapter implements ProviderAdapter {
         env: this.#options.env,
       });
     const timeoutMs = this.#options.modelDiscoveryTimeoutMs ?? CURSOR_MODEL_DISCOVERY_TIMEOUT_MS;
+    const spawnRequest: AcpProcessSpawnRequest = {
+      ...spawn,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    };
     let connection: CursorAcpClient | undefined;
     try {
       connection = await this.#connectAcp({
         providerInstanceId: 'cursor',
-        spawn,
+        spawn: spawnRequest,
         handshake: buildCursorHandshake({ cwd: process.cwd() }),
       });
       if (signal.aborted) {

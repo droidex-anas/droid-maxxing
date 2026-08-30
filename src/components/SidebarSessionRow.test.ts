@@ -71,6 +71,25 @@ test('areSessionRowPropsEqual ignores unrelated session updates', () => {
   assert.equal(areSessionRowPropsEqual(prev, retitled), true);
 });
 
+test('areSessionRowPropsEqual detects a harness change', () => {
+  const prev = makeProps({ ...STABLE });
+  const next = makeProps({
+    session: makeSession({
+      configuration: {
+        providerSelection: {
+          providerInstanceId: 'grok',
+          modelId: 'grok-build',
+          options: {},
+        },
+        interactionMode: 'auto',
+        autonomy: 'off',
+      },
+    }),
+    ...STABLE,
+  });
+  assert.equal(areSessionRowPropsEqual(prev, next), false);
+});
+
 test('areSessionRowPropsEqual detects row-visible session updates', () => {
   const base = makeProps({ ...STABLE });
   const changes: Partial<SessionSummary>[] = [{ appSessionId: 'sess-b' }, { updatedAt: 2_000 }];
@@ -195,10 +214,12 @@ test('SessionRow: question attention uses the question label', () => {
   assert.match(html, />Awaiting answer</);
 });
 
-test('SessionRow: an idle row shows the relative timestamp and no spinner', () => {
+test('SessionRow: an idle row shows the harness icon and the relative timestamp', () => {
   const html = render(makeProps({ running: false, now: 60_000 }));
   assert.doesNotMatch(html, /animate-spin/);
   assert.match(html, />now</);
+  assert.match(html, /data-testid="harness-icon"/);
+  assert.match(html, /data-harness="droid"/);
 });
 
 test('SessionRow: the title rests truncated inside an overflow viewport, marquee only on hover', () => {

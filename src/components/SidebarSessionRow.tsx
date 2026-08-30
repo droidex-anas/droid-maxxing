@@ -6,6 +6,8 @@ import { SESSION_MENU_WIDTH } from './SessionContextMenu';
 import type { SessionSummary } from '../types/bridge';
 import type { SessionAttentionKind } from '../lib/sessionAttention';
 import { SessionAttentionBadge } from './SessionAttentionBadge';
+import { HarnessIcon } from '../features/providers/HarnessIcon';
+import { sessionProviderInstanceId } from '../lib/sessionConfiguration';
 
 // Simple, smooth ring spinner shown on the left of a row while its model
 // works. motion-safe keeps it static for reduced-motion users.
@@ -41,6 +43,8 @@ export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowP
     prev.session.appSessionId === next.session.appSessionId &&
     prev.title === next.title &&
     prev.session.updatedAt === next.session.updatedAt &&
+    prev.session.configuration.providerSelection.providerInstanceId ===
+      next.session.configuration.providerSelection.providerInstanceId &&
     prev.active === next.active &&
     prev.unread === next.unread &&
     prev.running === next.running &&
@@ -116,7 +120,9 @@ export const SessionRow = memo(function SessionRow({
   if (renaming) {
     return (
       <div className="flex items-center gap-2.5 pl-3 pr-2 py-1.5">
-        <span className="w-3 shrink-0" />
+        <span className="w-3 shrink-0 flex items-center justify-center">
+          <HarnessIcon harness={sessionProviderInstanceId(session)} size={12} />
+        </span>
         <input
           autoFocus
           defaultValue={title}
@@ -171,7 +177,13 @@ export const SessionRow = memo(function SessionRow({
         <span
           className={`w-3 flex items-center justify-center shrink-0 ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
         >
-          {!attention && running ? <WorkingSpinner /> : null}
+          {!attention && running ? (
+            <WorkingSpinner />
+          ) : (
+            <span data-testid="harness-icon" data-harness={sessionProviderInstanceId(session)}>
+              <HarnessIcon harness={sessionProviderInstanceId(session)} size={12} />
+            </span>
+          )}
         </span>
         {unread && <span className="sr-only">Unread:</span>}
         {attention && (

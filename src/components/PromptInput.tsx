@@ -20,9 +20,11 @@ import {
   updateSessionSettings,
   newClientRef,
   listSkills,
+  refreshProviders,
 } from '../lib/commands';
 import { browserTranscriptReferencesFromDesignReferences } from './browser/browserTranscriptReferences';
 import {
+  configurationForComposer,
   droidSessionConfiguration,
   sessionAutonomy,
   sessionInteractionMode,
@@ -101,6 +103,9 @@ import AskUserInline from './AskUserInline';
 import PermissionInline from './PermissionInline';
 import PlanApprovalInline from './PlanApprovalInline';
 import { ModelIcon, providerOf } from './ModelIcon';
+import { HarnessIcon } from '../features/providers/HarnessIcon';
+import { resolveComposerHarness } from '../features/providers/composerHarness';
+import { composerSlashVisible } from '../features/providers/providerCapabilities';
 import { StartInBar } from './environment/StartInBar';
 import type { Autonomy, SkillInfo, TranscriptEvent } from '../types/bridge';
 import { feedbackDraftFromCommand } from '../lib/feedbackReport';
@@ -228,6 +233,8 @@ export default function PromptInput({
       skills: current.skills,
       skillsAppSessionId: current.skillsAppSessionId,
       specMode: current.specMode,
+      providerSnapshots: current.providerSnapshots,
+      draftProviderInstanceId: current.draftProviderInstanceId,
     }),
     shallowEqual,
   );
@@ -328,6 +335,12 @@ export default function PromptInput({
   });
 
   const activeSession = state.activeSession;
+  const { harnessId, capabilities, catalog, specAllowed } = resolveComposerHarness({
+    activeSession,
+    draftProviderInstanceId: state.draftProviderInstanceId,
+    providerSnapshots: state.providerSnapshots,
+    droidModels: state.models,
+  });
   const primaryIsLive = useSessionLive(state.activeAppSessionId);
 
   // The user's own prompts in this conversation, oldest to newest, for ArrowUp
@@ -347,7 +360,7 @@ export default function PromptInput({
   // (so a chat reopened in spec mode shows Spec); only fall back to the global
   // compose flag while drafting a brand-new chat.
   const isSpecMode =
-    activeSession?.sessionPurpose === 'mission-control'
+    !specAllowed || activeSession?.sessionPurpose === 'mission-control'
       ? false
       : activeSession
         ? sessionInteractionMode(activeSession) === 'spec'
@@ -447,6 +460,7 @@ export default function PromptInput({
   // Toggle spec mode. When a live chat session exists, switch its interaction
   // mode for real (not just the compose flag used for brand-new chats).
   const toggleSpec = () => {
+    if (!specAllowed) return;
     if (activeSession && activeSession.sessionPurpose !== 'mission-control') {
       // Existing live chat: flip the session's real interaction mode and
       // optimistically update its interaction mode so the toggle reflects immediately.
@@ -525,12 +539,16 @@ export default function PromptInput({
         dispatch({ type: 'TOGGLE_SETTINGS' });
       },
     },
-  ];
+  ].filter((command) => composerSlashVisible(command.cmd, capabilities));
 
   const trigger = useMemo(() => composerTrigger(input, caret), [input, caret]);
   const overlayOpen = [trigger, modelsOpen, addMenuOpen, feedbackReport, isLive && sendHover].some(
     Boolean,
   );
+
+  useEffect(() => {
+    refreshProviders();
+  }, []);
 
   useEffect(() => {
     if (!isLive) setSendHover(false);
@@ -732,9 +750,7 @@ export default function PromptInput({
   const primaryModelId = chatScoped
     ? sessionModelId(activeSession)
     : state.agentConfig.primary.modelId;
-  const selectedModel = primaryModelId
-    ? state.models.find((m) => m.id === primaryModelId)
-    : undefined;
+  const selectedModel = primaryModelId ? catalog.find((m) => m.id === primaryModelId) : undefined;
   const selectedModelLabel = primaryModelId
     ? (selectedModel?.displayName ?? primaryModelId)
     : 'Default model';
@@ -885,11 +901,13 @@ export default function PromptInput({
       fileCount: allFiles.length,
     });
     if (submitCommand === 'mission') {
+      if (!capabilities.missionControl) return;
       dispatch({ type: 'TOGGLE_MISSION_CONTROL' });
       clearAfterSubmit();
       return;
     }
     if (submitCommand === 'compact') {
+      if (!capabilities.compaction) return;
       if (!primaryActionsEnabled) return;
       if (activeSession) compactSession(activeSession.appSessionId);
       clearAfterSubmit();
@@ -1016,12 +1034,16 @@ export default function PromptInput({
           title,
           goal: composed,
           sessionPurpose: 'chat',
-          configuration: droidSessionConfiguration({
+          configuration: configurationForComposer({
+            providerInstanceId: harnessId,
             modelId:
-              primary.modelId ?? state.models.find((model) => model.isDefault)?.id ?? 'default',
+              primary.modelId ??
+              catalog.find((model) => model.isDefault)?.id ??
+              (harnessId === 'droid' ? 'default' : (catalog[0]?.id ?? 'default')),
             reasoningEffort: primary.reasoning,
             interactionMode: isSpecMode ? 'spec' : 'auto',
             autonomy: draftAutonomy,
+            capabilities,
           }),
           compactionModel:
             state.compactionModel === 'current-model' ? undefined : state.compactionModel,
@@ -1619,7 +1641,7 @@ export default function PromptInput({
                   </>
                 ) : (
                   <>
-                    <ModelIcon provider={providerOf(selectedModel, primaryModelId)} size={14} />
+                    <HarnessIcon harness={harnessId} size={14} />
                     <span className="truncate">{selectedModelLabel}</span>
                     {primaryReasoning && (
                       <span
@@ -1654,16 +1676,18 @@ export default function PromptInput({
               </AnimatePresence>
             </div>
 
-            <button
-              onClick={toggleSpec}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] transition-colors shrink-0 ${
-                isSpecMode
-                  ? 'text-droid-accent bg-droid-accent/10 hover:bg-droid-accent/15'
-                  : 'text-droid-text-secondary hover:text-droid-text hover:bg-droid-bg/40'
-              }`}
-            >
-              <span>{isSpecMode ? 'Spec' : 'Chat'}</span>
-            </button>
+            {specAllowed && (
+              <button
+                onClick={toggleSpec}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] transition-colors shrink-0 ${
+                  isSpecMode
+                    ? 'text-droid-accent bg-droid-accent/10 hover:bg-droid-accent/15'
+                    : 'text-droid-text-secondary hover:text-droid-text hover:bg-droid-bg/40'
+                }`}
+              >
+                <span>{isSpecMode ? 'Spec' : 'Chat'}</span>
+              </button>
+            )}
 
             <div className="flex-1 min-w-0" />
 

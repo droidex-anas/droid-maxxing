@@ -76,11 +76,14 @@ import type {
   ContextStatsSnapshot,
   BrowserState,
   DesignReference,
+  ProviderInstanceId,
+  ProviderWireSnapshot,
 } from '../types/bridge';
 import { addWorkspaceCwd, removeWorkspaceCwd } from '../lib/workspaces';
 import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
 import { isHistoryStatusError, applyHistoryServerEvent } from '../lib/historyHealth';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
+import { applyDraftSelection, loadProviderDraft } from '../features/providers/providerDraft';
 import {
   applyFactoryCompactionDefaults,
   compactionSettingsSnapshot,
@@ -326,6 +329,8 @@ export interface AppState {
 
   // Models / per-agent config
   models: ModelInfo[];
+  providerSnapshots: ProviderWireSnapshot[];
+  draftProviderInstanceId: ProviderInstanceId;
   agentConfig: AgentConfig;
 
   // Global compaction model applied to every session. 'current-model' = use
@@ -586,6 +591,13 @@ type Action =
 
   // Models / per-agent config
   | { type: 'MODELS_LIST'; models: ModelInfo[] }
+  | { type: 'PROVIDERS_UPDATED'; snapshots: ProviderWireSnapshot[] }
+  | {
+      type: 'SET_DRAFT_PROVIDER';
+      providerInstanceId: ProviderInstanceId;
+      modelId?: string;
+      reasoning?: ReasoningEffort;
+    }
   | {
       type: 'SKILLS_LIST';
       skills: SkillInfo[];
@@ -628,6 +640,7 @@ const initialCustomThemes = loadCustomThemes();
 
 const persistedUiState = loadPersistedUiState();
 const sessionSnapshot = loadSessionSnapshot();
+const initialProviderDraft = loadProviderDraft();
 
 export const initialState: AppState = {
   connection: 'idle',
@@ -696,6 +709,8 @@ export const initialState: AppState = {
   selectedFeatureId: persistedUiState.selectedFeatureId ?? null,
   selectedChild: null,
   models: [],
+  providerSnapshots: [],
+  draftProviderInstanceId: initialProviderDraft.draftProviderInstanceId,
   compactionModel: loadCompactionModel(),
   compactionTokenLimit: loadCompactionTokenLimit(),
   compactionTokenLimitPerModel: loadCompactionTokenLimitPerModel(),
@@ -710,7 +725,7 @@ export const initialState: AppState = {
   sessionSettingOverrides: {},
   skills: [],
   skillsAppSessionId: undefined,
-  agentConfig: loadAgentConfig(),
+  agentConfig: applyDraftSelection(loadAgentConfig(), initialProviderDraft),
   pendingCompose: {},
   lastCreatedSessionRequest: null,
 };
@@ -1907,7 +1922,26 @@ function baseReducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         models: action.models,
-        agentConfig: saveAgentConfig(sanitizeAgentConfig(state.agentConfig, action.models)),
+        agentConfig:
+          state.draftProviderInstanceId === 'droid'
+            ? saveAgentConfig(sanitizeAgentConfig(state.agentConfig, action.models))
+            : state.agentConfig,
+      };
+
+    case 'PROVIDERS_UPDATED':
+      return { ...state, providerSnapshots: action.snapshots };
+
+    case 'SET_DRAFT_PROVIDER':
+      return {
+        ...state,
+        draftProviderInstanceId: action.providerInstanceId,
+        agentConfig: saveAgentConfig({
+          ...state.agentConfig,
+          primary: {
+            modelId: action.modelId,
+            reasoning: action.reasoning ?? state.agentConfig.primary.reasoning,
+          },
+        }),
       };
 
     case 'SKILLS_LIST':
@@ -1949,7 +1983,8 @@ function baseReducer(state: AppState, action: Action): AppState {
 
       return {
         ...state,
-        agentConfig: saveAgentConfig(next),
+        agentConfig:
+          state.draftProviderInstanceId === 'droid' ? saveAgentConfig(next) : state.agentConfig,
         ...compactionDefaults,
         compactionSettingsRev: state.compactionSettingsRev + 1,
       };
@@ -2245,6 +2280,8 @@ export function adaptEvent(ev: ServerEvent): Action | null {
         };
       }
       return null;
+    case 'providers.updated':
+      return { type: 'PROVIDERS_UPDATED', snapshots: ev.snapshots };
     case 'settings.defaults':
       return { type: 'FACTORY_DEFAULTS', defaults: ev.defaults };
     case 'browser.updated':

@@ -1,5 +1,6 @@
 import type {
   Autonomy,
+  ProviderCapabilitySnapshot,
   ProviderSelection,
   ReasoningEffort,
   SessionConfiguration,
@@ -25,9 +26,19 @@ export function droidSessionConfiguration(input: {
   interactionMode: SessionInteractionMode;
   autonomy: Autonomy;
 }): SessionConfiguration {
+  return buildSessionConfiguration({ providerInstanceId: 'droid', ...input });
+}
+
+export function buildSessionConfiguration(input: {
+  providerInstanceId: ProviderSelection['providerInstanceId'];
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  interactionMode: SessionInteractionMode;
+  autonomy: Autonomy;
+}): SessionConfiguration {
   return {
     providerSelection: {
-      providerInstanceId: 'droid',
+      providerInstanceId: input.providerInstanceId,
       modelId: input.modelId,
       options:
         input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort },
@@ -35,6 +46,39 @@ export function droidSessionConfiguration(input: {
     interactionMode: input.interactionMode,
     autonomy: input.autonomy,
   };
+}
+
+export function sessionProviderInstanceId(
+  summary: SessionSummary,
+): ProviderSelection['providerInstanceId'] {
+  return summary.configuration.providerSelection.providerInstanceId;
+}
+
+export function configurationForComposer(input: {
+  providerInstanceId: ProviderSelection['providerInstanceId'];
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  interactionMode: SessionInteractionMode;
+  autonomy: Autonomy;
+  capabilities?: ProviderCapabilitySnapshot;
+}): SessionConfiguration {
+  const modes = input.capabilities?.modes;
+  const autonomyLevels = input.capabilities?.autonomyLevels;
+  const interactionMode =
+    !modes || modes.includes(input.interactionMode) ? input.interactionMode : (modes[0] ?? 'auto');
+  const autonomy =
+    !autonomyLevels || autonomyLevels.includes(input.autonomy)
+      ? input.autonomy
+      : (autonomyLevels[0] ?? 'off');
+  const reasoningEffort =
+    input.capabilities && !input.capabilities.reasoningStream ? undefined : input.reasoningEffort;
+  return buildSessionConfiguration({
+    providerInstanceId: input.providerInstanceId,
+    modelId: input.modelId,
+    reasoningEffort,
+    interactionMode,
+    autonomy,
+  });
 }
 
 function isReasoningEffort(value: string): value is ReasoningEffort {

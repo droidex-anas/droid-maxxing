@@ -70,6 +70,36 @@ test('spawnAcpProcess throws missing_executable for a path that does not exist',
   );
 });
 
+test('spawnAcpProcess throws when the abort signal is already aborted', () => {
+  assert.throws(
+    () =>
+      spawnAcpProcess({
+        command: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+        signal: AbortSignal.abort(),
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'AcpProcessSpawnFailure' &&
+      'reason' in error &&
+      error.reason === 'spawn_failed',
+  );
+});
+
+test('spawnAcpProcess abort signal SIGKILLs a long-running child', async () => {
+  const controller = new AbortController();
+  const spawned = spawnAcpProcess({
+    command: process.execPath,
+    args: ['-e', 'setInterval(() => {}, 1 << 30)'],
+    signal: controller.signal,
+  });
+  await waitForSpawn(spawned.child);
+  controller.abort();
+  const exited = await waitForProcessExit(spawned.child, ShutdownDeadline.fromDurationMs(2_000));
+  assert.equal(exited, 'exited');
+  assert.equal(hasExited(spawned.child), true);
+});
+
 test('terminateProcessTree with an expired deadline SIGKILLs and does not wait for a grace period', async () => {
   const child = spawn(
     process.execPath,

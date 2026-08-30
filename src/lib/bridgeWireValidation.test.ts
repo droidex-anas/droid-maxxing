@@ -102,3 +102,34 @@ test('rejects object payloads that are actually arrays', () => {
     null,
   );
 });
+
+test('accepts providers.updated snapshots and rejects a missing snapshot list', () => {
+  assert.ok(
+    serverWireMessage(
+      batch({
+        type: 'providers.updated',
+        snapshots: [
+          {
+            definition: {
+              providerDriverKind: 'grok',
+              providerInstanceId: 'grok',
+              displayName: 'Grok',
+            },
+            revision: 1,
+            readiness: 'ready',
+            models: [
+              {
+                id: 'grok-build',
+                displayName: 'Grok Build',
+                isDefault: true,
+                supportedReasoningEfforts: [],
+              },
+            ],
+            capabilities: { modes: ['auto'], autonomyLevels: ['off'] },
+          },
+        ],
+      }),
+    ),
+  );
+  assert.equal(serverWireMessage(batch({ type: 'providers.updated' })), null);
+});

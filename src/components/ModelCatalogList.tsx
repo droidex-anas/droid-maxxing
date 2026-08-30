@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import { Check } from 'lucide-react';
-import type { ModelInfo } from '../types/bridge';
+import type { ModelInfo, ProviderInstanceId } from '../types/bridge';
 import { ModelIcon, providerOf } from './ModelIcon';
+import { HarnessIcon } from '../features/providers/HarnessIcon';
 
 const ACCENT = 'var(--droid-accent)';
 
@@ -12,6 +13,9 @@ function ModelCatalogList({
   query,
   onSelectModel,
   disabled,
+  showFactoryDefault = true,
+  emptyMessage,
+  catalogHarness,
 }: {
   models: ModelInfo[];
   hasRealModels: boolean;
@@ -19,18 +23,23 @@ function ModelCatalogList({
   query: string;
   onSelectModel: (modelId?: string) => void;
   disabled: boolean;
+  showFactoryDefault?: boolean;
+  emptyMessage?: string;
+  catalogHarness?: ProviderInstanceId;
 }) {
   return (
     <div className="mt-2 max-h-[180px] overflow-y-auto -mx-1 px-1 space-y-0.5">
-      <ModelRow
-        label="Default"
-        sub="Use Factory CLI default"
-        selected={!selectedModelId}
-        onClick={() => {
-          onSelectModel(undefined);
-        }}
-        disabled={disabled}
-      />
+      {showFactoryDefault && (
+        <ModelRow
+          label="Default"
+          sub="Use Factory CLI default"
+          selected={!selectedModelId}
+          onClick={() => {
+            onSelectModel(undefined);
+          }}
+          disabled={disabled}
+        />
+      )}
       {hasRealModels ? (
         <>
           {models.map((model) => (
@@ -39,6 +48,7 @@ function ModelCatalogList({
               label={model.displayName}
               sub={model.provider ?? (model.isCustom ? 'custom' : model.id)}
               model={model}
+              catalogHarness={catalogHarness}
               selected={selectedModelId === model.id}
               onClick={() => {
                 onSelectModel(model.id);
@@ -54,7 +64,7 @@ function ModelCatalogList({
         </>
       ) : (
         <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
-          Loading models…
+          {emptyMessage ?? 'Loading models…'}
         </div>
       )}
     </div>
@@ -69,6 +79,7 @@ function ModelRow({
   selected,
   onClick,
   model,
+  catalogHarness,
   disabled = false,
 }: {
   label: string;
@@ -76,6 +87,7 @@ function ModelRow({
   selected: boolean;
   onClick: () => void;
   model?: ModelInfo;
+  catalogHarness?: ProviderInstanceId;
   disabled?: boolean;
 }) {
   return (
@@ -92,7 +104,11 @@ function ModelRow({
       }`}
     >
       <span className="w-4 h-4 shrink-0 flex items-center justify-center">
-        <ModelIcon provider={providerOf(model)} size={16} />
+        {catalogHarness && catalogHarness !== 'droid' ? (
+          <HarnessIcon harness={catalogHarness} size={16} />
+        ) : (
+          <ModelIcon provider={providerOf(model)} size={16} />
+        )}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[12px] text-droid-text truncate">{label}</span>
