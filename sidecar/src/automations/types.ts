@@ -7,6 +7,7 @@ export type AutomationSchedule =
   | { kind: 'cron'; expression: string };
 
 export type AutomationExecutionMode = 'local' | 'worktree';
+export type AutomationAutonomy = 'off' | 'low' | 'medium' | 'high';
 export type AutomationRunStatus = 'queued' | 'starting' | 'running' | 'completed' | 'failed';
 export type AutomationTrigger = 'schedule' | 'manual';
 export type AutomationReasoningEffort =
@@ -30,6 +31,7 @@ export interface AutomationInput {
   timezone?: string;
   modelId?: string | null;
   reasoningEffort?: AutomationReasoningEffort | null;
+  autonomy?: AutomationAutonomy;
 }
 
 export interface Automation extends Required<
@@ -60,6 +62,7 @@ export interface AutomationPatch {
   timezone?: string;
   modelId?: string | null;
   reasoningEffort?: AutomationReasoningEffort | null;
+  autonomy?: AutomationAutonomy;
 }
 
 export interface AutomationRunSnapshot {
@@ -71,6 +74,7 @@ export interface AutomationRunSnapshot {
   timezone: string;
   modelId: string | null;
   reasoningEffort: AutomationReasoningEffort | null;
+  autonomy: AutomationAutonomy;
 }
 
 export interface AutomationRun {

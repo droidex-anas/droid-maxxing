@@ -30,6 +30,7 @@ function proposal(overrides: Partial<AutomationProposal> = {}): AutomationPropos
       timezone: 'UTC',
       modelId: 'model-a',
       reasoningEffort: null,
+      autonomy: 'low',
     },
     ...overrides,
   };
@@ -120,6 +121,7 @@ test('the tool-argument preview fills a title and rejects malformed arguments', 
   });
   assert.equal(preview?.title, 'Post the standup summary');
   assert.equal(preview?.reasoningEffort, null);
+  assert.equal(preview?.autonomy, 'low');
   assert.equal(preview?.executionMode, 'local');
 
   assert.equal(draftPreviewFromToolArgs({ prompt: 'No schedule' }), null);

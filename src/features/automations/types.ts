@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from '../../types/bridge';
+import type { Autonomy, ReasoningEffort } from '../../types/bridge';
 
 export type AutomationSchedule =
   | { kind: 'once'; runAt: number }
@@ -20,6 +20,7 @@ export interface AutomationDraft {
   timezone: string;
   modelId: string | null;
   reasoningEffort: ReasoningEffort | null;
+  autonomy: Autonomy;
 }
 
 export interface Automation extends AutomationDraft {
@@ -48,6 +49,7 @@ export interface AutomationRun {
     | 'timezone'
     | 'modelId'
     | 'reasoningEffort'
+    | 'autonomy'
   >;
   scheduledAt: number;
   requestedAt: number;

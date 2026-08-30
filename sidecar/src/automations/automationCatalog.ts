@@ -115,6 +115,7 @@ export class AutomationCatalog {
       modelId: input.modelId === undefined ? context.modelId : input.modelId,
       reasoningEffort:
         input.reasoningEffort === undefined ? context.reasoningEffort : input.reasoningEffort,
+      autonomy: input.autonomy ?? context.autonomy,
     });
   }
 
@@ -131,6 +132,7 @@ export class AutomationCatalog {
       modelId: patch.modelId === undefined ? current.modelId : patch.modelId,
       reasoningEffort:
         patch.reasoningEffort === undefined ? current.reasoningEffort : patch.reasoningEffort,
+      autonomy: patch.autonomy ?? current.autonomy,
     });
     if (normalized.enabled) {
       assertModelSelection(normalized);

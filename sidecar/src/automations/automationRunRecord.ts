@@ -45,6 +45,7 @@ export function newQueuedRun(
       timezone: automation.timezone,
       modelId: automation.modelId,
       reasoningEffort: automation.reasoningEffort,
+      autonomy: automation.autonomy,
     },
     scheduledAt,
     requestedAt,
@@ -79,7 +80,7 @@ export function sessionCommandForRun(run: AutomationRun): SessionCreateCommand {
     interactionMode: 'auto',
     modelId: run.automation.modelId,
     reasoningEffort: run.automation.reasoningEffort,
-    autonomy: 'low',
+    autonomy: run.automation.autonomy,
   };
 }
 

@@ -51,6 +51,8 @@ interface AutomationManagerOptions {
   now?: () => number;
   /** How often the scheduler re-reads the clock while waiting. Tests shorten it. */
   schedulerRecheckMs?: number;
+  /** Delay between launch retries. Tests shorten it. */
+  launchRetryMs?: number;
 }
 
 let configuredManager: AutomationManager | null = null;
@@ -119,6 +121,7 @@ export class AutomationManager {
       rearmScheduler: () => {
         this.scheduler.arm();
       },
+      launchRetryMs: options.launchRetryMs,
     });
     this.scheduler = new AutomationScheduler({
       store: shared.store,

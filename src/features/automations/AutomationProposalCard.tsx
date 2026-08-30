@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import { useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
+import { AUTONOMY_LABELS } from '../../lib/autonomy';
 import { toast } from '../../lib/toast';
 import type { TranscriptEvent } from '../../types/bridge';
 import { EditorRow, ScheduleControls, scheduleForKind } from './AutomationEditor';
@@ -21,6 +22,7 @@ import {
   type ProposalCardState,
 } from './proposalCardState';
 import {
+  AUTOMATION_AUTONOMY_OPTIONS,
   convertOnceRunAt,
   formatSchedule,
   supportedTimeZones,
@@ -194,6 +196,7 @@ export function AutomationProposalCard({
                   : (workingDraft.modelId ?? 'No model')
               }
             />
+            <ViewRow label="Autonomy" value={AUTONOMY_LABELS[workingDraft.autonomy]} />
             <ViewRow
               label="Workspace"
               value={
@@ -253,6 +256,16 @@ export function AutomationProposalCard({
                     reasoningEffort: selection.reasoningEffort,
                   });
                 }}
+              />
+            </EditorRow>
+            <EditorRow label="Autonomy">
+              <SelectMenu
+                value={workingDraft.autonomy}
+                ariaLabel="Automation autonomy"
+                onChange={(value) => {
+                  updateDraft({ autonomy: value as AutomationDraft['autonomy'] });
+                }}
+                options={AUTOMATION_AUTONOMY_OPTIONS}
               />
             </EditorRow>
             <EditorRow label="Workspace">

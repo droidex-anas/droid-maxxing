@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { HoverTooltip } from '../../components/HoverTooltip';
+import { AUTONOMY_LABELS } from '../../lib/autonomy';
 import type { ModelInfo } from '../../types/bridge';
 import {
   formatAutomationRunStatus,
@@ -94,6 +95,8 @@ export function AutomationRow({
               ? `${automation.reasoningEffort} reasoning`
               : 'Choose reasoning'}
           </span>
+          <span aria-hidden>·</span>
+          <span>{AUTONOMY_LABELS[automation.autonomy]} autonomy</span>
         </div>
         <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[11px]">
           {error ? (

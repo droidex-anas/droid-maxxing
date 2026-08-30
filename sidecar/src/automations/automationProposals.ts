@@ -61,6 +61,7 @@ export class AutomationProposals {
         input.reasoningEffort === undefined
           ? (context?.reasoningEffort ?? null)
           : input.reasoningEffort,
+      autonomy: input.autonomy ?? context?.autonomy,
     });
     const now = this.options.now();
     const proposal: AutomationProposal = {

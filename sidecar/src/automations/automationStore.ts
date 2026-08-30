@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   isReasoningEffort,
+  isAutonomy,
   missingProposalFields,
   normalizeAutomationInput,
 } from './automationInput.js';
@@ -225,6 +226,7 @@ function parseAutomation(value: unknown, now: number): Automation | null {
       schedule: raw.schedule as AutomationInput['schedule'],
       modelId: typeof raw.modelId === 'string' ? raw.modelId : null,
       reasoningEffort: isReasoningEffort(raw.reasoningEffort) ? raw.reasoningEffort : null,
+      autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : undefined,
     };
     if (typeof raw.timezone === 'string') input.timezone = raw.timezone;
     const normalized = normalizeAutomationInput(input);
@@ -278,6 +280,7 @@ function parseRun(value: unknown, now: number): AutomationRun | null {
       reasoningEffort: isReasoningEffort(snapshot.reasoningEffort)
         ? snapshot.reasoningEffort
         : null,
+      autonomy: isAutonomy(snapshot.autonomy) ? snapshot.autonomy : 'low',
     },
     scheduledAt: finiteNumber(raw.scheduledAt, now),
     requestedAt: finiteNumber(raw.requestedAt, now),
@@ -328,6 +331,7 @@ function parseProposal(
       reasoningEffort: isReasoningEffort(draftRaw.reasoningEffort)
         ? draftRaw.reasoningEffort
         : null,
+      autonomy: isAutonomy(draftRaw.autonomy) ? draftRaw.autonomy : undefined,
     });
     const storedAutomationId =
       typeof raw.automationId === 'string' && automationIds.has(raw.automationId)
