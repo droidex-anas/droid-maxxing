@@ -3,7 +3,7 @@ import {
   MODEL_SELECTION_REQUIRED,
   type NormalizedAutomationInput,
 } from './automationInput.js';
-import { nextAutomationRun } from './schedule.js';
+import { nextAutomationRun, retireWhenUnschedulable } from './schedule.js';
 import type { Automation, AutomationStore } from './types.js';
 
 // How long the scheduler may sleep in one step. A timer measures elapsed time,
@@ -143,6 +143,7 @@ export class AutomationScheduler {
         automation.timezone,
         Math.max(now, scheduledAt),
       );
+      retireWhenUnschedulable(automation, now);
     }
     automation.updatedAt = now;
   }

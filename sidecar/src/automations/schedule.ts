@@ -1,4 +1,4 @@
-import type { AutomationSchedule } from './types.js';
+import type { Automation, AutomationSchedule } from './types.js';
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 86_400_000;
@@ -78,6 +78,17 @@ export function nextAutomationRun(
     case 'cron':
       return nextCronRun(parseCron(schedule.expression), timezone, fromMs);
   }
+}
+
+/**
+ * An enabled automation with no upcoming occurrence stops being scheduled, so a
+ * catch-up or editor save cannot leave it looking active with nothing to run.
+ */
+export function retireWhenUnschedulable(automation: Automation, now: number): void {
+  if (!automation.enabled || automation.nextRunAt !== null) return;
+  automation.enabled = false;
+  if (automation.schedule.kind === 'once') automation.completedAt = now;
+  automation.updatedAt = now;
 }
 
 export function validateSchedule(schedule: AutomationSchedule): void {

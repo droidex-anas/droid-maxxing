@@ -50,3 +50,11 @@ test('reasoningForModel keeps a supported level and falls back to the catalog de
   assert.equal(reasoningForModel(model, 'high'), 'high');
   assert.equal(reasoningForModel(model, 'xhigh'), 'medium');
 });
+
+test('reasoningForModel ignores a catalog default the model does not support', () => {
+  const model = catalogModel({
+    supportedReasoningEfforts: ['low', 'high'],
+    defaultReasoningEffort: 'medium',
+  });
+  assert.equal(reasoningForModel(model, null), 'high');
+});

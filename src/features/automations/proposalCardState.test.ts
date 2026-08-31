@@ -173,4 +173,7 @@ test('tool errors are unwrapped from the result payload and bounded', () => {
   const long = compactError('x'.repeat(400));
   assert.equal(long.length, 218);
   assert.ok(long.endsWith('…'));
+  const longUnwrapped = compactError(JSON.stringify({ error: 'y'.repeat(400) }));
+  assert.equal(longUnwrapped.length, 218);
+  assert.ok(longUnwrapped.endsWith('…'));
 });

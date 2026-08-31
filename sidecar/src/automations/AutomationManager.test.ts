@@ -202,6 +202,157 @@ test('closing a chat that already streamed completes the run instead of failing 
   }
 });
 
+test('closing a chat while it is still streaming fails the run', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Close mid-turn',
+      prompt: 'Do not mark this done.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected an automation session launch.');
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-mid-stream' },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-mid-stream', streaming: true },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.closed',
+      appSessionId: 'session-mid-stream',
+    } as ServerEvent);
+    await waitFor(async () => (await manager.snapshot()).runs[0]?.status === 'failed');
+    const snapshot = await manager.snapshot();
+    assert.equal(snapshot.runs[0]?.status, 'failed');
+    assert.match(snapshot.runs[0]?.error ?? '', /closed before its turn finished/);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('overlapping runNow requests return the same open run', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  let created = false;
+  let releaseValidate = (): void => undefined;
+  const validateGate = new Promise<void>((resolve) => {
+    releaseValidate = resolve;
+  });
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async () => undefined,
+    validateSelection: async () => {
+      if (created) await validateGate;
+    },
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'One open run',
+      prompt: 'Do not stack sessions.',
+      enabled: true,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    created = true;
+    const first = manager.runNow(automation.id);
+    const second = manager.runNow(automation.id);
+    releaseValidate();
+    const [left, right] = await Promise.all([first, second]);
+    assert.equal(left.id, right.id);
+    const snapshot = await manager.snapshot();
+    assert.equal(
+      snapshot.runs.filter(
+        (run) => run.status === 'queued' || run.status === 'starting' || run.status === 'running',
+      ).length,
+      1,
+    );
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a past once schedule is saved as completed instead of enabled with no next run', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async () => undefined,
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Already due once',
+      prompt: 'This instant has passed.',
+      enabled: true,
+      schedule: { kind: 'once', runAt: Date.now() - 1_000 },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    assert.equal(automation.enabled, false);
+    assert.equal(automation.nextRunAt, null);
+    assert.ok(automation.completedAt);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a cron that never occurs is saved disabled', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async () => undefined,
+  });
+
+  try {
+    const automation = await manager.create({
+      title: 'Impossible February 30',
+      prompt: 'This calendar date does not exist.',
+      enabled: true,
+      schedule: { kind: 'cron', expression: '0 0 30 2 *' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    assert.equal(automation.enabled, false);
+    assert.equal(automation.nextRunAt, null);
+    assert.equal(automation.completedAt, null);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('a due schedule launches without a renderer run pump', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];

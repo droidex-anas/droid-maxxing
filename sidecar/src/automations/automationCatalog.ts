@@ -4,6 +4,7 @@ import {
   normalizeAutomationInput,
 } from './automationInput.js';
 import { nextRunAfterUpdate } from './automationScheduler.js';
+import { retireWhenUnschedulable } from './schedule.js';
 import type { AutomationSessionContext } from './sessionContexts.js';
 import type {
   Automation,
@@ -73,7 +74,7 @@ export class AutomationCatalog {
 
   /** The definitions as they stand, for a caller that has to undo a delete. */
   capture(): Automation[] {
-    return this.records;
+    return this.records.slice();
   }
 
   restore(automations: Automation[]): void {
@@ -148,6 +149,7 @@ export class AutomationCatalog {
       completedAt: normalized.enabled ? null : current.completedAt,
       updatedAt: now,
     };
+    retireWhenUnschedulable(next, now);
     const previousRuns = this.options.runs.capture();
     await this.options.commit(
       () => {

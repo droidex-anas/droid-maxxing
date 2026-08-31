@@ -8,7 +8,9 @@ export function reasoningForModel(
   const supported = model.supportedReasoningEfforts;
   if (supported?.length) {
     if (current && supported.includes(current)) return current;
-    return model.defaultReasoningEffort ?? supported.at(-1) ?? 'medium';
+    const fallback = model.defaultReasoningEffort;
+    if (fallback && supported.includes(fallback)) return fallback;
+    return supported.at(-1) ?? 'medium';
   }
   return model.defaultReasoningEffort ?? current ?? 'medium';
 }

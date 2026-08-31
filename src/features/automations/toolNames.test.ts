@@ -19,7 +19,7 @@ test('proposal tool detection accepts the SDK namespace shapes used by MCP serve
   );
   assert.equal(
     automationToolBaseName('droidmaxx-browser___automation_propose'),
-    'automation_propose',
+    'droidmaxx_browser_automation_propose',
   );
   assert.equal(
     isAutomationProposalCall({

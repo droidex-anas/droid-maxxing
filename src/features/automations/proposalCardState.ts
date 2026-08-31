@@ -1,4 +1,6 @@
 import type { TranscriptEvent } from '../../types/bridge';
+import { normalizeAutonomy } from '../../lib/autonomy';
+import { isReasoningEffort } from '../../lib/reasoningEffort';
 import { cronExpressionIssue, deviceTimeZone, isTimeZone } from './schedule';
 import { parseToolResultObject } from './toolNames';
 import type { AutomationDraft, AutomationProposal, AutomationSchedule } from './types';
@@ -102,8 +104,8 @@ export function draftPreviewFromToolArgs(value: unknown): AutomationDraft | null
         ? raw.timezone
         : deviceTimeZone(),
     modelId: typeof raw.modelId === 'string' ? raw.modelId : null,
-    reasoningEffort: isReasoning(raw.reasoningEffort) ? raw.reasoningEffort : null,
-    autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : 'low',
+    reasoningEffort: isReasoningEffort(raw.reasoningEffort) ? raw.reasoningEffort : null,
+    autonomy: normalizeAutonomy(raw.autonomy) ?? 'low',
   };
 }
 
@@ -158,28 +160,15 @@ function derivePreviewTitle(prompt: string): string {
   return sentence.length > 72 ? `${sentence.slice(0, 69).trimEnd()}…` : sentence;
 }
 
-function isReasoning(value: unknown): value is NonNullable<AutomationDraft['reasoningEffort']> {
-  return (
-    value === 'off' ||
-    value === 'none' ||
-    value === 'minimal' ||
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max' ||
-    value === 'dynamic'
-  );
-}
-
-function isAutonomy(value: unknown): value is NonNullable<AutomationDraft['autonomy']> {
-  return value === 'off' || value === 'low' || value === 'medium' || value === 'high';
-}
-
 export function compactError(value: string | undefined): string {
   if (!value) return 'DROIDEX could not prepare this automation.';
   const parsed = parseToolResultObject(value);
-  if (parsed && typeof parsed.error === 'string') return parsed.error;
+  if (parsed && typeof parsed.error === 'string') return clipError(parsed.error);
+  return clipError(value);
+}
+
+function clipError(value: string): string {
   const trimmed = value.trim();
+  if (!trimmed) return 'DROIDEX could not prepare this automation.';
   return trimmed.length > 220 ? `${trimmed.slice(0, 217)}…` : trimmed;
 }

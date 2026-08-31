@@ -362,7 +362,7 @@ export function AutomationsView({
             </div>
           )}
 
-          {snapshot.automations.length === 0 && (
+          {snapshot.scheduler.ready && snapshot.automations.length === 0 && (
             <section className="mt-8">
               <h2 className="text-[14px] font-medium text-droid-text-secondary">Suggestions</h2>
               <div className="mt-2 overflow-hidden rounded-2xl border border-droid-border/75 bg-droid-surface/20">

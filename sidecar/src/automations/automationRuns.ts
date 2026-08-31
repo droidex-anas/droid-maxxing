@@ -118,24 +118,25 @@ export class AutomationRuns {
    */
   async queueManual(automation: Automation): Promise<AutomationRun> {
     assertModelSelection(automation);
+    const existing = this.openRunFor(automation.id);
+    if (existing) return structuredClone(existing);
     await this.options.validateSelection(automation.modelId, automation.reasoningEffort);
-    const pending = this.runs.find(
-      (run) =>
-        run.automationId === automation.id &&
-        (run.status === 'queued' || isActiveRunStatus(run.status)),
-    );
+    const pending = this.openRunFor(automation.id);
     if (pending) return structuredClone(pending);
     const requestedAt = this.options.now();
     const run = newQueuedRun(automation, requestedAt, requestedAt, 'manual');
     await this.options.commit(
       () => {
+        if (this.hasOpenFor(automation.id)) return;
         this.runs.push(run);
       },
       () => {
         this.store.runs = this.runs.filter((candidate) => candidate.id !== run.id);
       },
     );
-    return structuredClone(run);
+    const open = this.openRunFor(automation.id);
+    if (!open) throw new Error('Could not queue the automation run.');
+    return structuredClone(open);
   }
 
   /** Starts the next queued run unless one is already running. */
@@ -190,7 +191,11 @@ export class AutomationRuns {
   }
 
   hasOpenFor(automationId: string): boolean {
-    return this.runs.some(
+    return this.openRunFor(automationId) !== undefined;
+  }
+
+  private openRunFor(automationId: string): AutomationRun | undefined {
+    return this.runs.find(
       (run) =>
         run.automationId === automationId &&
         (run.status === 'queued' || isActiveRunStatus(run.status)),
@@ -199,7 +204,7 @@ export class AutomationRuns {
 
   /** The run list as it stands, for a caller that has to undo its own mutation. */
   capture(): AutomationRun[] {
-    return this.runs;
+    return this.runs.slice();
   }
 
   restore(runs: AutomationRun[]): void {
@@ -438,14 +443,16 @@ export class AutomationRuns {
       await this.finish(run.id, 'failed', failure);
       return;
     }
-    if (this.streamingSeen.has(run.id)) {
+    if (this.timers.isTurnSettleArmed(run.id)) {
       await this.finish(run.id, 'completed', null);
       return;
     }
     await this.finish(
       run.id,
       'failed',
-      'The automation chat closed before its first turn finished.',
+      this.streamingSeen.has(run.id)
+        ? 'The automation chat closed before its turn finished.'
+        : 'The automation chat closed before its first turn finished.',
     );
   }
 
