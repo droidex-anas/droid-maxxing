@@ -297,7 +297,7 @@ test('overlapping runNow requests return the same open run', async () => {
   }
 });
 
-test('a past once schedule is saved as completed instead of enabled with no next run', async () => {
+test('a past once schedule cannot be saved as an enabled run', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const manager = new AutomationManager({
     dataDir: directory,
@@ -307,25 +307,86 @@ test('a past once schedule is saved as completed instead of enabled with no next
   });
 
   try {
-    const automation = await manager.create({
-      title: 'Already due once',
-      prompt: 'This instant has passed.',
-      enabled: true,
-      schedule: { kind: 'once', runAt: Date.now() - 1_000 },
-      timezone: 'UTC',
-      modelId: 'model-a',
-      reasoningEffort: 'high',
-    });
-    assert.equal(automation.enabled, false);
-    assert.equal(automation.nextRunAt, null);
-    assert.ok(automation.completedAt);
+    await assert.rejects(
+      manager.create({
+        title: 'Already due once',
+        prompt: 'This instant has passed.',
+        enabled: true,
+        schedule: { kind: 'once', runAt: Date.now() - 1_000 },
+        timezone: 'UTC',
+        modelId: 'model-a',
+        reasoningEffort: 'high',
+      }),
+      /future date and time/i,
+    );
+    assert.equal((await manager.snapshot()).automations.length, 0);
   } finally {
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test('a cron that never occurs is saved disabled', async () => {
+test('a cron that never occurs cannot be saved enabled', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async () => undefined,
+  });
+
+  try {
+    await assert.rejects(
+      manager.create({
+        title: 'Impossible February 30',
+        prompt: 'This calendar date does not exist.',
+        enabled: true,
+        schedule: { kind: 'cron', expression: '0 0 30 2 *' },
+        timezone: 'UTC',
+        modelId: 'model-a',
+        reasoningEffort: 'high',
+      }),
+      /no upcoming run/i,
+    );
+    assert.equal((await manager.snapshot()).automations.length, 0);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a proposal cannot backdate a one-time run', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async () => undefined,
+  });
+
+  try {
+    await assert.rejects(
+      manager.propose(
+        {
+          title: 'Past proposal',
+          prompt: 'Run yesterday.',
+          enabled: true,
+          schedule: { kind: 'once', runAt: Date.now() - 1_000 },
+          timezone: 'UTC',
+          modelId: 'model-a',
+          reasoningEffort: 'high',
+        },
+        'chat-session',
+      ),
+      /future date and time/i,
+    );
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('an update cannot move an enabled once into the past', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const manager = new AutomationManager({
     dataDir: directory,
@@ -336,17 +397,22 @@ test('a cron that never occurs is saved disabled', async () => {
 
   try {
     const automation = await manager.create({
-      title: 'Impossible February 30',
-      prompt: 'This calendar date does not exist.',
+      title: 'Later today',
+      prompt: 'Run later.',
       enabled: true,
-      schedule: { kind: 'cron', expression: '0 0 30 2 *' },
+      schedule: { kind: 'once', runAt: Date.now() + 60_000 },
       timezone: 'UTC',
       modelId: 'model-a',
       reasoningEffort: 'high',
     });
-    assert.equal(automation.enabled, false);
-    assert.equal(automation.nextRunAt, null);
-    assert.equal(automation.completedAt, null);
+    await assert.rejects(
+      manager.update(automation.id, {
+        schedule: { kind: 'once', runAt: Date.now() - 1_000 },
+      }),
+      /future date and time/i,
+    );
+    const stored = (await manager.snapshot()).automations[0]?.schedule;
+    assert.ok(stored && stored.kind === 'once' && stored.runAt > Date.now());
   } finally {
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });
@@ -1105,7 +1171,7 @@ test('restarting fails unfinished runs, closes their chats, and releases their w
   }
 });
 
-test('an automation whose only run already passed has no upcoming run', async () => {
+test('an enabled one-time schedule cannot be backdated', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const manager = new AutomationManager({
     dataDir: directory,
@@ -1115,16 +1181,18 @@ test('an automation whose only run already passed has no upcoming run', async ()
   });
 
   try {
-    const automation = await manager.create({
-      title: 'Elapsed one-off',
-      prompt: 'Was scheduled for yesterday.',
-      enabled: true,
-      schedule: { kind: 'once', runAt: Date.now() - 60_000 },
-      timezone: 'UTC',
-      modelId: 'model-a',
-      reasoningEffort: 'high',
-    });
-    assert.equal(automation.nextRunAt, null);
+    await assert.rejects(
+      manager.create({
+        title: 'Elapsed one-off',
+        prompt: 'Was scheduled for yesterday.',
+        enabled: true,
+        schedule: { kind: 'once', runAt: Date.now() - 60_000 },
+        timezone: 'UTC',
+        modelId: 'model-a',
+        reasoningEffort: 'high',
+      }),
+      /future date and time/i,
+    );
   } finally {
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });

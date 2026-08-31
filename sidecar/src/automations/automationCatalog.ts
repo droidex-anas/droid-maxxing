@@ -1,10 +1,10 @@
 import {
+  assertEnabledScheduleHasNextRun,
   assertModelSelection,
   createAutomationRecord,
   normalizeAutomationInput,
 } from './automationInput.js';
 import { nextRunAfterUpdate } from './automationScheduler.js';
-import { retireWhenUnschedulable } from './schedule.js';
 import type { AutomationSessionContext } from './sessionContexts.js';
 import type {
   Automation,
@@ -142,6 +142,9 @@ export class AutomationCatalog {
     const now = this.options.now();
     const scheduleChanged = patch.schedule !== undefined || patch.timezone !== undefined;
     const enabledChanged = patch.enabled !== undefined;
+    if (scheduleChanged || enabledChanged) {
+      assertEnabledScheduleHasNextRun(normalized, now);
+    }
     const next: Automation = {
       ...current,
       ...normalized,
@@ -149,7 +152,6 @@ export class AutomationCatalog {
       completedAt: normalized.enabled ? null : current.completedAt,
       updatedAt: now,
     };
-    retireWhenUnschedulable(next, now);
     const previousRuns = this.options.runs.capture();
     await this.options.commit(
       () => {

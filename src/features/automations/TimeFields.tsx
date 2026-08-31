@@ -148,9 +148,11 @@ export function AutomationMinuteInput({
 
 export function AutomationDateInput({
   value,
+  minimum,
   onChange,
 }: {
   value: { year: number; month: number; day: number };
+  minimum?: { year: number; month: number; day: number };
   onChange: (value: { year: number; month: number; day: number }) => void;
 }) {
   const formatted = formatDate(value);
@@ -163,7 +165,7 @@ export function AutomationDateInput({
 
   const commit = () => {
     const parsed = parseDate(text);
-    if (!parsed) {
+    if (!parsed || (minimum && isCalendarDateBefore(parsed, minimum))) {
       setText(formatDate(value));
       return;
     }
@@ -225,6 +227,15 @@ function parseDate(value: string): { year: number; month: number; day: number } 
 
 function formatDate(value: { year: number; month: number; day: number }): string {
   return `${String(value.year).padStart(4, '0')}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
+}
+
+export function isCalendarDateBefore(
+  value: { year: number; month: number; day: number },
+  minimum: { year: number; month: number; day: number },
+): boolean {
+  if (value.year !== minimum.year) return value.year < minimum.year;
+  if (value.month !== minimum.month) return value.month < minimum.month;
+  return value.day < minimum.day;
 }
 
 function digits(value: string, maximum: number): string {

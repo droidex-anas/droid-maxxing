@@ -290,11 +290,13 @@ export function ScheduleControls({
   switch (schedule.kind) {
     case 'once': {
       const parts = zonedInputParts(schedule.runAt, timezone);
+      const minimumDate = zonedInputParts(Date.now(), timezone);
       return (
         <>
           <EditorRow label="Date">
             <AutomationDateInput
               value={parts}
+              minimum={minimumDate}
               onChange={(date) => {
                 onChange({
                   kind: 'once',

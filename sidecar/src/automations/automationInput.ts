@@ -1,10 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  assertTimeZone,
-  nextAutomationRun,
-  retireWhenUnschedulable,
-  validateSchedule,
-} from './schedule.js';
+import { assertTimeZone, nextAutomationRun, validateSchedule } from './schedule.js';
 import type {
   Automation,
   AutomationAutonomy,
@@ -68,11 +63,30 @@ export function normalizeAutomationInput(input: AutomationInput): NormalizedAuto
   };
 }
 
+/**
+ * An enabled schedule must have a next occurrence. A past one-time instant is
+ * backdating, not a catch-up: catch-up only applies to a time that was future
+ * when it was saved.
+ */
+export function assertEnabledScheduleHasNextRun(
+  input: Pick<NormalizedAutomationInput, 'enabled' | 'schedule' | 'timezone'>,
+  now: number,
+): void {
+  if (!input.enabled) return;
+  if (nextAutomationRun(input.schedule, input.timezone, now) !== null) return;
+  throw new Error(
+    input.schedule.kind === 'once'
+      ? 'Choose a future date and time.'
+      : 'This schedule has no upcoming run.',
+  );
+}
+
 export function createAutomationRecord(
   normalized: NormalizedAutomationInput,
   now: number,
 ): Automation {
-  const automation: Automation = {
+  assertEnabledScheduleHasNextRun(normalized, now);
+  return {
     id: randomUUID(),
     ...normalized,
     nextRunAt: normalized.enabled
@@ -87,8 +101,6 @@ export function createAutomationRecord(
     createdAt: now,
     updatedAt: now,
   };
-  retireWhenUnschedulable(automation, now);
-  return automation;
 }
 
 export function hasModelSelection(value: ModelSelection): value is {
