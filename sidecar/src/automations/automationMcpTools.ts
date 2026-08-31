@@ -20,7 +20,11 @@ const reasoningSchema = z.enum([
 const scheduleSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('once'),
-    runAt: z.number().int().positive().describe('Absolute Unix timestamp in milliseconds.'),
+    runAt: z
+      .number()
+      .int()
+      .positive()
+      .describe('Future Unix timestamp in milliseconds. Past times are rejected.'),
   }),
   z.object({ kind: z.literal('hourly'), minute: z.number().int().min(0).max(59) }),
   z.object({

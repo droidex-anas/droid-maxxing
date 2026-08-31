@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  assertEnabledScheduleHasNextRun,
   assertModelSelection,
   createAutomationRecord,
   missingProposalFields,
@@ -64,6 +65,7 @@ export class AutomationProposals {
       autonomy: input.autonomy ?? context?.autonomy,
     });
     const now = this.options.now();
+    assertEnabledScheduleHasNextRun(draft, now);
     const proposal: AutomationProposal = {
       id: randomUUID(),
       sourceAppSessionId,
