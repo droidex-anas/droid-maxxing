@@ -60,8 +60,13 @@ export function AnchoredPopover({
   const popoverId = useId();
   const reduceMotion = useReducedMotion();
   const [position, setPosition] = useState<PopoverPosition | null>(null);
-  onCloseRef.current = onClose;
-  openRef.current = open;
+
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useLayoutEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   const dismiss = useCallback(() => {
     if (!openRef.current) return;

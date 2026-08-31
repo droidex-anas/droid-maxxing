@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { assertTimeZone, nextAutomationRun, validateSchedule } from './schedule.js';
+import {
+  assertTimeZone,
+  nextAutomationRun,
+  retireWhenUnschedulable,
+  validateSchedule,
+} from './schedule.js';
 import type {
   Automation,
   AutomationAutonomy,
@@ -67,7 +72,7 @@ export function createAutomationRecord(
   normalized: NormalizedAutomationInput,
   now: number,
 ): Automation {
-  return {
+  const automation: Automation = {
     id: randomUUID(),
     ...normalized,
     nextRunAt: normalized.enabled
@@ -82,6 +87,8 @@ export function createAutomationRecord(
     createdAt: now,
     updatedAt: now,
   };
+  retireWhenUnschedulable(automation, now);
+  return automation;
 }
 
 export function hasModelSelection(value: ModelSelection): value is {

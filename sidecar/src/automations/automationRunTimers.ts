@@ -59,6 +59,11 @@ export class RunTimers {
     this.clear(this.turnSettle, runId);
   }
 
+  /** True while the run is in the post-turn grace period, not merely after streaming started. */
+  isTurnSettleArmed(runId: string): boolean {
+    return this.turnSettle.has(runId);
+  }
+
   /** Drops every timer watching a run that has settled. */
   clearRun(runId: string): void {
     this.clear(this.sessionCreate, runId);

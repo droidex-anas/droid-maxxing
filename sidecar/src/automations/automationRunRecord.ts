@@ -140,7 +140,7 @@ export function projectSettledRun(
   automation.lastRunError = run.error;
   automation.lastRunDurationMs =
     run.startedAt === null ? null : Math.max(0, finishedAt - run.startedAt);
-  automation.lastAppSessionId = run.appSessionId;
+  if (run.appSessionId) automation.lastAppSessionId = run.appSessionId;
   automation.updatedAt = finishedAt;
 }
 

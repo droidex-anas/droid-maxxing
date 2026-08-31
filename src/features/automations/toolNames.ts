@@ -8,6 +8,8 @@ const AUTOMATION_TOOLS = [
   'automation_delete',
 ] as const;
 
+const AUTOMATION_SERVER_PREFIXES = ['droidex_automations', 'mcp_droidex_automations'] as const;
+
 export function automationToolBaseName(name: string | undefined): string {
   if (!name) return '';
   const normalized = name
@@ -16,9 +18,16 @@ export function automationToolBaseName(name: string | undefined): string {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
   return (
-    AUTOMATION_TOOLS.find(
-      (toolName) => normalized === toolName || normalized.endsWith(`_${toolName}`),
-    ) ?? normalized
+    AUTOMATION_TOOLS.find((toolName) => matchesAutomationTool(normalized, toolName)) ?? normalized
+  );
+}
+
+function matchesAutomationTool(normalized: string, toolName: string): boolean {
+  if (normalized === toolName) return true;
+  const suffix = `_${toolName}`;
+  if (!normalized.endsWith(suffix)) return false;
+  return (AUTOMATION_SERVER_PREFIXES as readonly string[]).includes(
+    normalized.slice(0, -suffix.length),
   );
 }
 

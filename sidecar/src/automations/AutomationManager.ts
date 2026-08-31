@@ -262,6 +262,7 @@ export class AutomationManager {
    */
   async shutdown(): Promise<void> {
     this.closed = true;
+    await this.ready.catch(() => undefined);
     this.scheduler.stop();
     this.runs.stop();
     this.sessionContexts.clear();
@@ -344,9 +345,10 @@ export class AutomationManager {
       disableForMissingSelection(automation, now);
     }
     this.runs.failInterrupted(now);
-    this.scheduler.processDue();
+    if (!this.closed) this.scheduler.processDue();
     trimAutomationStore(this.store);
     await this.storeFile.write(this.store);
+    if (this.closed) return;
     this.scheduler.arm();
   }
 

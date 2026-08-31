@@ -1,6 +1,7 @@
 import { sanitizePersistedPrWorkspace } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { sanitizePersistedPrBacklog } from '../features/pull-requests/lib/prBacklog';
 import type { BrowserState, ModelInfo, ReasoningEffort } from '../types/bridge';
+import { isReasoningEffort } from '../lib/reasoningEffort';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
 import type { ImagePasteQuality } from '../lib/images';
 import {
@@ -31,20 +32,6 @@ const defaultAgentConfig: AgentConfig = {
   worker: { modelId: undefined, reasoning: 'medium' },
   validator: { modelId: undefined, reasoning: 'medium' },
 };
-
-function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return (
-    value === 'off' ||
-    value === 'none' ||
-    value === 'minimal' ||
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max' ||
-    value === 'dynamic'
-  );
-}
 
 function getLocalStorage(): Storage | undefined {
   if (typeof window !== 'undefined') return window.localStorage;
