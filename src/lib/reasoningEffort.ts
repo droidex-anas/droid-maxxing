@@ -1,5 +1,19 @@
 import type { ModelInfo, ReasoningEffort } from '../types/bridge';
 
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return (
+    value === 'off' ||
+    value === 'none' ||
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max' ||
+    value === 'dynamic'
+  );
+}
+
 // Shared rule for the reasoning effort shown next to a model (composer badge
 // and context-panel pill): the session's pinned effort wins, the global
 // default is the fallback, and a model known to support no reasoning efforts

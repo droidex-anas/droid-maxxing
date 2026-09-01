@@ -359,7 +359,7 @@ test('[C2] Provider-session swap', { concurrency: false }, async () => {
     assert.equal(load.handlers.mcpServers, creation.mcpServers);
     assert.deepEqual(
       load.handlers.mcpServers?.map((server) => server.name),
-      ['test-cli', 'test-browser'],
+      ['test-cli', 'test-browser', 'droidex-automations'],
     );
     assert.equal(callCount(h.calls, 'provider', 'onNotification', 'provider-2'), 1);
     assert.equal(callCount(h.calls, 'cleanup', 'unsubscribe', 'provider-1'), 1);

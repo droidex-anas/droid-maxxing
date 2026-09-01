@@ -237,6 +237,10 @@ function isServerEvent(value: unknown): value is ServerEvent {
       );
     case 'mcp.error':
       return hasStrings(value, ['requestId', 'message']);
+    case 'automations.snapshot':
+      return isAutomationSnapshot(value.snapshot);
+    case 'automations.result':
+      return typeof value.requestId === 'string' && typeof value.ok === 'boolean';
     default: {
       const unexpected: never = type;
       void unexpected;
@@ -424,6 +428,27 @@ function progressArray(value: unknown): boolean {
       (entry) =>
         isRecord(entry) && typeof entry.type === 'string' && typeof entry.timestamp === 'string',
     )
+  );
+}
+
+function isAutomationSnapshot(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !recordArray(value.automations) ||
+    !recordArray(value.runs) ||
+    !recordArray(value.proposals) ||
+    !isRecord(value.sessionOrigins) ||
+    !nonNegativeSafeInteger(value.queuedRunCount) ||
+    !nonNegativeSafeInteger(value.activeRunCount) ||
+    !isRecord(value.scheduler)
+  ) {
+    return false;
+  }
+  const scheduler = value.scheduler;
+  return (
+    typeof scheduler.ready === 'boolean' &&
+    (scheduler.nextWakeAt === null || typeof scheduler.nextWakeAt === 'number') &&
+    (scheduler.activeRunId === null || typeof scheduler.activeRunId === 'string')
   );
 }
 

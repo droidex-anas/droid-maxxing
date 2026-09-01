@@ -1,3 +1,4 @@
+import { isAutomationProposalCall } from '../features/automations/toolNames';
 import { feedItemTailId } from '../hooks/conversationViewportAnchor';
 import { classifyEvent } from '../lib/transcript';
 import { isSubagentBookkeepingTool } from '../lib/tools';
@@ -269,6 +270,11 @@ function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
       flush();
       out.push(it);
     } else if (it.type === 'child_session') {
+      flush();
+      out.push(it);
+    } else if (it.type === 'tools' && it.events.some(isAutomationProposalCall)) {
+      // The proposal is a user-facing review surface, not hidden execution
+      // detail. Keep it at the conversation level after the turn settles.
       flush();
       out.push(it);
     } else if (it.type === 'error') {

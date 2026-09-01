@@ -1,5 +1,11 @@
+// The composer consumes a seed once by comparing ids, so two seeds created in
+// the same millisecond must still differ: the id is a monotonic sequence rather
+// than a timestamp.
+let seedSequence = 0;
+
 export function createComposerSeed(text: string, replace = false) {
-  return { text, id: Date.now(), replace };
+  seedSequence += 1;
+  return { text, id: seedSequence, replace };
 }
 
 /**

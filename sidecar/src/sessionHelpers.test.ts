@@ -35,6 +35,14 @@ test('create requires an explicit autonomy snapshot and never falls back', () =>
     modelId: 'default-model',
     reasoningEffort: 'medium',
   });
+  assert.deepEqual(
+    createModelDefaultsForMode(
+      'auto',
+      { modelId: 'custom:byok', reasoningEffort: 'xhigh' },
+      defaults,
+    ),
+    { modelId: 'custom:byok', reasoningEffort: 'xhigh' },
+  );
   assert.deepEqual(createModelDefaultsForMode('agi', {}, defaults), {
     modelId: 'mission-model',
     reasoningEffort: 'high',

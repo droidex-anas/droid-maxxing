@@ -1,6 +1,7 @@
 import { sanitizePersistedPrWorkspace } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { sanitizePersistedPrBacklog } from '../features/pull-requests/lib/prBacklog';
 import type { BrowserState, ModelInfo, ReasoningEffort } from '../types/bridge';
+import { isReasoningEffort } from '../lib/reasoningEffort';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
 import type { ImagePasteQuality } from '../lib/images';
 import {
@@ -31,20 +32,6 @@ const defaultAgentConfig: AgentConfig = {
   worker: { modelId: undefined, reasoning: 'medium' },
   validator: { modelId: undefined, reasoning: 'medium' },
 };
-
-function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return (
-    value === 'off' ||
-    value === 'none' ||
-    value === 'minimal' ||
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max' ||
-    value === 'dynamic'
-  );
-}
 
 function getLocalStorage(): Storage | undefined {
   if (typeof window !== 'undefined') return window.localStorage;
@@ -100,6 +87,8 @@ const WORKSPACES_STORAGE_KEY = 'droid-workspaces';
 const SESSION_LAST_SEEN_STORAGE_KEY = 'droid-session-last-seen-v1';
 const UI_STATE_STORAGE_KEY = 'droid-ui-state-v2';
 
+export type MainView = 'session' | 'pull-requests' | 'automations';
+
 interface PersistedUiState {
   activeAppSessionId: string | null;
   rightPanelOpen: boolean;
@@ -110,7 +99,7 @@ interface PersistedUiState {
   browsers: Record<string, BrowserState>;
   browserOpenKeys: Record<string, boolean>;
   selectedFeatureId: string | null;
-  mainView?: 'session' | 'pull-requests';
+  mainView?: MainView;
   prWorkspaceCwd?: string | null;
   prWorkspaceNumber?: number | null;
   prBacklogIds?: string[];
@@ -259,7 +248,9 @@ export function loadPersistedUiState(): Partial<PersistedUiState> {
       selectedFeatureId:
         typeof parsed.selectedFeatureId === 'string' ? parsed.selectedFeatureId : null,
       mainView:
-        parsed.mainView === 'session' || parsed.mainView === 'pull-requests'
+        parsed.mainView === 'session' ||
+        parsed.mainView === 'pull-requests' ||
+        parsed.mainView === 'automations'
           ? parsed.mainView
           : undefined,
     };
@@ -278,7 +269,7 @@ export interface PersistedUiStateSource {
   browsers: Record<string, BrowserState>;
   browserOpenKeys: Record<string, boolean>;
   selectedFeatureId: string | null;
-  mainView: 'session' | 'pull-requests';
+  mainView: MainView;
   prWorkspaceCwd: string | null;
   prWorkspaceNumber: number | null;
   prBacklogIds: string[];

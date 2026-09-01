@@ -1,11 +1,13 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { MoreHorizontal } from 'lucide-react';
+import { Clock, MoreHorizontal } from 'lucide-react';
 import { MAX_CHAT_TITLE_LENGTH } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
 import { SESSION_MENU_WIDTH } from './SessionContextMenu';
 import type { SessionSummary } from '../types/bridge';
 import type { SessionAttentionKind } from '../lib/sessionAttention';
 import { SessionAttentionBadge } from './SessionAttentionBadge';
+import { HoverTooltip } from './HoverTooltip';
+import type { AutomationRunStatus } from '../features/automations/types';
 
 // Simple, smooth ring spinner shown on the left of a row while its model
 // works. motion-safe keeps it static for reduced-motion users.
@@ -28,6 +30,8 @@ export interface SessionRowProps {
   unread: boolean;
   running: boolean;
   attention: SessionAttentionKind | null;
+  automationTitle?: string | undefined;
+  automationStatus?: AutomationRunStatus | undefined;
   renaming: boolean;
   now: number;
   onSelect: (appSessionId: string) => void;
@@ -45,6 +49,8 @@ export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowP
     prev.unread === next.unread &&
     prev.running === next.running &&
     prev.attention === next.attention &&
+    prev.automationTitle === next.automationTitle &&
+    prev.automationStatus === next.automationStatus &&
     prev.renaming === next.renaming &&
     prev.now === next.now &&
     prev.onSelect === next.onSelect &&
@@ -62,6 +68,8 @@ export const SessionRow = memo(function SessionRow({
   unread,
   running,
   attention,
+  automationTitle,
+  automationStatus,
   renaming,
   now,
   onSelect,
@@ -205,6 +213,27 @@ export const SessionRow = memo(function SessionRow({
             {title}
           </span>
         </span>
+        {automationTitle && (
+          <HoverTooltip
+            label={`Automation: ${automationTitle}${automationStatus ? ` · ${automationStatus}` : ''}`}
+            placement="bottom"
+            delay={220}
+          >
+            <span
+              role="img"
+              aria-label={`Started by automation: ${automationTitle}${
+                automationStatus ? `, run ${automationStatus}` : ''
+              }`}
+              className={`shrink-0 text-droid-text-muted ${
+                automationStatus === 'running' || automationStatus === 'starting'
+                  ? 'motion-safe:animate-pulse text-droid-text-secondary'
+                  : ''
+              }`}
+            >
+              <Clock className="h-3 w-3" />
+            </span>
+          </HoverTooltip>
+        )}
         {attention ? (
           <SessionAttentionBadge kind={attention} />
         ) : (

@@ -5,13 +5,15 @@ const path = require('node:path');
 const electron = require('electron');
 const startUrl = process.env.ELECTRON_START_URL || 'http://127.0.0.1:1420';
 const viteTarget = new URL(startUrl);
+const childEnv = { ...process.env };
+delete childEnv.ELECTRON_RUN_AS_NODE;
 const vite = spawn(
   npmCmd(),
   ['run', 'dev', '--', '--host', viteTarget.hostname, '--port', viteTarget.port || '1420'],
   {
     cwd: path.resolve(__dirname, '..'),
     stdio: 'inherit',
-    env: process.env,
+    env: childEnv,
   },
 );
 
@@ -22,7 +24,7 @@ waitFor(`${startUrl}/@vite/client`)
     electronProcess = spawn(electron, [path.join(__dirname, 'main.cjs')], {
       cwd: path.resolve(__dirname, '..'),
       stdio: 'inherit',
-      env: { ...process.env, ELECTRON_START_URL: startUrl },
+      env: { ...childEnv, ELECTRON_START_URL: startUrl },
     });
     electronProcess.on('exit', (code, signal) => {
       stop(vite);
