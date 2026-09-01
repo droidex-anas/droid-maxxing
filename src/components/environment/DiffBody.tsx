@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { parseUnifiedDiff, toSplitRows, type DiffLine } from '../../lib/unifiedDiff';
-import type { DiffViewMode } from '../../hooks/useStore';
+import type { DiffViewMode } from '../../hooks/persistedUiPreferences';
 
 // Shared per-type style objects: a large diff renders thousands of lines, so
 // inline object literals would allocate on every line every render.

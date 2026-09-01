@@ -1,11 +1,6 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
-import {
-  shallowEqual,
-  useStoreDispatch,
-  useStoreSelector,
-  type ChildAccess,
-  type ChildRuntimeState,
-} from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import type { ChildAccess, ChildRuntimeState } from '../hooks/storeChildSession';
 import { useRepoStatus } from '../hooks/useRepoStatus';
 import { interruptVisibleSession, updateSessionSettings } from '../lib/commands';
 import { utilityPanelForSession } from '../lib/utilityPanel';
@@ -51,7 +46,7 @@ import {
   childSelectionForFeature,
   findChildSessionForTarget,
   orderedChildSessions,
-  transcriptForVisibleSession,
+  transcriptEventIsVisible,
   visibleSessionIsPending,
   visibleSessionTarget,
   type ChildSessionActivity,
@@ -61,6 +56,7 @@ import { MessageFeed } from './chat';
 import EditorOpenMenu, { openCodebase, openCurrentDiff } from './EditorOpenMenu';
 import PromptInput from './PromptInput';
 import AutonomySelector from './AutonomySelector';
+import { createIncrementalTranscriptFilter } from '../lib/incrementalTranscriptFilter';
 
 const ACCENT = 'var(--droid-accent)';
 const accentMix = (pct: number) =>
@@ -70,6 +66,23 @@ const EMPTY_PROGRESS: ProgressEntry[] = [];
 const EMPTY_CHILD_SESSIONS: Record<string, ChildSessionSummary> = {};
 const EMPTY_CHILD_ACCESS: Record<string, ChildAccess> = {};
 const EMPTY_CHILD_RUNTIME: Record<string, ChildRuntimeState> = {};
+
+const RENDERED_TRANSCRIPT_KIND: Record<TranscriptEvent['kind'], true> = {
+  text: true,
+  thinking: true,
+  tool_call: true,
+  tool_result: true,
+  error: true,
+  status: true,
+  compaction: true,
+};
+const RENDERED_TRANSCRIPT_KINDS = new Set(
+  Object.keys(RENDERED_TRANSCRIPT_KIND) as TranscriptEvent['kind'][],
+);
+
+/** The event kinds the mission transcript renders as feed rows. */
+export const isRenderedTranscriptEvent = (t: TranscriptEvent) =>
+  t.author === 'user' || RENDERED_TRANSCRIPT_KINDS.has(t.kind) || Boolean(t.isError);
 
 /* ════════════════════════ chat ════════════════════════ */
 
@@ -125,6 +138,7 @@ function ChatArea({
           onOpenChildSession={onOpenChildSession}
           density={toolActivity}
           childSessionActivity={childSessionActivity}
+          scrollElementRef={scrollRef}
         />
 
         {events.length === 0 && !pending && (
@@ -872,6 +886,7 @@ export default function MissionControl() {
       transcript: appSessionId
         ? (state.transcripts[appSessionId] ?? EMPTY_TRANSCRIPT)
         : EMPTY_TRANSCRIPT,
+      transcriptMutation: appSessionId ? state.transcriptMutations[appSessionId] : undefined,
       progress: appSessionId ? (state.progress[appSessionId] ?? EMPTY_PROGRESS) : EMPTY_PROGRESS,
       childSessions: appSessionId
         ? (state.childSessions[appSessionId] ?? EMPTY_CHILD_SESSIONS)
@@ -895,6 +910,7 @@ export default function MissionControl() {
     mission,
     utilityOpen,
     transcript: allTx,
+    transcriptMutation,
     progress,
     childSessions: childSessionsById,
     childAccess,
@@ -909,9 +925,20 @@ export default function MissionControl() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [expanded, setExpanded] = useState<'features' | 'context' | null>(null);
   const [openDiff, setOpenDiff] = useState<FileChange | null>(null);
+  const visibleEventsProjectorRef = useRef<ReturnType<
+    typeof createIncrementalTranscriptFilter
+  > | null>(null);
+  visibleEventsProjectorRef.current ??= createIncrementalTranscriptFilter();
+  const featureEventsProjectorRef = useRef<ReturnType<
+    typeof createIncrementalTranscriptFilter
+  > | null>(null);
+  featureEventsProjectorRef.current ??= createIncrementalTranscriptFilter();
 
   const features = mission?.features ?? [];
-  const childSessions = mission ? orderedChildSessions(Object.values(childSessionsById)) : [];
+  const childSessions = useMemo(
+    () => (mission ? orderedChildSessions(Object.values(childSessionsById)) : []),
+    [mission, childSessionsById],
+  );
   const visibleTarget = visibleSessionTarget(
     mission?.appSessionId,
     selectedChild,
@@ -950,6 +977,23 @@ export default function MissionControl() {
     [childSessions, allTx],
   );
   const isLive = mission ? sessionIsLive(mission) : false;
+  const visibleChildSessionId =
+    visibleTarget.kind === 'child' ? visibleTarget.child.childSessionId : null;
+  const selectedFeature = features.find((f) => f.id === selectedFeatureId) ?? null;
+  const selectedFeatureChildSessionId = selectedFeature
+    ? childSessionIdForFeature(progress, selectedFeature.id)
+    : undefined;
+  // The incremental transcript filters compare predicate identity, so the
+  // includes closures must stay referentially stable across renders.
+  const visibleEventsIncludes = useCallback(
+    (event: TranscriptEvent) =>
+      transcriptEventIsVisible(event, visibleChildSessionId) && isRenderedTranscriptEvent(event),
+    [visibleChildSessionId],
+  );
+  const featureEventsIncludes = useCallback(
+    (event: TranscriptEvent) => event.sourceSessionId === selectedFeatureChildSessionId,
+    [selectedFeatureChildSessionId],
+  );
   const phaseLabel = mission
     ? mission.phase === 'completed'
       ? 'Completed'
@@ -967,7 +1011,6 @@ export default function MissionControl() {
   if (!mission) return null;
 
   const selectedChildSession = visibleTarget.kind === 'child' ? visibleTarget.child : undefined;
-  const visibleChildSessionId = selectedChildSession?.childSessionId ?? null;
   const onOrchestrator = visibleChildSessionId === null;
   const visibleIsLive = visibleTarget.kind === 'child' ? visibleTarget.canInterrupt : isLive;
   const selectedChildIndex = selectedChildSession
@@ -978,16 +1021,12 @@ export default function MissionControl() {
   const visibleAgentLabel = selectedChildSession
     ? childSessionLabel(selectedChildSession, Math.max(0, selectedChildIndex))
     : 'Orchestrator';
-  const visible = (t: TranscriptEvent) =>
-    t.author === 'user' ||
-    t.kind === 'text' ||
-    t.kind === 'thinking' ||
-    t.kind === 'tool_call' ||
-    t.kind === 'tool_result' ||
-    t.kind === 'status' ||
-    t.kind === 'error' ||
-    t.isError;
-  const events = transcriptForVisibleSession(allTx, visibleChildSessionId).filter(visible);
+  const events = visibleEventsProjectorRef.current({
+    conversationKey: `${mission.appSessionId}:${visibleChildSessionId ?? 'primary'}:mission`,
+    source: allTx,
+    mutation: transcriptMutation,
+    includes: visibleEventsIncludes,
+  });
 
   const selectFeature = (f: BridgeFeature) => {
     setSelectedFeatureId(f.id);
@@ -995,12 +1034,13 @@ export default function MissionControl() {
     setFocusOpen(true);
   };
 
-  const selectedFeature = features.find((f) => f.id === selectedFeatureId) ?? null;
-  const selectedFeatureChildSessionId = selectedFeature
-    ? childSessionIdForFeature(progress, selectedFeature.id)
-    : undefined;
   const selectedFeatureEvents = selectedFeatureChildSessionId
-    ? transcriptForVisibleSession(allTx, selectedFeatureChildSessionId)
+    ? featureEventsProjectorRef.current({
+        conversationKey: `${mission.appSessionId}:${selectedFeatureChildSessionId}:feature`,
+        source: allTx,
+        mutation: transcriptMutation,
+        includes: featureEventsIncludes,
+      })
     : [];
   const done = features.filter((f) => f.status === 'completed').length;
 

@@ -213,6 +213,18 @@ async function detectPr(dir, { branch } = {}) {
   return { ok: true, pr: normalizePr(pr) };
 }
 
+function classifyGhListError(stderr) {
+  const text = String(stderr || '').trim();
+  const match = /Could not resolve to a Repository with the name '([^']+)'/i.exec(text);
+  if (match) {
+    return {
+      reason: 'unresolved_repository',
+      message: `GitHub could not find ${match[1]}.`,
+    };
+  }
+  return { reason: 'gh_error', message: text };
+}
+
 async function listPrs(dir, { state = 'open', limit = 50 } = {}, runGh = gh) {
   const list = await runGh(dir, [
     'pr',
@@ -228,10 +240,11 @@ async function listPrs(dir, { state = 'open', limit = 50 } = {}, runGh = gh) {
     return { ok: false, reason: 'gh_unavailable', viewerLogin: null, prs: [] };
   }
   if (list.code !== 0) {
+    const classified = classifyGhListError(list.stderr);
     return {
       ok: false,
-      reason: 'gh_error',
-      message: list.stderr.trim(),
+      reason: classified.reason,
+      message: classified.message,
       viewerLogin: null,
       prs: [],
     };

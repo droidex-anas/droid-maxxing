@@ -6,8 +6,11 @@ import {
   buildWorkspaceScopes,
   buildWorkspaceSections,
   discoverWorkspaceScopes,
+  removeWorkspaceCwd,
   resolveNewChatCwd,
   SIDEBAR_VISIBLE_SESSION_LIMIT,
+  uniqueRepositoryWorkspaceCwds,
+  repositoryRootCwd,
 } from './workspaces';
 
 const session = (appSessionId: string, cwd: string, updatedAt: number): SessionSummary => ({
@@ -37,6 +40,33 @@ test('addWorkspaceCwd keeps explicit workspaces unique and ordered newest first'
     '/repo/new',
   ]);
   assert.deepEqual(addWorkspaceCwd(['/repo/old'], ''), ['/repo/old']);
+});
+
+test('removeWorkspaceCwd drops a repository and its worktrees', () => {
+  const listed = ['/repo/app', '/repo/app/.worktrees/feat', '/repo/site'];
+  assert.deepEqual(removeWorkspaceCwd(listed, '/repo/app/.worktrees/other'), ['/repo/site']);
+  assert.equal(removeWorkspaceCwd(listed, '/repo/missing'), listed);
+  assert.equal(removeWorkspaceCwd(listed, ''), listed);
+});
+
+test('uniqueRepositoryWorkspaceCwds collapses worktrees of the same repository', () => {
+  assert.deepEqual(
+    uniqueRepositoryWorkspaceCwds([
+      '/repo/app/.worktrees/feature',
+      '/repo/app',
+      '/repo/site',
+      '/repo/app/.worktrees/other',
+      '',
+    ]),
+    ['/repo/app', '/repo/site'],
+  );
+});
+
+test('repositoryRootCwd collapses a worktree path and ignores empty values', () => {
+  assert.equal(repositoryRootCwd('/repo/app/.worktrees/feature'), '/repo/app');
+  assert.equal(repositoryRootCwd('/repo/app'), '/repo/app');
+  assert.equal(repositoryRootCwd(null), null);
+  assert.equal(repositoryRootCwd('  '), null);
 });
 
 test('resolveNewChatCwd inherits the active workspace session folder', () => {
@@ -139,6 +169,24 @@ test('buildWorkspaceSections groups registered external worktrees under their re
     sections[0].sessions.map((item) => item.appSessionId),
     ['worktree'],
   );
+});
+
+test('buildWorkspaceSections totals withheld earlier sessions across a repository worktrees', () => {
+  const worktree = '/repo/app/.worktrees/feature-a';
+  const sections = buildWorkspaceSections(['/repo/app'], [session('main', '/repo/app', 1)], {
+    executionCwds: new Map([['/repo/app', ['/repo/app', worktree]]]),
+    earlierSessionsByCwd: { '/repo/app': 900, [worktree]: 43, '/repo/other': 7 },
+  });
+
+  assert.deepEqual(sections[0].executionCwds, ['/repo/app', worktree]);
+  assert.equal(sections[0].earlierSessionCount, 943);
+});
+
+test('buildWorkspaceSections reports nothing to reveal when the sidecar withheld nothing', () => {
+  const sections = buildWorkspaceSections(['/repo/app'], [session('main', '/repo/app', 1)]);
+
+  assert.deepEqual(sections[0].executionCwds, ['/repo/app']);
+  assert.equal(sections[0].earlierSessionCount, 0);
 });
 
 test('buildWorkspaceSections matches Windows worktree paths without case sensitivity', () => {

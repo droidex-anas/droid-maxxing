@@ -205,12 +205,30 @@ jobs:
       - run: npm ci --prefix sidecar
       - run: mkdir -p reports
       - run: /usr/bin/time -f "production-build elapsed=%E max_rss_kb=%M" -o reports/build-timing.txt npm run build
+      - run: npm run quality:bundle-budgets
       - run: cat reports/build-timing.txt >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: build-timing
           path: reports/build-timing.txt
+
+  perf-gates:
+    name: Perf regression gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            sidecar/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix sidecar
+      - run: npm run quality:perf-gates
 
   format-check:
     name: Format check

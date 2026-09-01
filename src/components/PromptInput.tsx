@@ -41,6 +41,7 @@ import PlanSteps from './composer/PlanSteps';
 import { QueuedPrompts } from './composer/QueuedPrompts';
 import { markGitTurnStart } from '../lib/git';
 import { isAppUpdateInstalling, useAppUpdate } from '../lib/appUpdate';
+import { canRunAgents } from '../lib/runtimeHealth';
 import {
   chatWorktreeName,
   prepareChatWorkingDirectory,
@@ -76,7 +77,9 @@ import {
   visibleSessionTarget,
   type VisibleSessionTarget,
 } from '../lib/childSessions';
+import { commitPrimaryPromptAfterBaseline } from '../lib/promptSend';
 import { ArrowUp, ChevronDown, LoaderCircle, SlidersHorizontal, Square } from 'lucide-react';
+import { noteComposerInteractive } from '../lib/rendererPerf';
 import AddMenu from './composer/AddMenu';
 import { DraftSelections } from './composer/DraftSelections';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
@@ -95,6 +98,7 @@ import { StartInBar } from './environment/StartInBar';
 import type { Autonomy, SkillInfo, TranscriptEvent } from '../types/bridge';
 import { feedbackDraftFromCommand } from '../lib/feedbackReport';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
+import { useRuntimeHealth } from '../hooks/useRuntimeHealth';
 import { toast } from '../lib/toast';
 
 const ACCENT = 'var(--droid-accent)';
@@ -187,6 +191,8 @@ export default function PromptInput({
   const dispatch = useStoreDispatch();
   const { downloading: appUpdateInstalling, installResult: appUpdateInstallResult } =
     useAppUpdate();
+  const runtimeReady = useRuntimeHealth().canRunAgents;
+  const runtimeActionsBlocked = appUpdateInstalling || !runtimeReady;
   const state = useStoreSelector(
     (current) => ({
       activeAppSessionId: current.activeAppSessionId,
@@ -295,6 +301,11 @@ export default function PromptInput({
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!textareaRef.current) return;
+    noteComposerInteractive();
+  }, []);
   // The draft and the selections that share its first line. Autosize holds this
   // box still while it measures the draft.
   const draftBoxRef = useRef<HTMLDivElement>(null);
@@ -790,9 +801,8 @@ export default function PromptInput({
     return result;
   };
 
-  // Re-entry guard: a send awaits markGitTurnStart before the input is cleared,
-  // so without this a second Enter/click during that window would resend the
-  // same payload (and create a duplicate session turn).
+  // Re-entry guard: submit still awaits in-flight image encodes before the
+  // input is cleared, so a second Enter during that window would resend.
   const handleSubmit = async (mode: SubmitMode = 'queue', autonomyOverride?: Autonomy) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -805,9 +815,15 @@ export default function PromptInput({
 
   const runSubmit = async (mode: SubmitMode = 'queue', autonomyOverride?: Autonomy) => {
     const updateInterruptedSubmit = () => {
-      if (!isAppUpdateInstalling()) return false;
-      toast.info('DROIDEX is installing an update. New turns will resume after restart.');
-      return true;
+      if (isAppUpdateInstalling()) {
+        toast.info('DROIDEX is installing an update. New turns will resume after restart.');
+        return true;
+      }
+      if (!runtimeReady) {
+        toast.info('The agent runtime is unavailable. History, files, and notes stay usable.');
+        return true;
+      }
+      return false;
     };
     if (updateInterruptedSubmit()) return;
     const text = input.trim();
@@ -1059,7 +1075,7 @@ export default function PromptInput({
         waitForBaseline: () => markGitTurnStart(workingDirectory, activeSession.appSessionId),
         currentTarget: () => visibleTargetRef.current,
         currentComposerRevision: () => composerRevisionRef.current,
-        canCommit: () => !isAppUpdateInstalling(),
+        canCommit: () => !isAppUpdateInstalling() && canRunAgents(),
         appendTranscript,
         resetComposer: clearAfterSubmit,
         sendCommand,
@@ -1071,17 +1087,17 @@ export default function PromptInput({
     const showTurnStarting = shouldShowTurnStarting(isLive);
     if (showTurnStarting) startTurnStarting();
 
-    // Capture the last-turn baseline before the agent can touch the tree;
-    // a fire-and-forget call here races the first edit and corrupts the diff.
-    if (!childRuntimeTarget && workingDirectory)
-      await markGitTurnStart(workingDirectory, activeSession.appSessionId);
-    if (updateInterruptedSubmit()) {
-      if (showTurnStarting) stopTurnStarting();
-      return;
-    }
-    appendTranscript();
-    clearAfterSubmit();
-    sendCommand();
+    const committed = await commitPrimaryPromptAfterBaseline({
+      waitForBaseline: () =>
+        workingDirectory
+          ? markGitTurnStart(workingDirectory, activeSession.appSessionId)
+          : Promise.resolve(),
+      canCommit: () => !updateInterruptedSubmit(),
+      appendTranscript,
+      resetComposer: clearAfterSubmit,
+      sendCommand,
+    });
+    if (!committed && showTurnStarting) stopTurnStarting();
   };
 
   const queue: QueuedPrompt[] = activeSession
@@ -1742,8 +1758,14 @@ export default function PromptInput({
                 </AnimatePresence>
                 <button
                   onClick={() => void handleSubmit(enterSteers ? 'now' : 'queue')}
-                  disabled={appUpdateInstalling}
-                  title={appUpdateInstalling ? 'Installing DROIDEX update' : undefined}
+                  disabled={runtimeActionsBlocked}
+                  title={
+                    appUpdateInstalling
+                      ? 'Installing DROIDEX update'
+                      : runtimeReady
+                        ? undefined
+                        : 'Agent runtime is unavailable'
+                  }
                   className="p-2 rounded-full text-droid-bg transition-opacity enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   style={{ background: ACCENT }}
                 >
@@ -1753,8 +1775,14 @@ export default function PromptInput({
             ) : (
               <button
                 onClick={() => void handleSubmit()}
-                disabled={!hasContent || !childActionsEnabled || appUpdateInstalling}
-                title={appUpdateInstalling ? 'Installing DROIDEX update' : idleSendTooltip}
+                disabled={!hasContent || !childActionsEnabled || runtimeActionsBlocked}
+                title={
+                  appUpdateInstalling
+                    ? 'Installing DROIDEX update'
+                    : runtimeReady
+                      ? idleSendTooltip
+                      : 'Agent runtime is unavailable'
+                }
                 className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-25 disabled:cursor-not-allowed shrink-0"
                 style={{ background: ACCENT }}
               >

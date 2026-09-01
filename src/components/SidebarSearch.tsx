@@ -1,34 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
+import { useSidebarContentSearch } from '../hooks/useSidebarContentSearch';
 import { shallowEqual, useStoreSelector } from '../hooks/useStore';
-import { bridge } from '../lib/bridge';
-import { searchSessions } from '../lib/commands';
 import { chatDisplayTitle, isChatHidden } from '../lib/chatMetadata';
+import { sidebarSearchNotice } from '../lib/sidebarSearchStatus';
 import { formatRelativeTime } from '../lib/time';
 import type { SessionSearchMatch, SessionSummary } from '../types/bridge';
 import PaletteShell from './PaletteShell';
+import SidebarSearchNotice from './SidebarSearchNotice';
 import { usePaletteNavigation } from './usePaletteNavigation';
 
-// A session row in the search palette: a title hit, a transcript content hit
-// (with snippets), or both merged into one row.
 interface SearchEntry {
   session: SessionSummary;
   matches: SessionSearchMatch[];
 }
 
-const DEBOUNCE_MS = 250;
-const MIN_CONTENT_QUERY = 2;
 const MAX_ENTRIES = 12;
 const RECENT_ENTRIES = 8;
 const SNIPPETS_PER_ROW = 2;
 
-// Sidebar-wide session search (Codex-style): matches session titles locally
-// and chat message text via the sidecar's transcript scan, showing a snippet
-// preview so a query like "hi bro whatsapp" finds the session that contains
-// it even when the title says something else. Local state only — the palette
-// is a sidebar-local feature and closes itself after opening a session.
-// Opening routes through the sidebar's onOpen so all open paths share one
-// behavior (e.g. the unread-only filter drops so the row cannot vanish).
 export default function SidebarSearch({
   onClose,
   onOpen,
@@ -45,61 +35,14 @@ export default function SidebarSearch({
     shallowEqual,
   );
   const [query, setQuery] = useState('');
-  const [contentResults, setContentResults] = useState<ReadonlyMap<string, SessionSearchMatch[]>>(
-    new Map(),
-  );
-  const [searchPending, setSearchPending] = useState(false);
-  const requestSeq = useRef(0);
-  const latestRequestId = useRef<string | null>(null);
-  // searchResults are broadcast to every connected window, so the requestId
-  // carries a per-instance prefix: two open palettes never accept each
-  // other's responses.
-  const instanceId = useRef(Math.random().toString(36).slice(2));
+  const { pending, contentResults, searchUnavailable, indexingIncomplete } =
+    useSidebarContentSearch(query);
 
-  // Content search is debounced; stale responses are dropped by requestId so
-  // a slow scan of a previous keystroke never overwrites newer results.
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < MIN_CONTENT_QUERY) {
-      latestRequestId.current = null;
-      setSearchPending(false);
-      setContentResults(new Map());
-      return;
-    }
-    const requestId = `sidebar-search-${instanceId.current}-${String(++requestSeq.current)}`;
-    // Invalidate any in-flight request at scheduling time, not when the timer
-    // fires: a slow response for a superseded query must not overwrite the
-    // results shown under the query the user has already typed ahead to.
-    latestRequestId.current = requestId;
-    setSearchPending(true);
-    const timer = setTimeout(() => {
-      searchSessions(requestId, trimmed);
-    }, DEBOUNCE_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [query]);
-
-  useEffect(() => {
-    return bridge.subscribe((ev) => {
-      if (ev.type !== 'sessions.searchResults') return;
-      if (ev.requestId !== latestRequestId.current) return;
-      setSearchPending(false);
-      setContentResults(new Map(ev.results.map((r) => [r.appSessionId, r.matches])));
-    });
-  }, []);
-
-  // Merge title hits and content hits into one recency-ordered list. Content
-  // hits for sessions outside the current sidebar list are dropped: opening
-  // a row must land on a session the store can activate. Archived/deleted
-  // chats stay hidden here too — they are managed from Settings > Archived.
   const entries = useMemo<SearchEntry[]>(() => {
     const sessions = state.sessionOrder
       .map((id) => state.sessions[id])
       .filter((s): s is SessionSummary => Boolean(s))
       .filter((s) => !isChatHidden(state.chatMetadata[s.appSessionId]))
-      // Match and display the effective title: a user rename is what the rest
-      // of the UI shows, so it is what search should find.
       .map((s) => {
         const title = chatDisplayTitle(s, state.chatMetadata[s.appSessionId]);
         return title === s.title ? s : { ...s, title };
@@ -116,8 +59,6 @@ export default function SidebarSearch({
       if (!titleHit && !contentMatches) continue;
       byId.set(session.appSessionId, { session, matches: contentMatches ?? [] });
     }
-    // byId iterates in insertion order, which already follows the recency
-    // sort applied to sessions above — no second sort needed.
     return [...byId.values()].slice(0, MAX_ENTRIES);
   }, [query, state.sessionOrder, state.sessions, state.chatMetadata, contentResults]);
 
@@ -135,6 +76,13 @@ export default function SidebarSearch({
 
   const now = Date.now();
   const trimmed = query.trim();
+  const notice = sidebarSearchNotice({
+    queryLength: trimmed.length,
+    pending,
+    searchUnavailable,
+    indexingIncomplete,
+    entryCount: entries.length,
+  });
 
   return (
     <PaletteShell
@@ -147,11 +95,7 @@ export default function SidebarSearch({
       enterHint="Open session"
       footerRight={trimmed ? 'Titles and message text' : 'Recent sessions'}
     >
-      {entries.length === 0 && (
-        <div className="px-4 py-8 text-center text-sm text-droid-text-muted">
-          {searchPending ? 'Searching messages...' : 'No sessions found'}
-        </div>
-      )}
+      {notice ? <SidebarSearchNotice kind={notice.kind} layout={notice.layout} /> : null}
       {entries.map((entry, i) => (
         <button
           key={entry.session.appSessionId}

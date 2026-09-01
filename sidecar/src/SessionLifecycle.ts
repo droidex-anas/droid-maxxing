@@ -104,7 +104,7 @@ export interface SessionLifecycleDependencies {
   emit: (event: ServerEvent) => void;
   emitError: (error: LifecycleError) => void;
   emitStatus: (appSessionId: string, text: string) => void;
-  emitSessionList: (closedProviderSessionId: string) => void;
+  emitSessionList: (closedProviderSessionId: string) => void | Promise<void>;
 }
 export class SessionLifecycle {
   private readonly deferredCloses = new WeakMap<LiveSession, DeferredClose>();
@@ -514,9 +514,7 @@ export class SessionLifecycle {
         d.forgetEventFlow(liveSession.summary.appSessionId);
       });
     }
-    await run(() => {
-      d.emitSessionList(closedProviderSessionId);
-    });
+    await run(() => d.emitSessionList(closedProviderSessionId));
     if (firstError !== undefined) throw errorFromUnknown(firstError);
   }
 
@@ -570,6 +568,13 @@ export class SessionLifecycle {
 
   private async prepareToSend(appSessionId: string): Promise<LiveSession | undefined> {
     let liveSession = this.dependencies.registry.getLive(appSessionId);
+    // A send that lands while the runtime is being released must wait for that
+    // close and reopen, not vanish. Retirement makes this window reachable.
+    if (liveSession?.closeMode) {
+      await liveSession.closePromise;
+      if (this.dependencies.isShutdownStarted()) return undefined;
+      liveSession = this.dependencies.registry.getLive(appSessionId);
+    }
     if (!liveSession) {
       const resumed = await this.resume(appSessionId);
       if (!resumed) return undefined;

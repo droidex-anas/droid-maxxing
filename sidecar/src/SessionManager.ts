@@ -3,18 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import type {
   Autonomy,
-  BrowserNativeRequest,
-  BrowserNativeResult,
+  BridgeRuntimeSnapshot,
   ClientCommand,
   ConfigurableSessionRole,
   FactoryDefaultSettings,
   InstallChannel,
+  HistorySearchReply,
+  PersistenceRecovery,
   SessionSummary,
   ModelInfo,
   ReasoningEffort,
   ResponseFormat,
   ServerEvent,
   SessionInteractionMode,
+  TranscriptEvent,
 } from './protocol.js';
 import {
   defaultsModeForSummary,
@@ -35,25 +37,31 @@ import {
 import { detectEnvironment } from './Environment.js';
 import { buildInstallCommand, buildUpdateCommand, runStreaming } from './CliInstaller.js';
 import {
-  HistoryIndex,
+  type HistoryIndex,
+  type PersistedChildSession,
   loadMissionControlSessions,
-  loadSessionTranscriptWindow,
   readFactoryDefaults,
-  resolveSessionChain,
-  warmSessionIndex,
 } from './history.js';
-import { transcriptToMarkdown } from './sessionMarkdown.js';
+import { HistoryPersistence } from './HistoryPersistence.js';
+import { serverEventForHistoryStatus } from './historyStatusEvents.js';
+import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
+import { SessionAdoption } from './sessionAdoption.js';
+import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
+import { droidexUserDataDir } from './droidexPaths.js';
+import type { SessionFileChange } from './sessionFileCache.js';
+import { SessionBrowser, type SessionBrowsers } from './SessionBrowser.js';
+import { SessionHistoryQueries } from './SessionHistoryQueries.js';
 import {
   startSessionFileWatcher,
   type SessionFileWatcher,
   type SessionFileWatcherOptions,
 } from './sessionFileWatcher.js';
+import { SessionFileServing } from './SessionFileServing.js';
 import { mergeModelCatalog } from './modelCatalog.js';
 import { readDroidCliModelCatalog, readDroidCliModelCatalogCache } from './DroidCliCatalog.js';
 import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
 import { createBrowserMcpServer } from './browser/browserMcpServer.js';
 import { isDesignPrompt } from './browser/designPromptPacks.js';
-import { NativeBrowserRuntime } from './browser/NativeBrowserRuntime.js';
 import { SessionRegistry } from './SessionRegistry.js';
 import { SessionEventFlow, type NormalizedSideEffects } from './SessionEventFlow.js';
 import { SessionInteractions } from './SessionInteractions.js';
@@ -75,9 +83,14 @@ import {
 } from './SessionLifecycle.js';
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSettings } from './ChildSessionState.js';
+import { CHILD_RUNTIME_IDLE_RETIREMENT_MS } from './childRuntimeRetirement.js';
+import {
+  SESSION_RUNTIME_IDLE_RETIREMENT_MS,
+  SessionRuntimeRetirement,
+} from './sessionRuntimeRetirement.js';
 import { MissionControlPolicy } from './MissionControlPolicy.js';
-import type { SessionListFilterOptions } from './sessionListFilter.js';
 import { normalizeCompactionTokenLimit } from './compaction.js';
+import type { HotPathResourceCounts } from './telemetry/hotPathMetrics.js';
 import { DroidMcpConfiguration, type McpConfiguration } from './DroidMcpConfiguration.js';
 import { McpSettings } from './McpSettings.js';
 import { loadFactoryMcpServers } from './FactoryMcpConfig.js';
@@ -91,40 +104,28 @@ function formatResponsePrompt(text: string, responseFormat?: ResponseFormat): st
   return formatAppPrompt(text, responseFormat === 'app-create' ? 'create' : 'followup');
 }
 
-type SessionHistory = Pick<
+type SessionHistoryBase = Pick<
   HistoryIndex,
-  | 'syncSummaries'
   | 'summaryPatchesAndHidden'
   | 'listHistoricalSessions'
-  | 'searchSessions'
-  | 'reconcileSessionFiles'
-  | 'reconcileSessionFilePaths'
   | 'sessionFileCacheSize'
   | 'sessionLaunchSettings'
   | 'childSessions'
   | 'childSession'
-  | 'upsertChildSession'
-  | 'recordEvent'
   | 'close'
->;
+> & {
+  syncSummaries(summaries: SessionSummary[]): boolean | undefined;
+  upsertChildSession(child: PersistedChildSession): boolean | undefined;
+  recordEvent(event: TranscriptEvent): void;
+  persistenceRecovery?(): PersistenceRecovery;
+};
 
-type SessionBrowsers = Pick<
-  BrowserSessionManager,
-  | 'open'
-  | 'close'
-  | 'closeAll'
-  | 'reload'
-  | 'refresh'
-  | 'resizeViewport'
-  | 'click'
-  | 'type'
-  | 'keypress'
-  | 'scroll'
-  | 'screenshot'
-  | 'inspectPoint'
-  | 'addReference'
-  | 'designPrompt'
->;
+type SessionHistory = SessionHistoryBase & {
+  searchSessions(query: string, isStale?: () => boolean): Promise<HistorySearchReply>;
+  setIndexingIdle(isIdle: boolean): Promise<void>;
+  reconcileSessionFiles(): Promise<number>;
+  reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number>;
+};
 
 export interface StartableLocalMcpResource {
   start(): Promise<McpServerConfig>;
@@ -148,6 +149,10 @@ export interface SessionManagerDependencies {
   // delta coalescing and assert appended events synchronously; the merge
   // behavior itself is covered by SessionTimeline unit tests.
   streamingCoalesceMs?: number;
+  maxLiveRuntimes?: number;
+  maxQueuedRuntimes?: number;
+  childRuntimeIdleMs?: number;
+  sessionRuntimeIdleMs?: number;
 }
 
 export interface SessionManagerOptions {
@@ -167,32 +172,37 @@ const MAX_OPEN_CHILD_SESSIONS = boundedInt(
   1,
   24,
 );
-const BROWSER_NATIVE_TIMEOUT_MS = boundedInt(
-  process.env.DROID_CONTROL_BROWSER_NATIVE_TIMEOUT_MS,
-  12_000,
-  1_000,
-  60_000,
+const MAX_LIVE_CHILD_RUNTIMES = boundedInt(
+  process.env.DROID_CONTROL_MAX_LIVE_CHILD_RUNTIMES,
+  MAX_OPEN_CHILD_SESSIONS,
+  1,
+  MAX_OPEN_CHILD_SESSIONS,
 );
+const MAX_QUEUED_CHILD_RUNTIMES = boundedInt(
+  process.env.DROID_CONTROL_MAX_QUEUED_CHILD_RUNTIMES,
+  16,
+  0,
+  64,
+);
+// Production runtime limits. The overrides exist so tests can drive admission,
+// queueing, and retirement without waiting on a clock.
+function runtimeLimits(dependencies: SessionManagerDependencies | undefined) {
+  return {
+    maxLiveRuntimes: dependencies?.maxLiveRuntimes ?? MAX_LIVE_CHILD_RUNTIMES,
+    maxQueuedRuntimes: dependencies?.maxQueuedRuntimes ?? MAX_QUEUED_CHILD_RUNTIMES,
+    childRuntimeIdleMs: dependencies?.childRuntimeIdleMs ?? CHILD_RUNTIME_IDLE_RETIREMENT_MS,
+    sessionRuntimeIdleMs: dependencies?.sessionRuntimeIdleMs ?? SESSION_RUNTIME_IDLE_RETIREMENT_MS,
+  };
+}
+
 const ignoreError = (): undefined => undefined;
 
-let nativeBrowserSeq = 0;
-const nextNativeBrowserRequestId = () =>
-  `browser-native-${Date.now().toString(36)}-${(nativeBrowserSeq++).toString(36)}`;
 const nextChildSessionId = () => `child-${randomUUID()}`;
-
-interface PendingNativeBrowserRequest {
-  resolve: (result: BrowserNativeResult) => void;
-  reject: (err: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}
 
 export class SessionManager {
   private ready = false;
   private cachedModels: ModelInfo[] | null = null;
   private modelRefresh: Promise<ModelInfo[] | null> | null = null;
-  // Newest sessions.search requestId; older in-flight scans check staleness
-  // against this and stop early instead of finishing a discarded scan.
-  private latestSearchRequestId: string | null = null;
   // Context windows observed from provider stats for catalog-missing models.
   private readonly learnedModelContextWindows = new Map<string, number>();
   private readonly runtime: FactoryRuntime;
@@ -206,22 +216,19 @@ export class SessionManager {
   private readonly childSessions: ChildSessions;
   private readonly missionControlPolicy: MissionControlPolicy;
   private readonly lifecycle: SessionLifecycle;
+  private readonly runtimeRetirement: SessionRuntimeRetirement;
+  private readonly adoption: SessionAdoption;
+  private readonly sessionFiles: SessionFileServing;
+  private readonly sessionBrowser: SessionBrowser;
+  private readonly historyQueries: SessionHistoryQueries;
   private readonly pendingAgentSettings = new Map<
     string,
     Partial<Record<ConfigurableSessionRole, AgentSettingPatch>>
   >();
   private shutdownPromise?: Promise<void>;
-  private sessionsBootstrapDone = false;
-  // Non-null while the one-time warm-cache boot reconcile is pending;
-  // sessions.list responses wait for it (see bootstrapSessionListServing).
-  private sessionsBootReconcile: Promise<void> | null = null;
-  private sessionFileWatcher: SessionFileWatcher | null = null;
-  private readonly startWatcher: (options: SessionFileWatcherOptions) => SessionFileWatcher | null;
-  private lastSessionListOptions?: SessionListFilterOptions;
   // Per-session autonomy mutation queue: rapid changes settle against the
   // provider in the order they were requested.
   private readonly autonomyMutationTails = new Map<string, Promise<void>>();
-  private readonly pendingNativeBrowserRequests = new Map<string, PendingNativeBrowserRequest>();
   private readonly browsers: SessionBrowsers;
   private readonly createLocalMcpResource: SessionManagerDependencies['createLocalMcpResource'];
   private readonly mcpConfiguration: McpConfiguration;
@@ -234,6 +241,10 @@ export class SessionManager {
     private readonly emit: Emit,
     options: SessionManagerOptions = {},
   ) {
+    const limits = runtimeLimits(options.dependencies);
+    let startWatcher: (
+      options: SessionFileWatcherOptions,
+    ) => ReturnType<typeof startSessionFileWatcher>;
     if (options.dependencies) {
       this.runtime = options.dependencies.runtime;
       this.history = options.dependencies.history;
@@ -243,23 +254,26 @@ export class SessionManager {
       this.loadConfiguredMcpServers = options.dependencies.loadConfiguredMcpServers;
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
       this.nextChildSessionId = options.dependencies.nextChildSessionId ?? nextChildSessionId;
-      this.startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
+      startWatcher = options.dependencies.startSessionFileWatcher ?? (() => null);
     } else {
       this.runtime = new DroidRuntime();
-      this.history = new HistoryIndex();
+      this.history = new HistoryPersistence({
+        onStatusChanged: (status) => {
+          this.emit(serverEventForHistoryStatus(status));
+        },
+        onDurabilityRecovered: () => {
+          if (this.shutdownPromise) return;
+          this.registry.retryPendingDurability();
+          this.childSessions.retryPendingDurability();
+        },
+      });
       const browsers = new BrowserSessionManager({
         assetUrlFor: options.assetUrlFor,
         emit: (event) => {
           this.emit(event);
         },
         runtimeFactory: (browserSessionId, viewport, appSessionId) =>
-          new NativeBrowserRuntime({
-            browserSessionId,
-            appSessionId,
-            viewport,
-            request: (request) => this.requestNativeBrowser(request),
-            nextRequestId: nextNativeBrowserRequestId,
-          }),
+          this.sessionBrowser.createRuntime(browserSessionId, viewport, appSessionId),
       });
       this.browsers = browsers;
       this.createLocalMcpResource = (appSessionId) =>
@@ -268,7 +282,7 @@ export class SessionManager {
       this.loadConfiguredMcpServers = loadFactoryMcpServers;
       this.factoryDefaultsOverride = undefined;
       this.nextChildSessionId = nextChildSessionId;
-      this.startWatcher = startSessionFileWatcher;
+      startWatcher = startSessionFileWatcher;
     }
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
     this.mcpSettings = new McpSettings(
@@ -293,8 +307,23 @@ export class SessionManager {
       projectSummary: (summary) => this.applyPendingSettingsToSummary({ ...summary }),
       onSummaryUpdated: (summary) => {
         this.emit({ type: 'session.updated', session: summary });
+        this.runtimeRetirement.arm();
+      },
+      onLiveProviderReplaced: (providerSessionId) => {
+        this.sessionFiles.finalizeReplacedProvider(providerSessionId);
+      },
+      onLiveSetChanged: () => {
+        this.adoption.persistLiveSet();
+        this.runtimeRetirement.arm();
       },
       now: Date.now,
+    });
+    this.historyQueries = new SessionHistoryQueries({
+      searchSessions: (query, isStale) => this.history.searchSessions(query, isStale),
+      resolveSummary: (id) => this.registry.resolveSummary(id),
+      emit: (event) => {
+        this.emit(event);
+      },
     });
     this.context = new SessionContext({
       registry: this.registry,
@@ -388,10 +417,29 @@ export class SessionManager {
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       emit: (event) => {
         this.emit(event);
+        if (event.type !== 'session.child') return;
+        this.adoption.persistLiveSet();
+        this.runtimeRetirement.arm();
       },
       nextChildSessionId: this.nextChildSessionId,
       maxOpenSessions: MAX_OPEN_CHILD_SESSIONS,
+      maxLiveRuntimes: limits.maxLiveRuntimes,
+      maxQueuedRuntimes: limits.maxQueuedRuntimes,
+      childRuntimeIdleMs: limits.childRuntimeIdleMs,
       now: Date.now,
+    });
+    this.sessionFiles = new SessionFileServing({
+      history: this.history,
+      startWatcher,
+      isLiveSession: (providerSessionId) => this.registry.isCurrentLiveProvider(providerSessionId),
+      isShutdownStarted: () => this.shutdownPromise !== undefined,
+      retryPendingLaunchSettings: (providerSessionIds) => {
+        this.childSessions.retryPendingLaunchSettings(providerSessionIds);
+      },
+      listSummaries: (listOptions) => this.registry.listSummaries(listOptions),
+      emitList: ({ sessions, earlierSessionsByCwd }) => {
+        this.emit({ type: 'sessions.list', sessions, earlierSessionsByCwd });
+      },
     });
     this.missionControlPolicy = new MissionControlPolicy({
       registry: this.registry,
@@ -441,31 +489,112 @@ export class SessionManager {
       emitStatus: (appSessionId, text) => {
         this.timeline.appendStatus(appSessionId, text);
       },
-      emitSessionList: (closedProviderSessionId) => {
-        if (this.shutdownPromise) return;
-        // Live writes are excluded from historical reconciliation, but the
-        // watcher retains their paths. Reconcile exactly the finalized file
-        // after unregister; if a very short session closed before its first
-        // watch event, fall back to the authoritative tree diff.
-        const sessionFile =
-          this.sessionFileWatcher?.consumeLiveSessionFile(closedProviderSessionId);
-        if (sessionFile) {
-          this.history.reconcileSessionFilePaths([
-            { providerSessionId: closedProviderSessionId, path: sessionFile },
-          ]);
-        } else {
-          this.history.reconcileSessionFiles();
-        }
-        this.emitSessionList(this.lastSessionListOptions);
+      emitSessionList: async (closedProviderSessionId) => {
+        await this.sessionFiles.finalizeClosedProvider(closedProviderSessionId);
       },
     });
+    this.runtimeRetirement = new SessionRuntimeRetirement({
+      liveSessions: () => this.registry.liveSessionsSnapshot(),
+      focusedAppSessionId: () => this.context.focusedSession(),
+      hasUnsettledChildren: (id) => this.childSessions.hasUnsettledChildren(id),
+      hasOpenBrowser: (id) => this.browsers.hasSession(id),
+      hasPendingSettings: (id) => this.pendingAgentSettings.has(id),
+      retire: (id) => this.lifecycle.close(id, 'preserve-pending'),
+      emitStatus: (id, text) => {
+        this.timeline.appendStatus(id, text);
+      },
+      emitError: (appSessionId, message) => {
+        this.emitError({ appSessionId, message });
+      },
+      idleMs: limits.sessionRuntimeIdleMs,
+      now: Date.now,
+    });
+    this.adoption = new SessionAdoption({
+      journal: new LiveRuntimeJournal(liveRuntimeJournalPath(droidexUserDataDir())),
+      registry: this.registry,
+      lifecycle: this.lifecycle,
+      liveChildren: () =>
+        this.childSessions.liveChildSummaries().map((child) => ({
+          parentAppSessionId: child.parentAppSessionId,
+          childSessionId: child.childSessionId,
+          status: child.status,
+        })),
+      persistSummaries: (summaries) => {
+        this.history.syncSummaries(summaries);
+        for (const session of summaries) this.emit({ type: 'session.updated', session });
+      },
+      emitStatus: (appSessionId, text) => {
+        this.timeline.appendStatus(appSessionId, text);
+      },
+      sessionRuntimeIdleMs: limits.sessionRuntimeIdleMs,
+      now: Date.now,
+    });
+    this.sessionBrowser = new SessionBrowser({
+      browsers: this.browsers,
+      emit: (event) => {
+        this.emit(event);
+      },
+      sendPrompt: (appSessionId, prompt) => this.lifecycle.send(appSessionId, prompt),
+    });
+  }
+
+  startSessionFileServing(): void {
+    this.sessionFiles.start();
   }
 
   connect(apiKey?: string): void {
     this.runtime.connect(apiKey);
     this.ready = true;
+    void this.adoption.adopt();
     this.emit({ type: 'connection', status: 'connected' });
     this.emit({ type: 'runtime.updated', status: this.runtime.status() });
+    const recovery = this.history.persistenceRecovery?.();
+    if (recovery?.hadUnflushedWork) {
+      this.emit({
+        type: 'error',
+        code: 'history.unflushed_work',
+        message:
+          recovery.message ??
+          'The previous agent runtime exited with unflushed history. Restored sessions use the last durable snapshot.',
+        recoverable: true,
+      });
+    }
+  }
+
+  async runtimeSnapshot(): Promise<BridgeRuntimeSnapshot> {
+    await this.adoption.adopt();
+    const persistence = this.history.persistenceRecovery?.() ?? {
+      durable: true,
+      hadUnflushedWork: false,
+    };
+    return buildRuntimeSnapshot({
+      runtime: this.runtime.status(),
+      sessions: this.registry.liveSessionsSnapshot().map((live) => ({ ...live.summary })),
+      children: this.childSessions.liveChildSummaries(),
+      persistence,
+      interrupted: [...this.adoption.records()],
+    });
+  }
+
+  // Runs on its own idle timer; exposed so callers can force the sweep.
+  retireIdleSessionRuntimes(): Promise<void> {
+    return this.runtimeRetirement.sweep();
+  }
+
+  resourceCounts(): HotPathResourceCounts {
+    const children = this.childSessions.counts();
+    const pollers = this.context.pollerCounts();
+    return {
+      livePrimarySessions: this.registry.liveCount,
+      childAgentsTotal: children.total,
+      childAgentsActive: children.active,
+      childAgentsLive: children.live,
+      childAgentsQueued: children.queued,
+      contextPollers: pollers.total,
+      contextPollersActive: pollers.active,
+      autoCompactionWatchdogs: this.compaction.watchdogCount(),
+      sessionFileWatchers: this.sessionFiles.watcherCount(),
+    };
   }
 
   // eslint-disable-next-line complexity -- Public command dispatch is intentionally unchanged in PR 3.
@@ -556,6 +685,7 @@ export class SessionManager {
         await this.childSessions.interrupt(cmd);
         return;
       case 'child.loadHistory':
+        await this.sessionFiles.whenBootReconciled();
         await this.childSessions.loadHistory(cmd);
         return;
       case 'child.updateSettings':
@@ -581,7 +711,7 @@ export class SessionManager {
         await this.renameSession(cmd.appSessionId, cmd.title);
         return;
       case 'session.exportMarkdown':
-        this.exportSessionMarkdown(cmd);
+        this.historyQueries.exportMarkdown(cmd);
         return;
       case 'sessions.reanchorCwd':
         try {
@@ -617,20 +747,7 @@ export class SessionManager {
         await this.lifecycle.close(cmd.appSessionId);
         return;
       case 'sessions.list':
-        this.lastSessionListOptions = cmd;
-        this.bootstrapSessionListServing();
-        if (this.sessionsBootReconcile) {
-          // Hold list responses until the one-time boot reconcile settles so
-          // the first list the renderer sees is already authoritative; only
-          // the latest queued request emits.
-          const boot = this.sessionsBootReconcile;
-          void boot.then(() => {
-            if (this.shutdownPromise || this.lastSessionListOptions !== cmd) return;
-            this.emitSessionList(cmd);
-          });
-          return;
-        }
-        this.emitSessionList(cmd);
+        await this.sessionFiles.list(cmd);
         return;
       case 'history.list':
         this.timeline.list();
@@ -639,17 +756,19 @@ export class SessionManager {
         this.timeline.loadProviderPage(cmd.providerSessionId, cmd.cursor, cmd.limit);
         return;
       case 'session.loadHistory':
+        await this.sessionFiles.whenBootReconciled();
         this.timeline.load(cmd.appSessionId, cmd.cursor, cmd.limit);
         return;
-      case 'sessions.search': {
-        // Track the newest query so a superseded scan stops spending its file
-        // budget on results the renderer would discard by requestId anyway.
-        this.latestSearchRequestId = cmd.requestId;
-        const isStale = (): boolean => this.latestSearchRequestId !== cmd.requestId;
-        const results = await this.history.searchSessions(cmd.query, isStale);
-        if (!isStale()) {
-          this.emit({ type: 'sessions.searchResults', requestId: cmd.requestId, results });
-        }
+      case 'sessions.search':
+        await this.historyQueries.search(cmd);
+        return;
+      case 'history.indexingIdle':
+        await this.history.setIndexingIdle(cmd.isIdle);
+        return;
+      case 'app.backgroundWork': {
+        const previouslyFocused = this.context.focusedSession();
+        this.context.setBackgroundWork(cmd.tier, cmd.focusedAppSessionId);
+        this.runtimeRetirement.noteFocus(previouslyFocused);
         return;
       }
       case 'settings.agent.update':
@@ -659,107 +778,48 @@ export class SessionManager {
         await this.compaction.updateLimits(cmd, this.compactionRetuneTargets());
         return;
       case 'browser.open':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.open({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
+        await this.sessionBrowser.open(cmd);
         return;
       case 'browser.close':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-          await this.browsers.close(appSessionId);
-          this.emit({ type: 'browser.closed', appSessionId });
-        });
+        await this.sessionBrowser.close(cmd);
+        // Closing the last resource a session was holding can make it retirable.
+        this.runtimeRetirement.arm();
         return;
       case 'browser.reload':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.reload(this.requireBrowserAppSessionId(cmd.appSessionId)),
-        );
+        await this.sessionBrowser.reload(cmd);
         return;
       case 'browser.refresh':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.refresh(this.requireBrowserAppSessionId(cmd.appSessionId)),
-        );
+        await this.sessionBrowser.refresh(cmd);
         return;
       case 'browser.resizeViewport':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.resizeViewport({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
+        await this.sessionBrowser.resizeViewport(cmd);
         return;
       case 'browser.click':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.click({
-            ...cmd,
-            appSessionId: this.requireBrowserAppSessionId(cmd.appSessionId),
-          }),
-        );
+        await this.sessionBrowser.click(cmd);
         return;
       case 'browser.type':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.type(this.requireBrowserAppSessionId(cmd.appSessionId), cmd.text),
-        );
+        await this.sessionBrowser.type(cmd);
         return;
       case 'browser.keypress':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.keypress(this.requireBrowserAppSessionId(cmd.appSessionId), cmd.key),
-        );
+        await this.sessionBrowser.keypress(cmd);
         return;
       case 'browser.scroll':
-        await this.handleBrowser(cmd.appSessionId, () =>
-          this.browsers.scroll(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            cmd.direction,
-            cmd.pixels,
-            cmd.source,
-            cmd.ref,
-          ),
-        );
+        await this.sessionBrowser.scroll(cmd);
         return;
       case 'browser.screenshot':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          await this.browsers.screenshot(this.requireBrowserAppSessionId(cmd.appSessionId), {
-            fullPage: cmd.fullPage,
-            deviceScaleFactor: cmd.deviceScaleFactor,
-          });
-        });
+        await this.sessionBrowser.screenshot(cmd);
         return;
       case 'browser.inspectPoint':
-        await this.handleBrowser(cmd.appSessionId, () => {
-          const element = this.browsers.inspectPoint(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            cmd.x,
-            cmd.y,
-          );
-          if (!element) throw new Error('No browser element found at that point.');
-        });
+        await this.sessionBrowser.inspectPoint(cmd);
         return;
       case 'browser.design.addReference':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          await this.browsers.addReference(
-            this.requireBrowserAppSessionId(cmd.appSessionId),
-            {
-              anchor: cmd.reference.anchor,
-              detail: cmd.reference.detail,
-              id: cmd.reference.id,
-            },
-            cmd.reference.screenshot,
-          );
-        });
+        await this.sessionBrowser.addReference(cmd);
         return;
       case 'browser.design.sendPrompt':
-        await this.handleBrowser(cmd.appSessionId, async () => {
-          const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-          const { prompt } = await this.browsers.designPrompt({ ...cmd, appSessionId });
-          await this.lifecycle.send(appSessionId, prompt);
-        });
+        await this.sessionBrowser.sendDesignPrompt(cmd);
         return;
       case 'browser.native.result':
-        this.resolveNativeBrowserRequest(cmd.result);
+        this.sessionBrowser.resolveNativeBrowserRequest(cmd.result);
         return;
       default: {
         // Wire commands are JSON-parsed without runtime validation, so a
@@ -1094,87 +1154,6 @@ export class SessionManager {
       });
       return false;
     }
-  }
-
-  private emitSessionList(options?: SessionListFilterOptions): void {
-    this.emit({ type: 'sessions.list', sessions: this.registry.listSummaries(options) });
-  }
-
-  // Runs once per boot, on the first sessions.list. An empty session file
-  // cache (first run after install or a rebuilt index) is populated
-  // synchronously so the first list returns the same rows an uncached scan
-  // would. A warm cache is refreshed from disk in the background, and the
-  // first list is held until that reconcile settles: the sidebar paints
-  // instantly from its local snapshot, and the authoritative list lands
-  // moments later without ever pruning rows a stale list happened to omit.
-  // Also warms the memoized session id -> file index so the first session
-  // restore does not pay the sessions walk, and starts the sessions-dir
-  // watcher so sessions created, updated, or deleted outside this app
-  // instance are reconciled into the cache and republished live.
-  private bootstrapSessionListServing(): void {
-    if (this.sessionsBootstrapDone) return;
-    this.sessionsBootstrapDone = true;
-    setImmediate(() => {
-      if (this.shutdownPromise) return;
-      // warmSessionIndex walks ~/.factory/sessions, whose entries can vanish
-      // mid-walk (a parallel Droid CLI run). The walk is best-effort
-      // prefetch, so a failure must degrade to a lazy rebuild on first use
-      // instead of becoming an uncaught exception in this detached callback.
-      try {
-        warmSessionIndex();
-      } catch (error) {
-        console.error(`Session index warm-up failed: ${errMsg(error)}`);
-      }
-    });
-    this.sessionFileWatcher = this.startWatcher({
-      isLiveSession: (id) => this.registry.getLive(id) !== undefined,
-      onExternalChange: (changes) => {
-        // The watcher starts before the one-time warm-cache boot reconcile
-        // runs. An event in that window must not emit a list served from a
-        // partially-reconciled cache: the boot full reconcile scans the whole
-        // tree and its own emit is authoritative, so a change seen here is
-        // already covered by it. After boot, the cache is fresh and events
-        // reconcile and republish normally.
-        if (this.shutdownPromise || this.sessionsBootReconcile) return;
-        try {
-          // A targeted change list reconciles exactly the reported files;
-          // null means the watcher saw unexplained events and only a full
-          // diff of the sessions tree can restore freshness.
-          if (changes) this.history.reconcileSessionFilePaths(changes);
-          else this.history.reconcileSessionFiles();
-        } catch (error) {
-          console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
-          return;
-        }
-        this.childSessions.retryPendingLaunchSettings(
-          changes?.map(({ providerSessionId }) => providerSessionId),
-        );
-        if (this.lastSessionListOptions) this.emitSessionList(this.lastSessionListOptions);
-      },
-    });
-    if (this.history.sessionFileCacheSize === 0) {
-      try {
-        this.history.reconcileSessionFiles();
-        this.childSessions.retryPendingLaunchSettings();
-      } catch (error) {
-        console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
-      }
-      return;
-    }
-    this.sessionsBootReconcile = new Promise((resolve) => {
-      setImmediate(() => {
-        if (!this.shutdownPromise) {
-          try {
-            this.history.reconcileSessionFiles();
-            this.childSessions.retryPendingLaunchSettings();
-          } catch (error) {
-            console.error(`Session file cache reconcile failed: ${errMsg(error)}`);
-          }
-        }
-        this.sessionsBootReconcile = null;
-        resolve();
-      });
-    });
   }
 
   private async runPrimaryTurn(liveSession: LiveSession, prompt: string): Promise<void> {
@@ -1618,56 +1597,6 @@ export class SessionManager {
     if (appSessionId) this.registry.updateSummary(appSessionId, { title: safeTitle });
   }
 
-  // Reads the stored .jsonl files straight from disk, so the export is
-  // complete even for a chat the renderer never opened (its transcript is not
-  // in memory). Compaction rekeys the backing session, so the full chain must
-  // be replayed like the chat scrollback — otherwise pre-compaction messages
-  // silently vanish from the export.
-  private exportSessionMarkdown(cmd: {
-    appSessionId: string;
-    requestId: string;
-    title?: string;
-  }): void {
-    try {
-      const summary = this.registry.resolveSummary(cmd.appSessionId);
-      const providerSessionId = summary?.providerSessionId ?? cmd.appSessionId;
-      const appSessionId = summary?.appSessionId ?? cmd.appSessionId;
-      const chain = resolveSessionChain(appSessionId, providerSessionId);
-      const { events, olderCursor } = loadSessionTranscriptWindow(appSessionId, chain, {
-        limit: 100_000,
-      });
-      if (events.length === 0) throw new Error('No stored transcript for this chat.');
-      const markdown = transcriptToMarkdown(events, {
-        title: cmd.title ?? summary?.title ?? 'Chat export',
-        providerSessionId,
-        cwd: summary?.cwd,
-        // The window caps at 100k events; an export missing older turns must
-        // say so rather than read as the complete chat.
-        ...(olderCursor !== undefined
-          ? {
-              note: 'This chat exceeds the 100,000-event export limit; only the most recent events are included.',
-            }
-          : {}),
-      });
-      this.emit({
-        type: 'session.markdownExported',
-        requestId: cmd.requestId,
-        ok: true,
-        markdown,
-      });
-    } catch (error) {
-      // The raw error can carry internal paths; the renderer shows a generic
-      // failure toast while the detail stays in the sidecar log.
-      console.error(`Markdown export failed: ${errMsg(error)}`);
-      this.emit({
-        type: 'session.markdownExported',
-        requestId: cmd.requestId,
-        ok: false,
-        message: 'Could not export this chat.',
-      });
-    }
-  }
-
   private async withSession<T>(
     appSessionId: string,
     fn: (session: FactorySession) => Promise<T>,
@@ -1729,6 +1658,7 @@ export class SessionManager {
   private emitError(error: {
     code?: string;
     clientRef?: string;
+    requestId?: string;
     providerSessionId?: string;
     appSessionId?: string;
     message: string;
@@ -1737,58 +1667,14 @@ export class SessionManager {
     this.emit({ type: 'error', ...error });
   }
 
-  private async handleBrowser(
-    appSessionId: string | undefined,
-    action: () => unknown,
-  ): Promise<void> {
-    try {
-      await action();
-    } catch (err) {
-      const message = errMsg(err);
-      this.emit({ type: 'browser.error', appSessionId, message });
-      this.emitError({ code: 'browser.error', appSessionId, message });
-    }
-  }
-
-  private requestNativeBrowser(request: BrowserNativeRequest): Promise<BrowserNativeResult> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingNativeBrowserRequests.delete(request.requestId);
-        reject(
-          new Error(
-            `DROIDEX browser did not respond to ${request.action} within ${String(BROWSER_NATIVE_TIMEOUT_MS)}ms.`,
-          ),
-        );
-      }, BROWSER_NATIVE_TIMEOUT_MS);
-      this.pendingNativeBrowserRequests.set(request.requestId, { resolve, reject, timeout });
-      this.emit({ type: 'browser.native.request', request });
-    });
-  }
-
-  private resolveNativeBrowserRequest(result: BrowserNativeResult): void {
-    const pending = this.pendingNativeBrowserRequests.get(result.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingNativeBrowserRequests.delete(result.requestId);
-    if (result.ok) pending.resolve(result);
-    else pending.reject(new Error(result.error ?? 'DROIDEX browser action failed.'));
-  }
-
-  private requireBrowserAppSessionId(appSessionId?: string): string {
-    if (!appSessionId) {
-      throw new Error(
-        'Browser sessions are scoped to a Droid chat. Select or create a chat before opening the browser.',
-      );
-    }
-    return appSessionId;
-  }
-
   shutdown(): Promise<void> {
     this.shutdownPromise ??= Promise.resolve().then(() => this.performShutdown());
     return this.shutdownPromise;
   }
 
   private async performShutdown(): Promise<void> {
+    this.historyQueries.forget();
+    this.runtimeRetirement.stop();
     let firstError: unknown;
     const run = async (action: () => void | Promise<void>): Promise<void> => {
       try {
@@ -1798,7 +1684,7 @@ export class SessionManager {
       }
     };
 
-    await run(() => this.sessionFileWatcher?.close());
+    await run(() => this.sessionFiles.close());
     await run(() => this.lifecycle.closeAll());
     await run(() => this.childSessions.shutdown());
     await run(() => {

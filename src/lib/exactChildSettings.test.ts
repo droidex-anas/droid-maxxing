@@ -139,6 +139,7 @@ test('auto and spec selections plan settings for the exact visible child', () =>
       modelId: 'old-model',
       reasoningEffort: 'high' as const,
       transcriptAvailable: true,
+      streamFidelity: 'state',
     };
     const visible = visibleSessionTarget(
       parentAppSessionId,

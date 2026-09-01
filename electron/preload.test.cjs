@@ -4,10 +4,36 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+function createDomPort() {
+  const messageListeners = [];
+  return {
+    started: false,
+    closed: false,
+    posted: [],
+    start() {
+      this.started = true;
+    },
+    addEventListener(type, listener) {
+      if (type === 'message') messageListeners.push(listener);
+    },
+    postMessage(data) {
+      this.posted.push(data);
+    },
+    close() {
+      this.closed = true;
+    },
+    deliver(data) {
+      for (const listener of messageListeners) listener({ data });
+    },
+  };
+}
+
 function loadApi(invokeResult) {
   const calls = [];
   const listeners = [];
   const removedListeners = [];
+  const posts = [];
+  const channels = [];
   let api;
   const ipcRenderer = {
     invoke(channel, payload) {
@@ -20,9 +46,20 @@ function loadApi(invokeResult) {
     removeListener(channel, listener) {
       removedListeners.push({ channel, listener });
     },
+    postMessage(channel, payload, ports) {
+      posts.push({ channel, payload, ports });
+    },
   };
   const source = readFileSync(path.join(__dirname, 'preload.cjs'), 'utf8');
   vm.runInNewContext(source, {
+    Buffer,
+    MessageChannel: class MessageChannel {
+      constructor() {
+        this.port1 = createDomPort();
+        this.port2 = createDomPort();
+        channels.push(this);
+      }
+    },
     require(name) {
       if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
       return {
@@ -35,7 +72,7 @@ function loadApi(invokeResult) {
       };
     },
   });
-  return { api, calls, listeners, removedListeners };
+  return { api, calls, listeners, removedListeners, posts, channels };
 }
 
 test('notification IPC returns the main-process delivery result unchanged', async () => {
@@ -117,6 +154,20 @@ test('automatic diagnostics preference uses closed IPC payloads', async () => {
   assert.equal(calls[1].payload.enabled, false);
 });
 
+test('hardware acceleration preference uses closed IPC payloads', async () => {
+  const { api, calls } = loadApi();
+
+  await api.getHardwareAcceleration();
+  await api.setHardwareAcceleration(false);
+
+  assert.deepEqual(calls[0], {
+    channel: 'hardware-acceleration-preference-get',
+    payload: undefined,
+  });
+  assert.equal(calls[1].channel, 'hardware-acceleration-preference-set');
+  assert.equal(calls[1].payload.enabled, false);
+});
+
 test('GitHub setup IPC accepts no renderer-controlled command payload', async () => {
   const expected = { ok: true };
   const { api, calls } = loadApi(expected);
@@ -144,4 +195,112 @@ test('GitHub device codes use a removable trusted event subscription', () => {
   assert.equal(removedListeners.length, 1);
   assert.equal(removedListeners[0].channel, 'github-auth-code');
   assert.equal(removedListeners[0].listener, listeners[0].listener);
+});
+
+test('performance metrics IPC carries no payload', async () => {
+  const { api, calls } = loadApi();
+
+  await api.getPerformanceMetrics();
+
+  assert.equal(calls[0].channel, 'get-performance-metrics');
+  assert.equal(calls[0].payload, undefined);
+});
+
+test('system idle time IPC carries no renderer-controlled payload', async () => {
+  const { api, calls } = loadApi(75);
+
+  assert.equal(await api.systemIdleTime(), 75);
+  assert.deepEqual(calls[0], { channel: 'system-idle-time', payload: undefined });
+});
+
+test('power tier IPC carries no renderer-controlled payload', async () => {
+  const { api, calls } = loadApi({ tier: 'interactive', windowVisible: true, onBattery: false });
+
+  assert.deepEqual(await api.powerTier(), {
+    tier: 'interactive',
+    windowVisible: true,
+    onBattery: false,
+  });
+  assert.deepEqual(calls[0], { channel: 'power-tier', payload: undefined });
+});
+
+test('sidecar status IPC is exposed to the trusted renderer', async () => {
+  const expected = {
+    lifecycle: 'healthy',
+    processAlive: true,
+    bridgeResponsive: true,
+    lastHeartbeatAt: 1,
+    restartCount: 0,
+  };
+  const { api, calls, listeners } = loadApi(expected);
+
+  assert.deepEqual(await api.sidecarStatus(), expected);
+  assert.equal(calls[0].channel, 'sidecar-status');
+  const stop = api.onSidecarStatus(() => undefined);
+  assert.equal(listeners[0].channel, 'sidecar-status');
+  stop();
+});
+
+test('terminal subscribe transfers one MessagePort and posts input without invoke', () => {
+  const { api, calls, posts, channels } = loadApi();
+  const channel = api.terminalSubscribe('pty-1');
+  const rendererPort = channels[0].port2;
+
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].channel, 'terminal-subscribe');
+  assert.equal(posts[0].payload.id, 'pty-1');
+  assert.equal(posts[0].ports[0], channels[0].port1);
+  assert.equal(
+    calls.some(
+      (call) => call.channel === 'terminal-write' || call.channel === 'terminal-subscribe',
+    ),
+    false,
+  );
+
+  const received = [];
+  channel.onEvent((event) => received.push(event));
+  rendererPort.deliver({
+    kind: 'data',
+    data: 'hi',
+    sequence: 1,
+    byteOffset: 2,
+  });
+  assert.equal(received.length, 1);
+  assert.equal(received[0].kind, 'data');
+  assert.equal(received[0].data, 'hi');
+  assert.equal(received[0].sequence, 1);
+  assert.equal(received[0].byteOffset, 2);
+  assert.equal(rendererPort.posted[0].type, 'ack');
+  assert.equal(rendererPort.posted[0].bytes, 2);
+
+  channel.postInput('x');
+  assert.equal(rendererPort.posted[1].type, 'input');
+  assert.equal(rendererPort.posted[1].data, 'x');
+});
+
+test('preload queues stay bounded before a consumer attaches and report dropped bytes', () => {
+  const { api, channels } = loadApi();
+  const channel = api.terminalSubscribe('pty-1');
+  const rendererPort = channels[0].port2;
+  const chunk = 'x'.repeat(64 * 1024);
+  const flood = 40;
+
+  for (let index = 0; index < flood; index += 1) {
+    rendererPort.deliver({
+      kind: 'data',
+      data: chunk,
+      sequence: index + 1,
+      byteOffset: (index + 1) * chunk.length,
+    });
+  }
+
+  const received = [];
+  channel.onEvent((event) => received.push(event));
+  const queuedBytes = received.reduce(
+    (total, payload) => total + Buffer.byteLength(payload.data || '', 'utf8'),
+    0,
+  );
+  assert.ok(queuedBytes <= 2 * 1024 * 1024);
+  assert.ok(received.some((payload) => payload.truncated === true && payload.droppedBytes > 0));
+  assert.ok(received.length < flood);
 });

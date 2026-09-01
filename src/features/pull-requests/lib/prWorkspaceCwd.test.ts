@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolvePrWorkspaceCwd, selectionForPrWorkspace } from './prWorkspaceCwd';
+import {
+  resolvePrInboxContext,
+  resolvePrWorkspaceCwd,
+  selectionForPrWorkspace,
+} from './prWorkspaceCwd';
 
 test('prefers an explicit bind, then a folder session, then the newest workspace', () => {
   assert.equal(
@@ -110,4 +114,66 @@ test('a selected PR is retained only for the effective bound repository', () => 
   assert.equal(selectionForPrWorkspace('C:\\Work\\Repo', 'c:/work/repo', 12), 12);
   assert.equal(selectionForPrWorkspace('/removed', '/fallback', 12), null);
   assert.equal(selectionForPrWorkspace(null, '/fallback', 12), null);
+});
+
+test('resolvePrInboxContext pins the active folder repo and lists every workspace', () => {
+  const inbox = resolvePrInboxContext({
+    active: { cwd: '/repos/droid-control', workspaceKind: 'folder' },
+    draftCwd: '/repos/stale',
+    workspaceCwds: ['/repos/clinic', '/repos/droid-control'],
+    boundCwd: null,
+    boundNumber: null,
+  });
+  assert.deepEqual(inbox.listingCwds, ['/repos/droid-control', '/repos/clinic']);
+  assert.equal(inbox.currentCwd, '/repos/droid-control');
+  assert.equal(inbox.boundCwd, '/repos/droid-control');
+  assert.equal(inbox.selectedNumber, null);
+});
+
+test('resolvePrInboxContext collapses worktrees and keeps a listed selection', () => {
+  const inbox = resolvePrInboxContext({
+    active: { cwd: '/repos/droid-control/.worktrees/feat', workspaceKind: 'folder' },
+    workspaceCwds: ['/repos/clinic', '/repos/droid-control/.worktrees/other'],
+    boundCwd: '/repos/clinic/.worktrees/review',
+    boundNumber: 7,
+  });
+  assert.deepEqual(inbox.listingCwds, ['/repos/droid-control', '/repos/clinic']);
+  assert.equal(inbox.currentCwd, '/repos/droid-control');
+  assert.equal(inbox.boundCwd, '/repos/clinic');
+  assert.equal(inbox.selectedNumber, 7);
+});
+
+test('a folder-less chat does not inherit a leftover draft workspace', () => {
+  const inbox = resolvePrInboxContext({
+    active: { cwd: '', workspaceKind: 'none' },
+    draftCwd: '/repos/droid-control',
+    workspaceCwds: ['/repos/clinic', '/repos/droid-control'],
+    boundCwd: null,
+    boundNumber: null,
+  });
+  assert.equal(inbox.currentCwd, '/repos/clinic');
+  assert.deepEqual(inbox.listingCwds, ['/repos/clinic', '/repos/droid-control']);
+});
+
+test('with no session the draft folder is the current repository', () => {
+  const inbox = resolvePrInboxContext({
+    active: null,
+    draftCwd: '/repos/droid-control',
+    workspaceCwds: ['/repos/clinic'],
+    boundCwd: null,
+    boundNumber: null,
+  });
+  assert.equal(inbox.currentCwd, '/repos/droid-control');
+  assert.deepEqual(inbox.listingCwds, ['/repos/droid-control', '/repos/clinic']);
+});
+
+test('a bound repository that is no longer listed drops the selected number', () => {
+  const inbox = resolvePrInboxContext({
+    active: { cwd: '/repos/droid-control', workspaceKind: 'folder' },
+    workspaceCwds: ['/repos/droid-control'],
+    boundCwd: '/repos/gone',
+    boundNumber: 4,
+  });
+  assert.equal(inbox.boundCwd, '/repos/droid-control');
+  assert.equal(inbox.selectedNumber, null);
 });

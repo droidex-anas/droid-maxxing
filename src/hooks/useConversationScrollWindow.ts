@@ -5,42 +5,36 @@ import {
   restoreViewportAnchor,
   shouldCancelViewportRestore,
   viewportAnchorAfterScroll,
+  type ConversationViewportLayout,
   type ViewportAnchor,
 } from './conversationViewportAnchor';
+import {
+  applyConversationContentResize,
+  didCommitRequestedHistoryPrepend,
+  pinnedViewportAction,
+  rememberScrollSnapshot,
+  restoreConversationScrollSnapshot,
+  shouldBindConversationContentResize,
+  shouldCompensateConversationContentResize,
+  shouldLoadOlderHistoryAtTop,
+  shouldReleaseConversationTranscript,
+  shouldReportPinnedViewport,
+  deferredViewportRestoreAction,
+  TOP_AUTO_LOAD_PX,
+  type ConversationContentResizeBinding,
+  type PendingHistoryPrepend,
+  type ScrollDispatch,
+  type ScrollSnapshot,
+} from './conversationScrollWindow';
 
 const HISTORY_PAGE_EVENT_LIMIT = 240;
 // Reading near the thread's top pulls a large page so reaching the start of a
 // long thread takes a few loads, not dozens. Protocol mirror of
 // sidecar/src/SessionTimeline.ts MAX_HISTORY_PAGE_EVENTS.
-const OLDER_HISTORY_PAGE_EVENT_LIMIT = 1_600;
-const TOP_AUTO_LOAD_PX = 600;
+export const CONVERSATION_OLDER_HISTORY_PAGE_EVENT_LIMIT = 1_600;
 // Prepending while a flick is still in motion fights the reader's momentum and
 // feels laggy; a prepend against a settled viewport restores with zero drift.
 const SCROLL_SETTLE_MS = 200;
-const MAX_SCROLL_SNAPSHOTS = 100;
-
-type ScrollDispatch = (
-  action:
-    | { type: 'TRANSCRIPT_VIEWPORT'; appSessionId: string; pinned: boolean }
-    | { type: 'TRANSCRIPT_RELEASE_VIEWPORT'; appSessionId: string }
-    | { type: 'SESSION_HISTORY_LOADING_OLDER'; appSessionId: string }
-    | {
-        type: 'CHILD_HISTORY_LOADING_OLDER';
-        parentAppSessionId: string;
-        childSessionId: string;
-      }
-    | {
-        type: 'CHILD_TRANSCRIPT_VIEWPORT';
-        parentAppSessionId: string;
-        childSessionId: string;
-        pinned: boolean;
-      }
-    | {
-        type: 'CHILD_TRANSCRIPT_RELEASE_VIEWPORT';
-        parentAppSessionId: string;
-        childSessionId: string;
-      },
-) => void;
 
 interface ConversationScrollWindowOptions {
   scrollRef: RefObject<HTMLDivElement | null>;
@@ -57,104 +51,13 @@ interface ConversationScrollWindowOptions {
   isConversationLive: boolean;
   isAutoPagingOlderHistory: boolean;
   dispatch: ScrollDispatch;
+  viewportLayoutRef?: RefObject<ConversationViewportLayout | null>;
 }
 
-interface PendingHistoryPrepend {
-  conversationKey: string;
-  requestedCursor: string;
-  transcriptLength: number;
-}
-
-interface ScrollSnapshot {
-  top: number;
-  pinned: boolean;
-  anchor: ViewportAnchor | null;
-}
-
-function rememberScrollSnapshot(
-  snapshots: Map<string, ScrollSnapshot>,
-  conversationKey: string | null,
-  snapshot: ScrollSnapshot,
-): void {
-  if (!conversationKey) return;
-  snapshots.delete(conversationKey);
-  snapshots.set(conversationKey, snapshot);
-  while (snapshots.size > MAX_SCROLL_SNAPSHOTS) {
-    const oldest = snapshots.keys().next().value;
-    if (typeof oldest !== 'string') return;
-    snapshots.delete(oldest);
-  }
-}
-
-function shouldReportPinnedViewport(
-  reported: { conversationKey: string; pinned: boolean } | null,
-  conversationKey: string,
-  pinned: boolean,
-): boolean {
-  if (!reported) return true;
-  return reported.conversationKey !== conversationKey || reported.pinned !== pinned;
-}
-
-function pinnedViewportAction({
-  appSessionId,
-  childSessionId,
-  pinned,
-}: {
-  appSessionId: string;
-  childSessionId?: string;
-  pinned: boolean;
-}): Parameters<ScrollDispatch>[0] {
-  if (childSessionId) {
-    return {
-      type: 'CHILD_TRANSCRIPT_VIEWPORT',
-      parentAppSessionId: appSessionId,
-      childSessionId,
-      pinned,
-    };
-  }
-  return {
-    type: 'TRANSCRIPT_VIEWPORT',
-    appSessionId,
-    pinned,
-  };
-}
-
-export function shouldReleaseConversationTranscript(options: {
-  isConversationLive: boolean;
-  isLoadingOlder: boolean;
-  isAutoPagingOlderHistory: boolean;
-  isPinned: boolean;
-}): boolean {
-  return (
-    !options.isConversationLive &&
-    !options.isLoadingOlder &&
-    !options.isAutoPagingOlderHistory &&
-    options.isPinned
-  );
-}
-
-// Older history loads only once the reader has settled near the top: close
-// enough to want more, with no page already on the way.
-export function shouldLoadOlderHistoryAtTop(options: {
-  scrollTop: number;
-  hasOlderCursor: boolean;
-  isLoadingOlder: boolean;
-}): boolean {
-  return options.hasOlderCursor && !options.isLoadingOlder && options.scrollTop < TOP_AUTO_LOAD_PX;
-}
-
-export function didCommitRequestedHistoryPrepend({
-  requestedCursor,
-  currentCursor,
-  previousTranscriptLength,
-  transcriptLength,
-}: {
-  requestedCursor: string;
-  currentCursor: string | undefined;
-  previousTranscriptLength: number;
-  transcriptLength: number;
-}): boolean {
-  return requestedCursor !== currentCursor && transcriptLength > previousTranscriptLength;
+interface ActiveConversationContentResizeBinding extends ConversationContentResizeBinding {
+  observer: ResizeObserver;
+  releaseFrame: number;
+  ownedRestoreGeneration: number | null;
 }
 
 export function useConversationScrollWindow({
@@ -172,9 +75,11 @@ export function useConversationScrollWindow({
   isConversationLive,
   isAutoPagingOlderHistory,
   dispatch,
+  viewportLayoutRef,
 }: ConversationScrollWindowOptions): {
   onScroll: () => void;
   requestOlderHistory: (limit?: number) => void;
+  restoredScrollOffset: number | undefined;
 } {
   const viewportAnchor = useRef<ViewportAnchor | null>(null);
   const isRestoringViewport = useRef(false);
@@ -185,6 +90,8 @@ export function useConversationScrollWindow({
   const isPinned = useRef(true);
   const reportedPinned = useRef<{ conversationKey: string; pinned: boolean } | null>(null);
   const isOlderRequestPending = useRef(false);
+  const isUserScrolling = useRef(false);
+  const userScrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settledTopLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scrollSnapshots] = useState(() => new Map<string, ScrollSnapshot>());
 
@@ -194,7 +101,22 @@ export function useConversationScrollWindow({
     settledTopLoadTimer.current = null;
   }, []);
 
-  useEffect(() => cancelSettledTopLoad, [cancelSettledTopLoad, visibleConversationKey]);
+  const markUserScrolling = useCallback(() => {
+    isUserScrolling.current = true;
+    if (userScrollIdleTimer.current !== null) clearTimeout(userScrollIdleTimer.current);
+    userScrollIdleTimer.current = setTimeout(() => {
+      userScrollIdleTimer.current = null;
+      isUserScrolling.current = false;
+    }, SCROLL_SETTLE_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      cancelSettledTopLoad();
+      if (userScrollIdleTimer.current !== null) clearTimeout(userScrollIdleTimer.current);
+    },
+    [cancelSettledTopLoad, visibleConversationKey],
+  );
 
   useEffect(() => {
     if (isLoadingOlder) return;
@@ -214,13 +136,13 @@ export function useConversationScrollWindow({
     isSettlingHistoryPrepend.current = false;
     expectedRestoredScrollTop.current = null;
     viewportAnchor.current = null;
-    isPinned.current = snapshot?.pinned ?? true;
-    element.scrollTop = snapshot?.top ?? element.scrollHeight;
-    if (!isPinned.current) {
-      viewportAnchor.current = snapshot?.anchor
-        ? restoreViewportAnchor(element, snapshot.anchor).anchor
-        : captureViewportAnchor(element, true);
-    }
+    const restored = restoreConversationScrollSnapshot(
+      element,
+      snapshot,
+      viewportLayoutRef?.current,
+    );
+    isPinned.current = restored.pinned;
+    viewportAnchor.current = restored.anchor;
     if (activeAppSessionId) {
       reportedPinned.current = {
         conversationKey: visibleConversationKey,
@@ -248,6 +170,7 @@ export function useConversationScrollWindow({
     isViewingChildSession,
     scrollRef,
     scrollSnapshots,
+    viewportLayoutRef,
     visibleConversationKey,
   ]);
 
@@ -339,6 +262,7 @@ export function useConversationScrollWindow({
     // Every scroll event pushes the load out until the viewport settles, so a
     // page never prepends mid-flick.
     cancelSettledTopLoad();
+    markUserScrolling();
     if (
       historyAppSessionId &&
       shouldLoadOlderHistoryAtTop({
@@ -351,12 +275,13 @@ export function useConversationScrollWindow({
         settledTopLoadTimer.current = null;
         const settled = scrollRef.current;
         if (!settled || settled.scrollTop >= TOP_AUTO_LOAD_PX) return;
-        requestOlderHistory(OLDER_HISTORY_PAGE_EVENT_LIMIT);
+        requestOlderHistory(CONVERSATION_OLDER_HISTORY_PAGE_EVENT_LIMIT);
       }, SCROLL_SETTLE_MS);
     }
   }, [
     activeAppSessionId,
     cancelSettledTopLoad,
+    markUserScrolling,
     dispatch,
     historyChildSessionId,
     historyAppSessionId,
@@ -405,12 +330,16 @@ export function useConversationScrollWindow({
         expectedRestoredScrollTop.current = null;
         return;
       }
-      const restored = restoreViewportAnchor(element, viewportAnchor.current);
+      const restored = restoreViewportAnchor(
+        element,
+        viewportAnchor.current,
+        true,
+        viewportLayoutRef?.current,
+      );
       viewportAnchor.current = restored.anchor;
       expectedRestoredScrollTop.current = element.scrollTop;
-      // content-visibility can exchange intrinsic estimates for measured row
-      // heights without changing the feed's total height. Recheck for a few
-      // frames even after finding the row, because a container-only observer
+      // Virtualizer measurement can keep shifting row offsets for a few frames
+      // after a prepend. Recheck until the cache settles; a container observer
       // cannot see that internal redistribution.
       if (remainingAttempts > 0) {
         remainingAttempts--;
@@ -433,63 +362,128 @@ export function useConversationScrollWindow({
         expectedRestoredScrollTop.current = null;
       }
     };
-  }, [isLoadingOlder, olderCursor, scrollRef, transcriptLength, visibleConversationKey]);
+  }, [
+    isLoadingOlder,
+    olderCursor,
+    scrollRef,
+    transcriptLength,
+    viewportLayoutRef,
+    visibleConversationKey,
+  ]);
 
   // Keep compensating after the prepend commit while dynamic chat content
   // settles. This applies equally to today's markdown/tool cards and future
   // interactive app blocks whose height changes after data or animation work.
+  const contentResizeBindingRef = useRef<ActiveConversationContentResizeBinding | null>(null);
+  const disposeContentResizeBinding = useCallback(() => {
+    const binding = contentResizeBindingRef.current;
+    if (!binding) return;
+    contentResizeBindingRef.current = null;
+    binding.observer.disconnect();
+    if (binding.releaseFrame) cancelAnimationFrame(binding.releaseFrame);
+    if (
+      binding.ownedRestoreGeneration !== null &&
+      viewportRestoreGeneration.current === binding.ownedRestoreGeneration
+    ) {
+      isRestoringViewport.current = false;
+      expectedRestoredScrollTop.current = null;
+    }
+  }, []);
   useLayoutEffect(() => {
     const element = scrollRef.current;
-    const content = element?.firstElementChild;
-    if (!element || !content || typeof ResizeObserver === 'undefined') return undefined;
-    let releaseFrame = 0;
-    let ownedRestoreGeneration: number | null = null;
-    const observer = new ResizeObserver(() => {
-      if (isPinned.current || viewportAnchor.current === null) return;
-      const ownsRestore = !isRestoringViewport.current;
-      const restoreGeneration = ownsRestore
-        ? ++viewportRestoreGeneration.current
-        : viewportRestoreGeneration.current;
-      isRestoringViewport.current = true;
-      const restored = restoreViewportAnchor(
+    const content = element?.firstElementChild ?? null;
+    if (typeof ResizeObserver === 'undefined' || !element || !content) {
+      disposeContentResizeBinding();
+      return;
+    }
+    if (
+      !shouldBindConversationContentResize({
+        binding: contentResizeBindingRef.current,
         element,
-        viewportAnchor.current,
-        isSettlingHistoryPrepend.current,
-      );
-      viewportAnchor.current = restored.anchor;
-      expectedRestoredScrollTop.current = element.scrollTop;
-      if (ownsRestore) {
-        ownedRestoreGeneration = restoreGeneration;
-        if (releaseFrame) cancelAnimationFrame(releaseFrame);
-        releaseFrame = requestAnimationFrame(() => {
-          if (viewportAnchor.current !== null && !restored.didFindRow) {
-            const retried = restoreViewportAnchor(element, viewportAnchor.current, false);
-            viewportAnchor.current = retried.didFindRow
-              ? retried.anchor
-              : captureViewportAnchor(element, true);
-            expectedRestoredScrollTop.current = element.scrollTop;
-          }
-          if (viewportRestoreGeneration.current === restoreGeneration) {
+        content,
+        conversationKey: visibleConversationKey,
+      })
+    )
+      return;
+    disposeContentResizeBinding();
+    const binding: ActiveConversationContentResizeBinding = {
+      element,
+      content,
+      conversationKey: visibleConversationKey,
+      observer: new ResizeObserver(() => {
+        if (
+          !shouldCompensateConversationContentResize({
+            isPinned: isPinned.current,
+            isSettlingHistoryPrepend: isSettlingHistoryPrepend.current,
+            isUserScrolling: isUserScrolling.current,
+          })
+        ) {
+          return;
+        }
+        if (isPinned.current) {
+          // Images, interactive Apps, and disclosures can grow without changing
+          // transcript length. A bottom-pinned reader follows that growth just as
+          // they follow newly appended output.
+          applyConversationContentResize(
+            element,
+            viewportAnchor.current,
+            true,
+            false,
+            viewportLayoutRef?.current,
+          );
+          return;
+        }
+        if (viewportAnchor.current === null) return;
+        const ownsRestore = !isRestoringViewport.current;
+        const restoreGeneration = ownsRestore
+          ? ++viewportRestoreGeneration.current
+          : viewportRestoreGeneration.current;
+        isRestoringViewport.current = true;
+        const restored = applyConversationContentResize(
+          element,
+          viewportAnchor.current,
+          false,
+          isSettlingHistoryPrepend.current,
+          viewportLayoutRef?.current,
+        );
+        if (restored.mode !== 'preserve-anchor') return;
+        viewportAnchor.current = restored.anchor;
+        expectedRestoredScrollTop.current = element.scrollTop;
+        if (ownsRestore) {
+          binding.ownedRestoreGeneration = restoreGeneration;
+          if (binding.releaseFrame) cancelAnimationFrame(binding.releaseFrame);
+          binding.releaseFrame = requestAnimationFrame(() => {
+            binding.ownedRestoreGeneration = null;
+            const action = deferredViewportRestoreAction(
+              viewportRestoreGeneration.current,
+              restoreGeneration,
+              viewportAnchor.current !== null && !restored.didFindRow,
+            );
+            if (action === 'skip') return;
+            if (action === 'retry' && viewportAnchor.current !== null) {
+              const retried = restoreViewportAnchor(
+                element,
+                viewportAnchor.current,
+                false,
+                viewportLayoutRef?.current,
+              );
+              viewportAnchor.current = retried.didFindRow
+                ? retried.anchor
+                : captureViewportAnchor(element, true);
+              expectedRestoredScrollTop.current = element.scrollTop;
+            }
             isRestoringViewport.current = false;
             expectedRestoredScrollTop.current = null;
-          }
-          ownedRestoreGeneration = null;
-        });
-      }
-    });
-    observer.observe(content);
-    return () => {
-      observer.disconnect();
-      if (releaseFrame) cancelAnimationFrame(releaseFrame);
-      if (
-        ownedRestoreGeneration !== null &&
-        viewportRestoreGeneration.current === ownedRestoreGeneration
-      ) {
-        isRestoringViewport.current = false;
-        expectedRestoredScrollTop.current = null;
-      }
+          });
+        }
+      }),
+      releaseFrame: 0,
+      ownedRestoreGeneration: null,
     };
-  }, [scrollRef, transcriptLength, visibleConversationKey]);
+    contentResizeBindingRef.current = binding;
+    binding.observer.observe(content);
+  });
+  useEffect(() => disposeContentResizeBinding, [disposeContentResizeBinding]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -527,5 +521,12 @@ export function useConversationScrollWindow({
     retainedTranscriptLength,
   ]);
 
-  return { onScroll, requestOlderHistory };
+  return {
+    onScroll,
+    requestOlderHistory,
+    restoredScrollOffset:
+      visibleConversationKey && scrollSnapshots.has(visibleConversationKey)
+        ? scrollSnapshots.get(visibleConversationKey)?.top
+        : undefined,
+  };
 }

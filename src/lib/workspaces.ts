@@ -10,12 +10,19 @@ export const SIDEBAR_VISIBLE_SESSION_LIMIT = 5;
 export interface WorkspaceSection {
   cwd: string;
   name: string;
+  // Every cwd sessions for this workspace can run in (the folder plus its
+  // linked worktrees); also the keys the sidecar scopes a session list by.
+  executionCwds: string[];
   sessions: SessionSummary[];
+  // Pre-existing Droid sessions in this folder that the sidecar has not sent
+  // yet, and that "Show earlier" can pull in.
+  earlierSessionCount: number;
 }
 
 export interface WorkspaceSectionOptions {
   limit?: number;
   executionCwds?: ReadonlyMap<string, readonly string[]>;
+  earlierSessionsByCwd?: Readonly<Record<string, number>>;
 }
 
 export interface WorkspaceScope {
@@ -89,9 +96,36 @@ export function addWorkspaceCwd(existing: string[], cwd: string): string[] {
   return [next, ...existing.filter((item) => item !== next)];
 }
 
+export function removeWorkspaceCwd(existing: string[], cwd: string): string[] {
+  const root = repositoryWorkspaceCwd(cwd.trim());
+  if (!root) return existing;
+  const key = comparablePath(root);
+  const next = existing.filter((item) => comparablePath(repositoryWorkspaceCwd(item)) !== key);
+  return next.length === existing.length ? existing : next;
+}
+
 function repositoryWorkspaceCwd(cwd: string): string {
   const marker = /[\\/]\.worktrees[\\/]/.exec(cwd);
   return marker ? cwd.slice(0, marker.index) : cwd;
+}
+
+export function uniqueRepositoryWorkspaceCwds(workspaceCwds: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const cwd of workspaceCwds) {
+    const root = repositoryWorkspaceCwd(cwd.trim());
+    if (!root) continue;
+    const key = comparablePath(root);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(root);
+  }
+  return out;
+}
+
+export function repositoryRootCwd(cwd: string | null | undefined): string | null {
+  if (!cwd?.trim()) return null;
+  return uniqueRepositoryWorkspaceCwds([cwd])[0] ?? null;
 }
 
 export function buildWorkspaceSections(
@@ -128,14 +162,23 @@ export function buildWorkspaceSections(
     if (owner) sessionsByOwner.get(owner.cwd)?.push(session);
   }
 
-  return workspaces.map((cwd) => ({
-    cwd,
-    name: workspaceName(cwd),
-    sessions: maybeLimit(
-      (sessionsByOwner.get(cwd) ?? []).sort((a, b) => b.updatedAt - a.updatedAt),
-      options.limit,
-    ),
-  }));
+  const earlierByCwd = new Map(Object.entries(options.earlierSessionsByCwd ?? {}));
+  return workspaces.map((cwd) => {
+    const executionCwds = [...(options.executionCwds?.get(cwd) ?? [cwd])];
+    return {
+      cwd,
+      name: workspaceName(cwd),
+      executionCwds,
+      sessions: maybeLimit(
+        (sessionsByOwner.get(cwd) ?? []).sort((a, b) => b.updatedAt - a.updatedAt),
+        options.limit,
+      ),
+      earlierSessionCount: executionCwds.reduce(
+        (total, executionCwd) => total + (earlierByCwd.get(executionCwd) ?? 0),
+        0,
+      ),
+    };
+  });
 }
 
 function maybeLimit<T>(items: T[], limit?: number): T[] {

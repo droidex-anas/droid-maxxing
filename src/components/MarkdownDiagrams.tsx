@@ -1,6 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { Mermaid } from 'mermaid';
 
+import { useVisibleOnce } from '../hooks/useVisibleOnce';
+
 /* Renderers for the fenced languages that draw a diagram instead of code. */
 
 let mermaidPromise: Promise<Mermaid> | null = null;
@@ -49,8 +51,11 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string>('');
   const idRef = useRef(`mmd-${String(++mermaidSeq)}`);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const visible = useVisibleOnce(hostRef);
 
   useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
     const raw = code.trim();
     loadMermaid()
@@ -74,11 +79,14 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, visible]);
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5">
+      <div
+        ref={hostRef}
+        className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5"
+      >
         <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
           <span className="text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60">
             Diagram source
@@ -95,7 +103,10 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
   }
 
   return (
-    <div className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5">
+    <div
+      ref={hostRef}
+      className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5"
+    >
       <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
         <span className="text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60">
           Diagram

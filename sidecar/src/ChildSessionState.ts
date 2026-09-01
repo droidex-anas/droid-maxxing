@@ -1,7 +1,14 @@
 import type { McpServerConfig } from '@factory/droid-sdk';
 import type { FactorySession } from './DroidRuntime.js';
 import type { PersistedChildSession, PersistedChildSpawnLink } from './history.js';
-import type { Autonomy, ChildActivity, ReasoningEffort, SessionSummary } from './protocol.js';
+import { publishedStreamFidelity } from './childStreamFidelity.js';
+import type {
+  Autonomy,
+  ChildActivity,
+  ReasoningEffort,
+  SessionSummary,
+  StreamFidelity,
+} from './protocol.js';
 import { normalizeAutonomy, reasoningValue, type SessionInitResult } from './sessionHelpers.js';
 /* eslint-disable @typescript-eslint/no-unused-vars -- persisted-only fields are intentionally omitted. */
 export interface ChildIdentity {
@@ -48,6 +55,7 @@ export interface ChildTurnState {
   phase: 'idle' | 'streaming';
   autoCompacting: boolean;
   pendingSends: string[];
+  pendingDrainEpoch: number;
   interruptingForSteer: boolean;
   interrupting: boolean;
 }
@@ -70,6 +78,8 @@ export interface ChildSessionState {
   // See ChildSpawnObservation.activity: live-only, so it is absent after a
   // restart even though the child itself is restored from history.
   activity?: ChildActivity;
+  // Live-only. Absent until a token/tool stream is opened; summaries publish `state`.
+  streamFidelity?: StreamFidelity;
   runtimeGeneration: number;
   configurationGeneration: number;
   retiredProviderSessionIds: Set<string>;
@@ -77,6 +87,8 @@ export interface ChildSessionState {
   turn: ChildTurnState;
   closeWhenIdle: boolean;
   mutationTail?: Promise<void>;
+  queued?: boolean;
+  queuedRequestId?: string | null;
 }
 export interface ChildOpenAttempt {
   settled: Promise<void>;
@@ -95,6 +107,7 @@ export interface ParentChildSessions {
   pendingSpawns: Map<string, ChildSpawnObservation>;
   openAttempts: Map<string, ChildOpenAttempt>;
   reservedOpenSlots: Set<string>;
+  runtimeQueue: string[];
   closing: boolean;
 }
 export interface ChildRuntimeTarget {
@@ -143,6 +156,7 @@ export function childStateFromRecord(record: PersistedChildSession): ChildSessio
       phase: 'idle',
       autoCompacting: false,
       pendingSends: [],
+      pendingDrainEpoch: 0,
       interruptingForSteer: false,
       interrupting: false,
     },
@@ -170,6 +184,37 @@ export function newChildState(input: {
     transcriptAvailable: false,
     updatedAt: input.updatedAt,
   });
+}
+
+export function applyObservedChild(
+  child: ChildSessionState,
+  observed: ChildSpawnObservation,
+  spawnLink: PersistedChildSpawnLink | undefined,
+  providerSessionId: string,
+  now: number,
+): { previousPrompt: string | undefined } {
+  if (child.providerSessionId && child.providerSessionId !== providerSessionId)
+    child.retiredProviderSessionIds.add(child.providerSessionId);
+  const previousPrompt = child.prompt;
+  if (child.role !== observed.role) {
+    child.role = observed.role;
+    child.configurationGeneration += 1;
+  }
+  child.providerSessionId = providerSessionId;
+  child.status = 'running';
+  applyChildLaunchSettings(child, {
+    modelId: observed.modelId,
+    reasoningEffort: observed.reasoningEffort,
+  });
+  // First label wins: the spawn call's label is set at admission, and
+  // later poll observations echo the same metadata with different casing.
+  child.label ??= observed.label;
+  child.prompt = observed.prompt ?? child.prompt;
+  child.spawnLink = spawnLink ?? child.spawnLink;
+  child.activity = observed.activity ?? child.activity;
+  child.transcriptAvailable = true;
+  child.startedAt ??= now;
+  return { previousPrompt };
 }
 
 export function applyChildLaunchSettings(child: ChildSessionState, settings: ChildSettings): void {
@@ -217,7 +262,23 @@ export function childSummary(child: ChildSessionState | PersistedChildSession) {
     // Autonomy is runtime-scoped: only a live child reports its confirmed value.
     ...(live?.runtime && live.autonomy ? { autonomy: live.autonomy } : {}),
     ...(live?.activity ? { activity: live.activity } : {}),
+    ...(live?.queued ? { queued: true } : {}),
+    streamFidelity: publishedStreamFidelity(live?.streamFidelity),
   };
+}
+
+export function childHistoryProviderSessionIds(
+  child: ChildSessionState | PersistedChildSession,
+): string[] {
+  const previous =
+    'identity' in child
+      ? [...child.retiredProviderSessionIds]
+      : (child.previousProviderSessionIds ?? []);
+  return [...previous, ...(child.providerSessionId ? [child.providerSessionId] : [])];
+}
+
+export function childDurabilityKey(identity: ChildIdentity): string {
+  return `${identity.parentAppSessionId}\u0000${identity.childSessionId}`;
 }
 
 export function findChildByProvider(
@@ -298,4 +359,20 @@ export function forgetPendingChildObservation(
 
 export function childAcceptsWork(child: ChildSessionState): boolean {
   return child.status !== 'completed' && !child.closeWhenIdle;
+}
+
+// Work the parent must not close out from under: a running or queued child, a
+// turn in flight, or a mutation that has not settled.
+export function childHasWorkInFlight(child: ChildSessionState): boolean {
+  return (
+    child.status === 'running' ||
+    child.status === 'pending' ||
+    child.queued === true ||
+    child.turn.phase !== 'idle' ||
+    child.turn.autoCompacting ||
+    child.turn.pendingSends.length > 0 ||
+    child.turn.interrupting ||
+    child.turn.interruptingForSteer ||
+    child.mutationTail !== undefined
+  );
 }

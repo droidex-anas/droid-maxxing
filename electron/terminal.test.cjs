@@ -1,13 +1,6 @@
 const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const {
-  createTerminalManager,
-  createTerminalSubscriptionRegistry,
-  MAX_COLS,
-  MAX_REPLAY_BYTES,
-  MAX_ROWS,
-} = require('./terminal.cjs');
+const { createTerminalManager, MAX_COLS, MAX_REPLAY_BYTES, MAX_ROWS } = require('./terminal.cjs');
 
 function fixture(options = {}) {
   const instances = [];
@@ -67,34 +60,6 @@ function fixture(options = {}) {
   });
   return { manager, instances };
 }
-
-test('terminal subscription cycles retain one sender cleanup listener', () => {
-  let unsubscribed = 0;
-  const manager = {
-    subscribe: () => () => {
-      unsubscribed += 1;
-    },
-  };
-  const registry = createTerminalSubscriptionRegistry(manager);
-  const sender = new EventEmitter();
-  sender.id = 1;
-  sender.isDestroyed = () => false;
-  sender.send = () => {};
-
-  for (let index = 0; index < 20; index += 1) {
-    registry.subscribe(sender, `terminal-${index}`);
-    registry.unsubscribe(sender, `terminal-${index}`);
-  }
-
-  assert.equal(sender.listenerCount('destroyed'), 1);
-  assert.equal(unsubscribed, 20);
-
-  registry.subscribe(sender, 'terminal-active');
-  sender.emit('destroyed');
-
-  assert.equal(sender.listenerCount('destroyed'), 0);
-  assert.equal(unsubscribed, 21);
-});
 
 test('terminal manager keeps a PTY alive until explicit kill', async () => {
   const { manager, instances } = fixture();
@@ -248,6 +213,50 @@ test('replay trimming preserves complete UTF-8 characters', async () => {
   assert.equal(events[0].droppedBytes, 4);
 });
 
+test('replaySince owns window arithmetic at every offset boundary', async () => {
+  const { manager, instances } = fixture();
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  const overflow = 32;
+  instances[0].emitData('x'.repeat(MAX_REPLAY_BYTES + overflow));
+  const emitted = MAX_REPLAY_BYTES + overflow;
+  const windowStart = overflow;
+
+  const beforeWindow = manager.replaySince(terminal.id, 10);
+  assert.equal(beforeWindow.truncated, true);
+  assert.equal(beforeWindow.droppedBytes, windowStart - 10);
+  assert.equal(Buffer.byteLength(beforeWindow.data), MAX_REPLAY_BYTES);
+  assert.equal(beforeWindow.byteOffset, emitted);
+  assert.equal(beforeWindow.totalEmittedBytes, emitted);
+
+  const atStart = manager.replaySince(terminal.id, windowStart);
+  assert.equal(atStart.truncated, false);
+  assert.equal(atStart.droppedBytes, 0);
+  assert.equal(Buffer.byteLength(atStart.data), MAX_REPLAY_BYTES);
+  assert.equal(atStart.data, 'x'.repeat(MAX_REPLAY_BYTES));
+
+  const midOffset = windowStart + 100;
+  const midWindow = manager.replaySince(terminal.id, midOffset);
+  assert.equal(midWindow.truncated, false);
+  assert.equal(midWindow.droppedBytes, 0);
+  assert.equal(Buffer.byteLength(midWindow.data), MAX_REPLAY_BYTES - 100);
+  assert.equal(midWindow.data, 'x'.repeat(MAX_REPLAY_BYTES - 100));
+
+  const atHead = manager.replaySince(terminal.id, emitted);
+  assert.equal(atHead.data, '');
+  assert.equal(atHead.truncated, false);
+  assert.equal(atHead.droppedBytes, 0);
+  assert.equal(atHead.byteOffset, emitted);
+
+  const fromOrigin = manager.replaySince(terminal.id, 0);
+  const subscribed = [];
+  manager.subscribe(terminal.id, (event) => subscribed.push(event));
+  assert.equal(subscribed[0].kind, 'replay');
+  assert.equal(subscribed[0].data, fromOrigin.data);
+  assert.equal(subscribed[0].droppedBytes, fromOrigin.droppedBytes);
+  assert.equal(subscribed[0].truncated, fromOrigin.truncated);
+  assert.equal(subscribed[0].sequence, fromOrigin.sequence);
+});
+
 test('terminal manager releases capacity when node-pty fails to load', async () => {
   const manager = createTerminalManager({
     platform: 'darwin',
@@ -272,4 +281,42 @@ test('terminal manager releases capacity when node-pty fails to load', async () 
     );
   }
   assert.equal(manager.list().length, 0);
+});
+
+test('an exited terminal drops its PTY immediately and keeps bounded replay for late subscribers', async () => {
+  const cleanups = [];
+  const { manager, instances } = fixture({
+    setTimeout: (callback) => {
+      cleanups.push(callback);
+      return { unref() {} };
+    },
+    clearTimeout: () => {},
+    exitRetentionMs: 30_000,
+  });
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  instances[0].emitData('kept-for-replay');
+  instances[0].emitExit(0, 0);
+
+  assert.equal(instances[0].killed, true);
+  assert.equal(manager.count(), 0);
+  assert.equal(manager.countRetained(), 1);
+  assert.equal(manager.summary(terminal.id).lastActivityAt > 0, true);
+
+  const events = [];
+  manager.subscribe(terminal.id, (event) => events.push(event));
+  assert.equal(events[0].kind, 'replay');
+  assert.equal(events[0].data, 'kept-for-replay');
+  assert.equal(events[1].kind, 'exit');
+  assert.equal(cleanups.length, 1);
+});
+
+test('memory pressure trims live replay without dropping the terminal', async () => {
+  const { manager, instances } = fixture();
+  const terminal = await manager.create({ appSessionId: 'session-1', cwd: '/repo' });
+  instances[0].emitData('abcdefghijklmnopqrstuvwxyz');
+  assert.equal(manager.trimReplay(8), 1);
+  const replay = manager.replaySince(terminal.id, 0);
+  assert.ok(Buffer.byteLength(replay.data) <= 8);
+  assert.equal(manager.list().length, 1);
+  assert.equal(manager.resourceCounts().live, 1);
 });
