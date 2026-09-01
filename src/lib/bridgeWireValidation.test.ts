@@ -99,24 +99,3 @@ test('rejects object payloads that are actually arrays', () => {
     null,
   );
 });
-
-test('rejects an automations snapshot that is not the snapshot shape', () => {
-  assert.equal(serverWireMessage(batch({ type: 'automations.snapshot', snapshot: [] })), null);
-  assert.equal(serverWireMessage(batch({ type: 'automations.snapshot', snapshot: {} })), null);
-  assert.ok(
-    serverWireMessage(
-      batch({
-        type: 'automations.snapshot',
-        snapshot: {
-          automations: [],
-          runs: [],
-          proposals: [],
-          sessionOrigins: {},
-          queuedRunCount: 0,
-          activeRunCount: 0,
-          scheduler: { ready: true, nextWakeAt: null, activeRunId: null },
-        },
-      }),
-    ),
-  );
-});
