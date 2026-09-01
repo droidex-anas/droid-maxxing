@@ -194,6 +194,7 @@ export default function ChatView({
   isObscured?: boolean;
 }) {
   const dispatch = useStoreDispatch();
+  const toolActivity = useStoreSelector((current) => current.toolActivity);
   const equalChatState = useCallback(
     (previous: ChatViewState, next: ChatViewState) =>
       isObscured || equalVisibleChatState(previous, next),
@@ -469,8 +470,9 @@ export default function ChatView({
         specContent,
         changes: true,
         groupChildSessions: !viewingChildSession,
+        density: toolActivity,
       }),
-    [transcript, live, specContent, viewingChildSession],
+    [transcript, live, specContent, viewingChildSession, toolActivity],
   );
   const { timelineAnchors, isTimelinePriming, isAutoPagingOlderHistory } = useConversationTimeline({
     feedItems,

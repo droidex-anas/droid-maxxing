@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
 import type { FileChange } from '../lib/diff';
+import { displayPath, pathFileName } from '../lib/pathDisplay';
 
 export interface TurnFile {
   path: string;
@@ -18,15 +19,6 @@ export interface TurnChangesItem {
   files: TurnFile[];
   added: number;
   removed: number;
-}
-
-function displayTurnEditPath(path: string, cwd?: string): string {
-  const normalizedPath = path.replace(/\\/g, '/');
-  if (!cwd) return normalizedPath;
-  const root = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (normalizedPath === root) return normalizedPath;
-  if (normalizedPath.startsWith(`${root}/`)) return normalizedPath.slice(root.length + 1);
-  return normalizedPath;
 }
 
 function ChangeCount({ added, removed }: { added: number; removed: number }) {
@@ -94,10 +86,8 @@ export default function TurnChangesPanel({
       <Expand open={open}>
         <div className="border-t border-droid-border">
           {files.map((file) => {
-            const display = displayTurnEditPath(file.path, cwd);
-            const slash = display.lastIndexOf('/');
-            const directory = slash >= 0 ? display.slice(0, slash) : '';
-            const name = slash >= 0 ? display.slice(slash + 1) : display;
+            const display = displayPath(file.path, cwd);
+            const name = pathFileName(display);
             return (
               <button
                 key={file.path}
@@ -106,11 +96,8 @@ export default function TurnChangesPanel({
                 title={file.path}
                 className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/40 disabled:cursor-default"
               >
-                <span className="min-w-0 flex-1 truncate text-[12.5px]">
-                  <span className="text-droid-text-secondary">{name}</span>
-                  {directory && (
-                    <span className="ml-2 text-[11px] text-droid-text-muted/60">{directory}</span>
-                  )}
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
+                  {name}
                 </span>
                 <ChangeCount added={file.added} removed={file.removed} />
               </button>

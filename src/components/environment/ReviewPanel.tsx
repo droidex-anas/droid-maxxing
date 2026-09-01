@@ -36,6 +36,7 @@ import {
   nextReviewFocusScope,
   reviewScopeLabel,
 } from '../../lib/reviewScopes';
+import { displayPath } from '../../lib/pathDisplay';
 import type { DiffFile } from '../../types/vcs';
 import { FileTypeIcon } from '../FileTypeIcon';
 
@@ -178,16 +179,19 @@ function MenuItem({
 
 const FileRow = memo(function FileRow({
   file,
+  cwd,
   selected,
   onSelect,
 }: {
   file: DiffFile;
+  cwd?: string;
   selected: boolean;
   onSelect: (path: string) => void;
 }) {
-  const slash = file.path.lastIndexOf('/');
-  const dir = slash >= 0 ? file.path.slice(0, slash + 1) : '';
-  const name = slash >= 0 ? file.path.slice(slash + 1) : file.path;
+  const display = displayPath(file.path, cwd);
+  const slash = display.lastIndexOf('/');
+  const dir = slash >= 0 ? display.slice(0, slash + 1) : '';
+  const name = slash >= 0 ? display.slice(slash + 1) : display;
   return (
     <button
       onClick={() => {
@@ -678,6 +682,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
                       <FileRow
                         key={file.path}
                         file={file}
+                        cwd={cwd}
                         selected={activePath === file.path}
                         onSelect={jumpTo}
                       />
@@ -717,6 +722,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
                 <DiffFileSection
                   key={file.path}
                   file={file}
+                  cwd={cwd}
                   open={expanded.has(file.path)}
                   active={activePath === file.path}
                   entry={diffEntries[file.path]}

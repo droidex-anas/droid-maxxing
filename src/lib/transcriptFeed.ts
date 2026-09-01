@@ -48,7 +48,7 @@ export function correlateResults(events: TranscriptEvent[]): {
     if (call.toolUseId) {
       result = resultById.get(call.toolUseId);
     } else {
-      const next = events[i + 1];
+      const next = events.at(i + 1);
       if (next?.kind === 'tool_result' && !next.toolUseId) result = next;
     }
     if (!result || consumed.has(result)) continue;
@@ -195,7 +195,7 @@ export function buildFeed(
       continue;
     }
     if (ev.kind === 'thinking') {
-      const next = events[i + 1];
+      const next = events.at(i + 1);
       const end = ev.endTs ?? next?.ts;
       items.push({
         type: 'thinking',
@@ -313,73 +313,66 @@ export function buildFeed(
         continue;
       }
     }
-    if (ev.kind === 'tool_call' || ev.kind === 'tool_result') {
-      const group: TranscriptEvent[] = [];
-      while (i < events.length) {
-        const t = events[i];
-        if (t.kind === 'tool_result') {
-          // A failed child session/plan result breaks the group so the outer loop
-          // surfaces it as a standalone error (its card/checklist can't convey
-          // the failure). An ordinary failed result stays so it folds into its
-          // tool card.
-          if (t.isError && isCardResult(t)) break;
-          // A successful child session/plan result is dropped (represented by its
-          // card or checklist, or pure noise); other results stay in the group.
-          if (!t.isError && isCardResult(t)) {
-            i++;
-            continue;
-          }
-          // A result already reclaimed inline by an earlier group (its call was
-          // split from it by a child session spawn) must not be re-emitted here as
-          // raw activity, which would duplicate the output.
-          if (claimed.has(t)) {
-            i++;
-            continue;
-          }
-          group.push(t);
+    const group: TranscriptEvent[] = [];
+    while (i < events.length) {
+      const t = events[i];
+      if (t.kind === 'tool_result') {
+        // A failed child session/plan result breaks the group so the outer loop
+        // surfaces it as a standalone error (its card/checklist can't convey
+        // the failure). An ordinary failed result stays so it folds into its
+        // tool card.
+        if (t.isError && isCardResult(t)) break;
+        // A successful child session/plan result is dropped (represented by its
+        // card or checklist, or pure noise); other results stay in the group.
+        if (!t.isError && isCardResult(t)) {
           i++;
           continue;
         }
-        // A child session spawn must break the group so the outer loop can render it
-        // as its own card instead of folding it into the generic tools group.
-        if (
-          childSessionCards &&
-          t.kind === 'tool_call' &&
-          isChildSessionTool(t.toolName, t.toolArgs)
-        )
-          break;
-        // Skipped rather than breaking the group, so a poll landing between two
-        // real tool calls does not split them into two cards.
-        if (groupChildSessions && t.kind === 'tool_call' && isSubagentBookkeepingTool(t.toolName)) {
+        // A result already reclaimed inline by an earlier group (its call was
+        // split from it by a child session spawn) must not be re-emitted here as
+        // raw activity, which would duplicate the output.
+        if (claimed.has(t)) {
           i++;
           continue;
         }
-        if (t.kind === 'tool_call' && !extractFileChange(t.toolName, t.toolArgs)) {
-          group.push(t);
-          i++;
-          continue;
-        }
-        break;
+        group.push(t);
+        i++;
+        continue;
       }
-      if (group.length) {
-        // Reclaim any successful result whose call is in this group but was
-        // separated from it (a child session spawn broke the group before the result
-        // was reached) so it renders inline with its call rather than as a
-        // detached raw result later. Card/plan results are intentionally left
-        // out (handled by their card/checklist or dropped as noise).
-        for (const c of group) {
-          if (c.kind !== 'tool_call' || !c.toolUseId) continue;
-          const r = resultById.get(c.toolUseId);
-          if (r && !group.includes(r) && !isCardResult(r)) {
-            group.push(r);
-            claimed.add(r);
-          }
-        }
-        items.push({ type: 'tools', key: group[0].id, events: dedupePlanUpdates(group) });
-      } else i++;
-      continue;
+      // A child session spawn must break the group so the outer loop can render it
+      // as its own card instead of folding it into the generic tools group.
+      if (childSessionCards && t.kind === 'tool_call' && isChildSessionTool(t.toolName, t.toolArgs))
+        break;
+      // Skipped rather than breaking the group, so a poll landing between two
+      // real tool calls does not split them into two cards.
+      if (groupChildSessions && t.kind === 'tool_call' && isSubagentBookkeepingTool(t.toolName)) {
+        i++;
+        continue;
+      }
+      if (t.kind === 'tool_call' && !extractFileChange(t.toolName, t.toolArgs)) {
+        group.push(t);
+        i++;
+        continue;
+      }
+      break;
     }
-    i++;
+    if (group.length) {
+      // Reclaim any successful result whose call is in this group but was
+      // separated from it (a child session spawn broke the group before its
+      // result was reached) so it renders inline with its call rather than as a
+      // detached raw result later. Card/plan results are intentionally left
+      // out (handled by their card/checklist or dropped as noise).
+      for (const c of group) {
+        if (c.kind !== 'tool_call' || !c.toolUseId) continue;
+        const r = resultById.get(c.toolUseId);
+        if (r && !group.includes(r) && !isCardResult(r)) {
+          group.push(r);
+          claimed.add(r);
+        }
+      }
+      items.push({ type: 'tools', key: group[0].id, events: dedupePlanUpdates(group) });
+    } else i++;
+    continue;
   }
   return items;
 }
@@ -545,11 +538,11 @@ export function tailTimestamp(item?: FeedItem): number | undefined {
   if (item.type === 'worked' || item.type === 'turnChanges') return undefined;
   if (item.type === 'activity') return tailTimestamp(item.items.at(-1));
   if (item.type === 'tools') {
-    const e = item.events[item.events.length - 1];
+    const e = item.events.at(-1);
     return e?.endTs ?? e?.ts;
   }
   if (item.type === 'diffs') {
-    const c = item.changes[item.changes.length - 1];
+    const c = item.changes.at(-1);
     return c?.event.endTs ?? c?.event.ts;
   }
   if (item.type === 'child_sessions') {
@@ -581,10 +574,7 @@ function spanOf(items: FeedItem[]): { start: number; end: number } {
       it.events.forEach((e) => {
         consider(e.ts, e.endTs);
       });
-    else if (it.type === 'activity') {
-      const nested = spanOf(it.items);
-      consider(nested.start, nested.end);
-    } else if (it.type !== 'worked' && it.type !== 'turnChanges')
+    else if (it.type !== 'worked' && it.type !== 'turnChanges' && it.type !== 'activity')
       consider(it.event.ts, it.event.endTs);
   }
   if (start === Infinity) return { start: 0, end: 0 };
@@ -673,7 +663,7 @@ function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
       // then finished the sentence, so it's one final response. Merge the
       // fragments and drop the internal reconciliation so the turn renders a
       // single final answer instead of burying it behind a "Worked" group.
-      const prev = out[out.length - 1];
+      const prev = out.at(-1);
       if (
         it.event.author !== 'user' &&
         !isSpecBody(it.event.text) &&

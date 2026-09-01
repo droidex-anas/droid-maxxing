@@ -18,9 +18,14 @@ test('Expand omits children when closed', () => {
 test('Expand uses grid 0fr/1fr rows with reduced-motion off', () => {
   const closed = renderToStaticMarkup(createElement(Expand, { open: false }, 'x'));
   assert.match(closed, /grid-rows-\[0fr\]/);
+  assert.match(closed, /opacity-0/);
+  assert.match(closed, /aria-hidden="true"/);
   assert.match(closed, /motion-reduce:transition-none/);
   const opened = renderToStaticMarkup(createElement(Expand, { open: true }, 'x'));
   assert.match(opened, /grid-rows-\[1fr\]/);
+  assert.match(opened, /opacity-100/);
+  assert.match(opened, /aria-hidden="false"/);
+  assert.match(opened, /transition-\[grid-template-rows,opacity\]/);
   assert.match(opened, /min-h-0 overflow-hidden/);
 });
 

@@ -1,44 +1,25 @@
 import { Fragment, useMemo, useState, memo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  ChevronRight,
-  Terminal,
-  FileText,
-  Expand as ExpandIcon,
-  MousePointer2,
-  PenLine,
-  Globe,
-  AlertTriangle,
-} from 'lucide-react';
+import { ChevronRight, FileText, Expand as ExpandIcon, MousePointer2, PenLine } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
 import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
 import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
-import {
-  MAX_DIFF_CARDS_PER_COMMIT,
-  createDiffDisclosure,
-  mountNextRevealedDiffCards,
-  reopenDiffDisclosure,
-  revealNextDiffCards,
-  type FileChange,
-} from '../lib/diff';
+import type { FileChange } from '../lib/diff';
 import { ImageAttachmentChip } from './media/ImageAttachmentChip';
 import { isImagePath } from '../lib/localImage';
 import { userMessageAttachments } from '../lib/promptMentions';
-import { DiffCard } from './DiffView';
+import { DiffCard, DiffGroup } from './DiffView';
 import { SubagentsDock, type SubagentsDockData } from './SubagentsDock';
 import TurnChangesPanel from './TurnChangesPanel';
 import {
-  CAT_ICON,
-  CAT_LABEL,
   toolMeta,
   safeJson,
   stripAnsi,
   formatDuration,
   parseTruncatedTail,
   childSessionInfo,
-  parseTodos,
   isWebSearchTool,
   isWebFetchTool,
   parseWebSearch,
@@ -46,7 +27,6 @@ import {
   looksLikeHtml,
   formatCharCount,
   webSourceName,
-  faviconUrl,
   toolArgStringArray,
 } from '../lib/tools';
 import { classifyEvent } from '../lib/transcript';
@@ -56,9 +36,19 @@ import {
   type ChildSessionActivity,
   type ChildSessionTarget,
 } from '../lib/childSessions';
-import { openExternal } from '../lib/onboarding';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import { feedRowId } from '../hooks/conversationViewportAnchor';
+import {
+  ErrorLine,
+  httpHref,
+  linkify,
+  openLink,
+  PlanUpdate,
+  RED,
+  RED_TINT,
+  ShellCard,
+  ToolLine,
+} from './transcript/cards';
 import {
   Caret,
   CompactingIndicator,
@@ -75,32 +65,19 @@ import {
   buildFeed,
   childSessionLineIsRunning,
   correlateResults,
-  finalResponseAnchorsFromItems,
   groupTurns,
   isCompactionCompleteStatus,
   promptAnchorsFromItems,
   rememberFreshAppResponses,
   sameFeedEvents,
+  summarizeActivity,
   tailTimestamp,
   trailingSubagentPoll,
   type FeedItem,
   type FreshAppResponseState,
 } from '../lib/transcriptFeed';
+import type { ToolActivityDensity } from '../lib/toolActivity';
 
-// Open a link in the OS default browser rather than inside the Electron window.
-function openLink(e: React.MouseEvent, url: string) {
-  e.preventDefault();
-  void openExternal(url);
-}
-
-// Only http(s) URLs are safe as an href. Parsed web-search results can carry a
-// malformed or non-http token, and onClick alone does not cover middle-click or
-// "open in new tab" from the context menu, so a bad URL must never reach href.
-function httpHref(url: string): string | undefined {
-  return /^https?:\/\//i.test(url.trim()) ? url : undefined;
-}
-
-const ACCENT = 'var(--droid-accent)';
 const EASE = [0.16, 1, 0.3, 1] as const;
 
 export {
@@ -145,6 +122,8 @@ function ThinkingItem({
   return (
     <div>
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => {
           setOpen((o) => !o);
         }}
@@ -170,9 +149,9 @@ function ThinkingItem({
 }
 
 /* ── Condensed tool group: "Explored 4 files, 1 search" ── */
-function summarizeTools(events: TranscriptEvent[]): string {
+function summarizeTools(events: TranscriptEvent[], live = false): { verb: string; rest: string } {
   const calls = events.filter((e) => e.kind === 'tool_call');
-  if (calls.length === 0) return 'Tool result';
+  if (calls.length === 0) return { verb: 'Tool result', rest: '' };
   const counts = { file: 0, search: 0, command: 0, page: 0, task: 0, step: 0, plan: 0 };
   let onlyExec = true;
   let onlyWeb = true;
@@ -198,7 +177,7 @@ function summarizeTools(events: TranscriptEvent[]): string {
     else if (cat === 'skill') counts.step++;
     else counts.step++;
   });
-  if (onlyPlan) return 'Updated plan';
+  if (onlyPlan) return { verb: live ? 'Updating' : 'Updated', rest: 'plan' };
   const parts: string[] = [];
   const add = (n: number, s: string, p: string) => {
     if (n > 0) parts.push(`${n} ${n === 1 ? s : p}`);
@@ -210,8 +189,28 @@ function summarizeTools(events: TranscriptEvent[]): string {
   add(counts.task, 'task', 'tasks');
   add(counts.step, 'step', 'steps');
   add(counts.plan, 'plan update', 'plan updates');
-  const verb = onlyExec ? 'Ran' : onlyWeb ? 'Fetched' : 'Explored';
-  return `${verb} ${parts.join(', ')}`;
+  const verb = onlyExec
+    ? live
+      ? 'Running'
+      : 'Ran'
+    : onlyWeb
+      ? live
+        ? 'Fetching'
+        : 'Fetched'
+      : live
+        ? 'Exploring'
+        : 'Explored';
+  return { verb, rest: parts.join(', ') };
+}
+
+function isPlanOnlyTools(events: TranscriptEvent[]): boolean {
+  let sawPlan = false;
+  for (const e of events) {
+    if (e.kind !== 'tool_call') continue;
+    if (classifyEvent(e) !== 'plan_update') return false;
+    sawPlan = true;
+  }
+  return sawPlan;
 }
 
 function argStr(args: unknown, key: string): string | undefined {
@@ -220,244 +219,6 @@ function argStr(args: unknown, key: string): string | undefined {
     if (typeof v === 'string') return v;
   }
   return undefined;
-}
-
-// Turn bare URLs in captured tool output into clickable links, so a web search
-// or page fetch shows the links it visited and the user can open them.
-const URL_RE = /(https?:\/\/[^\s<>()[\]"'`]+)/g;
-function linkify(text: string): React.ReactNode {
-  const nodes: React.ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  URL_RE.lastIndex = 0;
-  while ((m = URL_RE.exec(text)) !== null) {
-    if (m.index > last) nodes.push(text.slice(last, m.index));
-    let url = m[0];
-    const tail = /[.,;:!?)\]}]+$/.exec(url)?.[0] ?? '';
-    if (tail) url = url.slice(0, url.length - tail.length);
-    nodes.push(
-      <a
-        key={m.index}
-        href={url}
-        onClick={(e) => {
-          openLink(e, url);
-        }}
-        className="underline underline-offset-2 hover:opacity-80 break-all"
-        style={{ color: ACCENT }}
-      >
-        {url}
-      </a>,
-    );
-    if (tail) nodes.push(tail);
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes.length ? nodes : text;
-}
-
-const RED = 'var(--droid-red)';
-const RED_TINT = 'color-mix(in srgb, var(--droid-red) 8%, transparent)';
-
-function firstLine(text: string): string {
-  const line = text.split('\n').find((l) => l.trim()) ?? text;
-  return line.trim();
-}
-
-// A standalone failed result (or a pure error event) rendered as a collapsible
-// row: a red "error" tag with the first line, expanding to the full message.
-function ErrorLine({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const body = stripAnsi(text).trim();
-  return (
-    <div>
-      <button
-        onClick={() => {
-          setOpen((o) => !o);
-        }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] leading-relaxed"
-      >
-        <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color: RED }} />
-        <span className="min-w-0 truncate text-droid-text-muted">{firstLine(body)}</span>
-        <ErrorTag />
-        <Caret open={open} />
-      </button>
-      <Expand open={open}>
-        {open ? (
-          <pre
-            className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-            style={{ backgroundColor: RED_TINT, color: RED }}
-          >
-            {linkify(body)}
-          </pre>
-        ) : null}
-      </Expand>
-    </div>
-  );
-}
-
-/* ── Terminal-style command card ── */
-function CommandCard({
-  command,
-  output,
-  title,
-  error = false,
-}: {
-  command: string;
-  output?: string;
-  title?: string;
-  error?: boolean;
-}) {
-  const out = output ? stripAnsi(output).trimEnd() : '';
-  const [open, setOpen] = useState(false);
-  const body = (
-    <div className="px-3.5 py-3 font-mono text-[11.5px] leading-[1.6]">
-      <div className="flex gap-2 break-words">
-        <span className="select-none text-droid-text-muted" style={{ color: error ? RED : ACCENT }}>
-          $
-        </span>
-        <span className="whitespace-pre-wrap text-droid-text">{command}</span>
-      </div>
-      {out && (
-        <pre
-          className="mt-2.5 pt-2.5 border-t border-droid-border/60 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] break-words"
-          style={error ? { color: RED } : undefined}
-        >
-          {error ? out : linkify(out)}
-        </pre>
-      )}
-    </div>
-  );
-  // A failed command collapses to a compact header with an "error" tag; expand
-  // to inspect the command and its error output.
-  if (error) {
-    return (
-      <div
-        className="rounded-xl border overflow-hidden bg-droid-bg/40"
-        style={{ borderColor: 'color-mix(in srgb, var(--droid-red) 30%, var(--droid-border))' }}
-      >
-        <button
-          onClick={() => {
-            setOpen((o) => !o);
-          }}
-          className="group flex w-full items-center gap-2 h-8 px-3 bg-droid-surface/60 border-b border-droid-border text-left"
-        >
-          <Terminal className="w-3.5 h-3.5 shrink-0" style={{ color: RED }} />
-          <span className="min-w-0 truncate text-[10.5px] font-medium uppercase tracking-wider text-droid-text-muted">
-            {title || 'Terminal'}
-          </span>
-          <ErrorTag />
-          <Caret open={open} />
-        </button>
-        <Expand open={open}>{open ? body : null}</Expand>
-      </div>
-    );
-  }
-  return (
-    <div className="rounded-xl border border-droid-border overflow-hidden bg-droid-bg/40">
-      <div className="flex items-center gap-2 h-8 px-3 bg-droid-surface/60 border-b border-droid-border">
-        <Terminal className="w-3.5 h-3.5 text-droid-text-muted shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-[10.5px] font-medium uppercase tracking-wider text-droid-text-muted">
-          {title || 'Terminal'}
-        </span>
-        <CopyButton text={out ? `${command}\n\n${out}` : command} />
-      </div>
-      {body}
-    </div>
-  );
-}
-
-function ToolLine({
-  event,
-  output,
-  error = false,
-}: {
-  event: TranscriptEvent;
-  output?: string;
-  error?: boolean;
-}) {
-  const { cat, detail } = toolMeta(event.toolName, event.toolArgs);
-  const Icon = CAT_ICON[cat];
-  const out = output ? stripAnsi(output).trimEnd() : '';
-  const raw = detail || event.toolName || '';
-  const slash = raw.lastIndexOf('/');
-  const looksLikePath = slash > 0 && !raw.includes(' ');
-  const dir = looksLikePath ? raw.slice(0, slash + 1) : '';
-  const name = looksLikePath ? raw.slice(slash + 1) : raw;
-  const [open, setOpen] = useState(false);
-  const label = (
-    <>
-      <Icon
-        className={`w-3.5 h-3.5 shrink-0 ${error ? '' : 'text-droid-text-muted'}`}
-        style={error ? { color: RED } : undefined}
-      />
-      <span className="text-droid-text-secondary shrink-0">{CAT_LABEL[cat]}</span>
-      {raw && (
-        <span className="font-mono text-[11.5px] min-w-0 truncate">
-          {dir && <span className="text-droid-text-muted/50">{dir}</span>}
-          <span className="text-droid-text-muted">{name}</span>
-        </span>
-      )}
-    </>
-  );
-  // A failed tool collapses to its header row with an "error" tag; expand to
-  // read the error output.
-  if (error) {
-    return (
-      <div>
-        <button
-          onClick={() => {
-            setOpen((o) => !o);
-          }}
-          className="group flex w-full items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0 text-left"
-        >
-          {label}
-          <ErrorTag />
-          <Caret open={open} />
-        </button>
-        {out && (
-          <Expand open={open}>
-            {open ? (
-              <pre
-                className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-                style={{ backgroundColor: RED_TINT, color: RED }}
-              >
-                {out}
-              </pre>
-            ) : null}
-          </Expand>
-        )}
-      </div>
-    );
-  }
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0">{label}</div>
-      {/* web/fetch tools render via WebFetchCard; keep a collapsible dump only
-          for generic search/other tools that still land here. */}
-      {(cat === 'other' || cat === 'search') && out && (
-        <pre className="mt-1.5 max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
-          {linkify(out)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function Favicon({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  const src = faviconUrl(url);
-  if (failed || !src) return <Globe className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />;
-  return (
-    <img
-      src={src}
-      alt=""
-      loading="lazy"
-      className="h-3.5 w-3.5 shrink-0 rounded-sm"
-      onError={() => {
-        setFailed(true);
-      }}
-    />
-  );
 }
 
 /* ── Shared source-row chrome for web search results + fetched pages ── */
@@ -483,7 +244,8 @@ function WebSourceRow({
             },
           }
         : {})}
-      className={`block rounded-lg px-3 py-2 transition-colors hover:bg-droid-elevated/60 ${
+      title={url || title}
+      className={`block px-3 py-2.5 transition-colors hover:bg-droid-elevated/60 ${
         emphasize ? 'bg-droid-elevated/40' : ''
       }`}
     >
@@ -494,11 +256,8 @@ function WebSourceRow({
         </div>
       )}
       {url && (
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <Favicon url={url} />
-          <span className="truncate text-[11px] text-droid-text-secondary">
-            {webSourceName(url)}
-          </span>
+        <div className="mt-1.5 truncate text-[11px] text-droid-text-muted/75">
+          <span>{webSourceName(url)}</span>
         </div>
       )}
     </a>
@@ -531,21 +290,15 @@ export function fetchSizeBadge(chars: number, truncatedChars: number | null): st
 }
 
 /* ── In-flight web tool row: shimmer label while the call has no result yet ── */
-function WebToolRunningRow({
-  icon,
-  label,
-  detail,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  detail?: string;
-}) {
+function WebToolRunningRow({ label, detail }: { label: string; detail?: string }) {
   return (
     <div className="flex min-w-0 items-center gap-1.5">
-      {icon}
       <span className="shimmer-text shrink-0 text-[12.5px] font-medium">{label}</span>
       {detail ? (
-        <span className="min-w-0 truncate font-mono text-[11.5px] text-droid-text-muted">
+        <span
+          className="min-w-0 truncate font-mono text-[11.5px] text-droid-text-muted"
+          title={detail}
+        >
           {detail}
         </span>
       ) : null}
@@ -556,15 +309,6 @@ function WebToolRunningRow({
 function WebSearchRunningRow({ isX, query }: { isX: boolean; query: string }) {
   return (
     <WebToolRunningRow
-      icon={
-        isX ? (
-          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[12px] font-bold leading-none text-droid-text-muted">
-            𝕏
-          </span>
-        ) : (
-          <Globe className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-        )
-      }
       label={isX ? 'Searching X…' : 'Searching web…'}
       detail={query.length > 0 ? query : undefined}
     />
@@ -580,7 +324,7 @@ function searchTrailing(error: boolean, total: number): React.ReactNode {
 /* ── Web search: a collapsible search row that expands into readable result
    cards (title, snippet, source) instead of a raw text dump. Stays collapsed
    by default — the header (query + result count) is enough until expanded. ── */
-function WebSearchCard({
+export function WebSearchCard({
   event,
   output,
   error = false,
@@ -605,21 +349,20 @@ function WebSearchCard({
   let body: React.ReactNode = null;
   if (open && results.length > 0) {
     body = (
-      <div className="mt-2 space-y-1">
+      <div className="mt-2 overflow-hidden rounded-lg border border-droid-border/70 bg-droid-surface/30">
         {results.map((r, i) => (
-          <WebSourceRow
+          <div
             key={`${r.url}-${String(i)}`}
-            title={r.title}
-            snippet={r.snippet}
-            url={r.url}
-            emphasize={i === 0}
-          />
+            className="border-b border-droid-border/60 last:border-b-0"
+          >
+            <WebSourceRow title={r.title} snippet={r.snippet} url={r.url} emphasize={i === 0} />
+          </div>
         ))}
       </div>
     );
   } else if (open && raw) {
     body = (
-      <pre className="mt-1.5 max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
+      <pre className="mt-2 max-h-44 overflow-auto rounded-lg border border-droid-border/70 bg-droid-surface/30 px-3 py-2.5 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
         {linkify(raw)}
       </pre>
     );
@@ -628,23 +371,21 @@ function WebSearchCard({
   return (
     <div>
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => {
           setOpen((o) => !o);
         }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left"
       >
-        {isX ? (
-          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[12px] font-bold leading-none text-droid-text-muted">
-            𝕏
-          </span>
-        ) : (
-          <Globe className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-        )}
         <span className="shrink-0 text-[12.5px] text-droid-text-secondary">
           {isX ? 'Searched X' : 'Searched web'}
         </span>
         {query ? (
-          <span className="min-w-0 truncate font-mono text-[11.5px] text-droid-text-muted">
+          <span
+            title={query}
+            className="min-w-0 truncate rounded-md bg-droid-elevated/40 px-1.5 py-0.5 font-mono text-[11.5px] text-droid-text-muted"
+          >
             {query}
           </span>
         ) : null}
@@ -696,7 +437,7 @@ export function WebFetchBody({
       </div>
     ) : null;
   return (
-    <div className="mt-2 space-y-1">
+    <div className="mt-2 overflow-hidden rounded-lg border border-droid-border/70 bg-droid-surface/30">
       <WebSourceRow title={title} snippet={rowSnippet} url={url} emphasize />
       {showBody ? <FetchBodyContent body={body} /> : snippetNode}
     </div>
@@ -724,17 +465,7 @@ function FetchBodyContent({ body }: { body: string }) {
 
 function WebFetchRunningRow({ url }: { url: string }) {
   return (
-    <WebToolRunningRow
-      icon={
-        url.length > 0 ? (
-          <Favicon url={url} />
-        ) : (
-          <Globe className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-        )
-      }
-      label="Fetching…"
-      detail={url.length > 0 ? url : undefined}
-    />
+    <WebToolRunningRow label="Fetching…" detail={url.length > 0 ? webSourceName(url) : undefined} />
   );
 }
 
@@ -744,7 +475,7 @@ function fetchTrailing(error: boolean, badge: string | null): React.ReactNode {
   return null;
 }
 
-/* ── Page fetch: same card language as web search (favicon, source, title,
+/* ── Page fetch: same card language as web search (source, title,
    readable body) so expanded tool groups never dump raw mono fetch text.
    Stays collapsed by default — header alone is enough until the user expands. ── */
 function WebFetchCard({
@@ -783,19 +514,19 @@ function WebFetchCard({
   return (
     <div>
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => {
           setOpen((o) => !o);
         }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left"
       >
-        {url.length > 0 ? (
-          <Favicon url={url} />
-        ) : (
-          <Globe className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-        )}
         <span className="shrink-0 text-[12.5px] text-droid-text-secondary">Fetched</span>
-        <span className="min-w-0 truncate font-mono text-[11.5px] text-droid-text-muted">
-          {url.length > 0 ? url : displayTitle}
+        <span
+          title={url || displayTitle}
+          className="min-w-0 truncate rounded-md bg-droid-elevated/40 px-1.5 py-0.5 font-mono text-[11.5px] text-droid-text-muted"
+        >
+          {url.length > 0 ? webSourceName(url) : displayTitle}
         </span>
         {trailing}
         <Caret open={open} />
@@ -816,30 +547,6 @@ function WebFetchCard({
   );
 }
 
-function TodoChecklist({ event }: { event: TranscriptEvent }) {
-  const todos = parseTodos(event.toolArgs);
-  if (todos.length === 0)
-    return <div className="text-[12.5px] text-droid-text-secondary">Updated plan</div>;
-  const mark = { completed: '✓', in_progress: '◐', pending: '○' } as const;
-  return (
-    <div className="space-y-1">
-      {todos.map((t, i) => (
-        <div
-          key={i}
-          className={`flex items-start gap-2 text-[12.5px] leading-relaxed break-words ${
-            t.status === 'completed'
-              ? 'text-droid-text-muted line-through'
-              : 'text-droid-text-secondary'
-          }`}
-        >
-          <span className="select-none text-droid-text-muted">{mark[t.status]}</span>
-          <span>{t.text}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function renderToolEvents(events: TranscriptEvent[], live = false): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const { resultByCall, consumed } = correlateResults(events);
@@ -847,7 +554,7 @@ function renderToolEvents(events: TranscriptEvent[], live = false): React.ReactN
     const e = events[i];
     if (e.kind === 'tool_call') {
       if (classifyEvent(e) === 'plan_update') {
-        nodes.push(<TodoChecklist key={e.id} event={e} />);
+        nodes.push(<PlanUpdate key={e.id} event={e} live={live && !resultByCall.get(e)} />);
         continue;
       }
       const result = resultByCall.get(e);
@@ -888,12 +595,13 @@ function renderToolEvents(events: TranscriptEvent[], live = false): React.ReactN
           e.toolName ??
           'command';
         nodes.push(
-          <CommandCard
+          <ShellCard
             key={e.id}
             command={command}
             output={result?.text}
             title={argStr(e.toolArgs, 'summary')}
             error={isError}
+            running={running}
           />,
         );
       } else {
@@ -924,37 +632,36 @@ function renderToolEvents(events: TranscriptEvent[], live = false): React.ReactN
   return nodes;
 }
 
-function ToolGroupItem({
-  events,
-  active,
-  defaultOpen = false,
-}: {
-  events: TranscriptEvent[];
-  active?: boolean;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const summary = useMemo(() => summarizeTools(events), [events]);
+function ToolGroupItem({ events, active }: { events: TranscriptEvent[]; active?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const { verb, rest } = useMemo(() => summarizeTools(events, active), [events, active]);
   return (
     <div>
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="group flex items-center gap-1.5 text-left"
+        className="group flex min-w-0 items-center gap-1.5 text-left"
       >
         <Caret open={open} />
-        {active ? (
-          <span className="shimmer-text text-[13px] font-medium">{summary}</span>
-        ) : (
-          <span className="text-[13px] text-droid-text-muted group-hover:text-droid-text-secondary transition-colors">
-            {summary}
-          </span>
-        )}
+        <span
+          className={
+            active
+              ? 'shimmer-text shrink-0 text-[13px] font-medium'
+              : 'shrink-0 text-[13px] text-droid-text-secondary'
+          }
+        >
+          {verb}
+        </span>
+        {rest ? (
+          <span className="min-w-0 truncate text-[13px] text-droid-text-muted">{rest}</span>
+        ) : null}
       </button>
       <Expand open={open}>
         {open ? (
-          <div className="mt-2 pl-[18px] space-y-2.5">{renderToolEvents(events, active)}</div>
+          <div className="mt-2 space-y-2.5 pl-[18px]">{renderToolEvents(events, active)}</div>
         ) : null}
       </Expand>
     </div>
@@ -1183,6 +890,7 @@ interface FeedItemViewProps {
   compacting?: boolean;
   cwd?: string;
   onOpenDiff?: (c: FileChange) => void;
+  openDiffLabel?: string;
   onOpenReviewFile?: (path: string) => void;
   onOpenChildSession?: (target: ChildSessionTarget) => void;
   childSessionActivity?: (target: ChildSessionTarget) => ChildSessionActivity | undefined;
@@ -1194,10 +902,6 @@ interface FeedItemViewProps {
   liveTiming?: boolean;
   specContent?: string;
   isFinalResponse?: boolean;
-  // When true, nested collapsible groups (tool runs, diff runs) render expanded.
-  // Set inside a "Worked for …" disclosure so opening it reveals the actual tool
-  // calls and edits directly instead of a second layer of collapsed groups.
-  expandGroups?: boolean;
 }
 
 // Lets memo skip the many static items while a response streams, re-rendering
@@ -1209,7 +913,8 @@ function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): b
   if (
     next.item.type === 'child_session' ||
     next.item.type === 'child_sessions' ||
-    next.item.type === 'worked'
+    next.item.type === 'worked' ||
+    (next.item.type === 'activity' && next.item.active)
   )
     return false;
   return (
@@ -1220,8 +925,8 @@ function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): b
     prev.liveTiming === next.liveTiming &&
     prev.specContent === next.specContent &&
     prev.cwd === next.cwd &&
+    prev.openDiffLabel === next.openDiffLabel &&
     prev.isFinalResponse === next.isFinalResponse &&
-    prev.expandGroups === next.expandGroups &&
     prev.onOpenDiff === next.onOpenDiff &&
     prev.onOpenReviewFile === next.onOpenReviewFile &&
     prev.onOpenChildSession === next.onOpenChildSession &&
@@ -1280,6 +985,7 @@ const FeedItemView = memo(function FeedItemView({
   compacting,
   cwd,
   onOpenDiff,
+  openDiffLabel,
   onOpenReviewFile,
   onOpenChildSession,
   childSessionActivity,
@@ -1287,7 +993,6 @@ const FeedItemView = memo(function FeedItemView({
   liveTiming,
   specContent,
   isFinalResponse,
-  expandGroups,
 }: FeedItemViewProps) {
   switch (item.type) {
     case 'message': {
@@ -1370,6 +1075,8 @@ const FeedItemView = memo(function FeedItemView({
       return (
         <DiffCard
           change={item.change}
+          cwd={cwd}
+          openLabel={openDiffLabel}
           onOpen={
             onOpenDiff
               ? () => {
@@ -1381,17 +1088,41 @@ const FeedItemView = memo(function FeedItemView({
       );
     case 'diffs':
       return (
-        <DiffGroup changes={item.changes} onOpenDiff={onOpenDiff} defaultOpen={expandGroups} />
+        <DiffGroup
+          changes={item.changes}
+          cwd={cwd}
+          onOpenDiff={onOpenDiff}
+          openLabel={openDiffLabel}
+        />
       );
     case 'tools':
-      return <ToolGroupItem events={item.events} active={live} defaultOpen={expandGroups} />;
+      return isPlanOnlyTools(item.events) ? (
+        <div className="space-y-2.5">{renderToolEvents(item.events, live)}</div>
+      ) : (
+        <ToolGroupItem events={item.events} active={live} />
+      );
     case 'turnChanges':
       return <TurnChangesPanel item={item} cwd={cwd} onOpenFile={onOpenReviewFile} />;
     case 'worked':
       return (
         <WorkedGroup
           item={item}
+          cwd={cwd}
           onOpenDiff={onOpenDiff}
+          openDiffLabel={openDiffLabel}
+          onOpenChildSession={onOpenChildSession}
+          childSessionActivity={childSessionActivity}
+          subagentsDock={subagentsDock}
+          specContent={specContent}
+        />
+      );
+    case 'activity':
+      return (
+        <ActivityGroup
+          item={item}
+          cwd={cwd}
+          onOpenDiff={onOpenDiff}
+          openDiffLabel={openDiffLabel}
           onOpenChildSession={onOpenChildSession}
           childSessionActivity={childSessionActivity}
           subagentsDock={subagentsDock}
@@ -1400,18 +1131,98 @@ const FeedItemView = memo(function FeedItemView({
       );
   }
 }, feedItemPropsEqual);
+function activityHeadline(summary: string): { verb: string; rest: string } {
+  const space = summary.indexOf(' ');
+  if (space < 0) return { verb: summary, rest: '' };
+  return { verb: summary.slice(0, space), rest: summary.slice(space + 1) };
+}
+
+/* ── Compact tool activity: one Factory-style summary line, nested rows stay closed ── */
+function ActivityGroup({
+  item,
+  cwd,
+  onOpenDiff,
+  openDiffLabel,
+  onOpenChildSession,
+  childSessionActivity,
+  subagentsDock,
+  specContent,
+}: {
+  item: Extract<FeedItem, { type: 'activity' }>;
+  cwd?: string;
+  onOpenDiff?: (c: FileChange) => void;
+  openDiffLabel?: string;
+  onOpenChildSession?: (target: ChildSessionTarget) => void;
+  childSessionActivity?: (target: ChildSessionTarget) => ChildSessionActivity | undefined;
+  subagentsDock?: SubagentsDockData;
+  specContent?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const { verb, rest } = activityHeadline(summarizeActivity(item.items, item.active));
+  const lastIdx = item.items.length - 1;
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
+        className="group flex min-w-0 items-center gap-1.5 text-left"
+      >
+        <Caret open={open} />
+        <span
+          className={
+            item.active
+              ? 'shimmer-text shrink-0 text-[13px] font-medium'
+              : 'shrink-0 text-[13px] text-droid-text-secondary'
+          }
+        >
+          {verb}
+        </span>
+        {rest ? (
+          <span className="min-w-0 truncate text-[13px] text-droid-text-muted">{rest}</span>
+        ) : null}
+      </button>
+      <Expand open={open}>
+        {open ? (
+          <div className="mt-2 space-y-2.5 pl-[18px]">
+            {item.items.map((child, idx) => (
+              <FeedItemView
+                key={child.key}
+                item={child}
+                live={item.active && idx === lastIdx}
+                cwd={cwd}
+                onOpenDiff={onOpenDiff}
+                openDiffLabel={openDiffLabel}
+                onOpenChildSession={onOpenChildSession}
+                childSessionActivity={childSessionActivity}
+                subagentsDock={subagentsDock}
+                specContent={specContent}
+              />
+            ))}
+          </div>
+        ) : null}
+      </Expand>
+    </div>
+  );
+}
 
 /* ── Worked-for group: a completed turn's steps folded into one disclosure ── */
 function WorkedGroup({
   item,
+  cwd,
   onOpenDiff,
+  openDiffLabel,
   onOpenChildSession,
   childSessionActivity,
   subagentsDock,
   specContent,
 }: {
   item: Extract<FeedItem, { type: 'worked' }>;
+  cwd?: string;
   onOpenDiff?: (c: FileChange) => void;
+  openDiffLabel?: string;
   onOpenChildSession?: (target: ChildSessionTarget) => void;
   childSessionActivity?: (target: ChildSessionTarget) => ChildSessionActivity | undefined;
   subagentsDock?: SubagentsDockData;
@@ -1439,113 +1250,15 @@ function WorkedGroup({
                 key={child.key}
                 item={child}
                 live={false}
+                cwd={cwd}
                 onOpenDiff={onOpenDiff}
+                openDiffLabel={openDiffLabel}
                 onOpenChildSession={onOpenChildSession}
                 childSessionActivity={childSessionActivity}
                 subagentsDock={subagentsDock}
                 specContent={specContent}
-                expandGroups
               />
             ))}
-          </div>
-        ) : null}
-      </Expand>
-    </div>
-  );
-}
-
-/* ── Folded run of file edits: one collapsible header over individual diffs ── */
-function DiffGroup({
-  changes,
-  onOpenDiff,
-  defaultOpen = false,
-}: {
-  changes: { event: TranscriptEvent; change: FileChange }[];
-  onOpenDiff?: (c: FileChange) => void;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const [disclosure, setDisclosure] = useState(() => createDiffDisclosure(changes.length));
-  const added = changes.reduce((s, c) => s + c.change.added, 0);
-  const removed = changes.reduce((s, c) => s + c.change.removed, 0);
-  const files = new Set(changes.map((c) => c.change.path));
-  const edits = `${changes.length} ${changes.length === 1 ? 'edit' : 'edits'}`;
-  const label =
-    files.size <= 1
-      ? `Edited ${baseName(changes[0].change.path)} · ${edits}`
-      : `Edited ${files.size} files · ${edits}`;
-  // Mount bounded chunks so neither opening nor disclosing a genuinely huge
-  // edit run creates one long renderer commit. No diff content is discarded.
-  const shown = changes.slice(0, disclosure.mountedCount);
-  const hiddenCount = changes.length - shown.length;
-  const revealCount = Math.min(MAX_DIFF_CARDS_PER_COMMIT, hiddenCount);
-  const canRevealMore = hiddenCount > 0 && disclosure.mountedCount >= disclosure.revealedCount;
-
-  useEffect(() => {
-    if (!open || disclosure.mountedCount >= disclosure.revealedCount) return;
-    const frame = requestAnimationFrame(() => {
-      setDisclosure((current) => mountNextRevealedDiffCards(current, changes.length));
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, [changes.length, disclosure.mountedCount, disclosure.revealedCount, open]);
-
-  return (
-    <div>
-      <button
-        onClick={() => {
-          if (!open) {
-            setDisclosure((current) => reopenDiffDisclosure(current, changes.length));
-          }
-          setOpen((current) => !current);
-        }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left"
-      >
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 text-droid-text-muted/50 transition-transform duration-200 group-hover:text-droid-text-muted ${open ? 'rotate-90' : ''}`}
-        />
-        <span className="min-w-0 truncate text-[13px] font-medium text-droid-text-muted group-hover:text-droid-text-secondary">
-          {label}
-        </span>
-        <span
-          className="ml-auto text-[11px] font-mono shrink-0"
-          style={{ color: 'var(--diff-add-fg)' }}
-        >
-          +{added}
-        </span>
-        <span className="text-[11px] font-mono shrink-0" style={{ color: 'var(--diff-del-fg)' }}>
-          −{removed}
-        </span>
-      </button>
-      <Expand open={open}>
-        {open ? (
-          <div className="mt-2 space-y-2 border-l border-droid-border pl-3">
-            {shown.map((c) => (
-              <DiffCard
-                key={c.event.id}
-                change={c.change}
-                onOpen={
-                  onOpenDiff
-                    ? () => {
-                        onOpenDiff(c.change);
-                      }
-                    : undefined
-                }
-              />
-            ))}
-            {canRevealMore && (
-              <button
-                type="button"
-                onClick={() => {
-                  setDisclosure((current) => revealNextDiffCards(current, changes.length));
-                }}
-                className="text-[11px] text-droid-text-muted/70 transition-colors hover:text-droid-text-secondary"
-              >
-                Show next {revealCount} {revealCount === 1 ? 'edit' : 'edits'} ({hiddenCount}{' '}
-                remaining)
-              </button>
-            )}
           </div>
         ) : null}
       </Expand>
@@ -1681,6 +1394,7 @@ export function MessageFeed({
   pending,
   cwd,
   onOpenDiff,
+  openDiffLabel = 'Open in Review',
   onOpenReviewFile,
   onOpenChildSession,
   childSessionActivity,
@@ -1688,12 +1402,14 @@ export function MessageFeed({
   specContent,
   onOpenSpecWiki,
   createdWorktreePath,
+  density,
 }: {
   events: TranscriptEvent[];
   items?: FeedItem[];
   pending: boolean;
   cwd?: string;
   onOpenDiff?: (c: FileChange) => void;
+  openDiffLabel?: string;
   onOpenReviewFile?: (path: string) => void;
   onOpenChildSession?: (target: ChildSessionTarget) => void;
   childSessionActivity?: (target: ChildSessionTarget) => ChildSessionActivity | undefined;
@@ -1703,6 +1419,7 @@ export function MessageFeed({
   specContent?: string;
   onOpenSpecWiki?: () => void;
   createdWorktreePath?: string;
+  density?: ToolActivityDensity;
 }) {
   // Child session cards, waiting label, and live timers are enabled only for the
   // chat/spec feed (which supplies onOpenChildSession). Per-turn change summaries
@@ -1756,8 +1473,9 @@ export function MessageFeed({
         pending,
         specContent,
         changes,
+        density,
       ),
-    [providedItems, events, pending, rich, changes, specContent, dockEnabled],
+    [providedItems, events, pending, rich, changes, specContent, dockEnabled, density],
   );
   const feedIdentity = `${events[0]?.appSessionId ?? ''}:${events[0]?.sourceSessionId ?? ''}`;
   const freshAppResponsesRef = useRef<FreshAppResponseState | null>(null);
@@ -1782,11 +1500,14 @@ export function MessageFeed({
   // enter with the rise animation.
   const animateKeys = appendedFeedItemKeys(items, previousFeed, feedIdentity);
 
-  // The copy button appears only on a turn's final model response.
-  const finalResponseKeys = useMemo(
-    () => new Set(finalResponseAnchorsFromItems(items).map((a) => a.id)),
-    [items],
-  );
+  // Copy only the conversation's last assistant reply, not every turn's answer.
+  const lastAssistantKey = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (item.type === 'message' && item.event.author !== 'user') return item.key;
+    }
+    return undefined;
+  }, [items]);
   // The conversation timeline anchors a dot on each user prompt; stamp those
   // rows so the rail (driven by the same data) can scroll to them.
   const promptKeys = useMemo(
@@ -1830,6 +1551,7 @@ export function MessageFeed({
     !!last &&
     (last.type === 'thinking' ||
       last.type === 'status' ||
+      last.type === 'activity' ||
       (last.type === 'child_session' && lastChildSessionRunning) ||
       (last.type === 'child_sessions' && lastDockRunning) ||
       (last.type === 'message' && last.event.author !== 'user'));
@@ -1891,13 +1613,14 @@ export function MessageFeed({
                 compacting={compacting && idx === lastIdx}
                 cwd={cwd}
                 onOpenDiff={stableOnOpenDiff}
+                openDiffLabel={openDiffLabel}
                 onOpenReviewFile={stableOnOpenReviewFile}
                 onOpenChildSession={stableOnOpenChildSession}
                 childSessionActivity={stableChildSessionActivity}
                 subagentsDock={subagentsDock}
                 liveTiming={rich}
                 specContent={specContent}
-                isFinalResponse={finalResponseKeys.has(item.key)}
+                isFinalResponse={item.key === lastAssistantKey}
               />
             </motion.div>
             {idx === worktreeInsertAfter && createdWorktreePath && (

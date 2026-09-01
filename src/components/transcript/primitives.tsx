@@ -123,13 +123,24 @@ export function Caret({ open }: { open: boolean }) {
 
 /* ── Animated expand/collapse, no chrome ── */
 export function Expand({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const cachedChildren = useRef<React.ReactNode>(null);
+  const hasOpened = useRef(open);
+  if (open) {
+    hasOpened.current = true;
+    if (children != null) cachedChildren.current = children;
+  }
+  const renderedChildren = hasOpened.current ? (open ? children : cachedChildren.current) : null;
+
   return (
     <div
-      className={`grid transition-[grid-template-rows] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
-        open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+      aria-hidden={!open}
+      className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+        open
+          ? 'pointer-events-auto grid-rows-[1fr] opacity-100'
+          : 'pointer-events-none grid-rows-[0fr] opacity-0'
       }`}
     >
-      <div className="min-h-0 overflow-hidden">{open ? children : null}</div>
+      <div className="min-h-0 overflow-hidden">{renderedChildren}</div>
     </div>
   );
 }
@@ -157,7 +168,7 @@ export function CopyButton({ text }: { text: string }) {
     <button
       onClick={(e) => {
         e.stopPropagation();
-        void navigator.clipboard?.writeText(text);
+        void navigator.clipboard.writeText(text);
         setCopied(true);
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(() => {

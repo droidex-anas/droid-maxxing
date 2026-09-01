@@ -64,9 +64,8 @@ const dockData = {
 const textOf = (html: string) => html.replace(/<!--.*?-->/g, '');
 
 // A tool group shimmers its summary only while the step is still running.
-const LIVE_SUMMARY_CLASS = 'shimmer-text text-[13px] font-medium';
-const SETTLED_SUMMARY_CLASS =
-  'text-[13px] text-droid-text-muted group-hover:text-droid-text-secondary transition-colors';
+const LIVE_SUMMARY_CLASS = 'shimmer-text shrink-0 text-[13px] font-medium';
+const SETTLED_SUMMARY_CLASS = 'shrink-0 text-[13px] text-droid-text-secondary';
 
 test('live runtime activity outranks the stored status', () => {
   const text = textOf(
@@ -351,8 +350,10 @@ test('a poll after a finished step reads as checking subagents, not a stuck step
     }),
   );
   assert.ok(textOf(html).includes('Checking subagents'));
-  assert.ok(html.includes(`${SETTLED_SUMMARY_CLASS}">Explored 1 search`));
-  assert.ok(!html.includes(`${LIVE_SUMMARY_CLASS}">Explored 1 search`));
+  assert.ok(html.includes(`${SETTLED_SUMMARY_CLASS}">Explored`));
+  assert.ok(html.includes('1 search'));
+  assert.ok(!html.includes(`${LIVE_SUMMARY_CLASS}">Explored`));
+  assert.ok(!html.includes(`${LIVE_SUMMARY_CLASS}">Exploring`));
 });
 
 test('a poll after the parent stopped talking still shows the parent working', () => {

@@ -12,6 +12,7 @@ import {
   StreamingCaret,
   UserBubble,
   WebFetchBody,
+  WebSearchCard,
   type FeedItem,
 } from './chat';
 import { EarlierHistoryControl, isConversationOpeningSettling } from './ChatView';
@@ -131,6 +132,71 @@ test('live thinking stays collapsed until the user opens it', () => {
 
   assert.ok(html.includes('Thinking'));
   assert.equal(html.includes('private live reasoning detail'), false);
+});
+
+test('the live aggregate tool row keeps its summary while child bodies stay collapsed', () => {
+  const events = [
+    userMsg('inspect this'),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Read',
+      toolArgs: { file_path: 'src/example.ts' },
+      toolUseId: 'read-1',
+    }),
+    ev({
+      kind: 'tool_result',
+      text: 'SECRET READ OUTPUT',
+      toolUseId: 'read-1',
+    }),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Execute',
+      toolArgs: { command: 'printf secret' },
+      toolUseId: 'exec-1',
+    }),
+    ev({
+      kind: 'tool_result',
+      text: 'SECRET SHELL OUTPUT',
+      toolUseId: 'exec-1',
+    }),
+  ];
+  const html = renderToStaticMarkup(createElement(MessageFeed, { events, pending: true }));
+
+  assert.match(html, />Exploring</);
+  assert.match(html, /1 file, 1 command/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /SECRET READ OUTPUT/);
+  assert.doesNotMatch(html, /SECRET SHELL OUTPUT/);
+});
+
+test('a completed turn keeps nested tool groups unmounted until Worked is opened', () => {
+  const events = [
+    userMsg('inspect this'),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Read',
+      toolArgs: { file_path: 'src/example.ts' },
+      toolUseId: 'read-1',
+    }),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Execute',
+      toolArgs: { command: 'printf secret' },
+      toolUseId: 'exec-1',
+    }),
+    ev({
+      kind: 'tool_result',
+      text: 'SECRET SHELL OUTPUT',
+      toolUseId: 'exec-1',
+    }),
+    asst('done'),
+  ];
+  const html = renderToStaticMarkup(createElement(MessageFeed, { events, pending: false }));
+
+  assert.match(html, /Worked for/);
+  assert.doesNotMatch(html, /Explored|Exploring|Ran |Running/);
+  assert.doesNotMatch(html, /SECRET SHELL OUTPUT/);
+  assert.doesNotMatch(html, /printf secret/);
 });
 
 test('#14 an assistant message that is exactly the spec text is not double-rendered in chat', () => {
@@ -269,6 +335,34 @@ test('fetch size badge counts the truncated-away characters', () => {
   assert.equal(fetchSizeBadge(0, null), null);
 });
 
+test('search rows are text-first and keep result bodies collapsed', () => {
+  const html = renderToStaticMarkup(
+    createElement(WebSearchCard, {
+      event: ev({
+        kind: 'tool_call',
+        toolName: 'WebSearch',
+        toolArgs: { query: 'native code review ui' },
+      }),
+      output: [
+        'Web Search Results for: "native code review ui"',
+        '',
+        '**Review guide**',
+        'URL: https://example.com/review',
+        'A useful result.',
+        '',
+        'Found 1 result',
+      ].join('\n'),
+    }),
+  );
+
+  assert.match(html, /Searched web/);
+  assert.match(html, /native code review ui/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /Review guide/);
+  assert.doesNotMatch(html, /lucide-globe|lucide-search/);
+  assert.doesNotMatch(html, />𝕏</);
+});
+
 test('a short fetched page body renders its URLs as links outside the source row', () => {
   // Bodies within the snippet threshold render only as the snippet (no
   // separate body block), so the snippet must linkify — otherwise URLs in a
@@ -321,6 +415,66 @@ test('StreamingCaret renders a plain span carrying the caret-blink CSS class', (
     html.includes('background:var(--droid-accent)'),
     'caret should keep the accent background',
   );
+});
+
+test('compact MessageFeed folds a completed turn into one activity line', () => {
+  const events = [
+    userMsg('inspect this'),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Edit',
+      toolArgs: { file_path: 'src/example.ts', old_string: 'a', new_string: 'b' },
+      toolUseId: 'edit-1',
+    }),
+    ev({
+      kind: 'tool_call',
+      toolName: 'Execute',
+      toolArgs: { command: 'printf secret' },
+      toolUseId: 'exec-1',
+    }),
+    ev({
+      kind: 'tool_result',
+      text: 'SECRET SHELL OUTPUT',
+      toolUseId: 'exec-1',
+    }),
+    asst('done'),
+  ];
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, { events, pending: false, density: 'compact' }),
+  );
+
+  assert.match(html, />Edited</);
+  assert.match(html, /files, ran commands/);
+  assert.doesNotMatch(html, /Worked for/);
+  assert.doesNotMatch(html, /SECRET SHELL OUTPUT/);
+  assert.doesNotMatch(html, /printf secret/);
+});
+
+test('copy appears only on the last assistant reply in the conversation', () => {
+  const events = [
+    userMsg('one'),
+    asst('first answer'),
+    userMsg('two'),
+    asst('second answer'),
+  ];
+  const html = renderToStaticMarkup(createElement(MessageFeed, { events, pending: false }));
+  const copies = html.split('title="Copy"').length - 1;
+  assert.equal(copies, 1);
+  assert.ok(html.includes('second answer'));
+  assert.ok(html.includes('first answer'));
+});
+
+test('a live plan-only group is a compact Updating plan row', () => {
+  const events = [
+    userMsg('go'),
+    todo('1. [completed] Inspect the feed\n2. [in_progress] Restyle the plan'),
+  ];
+  const html = renderToStaticMarkup(createElement(MessageFeed, { events, pending: true }));
+  assert.match(html, />Updating</);
+  assert.match(html, />plan</);
+  assert.match(html, /text-\[12\.5px\]/);
+  assert.doesNotMatch(html, /Inspect the feed/);
+  assert.doesNotMatch(html, /Restyle the plan/);
 });
 
 // The infinite status indicators (caret blink, shimmer) must honor

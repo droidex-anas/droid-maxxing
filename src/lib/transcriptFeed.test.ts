@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {
   appendedFeedItemKeys,
   buildFeed,
-  buildGroupedFeed,
   childSessionLineIsRunning,
   collectTurnFiles,
+  buildGroupedFeed,
   conversationAnchors,
   correlateResults,
   groupTurns,
