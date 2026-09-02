@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 function on(channel, handler) {
   const listener = (_event, payload) => handler(payload);
@@ -118,7 +118,17 @@ contextBridge.exposeInMainWorld('droidControl', {
   pickDirectory: () => ipcRenderer.invoke('pick-directory'),
   pickFiles: () => ipcRenderer.invoke('pick-files'),
   saveImage: (dataUrl) => ipcRenderer.invoke('save-image', { dataUrl }),
+  saveAttachment: (name, dataUrl) => ipcRenderer.invoke('save-attachment', { name, dataUrl }),
   discardImage: (path) => ipcRenderer.invoke('discard-image', { path }),
+  // Absolute path behind a dropped/pasted File ('' for clipboard snapshots).
+  // File.path was removed in Electron 32; webUtils is the supported seam.
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
   notify: (title, body, options) =>
     ipcRenderer.invoke('notify', {
       title,

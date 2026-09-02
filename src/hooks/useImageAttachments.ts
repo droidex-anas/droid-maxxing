@@ -66,17 +66,18 @@ export async function saveImageUnlessStale(
 }
 
 /**
- * Appends an image in paste/drop order. Each add reserves a sequence number
- * before its variably slow encode, so completion order must not reorder chips
- * or the prompt's attachment list. Ids without a reserved sequence sort last.
+ * Appends an attachment in paste/drop order. Each add reserves a sequence
+ * number before its variably slow encode, so completion order must not reorder
+ * chips or the prompt's attachment list. Ids without a reserved sequence sort
+ * last. Shared by the image and file attachment stores.
  */
-export function insertBySequence(
-  images: AttachedImage[],
-  image: AttachedImage,
+export function insertBySequence<T extends { id: string }>(
+  items: T[],
+  item: T,
   sequences: ReadonlyMap<string, number>,
-): AttachedImage[] {
-  const order = (item: AttachedImage) => sequences.get(item.id) ?? Number.MAX_SAFE_INTEGER;
-  return [...images, image].sort((a, b) => order(a) - order(b));
+): T[] {
+  const order = (entry: T) => sequences.get(entry.id) ?? Number.MAX_SAFE_INTEGER;
+  return [...items, item].sort((a, b) => order(a) - order(b));
 }
 
 /**
