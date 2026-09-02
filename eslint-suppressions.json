@@ -13,24 +13,10 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 36
+      "count": 32
     },
     "@typescript-eslint/restrict-template-expressions": {
       "count": 4
-    }
-  },
-  "src/components/chat.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 7
-    },
-    "@typescript-eslint/prefer-for-of": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
-    },
-    "@typescript-eslint/restrict-template-expressions": {
-      "count": 3
     }
   },
   "src/components/chatFeed.ts": {
@@ -40,7 +26,7 @@
   },
   "src/components/chatFeedTurns.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 5
+      "count": 4
     }
   },
   "src/hooks/useStore.tsx": {

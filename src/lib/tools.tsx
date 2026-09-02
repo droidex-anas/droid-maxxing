@@ -1,4 +1,3 @@
-import { FilePlus, FilePen, Terminal, FileText, Search, Globe, Boxes, Bot } from 'lucide-react';
 import type { TranscriptEvent } from '../types/bridge';
 import { isChildSessionTool } from './childSessionEvents';
 export { childSessionInfo, isChildSessionTool } from './childSessionEvents';
@@ -14,19 +13,6 @@ export type ToolCat =
   | 'task'
   | 'subagent'
   | 'other';
-
-export const CAT_ICON: Record<ToolCat, React.ElementType> = {
-  read: FileText,
-  create: FilePlus,
-  edit: FilePen,
-  exec: Terminal,
-  search: Search,
-  web: Globe,
-  skill: Boxes,
-  task: Bot,
-  subagent: Bot,
-  other: FileText,
-};
 
 export const CAT_LABEL: Record<ToolCat, string> = {
   read: 'Read',

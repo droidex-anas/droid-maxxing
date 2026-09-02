@@ -36,7 +36,7 @@ import { displayPath } from '../lib/pathDisplay';
 import { environmentLabels } from '../lib/repoEnvironment';
 import { DiffFull } from './DiffView';
 import { ModelIcon, providerOf } from './ModelIcon';
-import { CAT_ICON, CAT_LABEL, toolMeta } from '../lib/tools';
+import { CAT_LABEL, toolMeta } from '../lib/tools';
 import {
   childSessionActivityForTarget,
   childSessionIdForFeature,
@@ -52,7 +52,7 @@ import {
   type ChildSessionActivity,
 } from '../lib/childSessions';
 import { sessionIsLive } from '../lib/sessions';
-import { MessageFeed } from './chat';
+import { MessageFeed } from './MessageFeed';
 import EditorOpenMenu, { openCodebase, openCurrentDiff } from './EditorOpenMenu';
 import PromptInput from './PromptInput';
 import AutonomySelector from './AutonomySelector';
@@ -134,9 +134,9 @@ function ChatArea({
           pending={pending}
           cwd={cwd}
           onOpenDiff={onOpenDiff}
-          openDiffLabel="Open details"
           onOpenChildSession={onOpenChildSession}
-          density={toolActivity}
+          density={toolActivity.density}
+          inlineDiffs={toolActivity.inlineDiffs}
           childSessionActivity={childSessionActivity}
           scrollElementRef={scrollRef}
         />
@@ -726,7 +726,6 @@ function ActionRow({
   onOpenDiff?: (c: FileChange) => void;
 }) {
   const { cat, detail } = toolMeta(event.toolName, event.toolArgs);
-  const Icon = CAT_ICON[cat];
   const change = extractFileChange(event.toolName, event.toolArgs);
   const clickable = !!change && !!onOpenDiff;
   const displayDetail = change || cat === 'read' ? displayPath(detail, cwd) : detail;
@@ -736,7 +735,6 @@ function ActionRow({
       onClick={() => change && onOpenDiff?.(change)}
       className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left ${clickable ? 'hover:bg-droid-elevated/60 cursor-pointer' : 'cursor-default'}`}
     >
-      <Icon className="w-3.5 h-3.5 shrink-0 text-droid-text-muted" />
       <span className="text-[12px] font-medium text-droid-text-secondary shrink-0">
         {CAT_LABEL[cat]}
       </span>

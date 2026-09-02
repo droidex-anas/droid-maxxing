@@ -52,6 +52,29 @@ export type FeedItem =
   | { type: 'worked'; key: string; items: FeedItem[]; durationMs: number }
   | TurnChangesItem;
 
+// Two feed items render identically when they wrap the same underlying transcript
+// event objects. The store keeps prior events referentially stable and only swaps
+// the streaming tail event for a new object, so this ref check is enough: every
+// other FeedItem field (diff stats, durations, summaries) is a pure function of
+// these events.
+export function sameFeedEvents(a: FeedItem, b: FeedItem): boolean {
+  if (a.type !== b.type || a.key !== b.key) return false;
+  if (a.type === 'tools' && b.type === 'tools') {
+    return a.events.length === b.events.length && a.events.every((e, i) => e === b.events[i]);
+  }
+  if (a.type === 'diffs' && b.type === 'diffs') {
+    return (
+      a.changes.length === b.changes.length &&
+      a.changes.every((c, i) => c.event === b.changes[i].event)
+    );
+  }
+  if (a.type === 'child_sessions' && b.type === 'child_sessions') {
+    return a.events.length === b.events.length && a.events.every((e, i) => e === b.events[i]);
+  }
+  // message | thinking | status | error | diff | child session each carry one event.
+  return (a as { event: TranscriptEvent }).event === (b as { event: TranscriptEvent }).event;
+}
+
 // Collect the files a turn's run edited, folding repeated edits to the same
 // path into a single entry (summed line counts). Order follows first touch.
 export function collectTurnFiles(run: FeedItem[]): TurnFile[] {

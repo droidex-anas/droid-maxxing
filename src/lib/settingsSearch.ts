@@ -114,12 +114,15 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   // ── Configuration ────────────────────────────────────────────────────────
   e('Configuration', 'Tool activity', [
     'compact',
-    'verbose',
+    'balanced',
+    'detailed',
+    'density',
     'fold',
     'tool calls',
     'step by step',
     'transcript',
   ]),
+  e('Configuration', 'Inline code diffs', ['inline diffs', 'diffs', 'code diff', 'file edits']),
   e('Configuration', 'Default autonomy', [
     'autonomy',
     'permissions',

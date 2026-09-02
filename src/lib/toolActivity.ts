@@ -1,10 +1,35 @@
-export type ToolActivityDensity = 'compact' | 'verbose';
+export type ToolActivityDensity = 'compact' | 'balanced' | 'detailed';
 
-export const TOOL_ACTIVITY_STORAGE_KEY = 'droid-tool-activity';
-export const DEFAULT_TOOL_ACTIVITY_DENSITY: ToolActivityDensity = 'compact';
+export interface ToolActivitySettings {
+  density: ToolActivityDensity;
+  // Whether folded diff runs render expanded by default. Off collapses the
+  // whole diff group behind its header line.
+  inlineDiffs: boolean;
+}
 
-export function normalizeToolActivityDensity(value: unknown): ToolActivityDensity {
-  return value === 'verbose' ? 'verbose' : 'compact';
+const TOOL_ACTIVITY_STORAGE_KEY = 'droid-tool-activity';
+export const DEFAULT_TOOL_ACTIVITY: ToolActivitySettings = {
+  density: 'balanced',
+  inlineDiffs: true,
+};
+
+const DENSITIES: readonly ToolActivityDensity[] = ['compact', 'balanced', 'detailed'];
+
+function normalizeDensity(value: unknown): ToolActivityDensity {
+  return DENSITIES.includes(value as ToolActivityDensity)
+    ? (value as ToolActivityDensity)
+    : DEFAULT_TOOL_ACTIVITY.density;
+}
+
+function normalizeToolActivity(value: unknown): ToolActivitySettings {
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return {
+      density: normalizeDensity(record.density),
+      inlineDiffs: record.inlineDiffs !== false,
+    };
+  }
+  return DEFAULT_TOOL_ACTIVITY;
 }
 
 function storage(): Storage | undefined {
@@ -16,20 +41,22 @@ function storage(): Storage | undefined {
   }
 }
 
-export function loadToolActivityDensity(): ToolActivityDensity {
+export function loadToolActivity(): ToolActivitySettings {
   try {
-    return normalizeToolActivityDensity(storage()?.getItem(TOOL_ACTIVITY_STORAGE_KEY));
+    const raw = storage()?.getItem(TOOL_ACTIVITY_STORAGE_KEY);
+    if (raw == null) return DEFAULT_TOOL_ACTIVITY;
+    return normalizeToolActivity(JSON.parse(raw));
   } catch {
-    return DEFAULT_TOOL_ACTIVITY_DENSITY;
+    return DEFAULT_TOOL_ACTIVITY;
   }
 }
 
-export function saveToolActivityDensity(value: ToolActivityDensity): ToolActivityDensity {
-  const density = normalizeToolActivityDensity(value);
+export function saveToolActivity(value: ToolActivitySettings): ToolActivitySettings {
+  const settings = normalizeToolActivity(value);
   try {
-    storage()?.setItem(TOOL_ACTIVITY_STORAGE_KEY, density);
+    storage()?.setItem(TOOL_ACTIVITY_STORAGE_KEY, JSON.stringify(settings));
   } catch {
     /* ignore */
   }
-  return density;
+  return settings;
 }

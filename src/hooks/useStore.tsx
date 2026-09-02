@@ -73,11 +73,7 @@ import { addWorkspaceCwd, removeWorkspaceCwd } from '../lib/workspaces';
 import { createOrderedActionBatcher, type OrderedActionBatcher } from './orderedActionBatcher';
 import { isHistoryStatusError, applyHistoryServerEvent } from '../lib/historyHealth';
 import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/autonomy';
-import {
-  loadToolActivityDensity,
-  saveToolActivityDensity,
-  type ToolActivityDensity,
-} from '../lib/toolActivity';
+import { loadToolActivity, saveToolActivity, type ToolActivitySettings } from '../lib/toolActivity';
 import {
   applyFactoryCompactionDefaults,
   compactionSettingsSnapshot,
@@ -124,6 +120,7 @@ import {
   type UtilityPanelState,
   type UtilityTool,
 } from '../lib/utilityPanel';
+import type { FileChange } from '../lib/diff';
 import type { ImagePasteQuality } from '../lib/images';
 import {
   estimateTranscriptCost,
@@ -268,6 +265,10 @@ export interface AppState {
   // A file path the Review pane should jump to once its list loads, set when a
   // per-turn changes summary (or diff card) is clicked. Cleared after the jump.
   reviewFocusPath: string | null;
+  // The change captured in the transcript when the focus request came from a
+  // diff card. Review falls back to rendering it when no git scope lists the
+  // file (folderless session, or the edit was reverted since the turn).
+  reviewFocusChange: FileChange | null;
   // Generation counter for focus requests: every OPEN_REVIEW_AT bumps it so
   // the Review pane can tell a fresh click apart from a re-render of the
   // previous request (a repeated click must re-arm the scope-fallback dedupe).
@@ -294,8 +295,10 @@ export interface AppState {
   // Persisted app-wide default autonomy for new sessions. Owned by Settings;
   // factory-default reloads and draft/session changes never overwrite it.
   defaultAutonomy: Autonomy;
-  // Compact folds chat tool calls into one group; verbose shows each tool.
-  toolActivity: ToolActivityDensity;
+  // How much detail chat tool activity renders: one aggregate line per run
+  // (compact), one line per tool (balanced), or lines with bodies inline
+  // (detailed); plus whether folded diff runs default to expanded.
+  toolActivity: ToolActivitySettings;
   // Autonomy override for the current unsent draft. Null means the draft
   // follows `defaultAutonomy`; reset whenever the draft lifecycle resets.
   draftAutonomy: Autonomy | null;
@@ -531,7 +534,7 @@ type Action =
   | { type: 'SET_UTILITY_PANEL_OPEN'; open: boolean }
   | { type: 'SET_REVIEW_OPEN'; open: boolean }
   | { type: 'SET_REVIEW_SCOPE'; scope: DiffScope }
-  | { type: 'OPEN_REVIEW_AT'; scope: DiffScope; path?: string | null }
+  | { type: 'OPEN_REVIEW_AT'; scope: DiffScope; path?: string | null; change?: FileChange }
   | { type: 'CLEAR_REVIEW_FOCUS' }
   | { type: 'SET_DIFF_VIEW'; mode: DiffViewMode }
   | { type: 'TOGGLE_COMMAND_PALETTE' }
@@ -599,7 +602,7 @@ type Action =
   | { type: 'SET_LIVE_ENTER_BEHAVIOR'; behavior: LiveEnterBehavior }
   | { type: 'SET_IMAGE_PASTE_QUALITY'; quality: ImagePasteQuality }
   | { type: 'SET_DEFAULT_AUTONOMY'; autonomy: Autonomy }
-  | { type: 'SET_TOOL_ACTIVITY'; density: ToolActivityDensity }
+  | { type: 'SET_TOOL_ACTIVITY'; settings: ToolActivitySettings }
   | { type: 'SET_DRAFT_AUTONOMY'; autonomy: Autonomy }
   | { type: 'AUTONOMY_UPDATE_REQUESTED'; appSessionId: string; autonomy: Autonomy }
   | { type: 'AUTONOMY_UPDATE_SETTLED'; appSessionId: string };
@@ -675,7 +678,7 @@ export const initialState: AppState = {
   missionControlMode: persistedUiState.missionControlMode ?? false,
   draftChat: null,
   defaultAutonomy: loadDefaultAutonomy(),
-  toolActivity: loadToolActivityDensity(),
+  toolActivity: loadToolActivity(),
   draftAutonomy: null,
   pendingAutonomy: {},
   composerSeed: null,
@@ -698,6 +701,7 @@ export const initialState: AppState = {
   reviewOpenAppSessionId: null,
   reviewScope: loadReviewScope(),
   reviewFocusPath: null,
+  reviewFocusChange: null,
   reviewFocusRequestId: 0,
   diffView: loadDiffView(),
   sessionSettingOverrides: {},
@@ -847,6 +851,10 @@ function baseReducer(state: AppState, action: Action): AppState {
           shouldActivate && action.session.appSessionId !== state.activeAppSessionId
             ? null
             : state.reviewFocusPath,
+        reviewFocusChange:
+          shouldActivate && action.session.appSessionId !== state.activeAppSessionId
+            ? null
+            : state.reviewFocusChange,
         childAccess,
         childRuntime,
         pendingCompose,
@@ -1417,6 +1425,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         // A pending review-focus request belongs to the session that issued
         // it; never let it fire in another session's panel after a switch.
         reviewFocusPath: action.id === state.activeAppSessionId ? state.reviewFocusPath : null,
+        reviewFocusChange: action.id === state.activeAppSessionId ? state.reviewFocusChange : null,
         mainView: 'session',
       };
     }
@@ -1480,6 +1489,7 @@ function baseReducer(state: AppState, action: Action): AppState {
             ? null
             : state.reviewOpenAppSessionId,
         reviewFocusPath: closing?.tool === 'review' ? null : state.reviewFocusPath,
+        reviewFocusChange: closing?.tool === 'review' ? null : state.reviewFocusChange,
         browserOpenKeys:
           closing?.tool === 'browser'
             ? withBrowserOpenKey(state.browserOpenKeys, appSessionId, false)
@@ -1567,6 +1577,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         ...state,
         reviewOpenAppSessionId: null,
         reviewFocusPath: null,
+        reviewFocusChange: null,
         utilityPanels: state.activeAppSessionId
           ? {
               ...state.utilityPanels,
@@ -1589,6 +1600,7 @@ function baseReducer(state: AppState, action: Action): AppState {
           ...state,
           reviewScope: saveReviewScope(action.scope),
           reviewFocusPath: action.path ?? null,
+          reviewFocusChange: action.change ?? null,
           reviewFocusRequestId: state.reviewFocusRequestId + 1,
         };
       }
@@ -1598,6 +1610,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         reviewOpenAppSessionId: state.activeAppSessionId,
         reviewScope: saveReviewScope(action.scope),
         reviewFocusPath: action.path ?? null,
+        reviewFocusChange: action.change ?? null,
         reviewFocusRequestId: state.reviewFocusRequestId + 1,
         utilityPanels: {
           ...state.utilityPanels,
@@ -1610,7 +1623,9 @@ function baseReducer(state: AppState, action: Action): AppState {
       };
 
     case 'CLEAR_REVIEW_FOCUS':
-      return state.reviewFocusPath === null ? state : { ...state, reviewFocusPath: null };
+      return state.reviewFocusPath === null && state.reviewFocusChange === null
+        ? state
+        : { ...state, reviewFocusPath: null, reviewFocusChange: null };
 
     case 'SET_DIFF_VIEW':
       return { ...state, diffView: saveDiffView(action.mode) };
@@ -1674,6 +1689,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         selectedChild: null,
         // Leaving for a fresh draft orphans any pending review-focus request.
         reviewFocusPath: null,
+        reviewFocusChange: null,
         sessionLastSeen,
         mainView: 'session',
       };
@@ -2019,7 +2035,7 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'SET_TOOL_ACTIVITY':
-      return { ...state, toolActivity: saveToolActivityDensity(action.density) };
+      return { ...state, toolActivity: saveToolActivity(action.settings) };
 
     case 'SET_DRAFT_AUTONOMY':
       return { ...state, draftAutonomy: action.autonomy };

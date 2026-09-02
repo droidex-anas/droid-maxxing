@@ -1,9 +1,9 @@
-import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 
 import type { FileChange } from '../lib/diff';
 import { displayPath, pathFileName } from '../lib/pathDisplay';
+import { Expand } from './transcript/primitives';
 
 export interface TurnFile {
   path: string;
@@ -24,29 +24,11 @@ export interface TurnChangesItem {
 function ChangeCount({ added, removed }: { added: number; removed: number }) {
   if (added === 0 && removed === 0) return null;
   return (
-    <span className="shrink-0 font-mono text-[11px]">
+    <span className="shrink-0 tabular-nums text-[11px]">
       {added > 0 && <span style={{ color: 'var(--diff-add-fg)' }}>+{added}</span>}
       {added > 0 && removed > 0 && ' '}
       {removed > 0 && <span style={{ color: 'var(--diff-del-fg)' }}>−{removed}</span>}
     </span>
-  );
-}
-
-function Expand({ open, children }: { open: boolean; children: ReactNode }) {
-  return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-          className="overflow-hidden"
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
   );
 }
 

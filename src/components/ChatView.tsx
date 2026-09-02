@@ -4,13 +4,8 @@ import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import type { SessionRestore } from '../hooks/storeChildSession';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  MessageFeed,
-  WorkingIndicator,
-  UserBubble,
-  ChatSkeleton,
-  TranscriptSkeleton,
-} from './chat';
+import { MessageFeed } from './MessageFeed';
+import { WorkingIndicator, UserBubble, ChatSkeleton, TranscriptSkeleton } from './chat';
 import { readFile } from '../lib/desktop';
 import { interruptChild, loadChildHistory, loadSessionHistory } from '../lib/commands';
 import { chatDisplayTitle } from '../lib/chatMetadata';
@@ -210,6 +205,9 @@ export default function ChatView({
     [isObscured],
   );
   const state = useStoreSelector(selectChatViewState, equalChatState);
+  // Tool-activity settings are render-only feed props; select them apart from
+  // the obscured-gated chat state so a settings change always applies live.
+  const toolActivity = useStoreSelector((s) => s.toolActivity);
   const scrollRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<ConversationListHandle>(null);
   const viewportLayoutRef = useRef<ConversationViewportLayout | null>(null);
@@ -294,15 +292,17 @@ export default function ChatView({
 
   // Open the Review pane scoped to the agent's last turn and jump to the clicked
   // file, reused by both the per-turn changes summary and inline diff cards.
+  // Diff cards hand over the captured change so the pane can render it even
+  // when no git scope lists the file (folderless session, reverted edit).
   const openReviewFile = useCallback(
-    (path: string) => {
-      dispatch({ type: 'OPEN_REVIEW_AT', scope: 'last_turn', path });
+    (path: string, change?: FileChange) => {
+      dispatch({ type: 'OPEN_REVIEW_AT', scope: 'last_turn', path, change });
     },
     [dispatch],
   );
   const openDiff = useCallback(
     (change: FileChange) => {
-      openReviewFile(change.path);
+      openReviewFile(change.path, change);
     },
     [openReviewFile],
   );
@@ -613,6 +613,8 @@ export default function ChatView({
             ? { subagentsDock: messageFeedSubagentsDock }
             : {})}
           specContent={specContent}
+          density={toolActivity.density}
+          inlineDiffs={toolActivity.inlineDiffs}
           {...(openSpecWiki !== undefined ? { onOpenSpecWiki: openSpecWiki } : {})}
           {...(!viewingChildSession && createdWorktreePath !== undefined
             ? { createdWorktreePath }

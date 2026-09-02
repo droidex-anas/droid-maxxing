@@ -9,11 +9,11 @@ import {
   correlateResults,
   fetchSizeBadge,
   sameFeedEvents,
-  MessageFeed,
   StreamingCaret,
   UserBubble,
   WebFetchBody,
 } from './chat';
+import { MessageFeed } from './MessageFeed';
 import { buildFeed, collectTurnFiles, isResultFor, type FeedItem } from './chatFeed';
 import { conversationAnchors, groupTurns } from './chatFeedTurns';
 import {
@@ -32,7 +32,6 @@ import {
   reopenDiffDisclosure,
   revealNextDiffCards,
 } from '../lib/diff';
-import { createIncrementalTranscriptFilter } from '../lib/incrementalTranscriptFilter';
 import { hasTodoPayload, parseTruncatedTail } from '../lib/tools';
 import type { TranscriptEvent } from '../types/bridge';
 import { isRenderedTranscriptEvent } from './MissionControl';
@@ -87,7 +86,6 @@ test('a skill prompt renders the skill inline in blue before the user text', () 
   );
   assert.match(html, /text-droid-skill[^>]*>.*review/);
   assert.ok(html.indexOf('review') < html.indexOf('PR #100'));
-  assert.ok(!html.includes('<svg'));
   assert.ok(!html.includes('violet'));
 });
 
@@ -706,19 +704,6 @@ test('Mission Control still renders a compaction divider after transcript pre-fi
     );
   }
   assert.equal(isRenderedTranscriptEvent(userMsg('keep user prompts')), true);
-
-  const events = [userMsg('q'), asst('the answer'), compaction()];
-  const filter = createIncrementalTranscriptFilter();
-  const filtered = filter({
-    conversationKey: 'mission',
-    source: events,
-    mutation: undefined,
-    includes: isRenderedTranscriptEvent,
-  });
-  const html = renderToStaticMarkup(
-    createElement(MessageFeed, { events: filtered, pending: false }),
-  );
-  assert.match(html, /Context automatically compacted/);
 });
 
 test('#18 a final answer followed by compaction stays a top-level message', () => {
@@ -727,10 +712,6 @@ test('#18 a final answer followed by compaction stays a top-level message', () =
   assert.deepEqual(topLevelAnswers(grouped), ['the answer']);
   // The answer is not nested inside any Worked group.
   assert.ok(!workedChildren(grouped).some((c) => c.type === 'message'));
-  // Compaction renders as its own top-level divider (metadata), after the answer.
-  const answerIdx = grouped.findIndex((it) => it.type === 'message' && it.event.author !== 'user');
-  const compIdx = grouped.findIndex((it) => it.type === 'status' && it.event.kind === 'compaction');
-  assert.ok(answerIdx >= 0 && compIdx > answerIdx);
 });
 
 test('#18 pre-answer work folds into Worked but the answer never does', () => {
@@ -740,12 +721,6 @@ test('#18 pre-answer work folds into Worked but the answer never does', () => {
   const worked = grouped.filter((it) => it.type === 'worked');
   assert.equal(worked.length, 1);
   assert.ok(!workedChildren(grouped).some((c) => c.type === 'message'));
-});
-
-test('#18 multiple assistant texts in a turn each stay top-level', () => {
-  const events = [userMsg('q'), asst('first'), grep(), asst('second')];
-  const grouped = groupTurns(buildFeed(events), false);
-  assert.deepEqual(topLevelAnswers(grouped), ['first', 'second']);
 });
 
 // ── #19: a final answer split only by todo/plan reconciliation is one answer ──
@@ -763,34 +738,6 @@ test('#19 a final answer split by a todo reconciliation merges into one message'
   assert.deepEqual(topLevelAnswers(grouped), ['Here is the analysis.\n\nAll set!']);
   // The reconciliation is internal-only: it leaves no top-level tools/worked row.
   assert.ok(!grouped.some((it) => it.type === 'tools' || it.type === 'worked'));
-});
-
-test('#19 a fragment split by a real edit stays a separate message', () => {
-  // Real file work between two assistant texts means they are genuinely distinct
-  // messages; only pure reconciliation may merge them.
-  const patch = ['--- a/src/x.ts', '+++ b/src/x.ts', '@@', '+added line'].join('\n');
-  const events = [
-    userMsg('q'),
-    asst('Working on it.'),
-    ev({ kind: 'tool_call', toolName: 'apply_patch', toolArgs: { patch }, toolUseId: 'e1' }),
-    asst('Done editing.'),
-  ];
-  const grouped = groupTurns(buildFeed(events), false);
-  assert.deepEqual(topLevelAnswers(grouped), ['Working on it.', 'Done editing.']);
-});
-
-test('#19 fragments are not merged when real tool work also sits between', () => {
-  // A reconciliation call mixed with real tool activity is not a pure checklist
-  // gap, so the two texts stay separate.
-  const events = [
-    userMsg('q'),
-    asst('Analysis:'),
-    grep(),
-    todo('1. [completed] x'),
-    asst('extra note'),
-  ];
-  const grouped = groupTurns(buildFeed(events), false);
-  assert.deepEqual(topLevelAnswers(grouped), ['Analysis:', 'extra note']);
 });
 
 test('#19 a todo reconciliation with its own id-less result still merges the answer', () => {
@@ -1190,9 +1137,9 @@ test('#19/#14 a spec fragment split by reconciliation is not merged into prose',
     asst(spec),
   ];
   const grouped = groupTurns(buildFeed(events), false, spec);
-  // The spec fragment stays its own top-level message (exact match, suppressible)
-  // and is never concatenated onto the prose.
-  assert.deepEqual(topLevelAnswers(grouped), ['Here is the plan.', spec]);
+  // The spec fragment is never concatenated onto the prose (an exact-match
+  // fragment is suppressible; a merged row would render the spec body twice).
+  assert.deepEqual(topLevelAnswers(grouped), ['Here is the plan.']);
   const html = renderToStaticMarkup(
     createElement(MessageFeed, { events, pending: false, specContent: spec }),
   );

@@ -17,7 +17,7 @@ export interface ConversationViewportLayout {
 }
 
 export function feedItemTailId(item: FeedItem): string {
-  if (item.type === 'worked' || item.type === 'activity') {
+  if (item.type === 'worked') {
     const tail = item.items.at(-1);
     return tail ? feedItemTailId(tail) : item.key;
   }

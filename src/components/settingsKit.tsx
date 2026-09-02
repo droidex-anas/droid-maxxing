@@ -23,6 +23,29 @@ export function GroupLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/* ── settings row: label + description on the left, control on the right ── */
+export function SettingRow({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3">
+      <div className="min-w-0">
+        <div className="text-[13px] text-droid-text">{label}</div>
+        {description && (
+          <div className="text-[11px] text-droid-text-muted mt-0.5">{description}</div>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /* ── generic in-app dropdown (replaces native <select>) ── */
 export interface DropdownOption {
   value: string;
@@ -85,8 +108,8 @@ export function Dropdown({
       const index = items.indexOf(document.activeElement as HTMLElement);
       const next =
         e.key === 'ArrowDown'
-          ? items[(index + 1) % items.length]
-          : items[(index - 1 + items.length) % items.length];
+          ? items.at((index + 1) % items.length)
+          : items.at((index - 1 + items.length) % items.length);
       next?.focus();
     };
     window.addEventListener('mousedown', onDown);
