@@ -1,6 +1,7 @@
 import { useCallback, useState, type SetStateAction } from 'react';
-import { AppWindow, Blocks } from 'lucide-react';
+import { Blocks } from 'lucide-react';
 import type { SkillInfo } from '../../types/bridge';
+import { VisualizeIcon } from '../icons/VisualizeIcon';
 import type { DraftSelection } from './DraftSelections';
 
 export interface DraftSelectionsState {
@@ -57,7 +58,7 @@ export function useDraftSelections(onDraftEdited: () => void): DraftSelectionsSt
       ? [
           {
             key: 'visualize',
-            icon: AppWindow,
+            icon: VisualizeIcon,
             label: 'Visualize',
             removeLabel: 'Remove Visualize',
             onRemove: () => {

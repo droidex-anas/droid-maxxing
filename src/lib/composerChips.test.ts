@@ -5,6 +5,7 @@ import { chipRemovedByBackspace, type ComposerChips } from './composerChips';
 const chips = (overrides: Partial<ComposerChips> = {}): ComposerChips => ({
   visualizeSelected: false,
   pastedImageIds: [],
+  pastedFileIds: [],
   imagePaths: [],
   skillFilePaths: [],
   documentPaths: [],
@@ -24,6 +25,7 @@ test('backspace unwinds the selections before the attachment row', () => {
   const full = chips({
     visualizeSelected: true,
     pastedImageIds: ['img-1'],
+    pastedFileIds: ['file-1'],
     imagePaths: ['/tmp/shot.png'],
     skillFilePaths: ['/skills/review/SKILL.md'],
     documentPaths: ['/repo/notes.md'],
@@ -41,9 +43,13 @@ test('backspace unwinds the selections before the attachment row', () => {
     path: '/tmp/shot.png',
   });
   assert.deepEqual(chipRemovedByBackspace({ ...staged, documentPaths: [], imagePaths: [] }), {
-    chip: 'pastedImage',
-    id: 'img-1',
+    chip: 'pastedFile',
+    id: 'file-1',
   });
+  assert.deepEqual(
+    chipRemovedByBackspace({ ...staged, documentPaths: [], imagePaths: [], pastedFileIds: [] }),
+    { chip: 'pastedImage', id: 'img-1' },
+  );
 });
 
 test('Visualize goes off in a single press', () => {

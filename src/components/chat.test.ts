@@ -81,14 +81,14 @@ test('parent liveness cannot make paused historical child activity look running'
   assert.equal(childSessionLineIsRunning({ status: 'running' }), true);
 });
 
-test('a skill prompt renders the skill inline in blue before the user text', () => {
+test('a sent prompt shows Visualize and skill chips instead of slash text', () => {
   const html = renderToStaticMarkup(
-    createElement(UserBubble, { event: { text: 'PR #100', skills: ['review'] } }),
+    createElement(UserBubble, { event: { text: '/visualize PR #100', skills: ['review'] } }),
   );
-  assert.match(html, /text-droid-skill[^>]*>.*review/);
-  assert.ok(html.indexOf('review') < html.indexOf('PR #100'));
-  assert.ok(!html.includes('<svg'));
-  assert.ok(!html.includes('violet'));
+  assert.equal(html.includes('/visualize') || html.includes('/review'), false);
+  assert.ok(html.includes('Visualize'));
+  assert.ok(html.includes('review'));
+  assert.ok(html.includes('PR #100'));
 });
 
 // ── #20: TodoWrite / tool orchestration must not leak as chat ──

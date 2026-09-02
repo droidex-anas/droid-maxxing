@@ -7,9 +7,8 @@ export function isVisualizeCommand(text: string): boolean {
   return /^\/visualize(?:\s|$)/i.test(text.trim());
 }
 
-// The composer can hold Visualize as a chip instead of leaving the command in
-// the draft. Sending re-attaches it so one canonical text drives the response
-// format, the transcript echo, and prompt history.
+// Re-attach /visualize for the payload sent to the session. The transcript
+// peels it back off so the bubble matches the composer chip.
 export function promptTextWithVisualize(text: string, visualizeSelected: boolean): string {
   if (!visualizeSelected || isVisualizeCommand(text)) return text;
   return `${VISUALIZE_COMMAND.cmd} ${text}`.trim();
@@ -67,4 +66,77 @@ export function parseSlashSkillInvocation(
   const skill = skills.find((candidate) => candidate.name.toLowerCase() === match[1].toLowerCase());
   if (!skill) return undefined;
   return { skillName: skill.name, prompt: match.at(2)?.trim() ?? '' };
+}
+
+const RESERVED_SLASH = new Set([
+  'visualize',
+  'bug',
+  'feedback',
+  'mission',
+  'model',
+  'spec',
+  'settings',
+  ...[...COMPACT_COMMANDS].map((cmd) => cmd.slice(1)),
+]);
+
+function afterSlash(text: string, name: string): string | null {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`^/${escaped}(?:\\s+|$)([\\s\\S]*)`, 'i').exec(text.trim());
+  return match ? match[1] : null;
+}
+
+// Inverse of promptTextWithVisualize + composePrompt: chips in, slash text out.
+export function promptDisplayParts(
+  text: string,
+  skills?: readonly string[],
+): { text: string; skills: string[]; visualize: boolean } {
+  let body = text;
+  let visualize = false;
+  let names = skills?.length ? [...skills] : [];
+
+  const vis = afterSlash(body, 'visualize');
+  if (vis !== null) {
+    visualize = true;
+    body = vis;
+  }
+
+  if (names.length > 0) {
+    for (const skill of names) {
+      const rest = afterSlash(body, skill);
+      if (rest !== null) {
+        body = rest;
+        break;
+      }
+    }
+  } else {
+    const multi = /^Use these skills: (.+)\.\n\n([\s\S]*)$/.exec(body);
+    if (multi) {
+      names = [...multi[1].matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] ? [m[1]] : []));
+      body = multi[2];
+    } else {
+      const slash = /^\/([A-Za-z][\w-]*)\s*([\s\S]*)$/.exec(body.trim());
+      if (slash && !RESERVED_SLASH.has(slash[1].toLowerCase())) {
+        names = [slash[1]];
+        body = slash[2];
+      }
+    }
+  }
+
+  if (!visualize) {
+    const rest = afterSlash(body, 'visualize');
+    if (rest !== null) {
+      visualize = true;
+      body = rest;
+    }
+  }
+
+  return { text: body, skills: names, visualize };
+}
+
+export function promptDisplayText(text: string, skills?: readonly string[]): string {
+  const display = promptDisplayParts(text, skills);
+  return (
+    display.text.replace(/\s+/g, ' ').trim() ||
+    (display.visualize ? 'Visualize' : display.skills.join(', '))
+  );
 }

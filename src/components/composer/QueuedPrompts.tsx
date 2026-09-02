@@ -8,6 +8,7 @@ import {
   X,
 } from 'lucide-react';
 import type { QueuedPrompt } from '../../hooks/useStore';
+import { promptDisplayText } from '../../lib/composePrompt';
 import { imageSrc, partitionImagePaths, pathBaseName } from '../../lib/localImage';
 import { queuedPromptPreview } from './queuedPromptPreview';
 
@@ -121,7 +122,7 @@ export function QueuedPrompts({
             </span>
             <span className="flex-1 min-w-0">
               <span className="line-clamp-2 block break-words text-[12px] text-droid-text-secondary">
-                {queuedPromptPreview(p.text) || '(empty)'}
+                {queuedPromptPreview(promptDisplayText(p.text, p.skills)) || '(empty)'}
               </span>
               {images.length > 0 && <QueuedImages paths={images} />}
               {p.design && p.design.references.length > 0 && (

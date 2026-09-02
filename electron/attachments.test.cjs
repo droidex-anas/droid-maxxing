@@ -6,8 +6,10 @@ const path = require('node:path');
 
 const {
   save,
+  saveFile,
   discard,
   decodeImageDataUrl,
+  sanitizeAttachmentName,
   writeExclusive,
   evictToBudget,
   withSaveLock,
@@ -249,3 +251,36 @@ test(
     assert.equal(await fsp.readFile(path.join(dir, 'victim.png'), 'utf8'), 'victim');
   },
 );
+
+test('saveFile writes the bytes under a readable original name', async () => {
+  const dir = await tempDir();
+  const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.7 fake').toString('base64')}`;
+  const named = await saveFile(dir, { name: 'Adventure travel.docx', dataUrl: pdf });
+  assert.equal(path.dirname(named), path.resolve(dir));
+  assert.match(path.basename(named), /^file-\d+-[0-9a-f]{8}-Adventure travel\.docx$/);
+  assert.deepEqual(await fsp.readFile(named), Buffer.from('%PDF-1.7 fake'));
+
+  const unnamed = await saveFile(dir, { name: '', dataUrl: pdf });
+  assert.match(path.basename(unnamed), /^file-\d+-[0-9a-f]{8}-pasted-file\.pdf$/);
+});
+
+test('sanitizeAttachmentName strips traversal and unusable characters', () => {
+  // Names come from the renderer, so anything with separators must collapse to
+  // a plain basename that cannot escape the attachments root.
+  assert.equal(sanitizeAttachmentName('../../etc/passwd'), 'passwd');
+  assert.equal(sanitizeAttachmentName('..\\..\\evil.pdf'), 'evil.pdf');
+  assert.equal(sanitizeAttachmentName('Q4 plan: final?.pdf'), 'Q4 plan- final-.pdf');
+  // Leading dots are stripped so a name cannot create a hidden file or a
+  // dot-segment; what remains is still a usable basename.
+  assert.equal(sanitizeAttachmentName('.hidden'), 'hidden');
+  assert.equal(sanitizeAttachmentName(''), null);
+  assert.equal(sanitizeAttachmentName('...'), null);
+  assert.equal(sanitizeAttachmentName(42), null);
+});
+
+test('sanitizeAttachmentName caps length without losing the extension', () => {
+  const long = `${'a'.repeat(200)}.pdf`;
+  const cleaned = sanitizeAttachmentName(long);
+  assert.equal(cleaned.length, 120);
+  assert.ok(cleaned.endsWith('.pdf'));
+});

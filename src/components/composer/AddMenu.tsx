@@ -1,6 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type KeyboardEvent,
+} from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AppWindow, FolderOpen, Plus, type LucideIcon } from 'lucide-react';
+import { FolderOpen, Plus } from 'lucide-react';
+import { VisualizeIcon } from '../icons/VisualizeIcon';
 
 const ACCENT = 'var(--droid-accent)';
 
@@ -27,7 +35,9 @@ function MenuRow({
   autoFocus = false,
   onRun,
 }: {
-  icon: LucideIcon;
+  // Lucide outlines for the file row, the brand tile for Visualize: anything
+  // that takes its size from className fits here.
+  icon: ComponentType<{ className?: string }>;
   label: string;
   hint: string;
   checked?: boolean;
@@ -197,7 +207,7 @@ export default function AddMenu({
             />
             <SectionTitle>Plugins</SectionTitle>
             <MenuRow
-              icon={AppWindow}
+              icon={VisualizeIcon}
               label="Visualize"
               hint="Create an interactive in-chat App"
               checked={visualizeSelected}

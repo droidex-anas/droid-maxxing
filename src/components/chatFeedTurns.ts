@@ -1,4 +1,5 @@
 import { feedItemTailId } from '../hooks/conversationViewportAnchor';
+import { promptDisplayText } from '../lib/composePrompt';
 import { classifyEvent } from '../lib/transcript';
 import { isSubagentBookkeepingTool } from '../lib/tools';
 import type { TranscriptEvent } from '../types/bridge';
@@ -21,9 +22,9 @@ function isUserMessage(item: FeedItem): boolean {
 // a huge tooltip.
 function turnLabel(text?: string): string {
   if (!text) return 'Message';
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return 'Message';
-  return clean.length > 160 ? `${clean.slice(0, 160).trimEnd()}…` : clean;
+  const label = promptDisplayText(text);
+  if (!label) return 'Message';
+  return label.length > 160 ? `${label.slice(0, 160).trimEnd()}…` : label;
 }
 
 export interface ConversationAnchor {
