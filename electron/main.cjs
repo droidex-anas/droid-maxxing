@@ -338,6 +338,11 @@ function registerIpc() {
   // ordinary @-mentioned paths; discard only ever unlinks inside that dir.
   const attachmentsDir = path.join(os.tmpdir(), 'droidex-attachments');
   ipcMain.handle('save-image', (_event, { dataUrl }) => attachments.save(attachmentsDir, dataUrl));
+  // Pasted non-image files (PDF, doc, video, ...) land in the same temp store
+  // and likewise travel to Droid as @-mentioned paths.
+  ipcMain.handle('save-attachment', (_event, { name, dataUrl }) =>
+    attachments.saveFile(attachmentsDir, { name, dataUrl }),
+  );
   ipcMain.handle('discard-image', (_event, { path: target }) =>
     attachments.discard(attachmentsDir, target),
   );

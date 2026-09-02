@@ -1,6 +1,15 @@
-import { useMemo, useState, memo, useEffect, useRef, type RefObject } from 'react';
+import {
+  useMemo,
+  useState,
+  memo,
+  useEffect,
+  useRef,
+  type ComponentType,
+  type RefObject,
+} from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  Blocks,
   ChevronRight,
   Terminal,
   Copy,
@@ -26,8 +35,11 @@ import {
   type FileChange,
 } from '../lib/diff';
 import { ImageAttachmentChip } from './media/ImageAttachmentChip';
+import { FileChip } from './composer/FileChip';
 import { isImagePath } from '../lib/localImage';
+import { promptDisplayParts } from '../lib/composePrompt';
 import { userMessageAttachments } from '../lib/promptMentions';
+import { VisualizeIcon } from './icons/VisualizeIcon';
 import { DiffCard } from './DiffView';
 import { SubagentsDock, type SubagentsDockData } from './SubagentsDock';
 import TurnChangesPanel from './TurnChangesPanel';
@@ -1181,19 +1193,40 @@ function BrowserReferenceChip({ reference }: { reference: BrowserTranscriptRefer
   );
 }
 
+function PromptChip({
+  icon: Icon,
+  label,
+  title,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title ?? label}
+      className="inline-flex items-center gap-1.5 font-medium text-droid-skill"
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </span>
+  );
+}
+
 export function UserBubble({
   event,
 }: {
   event: Pick<TranscriptEvent, 'text' | 'skills' | 'files' | 'browserRefs' | 'steered'>;
 }) {
-  const skills = event.skills ?? [];
   const browserRefs = event.browserRefs ?? [];
   // A replayed message has no files metadata, only the composed text it was sent
   // as, so attachments are recovered from its trailing @mention block.
   const message = userMessageAttachments(event.text, event.files);
+  const display = promptDisplayParts(message.text, event.skills);
   const images = message.files.filter((f) => isImagePath(f));
   const files = message.files.filter((f) => !isImagePath(f));
   const hasAttachments = message.files.length > 0 || browserRefs.length > 0;
+  const hasPrompt = Boolean(display.text) || display.skills.length > 0 || display.visualize;
   return (
     <div className="flex flex-col items-end gap-1.5 py-1">
       {event.steered && (
@@ -1221,25 +1254,19 @@ export function UserBubble({
             <ImageAttachmentChip key={f} path={f} />
           ))}
           {files.map((f) => (
-            <span
-              key={f}
-              title={f}
-              className="flex items-center gap-1 rounded-lg border border-droid-border bg-droid-elevated/80 px-2 py-1 text-[11px] text-droid-text-secondary"
-            >
-              <FileText className="h-3 w-3 text-droid-text-muted" />
-              {baseName(f)}
-            </span>
+            <FileChip key={f} path={f} />
           ))}
         </div>
       )}
-      {(message.text || skills.length > 0) && (
+      {hasPrompt && (
         <div className="flex max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-relaxed text-droid-text">
-          {skills.map((skill) => (
-            <span key={skill} title={`Skill: ${skill}`} className="font-medium text-droid-skill">
-              {skill}
-            </span>
+          {display.visualize && <PromptChip icon={VisualizeIcon} label="Visualize" />}
+          {display.skills.map((skill) => (
+            <PromptChip key={skill} icon={Blocks} label={skill} title={`Skill: ${skill}`} />
           ))}
-          {message.text && <span className="whitespace-pre-wrap break-words">{message.text}</span>}
+          {display.text ? (
+            <span className="whitespace-pre-wrap break-words">{display.text}</span>
+          ) : null}
         </div>
       )}
     </div>

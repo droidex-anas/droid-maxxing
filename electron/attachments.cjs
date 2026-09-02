@@ -56,25 +56,67 @@ const EXTENSION_BY_MIME = new Map([
   ['image/gif', 'gif'],
 ]);
 
-// Returns { ext, buffer } or throws on anything that is not a decodable image
-// data URL within the size cap.
-function decodeImageDataUrl(dataUrl) {
+// Returns { mime, buffer } or throws on anything that is not a decodable
+// base64 data URL within the size cap.
+function decodeDataUrl(dataUrl) {
   if (typeof dataUrl !== 'string') throw new Error('Attachment payload must be a data URL string');
   const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl);
   if (!match) throw new Error('Attachment payload is not a base64 data URL');
-  const ext = EXTENSION_BY_MIME.get(match[1]);
-  if (!ext) {
-    throw new Error(
-      `Unsupported image type: ${match[1]} (supported: ${[...EXTENSION_BY_MIME.keys()].join(', ')})`,
-    );
-  }
   if (match[2].length > MAX_DATA_URL_BASE64_CHARS) {
     throw new Error('Attachment exceeds the size limit');
   }
   const buffer = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
   if (buffer.length === 0) throw new Error('Attachment payload is empty');
   if (buffer.length > MAX_ATTACHMENT_BYTES) throw new Error('Attachment exceeds the size limit');
+  return { mime: match[1], buffer };
+}
+
+// Returns { ext, buffer } or throws on anything that is not a decodable image
+// data URL within the size cap.
+function decodeImageDataUrl(dataUrl) {
+  const { mime, buffer } = decodeDataUrl(dataUrl);
+  const ext = EXTENSION_BY_MIME.get(mime);
+  if (!ext) {
+    throw new Error(
+      `Unsupported image type: ${mime} (supported: ${[...EXTENSION_BY_MIME.keys()].join(', ')})`,
+    );
+  }
   return { ext, buffer };
+}
+
+// Extension hint for a pasted blob whose File carried no usable name, keyed by
+// its data URL MIME. Anything unmapped still saves, as .bin.
+const EXTENSION_BY_FILE_MIME = new Map([
+  ['application/pdf', 'pdf'],
+  ['application/xml', 'xml'],
+  ['text/xml', 'xml'],
+  ['application/json', 'json'],
+  ['text/plain', 'txt'],
+  ['text/csv', 'csv'],
+  ['application/zip', 'zip'],
+  ['audio/mpeg', 'mp3'],
+  ['video/mp4', 'mp4'],
+]);
+
+// The pasted File's name is renderer-controlled, so it is untrusted: path
+// separators and dot-segments would let a crafted name escape the attachments
+// root or clobber a sibling. Keeps the original characters where possible so
+// the saved path still reads like the user's file; null when nothing usable
+// remains.
+function sanitizeAttachmentName(name) {
+  if (typeof name !== 'string') return null;
+  const base = name.split(/[\\/]/).pop() ?? '';
+  const cleaned = base
+    // Unicode letters and numbers stay (users paste non-ASCII names); every
+    // other character outside a small punctuation set collapses to a dash.
+    .replace(/[^\p{L}\p{N} .()_@-]+/gu, '-')
+    .replace(/^\.+/, '')
+    .trim();
+  if (cleaned.length === 0 || cleaned === '.' || cleaned === '..') return null;
+  if (cleaned.length <= 120) return cleaned;
+  const dot = cleaned.lastIndexOf('.');
+  const ext = dot > 0 ? cleaned.slice(dot) : '';
+  return cleaned.slice(0, 120 - ext.length) + ext;
 }
 
 // Creates the attachments root owner-only and verifies it is a real directory
@@ -217,6 +259,33 @@ async function save(dir, dataUrl, opts = {}) {
   });
 }
 
+// Saves a pasted non-image file (PDF, document, video, ...) under a name that
+// keeps the original basename readable after the unique prefix, so a chip
+// restored from a queued prompt still names the user's file. Same temp-root
+// discipline as save(): sweep → evict → exclusive write.
+async function saveFile(dir, { name, dataUrl } = {}, opts = {}) {
+  const budgetBytes = opts.budgetBytes ?? MAX_DIR_BYTES;
+  const graceMs = opts.graceMs ?? EVICTION_GRACE_MS;
+  const { mime, buffer } = decodeDataUrl(dataUrl);
+  const displayName =
+    sanitizeAttachmentName(name) ?? `pasted-file.${EXTENSION_BY_FILE_MIME.get(mime) ?? 'bin'}`;
+  await ensurePrivateDir(dir);
+  return withSaveLock(dir, async () => {
+    await sweepStale(dir);
+    const fits = await evictToBudget(dir, buffer.length, budgetBytes, graceMs);
+    if (!fits) {
+      throw new Error(
+        'Attachments directory is full: recent attachments are preserved for unsent prompts',
+      );
+    }
+    return writeExclusive(
+      dir,
+      () => `file-${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${displayName}`,
+      buffer,
+    );
+  });
+}
+
 // Unlinks a previously saved attachment. Paths escaping the attachments
 // directory are refused outright; a missing file is treated as already gone.
 async function discard(dir, target) {
@@ -232,8 +301,10 @@ async function discard(dir, target) {
 
 module.exports = {
   save,
+  saveFile,
   discard,
   decodeImageDataUrl,
+  sanitizeAttachmentName,
   writeExclusive,
   evictToBudget,
   withSaveLock,
