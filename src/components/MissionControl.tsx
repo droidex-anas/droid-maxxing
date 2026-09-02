@@ -32,10 +32,11 @@ import type {
   ModelInfo,
 } from '../types/bridge';
 import { extractFileChange, type FileChange } from '../lib/diff';
+import { displayPath } from '../lib/pathDisplay';
 import { environmentLabels } from '../lib/repoEnvironment';
 import { DiffFull } from './DiffView';
 import { ModelIcon, providerOf } from './ModelIcon';
-import { CAT_ICON, CAT_LABEL, toolMeta } from '../lib/tools';
+import { CAT_LABEL, toolMeta } from '../lib/tools';
 import {
   childSessionActivityForTarget,
   childSessionIdForFeature,
@@ -51,7 +52,7 @@ import {
   type ChildSessionActivity,
 } from '../lib/childSessions';
 import { sessionIsLive } from '../lib/sessions';
-import { MessageFeed } from './chat';
+import { MessageFeed } from './MessageFeed';
 import EditorOpenMenu, { openCodebase, openCurrentDiff } from './EditorOpenMenu';
 import PromptInput from './PromptInput';
 import AutonomySelector from './AutonomySelector';
@@ -89,6 +90,7 @@ function ChatArea({
   events,
   live,
   pending,
+  cwd,
   onOpenDiff,
   onOpenChildSession,
   childSessionActivity,
@@ -97,6 +99,7 @@ function ChatArea({
   events: TranscriptEvent[];
   live: boolean;
   pending: boolean;
+  cwd?: string;
   onOpenDiff?: (c: FileChange) => void;
   onOpenChildSession?: (target: { toolUseId?: string; label?: string }) => void;
   childSessionActivity?: (target: {
@@ -105,6 +108,7 @@ function ChatArea({
   }) => ChildSessionActivity | undefined;
   big?: boolean;
 }) {
+  const toolActivity = useStoreSelector((state) => state.toolActivity);
   const scrollRef = useRef<HTMLDivElement>(null);
   const renderEvents = events.length > 900 ? events.slice(-900) : events;
   const hidden = events.length - renderEvents.length;
@@ -128,8 +132,11 @@ function ChatArea({
         <MessageFeed
           events={renderEvents}
           pending={pending}
+          cwd={cwd}
           onOpenDiff={onOpenDiff}
           onOpenChildSession={onOpenChildSession}
+          density={toolActivity.density}
+          inlineDiffs={toolActivity.inlineDiffs}
           childSessionActivity={childSessionActivity}
           scrollElementRef={scrollRef}
         />
@@ -711,27 +718,28 @@ function StatusDot({ status }: { status: string }) {
 
 function ActionRow({
   event,
+  cwd,
   onOpenDiff,
 }: {
   event: TranscriptEvent;
+  cwd?: string;
   onOpenDiff?: (c: FileChange) => void;
 }) {
   const { cat, detail } = toolMeta(event.toolName, event.toolArgs);
-  const Icon = CAT_ICON[cat];
   const change = extractFileChange(event.toolName, event.toolArgs);
   const clickable = !!change && !!onOpenDiff;
+  const displayDetail = change || cat === 'read' ? displayPath(detail, cwd) : detail;
   return (
     <button
       disabled={!clickable}
       onClick={() => change && onOpenDiff?.(change)}
       className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left ${clickable ? 'hover:bg-droid-elevated/60 cursor-pointer' : 'cursor-default'}`}
     >
-      <Icon className="w-3.5 h-3.5 shrink-0 text-droid-text-muted" />
       <span className="text-[12px] font-medium text-droid-text-secondary shrink-0">
         {CAT_LABEL[cat]}
       </span>
       <span className="text-[12px] font-mono text-droid-text-muted truncate">
-        {detail || event.toolName}
+        {displayDetail || event.toolName}
       </span>
       {clickable && <FileDiff className="w-3 h-3 ml-auto shrink-0 text-droid-text-muted/60" />}
     </button>
@@ -760,11 +768,13 @@ function SpecList({ title, items }: { title: string; items: string[] }) {
 function FeatureFocus({
   feature,
   events,
+  cwd,
   onBack,
   onOpenDiff,
 }: {
   feature: BridgeFeature;
   events: TranscriptEvent[];
+  cwd?: string;
   onBack: () => void;
   onOpenDiff?: (c: FileChange) => void;
 }) {
@@ -849,7 +859,7 @@ function FeatureFocus({
         </div>
         <div className="space-y-1">
           {shown.map((e) => (
-            <ActionRow key={e.id} event={e} onOpenDiff={onOpenDiff} />
+            <ActionRow key={e.id} event={e} cwd={cwd} onOpenDiff={onOpenDiff} />
           ))}
           {shown.length === 0 && (
             <div className="py-8 text-center text-[12.5px] text-droid-text-muted">
@@ -1103,6 +1113,7 @@ export default function MissionControl() {
             <FeatureFocus
               feature={selectedFeature}
               events={selectedFeatureEvents}
+              cwd={mission.cwd}
               onBack={() => {
                 setFocusOpen(false);
               }}
@@ -1113,6 +1124,7 @@ export default function MissionControl() {
               events={events}
               live={visibleIsLive}
               pending={visibleSessionIsPending(visibleTarget, isLive, isLive ? 'primary' : null)}
+              cwd={mission.cwd}
               onOpenDiff={setOpenDiff}
               onOpenChildSession={onOrchestrator ? openChildSession : undefined}
               childSessionActivity={onOrchestrator ? childSessionActivity : undefined}
@@ -1203,12 +1215,12 @@ export default function MissionControl() {
         )}
         {openDiff && (
           <ExpandModal
-            title={openDiff.path}
+            title={displayPath(openDiff.path, mission.cwd)}
             onClose={() => {
               setOpenDiff(null);
             }}
           >
-            <DiffFull change={openDiff} />
+            <DiffFull change={openDiff} cwd={mission.cwd} />
           </ExpandModal>
         )}
       </AnimatePresence>

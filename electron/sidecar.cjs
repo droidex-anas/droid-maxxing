@@ -131,18 +131,26 @@ function createSidecarSupervisor(options) {
     bridgeResponsive = false;
     const token = crypto.randomBytes(32).toString('hex');
     const assetToken = crypto.randomBytes(32).toString('hex');
+    const env = {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      BRIDGE_PORT: process.env.BRIDGE_PORT || '0',
+      BRIDGE_TOKEN: token,
+      BROWSER_ASSET_TOKEN: assetToken,
+      DROIDEX_USER_DATA_DIR: options.userData(),
+      BRIDGE_EXIT_ON_STDIN_CLOSE: '1',
+    };
+    // An isolated history state dir is only handed down when the launcher
+    // provided one (a dev instance beside the main app); otherwise the sidecar
+    // keeps the shared ~/.factory/droidex default and any ambient
+    // DROIDEX_STATE_DIR must not leak through.
+    const stateDir = options.stateDir?.();
+    if (stateDir) env.DROIDEX_STATE_DIR = stateDir;
+    else delete env.DROIDEX_STATE_DIR;
     const nextChild = spawnProcess(process.execPath, [options.entryPath()], {
       cwd: options.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-        BRIDGE_PORT: process.env.BRIDGE_PORT || '0',
-        BRIDGE_TOKEN: token,
-        BROWSER_ASSET_TOKEN: assetToken,
-        DROIDEX_USER_DATA_DIR: options.userData(),
-        BRIDGE_EXIT_ON_STDIN_CLOSE: '1',
-      },
+      env,
     });
     const run = {
       child: nextChild,

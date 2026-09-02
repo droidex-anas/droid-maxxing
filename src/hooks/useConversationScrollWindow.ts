@@ -10,8 +10,12 @@ import {
 } from './conversationViewportAnchor';
 import {
   applyConversationContentResize,
+  captureDisclosureAnchor,
   didCommitRequestedHistoryPrepend,
+  disclosureAnchorDelta,
   pinnedViewportAction,
+  touchDisclosureAnchor,
+  type DisclosureAnchor,
   rememberScrollSnapshot,
   restoreConversationScrollSnapshot,
   shouldBindConversationContentResize,
@@ -82,6 +86,7 @@ export function useConversationScrollWindow({
   restoredScrollOffset: number | undefined;
 } {
   const viewportAnchor = useRef<ViewportAnchor | null>(null);
+  const disclosureAnchor = useRef<DisclosureAnchor | null>(null);
   const isRestoringViewport = useRef(false);
   const isSettlingHistoryPrepend = useRef(false);
   const expectedRestoredScrollTop = useRef<number | null>(null);
@@ -136,6 +141,7 @@ export function useConversationScrollWindow({
     isSettlingHistoryPrepend.current = false;
     expectedRestoredScrollTop.current = null;
     viewportAnchor.current = null;
+    disclosureAnchor.current = null;
     const restored = restoreConversationScrollSnapshot(
       element,
       snapshot,
@@ -213,6 +219,55 @@ export function useConversationScrollWindow({
       visibleConversationKey,
     ],
   );
+
+  // Capture-phase click: before React applies a disclosure toggle, remember
+  // the clicked header's viewport position so the content-resize observer can
+  // keep it under the cursor. Clicking a disclosure while pinned hands scroll
+  // control to the reader: the feed stops following the tail until they
+  // scroll back to the bottom. Wheel/touch releases the anchor immediately.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const captureDisclosure = (event: MouseEvent) => {
+      const button =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>('button[aria-expanded]')
+          : null;
+      const anchor = captureDisclosureAnchor(element, button, Date.now());
+      if (!anchor) return;
+      disclosureAnchor.current = anchor;
+      if (!isPinned.current) return;
+      isPinned.current = false;
+      viewportAnchor.current = captureViewportAnchor(element, true);
+      if (!activeAppSessionId || !visibleConversationKey) return;
+      reportedPinned.current = { conversationKey: visibleConversationKey, pinned: false };
+      dispatch(
+        pinnedViewportAction({
+          appSessionId: activeAppSessionId,
+          childSessionId: isViewingChildSession ? historyChildSessionId : undefined,
+          pinned: false,
+        }),
+      );
+    };
+    const releaseDisclosure = () => {
+      disclosureAnchor.current = null;
+    };
+    element.addEventListener('click', captureDisclosure, true);
+    element.addEventListener('wheel', releaseDisclosure, { passive: true });
+    element.addEventListener('touchstart', releaseDisclosure, { passive: true });
+    return () => {
+      element.removeEventListener('click', captureDisclosure, true);
+      element.removeEventListener('wheel', releaseDisclosure);
+      element.removeEventListener('touchstart', releaseDisclosure);
+    };
+  }, [
+    activeAppSessionId,
+    dispatch,
+    historyChildSessionId,
+    isViewingChildSession,
+    scrollRef,
+    visibleConversationKey,
+  ]);
 
   const onScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -411,6 +466,19 @@ export function useConversationScrollWindow({
       content,
       conversationKey: visibleConversationKey,
       observer: new ResizeObserver(() => {
+        const disclosure = disclosureAnchor.current;
+        if (disclosure) {
+          const action = disclosureAnchorDelta(element, disclosure, Date.now());
+          if (action.mode === 'release') {
+            disclosureAnchor.current = null;
+          } else {
+            if (action.mode === 'adjust') {
+              element.scrollTop += action.delta;
+              touchDisclosureAnchor(disclosure, Date.now());
+            }
+            return;
+          }
+        }
         if (
           !shouldCompensateConversationContentResize({
             isPinned: isPinned.current,

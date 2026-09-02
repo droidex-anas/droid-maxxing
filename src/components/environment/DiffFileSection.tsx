@@ -6,6 +6,7 @@ import type { DiffViewMode } from '../../hooks/persistedUiPreferences';
 import type { FileDiffEntry } from '../../hooks/useReviewFileDiffs';
 import type { DiffFile } from '../../types/vcs';
 import { FileTypeIcon } from '../FileTypeIcon';
+import { displayPath } from '../../lib/pathDisplay';
 
 // One collapsible file in the Review tab: a sticky header (type, path, line
 // counts) that toggles the file's diff. The diff is fetched lazily the first
@@ -15,6 +16,7 @@ import { FileTypeIcon } from '../FileTypeIcon';
 // section and detach/re-attach every callback ref each cycle.
 export const DiffFileSection = memo(function DiffFileSection({
   file,
+  cwd,
   open,
   active,
   entry,
@@ -24,6 +26,7 @@ export const DiffFileSection = memo(function DiffFileSection({
   onSectionRef,
 }: {
   file: DiffFile;
+  cwd?: string;
   open: boolean;
   active: boolean;
   entry: FileDiffEntry | undefined;
@@ -39,9 +42,10 @@ export const DiffFileSection = memo(function DiffFileSection({
     },
     [onSectionRef, path],
   );
-  const slash = file.path.lastIndexOf('/');
-  const dir = slash >= 0 ? file.path.slice(0, slash + 1) : '';
-  const name = slash >= 0 ? file.path.slice(slash + 1) : file.path;
+  const display = displayPath(file.path, cwd);
+  const slash = display.lastIndexOf('/');
+  const dir = slash >= 0 ? display.slice(0, slash + 1) : '';
+  const name = slash >= 0 ? display.slice(slash + 1) : display;
   return (
     <div ref={sectionRef} className="border-b border-droid-border/70">
       <button

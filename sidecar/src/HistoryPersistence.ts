@@ -1,5 +1,6 @@
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+
+import { droidexStateDir } from './droidexPaths.js';
 
 import {
   HistoryIndex,
@@ -70,7 +71,7 @@ export class HistoryPersistence {
       throw new Error('Provide either a history search client or a search client factory.');
     }
     this.core = new HistoryIndex();
-    const dbPath = join(homedir(), '.factory', 'droidex', SESSION_INDEX_FILENAME);
+    const dbPath = join(droidexStateDir(), SESSION_INDEX_FILENAME);
     this.searchClient = options.searchClient ?? null;
     this.createSearchClient =
       options.createSearchClient ??

@@ -1,6 +1,6 @@
 import { memo, useMemo, useRef } from 'react';
 
-import { useFrameThrottledValue } from '../hooks/useFrameThrottledValue';
+import { useSmoothStreamingText } from '../hooks/streamingText';
 
 import { AppBlock } from './AppBlock';
 import {
@@ -167,7 +167,7 @@ function LiveStreamingMarkdown({
   specMode: boolean;
   flags: MarkdownFenceFlags;
 }) {
-  const shown = useFrameThrottledValue(source, live);
+  const shown = useSmoothStreamingText(source, live);
   const document = useStreamingDocument(shown);
   return (
     <div className={markdownShellClass(specMode)}>

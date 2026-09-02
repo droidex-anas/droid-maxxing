@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Virtualizer } from '@tanstack/virtual-core';
 
-import { MessageFeed } from './chat';
+import { MessageFeed } from './MessageFeed';
 import type { FeedItem } from './chatFeed';
 import {
   buildConversationRowLookup,

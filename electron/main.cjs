@@ -48,6 +48,10 @@ const {
 } = require('./hardwareAcceleration.cjs');
 const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 const APP_NAME = 'DROIDEX';
+// An explicit profile override means a second dev instance is running beside
+// the main one; its sidecar then gets an isolated history state dir so the two
+// instances never fight over the history writer lease.
+const userDataOverride = process.env.DROIDEX_USER_DATA_DIR;
 const buildMetadata = readBuildMetadata();
 const terminalManager = createTerminalManager({
   defaultCwd: async () => {
@@ -76,6 +80,7 @@ const sidecarSupervisor = createSidecarSupervisor({
   entryPath: sidecarEntry,
   cwd: () => (app.isPackaged ? process.resourcesPath : appRoot()),
   userData: () => app.getPath('userData'),
+  stateDir: () => (userDataOverride ? path.join(userDataOverride, 'state') : undefined),
   onUnexpectedExit: (error) => diagnostics.captureException(error, { process: 'sidecar' }),
 });
 // subscribe() replays the current status synchronously, so mainWindow must
@@ -149,10 +154,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 // Overridable so a second dev instance (e.g. a feature worktree) can run beside
 // the main one without fighting over the Chromium profile lock.
-app.setPath(
-  'userData',
-  process.env.DROIDEX_USER_DATA_DIR || path.join(app.getPath('appData'), APP_NAME),
-);
+app.setPath('userData', userDataOverride || path.join(app.getPath('appData'), APP_NAME));
 const hardwareAccelerationPreferencePath = hardwareAccelerationPreferenceFilePath(
   app.getPath('userData'),
 );

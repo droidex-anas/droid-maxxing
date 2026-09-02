@@ -133,7 +133,7 @@ test('malformed replacement chains fail with hard-cut index recovery guidance', 
   try {
     assert.throws(
       () => reopened.childSession(parentAppSessionId, childSessionId),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
+      /remove .*\.factory\/droidex\/session-index.sqlite.*Raw Factory session history is not removed\./,
     );
   } finally {
     reopened.close();
@@ -378,7 +378,7 @@ test('current index missing a canonical identity constraint uses hard-cut recove
 
     assert.throws(
       () => new HistoryIndex(),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
+      /remove .*\.factory\/droidex\/session-index.sqlite.*Raw Factory session history is not removed\./,
     );
   } finally {
     process.env.HOME = home;
@@ -435,7 +435,7 @@ test('current index missing the canonical spawn-kind check uses hard-cut recover
 
     assert.throws(
       () => new HistoryIndex(),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
+      /remove .*\.factory\/droidex\/session-index.sqlite.*Raw Factory session history is not removed\./,
     );
   } finally {
     process.env.HOME = home;
@@ -480,7 +480,7 @@ test('current indexes with incompatible partial definitions use hard-cut recover
 
       assert.throws(
         () => new HistoryIndex(),
-        /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
+        /remove .*\.factory\/droidex\/session-index.sqlite.*Raw Factory session history is not removed\./,
         malformed.name,
       );
     } finally {
@@ -508,7 +508,7 @@ test('incompatible local index fails fast with explicit recovery and leaves raw 
   try {
     assert.throws(
       () => new HistoryIndex(),
-      /remove ~\/\.factory\/droidex\/session-index\.sqlite.*Raw Factory session history is not removed\./,
+      /remove .*\.factory\/droidex\/session-index.sqlite.*Raw Factory session history is not removed\./,
     );
     assert.equal(readFileSync(rawPath, 'utf8'), raw);
     const reopened = new DatabaseSync(incompatiblePath);

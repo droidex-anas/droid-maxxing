@@ -36,8 +36,14 @@ import {
   nextReviewFocusScope,
   reviewScopeLabel,
 } from '../../lib/reviewScopes';
+import { displayPath } from '../../lib/pathDisplay';
+import { readFile } from '../../lib/desktop';
+import type { FileChange } from '../../lib/diff';
 import type { DiffFile } from '../../types/vcs';
 import { FileTypeIcon } from '../FileTypeIcon';
+import { DiffLines } from '../DiffView';
+import { Markdown } from '../Markdown';
+import { MARKDOWN_EXTENSIONS } from '../files/FilePreviewPane';
 
 function ScopeSelector() {
   const dispatch = useStoreDispatch();
@@ -178,16 +184,19 @@ function MenuItem({
 
 const FileRow = memo(function FileRow({
   file,
+  cwd,
   selected,
   onSelect,
 }: {
   file: DiffFile;
+  cwd?: string;
   selected: boolean;
   onSelect: (path: string) => void;
 }) {
-  const slash = file.path.lastIndexOf('/');
-  const dir = slash >= 0 ? file.path.slice(0, slash + 1) : '';
-  const name = slash >= 0 ? file.path.slice(slash + 1) : file.path;
+  const display = displayPath(file.path, cwd);
+  const slash = display.lastIndexOf('/');
+  const dir = slash >= 0 ? display.slice(0, slash + 1) : '';
+  const name = slash >= 0 ? display.slice(slash + 1) : display;
   return (
     <button
       onClick={() => {
@@ -215,6 +224,90 @@ const FileRow = memo(function FileRow({
   );
 });
 
+// A focus request that no git scope could satisfy still lands somewhere
+// useful: the change captured in the transcript, or the file on disk.
+type DetachedFocus =
+  | { kind: 'change'; change: FileChange }
+  | { kind: 'preview'; path: string; content: string | null };
+
+const PREVIEW_CHAR_LIMIT = 200_000;
+
+function DetachedFilePreview({ path, content }: { path: string; content: string }) {
+  const ext = path.split(/[\\/]/).pop()?.split('.').pop()?.toLowerCase() ?? '';
+  const truncated = content.length > PREVIEW_CHAR_LIMIT;
+  const text = truncated ? content.slice(0, PREVIEW_CHAR_LIMIT) : content;
+  return (
+    <div className="px-4 py-3">
+      {MARKDOWN_EXTENSIONS.has(ext) ? (
+        <Markdown allowGeneratedContent={false}>{text}</Markdown>
+      ) : (
+        <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-droid-text-secondary">
+          {text}
+        </pre>
+      )}
+      {truncated && (
+        <div className="mt-2 text-[11px] text-droid-text-muted">
+          Preview truncated at {Math.round(PREVIEW_CHAR_LIMIT / 1000)}k characters
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetachedFocusPane({
+  focus,
+  cwd,
+  onClose,
+}: {
+  focus: DetachedFocus;
+  cwd: string;
+  onClose: () => void;
+}) {
+  const path = focus.kind === 'change' ? focus.change.path : focus.path;
+  const label = displayPath(path, cwd);
+  const name = label.split(/[\\/]/).pop() ?? label;
+  const note =
+    focus.kind === 'change'
+      ? 'Change captured during the turn'
+      : 'No diff in this scope, showing the file on disk';
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-droid-border bg-droid-bg/40 px-3">
+        <FileTypeIcon filename={path} className="h-3.5 w-3.5 shrink-0" />
+        <span className="shrink-0 text-[12px] font-medium text-droid-text-secondary">{name}</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-droid-text-muted">{note}</span>
+        {focus.kind === 'change' && (
+          <span className="shrink-0 text-[11px] tabular-nums">
+            <span style={{ color: 'var(--diff-add-fg)' }}>+{focus.change.added}</span>{' '}
+            <span style={{ color: 'var(--diff-del-fg)' }}>−{focus.change.removed}</span>
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          title="Close"
+          className="shrink-0 rounded-md p-1 text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {focus.kind === 'change' ? (
+          <div className="py-1">
+            <DiffLines ops={focus.change.ops} />
+          </div>
+        ) : focus.content === null ? (
+          <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          <DetachedFilePreview path={focus.path} content={focus.content} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Below this many files a scope loads fully expanded (GitHub-style); larger
 // changesets start collapsed so the view stays snappy and the user expands what
 // they want to read.
@@ -239,6 +332,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
       appSessionId: state.activeAppSessionId ?? undefined,
       reviewScope: state.reviewScope,
       reviewFocusPath: state.reviewFocusPath,
+      reviewFocusChange: state.reviewFocusChange,
       reviewFocusRequestId: state.reviewFocusRequestId,
       diffView: state.diffView,
     }),
@@ -266,6 +360,30 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   // Last scope-fallback dispatched for the in-flight focus request, so a
   // re-run of the focus effect can't dispatch the same fallback twice.
   const focusFallbackRef = useRef<string | null>(null);
+  // A focus request that no git scope could satisfy still opens something
+  // useful: the change captured in the transcript, or the file on disk.
+  const [detachedFocus, setDetachedFocus] = useState<DetachedFocus | null>(null);
+
+  // Resolve a path-only focus (e.g. a per-turn changes row) by reading the
+  // file from disk; folders/markdown render as documents, everything else as
+  // plain text. A failed read falls back to the original no-diff toast.
+  useEffect(() => {
+    if (detachedFocus?.kind !== 'preview' || detachedFocus.content !== null) return;
+    const { path } = detachedFocus;
+    let stale = false;
+    void readFile(path).then((content) => {
+      if (stale) return;
+      if (content === null) {
+        setDetachedFocus(null);
+        toast.info(`No current diff for ${path.replace(/\\/g, '/').split('/').pop() ?? path}`);
+        return;
+      }
+      setDetachedFocus({ kind: 'preview', path, content });
+    });
+    return () => {
+      stale = true;
+    };
+  }, [detachedFocus]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -414,6 +532,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
 
   const jumpTo = useCallback((path: string) => {
     setActivePath(path);
+    setDetachedFocus(null);
     if (narrowRef.current) setFilesOpen(false);
     const idx = filesRef.current.findIndex((f) => f.path === path);
     if (idx >= 0) setRenderLimit((cur) => (idx < cur ? cur : idx + FILE_RENDER_JUMP_BUFFER));
@@ -440,6 +559,9 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
       focusFallbackRef.current = null;
       return;
     }
+    // A live focus request supersedes whatever detached pane a previous
+    // request ended in.
+    setDetachedFocus(null);
     // Match only against the current scope's settled list: on a scope
     // transition the hook still serves the previous scope's files, and acting
     // on that stale list could jump to a file the new scope doesn't have and
@@ -460,15 +582,24 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
       // Guard against dispatching the same fallback twice when this effect
       // re-runs (e.g. a poll tick) while the next scope's list loads.
       focusFallbackRef.current = attemptKey;
-      dispatch({ type: 'OPEN_REVIEW_AT', scope: nextScope, path: focus });
+      dispatch({
+        type: 'OPEN_REVIEW_AT',
+        scope: nextScope,
+        path: focus,
+        change: reviewState.reviewFocusChange ?? undefined,
+      });
       return;
     }
-    // No scope lists the file: it was reverted or its diff is otherwise gone.
-    // Drop the request; keeping it would re-run this effect on every poll and
-    // surprise-jump if the file reappears after the user navigated elsewhere.
+    // No scope lists the file (folderless session, or the edit was reverted
+    // since the turn). Show what we still have instead of a dead end: the
+    // change captured in the transcript, or the file as it stands on disk.
     focusFallbackRef.current = null;
+    setDetachedFocus(
+      reviewState.reviewFocusChange
+        ? { kind: 'change', change: reviewState.reviewFocusChange }
+        : { kind: 'preview', path: focus, content: null },
+    );
     dispatch({ type: 'CLEAR_REVIEW_FOCUS' });
-    toast.info(`No current diff for ${focus.replace(/\\/g, '/').split('/').pop() ?? focus}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     reviewState.reviewFocusPath,
@@ -678,6 +809,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
                       <FileRow
                         key={file.path}
                         file={file}
+                        cwd={cwd}
                         selected={activePath === file.path}
                         onSelect={jumpTo}
                       />
@@ -701,7 +833,15 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
         </AnimatePresence>
 
         <div ref={scrollRef} className="review-diff-scroll min-h-0 min-w-0 flex-1">
-          {review.files.length === 0 ? (
+          {detachedFocus ? (
+            <DetachedFocusPane
+              focus={detachedFocus}
+              cwd={cwd}
+              onClose={() => {
+                setDetachedFocus(null);
+              }}
+            />
+          ) : review.files.length === 0 ? (
             <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
               {review.loadingList ? (
                 <>
@@ -717,6 +857,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
                 <DiffFileSection
                   key={file.path}
                   file={file}
+                  cwd={cwd}
                   open={expanded.has(file.path)}
                   active={activePath === file.path}
                   entry={diffEntries[file.path]}
