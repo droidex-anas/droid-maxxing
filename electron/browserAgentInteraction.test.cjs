@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const vm = require('node:vm');
 const {
   blockBrowserAgentSensitiveTyping,
   executeBrowserAgentInteraction,
@@ -196,46 +197,54 @@ test('agent-authored text cannot enter password or one-time-code fields', async 
   );
 });
 
-test('scroll uses the isolated live scroller and returns a fresh snapshot', async () => {
-  const scripts = [];
-  const inputEvents = [];
-  const cursorEvents = [];
-  const contents = {
-    executeJavaScript: async (script) => {
-      scripts.push(script);
-      if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 12, y: 46 };
-      return { ok: true };
-    },
-    sendInputEvent: (event) => inputEvents.push(event),
-  };
-
-  await executeBrowserAgentInteraction(
-    contents,
-    {
-      action: 'scroll',
-      requestId: 'request-2',
-      ref: '@b-current-results',
-      selector: '#results',
-      x: 12.3,
-      y: 45.8,
-      direction: 'down',
-      pixels: 640,
-    },
-    {
-      showCursor: async (event) => {
-        cursorEvents.push(event);
-        return true;
+for (const selector of ['#results', undefined]) {
+  test(`scroll preserves its ref target ${selector ? 'with' : 'without'} a selector`, async () => {
+    const scripts = [];
+    const inputEvents = [];
+    const cursorEvents = [];
+    const contents = {
+      executeJavaScript: async (script) => {
+        scripts.push(script);
+        if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 12, y: 46 };
+        return { ok: true };
       },
-      pageContext: PAGE_CONTEXT,
-      viewportBounds: { width: 300, height: 200 },
-    },
-  );
+      sendInputEvent: (event) => inputEvents.push(event),
+    };
 
-  assert.deepEqual(cursorEvents, [{ x: 12, y: 46, pressed: false }]);
-  assert.deepEqual(inputEvents, []);
-  assert.match(scripts[1], /"action":"scroll"/);
-  assert.match(scripts[1], /"selector":"#results"/);
-});
+    await executeBrowserAgentInteraction(
+      contents,
+      {
+        action: 'scroll',
+        requestId: 'request-2',
+        ref: '@b-current-results',
+        selector,
+        x: 12.3,
+        y: 45.8,
+        direction: 'down',
+        pixels: 640,
+      },
+      {
+        showCursor: async (event) => {
+          cursorEvents.push(event);
+          return true;
+        },
+        pageContext: PAGE_CONTEXT,
+        viewportBounds: { width: 300, height: 200 },
+      },
+    );
+
+    assert.deepEqual(cursorEvents, [{ x: 12, y: 46, pressed: false }]);
+    assert.deepEqual(inputEvents, []);
+    const sent = vm.runInNewContext(scripts.at(-1), {
+      window: { __DROIDMAXX_AGENT_ACTION: (request) => request },
+    });
+    assert.equal(sent.action, 'scroll');
+    assert.equal(sent.ref, '@b-current-results');
+    assert.equal(sent.selector, selector);
+    assert.equal(sent.x, 12);
+    assert.equal(sent.y, 46);
+  });
+}
 
 test('untargeted scroll uses the live native viewport center instead of emulated dimensions', async () => {
   const inputEvents = [];

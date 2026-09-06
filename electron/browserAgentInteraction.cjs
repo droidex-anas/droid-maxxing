@@ -2,7 +2,9 @@ const { runWithWebContentsDebugger } = require('./nativeBrowserEmulation.cjs');
 
 async function executeBrowserAgentInteraction(contents, request, options) {
   if (request.action === 'scroll') {
-    const resolved = request.selector ? await resolveBrowserPointer(contents, request) : undefined;
+    const hasTarget =
+      request.selector || request.ref || request.x !== undefined || request.y !== undefined;
+    const resolved = hasTarget ? await resolveBrowserPointer(contents, request) : undefined;
     assertCurrentBrowserAction(options);
     const x = resolved?.x ?? viewportCenter(options.viewportBounds, 'width');
     const y = resolved?.y ?? viewportCenter(options.viewportBounds, 'height');
