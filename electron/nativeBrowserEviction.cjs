@@ -26,6 +26,7 @@ function createNativeBrowserEviction({ budget, entries, closeEntry, loadUrl, rep
   function isActive(entry) {
     return Boolean(
       entry.agentActionActive ||
+      entry.pendingAgentNavigation ||
       entry.userNavigationActive ||
       entry.captureActivityCount ||
       entry.loadingPromise ||

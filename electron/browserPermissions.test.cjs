@@ -315,6 +315,37 @@ test('site decisions revoke temporary grants and invalidate pending prompts', as
   assert.equal(canAccess(controller, contents, 'https://camera.example', 'video'), false);
 });
 
+test('site policy changes cancel only prompts for the affected origin and media', async () => {
+  const camera = browserContents('https://camera.example');
+  const microphone = browserContents('https://camera.example');
+  const unrelated = browserContents('https://other.example');
+  const owned = [camera, microphone, unrelated];
+  const prompts = [];
+  const { controller } = controllerFor(camera, {
+    isNativeBrowserContents: (contents) => owned.includes(contents),
+    requestPermission: (request) => {
+      const response = deferred();
+      prompts.push({ ...request, response });
+      return response.promise;
+    },
+  });
+  const decisions = owned.map((contents, index) =>
+    requestDecision(controller, contents, {
+      securityOrigin: contents.url,
+      mediaTypes: index === 1 ? ['audio'] : ['video'],
+    }),
+  );
+  await Promise.resolve();
+  await controller.setSiteDecision('https://camera.example', ['video'], 'deny');
+  const aborted = prompts.map((prompt) => prompt.signal.aborted);
+  for (const prompt of prompts) {
+    prompt.response.resolve({ promptId: prompt.promptId, decision: 'allow_once' });
+  }
+  assert.deepEqual(await Promise.all(decisions), [false, true, true]);
+  assert.deepEqual(aborted, [true, false, false]);
+  assert.equal(canAccess(controller, unrelated, 'https://other.example', 'video'), true);
+});
+
 test('persistence failures deny access and do not leave a temporary grant', async () => {
   const contents = browserContents();
   const { controller } = controllerFor(contents, {

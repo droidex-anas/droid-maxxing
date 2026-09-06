@@ -142,10 +142,11 @@ test('touch cancels the idle timer before refreshing an entry', async () => {
   });
 });
 
-test('active agent actions and captures are excluded from eviction', async (t) => {
+test('active browser work is excluded from eviction', async (t) => {
   for (const [name, activeState] of [
     ['agent action', { agentActionActive: true }],
     ['capture', { captureActivityCount: 1 }],
+    ['navigation approval', { pendingAgentNavigation: { promise: Promise.resolve() } }],
   ]) {
     await t.test(name, async () => {
       let captureCount = 0;
@@ -165,10 +166,14 @@ test('active agent actions and captures are excluded from eviction', async (t) =
   }
 });
 
-test('an action or capture that starts during scroll capture cancels the pending eviction', async (t) => {
+test('browser work that starts during scroll capture cancels the pending eviction', async (t) => {
   for (const [name, activate] of [
     ['agent action', (entry) => (entry.agentActionActive = true)],
     ['capture', (entry) => (entry.captureActivityCount = 1)],
+    [
+      'navigation approval',
+      (entry) => (entry.pendingAgentNavigation = { promise: Promise.resolve() }),
+    ],
   ]) {
     await t.test(name, async () => {
       const captured = deferred();

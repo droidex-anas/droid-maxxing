@@ -810,14 +810,16 @@ async function runAgentAction(request) {
       });
     }
     if (action === 'click') {
-      const target = request.selector
-        ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
-        : undefined;
+      const target =
+        request.ref || request.selector
+          ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
+          : undefined;
       clickAt(Number(request.x), Number(request.y), target);
     } else if (action === 'hover') {
-      const target = request.selector
-        ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
-        : undefined;
+      const target =
+        request.ref || request.selector
+          ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
+          : undefined;
       validateHoverTargetAt(Number(request.x), Number(request.y), target);
       return sendAgent({ requestId: request.requestId, ok: true });
     } else if (action === 'selectOption')

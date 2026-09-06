@@ -288,6 +288,56 @@ test('hover action validates its exact context and target without minting a prem
   assert.equal(snapshotCount, 0);
 });
 
+for (const action of ['click', 'hover']) {
+  test(`ref-only ${action} rejects a different element at the leased coordinates`, async () => {
+    class Element {}
+    let inputCount = 0;
+    const document = { elementFromPoint: () => hitTarget };
+    const leasedTarget = Object.assign(new Element(), {
+      isConnected: true,
+      ownerDocument: document,
+      contains: () => false,
+      dispatchEvent: () => {
+        inputCount += 1;
+      },
+    });
+    let hitTarget = Object.assign(new Element(), {
+      dispatchEvent: () => {
+        inputCount += 1;
+      },
+    });
+    const start = source.indexOf('async function runAgentAction(request)');
+    const end = source.indexOf('\nfunction typeIntoFocused', start);
+    const leaseStart = source.indexOf('function currentAgentSnapshotTarget(ref, selector)');
+    const leaseEnd = source.indexOf('\nfunction invalidateAgentSnapshot', leaseStart);
+    const runAction = vm.runInNewContext(
+      `${source.slice(start, end)}\n${source.slice(leaseStart, leaseEnd)}\nrunAgentAction`,
+      {
+        document,
+        Element,
+        MouseEvent: class {},
+        agentSnapshotId: 'document:1',
+        agentSnapshotTargets: new Map([
+          ['@b-current', { element: leasedTarget, selector: '#target' }],
+        ]),
+        requireCurrentAgentActionContext: () => {},
+        pageSnapshot: () => ({ refs: [] }),
+        safeSnapshot: () => ({ refs: [] }),
+        sendAgent: (result) => result,
+        settle: async () => {},
+      },
+    );
+    const request = { requestId: 'ref-only', action, ref: '@b-current', x: 40, y: 60 };
+    const rejected = await runAction(request);
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error, /target moved/);
+    assert.equal(inputCount, 0);
+    hitTarget = leasedTarget;
+    assert.equal((await runAction(request)).ok, true);
+    assert.equal(inputCount, action === 'click' ? 3 : 0);
+  });
+}
+
 test('the isolated final action rechecks sensitive focus immediately before typing', () => {
   const start = source.indexOf('function requireSafeAgentTextAction(request)');
   const end = source.indexOf('\nfunction currentAgentSnapshotTarget', start);

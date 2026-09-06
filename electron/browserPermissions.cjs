@@ -97,7 +97,7 @@ function createBrowserPermissionController(options) {
     }
     const expectedGeneration = state.generation;
     const abortController = new AbortController();
-    state.pendingPrompt = { promptId, abortController };
+    state.pendingPrompt = { promptId, abortController, origin, mediaTypes };
 
     void Promise.resolve()
       .then(() => {
@@ -208,8 +208,14 @@ function createBrowserPermissionController(options) {
 
   function invalidateOrigin(origin, mediaTypes) {
     for (const state of states.values()) {
-      state.generation += 1;
-      cancelPendingPrompt(state);
+      const prompt = state.pendingPrompt;
+      if (
+        prompt?.origin === origin &&
+        prompt.mediaTypes.some((mediaType) => mediaTypes.includes(mediaType))
+      ) {
+        state.generation += 1;
+        cancelPendingPrompt(state);
+      }
       removeGrantKeys(state.grants, origin, mediaTypes);
     }
   }
