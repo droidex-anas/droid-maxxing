@@ -8,7 +8,6 @@ export interface NativeBrowserController {
 
 let controller: NativeBrowserController | null = null;
 const waiters = new Set<() => void>();
-const OPEN_CONTROLLER_GRACE_MS = 250;
 
 export interface NativeBrowserRequestOptions {
   surface?: 'visible' | 'background';
@@ -29,16 +28,7 @@ export async function performNativeBrowserRequest(
   options: NativeBrowserRequestOptions = {},
 ): Promise<BrowserNativeResult> {
   const timeoutMs = options.timeoutMs ?? 8_000;
-  if (options.surface === 'background') {
-    return performDesktopNativeBrowserRequest(request);
-  }
-  if (!controller && isDesktop()) {
-    if (request.action === 'open') {
-      const mounted = await waitForController(Math.min(timeoutMs, OPEN_CONTROLLER_GRACE_MS)).catch(
-        () => null,
-      );
-      if (mounted) return mounted.perform(request);
-    }
+  if (isDesktop() || options.surface === 'background') {
     return performDesktopNativeBrowserRequest(request);
   }
   const active = controller ?? (await waitForController(timeoutMs));

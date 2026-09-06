@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import type { SessionFileWatcherOptions } from './sessionFileWatcher.js';
+import { FakeFactorySession } from './testing/fakeFactoryRuntime.js';
 import { createSessionManagerTestContext } from './testing/sessionManagerTestContext.js';
 import {
   providerSessionJsonl,
@@ -65,6 +66,7 @@ test('sessions created outside the app are republished live when the watcher fir
     watcherOptions.onExternalChange([
       { providerSessionId: 'external-session-1', path: sessionFile },
     ]);
+    await ctx.waitForIdle();
 
     assert.deepEqual(
       ctx.history.targetedReconcileCalls,
@@ -163,6 +165,7 @@ test('unexplained watcher events fall back to a full reconcile before republishi
     const fullReconcilesBefore = ctx.history.fullReconcileCalls;
 
     watcherOptions.onExternalChange(null);
+    await ctx.waitForIdle();
 
     assert.equal(
       ctx.history.fullReconcileCalls,
@@ -170,6 +173,39 @@ test('unexplained watcher events fall back to a full reconcile before republishi
       'a null change list runs a full reconcile',
     );
     assert.equal(ctx.history.targetedReconcileCalls.length, 0);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test('a failed watcher reconcile marks the next list for an authoritative full retry', async () => {
+  let watcherOptions: SessionFileWatcherOptions | undefined;
+  const ctx = createSessionManagerTestContext({
+    startSessionFileWatcher: (options) => {
+      watcherOptions = options;
+      return { consumeLiveSessionFile: () => undefined, close: () => {} };
+    },
+  });
+  try {
+    await ctx.handle({ type: 'sessions.list' });
+    const listsBefore = ctx.events.filter((event) => event.type === 'sessions.list').length;
+    ctx.history.failNextTargetedReconcile = new Error('derived database busy');
+    watcherOptions?.onExternalChange([
+      { providerSessionId: 'failed-watcher-session', path: '/tmp/failed-watcher.jsonl' },
+    ]);
+    await ctx.waitForIdle();
+
+    assert.equal(
+      ctx.events.filter((event) => event.type === 'sessions.list').length,
+      listsBefore,
+      'a failed delta never republishes a stale list',
+    );
+    await ctx.handle({ type: 'sessions.list' });
+    assert.equal(ctx.history.fullReconcileCalls, 2, 'the next list performs a full retry');
+    assert.equal(
+      ctx.events.filter((event) => event.type === 'sessions.list').length,
+      listsBefore + 1,
+    );
   } finally {
     await ctx.dispose();
   }
@@ -227,6 +263,48 @@ test('closing a live session reconciles its final file before republishing', asy
   }
 });
 
+test('provider replacement finalizes the retired file without treating its alias as live', async () => {
+  const consumedProviderSessionIds: string[] = [];
+  const retiredPath = '/tmp/provider-1.jsonl';
+  const ctx = createSessionManagerTestContext({
+    startSessionFileWatcher: () => ({
+      consumeLiveSessionFile: (providerSessionId) => {
+        consumedProviderSessionIds.push(providerSessionId);
+        return providerSessionId === 'provider-1' ? retiredPath : undefined;
+      },
+      close: () => {},
+    }),
+  });
+  try {
+    await ctx.create({
+      cwd: '/tmp/compacted-workspace',
+      sessionPurpose: 'chat',
+      clientRef: 'compacted-session',
+      title: 'Compacted session',
+      goal: 'compact',
+      interactionMode: 'auto',
+      autonomy: 'low',
+    });
+    await ctx.handle({ type: 'sessions.list' });
+    const targetedBefore = ctx.history.targetedReconcileCalls.length;
+    ctx.provider.session('provider-1').nextCompactResult = {
+      newSessionId: 'provider-2',
+      removedCount: 1,
+    };
+    ctx.runtime.loadQueue.set('provider-2', [new FakeFactorySession('provider-2', {}, ctx.calls)]);
+
+    await ctx.handle({ type: 'session.compact', appSessionId: 'provider-1' });
+    await ctx.waitForIdle();
+
+    assert.deepEqual(consumedProviderSessionIds, ['provider-1']);
+    assert.deepEqual(ctx.history.targetedReconcileCalls.slice(targetedBefore), [
+      [{ providerSessionId: 'provider-1', path: retiredPath }],
+    ]);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
 test('the watcher starts once per boot, not per sessions.list command', async () => {
   let starts = 0;
   const ctx = createSessionManagerTestContext({
@@ -245,22 +323,31 @@ test('the watcher starts once per boot, not per sessions.list command', async ()
   }
 });
 
-test('the first sessions.list waits for the warm-cache boot reconcile to settle', async () => {
+test('history idle commands forward the exact desktop activity state', async () => {
   const ctx = createSessionManagerTestContext();
   try {
-    // A nonzero cache size takes the warm path: refresh from disk in the
-    // background instead of populating synchronously.
+    await ctx.handle({ type: 'history.indexingIdle', isIdle: true });
+    await ctx.handle({ type: 'history.indexingIdle', isIdle: false });
+
+    assert.deepEqual(ctx.history.indexingIdleStates, [true, false]);
+  } finally {
+    await ctx.dispose();
+  }
+});
+
+test('the first sessions.list resolves only after the boot reconcile publishes', async () => {
+  const ctx = createSessionManagerTestContext();
+  try {
     ctx.history.sessionFileCacheSize = 2;
     writeExternalSession(ctx.home, 'boot-external-session', '/tmp/boot-workspace');
 
     await ctx.handle({ type: 'sessions.list' });
     assert.equal(
       ctx.events.filter((event) => event.type === 'sessions.list').length,
-      0,
-      'no list is emitted while the boot reconcile is pending',
+      1,
+      'the command resolves after publishing the reconciled list',
     );
 
-    await ctx.waitForIdle();
     const lists = ctx.events.filter((event) => event.type === 'sessions.list');
     assert.equal(lists.length, 1, 'the first list is emitted once the boot reconcile settles');
     assert.equal(ctx.history.fullReconcileCalls, 1, 'the boot reconcile ran exactly once');
@@ -286,9 +373,9 @@ test('sessions.list commands queued during the boot reconcile emit only the late
     ctx.history.sessionFileCacheSize = 2;
     writeExternalSession(ctx.home, 'queued-first-session', '/tmp/first');
     writeExternalSession(ctx.home, 'queued-second-session', '/tmp/second');
-    await ctx.handle({ type: 'sessions.list', workspaceCwds: ['/tmp/first'] });
-    await ctx.handle({ type: 'sessions.list', workspaceCwds: ['/tmp/second'] });
-    await ctx.waitForIdle();
+    const first = ctx.handle({ type: 'sessions.list', workspaceCwds: ['/tmp/first'] });
+    const second = ctx.handle({ type: 'sessions.list', workspaceCwds: ['/tmp/second'] });
+    await Promise.all([first, second]);
     const lists = ctx.events.filter((event) => event.type === 'sessions.list');
     assert.equal(lists.length, 1, 'only the latest queued request emits after the reconcile');
     assert.equal(ctx.history.fullReconcileCalls, 1);
@@ -306,31 +393,25 @@ test('sessions.list commands queued during the boot reconcile emit only the late
   }
 });
 
-test('a boot reconcile failure still serves the first list and never starves later ones', async () => {
+test('a boot reconcile failure rejects the stale list and retries on the next request', async () => {
   const ctx = createSessionManagerTestContext();
   try {
     ctx.history.sessionFileCacheSize = 2;
     ctx.history.failNextReconcile = new Error('sqlite busy');
-    await ctx.handle({ type: 'sessions.list' });
+    await assert.rejects(ctx.handle({ type: 'sessions.list' }), /sqlite busy/);
     assert.equal(
       ctx.events.filter((event) => event.type === 'sessions.list').length,
       0,
-      'the list is held while the boot reconcile is pending',
-    );
-    await ctx.waitForIdle();
-    assert.equal(
-      ctx.events.filter((event) => event.type === 'sessions.list').length,
-      1,
-      'the first list is served even though the boot reconcile failed',
+      'a failed authoritative reconcile never publishes stale history',
     );
 
     await ctx.handle({ type: 'sessions.list' });
     assert.equal(
       ctx.events.filter((event) => event.type === 'sessions.list').length,
-      2,
-      'lists after a failed boot reconcile are served immediately, not starved',
+      1,
+      'the next request retries and publishes once the cache is authoritative',
     );
-    assert.equal(ctx.history.fullReconcileCalls, 1);
+    assert.equal(ctx.history.fullReconcileCalls, 2);
   } finally {
     await ctx.dispose();
   }
@@ -385,7 +466,7 @@ test('a seeded cwd patch is respected before workspace filtering', async () => {
   }
 });
 
-test('a watcher event during the warm-cache boot window does not emit a stale list', async () => {
+test('a watcher event during the worker boot reconcile is replayed before the first list', async () => {
   let watcherOptions: SessionFileWatcherOptions | undefined;
   const ctx = createSessionManagerTestContext({
     startSessionFileWatcher: (options) => {
@@ -396,21 +477,88 @@ test('a watcher event during the warm-cache boot window does not emit a stale li
   try {
     ctx.history.sessionFileCacheSize = 2;
     writeExternalSession(ctx.home, 'boot-window-session', '/tmp/boot-window');
-    await ctx.handle({ type: 'sessions.list', workspaceCwds: ['/tmp/boot-window'] });
-    // The boot reconcile is still pending. A watcher event in this window is
-    // held: emitting from the partially-reconciled cache would serve a stale
-    // list, and the boot full reconcile already covers the change.
-    watcherOptions!.onExternalChange(null);
+    const firstList = ctx.handle({
+      type: 'sessions.list',
+      workspaceCwds: ['/tmp/boot-window'],
+    });
+    // The boot reconcile is still pending. Changes in this window are held
+    // and replayed after the full scan because the scan may already have
+    // passed the changed path.
+    const sessionFile = join(
+      ctx.home,
+      '.factory',
+      'sessions',
+      '2026',
+      '08',
+      'boot-window-session.jsonl',
+    );
+    watcherOptions!.onExternalChange([
+      { providerSessionId: 'boot-window-session', path: sessionFile },
+    ]);
     assert.equal(
       ctx.history.fullReconcileCalls,
       0,
       'a watcher reconcile is not scheduled during the boot window',
     );
-    await ctx.waitForIdle();
+    await firstList;
     const lists = ctx.events.filter((event) => event.type === 'sessions.list');
     assert.equal(lists.length, 1, 'only the authoritative boot reconcile list is emitted');
-    assert.equal(ctx.history.fullReconcileCalls, 1, 'only the boot full reconcile ran');
+    assert.equal(ctx.history.fullReconcileCalls, 1);
+    assert.deepEqual(ctx.history.targetedReconcileCalls, [
+      [{ providerSessionId: 'boot-window-session', path: sessionFile }],
+    ]);
   } finally {
+    await ctx.dispose();
+  }
+});
+
+test('shutdown waits for an active watcher reconcile and suppresses its republish', async () => {
+  let watcherOptions: SessionFileWatcherOptions | undefined;
+  let releaseReconcile: (() => void) | undefined;
+  let markReconcileStarted: (() => void) | undefined;
+  const reconcileStarted = new Promise<void>((resolve) => {
+    markReconcileStarted = resolve;
+  });
+  const reconcileGate = new Promise<void>((resolve) => {
+    releaseReconcile = resolve;
+  });
+  const ctx = createSessionManagerTestContext({
+    startSessionFileWatcher: (options) => {
+      watcherOptions = options;
+      return { consumeLiveSessionFile: () => undefined, close: () => {} };
+    },
+  });
+  try {
+    await ctx.handle({ type: 'sessions.list' });
+    const reconcile = ctx.history.reconcileSessionFilePaths.bind(ctx.history);
+    ctx.history.reconcileSessionFilePaths = async (changes) => {
+      await reconcile(changes);
+      markReconcileStarted?.();
+      await reconcileGate;
+      return 0;
+    };
+    const listsBefore = ctx.events.filter((event) => event.type === 'sessions.list').length;
+
+    watcherOptions!.onExternalChange([
+      { providerSessionId: 'external-during-shutdown', path: '/tmp/external.jsonl' },
+    ]);
+    await reconcileStarted;
+    let shutdownSettled = false;
+    const shutdown = ctx.shutdown().then(() => {
+      shutdownSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(shutdownSettled, false, 'history stays open until the active reconcile settles');
+
+    releaseReconcile?.();
+    await shutdown;
+    assert.equal(
+      ctx.events.filter((event) => event.type === 'sessions.list').length,
+      listsBefore,
+      'a reconcile that finishes during shutdown does not publish renderer state',
+    );
+  } finally {
+    releaseReconcile?.();
     await ctx.dispose();
   }
 });

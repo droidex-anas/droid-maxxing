@@ -2,6 +2,7 @@ import type { DroidStreamEvent } from '@factory/droid-sdk';
 
 import { normalizeNotification, normalizeStreamEvent, type NormalizedEvent } from './normalize.js';
 import type { SessionRole, TranscriptEvent } from './protocol.js';
+import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 export type NormalizedSideEffects = Omit<NormalizedEvent, 'transcript' | 'done' | 'tokens'>;
 export type NormalizedTokenUsage = NonNullable<NormalizedEvent['tokens']>;
@@ -35,7 +36,9 @@ export class SessionEventFlow {
     event: DroidStreamEvent,
     childSessionId?: string,
   ): void {
+    const normalizeStartedAt = performance.now();
     const normalized = normalizeStreamEvent(appSessionId, sourceProviderSessionId, role, event);
+    hotPathMetrics.recordNormalize(performance.now() - normalizeStartedAt);
     if (normalized) {
       this.applyNormalized(appSessionId, sourceProviderSessionId, role, normalized, childSessionId);
     }
@@ -48,12 +51,15 @@ export class SessionEventFlow {
     notification: Record<string, unknown>,
     childSessionId?: string,
   ): void {
-    for (const normalized of normalizeNotification(
+    const normalizeStartedAt = performance.now();
+    const notifications = normalizeNotification(
       appSessionId,
       sourceProviderSessionId,
       role,
       notification,
-    )) {
+    );
+    hotPathMetrics.recordNormalize(performance.now() - normalizeStartedAt);
+    for (const normalized of notifications) {
       this.applyNormalized(appSessionId, sourceProviderSessionId, role, normalized, childSessionId);
     }
   }

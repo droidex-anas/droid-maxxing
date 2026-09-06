@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bridge } from './bridge';
-import { exportSessionMarkdown, restoreBrowser } from './commands';
+import {
+  exportSessionMarkdown,
+  restoreBrowser,
+  setBackgroundWork,
+  setHistoryIndexingIdle,
+} from './commands';
 import type { ClientCommand, ServerEvent } from '../types/bridge';
 
 // Drives the bridge singleton with an in-memory double; exportSessionMarkdown
@@ -42,6 +47,28 @@ function exportRequestId(sent: ClientCommand[]): string {
   assert.ok(command?.type === 'session.exportMarkdown');
   return command.requestId;
 }
+
+test('history indexing idle samples are ephemeral and use the connected-only lane', () => {
+  const fake = fakeBridge();
+  try {
+    assert.equal(setHistoryIndexingIdle(true), true);
+    assert.deepEqual(fake.sent, [{ type: 'history.indexingIdle', isIdle: true }]);
+  } finally {
+    fake.restore();
+  }
+});
+
+test('background work tier samples are ephemeral and use the connected-only lane', () => {
+  const fake = fakeBridge();
+  try {
+    assert.equal(setBackgroundWork('hidden', 'app-1'), true);
+    assert.deepEqual(fake.sent, [
+      { type: 'app.backgroundWork', tier: 'hidden', focusedAppSessionId: 'app-1' },
+    ]);
+  } finally {
+    fake.restore();
+  }
+});
 
 test('exportSessionMarkdown resolves the markdown for its own request id only', async () => {
   const fake = fakeBridge();

@@ -45,8 +45,8 @@ function matches(
   const expected = input.text.toLocaleLowerCase();
   return state.refs.some(
     (item) =>
-      item.text?.toLocaleLowerCase().includes(expected) ||
-      item.name?.toLocaleLowerCase().includes(expected),
+      (item.text ?? '').toLocaleLowerCase().includes(expected) ||
+      (item.name ?? '').toLocaleLowerCase().includes(expected),
   );
 }
 

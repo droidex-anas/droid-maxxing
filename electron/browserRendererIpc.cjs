@@ -32,16 +32,14 @@ function registerBrowserRendererIpc(options) {
   handle('native-browser-set-pencil-mode', ({ browserSessionId, active }) =>
     nativeBrowser.setPencilMode(browserSessionId, active),
   );
-  handle('native-browser-agent-action', async ({ request, bounds }) => {
+  handle('native-browser-agent-action', async ({ request }) => {
     const action = browserSettings.validateRequest(request);
     if (request.source === 'user') {
       if (!USER_BROWSER_ACTIONS.has(action)) {
         throw new Error('This browser action cannot claim direct user navigation.');
       }
-    } else {
-      await browserSettings.authorizeAgentRequest(request);
     }
-    const result = await nativeBrowser.runAgentAction(request, bounds);
+    const result = await nativeBrowser.runAgentAction(request);
     return {
       ...result,
       appSessionId: request.appSessionId,

@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterPullRequests, searchPullRequests } from './prInbox';
-import type { PullRequest } from '../../../types/vcs';
+import {
+  attachInboxRepoErrors,
+  ensureCurrentInboxGroup,
+  filterPullRequests,
+  groupInboxPullRequests,
+  inboxGroupIsExpanded,
+  orderInboxGroups,
+  searchPullRequests,
+  selectedInboxPullRequest,
+  type InboxPullRequest,
+} from './prInbox';
+import { prBacklogId } from './prBacklog';
 
-function pr(partial: Partial<PullRequest> & Pick<PullRequest, 'number' | 'title'>): PullRequest {
+function pr(
+  partial: Partial<InboxPullRequest> & Pick<InboxPullRequest, 'number' | 'title'>,
+): InboxPullRequest {
   return {
     state: 'open',
     url: '',
@@ -20,6 +32,8 @@ function pr(partial: Partial<PullRequest> & Pick<PullRequest, 'number' | 'title'
     author: 'ana',
     reviewRequests: [],
     reviews: [],
+    cwd: '/repo',
+    repoName: 'repo',
     ...partial,
   };
 }
@@ -62,12 +76,17 @@ test('empty viewer makes reviewing and authored empty, not all', () => {
   assert.equal(filterPullRequests(rows, 'all', null).length, 3);
 });
 
-test('search matches title, number, author, and branch', () => {
+test('search matches title, number, author, branch, and repo name', () => {
   assert.equal(searchPullRequests(rows, '#2')[0].number, 2);
   assert.equal(searchPullRequests(rows, 'inbox')[0].number, 1);
   assert.equal(searchPullRequests(rows, 'dev').length, 2);
   assert.equal(searchPullRequests(rows, 'feat').length, 3);
   assert.deepEqual(searchPullRequests(rows, '   '), rows);
+  assert.equal(
+    searchPullRequests([pr({ number: 4, title: 'Clinic', repoName: 'dr-koshley' })], 'koshley')
+      .length,
+    1,
+  );
 });
 
 test('a hash with no number is not a filter', () => {
@@ -92,5 +111,132 @@ test('login matching folds ASCII case only, not collation equivalences', () => {
       'ffactory',
     ).length,
     0,
+  );
+});
+
+test('backlog rows leave All, Reviewing, and Authored', () => {
+  const ids = new Set([prBacklogId(rows[0])]);
+  assert.deepEqual(
+    filterPullRequests(rows, 'all', 'octocat', ids).map((item) => item.number),
+    [2, 3],
+  );
+  assert.deepEqual(
+    filterPullRequests(rows, 'reviewing', 'octocat', ids).map((item) => item.number),
+    [2],
+  );
+  assert.deepEqual(
+    filterPullRequests(rows, 'authored', 'ana', ids).map((item) => item.number),
+    [],
+  );
+  assert.deepEqual(
+    filterPullRequests(rows, 'backlog', 'octocat', ids).map((item) => item.number),
+    [1],
+  );
+});
+
+test('groupInboxPullRequests keeps repository order and path identity', () => {
+  const grouped = groupInboxPullRequests([
+    pr({ number: 1, title: 'A', cwd: '/repo/app', repoName: 'app' }),
+    pr({ number: 2, title: 'B', cwd: '/repo/site', repoName: 'site' }),
+    pr({ number: 3, title: 'C', cwd: '/repo/app', repoName: 'app' }),
+  ]);
+  assert.deepEqual(
+    grouped.map((group) => [group.repoName, group.prs.map((item) => item.number)]),
+    [
+      ['app', [1, 3]],
+      ['site', [2]],
+    ],
+  );
+});
+
+test('selectedInboxPullRequest matches repository and number together', () => {
+  const listed = [
+    pr({ number: 1, title: 'A', cwd: '/repo/app' }),
+    pr({ number: 1, title: 'B', cwd: '/repo/site' }),
+  ];
+  assert.equal(selectedInboxPullRequest(listed, '/repo/site', 1)?.title, 'B');
+  assert.equal(selectedInboxPullRequest(listed, '/missing', 1), null);
+});
+
+test('orderInboxGroups pins the current workspace above the others', () => {
+  const grouped = groupInboxPullRequests([
+    pr({ number: 1, title: 'A', cwd: '/site', repoName: 'site' }),
+    pr({ number: 2, title: 'B', cwd: '/app', repoName: 'app' }),
+  ]);
+  assert.deepEqual(
+    orderInboxGroups(grouped, '/app').map((group) => group.repoName),
+    ['app', 'site'],
+  );
+});
+
+test('attachInboxRepoErrors keeps a workspace that failed to list', () => {
+  const grouped = attachInboxRepoErrors(
+    groupInboxPullRequests([pr({ number: 1, title: 'A', cwd: '/app', repoName: 'app' })]),
+    [{ cwd: '/clinic', repoName: 'clinic' }],
+  );
+  assert.deepEqual(
+    grouped.map((group) => [group.repoName, group.prs.length]),
+    [
+      ['app', 1],
+      ['clinic', 0],
+    ],
+  );
+});
+
+test('ensureCurrentInboxGroup inserts an empty current repository when listing missed it', () => {
+  const grouped = ensureCurrentInboxGroup(
+    groupInboxPullRequests([pr({ number: 1, title: 'A', cwd: '/site', repoName: 'site' })]),
+    '/app',
+    'app',
+  );
+  assert.deepEqual(
+    grouped.map((group) => [group.repoName, group.prs.length]),
+    [
+      ['app', 0],
+      ['site', 1],
+    ],
+  );
+});
+
+test('inboxGroupIsExpanded keeps the current repo open and others closed', () => {
+  assert.equal(
+    inboxGroupIsExpanded({
+      cwd: '/app',
+      currentCwd: '/app',
+      expandedOther: new Set(),
+      searching: false,
+      selectedCwd: '/app',
+    }),
+    true,
+  );
+  assert.equal(
+    inboxGroupIsExpanded({
+      cwd: '/site',
+      currentCwd: '/app',
+      expandedOther: new Set(),
+      searching: false,
+      selectedCwd: '/app',
+    }),
+    false,
+  );
+  assert.equal(
+    inboxGroupIsExpanded({
+      cwd: '/site',
+      currentCwd: '/app',
+      expandedOther: new Set(),
+      searching: false,
+      selectedCwd: '/site',
+    }),
+    true,
+  );
+  assert.equal(
+    inboxGroupIsExpanded({
+      cwd: '/site',
+      currentCwd: '/app',
+      expandedOther: new Set(),
+      searching: true,
+      selectedCwd: '/app',
+    }),
+    true,
   );
 });

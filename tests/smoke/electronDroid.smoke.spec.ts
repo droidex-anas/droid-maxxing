@@ -23,6 +23,7 @@ import {
 } from '@playwright/test';
 
 import { resolveDroidPath } from '../../sidecar/src/Environment.ts';
+import { BRIDGE_PROTOCOL_VERSION } from '../../src/types/bridge.ts';
 
 type SmokeResult = { appSessionId: string; assistantText: string };
 type BridgeInfo = { port: number; token: string };
@@ -200,6 +201,7 @@ async function verifySidecarReadyProof(proofPath: string, bridge: BridgeInfo): P
 }
 
 async function verifyOwnedBridge(page: Page, bridge: BridgeInfo): Promise<void> {
+  const info = { ...bridge, bridgeProtocol: BRIDGE_PROTOCOL_VERSION };
   await page.evaluate(async (info) => {
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(`ws://127.0.0.1:${info.port}`);
@@ -230,7 +232,7 @@ async function verifyOwnedBridge(page: Page, bridge: BridgeInfo): Promise<void> 
 
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(
-        `ws://127.0.0.1:${info.port}?token=${encodeURIComponent(info.token)}`,
+        `ws://127.0.0.1:${info.port}?token=${encodeURIComponent(info.token)}&bridgeProtocol=${info.bridgeProtocol}`,
       );
       let settled = false;
       const settle = (error?: Error) => {
@@ -265,8 +267,19 @@ async function verifyOwnedBridge(page: Page, bridge: BridgeInfo): Promise<void> 
           return;
         }
         if (!event || typeof event !== 'object' || Array.isArray(event)) return;
-        const value = event as Record<string, unknown>;
-        if (value.type !== 'env.report') return;
+        const wireMessage = event as Record<string, unknown>;
+        const entries =
+          wireMessage.type === 'events.batch' && Array.isArray(wireMessage.events)
+            ? wireMessage.events
+            : [{ event: wireMessage }];
+        const value = entries
+          .map((entry) =>
+            entry && typeof entry === 'object' && 'event' in entry
+              ? (entry.event as Record<string, unknown>)
+              : null,
+          )
+          .find((entry) => entry?.type === 'env.report');
+        if (!value) return;
         const report = value.report;
         if (
           !report ||
@@ -284,13 +297,15 @@ async function verifyOwnedBridge(page: Page, bridge: BridgeInfo): Promise<void> 
         settle();
       };
     });
-  }, bridge);
+  }, info);
 }
 
 async function runRoundTrip(page: Page): Promise<SmokeResult> {
-  return page.evaluate(async () => {
+  return page.evaluate(async (bridgeProtocol) => {
     const { port, token } = await window.droidControl!.bridgeInfo();
-    const ws = new WebSocket(`ws://127.0.0.1:${port}${token ? `?token=${token}` : ''}`);
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${port}?token=${encodeURIComponent(token)}&bridgeProtocol=${bridgeProtocol}`,
+    );
     return new Promise<SmokeResult>((resolve, reject) => {
       const clientRef = `e1-${Date.now()}`;
       let appSessionId = '';
@@ -345,53 +360,61 @@ async function runRoundTrip(page: Page): Promise<SmokeResult> {
           return;
         }
         if (!event || typeof event !== 'object' || !('type' in event)) return;
-        const value = event as Record<string, unknown>;
-        if (value.type === 'error') {
-          settle(new Error(String(value.message ?? 'E1 sidecar error')));
-          return;
+        const wireMessage = event as Record<string, unknown>;
+        const entries =
+          wireMessage.type === 'events.batch' && Array.isArray(wireMessage.events)
+            ? wireMessage.events
+            : [{ event: wireMessage }];
+        for (const entry of entries) {
+          if (!entry || typeof entry !== 'object' || !('event' in entry)) continue;
+          const value = entry.event as Record<string, unknown>;
+          if (value.type === 'error') {
+            settle(new Error(String(value.message ?? 'E1 sidecar error')));
+            return;
+          }
+          if (value.type === 'session.created' && value.clientRef === clientRef) {
+            const session = value.session as Record<string, unknown>;
+            appSessionId = String(session.appSessionId ?? '');
+            if (
+              !appSessionId ||
+              session.sessionPurpose !== 'chat' ||
+              session.interactionMode !== 'auto' ||
+              session.autonomy !== 'off' ||
+              session.goal !== 'Reply with exactly E1_OK.'
+            )
+              settle(new Error('E1 creation contract drift'));
+            continue;
+          }
+          if (value.type === 'event.appended') {
+            const transcript = value.event as Record<string, unknown>;
+            if (
+              transcript.appSessionId === appSessionId &&
+              transcript.sourceSessionId === appSessionId &&
+              transcript.role === 'primary' &&
+              transcript.kind === 'text' &&
+              transcript.author === undefined &&
+              typeof transcript.text === 'string' &&
+              transcript.text.trim()
+            )
+              assistantText += transcript.text;
+            continue;
+          }
+          if (value.type === 'session.updated') {
+            const session = value.session as Record<string, unknown>;
+            if (
+              session.appSessionId === appSessionId &&
+              session.streaming === false &&
+              assistantText.trim() &&
+              !closeSent
+            )
+              sendSessionClose();
+            continue;
+          }
+          if (value.type === 'sessions.list' && closeSent) settle();
         }
-        if (value.type === 'session.created' && value.clientRef === clientRef) {
-          const session = value.session as Record<string, unknown>;
-          appSessionId = String(session.appSessionId ?? '');
-          if (
-            !appSessionId ||
-            session.sessionPurpose !== 'chat' ||
-            session.interactionMode !== 'auto' ||
-            session.autonomy !== 'off' ||
-            session.goal !== 'Reply with exactly E1_OK.'
-          )
-            settle(new Error('E1 creation contract drift'));
-          return;
-        }
-        if (value.type === 'event.appended') {
-          const transcript = value.event as Record<string, unknown>;
-          if (
-            transcript.appSessionId === appSessionId &&
-            transcript.sourceSessionId === appSessionId &&
-            transcript.role === 'primary' &&
-            transcript.kind === 'text' &&
-            transcript.author === undefined &&
-            typeof transcript.text === 'string' &&
-            transcript.text.trim()
-          )
-            assistantText += transcript.text;
-          return;
-        }
-        if (value.type === 'session.updated') {
-          const session = value.session as Record<string, unknown>;
-          if (
-            session.appSessionId === appSessionId &&
-            session.streaming === false &&
-            assistantText.trim() &&
-            !closeSent
-          )
-            sendSessionClose();
-          return;
-        }
-        if (value.type === 'sessions.list' && closeSent) settle();
       };
     });
-  });
+  }, BRIDGE_PROTOCOL_VERSION);
 }
 
 test('[E1] Authenticated desktop round trip', async () => {

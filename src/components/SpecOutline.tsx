@@ -1,5 +1,6 @@
 import { useRef, useEffect, useMemo } from 'react';
 import { Search, X } from 'lucide-react';
+import { isTranscriptFindShortcut } from '../lib/keyboardShortcuts';
 
 export interface OutlineHeading {
   level: number;
@@ -72,7 +73,7 @@ export function SpecOutline({
   // Cmd/Ctrl+F focuses the outline search.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      if (isTranscriptFindShortcut(e)) {
         e.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -98,7 +99,10 @@ export function SpecOutline({
   };
 
   return (
-    <aside className="w-60 shrink-0 flex flex-col border-l border-droid-border bg-droid-surface/20 select-none">
+    <aside
+      data-spec-outline
+      className="w-60 shrink-0 flex flex-col border-l border-droid-border bg-droid-surface/20 select-none"
+    >
       {/* Search */}
       <div className="shrink-0 px-3 py-2.5 border-b border-droid-border">
         <div className="flex items-center gap-2 h-8 px-2.5 rounded-lg bg-droid-bg/50 border border-droid-border focus-within:border-droid-border-hover transition-colors">

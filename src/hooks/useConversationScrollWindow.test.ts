@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  firstRowNotAboveViewport,
+  restoreViewportAnchor,
   rowIntersectsViewport,
   scrollTopForPreservedAnchor,
   shouldCancelViewportRestore,
@@ -8,10 +10,14 @@ import {
   updateViewportAnchorGeometry,
 } from './conversationViewportAnchor';
 import {
+  applyConversationContentResize,
   didCommitRequestedHistoryPrepend,
+  deferredViewportRestoreAction,
+  shouldBindConversationContentResize,
+  shouldCompensateConversationContentResize,
   shouldLoadOlderHistoryAtTop,
   shouldReleaseConversationTranscript,
-} from './useConversationScrollWindow';
+} from './conversationScrollWindow';
 
 const settledPinned = {
   isConversationLive: false,
@@ -167,4 +173,213 @@ test('anchor fallback ignores feed rows entirely below non-feed viewport content
     }),
     true,
   );
+});
+
+test('anchor fallback locates a deep viewport row logarithmically', () => {
+  let geometryReads = 0;
+  const index = firstRowNotAboveViewport(
+    10_000,
+    (rowIndex) => {
+      geometryReads += 1;
+      return (rowIndex + 1) * 100;
+    },
+    543_210,
+  );
+
+  assert.equal(index, 5_432);
+  assert.ok(geometryReads <= 14, `expected logarithmic reads, observed ${geometryReads}`);
+});
+
+test('content resize follows a pinned tail and preserves an unpinned row anchor', () => {
+  const pinnedElement = { scrollTop: 100, scrollHeight: 2_400 } as HTMLDivElement;
+  const pinned = applyConversationContentResize(pinnedElement, null, true, false);
+  assert.equal(pinned.mode, 'follow-tail');
+  assert.equal(pinnedElement.scrollTop, 2_400);
+
+  const unpinnedElement = { scrollTop: 1_000, scrollHeight: 2_500 } as HTMLDivElement;
+  const unpinned = applyConversationContentResize(
+    unpinnedElement,
+    {
+      rowId: 'message-42',
+      rowOffsetTop: 50,
+      scrollTop: 1_000,
+      scrollHeight: 2_000,
+    },
+    false,
+    true,
+    { rowContentOffset: (rowId) => (rowId === 'message-42' ? 1_200 : undefined) },
+  );
+
+  assert.equal(unpinned.mode, 'preserve-anchor');
+  assert.equal(unpinned.didFindRow, true);
+  assert.equal(unpinnedElement.scrollTop, 1_150);
+});
+
+test('restore without a layout offset uses height fallback, not a mounted DOM row', () => {
+  const row = {
+    dataset: { feedRowId: 'message-42' },
+    getBoundingClientRect: () => ({ top: 300 }),
+  } as HTMLElement;
+  const element = {
+    scrollTop: 1_000,
+    scrollHeight: 2_500,
+    getBoundingClientRect: () => ({ top: 100 }),
+    querySelector: () => row,
+    querySelectorAll: () => [row],
+  } as unknown as HTMLDivElement;
+
+  const restored = restoreViewportAnchor(
+    element,
+    {
+      rowId: 'message-42',
+      rowOffsetTop: 50,
+      scrollTop: 1_000,
+      scrollHeight: 2_000,
+    },
+    true,
+  );
+
+  assert.equal(restored.didFindRow, false);
+  assert.equal(element.scrollTop, 1_500);
+});
+
+test('restore falls back to height delta when the layout misses the captured row', () => {
+  const element = { scrollTop: 1_000, scrollHeight: 2_500 } as HTMLDivElement;
+  const restored = restoreViewportAnchor(
+    element,
+    {
+      rowId: 'message:gone',
+      rowOffsetTop: 50,
+      scrollTop: 1_000,
+      scrollHeight: 2_000,
+    },
+    true,
+    { rowContentOffset: () => undefined },
+  );
+
+  assert.equal(restored.didFindRow, false);
+  assert.equal(element.scrollTop, 1_500);
+});
+
+test('virtual layout restore preserves an unpinned row when it is not mounted', () => {
+  const element = { scrollTop: 400, scrollHeight: 12_000 } as HTMLDivElement;
+  const restored = restoreViewportAnchor(
+    element,
+    {
+      rowId: 'message:anchor',
+      rowOffsetTop: 40,
+      scrollTop: 400,
+      scrollHeight: 8_000,
+    },
+    true,
+    { rowContentOffset: (rowId) => (rowId === 'message:anchor' ? 3_200 : undefined) },
+  );
+
+  assert.equal(restored.didFindRow, true);
+  assert.equal(element.scrollTop, 3_160);
+  assert.equal(restored.anchor.rowId, 'message:anchor');
+});
+
+test('content resize binding follows the live first child even with an empty transcript', () => {
+  const container = {} as HTMLDivElement;
+  const welcome = {} as Element;
+  const composeSkeleton = {} as Element;
+
+  // First bind while the transcript is still empty.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding: null,
+      element: container,
+      content: welcome,
+      conversationKey: 'session-a',
+    }),
+    true,
+  );
+  const binding = { element: container, content: welcome, conversationKey: 'session-a' };
+
+  // Same child and conversation: nothing to rebind.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding,
+      element: container,
+      content: welcome,
+      conversationKey: 'session-a',
+    }),
+    false,
+  );
+
+  // The conversation content element is swapped with the transcript still at
+  // zero events; the observer must follow the replacement child.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding,
+      element: container,
+      content: composeSkeleton,
+      conversationKey: 'session-a',
+    }),
+    true,
+  );
+
+  // A conversation switch rebinds even when the container keeps its child.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding,
+      element: container,
+      content: welcome,
+      conversationKey: 'session-b',
+    }),
+    true,
+  );
+
+  // No container or child means nothing can be observed.
+  assert.equal(
+    shouldBindConversationContentResize({
+      binding: null,
+      element: null,
+      content: null,
+      conversationKey: 'session-a',
+    }),
+    false,
+  );
+});
+
+test('content resize compensation stays off during an unpinned user scroll', () => {
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: false,
+      isSettlingHistoryPrepend: false,
+      isUserScrolling: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: true,
+      isSettlingHistoryPrepend: false,
+      isUserScrolling: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: false,
+      isSettlingHistoryPrepend: true,
+      isUserScrolling: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldCompensateConversationContentResize({
+      isPinned: false,
+      isSettlingHistoryPrepend: false,
+      isUserScrolling: false,
+    }),
+    true,
+  );
+});
+
+test('deferred content-resize restore skips when a newer owner took the generation', () => {
+  assert.equal(deferredViewportRestoreAction(4, 3, true), 'skip');
+  assert.equal(deferredViewportRestoreAction(3, 3, true), 'retry');
+  assert.equal(deferredViewportRestoreAction(3, 3, false), 'release');
 });

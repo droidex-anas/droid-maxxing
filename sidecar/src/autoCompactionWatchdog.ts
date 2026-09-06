@@ -55,4 +55,8 @@ export class AutoCompactionWatchdogs<Key> {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }
+
+  size(): number {
+    return this.timers.size;
+  }
 }

@@ -1,5 +1,8 @@
 export interface MarkdownAppFence {
   complete: boolean;
+  // 1-based line of the opening fence, matching the positions remark reports,
+  // so a renderer can tell one fence from another without counting renders.
+  startLine: number;
 }
 
 interface FenceContainer {
@@ -49,15 +52,16 @@ export function appFencesInMarkdown(markdown: string): MarkdownAppFence[] {
     marker: '`' | '~';
     length: number;
     isApp: boolean;
+    startLine: number;
     prefixes: FenceContainerPrefix[];
   } | null = null;
 
-  for (const line of markdown.split(/\r?\n/)) {
+  for (const [index, line] of markdown.split(/\r?\n/).entries()) {
     if (open) {
       const content = closingFenceContent(line, open.prefixes);
       const closing = content ? /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(content) : null;
       if (closing?.[1][0] === open.marker && closing[1].length >= open.length) {
-        if (open.isApp) fences.push({ complete: true });
+        if (open.isApp) fences.push({ complete: true, startLine: open.startLine });
         open = null;
       }
       continue;
@@ -72,11 +76,12 @@ export function appFencesInMarkdown(markdown: string): MarkdownAppFence[] {
       marker,
       length: opening[1].length,
       isApp: infoWord === 'app',
+      startLine: index + 1,
       prefixes: container.prefixes,
     };
   }
 
-  if (open?.isApp) fences.push({ complete: false });
+  if (open?.isApp) fences.push({ complete: false, startLine: open.startLine });
   return fences;
 }
 

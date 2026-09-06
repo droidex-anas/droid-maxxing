@@ -2,260 +2,235 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   attachChildView,
-  closeBrowserRegistry,
+  createNativeBrowserViewHost,
   detachChildView,
-  disposeBrowserEntryView,
+  isBrowserViewUsable,
+  safeWebContents,
   setBrowserActionActive,
   setBrowserViewBoundsIfChanged,
-  suspendBrowserRegistry,
-  createNativeBrowserHostController,
 } = require('./nativeBrowserHost.cjs');
 
-function createHost() {
-  const calls = [];
+function createWindow() {
+  const listeners = new Map();
+  const children = [];
   return {
-    calls,
-    isDestroyed: () => false,
+    children,
+    closed: 0,
+    contentSizes: [],
+    destroyed: false,
     contentView: {
-      addChildView: (view) => calls.push(['add', view]),
-      removeChildView: (view) => calls.push(['remove', view]),
+      addChildView(view) {
+        children.push(view);
+      },
+      removeChildView(view) {
+        const index = children.indexOf(view);
+        if (index >= 0) children.splice(index, 1);
+      },
+    },
+    isDestroyed() {
+      return this.destroyed;
+    },
+    setContentSize(width, height) {
+      this.contentSizes.push({ width, height });
+    },
+    setIgnoreMouseEvents() {},
+    on(event, listener) {
+      listeners.set(event, listener);
+    },
+    close() {
+      this.closed += 1;
+      this.destroyed = true;
+      listeners.get('closed')?.();
     },
   };
 }
 
-test('attaching a browser view to its current host is idempotent', () => {
-  const host = createHost();
-  const view = {};
-  const entry = { view, windowAttached: false, hostWindow: null };
-
-  assert.equal(attachChildView(entry, host), true);
-  assert.equal(attachChildView(entry, host), false);
-  assert.deepEqual(host.calls, [['add', view]]);
-});
-
-test('moving a browser view removes it from the previous host first', () => {
-  const firstHost = createHost();
-  const secondHost = createHost();
-  const view = {};
-  const entry = { view, windowAttached: false, hostWindow: null };
-
-  attachChildView(entry, firstHost);
-  attachChildView(entry, secondHost);
-
-  assert.deepEqual(firstHost.calls, [
-    ['add', view],
-    ['remove', view],
-  ]);
-  assert.deepEqual(secondHost.calls, [['add', view]]);
-  assert.equal(entry.hostWindow, secondHost);
-});
-
-test('detaching a browser view clears ownership even when its host is gone', () => {
-  const entry = {
-    view: {},
-    windowAttached: true,
-    hostWindow: { isDestroyed: () => true },
-  };
-
-  assert.equal(detachChildView(entry), true);
-  assert.equal(entry.windowAttached, false);
-  assert.equal(entry.hostWindow, null);
-});
-
-test('suspending browser views preserves registry ownership for later restoration', () => {
-  const first = { browserSessionId: 'browser-1' };
-  const second = { browserSessionId: 'browser-2' };
-  const registry = new Map([
-    [first.browserSessionId, first],
-    [second.browserSessionId, second],
-  ]);
-  const closed = [];
-
-  suspendBrowserRegistry(registry, (entry, forget) => closed.push([entry, forget]));
-
-  assert.deepEqual(closed, [
-    [first, false],
-    [second, false],
-  ]);
-  assert.equal(registry.get('browser-1'), first);
-  assert.equal(registry.get('browser-2'), second);
-});
-
-test('closing all browser views forgets every registry entry', () => {
-  const entry = { browserSessionId: 'browser-1' };
-  const registry = new Map([[entry.browserSessionId, entry]]);
-  const closed = [];
-
-  closeBrowserRegistry(registry, (value, forget) => closed.push([value, forget]));
-
-  assert.deepEqual(closed, [[entry, true]]);
-  assert.equal(registry.size, 0);
-});
-
-test('disposing a browser view revokes permissions before ownership is cleared and contents close', () => {
-  const events = [];
+function createView(initialBounds = { x: 0, y: 0, width: 800, height: 600 }) {
+  let bounds = initialBounds;
+  const visibility = [];
+  const throttling = [];
+  const boundsChanges = [];
   const contents = {
-    isDestroyed: () => false,
-    close: () => events.push(['close']),
-  };
-  const view = { webContents: contents };
-  const entry = {
-    browserSessionId: 'browser-1',
-    view,
-    attached: true,
-    windowAttached: true,
-    hostWindow: createHost(),
-  };
-
-  disposeBrowserEntryView(entry, {
-    detachCursor: () => events.push(['cursor']),
-    removeView: (_entry, removedView) => events.push(['remove', removedView]),
-    revokePermissions: (revokedContents) => {
-      events.push(['revoke', revokedContents, entry.view]);
+    destroyed: false,
+    isDestroyed() {
+      return this.destroyed;
     },
+    setBackgroundThrottling(value) {
+      throttling.push(value);
+    },
+  };
+  return {
+    boundsChanges,
+    contents,
+    throttling,
+    visibility,
+    webContents: contents,
+    getBounds: () => bounds,
+    setBounds(next) {
+      bounds = next;
+      boundsChanges.push(next);
+    },
+    setVisible(value) {
+      visibility.push(value);
+    },
+  };
+}
+
+function createEntry(browserSessionId, view, overrides = {}) {
+  return {
+    browserSessionId,
+    view,
+    visible: true,
+    attached: false,
+    windowAttached: false,
+    hostWindow: null,
+    ...overrides,
+  };
+}
+
+function createHarness(entries) {
+  const mainWindow = createWindow();
+  const hiddenWindows = [];
+  function BrowserWindow(options) {
+    const window = createWindow();
+    window.options = options;
+    hiddenWindows.push(window);
+    return window;
+  }
+  const host = createNativeBrowserViewHost({
+    BrowserWindow,
+    getMainWindow: () => mainWindow,
+    listEntries: () => entries,
+  });
+  return { hiddenWindows, host, mainWindow };
+}
+
+test('child-view attachment is idempotent and removes the previous host first', () => {
+  const firstHost = createWindow();
+  const secondHost = createWindow();
+  const view = createView();
+  const entry = createEntry('browser-1', view);
+
+  assert.equal(attachChildView(entry, firstHost), true);
+  assert.equal(attachChildView(entry, firstHost), false);
+  assert.equal(attachChildView(entry, secondHost), true);
+
+  assert.deepEqual(firstHost.children, []);
+  assert.deepEqual(secondHost.children, [view]);
+  assert.equal(entry.hostWindow, secondHost);
+  assert.equal(entry.windowAttached, true);
+});
+
+test('detaching clears ownership even when the host is already destroyed', () => {
+  const view = createView();
+  const host = createWindow();
+  host.destroyed = true;
+  const entry = createEntry('browser-1', view, {
+    hostWindow: host,
+    windowAttached: true,
   });
 
-  assert.deepEqual(events, [['cursor'], ['revoke', contents, view], ['remove', view], ['close']]);
-  assert.equal(entry.view, null);
-  assert.equal(entry.attached, false);
+  assert.equal(detachChildView(entry), true);
+  assert.equal(entry.hostWindow, null);
+  assert.equal(entry.windowAttached, false);
 });
 
-test('equal browser bounds do not trigger a native view rebound', () => {
-  const calls = [];
-  const view = {
-    getBounds: () => ({ x: 10, y: 20, width: 800, height: 600 }),
-    setBounds: (bounds) => calls.push(bounds),
-  };
+test('hidden views share one offscreen host sized to the largest browser viewport', () => {
+  const firstView = createView({ x: 0, y: 0, width: 800, height: 600 });
+  const secondView = createView({ x: 0, y: 0, width: 1200, height: 700 });
+  const entries = [createEntry('browser-1', firstView), createEntry('browser-2', secondView)];
+  const { hiddenWindows, host } = createHarness(entries);
 
+  host.addHiddenView(entries[0]);
+  host.addHiddenView(entries[1]);
+
+  assert.equal(hiddenWindows.length, 1);
+  assert.deepEqual(hiddenWindows[0].children, [firstView, secondView]);
+  assert.deepEqual(hiddenWindows[0].contentSizes.at(-1), { width: 1200, height: 700 });
+  assert.deepEqual(firstView.visibility, [true]);
+  assert.deepEqual(secondView.visibility, [true]);
+  assert.equal(entries[0].hostWindow, hiddenWindows[0]);
+  assert.equal(entries[1].hostWindow, hiddenWindows[0]);
+});
+
+test('moving the last hidden view to the main window closes the unused hidden host', () => {
+  const view = createView();
+  const entry = createEntry('browser-1', view, { visible: false });
+  const entries = [entry];
+  const { hiddenWindows, host, mainWindow } = createHarness(entries);
+
+  host.addHiddenView(entry);
+  const hiddenWindow = hiddenWindows[0];
+  host.attachToMainWindow(entry);
+
+  assert.deepEqual(hiddenWindow.children, []);
+  assert.equal(hiddenWindow.closed, 1);
+  assert.deepEqual(mainWindow.children, [view]);
+  assert.equal(entry.hostWindow, mainWindow);
+  assert.deepEqual(view.visibility, [true, false]);
+  assert.deepEqual(view.throttling, [true]);
+});
+
+test('removing the last hidden view clears ownership and closes its host', () => {
+  const view = createView();
+  const entry = createEntry('browser-1', view);
+  const entries = [entry];
+  const { hiddenWindows, host } = createHarness(entries);
+
+  host.addHiddenView(entry);
+  const hiddenWindow = hiddenWindows[0];
+  host.removeView(entry, view);
+
+  assert.deepEqual(hiddenWindow.children, []);
+  assert.equal(hiddenWindow.closed, 1);
+  assert.equal(entry.hostWindow, null);
+  assert.equal(entry.windowAttached, false);
+});
+
+test('hidden bounds normalize invalid dimensions and resize their live host', () => {
+  const view = createView();
+  const entry = createEntry('browser-1', view);
+  const entries = [entry];
+  const { hiddenWindows, host } = createHarness(entries);
+  host.addHiddenView(entry);
+
+  host.setHiddenBounds(entry, { width: 1400.4, height: 0 });
+
+  assert.deepEqual(view.boundsChanges, [{ x: 0, y: 0, width: 1400, height: 800 }]);
+  assert.deepEqual(hiddenWindows[0].contentSizes.at(-1), { width: 1400, height: 800 });
+});
+
+test('equal bounds avoid a native rebound and action state controls background throttling', () => {
+  const view = createView({ x: 10, y: 20, width: 800, height: 600 });
   assert.equal(
     setBrowserViewBoundsIfChanged(view, { x: 10, y: 20, width: 800, height: 600 }),
     false,
   );
-  assert.deepEqual(calls, []);
   assert.equal(
     setBrowserViewBoundsIfChanged(view, { x: 12, y: 20, width: 800, height: 600 }),
     true,
   );
-  assert.deepEqual(calls, [{ x: 12, y: 20, width: 800, height: 600 }]);
+  assert.deepEqual(view.boundsChanges, [{ x: 12, y: 20, width: 800, height: 600 }]);
+
+  const entry = createEntry('browser-1', view, { attached: false });
+  assert.equal(setBrowserActionActive(entry, true), true);
+  assert.equal(setBrowserActionActive(entry, false), true);
+  entry.attached = true;
+  assert.equal(setBrowserActionActive(entry, false), true);
+  assert.deepEqual(view.throttling, [false, true, false]);
 });
 
-test('hidden browser actions unthrottle only while active and visible browsers stay unthrottled', () => {
-  const hiddenThrottling = [];
-  const hidden = {
-    attached: false,
-    visible: true,
-    view: {
-      webContents: {
-        isDestroyed: () => false,
-        setBackgroundThrottling: (value) => hiddenThrottling.push(value),
-      },
+test('view usability fails closed for destroyed or throwing web contents', () => {
+  const destroyed = createView();
+  destroyed.contents.destroyed = true;
+  assert.equal(safeWebContents(destroyed), null);
+  assert.equal(isBrowserViewUsable(destroyed), false);
+
+  const throwing = {
+    get webContents() {
+      throw new Error('view is closing');
     },
   };
-  setBrowserActionActive(hidden, true);
-  setBrowserActionActive(hidden, false);
-  assert.deepEqual(hiddenThrottling, [false, true]);
-
-  const visibleThrottling = [];
-  const visible = {
-    attached: true,
-    visible: true,
-    view: {
-      webContents: {
-        isDestroyed: () => false,
-        setBackgroundThrottling: (value) => visibleThrottling.push(value),
-      },
-    },
-  };
-  setBrowserActionActive(visible, true);
-  setBrowserActionActive(visible, false);
-  assert.deepEqual(visibleThrottling, [false, false]);
-});
-
-test('host controller owns attachment moves and preserves hidden session entries', () => {
-  const main = createHost();
-  const hidden = createHost();
-  const detachedCursors = [];
-  hidden.setContentSize = () => {};
-  hidden.close = () => hidden.calls.push(['close']);
-  hidden.on = () => {};
-  const controller = createNativeBrowserHostController({
-    idleMs: 0,
-    getMainWindow: () => main,
-    isViewUsable: Boolean,
-    createHiddenWindow: () => hidden,
-    detachCursor: (browserSessionId) => detachedCursors.push(browserSessionId),
-  });
-  const view = {
-    setVisible: () => {},
-    setBounds: () => {},
-    getBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
-    webContents: {
-      isDestroyed: () => false,
-      setBackgroundThrottling: () => {},
-      close: () => {},
-    },
-  };
-  const entry = controller.ensureEntry('browser-1', (browserSessionId) => ({
-    browserSessionId,
-    view,
-    visible: true,
-    attached: false,
-    windowAttached: false,
-    hostWindow: null,
-    idleTimer: null,
-    viewport: { width: 800, height: 600 },
-  }));
-
-  assert.equal(controller.attachToMain(entry), true);
-  assert.equal(controller.getAttachedSessionId(), 'browser-1');
-  controller.detach('browser-1');
-  assert.equal(controller.getAttachedSessionId(), null);
-  assert.equal(controller.getEntry('browser-1'), entry);
-  assert.equal(entry.hostWindow, hidden);
-  assert.equal(entry.attached, false);
-  assert.deepEqual(detachedCursors, ['browser-1']);
-});
-
-test('host controller suspend disposes views but retains entries and close forgets them', () => {
-  const closed = [];
-  const cursorEvents = [];
-  const hidden = createHost();
-  hidden.setContentSize = () => {};
-  hidden.close = () => {};
-  hidden.on = () => {};
-  const controller = createNativeBrowserHostController({
-    idleMs: 0,
-    getMainWindow: createHost,
-    isViewUsable: Boolean,
-    createHiddenWindow: () => hidden,
-    detachCursor: (browserSessionId) => cursorEvents.push(['detach', browserSessionId]),
-    forgetCursor: (browserSessionId) => cursorEvents.push(['forget', browserSessionId]),
-    revokePermissions: () => closed.push('revoke'),
-  });
-  const makeEntry = (browserSessionId) => ({
-    browserSessionId,
-    view: {
-      webContents: {
-        isDestroyed: () => false,
-        close: () => closed.push('close'),
-      },
-    },
-    attached: false,
-    windowAttached: false,
-    hostWindow: null,
-    idleTimer: null,
-  });
-  controller.ensureEntry('browser-1', makeEntry);
-  controller.suspendAll();
-  assert.equal(controller.hasEntry('browser-1'), true);
-  assert.equal(controller.getEntry('browser-1').view, null);
-  assert.deepEqual(closed, ['revoke', 'close']);
-  assert.deepEqual(cursorEvents, [['detach', 'browser-1']]);
-
-  controller.closeAll();
-  assert.equal(controller.hasEntry('browser-1'), false);
-  assert.deepEqual(cursorEvents, [
-    ['detach', 'browser-1'],
-    ['forget', 'browser-1'],
-  ]);
+  assert.equal(safeWebContents(throwing), null);
+  assert.equal(isBrowserViewUsable(throwing), false);
 });

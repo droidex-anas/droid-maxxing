@@ -13,15 +13,3 @@ export function nativeBrowserRequestTargetsActiveSession(
 ): boolean {
   return activeBrowserKey !== undefined && activeBrowserKey === requestAppSessionId;
 }
-
-export function nativeBrowserRequestTargetsVisibleSurface(input: {
-  browserKey: string;
-  visibleBrowserSessionId?: string;
-  requestAppSessionId: string;
-  requestBrowserSessionId: string;
-}): boolean {
-  return (
-    input.browserKey === input.requestAppSessionId ||
-    input.visibleBrowserSessionId === input.requestBrowserSessionId
-  );
-}

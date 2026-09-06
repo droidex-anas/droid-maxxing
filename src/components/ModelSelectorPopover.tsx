@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, Check, SlidersHorizontal } from 'lucide-react';
-import {
-  shallowEqual,
-  useStoreDispatch,
-  useStoreSelector,
-  type AgentKind,
-} from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import type { AgentKind } from '../hooks/persistedUiPreferences';
 import type { ReasoningEffort, ModelInfo } from '../types/bridge';
 import { updateAgentSettings, updateChildSettings, listModels } from '../lib/commands';
 import {

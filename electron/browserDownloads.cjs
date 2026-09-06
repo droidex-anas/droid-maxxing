@@ -5,6 +5,7 @@ function reserveDownloadPath(directory, filename, reservedPaths) {
   const safeName =
     path
       .basename(String(filename || 'download'))
+      // eslint-disable-next-line no-control-regex -- Download filenames must sanitize control bytes.
       .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '_')
       .replace(/[. ]+$/g, '')
       .slice(0, 240) || 'download';

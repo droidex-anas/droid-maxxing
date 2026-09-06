@@ -57,6 +57,10 @@ export class FakeBrowserSessionManager implements SessionBrowserDependencies {
     return state;
   }
 
+  hasSession(appSessionId: string): boolean {
+    return this.states.has(appSessionId);
+  }
+
   reload(appSessionId: string): Promise<BrowserState> {
     const state = this.requireOpenSession(appSessionId);
     this.recordCall('browser', 'reload', [appSessionId]);

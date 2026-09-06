@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,7 +9,9 @@ import {
   type SessionManagerDependencies,
   type StartableLocalMcpResource,
 } from '../SessionManager.js';
+import { HistoryIndex } from '../history.js';
 import type * as Protocol from '../protocol.js';
+import type { SessionFileChange } from '../sessionFileCache.js';
 import { FakeBrowserSessionManager } from './browserCharacterizationSupport.js';
 import {
   FakeFactoryRuntime,
@@ -59,6 +61,7 @@ export interface SessionManagerTestContext {
   readonly fixture: {
     seedHistorySummaries(summaries: Protocol.SessionSummary[]): void;
     seedChildSessions(children: Protocol.ChildSessionSummary[]): void;
+    publishSessionFiles(changes: SessionFileChange[]): void;
   };
   readonly browsers: FakeBrowserSessionManager;
   readonly home: string;
@@ -67,6 +70,7 @@ export interface SessionManagerTestContext {
   create(
     command: Omit<Extract<Protocol.ClientCommand, { type: 'session.create' }>, 'type'>,
   ): Promise<void>;
+  retireIdleSessionRuntimes(): Promise<void>;
   shutdown(): Promise<void>;
   waitForIdle(): Promise<void>;
   dispose(): Promise<void>;
@@ -84,6 +88,8 @@ export function createSessionManagerTestContext(
     getFactoryDefaults?: () => Promise<Protocol.FactoryDefaultSettings>;
     startSessionFileWatcher?: SessionManagerDependencies['startSessionFileWatcher'];
     streamingCoalesceMs?: number;
+    childRuntimeIdleMs?: number;
+    sessionRuntimeIdleMs?: number;
   } = {},
 ): SessionManagerTestContext {
   const calls: RecordedCall[] = [];
@@ -114,6 +120,18 @@ export function createSessionManagerTestContext(
       },
     },
     nextChildSessionId: () => `child-${String(++childSequence)}`,
+    // Pin live runtimes at the hard-open maximum so eviction races stay valid
+    // even if a host lowers DROID_CONTROL_MAX_LIVE_CHILD_RUNTIMES.
+    maxLiveRuntimes: 4,
+    maxQueuedRuntimes: 16,
+    // Zero means "anything already settled is retirable now", so retirement
+    // tests drive the real sweep without waiting on a clock.
+    ...(options.childRuntimeIdleMs === undefined
+      ? {}
+      : { childRuntimeIdleMs: options.childRuntimeIdleMs }),
+    ...(options.sessionRuntimeIdleMs === undefined
+      ? {}
+      : { sessionRuntimeIdleMs: options.sessionRuntimeIdleMs }),
     // Integration assertions read appended events synchronously; the timer
     // coalescing behavior is covered by SessionTimeline unit tests.
     streamingCoalesceMs: options.streamingCoalesceMs ?? 0,
@@ -129,10 +147,20 @@ export function createSessionManagerTestContext(
     rmSync(home, { recursive: true, force: true });
     throw error;
   }
+  let sessionFileMirror: HistoryIndex;
+  try {
+    sessionFileMirror = new HistoryIndex();
+  } catch (error) {
+    unpinTestHome();
+    rmSync(home, { recursive: true, force: true });
+    throw error;
+  }
+  let sessionFileRevision = 0;
   let manager: SessionManager;
   try {
     manager = new SessionManager(recordEvent, { dependencies, initialModels: INITIAL_MODELS });
   } catch (error) {
+    sessionFileMirror.close();
     unpinTestHome();
     rmSync(home, { recursive: true, force: true });
     throw error;
@@ -179,6 +207,36 @@ export function createSessionManagerTestContext(
           })),
         );
       },
+      publishSessionFiles: (changes) => {
+        const upserts = changes.flatMap(({ providerSessionId, path: sessionPath }) => {
+          if (!existsSync(sessionPath)) return [];
+          const stat = statSync(sessionPath);
+          return [
+            {
+              providerSessionId,
+              path: sessionPath,
+              birthtimeMs: stat.birthtimeMs,
+              mtimeMs: stat.mtimeMs,
+              sizeBytes: stat.size,
+              settingsMtimeMs: null,
+              summary: null,
+            },
+          ];
+        });
+        const removedProviderSessionIds = changes
+          .filter(({ path: sessionPath }) => !existsSync(sessionPath))
+          .map(({ providerSessionId }) => providerSessionId);
+        const previousRevision = sessionFileRevision;
+        sessionFileRevision += 1;
+        const applied = sessionFileMirror.applySessionFileReconciliation({
+          previousRevision,
+          revision: sessionFileRevision,
+          changed: upserts.length + removedProviderSessionIds.length,
+          upserts,
+          removedProviderSessionIds,
+        });
+        if (!applied) throw new Error('Test session-file mirror revision diverged.');
+      },
     },
     browsers,
     home,
@@ -188,6 +246,7 @@ export function createSessionManagerTestContext(
     },
     handle,
     create: (command) => handle({ type: 'session.create', ...command }),
+    retireIdleSessionRuntimes: () => manager.retireIdleSessionRuntimes(),
     shutdown: () => manager.shutdown(),
     waitForIdle: () => new Promise((resolve) => setImmediate(resolve)),
     dispose: async () => {
@@ -196,6 +255,7 @@ export function createSessionManagerTestContext(
       try {
         await manager.shutdown();
       } finally {
+        sessionFileMirror.close();
         unpinTestHome();
         rmSync(home, { recursive: true, force: true });
       }

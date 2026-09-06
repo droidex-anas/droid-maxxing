@@ -20,7 +20,7 @@ export interface BrowserCookieProfile {
   isLastUsed: boolean;
 }
 
-export type BrowserCookieProfileDiscovery = {
+export interface BrowserCookieProfileDiscovery {
   chrome:
     | {
         status: 'available';
@@ -40,7 +40,7 @@ export type BrowserCookieProfileDiscovery = {
     message: string;
     recovery: string;
   };
-};
+}
 
 export interface BrowserCookieProfileImportPreview {
   source: 'chrome';

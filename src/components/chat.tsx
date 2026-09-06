@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, memo, useEffect, useRef } from 'react';
+import { useMemo, useState, memo, useEffect, useRef, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRight,
@@ -15,11 +15,9 @@ import {
 } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../types/bridge';
 import { Markdown } from './Markdown';
-import { hasAppBlock, hasCompleteAppBlock, hasIncompleteAppBlock } from './appBlockRuntime';
+import { hasAppBlock } from './appBlockRuntime';
 import { SpecRenderer } from './SpecRenderer';
-import { JsonRender, splitJsonRender, hasJsonRender } from './JsonRender';
 import {
-  extractFileChange,
   MAX_DIFF_CARDS_PER_COMMIT,
   createDiffDisclosure,
   mountNextRevealedDiffCards,
@@ -32,7 +30,7 @@ import { isImagePath } from '../lib/localImage';
 import { userMessageAttachments } from '../lib/promptMentions';
 import { DiffCard } from './DiffView';
 import { SubagentsDock, type SubagentsDockData } from './SubagentsDock';
-import TurnChangesPanel, { type TurnChangesItem, type TurnFile } from './TurnChangesPanel';
+import TurnChangesPanel from './TurnChangesPanel';
 import {
   CAT_ICON,
   CAT_LABEL,
@@ -40,12 +38,8 @@ import {
   safeJson,
   stripAnsi,
   formatDuration,
-  parseTruncatedTail,
-  isChildSessionTool,
-  isSubagentBookkeepingTool,
   childSessionInfo,
   parseTodos,
-  hasTodoPayload,
   isWebSearchTool,
   isWebFetchTool,
   parseWebSearch,
@@ -56,18 +50,43 @@ import {
   faviconUrl,
   toolArgStringArray,
 } from '../lib/tools';
+import {
+  copyTextForCommand,
+  copyTextForMessage,
+} from '../features/transcript-reach/transcriptCopy';
 import { classifyEvent } from '../lib/transcript';
 import {
-  mergeChildSessionSpawn,
   childSessionLatest,
   resolveWaveSessions,
   type ChildSessionActivity,
   type ChildSessionTarget,
 } from '../lib/childSessions';
 import { openExternal } from '../lib/onboarding';
-import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
-import { feedItemTailId, feedRowId } from '../hooks/conversationViewportAnchor';
+import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
+import { asChunkedSequence } from '../lib/chunkedSequence';
+import { ConversationList, type ConversationListHandle } from './ConversationList';
+import { takeFeedRowEntrance } from './conversationListState';
+import { MessageBody } from './MessageBody';
+import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
+import { StreamingCaret } from './StreamingCaret';
+import { WorktreeCreatedCard } from './WorktreeCreatedCard';
+import {
+  appendedFeedItemKeysFromProjection,
+  projectFinalResponseKeys,
+  rememberFreshAppResponses,
+  type FinalResponseKeyState,
+  type FreshAppResponseState,
+} from './messageFeedState';
+import {
+  buildFeed,
+  isCompactingStatus,
+  isCompactionCompleteStatus,
+  type FeedItem,
+} from './chatFeed';
+import { groupTurns, tailTimestamp, trailingSubagentPoll } from './chatFeedTurns';
+
+export { StreamingCaret } from './StreamingCaret';
 
 // Open a link in the OS default browser rather than inside the Electron window.
 function openLink(e: React.MouseEvent, url: string) {
@@ -100,16 +119,6 @@ function useElapsed(startTs: number | undefined, active: boolean): number {
     };
   }, [active, visible]);
   return startTs != null ? Math.max(0, now - startTs) : 0;
-}
-
-/* ── Streaming caret (text being written) ── */
-export function StreamingCaret() {
-  return (
-    <span
-      className="caret-blink inline-block w-[2px] h-[1.05em] -mb-[0.15em] ml-0.5 rounded-sm align-baseline"
-      style={{ background: ACCENT }}
-    />
-  );
 }
 
 /* ── Working indicator — minimal shimmer label, no icons/dots/bars ── */
@@ -189,21 +198,6 @@ export function CompactionDivider({ compactType }: { compactType?: 'auto' | 'man
       <div className="h-px flex-1 bg-droid-border/70" />
     </div>
   );
-}
-
-// A status line that signals compaction is in progress (not the completion
-// line). Match the active gerund ("Compacting conversation...") specifically so
-// terminal lines ("Compaction complete.", "Nothing to compact.") and rejections
-// ("Cannot compact while a turn is active.") don't keep the shimmer running.
-export function isCompactingStatus(text?: string): boolean {
-  const t = text ?? '';
-  return /compacting/i.test(t) && !/complete/i.test(t);
-}
-
-// A status line that signals compaction finished.
-export function isCompactionCompleteStatus(text?: string): boolean {
-  const t = text ?? '';
-  return /compact/i.test(t) && /complete/i.test(t);
 }
 
 /* ── Subtle expand affordance ── */
@@ -517,7 +511,7 @@ function CommandCard({
         <span className="min-w-0 flex-1 truncate text-[10.5px] font-medium uppercase tracking-wider text-droid-text-muted">
           {title || 'Terminal'}
         </span>
-        <CopyButton text={out ? `${command}\n\n${out}` : command} />
+        <CopyButton text={copyTextForCommand(command, output)} />
       </div>
       {body}
     </div>
@@ -998,22 +992,6 @@ function TodoChecklist({ event }: { event: TranscriptEvent }) {
   );
 }
 
-// Whether `next` is the tool_result produced by the `call` event. Result events
-// carry no usable `toolName` (the live SDK emits "" and history reads the empty
-// result name), so classification cannot identify them; correlate by toolUseId
-// instead. When either side has an id, require an exact match so a call never
-// swallows an unrelated result (replayed transcripts batch several calls before
-// their results); fall back to adjacency only when neither side has an id (the
-// live stream emits each result immediately after its call).
-export function isResultFor(call: TranscriptEvent, next: TranscriptEvent | undefined): boolean {
-  if (next?.kind !== 'tool_result') return false;
-  // A failed result must always surface so the user sees the failure, even when
-  // it correlates to the call we are otherwise hiding (e.g. a failed TodoWrite).
-  if (next.isError) return false;
-  if (call.toolUseId || next.toolUseId) return call.toolUseId === next.toolUseId;
-  return true;
-}
-
 // Pair each tool_call with its tool_result across the whole group. Results
 // correlate by toolUseId wherever they sit (replayed transcripts batch several
 // calls before their results, so the result is often not adjacent); id-less
@@ -1171,688 +1149,6 @@ function ToolGroupItem({
       </Expand>
     </div>
   );
-}
-
-/* ── Feed model ── */
-export type FeedItem =
-  | { type: 'message'; key: string; event: TranscriptEvent }
-  | { type: 'thinking'; key: string; event: TranscriptEvent; durationMs?: number }
-  | { type: 'status'; key: string; event: TranscriptEvent }
-  | { type: 'error'; key: string; event: TranscriptEvent }
-  | { type: 'diff'; key: string; event: TranscriptEvent; change: FileChange }
-  | { type: 'diffs'; key: string; changes: { event: TranscriptEvent; change: FileChange }[] }
-  | { type: 'child_session'; key: string; event: TranscriptEvent }
-  // One contiguous run of Task spawns (a turn's subagent wave); rendered as a
-  // single subagents dock card scoped to just these spawns.
-  | { type: 'child_sessions'; key: string; events: TranscriptEvent[] }
-  | { type: 'tools'; key: string; events: TranscriptEvent[] }
-  | { type: 'worked'; key: string; items: FeedItem[]; durationMs: number }
-  | TurnChangesItem;
-
-// One file touched during a completed turn, aggregated across every edit the
-// agent made to it that turn.
-export type { TurnFile } from './TurnChangesPanel';
-
-// Collect the files a turn's run edited, folding repeated edits to the same
-// path into a single entry (summed line counts). Order follows first touch.
-export function collectTurnFiles(run: FeedItem[]): TurnFile[] {
-  const byPath = new Map<string, TurnFile>();
-  const consider = (c: FileChange) => {
-    const cur = byPath.get(c.path);
-    if (cur) {
-      cur.added += c.added;
-      cur.removed += c.removed;
-      // A file created then edited in one turn reads best as a creation.
-      if (c.verb === 'create') cur.verb = 'create';
-    } else {
-      byPath.set(c.path, { path: c.path, added: c.added, removed: c.removed, verb: c.verb });
-    }
-  };
-  for (const it of run) {
-    if (it.type === 'diff') consider(it.change);
-    else if (it.type === 'diffs')
-      it.changes.forEach((c) => {
-        consider(c.change);
-      });
-  }
-  return [...byPath.values()];
-}
-
-// Artifacts the SDK persists when the user stops a run: a failed tool_result for
-// each in-flight tool ("… cancelled by user") plus a "Request interrupted/
-// cancelled by user" note. A user Stop is not a failure, so these are hidden
-// from the feed — both live and on replay.
-export function isCancellationArtifact(e: TranscriptEvent): boolean {
-  const text = (e.text ?? '').trim();
-  if (!text) return false;
-  if (e.isError && /cancell?ed by user/i.test(text)) return true;
-  if (/^request (interrupted|cancell?ed) by user\.?$/i.test(text)) return true;
-  return false;
-}
-
-export interface BuildFeedOptions {
-  // Render child-session spawns as cards/lines instead of plain tool calls.
-  childSessionCards?: boolean;
-  // Group each contiguous run of spawns into one wave item for the dock card.
-  groupChildSessions?: boolean;
-}
-
-export function buildFeed(
-  events: TranscriptEvent[],
-  { childSessionCards = false, groupChildSessions = false }: BuildFeedOptions = {},
-): FeedItem[] {
-  events = events.filter((e) => !isCancellationArtifact(e));
-  const items: FeedItem[] = [];
-  // toolUseId → index of its spawn item, so streaming deltas collapse into one.
-  const childSessionIndex = new Map<string, number>();
-  // toolUseIds whose successful completion result must be dropped wherever it
-  // lands: a child session spawn's result is represented by its card, and a plan
-  // (TodoWrite) result is pure orchestration noise. History results carry no
-  // toolName, and replay can batch a result into a different tool group than its
-  // call (e.g. a child session spawn splits the group between a plan call and its
-  // result), so adjacency/positional checks are not enough — correlate by id
-  // across the whole feed. A *failed* such result is never dropped; it surfaces
-  // as an error instead. Pre-scanned so it works regardless of call/result order.
-  const childSessionResultIds = new Set<string>();
-  const planResultIds = new Set<string>();
-  for (const e of events) {
-    if (e.kind !== 'tool_call' || !e.toolUseId) continue;
-    // Subagent polls (TaskOutput/TaskStop) belong to the wave card the same way a
-    // spawn's own result does: the card reports the status they carry, and their
-    // bodies are the subagent's output echoed back into the parent feed. Only the
-    // grouped card speaks for them, so views that keep per-spawn lines keep them.
-    if (childSessionCards && isChildSessionTool(e.toolName, e.toolArgs))
-      childSessionResultIds.add(e.toolUseId);
-    else if (groupChildSessions && isSubagentBookkeepingTool(e.toolName))
-      childSessionResultIds.add(e.toolUseId);
-    else if (classifyEvent(e) === 'plan_update') planResultIds.add(e.toolUseId);
-  }
-  const isCardResult = (e: TranscriptEvent) =>
-    e.kind === 'tool_result' &&
-    !!e.toolUseId &&
-    (childSessionResultIds.has(e.toolUseId) || planResultIds.has(e.toolUseId));
-  // toolUseId → its successful result, so a tools group can reclaim a result that
-  // a child session spawn split away from its call (the spawn breaks the group, so the
-  // call is finalized before its result is reached). Pulled results are marked
-  // claimed and skipped when iteration later reaches them, instead of rendering
-  // as a detached raw "Tool result".
-  const resultById = new Map<string, TranscriptEvent>();
-  for (const e of events)
-    if (e.kind === 'tool_result' && e.toolUseId && !e.isError) resultById.set(e.toolUseId, e);
-  const claimed = new Set<TranscriptEvent>();
-  let i = 0;
-  while (i < events.length) {
-    const ev = events[i];
-    // A result reclaimed by an earlier group (its call was split from it by a
-    // child session spawn) must not also start a new group here.
-    if (ev.kind === 'tool_result' && claimed.has(ev)) {
-      i++;
-      continue;
-    }
-    // A successful child session/plan completion result is already represented by its
-    // card or checklist (or is noise); drop it wherever it lands. Failed ones
-    // fall through to the error branch below so the failure still surfaces.
-    if (isCardResult(ev) && !ev.isError) {
-      i++;
-      continue;
-    }
-    if (ev.author === 'user' || ev.kind === 'text') {
-      items.push({ type: 'message', key: ev.id, event: ev });
-      i++;
-      continue;
-    }
-    if (ev.kind === 'thinking') {
-      const next = events[i + 1];
-      const end = ev.endTs ?? next?.ts;
-      items.push({
-        type: 'thinking',
-        key: ev.id,
-        event: ev,
-        durationMs: end != null ? Math.max(0, end - ev.ts) : undefined,
-      });
-      i++;
-      continue;
-    }
-    if (ev.kind === 'compaction' || ev.kind === 'status') {
-      items.push({ type: 'status', key: ev.id, event: ev });
-      i++;
-      continue;
-    }
-    // A pure error event (no tool call) and a failed child session/plan result surface
-    // as a standalone error. An ordinary failed tool result is not diverted here;
-    // it flows into its tool group below and folds into the tool card as an error.
-    if (ev.kind === 'error' || (ev.isError && isCardResult(ev))) {
-      items.push({ type: 'error', key: ev.id, event: ev });
-      i++;
-      continue;
-    }
-    if (ev.kind === 'tool_call') {
-      const change = extractFileChange(ev.toolName, ev.toolArgs);
-      if (change) {
-        // Fold a contiguous run of file edits into one collapsible group so a
-        // large multi-file change doesn't bury the chat under dozens of cards.
-        const changes: { event: TranscriptEvent; change: FileChange }[] = [];
-        // Dedupe by toolUseId: a single edit can arrive as many streaming
-        // tool_call snapshots; counting each one inflates the diff stats and
-        // floods the group with repeated rows. Keep only the latest per call.
-        const byToolUse = new Map<string, number>();
-        const addChange = (e: TranscriptEvent, c: FileChange) => {
-          const at = e.toolUseId ? byToolUse.get(e.toolUseId) : undefined;
-          if (at != null) changes[at] = { event: e, change: c };
-          else {
-            if (e.toolUseId) byToolUse.set(e.toolUseId, changes.length);
-            changes.push({ event: e, change: c });
-          }
-        };
-        addChange(ev, change);
-        i++;
-        while (i < events.length) {
-          const t = events[i];
-          // Real transcripts interleave each edit's tool_result between calls;
-          // fold a successful edit result into the run so consecutive edits group
-          // into one card. A failed result breaks out so it can surface.
-          if (t.kind === 'tool_result') {
-            if (t.isError) break;
-            i++;
-            continue;
-          }
-          if (t.kind !== 'tool_call') break;
-          const c = extractFileChange(t.toolName, t.toolArgs);
-          if (!c) break;
-          addChange(t, c);
-          i++;
-        }
-        if (changes.length === 1)
-          items.push({
-            type: 'diff',
-            key: changes[0].event.id,
-            event: changes[0].event,
-            change: changes[0].change,
-          });
-        else items.push({ type: 'diffs', key: `diffs-${ev.id}`, changes });
-        continue;
-      }
-      // Polling or stopping an existing subagent is bookkeeping the wave card
-      // already speaks for, so it never becomes a row of its own.
-      if (groupChildSessions && isSubagentBookkeepingTool(ev.toolName)) {
-        i++;
-        if (isResultFor(ev, events[i])) i++;
-        continue;
-      }
-      if (childSessionCards && isChildSessionTool(ev.toolName, ev.toolArgs)) {
-        const key = ev.toolUseId ?? ev.id;
-        const at = childSessionIndex.get(key);
-        if (at == null) {
-          if (groupChildSessions) {
-            // Merge into the trailing wave item so a turn's spawns stay one
-            // card at the spot where the spawning happened.
-            const prevIdx = items.length - 1;
-            const prev: FeedItem | undefined = items.length > 0 ? items[prevIdx] : undefined;
-            if (prev?.type === 'child_sessions') {
-              childSessionIndex.set(key, prevIdx);
-              items[prevIdx] = { ...prev, events: [...prev.events, ev] };
-            } else {
-              childSessionIndex.set(key, items.length);
-              items.push({ type: 'child_sessions', key: `child-sessions-${key}`, events: [ev] });
-            }
-          } else {
-            childSessionIndex.set(key, items.length);
-            items.push({ type: 'child_session', key: `child-session-${key}`, event: ev });
-          }
-        } else {
-          const cur = items[at];
-          if (cur.type === 'child_sessions') {
-            items[at] = {
-              ...cur,
-              events: cur.events.map((e) =>
-                (e.toolUseId ?? e.id) === key ? mergeChildSessionSpawn(e, ev) : e,
-              ),
-            };
-          } else if (cur.type === 'child_session') {
-            items[at] = { ...cur, event: mergeChildSessionSpawn(cur.event, ev) };
-          }
-        }
-        i++;
-        // Advance past an adjacent successful completion result (the common live
-        // case); a result batched elsewhere is dropped by the group-wide guards.
-        // Correlate by toolUseId since history results carry no toolName.
-        if (isResultFor(ev, events[i])) i++;
-        continue;
-      }
-    }
-    if (ev.kind === 'tool_call' || ev.kind === 'tool_result') {
-      const group: TranscriptEvent[] = [];
-      while (i < events.length) {
-        const t = events[i];
-        if (t.kind === 'tool_result') {
-          // A failed child session/plan result breaks the group so the outer loop
-          // surfaces it as a standalone error (its card/checklist can't convey
-          // the failure). An ordinary failed result stays so it folds into its
-          // tool card.
-          if (t.isError && isCardResult(t)) break;
-          // A successful child session/plan result is dropped (represented by its
-          // card or checklist, or pure noise); other results stay in the group.
-          if (!t.isError && isCardResult(t)) {
-            i++;
-            continue;
-          }
-          // A result already reclaimed inline by an earlier group (its call was
-          // split from it by a child session spawn) must not be re-emitted here as
-          // raw activity, which would duplicate the output.
-          if (claimed.has(t)) {
-            i++;
-            continue;
-          }
-          group.push(t);
-          i++;
-          continue;
-        }
-        // A child session spawn must break the group so the outer loop can render it
-        // as its own card instead of folding it into the generic tools group.
-        if (
-          childSessionCards &&
-          t.kind === 'tool_call' &&
-          isChildSessionTool(t.toolName, t.toolArgs)
-        )
-          break;
-        // Skipped rather than breaking the group, so a poll landing between two
-        // real tool calls does not split them into two cards.
-        if (groupChildSessions && t.kind === 'tool_call' && isSubagentBookkeepingTool(t.toolName)) {
-          i++;
-          continue;
-        }
-        if (t.kind === 'tool_call' && !extractFileChange(t.toolName, t.toolArgs)) {
-          group.push(t);
-          i++;
-          continue;
-        }
-        break;
-      }
-      if (group.length) {
-        // Reclaim any successful result whose call is in this group but was
-        // separated from it (a child session spawn broke the group before the result
-        // was reached) so it renders inline with its call rather than as a
-        // detached raw result later. Card/plan results are intentionally left
-        // out (handled by their card/checklist or dropped as noise).
-        for (const c of group) {
-          if (c.kind !== 'tool_call' || !c.toolUseId) continue;
-          const r = resultById.get(c.toolUseId);
-          if (r && !group.includes(r) && !isCardResult(r)) {
-            group.push(r);
-            claimed.add(r);
-          }
-        }
-        items.push({ type: 'tools', key: group[0].id, events: dedupePlanUpdates(group) });
-      } else i++;
-      continue;
-    }
-    i++;
-  }
-  return items;
-}
-
-// Repeated TodoWrite calls in one activity group are noise (#20): keep only the
-// latest plan snapshot and drop the superseded ones (and their empty results).
-function dedupePlanUpdates(events: TranscriptEvent[]): TranscriptEvent[] {
-  const plans = events.filter((e) => e.kind === 'tool_call' && classifyEvent(e) === 'plan_update');
-  if (plans.length <= 1) return events;
-  // A partial tool_call_delta normalizes as a plan_update carrying the tool name
-  // but no `todos` payload; it must never become the kept snapshot or it would
-  // replace the complete checklist with an empty "Updated plan". Prefer the
-  // latest plan that has a real Todo payload (mirroring RightPanel), falling
-  // back to the last plan only when none carry one.
-  const withPayload = plans.filter((p) => hasTodoPayload(p.toolArgs));
-  const keepId = (
-    withPayload.length ? withPayload[withPayload.length - 1] : plans[plans.length - 1]
-  ).id;
-  // toolUseIds of superseded plan calls, so their own results are dropped no
-  // matter where they sit in the group (replay batches calls before results).
-  const supersededIds = new Set<string>();
-  for (const plan of plans) {
-    if (plan.id !== keepId && plan.toolUseId) supersededIds.add(plan.toolUseId);
-  }
-  const out: TranscriptEvent[] = [];
-  for (let j = 0; j < events.length; j++) {
-    const e = events[j];
-    if (e.kind === 'tool_call' && classifyEvent(e) === 'plan_update' && e.id !== keepId) {
-      // id-less live result sits right after its call; id-correlated results are
-      // dropped by the supersededIds check below. Never drop a failed result.
-      if (!e.toolUseId && isResultFor(e, events[j + 1])) j++;
-      continue;
-    }
-    if (e.kind === 'tool_result' && !e.isError && e.toolUseId && supersededIds.has(e.toolUseId)) {
-      continue;
-    }
-    out.push(e);
-  }
-  return out;
-}
-
-function isUserMessage(item: FeedItem): boolean {
-  return item.type === 'message' && item.event.author === 'user';
-}
-
-// Short preview of a message for the conversation timeline tooltip: whitespace
-// (including newlines) is collapsed to single spaces so the hover reads as one
-// flowing horizontal snippet, capped in length so a large prompt can't produce
-// a huge tooltip.
-function turnLabel(text?: string): string {
-  if (!text) return 'Message';
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return 'Message';
-  return clean.length > 160 ? `${clean.slice(0, 160).trimEnd()}…` : clean;
-}
-
-export interface ConversationAnchor {
-  id: string;
-  label: string;
-}
-
-// One anchor per turn: the turn's final model response (its summary). The id is
-// the feed item key, which MessageFeed also stamps onto the rendered row so the
-// timeline can scroll to it.
-export function finalResponseAnchorsFromItems(items: FeedItem[]): ConversationAnchor[] {
-  const out: ConversationAnchor[] = [];
-  let pendingKey: string | null = null;
-  let pendingText: string | undefined;
-  const flush = () => {
-    if (pendingKey !== null) out.push({ id: pendingKey, label: turnLabel(pendingText) });
-    pendingKey = null;
-    pendingText = undefined;
-  };
-  for (const it of items) {
-    if (isUserMessage(it)) {
-      flush();
-    } else if (it.type === 'message' && it.event.author !== 'user') {
-      pendingKey = it.key;
-      pendingText = it.event.text;
-    }
-  }
-  flush();
-  return out;
-}
-
-// One anchor per user prompt for the conversation timeline: the dot previews the
-// prompt text and scrolls that prompt to the top. Anchoring on prompts keeps the
-// dot count exactly equal to the number of prompts (a leading model/spec message
-// no longer adds a stray dot) and lets the hover preview show what was asked.
-export function promptAnchorsFromItems(items: FeedItem[]): ConversationAnchor[] {
-  const out: ConversationAnchor[] = [];
-  for (const it of items) {
-    if (it.type === 'message' && it.event.author === 'user') {
-      out.push({ id: it.key, label: turnLabel(it.event.text) });
-    }
-  }
-  return out;
-}
-
-// The subagent poll call the transcript currently ends on, if any. The dock
-// suppresses these calls (the wave card speaks for them), so the tail the user
-// sees is an earlier, already-finished step: without this the feed shimmers a
-// settled row while the parent's real work — checking on its subagents — goes
-// unannounced. Returning the call also lets the cue time the check itself.
-export function trailingSubagentPoll(
-  events: TranscriptEvent[],
-  grouped: boolean,
-): TranscriptEvent | undefined {
-  if (!grouped) return undefined;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (isCancellationArtifact(e)) continue;
-    if (e.kind === 'tool_call') return isSubagentBookkeepingTool(e.toolName) ? e : undefined;
-    if (e.kind !== 'tool_result' || !e.toolUseId) return undefined;
-    // A replayed result carries no toolName, so correlate it back to its call —
-    // scanning backward from the result, since the call is always just behind it
-    // and a forward scan would walk the whole transcript on every render.
-    for (let j = i - 1; j >= 0; j--) {
-      const call = events[j];
-      if (call.kind !== 'tool_call' || call.toolUseId !== e.toolUseId) continue;
-      return isSubagentBookkeepingTool(call.toolName) ? call : undefined;
-    }
-    return undefined;
-  }
-  return undefined;
-}
-
-// Build the grouped feed once so callers can share it (the chat view derives
-// timeline anchors from the same items it hands to MessageFeed, instead of
-// running buildFeed/groupTurns a second time on every render and switch).
-export type GroupedFeedOptions = BuildFeedOptions & {
-  specContent?: string;
-  changes?: boolean;
-};
-
-export function buildGroupedFeed(
-  events: TranscriptEvent[],
-  pending: boolean,
-  { specContent, changes = false, ...feedOptions }: GroupedFeedOptions = {},
-): FeedItem[] {
-  return groupTurns(buildFeed(events, feedOptions), pending, specContent, changes);
-}
-
-// Public helper so the chat view can derive the same anchors MessageFeed stamps.
-export function conversationAnchors(
-  events: TranscriptEvent[],
-  pending: boolean,
-  options?: GroupedFeedOptions,
-): ConversationAnchor[] {
-  return promptAnchorsFromItems(buildGroupedFeed(events, pending, options));
-}
-
-// Best-effort end timestamp of a feed item, used to time the live working cue.
-function tailTimestamp(item?: FeedItem): number | undefined {
-  if (!item) return undefined;
-  if (item.type === 'worked' || item.type === 'turnChanges') return undefined;
-  if (item.type === 'tools') {
-    const e = item.events[item.events.length - 1];
-    return e?.endTs ?? e?.ts;
-  }
-  if (item.type === 'diffs') {
-    const c = item.changes[item.changes.length - 1];
-    return c?.event.endTs ?? c?.event.ts;
-  }
-  if (item.type === 'child_sessions') {
-    const e = item.events.at(-1);
-    return e?.endTs ?? e?.ts;
-  }
-  return item.event.endTs ?? item.event.ts;
-}
-
-// Earliest start and latest end timestamps across a set of feed items.
-function spanOf(items: FeedItem[]): { start: number; end: number } {
-  let start = Infinity;
-  let end = -Infinity;
-  const consider = (ts?: number, endTs?: number) => {
-    if (ts == null) return;
-    start = Math.min(start, ts);
-    end = Math.max(end, endTs ?? ts);
-  };
-  for (const it of items) {
-    if (it.type === 'tools')
-      it.events.forEach((e) => {
-        consider(e.ts, e.endTs);
-      });
-    else if (it.type === 'diffs')
-      it.changes.forEach((c) => {
-        consider(c.event.ts, c.event.endTs);
-      });
-    else if (it.type === 'child_sessions')
-      it.events.forEach((e) => {
-        consider(e.ts, e.endTs);
-      });
-    else if (it.type !== 'worked' && it.type !== 'turnChanges')
-      consider(it.event.ts, it.event.endTs);
-  }
-  if (start === Infinity) return { start: 0, end: 0 };
-  return { start, end };
-}
-
-// A folded activity item that is purely todo/plan reconciliation (no real tool
-// work). Used to decide whether two assistant text fragments are actually one
-// final answer split by an internal checklist update. The group must contain a
-// plan update and otherwise hold only its own successful results: an id-less
-// TodoWrite result classifies as generic tool_activity, so accepting successful
-// results keeps `assistant -> TodoWrite -> result -> assistant` a single answer,
-// while a failed result keeps the messages distinct so the failure surfaces.
-function isReconciliationItem(it: FeedItem): boolean {
-  if (it.type !== 'tools') return false;
-  let hasPlan = false;
-  for (const e of it.events) {
-    if (classifyEvent(e) === 'plan_update') {
-      hasPlan = true;
-      continue;
-    }
-    if (e.kind === 'tool_result' && !e.isError) continue;
-    return false;
-  }
-  return hasPlan;
-}
-
-// Join a trailing assistant fragment back onto the running final answer.
-function mergeAssistantMessages(
-  prev: Extract<FeedItem, { type: 'message' }>,
-  next: Extract<FeedItem, { type: 'message' }>,
-): Extract<FeedItem, { type: 'message' }> {
-  const text = [prev.event.text ?? '', next.event.text ?? '']
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .join('\n\n');
-  return {
-    ...next,
-    key: prev.key,
-    event: {
-      ...next.event,
-      text,
-      ts: prev.event.ts,
-    },
-  };
-}
-
-// Collapse a completed assistant turn: thinking/tool/file activity folds into
-// "Worked for …" groups while assistant chat messages, child session cards, and
-// compaction dividers stay top-level. Invariant (#18): an assistant message is
-// ALWAYS a top-level boundary and can never be nested inside a Worked group,
-// no matter what trailing compaction/tool status follows it.
-function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
-  if (run.length === 0) return [];
-  const out: FeedItem[] = [];
-  // A fragment equal to the pinned spec is suppressed by FeedItemView only when
-  // its whole text matches the spec, so it must never be merged into prose (that
-  // would defeat the match and render the spec body twice).
-  const spec = specContent?.trim();
-  const isSpecBody = (text: string | undefined) => !!spec && (text ?? '').trim() === spec;
-  // Fold contiguous work into "Worked for …" groups. Per-spawn child_session
-  // lines stay top-level so they remain visible (and navigable) after a turn,
-  // while child_sessions wave cards fold with the rest of the turn — they exist
-  // only in dock mode, where a finished wave's job is done.
-  let buf: FeedItem[] = [];
-  const flush = () => {
-    if (buf.length === 0) return;
-    if (buf.some((it) => it.type === 'message')) {
-      // Should never happen: assistant chat must stay top-level (#18).
-      console.warn('[transcript] assistant message folded into Worked activity group');
-    }
-    const { start, end } = spanOf(buf);
-    out.push({
-      type: 'worked',
-      key: `worked-${buf[0].key}`,
-      items: buf,
-      durationMs: Math.max(0, end - start),
-    });
-    buf = [];
-  };
-  for (const it of run) {
-    if (it.type === 'message') {
-      // Assistant chat (user messages were already split out by groupTurns).
-      // #19: when only a todo/plan reconciliation separates this fragment from
-      // the running answer, the model emitted its answer, updated the checklist,
-      // then finished the sentence, so it's one final response. Merge the
-      // fragments and drop the internal reconciliation so the turn renders a
-      // single final answer instead of burying it behind a "Worked" group.
-      const prev = out[out.length - 1];
-      if (
-        it.event.author !== 'user' &&
-        !isSpecBody(it.event.text) &&
-        buf.length > 0 &&
-        buf.every(isReconciliationItem) &&
-        prev?.type === 'message' &&
-        prev.event.author !== 'user' &&
-        !isSpecBody(prev.event.text)
-      ) {
-        out[out.length - 1] = mergeAssistantMessages(prev, it);
-        buf = [];
-        continue;
-      }
-      flush();
-      out.push(it);
-    } else if (it.type === 'child_session') {
-      flush();
-      out.push(it);
-    } else if (it.type === 'error') {
-      // A failed tool/result must stay visible after the turn completes instead
-      // of being buried in a collapsed "Worked for …" group (classifier intent).
-      flush();
-      out.push(it);
-    } else if (it.type === 'status' && it.event.kind === 'compaction') {
-      flush();
-      out.push(it);
-    } else if (
-      it.type === 'status' &&
-      isCompactionCompleteStatus(it.event.text) &&
-      it.event.compactType === 'manual'
-    ) {
-      flush();
-      out.push(it);
-    } else buf.push(it);
-  }
-  flush();
-  return out;
-}
-
-// Fold completed assistant turns into "Worked for …" groups. The in-flight turn
-// (while pending) is left expanded so live thinking/tools/status keep streaming.
-// When `changes` is set, a completed turn that edited files gets a top-level
-// "Changes · N files" summary appended so it survives the Worked-for folding.
-export function groupTurns(
-  items: FeedItem[],
-  pending: boolean,
-  specContent?: string,
-  changes = false,
-): FeedItem[] {
-  const out: FeedItem[] = [];
-  let i = 0;
-  while (i < items.length) {
-    if (isUserMessage(items[i])) {
-      out.push(items[i]);
-      i++;
-      continue;
-    }
-    const run: FeedItem[] = [];
-    while (i < items.length && !isUserMessage(items[i])) {
-      run.push(items[i]);
-      i++;
-    }
-    const isLastRun = i >= items.length;
-    if (isLastRun && pending) {
-      out.push(...run);
-    } else {
-      out.push(...collapseRun(run, specContent));
-      if (changes) {
-        const files = collectTurnFiles(run);
-        if (files.length > 0) {
-          out.push({
-            type: 'turnChanges',
-            key: `changes-${run[0].key}`,
-            tailEventId: feedItemTailId(run[run.length - 1]),
-            files,
-            added: files.reduce((s, f) => s + f.added, 0),
-            removed: files.reduce((s, f) => s + f.removed, 0),
-          });
-        }
-      }
-    }
-  }
-  return out;
 }
 
 function baseName(p: string): string {
@@ -2013,59 +1309,7 @@ const InlineSpecCard = memo(function InlineSpecCard({
   );
 });
 
-/* ── Assistant message body: interleaves Markdown with <json-render> blocks ── */
-const MessageBody = memo(function MessageBody({
-  text,
-  live,
-  autoPlayAppBlocks,
-}: {
-  text: string;
-  live: boolean;
-  autoPlayAppBlocks: boolean;
-}) {
-  // Strip the history "[truncated N chars]" sentinel so the raw marker never
-  // shows; the cut itself is intentionally not surfaced.
-  const { body, truncatedChars } = parseTruncatedTail(text);
-  const hasCompleteApp = hasCompleteAppBlock(body);
-  const buildingAppBlocks = live && hasAppBlock(body);
-  // History caps message text. When that cut landed inside an App fence the
-  // source can never run, so the block says so instead of offering a Play
-  // control that would start an empty App. Only replayed text can be cut: a
-  // live answer whose tail merely looks like the sentinel is still streaming.
-  const cutOffAppBlocks = !live && truncatedChars !== null && hasIncompleteAppBlock(body);
-  const shouldAutoPlayAppBlocks = autoPlayAppBlocks && hasCompleteApp;
-  if (!hasJsonRender(body))
-    return (
-      <Markdown
-        autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-        buildingAppBlocks={buildingAppBlocks}
-        cutOffAppBlocks={cutOffAppBlocks}
-      >
-        {body}
-      </Markdown>
-    );
-  const segments = splitJsonRender(body);
-  return (
-    <>
-      {segments.map((seg, i) =>
-        seg.type === 'json-render' ? (
-          <JsonRender key={i} source={seg.value} />
-        ) : seg.value.trim() ? (
-          <Markdown
-            key={i}
-            autoPlayAppBlocks={shouldAutoPlayAppBlocks}
-            buildingAppBlocks={buildingAppBlocks}
-            cutOffAppBlocks={cutOffAppBlocks}
-          >
-            {seg.value}
-          </Markdown>
-        ) : null,
-      )}
-    </>
-  );
-});
-
-interface FeedItemViewProps {
+export interface FeedItemViewProps {
   item: FeedItem;
   live: boolean;
   autoPlayAppBlocks?: boolean;
@@ -2119,16 +1363,21 @@ export function sameFeedEvents(a: FeedItem, b: FeedItem): boolean {
 
 // Lets memo skip the many static items while a response streams, re-rendering
 // only the growing tail.
-function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): boolean {
-  // Live-updating items (spawn lines, dock wave cards, worked groups with
-  // ticking timers) always re-render. The static types never read
-  // subagentsDock, so it is intentionally absent from the comparison below.
-  if (
-    next.item.type === 'child_session' ||
-    next.item.type === 'child_sessions' ||
-    next.item.type === 'worked'
-  )
-    return false;
+export function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewProps): boolean {
+  // Live-updating spawn lines and worked groups still re-render; a child_sessions
+  // wave skips unless this card's events, dock (including throttled snapshots),
+  // or liveness changed. Sibling feed rows compare as usual below.
+  if (next.item.type === 'child_sessions') {
+    return (
+      prev.live === next.live &&
+      prev.sessionLive === next.sessionLive &&
+      prev.subagentsDock === next.subagentsDock &&
+      prev.onOpenChildSession === next.onOpenChildSession &&
+      prev.childSessionActivity === next.childSessionActivity &&
+      sameFeedEvents(prev.item, next.item)
+    );
+  }
+  if (next.item.type === 'child_session' || next.item.type === 'worked') return false;
   return (
     prev.live === next.live &&
     prev.autoPlayAppBlocks === next.autoPlayAppBlocks &&
@@ -2217,7 +1466,12 @@ const FeedItemView = memo(function FeedItemView({
       const appOwnsLiveStatus = live && hasAppBlock(text);
       return (
         <div className="group/msg">
-          <MessageBody text={text} live={live} autoPlayAppBlocks={autoPlayAppBlocks} />
+          <MessageBody
+            text={text}
+            live={live}
+            autoPlayAppBlocks={autoPlayAppBlocks}
+            cacheId={item.key}
+          />
           {live && !appOwnsLiveStatus ? (
             <StreamingCaret />
           ) : (
@@ -2225,7 +1479,7 @@ const FeedItemView = memo(function FeedItemView({
             isFinalResponse &&
             text.trim() && (
               <div className="mt-1.5 -ml-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
-                <CopyButton text={parseTruncatedTail(text).body} />
+                <CopyButton text={copyTextForMessage(text)} />
               </div>
             )
           )}
@@ -2583,83 +1837,6 @@ export function childSessionLineIsRunning(activity?: ChildSessionActivity): bool
   return activity?.status === 'running';
 }
 
-// Only genuinely appended items (new keys appearing at the tail) animate in.
-// Paging older history prepends already-past messages at the top; those and
-// every previously-rendered item must stay still rather than re-animating as if
-// they were fresh activity. Walking from the tail collects the contiguous run of
-// new keys and stops at the first previously-seen item, so a prepend (new keys
-// ahead of the old ones) animates nothing.
-export function appendedFeedItemKeys(
-  items: readonly { key: string }[],
-  previous: { identity: string; keys: Set<string> } | null,
-  identity: string,
-): Set<string> {
-  const appended = new Set<string>();
-  if (previous?.identity !== identity) return appended;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const key = items[i].key;
-    if (previous.keys.has(key)) break;
-    appended.add(key);
-  }
-  return appended;
-}
-
-export interface FreshAppResponseState {
-  identity: string;
-  wasPending: boolean;
-  texts: Set<string>;
-}
-
-export function completeAppResponsesInLatestTurn(items: FeedItem[]): string[] {
-  let latestPromptIndex = -1;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.type === 'message' && item.event.author === 'user') {
-      latestPromptIndex = i;
-      break;
-    }
-  }
-  if (latestPromptIndex < 0) return [];
-
-  const responses: string[] = [];
-  for (let i = latestPromptIndex + 1; i < items.length; i++) {
-    const item = items[i];
-    if (item.type !== 'message' || item.event.author === 'user') continue;
-    const text = item.event.text ?? '';
-    if (hasCompleteAppBlock(text)) responses.push(text);
-  }
-  return responses;
-}
-
-export function rememberFreshAppResponses(
-  previous: FreshAppResponseState | null,
-  identity: string,
-  items: FeedItem[],
-  pending: boolean,
-): FreshAppResponseState {
-  const sameSession = previous?.identity === identity;
-  const texts = new Set(sameSession ? previous.texts : []);
-  const justSettled = sameSession && previous.wasPending && !pending;
-
-  if (pending || justSettled) {
-    for (const text of completeAppResponsesInLatestTurn(items)) texts.add(text);
-  }
-
-  return { identity, wasPending: pending, texts };
-}
-
-// Offscreen feed rows skip layout and paint entirely (content-visibility) so
-// long transcripts scroll and chat switches render at the cost of the visible
-// screen only. The browser keeps DOM, component state, and animation timelines
-// alive: a row scrolling back in repaints the same frame with its shimmer or
-// caret exactly where the shared timeline puts it, so nothing ever looks
-// paused. The intrinsic-size hint sizes never-rendered rows for the scrollbar;
-// 'auto' remembers each row's real height once it has been rendered.
-const FEED_ROW_RENDER_STYLE = {
-  contentVisibility: 'auto',
-  containIntrinsicSize: 'auto 96px',
-} as const;
-
 /* ── The activity feed (list only; parent owns the scroll container) ── */
 export function MessageFeed({
   events,
@@ -2674,6 +1851,13 @@ export function MessageFeed({
   specContent,
   onOpenSpecWiki,
   createdWorktreePath,
+  onMountedRowsChange,
+  scrollElementRef,
+  viewportLayoutRef,
+  listRef,
+  initialScrollOffset,
+  updateKind = 'full',
+  rebuiltFromItemIndex = 0,
 }: {
   events: TranscriptEvent[];
   items?: FeedItem[];
@@ -2689,6 +1873,13 @@ export function MessageFeed({
   specContent?: string;
   onOpenSpecWiki?: () => void;
   createdWorktreePath?: string;
+  onMountedRowsChange?: (count: number) => void;
+  scrollElementRef?: RefObject<HTMLElement | null>;
+  viewportLayoutRef?: RefObject<ConversationViewportLayout | null>;
+  listRef?: RefObject<ConversationListHandle | null>;
+  initialScrollOffset?: number;
+  updateKind?: 'full' | 'append' | 'prepend';
+  rebuiltFromItemIndex?: number;
 }) {
   // Child session cards, waiting label, and live timers are enabled only for the
   // chat/spec feed (which supplies onOpenChildSession). Per-turn change summaries
@@ -2736,12 +1927,14 @@ export function MessageFeed({
   const dockEnabled = !!subagentsDock;
   const items = useMemo(
     () =>
-      providedItems ??
-      groupTurns(
-        buildFeed(events, { childSessionCards: rich, groupChildSessions: dockEnabled }),
-        pending,
-        specContent,
-        changes,
+      asChunkedSequence(
+        providedItems ??
+          groupTurns(
+            buildFeed(events, { childSessionCards: rich, groupChildSessions: dockEnabled }),
+            pending,
+            specContent,
+            changes,
+          ),
       ),
     [providedItems, events, pending, rich, changes, specContent, dockEnabled],
   );
@@ -2755,30 +1948,40 @@ export function MessageFeed({
     freshAppResponsesRef.current = freshAppResponseState;
   }, [freshAppResponseState]);
   const freshAppResponseTexts = freshAppResponseState.texts;
-  const renderedFeedRef = useRef<{ identity: string; keys: Set<string> } | null>(null);
+  const renderedFeedRef = useRef<{ identity: string; items: FeedItem[] } | null>(null);
   const previousFeed = renderedFeedRef.current;
   useEffect(() => {
     renderedFeedRef.current = {
       identity: feedIdentity,
-      keys: new Set(items.map((item) => item.key)),
+      items,
     };
   }, [feedIdentity, items]);
   // Track item identity (not list index) so prepended older-history items and
   // every already-rendered item stay still; only genuinely appended tail items
   // enter with the rise animation.
-  const animateKeys = appendedFeedItemKeys(items, previousFeed, feedIdentity);
+  const animateKeys = appendedFeedItemKeysFromProjection(
+    items,
+    previousFeed,
+    feedIdentity,
+    updateKind,
+    rebuiltFromItemIndex,
+  );
+  const enteredKeysRef = useRef(new Set<string>());
+  const enteredIdentityRef = useRef(feedIdentity);
+  if (enteredIdentityRef.current !== feedIdentity) {
+    enteredKeysRef.current = new Set();
+    enteredIdentityRef.current = feedIdentity;
+  }
 
   // The copy button appears only on a turn's final model response.
-  const finalResponseKeys = useMemo(
-    () => new Set(finalResponseAnchorsFromItems(items).map((a) => a.id)),
-    [items],
+  const finalResponseStateRef = useRef<FinalResponseKeyState | null>(null);
+  const finalResponseState = useMemo(
+    () => projectFinalResponseKeys(finalResponseStateRef.current, feedIdentity, items, updateKind),
+    [feedIdentity, items, updateKind],
   );
-  // The conversation timeline anchors a dot on each user prompt; stamp those
-  // rows so the rail (driven by the same data) can scroll to them.
-  const promptKeys = useMemo(
-    () => new Set(promptAnchorsFromItems(items).map((a) => a.id)),
-    [items],
-  );
+  useEffect(() => {
+    finalResponseStateRef.current = finalResponseState;
+  }, [finalResponseState]);
   const worktreeInsertAfter = createdWorktreePath
     ? items.findIndex((item) => item.type === 'message' && item.event.author === 'user')
     : -1;
@@ -2837,6 +2040,32 @@ export function MessageFeed({
         : 'Working';
   // Time the check from the poll itself; the visible tail can be minutes old.
   const workingStart = rich ? (subagentPoll?.ts ?? tailTimestamp(last)) : undefined;
+  const rowSharedProps = useMemo<FeedRowsSharedProps>(
+    () => ({
+      pending,
+      cwd,
+      onOpenDiff: stableOnOpenDiff,
+      onOpenReviewFile: stableOnOpenReviewFile,
+      onOpenChildSession: stableOnOpenChildSession,
+      childSessionActivity: stableChildSessionActivity,
+      subagentsDock,
+      liveTiming: rich,
+      specContent,
+    }),
+    [
+      pending,
+      cwd,
+      stableOnOpenDiff,
+      stableOnOpenReviewFile,
+      stableOnOpenChildSession,
+      stableChildSessionActivity,
+      subagentsDock,
+      rich,
+      specContent,
+    ],
+  );
+  const optionalItemProps = optionalFeedRowProps(rowSharedProps);
+  const subagentPollActive = Boolean(subagentPoll);
 
   return (
     <div className="space-y-4">
@@ -2846,54 +2075,44 @@ export function MessageFeed({
         </div>
       )}
 
-      {items.map((item, idx) => {
-        const isNewItem = animateKeys.has(item.key);
-        return (
-          <Fragment key={item.key}>
-            <motion.div
-              data-feed-row-id={feedRowId(item)}
-              {...(promptKeys.has(item.key) ? { 'data-anchor-id': item.key } : {})}
-              style={FEED_ROW_RENDER_STYLE}
-              className={`mx-auto min-w-0 ${
+      <ConversationList
+        items={items}
+        {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
+        {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
+        {...(listRef !== undefined ? { listRef } : {})}
+        {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
+        {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
+      >
+        {(item, index) => (
+          <>
+            <FeedRow
+              item={item}
+              itemView={FeedItemView}
+              areItemPropsEqual={feedItemPropsEqual}
+              animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
+              live={pending && index === lastIdx && !subagentPollActive}
+              autoPlayAppBlocks={
                 item.type === 'message' &&
                 item.event.author !== 'user' &&
-                hasAppBlock(item.event.text ?? '')
-                  ? 'max-w-4xl'
-                  : 'max-w-2xl'
-              }`}
-              initial={isNewItem ? { opacity: 0, y: 4 } : false}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: EASE }}
-            >
-              <FeedItemView
-                item={item}
-                live={pending && idx === lastIdx && !subagentPoll}
-                autoPlayAppBlocks={
-                  item.type === 'message' &&
-                  item.event.author !== 'user' &&
-                  freshAppResponseTexts.has(item.event.text ?? '')
-                }
-                sessionLive={pending}
-                compacting={compacting && idx === lastIdx}
-                cwd={cwd}
-                onOpenDiff={stableOnOpenDiff}
-                onOpenReviewFile={stableOnOpenReviewFile}
-                onOpenChildSession={stableOnOpenChildSession}
-                childSessionActivity={stableChildSessionActivity}
-                subagentsDock={subagentsDock}
-                liveTiming={rich}
-                specContent={specContent}
-                isFinalResponse={finalResponseKeys.has(item.key)}
-              />
-            </motion.div>
-            {idx === worktreeInsertAfter && createdWorktreePath && (
+                freshAppResponseTexts.has(item.event.text ?? '')
+              }
+              sessionLive={pending}
+              compacting={compacting && index === lastIdx}
+              {...optionalItemProps}
+              liveTiming={rowSharedProps.liveTiming}
+              isFinalResponse={
+                finalResponseState.settledKeys.has(item.key) ||
+                finalResponseState.liveKeys.has(item.key)
+              }
+            />
+            {index === worktreeInsertAfter && createdWorktreePath ? (
               <div className="mx-auto min-w-0 max-w-2xl">
                 <WorktreeCreatedCard path={createdWorktreePath} />
               </div>
-            )}
-          </Fragment>
-        );
-      })}
+            ) : null}
+          </>
+        )}
+      </ConversationList>
 
       {showWorking && (
         <div className="mx-auto min-w-0 max-w-2xl">

@@ -48,14 +48,18 @@ the account is connected.
 
 The built-in DROIDEX Browser gives an agent a reliable native browser session
 with the user in control of sign-ins and sensitive capabilities. Every task
-keeps its own live browser session—even while the user views another chat—while
+keeps its own browser session—even while the user views another chat—while
 the authenticated browser profile is shared so sites do not require a fresh
 sign-in per chat. The active pane can show a crisp curved DROIDEX agent cursor
 with a soft blue activity halo and native eased movement at the agent's exact
 hover and click position; its high-contrast style and
 24–64 px size are configurable in Browser settings, and the
-indicator is optional, expires instead of lingering over stale content, and
+indicator is optional, is hidden when its document changes, and
 never pulls a background task into the visible pane.
+
+Active browser work stays live in the background. Idle hidden pages may be
+suspended to keep memory bounded; returning to one restores its URL, viewport,
+and scroll position. Unsaved page-local state is not preserved by suspension.
 
 **Settings → Browser** controls global agent access, autonomy-aware website
 opening, the Google-default home/search page, the agent cursor, saved-login use,
@@ -127,7 +131,8 @@ Agent `snapshot` observes that page without reopening a URL remembered from the
 conversation. Reload recovers the last valid HTTP(S) page—or the configured
 home page—if Chromium temporarily reports a blank/error document. The agent
 cursor is a separate sandboxed click-through overlay above the website, so page
-scripts cannot hide, remove, or spoof it.
+scripts cannot hide or remove it. Pages can imitate its artwork, so it is an
+activity indicator, not proof that a page or authentication request is trusted.
 
 ## Useful commands
 

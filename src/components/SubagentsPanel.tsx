@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check } from 'lucide-react';
-import type { ChildSessionInfo } from '../hooks/useStore';
+import type { ChildSessionInfo } from '../hooks/storeChildSession';
 import type { ChildStatus, ModelInfo } from '../types/bridge';
 import {
   childSessionMeta,
@@ -27,8 +27,11 @@ const STATUS_LABEL: Record<ChildStatus, string> = {
   completed: 'Done',
 };
 
-function RowStatus({ status }: { status: ChildStatus }) {
+function RowStatus({ status, queued }: { status: ChildStatus; queued?: boolean }) {
   // The shimmer sweep is the working signal — no spinner, no pulsing dot.
+  if (queued) {
+    return <span className="text-[11px] font-medium text-droid-text-muted">Queued</span>;
+  }
   if (status === 'running') {
     return <span className="shimmer-text text-[11px] font-medium">Working</span>;
   }
@@ -79,7 +82,11 @@ function SubagentRow({
         className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left disabled:cursor-default"
       >
         <span className="shrink-0 transition-[filter] group-hover:brightness-125">
-          <AgentAvatar seed={seed} size={16} working={child.status === 'running'} />
+          <AgentAvatar
+            seed={seed}
+            size={16}
+            working={child.status === 'running' && !child.queued}
+          />
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span
@@ -96,7 +103,7 @@ function SubagentRow({
             </span>
           )}
         </span>
-        <RowStatus status={child.status} />
+        <RowStatus status={child.status} queued={child.queued} />
       </button>
     </div>
   );

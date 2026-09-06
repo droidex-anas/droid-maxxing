@@ -1,4 +1,4 @@
-import { Chrome, FileUp, KeyRound, RotateCcw } from 'lucide-react';
+import { Globe, FileUp, KeyRound, RotateCcw } from 'lucide-react';
 import type {
   BrowserCookieProfileDiscovery,
   BrowserCookieProfileImportPreview,
@@ -23,7 +23,7 @@ export function BrowserProfileImportSelection({
     <div className="space-y-5">
       <section aria-labelledby="chrome-profile-heading">
         <div className="mb-2.5 flex items-center gap-2">
-          <Chrome className="h-3.5 w-3.5 text-droid-text-muted" />
+          <Globe className="h-3.5 w-3.5 text-droid-text-muted" />
           <h3
             id="chrome-profile-heading"
             className="text-[11px] font-medium uppercase tracking-wider text-droid-text-muted"

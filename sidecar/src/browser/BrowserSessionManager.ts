@@ -3,9 +3,6 @@ import { BrowserDesignReferences } from './BrowserDesignReferences.js';
 import { normalizeBrowserUrl } from './browserUrl.js';
 import type { writeDesignPromptPack } from './designPromptPacks.js';
 import { waitForBrowserCondition } from './browserWait.js';
-import { DEFAULT_BROWSER_VIEWPORT } from './browserViewports.js';
-import { centerOfBrowserRef, requireBrowserPoint } from './browserTargets.js';
-export { DEFAULT_BROWSER_VIEWPORT, VIEWPORT_PRESETS } from './browserViewports.js';
 import { SerializedBrowserRuntime } from './SerializedBrowserRuntime.js';
 import type {
   BrowserBox,
@@ -84,6 +81,12 @@ interface ManagedBrowserSession {
 
 export type BrowserInputSource = 'agent' | 'user';
 
+export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = {
+  width: 1200,
+  height: 800,
+  deviceScaleFactor: 2,
+};
+
 export type BrowserRestoreState = Omit<
   BrowserState,
   'appSessionId' | 'refs' | 'screenshotPath' | 'screenshotUrl' | 'agentCursor' | 'error'
@@ -131,7 +134,7 @@ export class BrowserSessionManager {
   }
 
   restore(input: BrowserRestoreState): BrowserState {
-    const existing = this.resolveSession(input.appSessionId);
+    const existing = this.sessions.get(input.appSessionId);
     if (existing) {
       this.emitUpdated(existing.state);
       return existing.state;
@@ -162,10 +165,7 @@ export class BrowserSessionManager {
 
   async reload(appSessionId: string, source?: BrowserInputSource): Promise<BrowserState> {
     const session = this.requireSession(appSessionId);
-    const snapshot = await session.runtime.reload(source);
-    session.state = this.stateFromSnapshot(session, snapshot);
-    this.emitUpdated(session.state);
-    return session.state;
+    return this.updateFromSnapshot(session, await session.runtime.reload(source));
   }
 
   async goBack(appSessionId: string): Promise<BrowserState> {
@@ -178,9 +178,7 @@ export class BrowserSessionManager {
 
   async refresh(appSessionId: string): Promise<BrowserState> {
     const session = this.requireSession(appSessionId);
-    session.state = await this.captureState(session);
-    this.emitUpdated(session.state);
-    return session.state;
+    return this.updateFromSnapshot(session, await session.runtime.snapshot());
   }
 
   private async navigateHistory(
@@ -190,9 +188,7 @@ export class BrowserSessionManager {
     const session = this.requireSession(appSessionId);
     const snapshot =
       direction === 'back' ? await session.runtime.goBack() : await session.runtime.goForward();
-    session.state = this.stateFromSnapshot(session, snapshot);
-    this.emitUpdated(session.state);
-    return session.state;
+    return this.updateFromSnapshot(session, snapshot);
   }
 
   async resizeViewport(input: {
@@ -320,9 +316,7 @@ export class BrowserSessionManager {
       throw new Error('Credential autofill is only available in the live DROIDEX browser.');
     }
     const snapshot = await session.runtime.fillCredentials();
-    session.state = this.stateFromSnapshot(session, snapshot);
-    this.emitUpdated(session.state);
-    return session.state;
+    return this.updateFromSnapshot(session, snapshot);
   }
 
   async screenshot(appSessionId: string, options: BrowserScreenshotOptions = {}): Promise<string> {
@@ -362,7 +356,7 @@ export class BrowserSessionManager {
   }
 
   referenceDetail(appSessionId: string, id: string): DesignReference | undefined {
-    return this.resolveSession(appSessionId)?.designReferences.detail(id);
+    return this.sessions.get(appSessionId)?.designReferences.detail(id);
   }
 
   async designPrompt(input: {
@@ -375,7 +369,7 @@ export class BrowserSessionManager {
   }
 
   state(appSessionId: string): BrowserState | undefined {
-    return this.resolveSession(appSessionId)?.state;
+    return this.sessions.get(appSessionId)?.state;
   }
 
   designContext(appSessionId: string): { state: BrowserState; references: DesignReference[] } {
@@ -386,8 +380,12 @@ export class BrowserSessionManager {
     };
   }
 
+  hasSession(appSessionId: string): boolean {
+    return this.sessions.has(appSessionId);
+  }
+
   async close(appSessionId: string): Promise<void> {
-    const session = this.resolveSession(appSessionId);
+    const session = this.sessions.get(appSessionId);
     if (!session) return;
     this.sessions.delete(appSessionId);
     await session.runtime.close();
@@ -407,14 +405,13 @@ export class BrowserSessionManager {
     const existing = this.sessions.get(appSessionId);
     if (existing) return existing;
     const initialViewport = viewport ?? DEFAULT_BROWSER_VIEWPORT;
-    const initialViewportMode = viewportMode ?? 'fit';
     const id = `browser-${appSessionId}-${randomUUID()}`;
     return this.createSession(appSessionId, id, initialViewport, {
       browserSessionId: id,
       appSessionId,
       url: 'about:blank',
       viewport: initialViewport,
-      viewportMode: initialViewportMode,
+      viewportMode: viewportMode ?? 'fit',
       scroll: { x: 0, y: 0 },
       refs: [],
     });
@@ -449,28 +446,15 @@ export class BrowserSessionManager {
   }
 
   private requireSession(appSessionId: string): ManagedBrowserSession {
-    const session = this.resolveSession(appSessionId);
+    const session = this.sessions.get(appSessionId);
     if (!session) throw new Error('Browser session is not open yet.');
     return session;
-  }
-
-  private resolveSession(appSessionId: string): ManagedBrowserSession | undefined {
-    return this.sessions.get(appSessionId);
   }
 
   private stateFromSnapshot(
     session: ManagedBrowserSession,
     snapshot: BrowserSnapshot,
   ): BrowserState {
-    return {
-      ...session.state,
-      ...snapshot,
-      scrollResult: snapshot.scrollResult,
-    };
-  }
-
-  private async captureState(session: ManagedBrowserSession): Promise<BrowserState> {
-    const snapshot = await session.runtime.snapshot();
     return {
       ...session.state,
       ...snapshot,
@@ -499,4 +483,18 @@ export class BrowserSessionManager {
   private emitUpdated(state: BrowserState): void {
     this.options.emit?.({ type: 'browser.updated', state });
   }
+}
+
+function centerOfBrowserRef(ref: BrowserElementRef): { x: number; y: number } {
+  return {
+    x: Math.round(ref.box.x + ref.box.width / 2),
+    y: Math.round(ref.box.y + ref.box.height / 2),
+  };
+}
+
+function requireBrowserPoint(input: { x?: number; y?: number }): { x: number; y: number } {
+  if (input.x === undefined || input.y === undefined) {
+    throw new Error('Browser interaction requires either a ref or x/y coordinates.');
+  }
+  return { x: input.x, y: input.y };
 }

@@ -1,3 +1,5 @@
+const { runWithWebContentsDebugger } = require('./nativeBrowserEmulation.cjs');
+
 async function executeBrowserAgentInteraction(contents, request, options) {
   if (request.action === 'scroll') {
     const resolved = request.selector ? await resolveBrowserPointer(contents, request) : undefined;
@@ -21,6 +23,27 @@ async function executeBrowserAgentInteraction(contents, request, options) {
     requirePointerInsideViewport({ x, y }, options.viewportBounds);
     await requireTrustedCursor(options, { x, y, pressed: request.action === 'click' });
     assertCurrentBrowserAction(options);
+    if (request.action === 'hover') {
+      const validation = await runWithWebContentsDebugger(contents, async (debuggerApi) => {
+        assertCurrentBrowserAction(options);
+        const result = await executePageAction(contents, request, options, { x, y });
+        assertCurrentBrowserAction(options);
+        if (result?.ok !== true) return result;
+        await debuggerApi.sendCommand('Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x,
+          y,
+          button: 'none',
+          buttons: 0,
+          clickCount: 0,
+          pointerType: 'mouse',
+        });
+        return result;
+      });
+      assertCurrentBrowserAction(options);
+      if (validation?.ok !== true) return validation;
+      return executePageAction(contents, { ...request, action: 'snapshot' }, options);
+    }
     return contents.executeJavaScript(
       `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(
         pageActionRequest(request, options, { x, y }),
@@ -32,6 +55,15 @@ async function executeBrowserAgentInteraction(contents, request, options) {
   assertCurrentBrowserAction(options);
   return contents.executeJavaScript(
     `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(pageActionRequest(request, options))});`,
+    true,
+  );
+}
+
+function executePageAction(contents, request, options, fields = {}) {
+  return contents.executeJavaScript(
+    `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(
+      pageActionRequest(request, options, fields),
+    )});`,
     true,
   );
 }

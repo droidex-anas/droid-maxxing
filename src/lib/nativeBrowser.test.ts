@@ -1,30 +1,70 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runNativeBrowserAgentAction } from './nativeBrowser';
+import { attachNativeBrowser, runNativeBrowserAgentAction } from './nativeBrowser';
 
-test('an approval-capable action remains pending past the normal transport timeout', async () => {
+interface FakeTimer {
+  active: boolean;
+  callback: () => void;
+  delay: number;
+}
+
+function fakeBrowserWindow(nativeBrowserAgentAction: () => Promise<unknown>) {
+  const timers: FakeTimer[] = [];
+  return {
+    timers,
+    value: {
+      droidControl: { nativeBrowserAgentAction },
+      setTimeout: (callback: () => void, delay: number) => {
+        timers.push({ active: true, callback, delay });
+        return timers.length;
+      },
+      clearTimeout: (timer: number) => {
+        const record = timers[timer - 1];
+        if (record) record.active = false;
+      },
+    },
+  };
+}
+
+async function withBrowserWindow(run: () => Promise<void>, value: unknown): Promise<void> {
   const globals = globalThis as typeof globalThis & { window?: unknown };
   const previousWindow = globals.window;
-  let resolveAction: ((value: Record<string, unknown>) => void) | undefined;
-  const timers: Array<{ active: boolean; callback: () => void; delay: number }> = [];
-  globals.window = {
-    droidControl: {
-      nativeBrowserAgentAction: () =>
-        new Promise((resolve) => {
-          resolveAction = resolve;
-        }),
-    },
-    setTimeout: (callback: () => void, delay: number) => {
-      timers.push({ active: true, callback, delay });
-      return timers.length;
-    },
-    clearTimeout: (timer: number) => {
-      const record = timers[timer - 1];
-      if (record) record.active = false;
+  globals.window = value;
+  try {
+    await run();
+  } finally {
+    if (previousWindow === undefined) delete globals.window;
+    else globals.window = previousWindow;
+  }
+}
+
+test('desktop operations fail clearly if the bridge disappears after availability detection', async () => {
+  let reads = 0;
+  const value = {
+    get droidControl() {
+      reads += 1;
+      return reads === 1 ? {} : undefined;
     },
   };
 
-  try {
+  await withBrowserWindow(async () => {
+    await assert.rejects(
+      attachNativeBrowser('browser-1', { x: 0, y: 0, width: 800, height: 600 }),
+      /DROIDEX desktop bridge is unavailable/,
+    );
+  }, value);
+});
+
+test('an approval-capable action remains pending past the normal transport timeout', async () => {
+  let resolveAction: ((value: Record<string, unknown>) => void) | undefined;
+  const fake = fakeBrowserWindow(
+    () =>
+      new Promise((resolve) => {
+        resolveAction = resolve;
+      }),
+  );
+
+  await withBrowserWindow(async () => {
     let settled = false;
     const action = runNativeBrowserAgentAction({
       requestId: 'approval-request',
@@ -36,7 +76,7 @@ test('an approval-capable action remains pending past the normal transport timeo
       settled = true;
     });
 
-    const timeout = timers.at(-1);
+    const timeout = fake.timers.at(-1);
     assert.ok(timeout);
     assert.ok(timeout.delay > 10_000);
     assert.equal(settled, false);
@@ -48,60 +88,31 @@ test('an approval-capable action remains pending past the normal transport timeo
       ok: true,
     });
     assert.equal((await action).ok, true);
-  } finally {
-    if (previousWindow === undefined) delete globals.window;
-    else globals.window = previousWindow;
-  }
+  }, fake.value);
 });
 
 test('non-interactive actions retain the bounded transport timeout', async () => {
-  const globals = globalThis as typeof globalThis & { window?: unknown };
-  const previousWindow = globals.window;
-  const timers: Array<{ active: boolean; callback: () => void; delay: number }> = [];
-  globals.window = {
-    droidControl: { nativeBrowserAgentAction: () => new Promise(() => {}) },
-    setTimeout: (callback: () => void, delay: number) => {
-      timers.push({ active: true, callback, delay });
-      return timers.length;
-    },
-    clearTimeout: (timer: number) => {
-      const record = timers[timer - 1];
-      if (record) record.active = false;
-    },
-  };
+  const fake = fakeBrowserWindow(() => new Promise(() => {}));
 
-  try {
+  await withBrowserWindow(async () => {
     const action = runNativeBrowserAgentAction({
       requestId: 'snapshot-request',
       appSessionId: 'app-1',
       browserSessionId: 'browser-1',
       action: 'snapshot',
     });
-    const timeout = timers.at(-1);
+    const timeout = fake.timers.at(-1);
     assert.ok(timeout);
     assert.equal(timeout.delay, 10_000);
     timeout.callback();
     await assert.rejects(action, /snapshot timed out/);
-  } finally {
-    if (previousWindow === undefined) delete globals.window;
-    else globals.window = previousWindow;
-  }
+  }, fake.value);
 });
 
-test('simple pointer, typing, selection, scroll, and non-Enter key actions use the short timeout', async () => {
-  const globals = globalThis as typeof globalThis & { window?: unknown };
-  const previousWindow = globals.window;
-  const timers: Array<{ callback: () => void; delay: number }> = [];
-  globals.window = {
-    droidControl: { nativeBrowserAgentAction: () => new Promise(() => {}) },
-    setTimeout: (callback: () => void, delay: number) => {
-      timers.push({ callback, delay });
-      return timers.length;
-    },
-    clearTimeout: () => {},
-  };
+test('simple actions use the short timeout', async () => {
+  const fake = fakeBrowserWindow(() => new Promise(() => {}));
 
-  try {
+  await withBrowserWindow(async () => {
     const actions = [
       { action: 'hover' as const, x: 1, y: 2 },
       { action: 'type' as const, text: 'hello' },
@@ -119,31 +130,18 @@ test('simple pointer, typing, selection, scroll, and non-Enter key actions use t
     );
 
     assert.deepEqual(
-      timers.map(({ delay }) => delay),
+      fake.timers.map(({ delay }) => delay),
       [10_000, 10_000, 10_000, 10_000, 10_000],
     );
-    timers.forEach(({ callback }) => callback());
+    fake.timers.forEach(({ callback }) => callback());
     await Promise.all(pending.map((promise) => assert.rejects(promise, /timed out/)));
-  } finally {
-    if (previousWindow === undefined) delete globals.window;
-    else globals.window = previousWindow;
-  }
+  }, fake.value);
 });
 
 test('Enter and saved-login actions retain the approval timeout', async () => {
-  const globals = globalThis as typeof globalThis & { window?: unknown };
-  const previousWindow = globals.window;
-  const timers: Array<{ callback: () => void; delay: number }> = [];
-  globals.window = {
-    droidControl: { nativeBrowserAgentAction: () => new Promise(() => {}) },
-    setTimeout: (callback: () => void, delay: number) => {
-      timers.push({ callback, delay });
-      return timers.length;
-    },
-    clearTimeout: () => {},
-  };
+  const fake = fakeBrowserWindow(() => new Promise(() => {}));
 
-  try {
+  await withBrowserWindow(async () => {
     const pending = [
       runNativeBrowserAgentAction({
         requestId: 'enter',
@@ -161,13 +159,10 @@ test('Enter and saved-login actions retain the approval timeout', async () => {
     ];
 
     assert.deepEqual(
-      timers.map(({ delay }) => delay),
+      fake.timers.map(({ delay }) => delay),
       [180_000, 180_000],
     );
-    timers.forEach(({ callback }) => callback());
+    fake.timers.forEach(({ callback }) => callback());
     await Promise.all(pending.map((promise) => assert.rejects(promise, /timed out/)));
-  } finally {
-    if (previousWindow === undefined) delete globals.window;
-    else globals.window = previousWindow;
-  }
+  }, fake.value);
 });

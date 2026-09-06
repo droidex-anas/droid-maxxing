@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BrowserRuntime } from './BrowserSessionManager.js';
@@ -31,7 +30,7 @@ export class BrowserDesignReferences {
     input: { anchor: DesignAnchor; detail?: DesignAnchorDetail; id?: string },
     screenshot?: DesignSelectionScreenshot,
   ): Promise<DesignReference> {
-    const id = input.id ?? input.anchor.id ?? `ref-${randomUUID()}`;
+    const id = input.id ?? input.anchor.id;
     const anchor: DesignAnchor = { ...input.anchor, id };
     const detail = input.detail ? { ...input.detail, id } : undefined;
     if (!anchor.screenshotPath) {
@@ -94,7 +93,7 @@ export class BrowserDesignReferences {
   private async captureAnchor(box?: BrowserBox): Promise<string | undefined> {
     const base64 = await this.options.runtime.capture(box);
     if (!base64) return undefined;
-    const tag = box ? `${box.x}-${box.y}-${box.width}-${box.height}` : 'view';
+    const tag = box ? [box.x, box.y, box.width, box.height].join('-') : 'view';
     return this.persist(`anchor-${tag}-${Date.now().toString(36)}.png`, base64);
   }
 

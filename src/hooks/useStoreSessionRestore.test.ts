@@ -690,6 +690,7 @@ test('opening an unloaded child creates explicit history loading state', () => {
           status: 'completed' as const,
           modelId: 'model-1',
           transcriptAvailable: true,
+          streamFidelity: 'state',
         },
       },
     },

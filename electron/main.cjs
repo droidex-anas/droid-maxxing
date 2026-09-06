@@ -7,11 +7,13 @@ const {
   dialog,
   ipcMain,
   nativeTheme,
+  powerMonitor,
   protocol,
   safeStorage,
   session,
   shell,
   systemPreferences,
+  webContents,
 } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -22,61 +24,34 @@ const { pathToFileURL } = require('node:url');
 const gitVcs = require('./git.cjs');
 const githubVcs = require('./github.cjs');
 const githubPrConversation = require('./githubPrConversation.cjs');
-const { createTerminalManager, createTerminalSubscriptionRegistry } = require('./terminal.cjs');
+const { createTerminalManager } = require('./terminal.cjs');
+const { createTerminalSubscriptionRegistry } = require('./terminalPort.cjs');
+const { createPerformanceMetricsCollector } = require('./performanceMetrics.cjs');
+const { createNativeBrowserBudget } = require('./nativeBrowserBudget.cjs');
+const { createNativeBrowserManager, BROWSER_PARTITION } = require('./nativeBrowser.cjs');
+const { createPowerTier } = require('./powerTier.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
 const localImages = require('./localImages.cjs');
-const {
-  normalizeBrowserConsoleMessage,
-  redactBrowserDiagnosticUrl,
-} = require('./browserDiagnostics.cjs');
-const { runWithWebContentsDebugger } = require('./nativeBrowserEmulation.cjs');
-const {
-  createNativeBrowserHostController,
-  setBrowserActionActive,
-  setBrowserViewBoundsIfChanged,
-} = require('./nativeBrowserHost.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
 const { createBrowserSettingsController } = require('./browserSettings.cjs');
-const {
-  blockBrowserAgentSensitiveTyping,
-  executeBrowserAgentInteraction,
-} = require('./browserAgentInteraction.cjs');
-const {
-  consumeAuthenticationPopup,
-  grantAuthenticationPopup,
-  hardenAuthenticationPopup,
-} = require('./browserAuthenticationPopup.cjs');
-const {
-  authenticationPopupTarget,
-  validateAgentAuthenticationIntent,
-} = require('./browserAuthenticationIntent.cjs');
-const { createCredentialCaptureGuard } = require('./browserCredentialCapture.cjs');
 const { createBrowserPromptController } = require('./browserPrompt.cjs');
-const {
-  browserTargetBeforeViewClose,
-  chooseBrowserReload,
-  chooseBrowserRestore,
-  isExpectedSupersededLoad,
-  requireFreshBrowserSnapshot,
-  userVisibleBrowserUrl,
-} = require('./browserPageState.cjs');
 const { createBrowserAgentCursorController } = require('./browserAgentCursor.cjs');
 const { registerBrowserRendererIpc } = require('./browserRendererIpc.cjs');
 const { createBrowserWebAuthnController } = require('./browserWebAuthn.cjs');
-const {
-  agentNavigationAutonomy,
-  consumeTrustedUserNavigation,
-  createTrustedUserNavigation,
-  requiresAgentOriginApproval,
-} = require('./browserNavigationProvenance.cjs');
 const { createRendererOomRecovery, isRendererMemoryExit } = require('./rendererOomRecovery.cjs');
 const { autoUpdater } = require('electron-updater');
 const { createAppUpdater } = require('./appUpdater.cjs');
 const Sentry = require('@sentry/electron/main');
 const { createDiagnostics } = require('./diagnostics.cjs');
+const {
+  preferenceFilePath: hardwareAccelerationPreferenceFilePath,
+  readHardwareAccelerationPreferenceSync,
+  loadHardwareAccelerationPreference,
+  saveHardwareAccelerationPreference,
+} = require('./hardwareAcceleration.cjs');
 const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 const APP_NAME = 'DROIDEX';
 const buildMetadata = readBuildMetadata();
@@ -88,6 +63,14 @@ const terminalManager = createTerminalManager({
   },
 });
 const terminalSubscriptions = createTerminalSubscriptionRegistry(terminalManager);
+const performanceMetrics = createPerformanceMetricsCollector({
+  countPtys: () => terminalManager.count(),
+  listWebContents: () => webContents.getAllWebContents(),
+  nativeBrowserCounts: () => nativeBrowserManager.resourceCounts(),
+  terminalCounts: () => terminalManager.resourceCounts(),
+  powerTier: () => powerTier.current(),
+  onSample: (metrics) => powerTier.noteRss(metrics.memory.rssBytes),
+});
 const filesRootAccess = files.createRootAccessRegistry();
 const diagnostics = createDiagnostics({
   app,
@@ -101,6 +84,14 @@ const sidecarSupervisor = createSidecarSupervisor({
   userData: () => app.getPath('userData'),
   onUnexpectedExit: (error) => diagnostics.captureException(error, { process: 'sidecar' }),
 });
+// subscribe() replays the current status synchronously, so mainWindow must
+// already be initialized when this runs.
+let mainWindow = null;
+sidecarSupervisor.subscribe((status) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('sidecar-status', status);
+  }
+});
 const appUpdater = createAppUpdater({
   app,
   autoUpdater,
@@ -112,7 +103,6 @@ const appUpdater = createAppUpdater({
 });
 const rendererOomRecovery = createRendererOomRecovery();
 
-let mainWindow = null;
 // Selected app-icon appearance. 'system' tracks the OS light/dark setting via
 // nativeTheme; 'light'/'dark' pin a specific artwork.
 let appIconMode = 'system';
@@ -146,53 +136,16 @@ const browserWebAuthn = createBrowserWebAuthnController({
 // Keep hidden browser sessions warm by default so authenticated pages and
 // compositor state survive while the Browser pane is closed.
 const HIDDEN_BROWSER_IDLE_MS = Number(process.env.DROID_NATIVE_BROWSER_IDLE_MS ?? 0);
-// A single persistent partition keeps cookies and site storage alive across
-// reloads, dev-server restarts, and app restarts so the user does not have to
-// sign in again every time. Platform-passkey availability remains owned by
-// Chromium, the OS, and the app's signed entitlements.
-const BROWSER_PARTITION = 'persist:droidex-browser';
-let browserSessionConfigured = false;
-const nativeBrowserHost = createNativeBrowserHostController({
+const nativeBrowserBudget = createNativeBrowserBudget({
+  maxLive: process.env.DROID_NATIVE_BROWSER_MAX_LIVE,
   idleMs: HIDDEN_BROWSER_IDLE_MS,
-  getMainWindow: () => mainWindow,
-  isViewUsable: isBrowserViewUsable,
-  detachCursor: (browserSessionId) => browserAgentCursor.detach(browserSessionId),
-  forgetCursor: (browserSessionId) => browserAgentCursor.forget(browserSessionId),
-  revokePermissions: (contents) => browserSettings.revokePermissionsForContents(contents),
-  beforeDispose: (entry) => {
-    invalidatePendingAgentNavigation(entry);
-    const contents = safeWebContents(entry.view);
-    const targetUrl = browserTargetBeforeViewClose({
-      currentUrl: contents?.getURL(),
-      loadingUrl: entry.loadingUrl,
-      targetUrl: entry.targetUrl,
-    });
-    if (targetUrl) entry.targetUrl = targetUrl;
-    entry.loadingUrl = null;
-    entry.loadingPromise = null;
-  },
-  createHiddenWindow: () => {
-    const window = new BrowserWindow({
-      show: true,
-      x: -10000,
-      y: -10000,
-      width: 1200,
-      height: 800,
-      frame: false,
-      backgroundColor: '#ffffff',
-      opacity: 0,
-      focusable: false,
-      skipTaskbar: true,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        backgroundThrottling: false,
-      },
-    });
-    window.setIgnoreMouseEvents(true);
-    return window;
-  },
+});
+const MEMORY_PRESSURE_RSS_BYTES = Number(
+  process.env.DROID_MEMORY_PRESSURE_RSS_BYTES ?? 1.5 * 1024 * 1024 * 1024,
+);
+const powerTier = createPowerTier({
+  powerMonitor,
+  rssPressureBytes: MEMORY_PRESSURE_RSS_BYTES,
 });
 
 app.setName(APP_NAME);
@@ -221,16 +174,40 @@ const browserSettings = createBrowserSettingsController({
   dialog,
   getWindow: () => mainWindow,
   getSession: () => session.fromPartition(BROWSER_PARTITION),
-  closeBrowsers: () => closeAllNativeBrowsers(),
-  suspendBrowsers: () => suspendAllNativeBrowsers(),
+  closeBrowsers: () => nativeBrowserManager.closeAll(),
+  suspendBrowsers: () => nativeBrowserManager.suspendAll(),
   applyAgentCursorStyle: (style) => browserAgentCursor.setStyle(style),
   applyAgentCursorSize: (size) => browserAgentCursor.setSize(size),
   applyAgentCursorVisibility: (isVisible) => browserAgentCursor.setEnabled(isVisible),
   getWebAuthnCapability: () => browserWebAuthn.capability(),
-  clearBrowserDiagnostics: () => clearAllNativeBrowserDiagnostics(),
-  isNativeBrowserContents: (contents) => Boolean(findNativeBrowserEntryForWebContents(contents)),
+  clearBrowserDiagnostics: () => nativeBrowserManager.clearDiagnostics(),
+  isNativeBrowserContents: (contents) =>
+    Boolean(nativeBrowserManager.sessionIdForWebContents(contents)),
   showPrompt: (prompt, requestOptions) => browserPrompts.request(prompt, requestOptions),
 });
+const nativeBrowserManager = createNativeBrowserManager({
+  browserSettings,
+  cursor: browserAgentCursor,
+  appName: APP_NAME,
+  BrowserWindow,
+  WebContentsView,
+  session,
+  budget: nativeBrowserBudget,
+  getMainWindow: () => mainWindow,
+  preloadPath: path.join(__dirname, 'nativeBrowserPreload.cjs'),
+  getHostAppUrl: () => process.env.ELECTRON_START_URL || mainWindow?.webContents.getURL(),
+  sendToRenderer: (channel, payload) => {
+    if (isWindowUsable(mainWindow)) mainWindow.webContents.send(channel, payload);
+  },
+});
+const hardwareAccelerationPreferencePath = hardwareAccelerationPreferenceFilePath(
+  app.getPath('userData'),
+);
+if (
+  !readHardwareAccelerationPreferenceSync({ filePath: hardwareAccelerationPreferencePath }).enabled
+) {
+  app.disableHardwareAcceleration();
+}
 const diagnosticsInitialization = diagnostics.initialize();
 function failBrowserSettingsStartup(error) {
   const detail = `${error?.message ?? error}
@@ -262,6 +239,19 @@ app.whenReady().then(async () => {
   registerIpc();
   registerLocalImageProtocol();
   createMainWindow();
+  powerTier.start();
+  const metricsTimer = setInterval(() => performanceMetrics.collect(), 30_000);
+  metricsTimer.unref?.();
+  powerTier.onChange((tier) => {
+    if (isWindowUsable(mainWindow))
+      mainWindow.webContents.send('power-tier', { ...powerTier.snapshot(), tier });
+  });
+  powerTier.onMemoryPressure(() => {
+    nativeBrowserManager.evictUnattached();
+    terminalManager.trimReplay();
+    if (isWindowUsable(mainWindow))
+      mainWindow.webContents.send('memory-pressure', { at: Date.now() });
+  });
   // Pin the DROIDEX mark on the dock/taskbar up front so OS notifications
   // inherit it instead of the bare Electron atom in dev builds.
   applyAppIcon();
@@ -291,6 +281,7 @@ app.on('before-quit', () => {
 app.on('activate', () => {
   if (!mainWindow) createMainWindow();
   else focusMainWindow();
+  void sidecarSupervisor.start().catch((error) => console.error(error));
   deliverPendingNotificationOpen();
 });
 
@@ -350,12 +341,13 @@ function createMainWindow() {
     browserPrompts.cancelAll();
     rendererOomRecovery.cancel();
     githubVcs.cancelSetup();
-    closeAllNativeBrowsers();
+    nativeBrowserManager.closeAll();
     terminalManager.closeAll();
     terminalSubscriptions.clear();
     filesRootAccess.clear();
     mainWindow = null;
   });
+  powerTier.attachWindow(mainWindow);
 }
 
 // Serves local image files to the renderer (see localImages.cjs). Registered on
@@ -393,6 +385,10 @@ function registerIpc() {
   ipcMain.handle('bridge-info', (event) => {
     assertMainRenderer(event);
     return sidecarSupervisor.getBridgeInfo();
+  });
+  ipcMain.handle('sidecar-status', (event) => {
+    assertMainRenderer(event);
+    return sidecarSupervisor.snapshot();
   });
   ipcMain.handle('pick-directory', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
@@ -459,6 +455,18 @@ function registerIpc() {
   ipcMain.handle('set-api-key', (_event, { key }) => setApiKey(key));
   ipcMain.handle('clear-api-key', clearApiKey);
   ipcMain.handle('list-files', (_event, { dir }) => listFiles(dir));
+  ipcMain.handle('get-performance-metrics', (event) => {
+    assertMainRenderer(event);
+    return performanceMetrics.collect();
+  });
+  ipcMain.handle('system-idle-time', (event) => {
+    assertMainRenderer(event);
+    return powerMonitor.getSystemIdleTime();
+  });
+  ipcMain.handle('power-tier', (event) => {
+    assertMainRenderer(event);
+    return powerTier.snapshot();
+  });
   ipcMain.handle('read-file', (_event, { path: filePath }) => readFile(filePath));
   ipcMain.handle('repo-status', (_event, { dir }) => repoStatus(dir));
   ipcMain.handle('list-editors', () => listEditors());
@@ -617,6 +625,21 @@ function registerIpc() {
     assertMainRenderer(event);
     return diagnostics.setAutomaticDiagnosticsEnabled(enabled);
   });
+  ipcMain.handle('hardware-acceleration-preference-get', (event) => {
+    assertMainRenderer(event);
+    return loadHardwareAccelerationPreference({
+      filePath: hardwareAccelerationPreferencePath,
+      fs: fsp,
+    });
+  });
+  ipcMain.handle('hardware-acceleration-preference-set', async (event, { enabled }) => {
+    assertMainRenderer(event);
+    return saveHardwareAccelerationPreference({
+      filePath: hardwareAccelerationPreferencePath,
+      enabled,
+      fs: fsp,
+    });
+  });
   ipcMain.handle('app-relaunch', () => relaunchApp());
   ipcMain.handle('app-set-icon', (event, payload) => {
     assertMainRenderer(event);
@@ -633,10 +656,6 @@ function registerIpc() {
       rows: args?.rows,
     });
   });
-  ipcMain.handle('terminal-write', (event, { id, data }) => {
-    assertMainRenderer(event);
-    terminalManager.write(id, data);
-  });
   ipcMain.handle('terminal-resize', (event, { id, cols, rows }) => {
     assertMainRenderer(event);
     terminalManager.resize(id, cols, rows);
@@ -650,9 +669,33 @@ function registerIpc() {
     assertMainRenderer(event);
     return terminalManager.list({ appSessionId: filter?.appSessionId });
   });
-  ipcMain.handle('terminal-subscribe', (event, { id }) => {
-    assertMainRenderer(event);
-    terminalSubscriptions.subscribe(event.sender, id);
+  ipcMain.on('terminal-subscribe', (event, payload) => {
+    const port = event.ports?.[0];
+    try {
+      assertMainRenderer(event);
+      const id = payload?.id;
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new Error('terminal-subscribe requires an id');
+      }
+      if (!port) throw new Error('terminal-subscribe requires a MessagePort');
+      terminalSubscriptions.subscribe(event.sender, id, port);
+    } catch (error) {
+      if (port) {
+        try {
+          port.postMessage({
+            kind: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        } catch {
+          // port already closed
+        }
+        try {
+          port.close();
+        } catch {
+          // already closed
+        }
+      }
+    }
   });
   ipcMain.handle('terminal-unsubscribe', (event, { id }) => {
     assertMainRenderer(event);
@@ -700,82 +743,32 @@ function registerIpc() {
     assertMainRenderer,
     browserSettings,
     browserPrompts,
-    nativeBrowser: {
-      attach: attachNativeBrowser,
-      detach: detachNativeBrowser,
-      setBounds: setNativeBrowserBounds,
-      setVisible: setNativeBrowserVisible,
-      navigateHistory: navigateNativeBrowserHistory,
-      setDesignMode: setNativeBrowserDesignMode,
-      setPencilMode: setNativeBrowserPencilMode,
-      runAgentAction: runNativeBrowserAgentAction,
-    },
+    nativeBrowser: nativeBrowserManager,
   });
 
   ipcMain.on('native-browser-selection', (event, selection) => {
-    mainWindow?.webContents.send(
-      'native-browser-selection',
-      withNativeBrowserSession(event, selection),
-    );
+    const selected = nativeBrowserManager.selectionForEvent(event, selection);
+    if (selected) mainWindow?.webContents.send('native-browser-selection', selected);
   });
   ipcMain.on('native-browser-design-prompt', async (event, payload) => {
-    const browserSessionId = nativeBrowserSessionIdForWebContents(event.sender);
-    let selection = { ...payload.selection, browserSessionId };
-    // Capture the annotated region (pencil strokes, highlights) while it is
-    // still on screen so the agent receives the marked screenshot, not a
-    // clean page that lost the user's annotations.
-    const screenshot = await captureDesignSelection(event.sender, selection).catch(() => undefined);
-    if (screenshot) selection = { ...selection, screenshot };
-    mainWindow?.webContents.send('native-browser-design-prompt', { ...payload, selection });
-    // Echo the capture id so the preload only clears the matching pending
-    // capture and ignores acks from superseded prompts.
-    event.sender.send('native-browser-design-prompt-sent', { captureId: payload.captureId });
+    try {
+      const prompt = await nativeBrowserManager.prepareDesignPrompt(event, payload);
+      if (!prompt) return;
+      mainWindow?.webContents.send('native-browser-design-prompt', prompt);
+      event.sender.send('native-browser-design-prompt-sent', { captureId: payload.captureId });
+    } catch (error) {
+      console.error(`failed to prepare browser design selection: ${error.message}`);
+    }
   });
   ipcMain.on('native-browser-user-navigation', (event, payload) => {
-    const entry = findNativeBrowserEntryForWebContents(event.sender);
-    const contents = safeWebContents(entry?.view);
-    if (!entry || contents !== event.sender || event.senderFrame !== contents.mainFrame) return;
-    if (entry.agentActionActive) {
-      entry.trustedUserNavigation = null;
-      return;
-    }
-    if (typeof payload?.activationId !== 'string' || payload.activationId.length > 100) return;
-    try {
-      validateUrl(payload?.destinationUrl);
-      entry.trustedUserNavigation = createTrustedUserNavigation({
-        activationId: payload.activationId,
-        browserSessionId: entry.browserSessionId,
-        destinationUrl: payload.destinationUrl,
-        view: entry.view,
-        navigationGeneration: entry.navigationGeneration,
-        documentGeneration: entry.documentGeneration,
-      });
-    } catch {
-      entry.trustedUserNavigation = null;
-    }
+    nativeBrowserManager.recordUserNavigation(event, payload);
   });
   ipcMain.on('native-browser-user-navigation-expired', (event, payload) => {
-    const entry = findNativeBrowserEntryForWebContents(event.sender);
-    const contents = safeWebContents(entry?.view);
-    if (!entry || contents !== event.sender || event.senderFrame !== contents.mainFrame) return;
-    if (entry.trustedUserNavigation?.activationId === payload?.activationId) {
-      entry.trustedUserNavigation = null;
-    }
+    nativeBrowserManager.expireUserNavigation(event, payload);
   });
   ipcMain.on('native-browser-credential-capture', (event, payload) => {
-    const entry = findNativeBrowserEntryForWebContents(event.sender);
-    const contents = safeWebContents(entry?.view);
-    if (!entry || contents !== event.sender || event.senderFrame !== contents.mainFrame) return;
-    const url = event.senderFrame.url;
-    const isStillValid = createCredentialCaptureGuard(entry, contents, url);
-    void browserSettings
-      .captureCredential({
-        url,
-        username: payload?.username,
-        password: payload?.password,
-        kind: payload?.kind,
-        isStillValid,
-      })
+    void nativeBrowserManager
+      .captureCredential(event, payload)
       .catch((error) => console.error(`failed to capture browser login: ${error.message}`));
   });
 }
@@ -868,7 +861,7 @@ function setAppIcon(mode) {
 }
 
 function reloadShell(ignoreCache) {
-  detachNativeBrowser();
+  nativeBrowserManager.detach();
   if (!isWindowUsable(mainWindow)) return;
   closeRendererOwnedTerminals();
   if (ignoreCache) mainWindow.webContents.reloadIgnoringCache();
@@ -968,1274 +961,8 @@ function readBuildMetadata() {
   }
 }
 
-function configureBrowserSession() {
-  if (browserSessionConfigured) return;
-  const ses = session.fromPartition(BROWSER_PARTITION);
-  // Keep Electron's safe defaults: deny WebHID/WebUSB device access for the
-  // embedded browser. WebAuthn / passkeys are handled by Chromium natively and
-  // do not flow through these handlers, so granting HID/USB to arbitrary sites
-  // (and auto-selecting a device) would only open a hardware-permission
-  // escalation path with no upside.
-  ses.setDevicePermissionHandler(() => false);
-  ses.setPermissionCheckHandler((contents, permission, requestingOrigin, details) =>
-    browserSettings.canAccessPermission(contents, permission, requestingOrigin, details),
-  );
-  ses.setPermissionRequestHandler((contents, permission, callback, details) =>
-    browserSettings.handlePermissionRequest(contents, permission, callback, details),
-  );
-  ses.on('will-download', (_event, item) => browserSettings.prepareDownload(item));
-  ses.webRequest.onCompleted({ urls: ['http://*/*', 'https://*/*'] }, (details) => {
-    recordNativeBrowserNetworkEvent(details);
-  });
-  ses.webRequest.onErrorOccurred({ urls: ['http://*/*', 'https://*/*'] }, (details) => {
-    recordNativeBrowserNetworkEvent(details);
-  });
-  browserSessionConfigured = true;
-}
-
-function ensureNativeBrowserEntry(browserSessionId) {
-  browserSessionId = normalizeNativeBrowserSessionId(browserSessionId);
-  return nativeBrowserHost.ensureEntry(browserSessionId, createNativeBrowserEntry);
-}
-
-function createNativeBrowserEntry(browserSessionId) {
-  return {
-    browserSessionId,
-    appSessionId: null,
-    view: null,
-    targetUrl: null,
-    failedRestoreUrl: null,
-    state: { designMode: false, pencilMode: false },
-    attached: false,
-    visible: true,
-    windowAttached: false,
-    hostWindow: null,
-    idleTimer: null,
-    loadingUrl: null,
-    loadingPromise: null,
-    viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
-    networkEvents: [],
-    consoleEvents: [],
-    rendererCrashes: [],
-    agentActionActive: false,
-    userNavigationActive: false,
-    agentRequest: null,
-    navigationGeneration: 0,
-    documentGeneration: 0,
-    pendingAgentNavigation: null,
-    trustedUserNavigation: null,
-    authenticationCapability: null,
-    authenticationPopupCapability: null,
-  };
-}
-
-function ensureNativeBrowserView(browserSessionId) {
-  const entry = ensureNativeBrowserEntry(browserSessionId);
-  if (isBrowserViewUsable(entry.view)) return entry;
-  if (!isWindowUsable(mainWindow)) throw new Error(`${APP_NAME} window is not available.`);
-  configureBrowserSession();
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, 'nativeBrowserPreload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      backgroundThrottling: true,
-      partition: BROWSER_PARTITION,
-    },
-  });
-  entry.view = view;
-  const contents = view.webContents;
-  contents.setWindowOpenHandler(({ url: nextUrl }) => {
-    const authenticationPopup = consumeAuthenticationPopup(entry, view, nextUrl, BROWSER_PARTITION);
-    if (authenticationPopup) return authenticationPopup;
-    try {
-      validateUrl(nextUrl);
-      if (entry.view === view) {
-        const trustedUserTransition =
-          entry.userNavigationActive || consumeTrustedPhysicalNavigation(entry, view, nextUrl);
-        if (
-          isCrossOriginNavigation(contents.getURL(), nextUrl) &&
-          requiresAgentOriginApproval('popup', trustedUserTransition)
-        ) {
-          beginAgentNavigationApproval(entry, view, nextUrl);
-        } else {
-          void loadNativeBrowserUrl(entry, nextUrl);
-        }
-      }
-    } catch {
-      // Popups never escape the embedded browser and unsafe schemes fail closed.
-    }
-    return { action: 'deny' };
-  });
-  contents.on('did-create-window', (window) => {
-    hardenAuthenticationPopup(window);
-  });
-  contents.on('console-message', (details) => {
-    if (!browserSettings.areDiagnosticsEnabled()) return;
-    entry.consoleEvents.push({
-      timestamp: Date.now(),
-      ...normalizeBrowserConsoleMessage(details),
-    });
-    if (entry.consoleEvents.length > 100) {
-      entry.consoleEvents.splice(0, entry.consoleEvents.length - 100);
-    }
-  });
-  contents.on('will-navigate', (event, requestedUrl) => {
-    if (entry.view !== view) return;
-    try {
-      validateUrl(requestedUrl);
-    } catch {
-      event.preventDefault();
-      return;
-    }
-    const trustedUserTransition =
-      entry.userNavigationActive || consumeTrustedPhysicalNavigation(entry, view, requestedUrl);
-    if (
-      isCrossOriginNavigation(contents.getURL(), requestedUrl) &&
-      requiresAgentOriginApproval('navigate', trustedUserTransition)
-    ) {
-      event.preventDefault();
-      beginAgentNavigationApproval(entry, view, requestedUrl);
-      return;
-    }
-    // This event is limited to page/user-initiated navigations; programmatic
-    // loadURL retries (including the HTTPS-to-HTTP fallback) do not emit it.
-    entry.failedRestoreUrl = null;
-    entry.targetUrl = requestedUrl;
-  });
-  contents.on('will-redirect', (event, requestedUrl, _isInPlace, isMainFrame) => {
-    if (entry.view !== view || !isMainFrame) return;
-    try {
-      validateUrl(requestedUrl);
-    } catch {
-      event.preventDefault();
-      return;
-    }
-    if (
-      isCrossOriginNavigation(contents.getURL(), requestedUrl) &&
-      requiresAgentOriginApproval('redirect', entry.userNavigationActive)
-    ) {
-      event.preventDefault();
-      beginAgentNavigationApproval(entry, view, requestedUrl);
-    }
-  });
-  contents.on('did-navigate', (_event, loadedUrl) => {
-    if (entry.view !== view || isChromeErrorUrl(loadedUrl)) return;
-    entry.failedRestoreUrl = null;
-    entry.targetUrl = loadedUrl;
-    emitNativeBrowserLoaded(entry, loadedUrl);
-  });
-  contents.on('did-finish-load', () => {
-    const current = safeWebContents(view);
-    if (entry.view !== view || !current) return;
-    const loadedUrl = current.getURL();
-    if (isChromeErrorUrl(loadedUrl)) {
-      emitNativeBrowserLoadFailed(
-        entry,
-        entry.targetUrl || loadedUrl,
-        'Browser page failed to load.',
-      );
-      return;
-    }
-    if (entry.state.designMode) applyNativeBrowserDesignState(entry);
-  });
-  contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (entry.view !== view || !isMainFrame) return;
-    entry.documentGeneration += 1;
-    if (isInPlace) contents.send('native-browser-agent-snapshot-invalidated');
-    else {
-      entry.trustedUserNavigation = null;
-      entry.authenticationCapability = null;
-      entry.authenticationPopupCapability = null;
-      browserSettings.revokePermissionsForNavigation(contents);
-    }
-  });
-  contents.on('did-fail-load', (_event, errorCode, errorDescription, failedUrl, isMainFrame) => {
-    if (entry.view !== view || !isMainFrame || errorCode === -3) return;
-    const fallback = httpFallbackUrl(failedUrl, errorCode);
-    if (fallback) {
-      rememberFailedRestoreUrl(entry, entry.targetUrl || failedUrl);
-      void loadNativeBrowserUrl(entry, fallback, { force: true });
-      return;
-    }
-    rememberFailedRestoreUrl(entry, entry.targetUrl || failedUrl);
-    emitNativeBrowserLoadFailed(entry, failedUrl, errorDescription || `net error ${errorCode}`);
-  });
-  contents.on('dom-ready', () => {
-    if (entry.view === view && entry.state.designMode) applyNativeBrowserDesignState(entry);
-  });
-  contents.on('destroyed', () => {
-    if (entry.view === view) {
-      browserAgentCursor.detach(entry.browserSessionId);
-      browserSettings.revokePermissionsForContents(contents);
-      invalidatePendingAgentNavigation(entry);
-      entry.view = null;
-      entry.attached = false;
-      entry.windowAttached = false;
-      entry.hostWindow = null;
-      nativeBrowserHost.clearAttached(entry.browserSessionId);
-    }
-  });
-  contents.on('render-process-gone', (_event, details) => {
-    if (entry.view === view) recoverNativeBrowserRenderer(entry, view, details);
-  });
-  contents.on('did-navigate-in-page', (_event, nextUrl) => {
-    if (entry.view !== view) return;
-    entry.targetUrl = nextUrl;
-    emitNativeBrowserLoaded(entry, nextUrl);
-    if (entry.state.designMode) applyNativeBrowserDesignState(entry);
-  });
-  return entry;
-}
-
-async function openNativeBrowser(browserSessionId, url, bounds, viewport) {
-  const entry = ensureNativeBrowserView(browserSessionId);
-  if (viewport) entry.viewport = normalizeBrowserViewport(viewport);
-  rejectHostAppUrl(url);
-  url = normalizeNativeBrowserUrl(entry, url);
-  if (url === 'about:blank' && !entry.targetUrl) url = browserSettings.homePage();
-  validateUrl(url);
-  entry.failedRestoreUrl = null;
-  if (bounds) await attachNativeBrowser(entry.browserSessionId, bounds, { restore: false });
-  else {
-    nativeBrowserHost.parkHidden(entry);
-  }
-  await loadNativeBrowserUrl(entry, url, { force: true });
-  nativeBrowserHost.scheduleIdle(entry);
-}
-
-async function attachNativeBrowser(browserSessionId, bounds, options = {}) {
-  const entry = ensureNativeBrowserView(browserSessionId);
-  if (!isWindowUsable(mainWindow)) throw new Error(`${APP_NAME} window is not available.`);
-  const attachedBrowserSessionId = nativeBrowserHost.getAttachedSessionId();
-  if (attachedBrowserSessionId && attachedBrowserSessionId !== entry.browserSessionId) {
-    nativeBrowserHost.detach(attachedBrowserSessionId);
-  }
-  const view = entry.view;
-  if (!view) throw new Error(`${APP_NAME} browser is not open.`);
-  nativeBrowserHost.attachToMain(entry);
-  const normalizedBounds = normalizeBounds(bounds);
-  setBrowserViewBoundsIfChanged(view, normalizedBounds);
-  if (entry.visible) {
-    browserAgentCursor.attach({
-      browserSessionId: entry.browserSessionId,
-      hostWindow: mainWindow,
-      bounds: normalizedBounds,
-    });
-  }
-  nativeBrowserHost.clearIdle(entry);
-  if (entry.state.designMode) applyNativeBrowserDesignState(entry);
-  if (options.restore !== false) {
-    const targetUrl =
-      restorableUrlForEntry(entry, entry.targetUrl) ??
-      restorableUrlForEntry(entry, options.restoreUrl);
-    const currentUrl = safeWebContents(view)?.getURL() ?? '';
-    if (
-      targetUrl &&
-      (!currentUrl || currentUrl === 'about:blank' || isChromeErrorUrl(currentUrl))
-    ) {
-      rejectHostAppUrl(targetUrl);
-      validateUrl(targetUrl);
-      await loadNativeBrowserUrl(entry, targetUrl, { force: true });
-    }
-  }
-}
-
-function detachNativeBrowser(browserSessionId) {
-  nativeBrowserHost.detach(browserSessionId);
-}
-
-function setNativeBrowserBounds(browserSessionId, bounds) {
-  const entry = nativeBrowserHost.getEntry(normalizeNativeBrowserSessionId(browserSessionId));
-  if (!entry?.attached || !isBrowserViewUsable(entry.view)) return;
-  const normalizedBounds = normalizeBounds(bounds);
-  if (setBrowserViewBoundsIfChanged(entry.view, normalizedBounds)) {
-    browserAgentCursor.setBounds(entry.browserSessionId, normalizedBounds);
-  }
-}
-
-function setNativeBrowserVisible(browserSessionId, visible) {
-  const entry = ensureNativeBrowserEntry(browserSessionId);
-  entry.visible = Boolean(visible);
-  if (!isBrowserViewUsable(entry.view) || !entry.attached) return;
-  entry.view.setVisible(entry.visible);
-  safeWebContents(entry.view)?.setBackgroundThrottling(!entry.visible);
-  if (entry.visible) {
-    browserAgentCursor.attach({
-      browserSessionId: entry.browserSessionId,
-      hostWindow: mainWindow,
-      bounds: entry.view.getBounds(),
-    });
-  } else {
-    browserAgentCursor.detach(entry.browserSessionId);
-  }
-}
-
-function closeNativeBrowser(browserSessionId) {
-  const entry = nativeBrowserHost.getEntry(normalizeNativeBrowserSessionId(browserSessionId));
-  if (entry) nativeBrowserHost.disposeEntry(entry, true);
-}
-
-function reloadNativeBrowser(browserSessionId) {
-  const entry = nativeBrowserHost.getEntry(normalizeNativeBrowserSessionId(browserSessionId));
-  const contents = safeWebContents(entry?.view);
-  if (!contents) throw new Error(`${APP_NAME} browser is not open.`);
-  const reload = chooseBrowserReload({
-    currentUrl: contents.getURL(),
-    failedRestoreUrl: entry.failedRestoreUrl,
-    loadingUrl: entry.loadingUrl,
-    targetUrl: entry.targetUrl,
-    homePage: browserSettings.homePage(),
-  });
-  entry.failedRestoreUrl = null;
-  entry.targetUrl = reload.url;
-  if (reload.kind === 'load') {
-    return loadNativeBrowserUrl(entry, reload.url, { force: true });
-  }
-  contents.reload();
-}
-
-function navigateNativeBrowserHistory(browserSessionId, direction) {
-  const entry = nativeBrowserHost.getEntry(normalizeNativeBrowserSessionId(browserSessionId));
-  const contents = safeWebContents(entry?.view);
-  if (!contents) throw new Error(`${APP_NAME} browser is not open.`);
-  const history = contents.navigationHistory;
-  if (!history) return false;
-  if (direction === 'back') {
-    if (!history.canGoBack()) return false;
-    history.goBack();
-  } else {
-    if (!history.canGoForward()) return false;
-    history.goForward();
-  }
-  return true;
-}
-
-function setNativeBrowserDesignMode(browserSessionId, active) {
-  const entry = ensureNativeBrowserEntry(browserSessionId);
-  const next = Boolean(active);
-  if (entry.state.designMode === next) return;
-  entry.state.designMode = next;
-  if (!entry.state.designMode) entry.state.pencilMode = false;
-  return applyNativeBrowserDesignState(entry);
-}
-
-function setNativeBrowserPencilMode(browserSessionId, active) {
-  const entry = ensureNativeBrowserEntry(browserSessionId);
-  const next = entry.state.designMode && Boolean(active);
-  if (entry.state.pencilMode === next) return;
-  entry.state.pencilMode = next;
-  return applyNativeBrowserDesignState(entry);
-}
-
-async function runNativeBrowserAgentAction(request, bounds) {
-  if (request.action === 'close') {
-    const existing = nativeBrowserHost.getEntry(request.browserSessionId);
-    if (existing) bindNativeBrowserAppSession(existing, request.appSessionId);
-    closeNativeBrowser(request.browserSessionId);
-    return { requestId: request.requestId, ok: true };
-  }
-  const entry = ensureNativeBrowserView(request.browserSessionId);
-  bindNativeBrowserAppSession(entry, request.appSessionId);
-  if (bounds) {
-    entry.visible = true;
-    if (request.action !== 'open') {
-      await attachNativeBrowser(request.browserSessionId, bounds);
-    }
-  } else {
-    await restoreNativeBrowserForAction(request.browserSessionId);
-  }
-  const isUserNavigation = request.source === 'user';
-  entry.agentRequest = isUserNavigation ? null : request;
-  entry.agentActionActive = !isUserNavigation;
-  entry.userNavigationActive = isUserNavigation;
-  let actionContents = null;
-  try {
-    const contents = safeWebContents(entry.view);
-    if (!contents) throw new Error(`${APP_NAME} browser is not open.`);
-    const actionView = entry.view;
-    const actionDocumentGeneration = entry.documentGeneration;
-    const isCurrentActionTarget = () =>
-      entry.view === actionView &&
-      safeWebContents(actionView) === contents &&
-      !contents.isDestroyed() &&
-      entry.documentGeneration === actionDocumentGeneration;
-    const assertCurrentActionTarget = () => {
-      if (!isCurrentActionTarget()) {
-        throw new Error('The page changed before the browser action completed. No input was sent.');
-      }
-    };
-    actionContents = contents;
-    setBrowserActionActive(entry, true);
-    if (request.action === 'open') {
-      await openNativeBrowser(request.browserSessionId, request.url, bounds, request.viewport);
-      await consumePendingAgentNavigation(entry);
-      return await snapshotNativeBrowserAfterNavigation(contents, request);
-    }
-    if (request.action === 'capture') {
-      const image = await captureNativeBrowser(request.browserSessionId, request.box, {
-        fullPage: request.fullPage,
-        deviceScaleFactor: request.deviceScaleFactor,
-      });
-      return { requestId: request.requestId, ok: true, image };
-    }
-    if (request.action === 'resize') {
-      entry.viewport = normalizeBrowserViewport(request.viewport);
-      // Attached bounds remain owned by the Browser pane layout.
-      if (!entry.attached) nativeBrowserHost.setHiddenBounds(entry, entry.viewport);
-      return { requestId: request.requestId, ok: true };
-    }
-    if (request.action === 'network') {
-      const networkEvents = entry.networkEvents.slice();
-      if (request.clearNetworkLog) entry.networkEvents.length = 0;
-      return { requestId: request.requestId, ok: true, networkEvents };
-    }
-    if (request.action === 'console') {
-      const consoleEvents = entry.consoleEvents.slice();
-      if (request.clearConsoleLog) entry.consoleEvents.length = 0;
-      return { requestId: request.requestId, ok: true, consoleEvents };
-    }
-    const navigation = observeAgentNavigation(contents);
-    try {
-      if (request.action === 'reload') {
-        reloadNativeBrowser(request.browserSessionId);
-        await navigation.wait();
-        await consumePendingAgentNavigation(entry);
-        return await snapshotNativeBrowserAfterNavigation(contents, request);
-      }
-      if (request.action === 'goBack' || request.action === 'goForward') {
-        const history = contents.navigationHistory;
-        const offset = request.action === 'goBack' ? -1 : 1;
-        if (!history?.canGoToOffset(offset)) {
-          return await snapshotNativeBrowserAfterNavigation(contents, request);
-        }
-        const target = history.getEntryAtIndex(history.getActiveIndex() + offset);
-        if (target?.url && isCrossOriginNavigation(contents.getURL(), target.url)) {
-          await browserSettings.authorizeAgentOrigin(target.url, request.autonomy);
-        }
-        history.goToOffset(offset);
-        await navigation.wait();
-        await consumePendingAgentNavigation(entry);
-        return await snapshotNativeBrowserAfterNavigation(contents, request);
-      }
-      if (request.action === 'fillCredentials') {
-        return withNativeBrowserHistory(
-          contents,
-          await fillCredentialsForAgent(entry, contents, request),
-        );
-      }
-      if (request.action === 'snapshot') {
-        return await snapshotNativeBrowserAfterNavigation(contents, request);
-      }
-      const pageContext = await contents.executeJavaScript(
-        'window.__DROIDMAXX_AGENT_CONTEXT?.();',
-        true,
-      );
-      assertCurrentActionTarget();
-      if (
-        !pageContext ||
-        typeof pageContext.documentId !== 'string' ||
-        typeof pageContext.snapshotId !== 'string' ||
-        typeof pageContext.urlHash !== 'string' ||
-        !pageContext.documentId ||
-        !pageContext.snapshotId ||
-        !pageContext.urlHash
-      ) {
-        throw new Error('The browser page has no current action snapshot. Refresh and try again.');
-      }
-      await authorizeNativeBrowserAuthentication(entry, contents, request);
-      assertCurrentActionTarget();
-      await blockBrowserAgentSensitiveTyping(contents, request);
-      assertCurrentActionTarget();
-      const execution = executeBrowserAgentInteraction(contents, request, {
-        isCurrent: isCurrentActionTarget,
-        pageContext,
-        showCursor: async ({ x, y, pressed }) => {
-          if (!entry.attached || !entry.visible) {
-            return browserAgentCursor.park({
-              browserSessionId: entry.browserSessionId,
-              bounds: entry.view.getBounds(),
-              x,
-              y,
-            });
-          }
-          return browserAgentCursor.show({
-            browserSessionId: entry.browserSessionId,
-            x,
-            y,
-            pressed,
-          });
-        },
-        viewportBounds: entry.view.getBounds(),
-      }).then(
-        (result) => ({ type: 'result', result }),
-        (error) => ({ type: 'error', error }),
-      );
-      const outcome = await Promise.race([
-        execution,
-        navigation.wait().then(() => ({ type: 'navigation' })),
-      ]);
-      if (await consumePendingAgentNavigation(entry)) {
-        return await snapshotNativeBrowserAfterNavigation(contents, request);
-      }
-      if (outcome.type === 'navigation') {
-        return await snapshotNativeBrowserAfterNavigation(contents, request);
-      }
-      if (outcome.type === 'error') {
-        if (!navigation.started() || !isNavigationExecutionError(outcome.error))
-          throw outcome.error;
-        await navigation.wait();
-        return await snapshotNativeBrowserAfterNavigation(contents, request);
-      }
-      return withNativeBrowserHistory(contents, outcome.result);
-    } finally {
-      navigation.dispose();
-    }
-  } finally {
-    if (actionContents) setBrowserActionActive(entry, false);
-    entry.agentRequest = null;
-    entry.agentActionActive = false;
-    entry.userNavigationActive = false;
-    nativeBrowserHost.scheduleIdle(entry);
-  }
-}
-
-function bindNativeBrowserAppSession(entry, appSessionId) {
-  if (entry.appSessionId && entry.appSessionId !== appSessionId) {
-    throw new Error('Browser session belongs to a different DROIDEX chat.');
-  }
-  entry.appSessionId = appSessionId;
-}
-
-async function authorizeNativeBrowserAuthentication(entry, contents, request) {
-  const isEnter = request.action === 'keypress' && request.key === 'Enter';
-  if (request.action !== 'click' && !isEnter) return;
-  const expectedView = entry.view;
-  const expectedGeneration = entry.documentGeneration;
-  const inspect = () =>
-    contents.executeJavaScript(
-      `window.__DROIDMAXX_AUTH_INTENT?.(${JSON.stringify(request)});`,
-      true,
-    );
-  const inspectedIntent = await inspect();
-  if (!inspectedIntent) return;
-  const intent = validateAgentAuthenticationIntent(inspectedIntent, contents.getURL());
-  const popupTarget = authenticationPopupTarget(intent);
-  const currentOrigin = intent.origin;
-  const capability = entry.authenticationCapability;
-  const canReuseSavedLoginApproval =
-    intent.kind === 'signin' &&
-    capability?.origin === currentOrigin &&
-    capability.documentGeneration === expectedGeneration &&
-    capability.expiresAt > Date.now();
-  entry.authenticationCapability = null;
-  if (!canReuseSavedLoginApproval) await browserSettings.authorizeAuthenticationAction(intent);
-  if (
-    entry.view !== expectedView ||
-    entry.documentGeneration !== expectedGeneration ||
-    safeWebContents(entry.view) !== contents ||
-    contents.isDestroyed() ||
-    new URL(contents.getURL()).origin !== currentOrigin
-  ) {
-    throw new Error('The page changed while authentication was being approved.');
-  }
-  const confirmed = await inspect();
-  if (!confirmed) {
-    throw new Error('The authentication control changed while approval was open.');
-  }
-  const confirmedIntent = validateAgentAuthenticationIntent(confirmed, contents.getURL());
-  if (
-    confirmedIntent.kind !== intent.kind ||
-    confirmedIntent.origin !== intent.origin ||
-    confirmedIntent.targetUrl !== intent.targetUrl
-  ) {
-    throw new Error('The authentication control changed while approval was open.');
-  }
-  if (popupTarget) {
-    grantAuthenticationPopup(entry, expectedView, popupTarget);
-  }
-}
-
-async function snapshotNativeBrowserAfterNavigation(contents, request) {
-  const result = await contents.executeJavaScript(
-    `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify({
-      requestId: request.requestId,
-      action: 'snapshot',
-    })});`,
-    true,
-  );
-  return withNativeBrowserHistory(contents, requireFreshBrowserSnapshot(result, request.requestId));
-}
-
-function consumeTrustedPhysicalNavigation(entry, view, destinationUrl) {
-  const capability = entry.trustedUserNavigation;
-  entry.trustedUserNavigation = null;
-  return consumeTrustedUserNavigation(capability, {
-    browserSessionId: entry.browserSessionId,
-    destinationUrl,
-    view,
-    navigationGeneration: entry.navigationGeneration,
-    documentGeneration: entry.documentGeneration,
-    now: Date.now(),
-  });
-}
-
-function beginAgentNavigationApproval(entry, view, requestedUrl) {
-  if (entry.pendingAgentNavigation?.requestedUrl === requestedUrl) {
-    return entry.pendingAgentNavigation.promise;
-  }
-  if (entry.pendingAgentNavigation) invalidatePendingAgentNavigation(entry);
-  const generation = entry.navigationGeneration;
-  const autonomy = agentNavigationAutonomy(entry.agentRequest);
-  const promise = browserSettings.authorizeAgentOrigin(requestedUrl, autonomy).then(async () => {
-    if (entry.navigationGeneration !== generation || entry.view !== view) {
-      throw new Error('Browser navigation was canceled because the browser session changed.');
-    }
-    await loadNativeBrowserUrl(entry, requestedUrl, { force: true });
-    if (entry.navigationGeneration !== generation || entry.view !== view) {
-      throw new Error('Browser navigation was canceled because the browser session changed.');
-    }
-  });
-  const pending = { generation, requestedUrl, promise };
-  entry.pendingAgentNavigation = pending;
-  // Active agent actions consume their transition explicitly. Page-triggered
-  // transitions outside an agent action must retire themselves after the app
-  // prompt settles so a later agent action cannot consume stale approval.
-  void promise
-    .finally(() => {
-      if (!entry.agentRequest && entry.pendingAgentNavigation === pending) {
-        entry.pendingAgentNavigation = null;
-      }
-    })
-    .catch(() => {});
-  return promise;
-}
-
-async function consumePendingAgentNavigation(entry) {
-  const pending = entry.pendingAgentNavigation;
-  if (!pending) return false;
-  try {
-    await pending.promise;
-    return true;
-  } finally {
-    if (entry.pendingAgentNavigation === pending) entry.pendingAgentNavigation = null;
-  }
-}
-
-function invalidatePendingAgentNavigation(entry) {
-  entry.navigationGeneration += 1;
-  entry.pendingAgentNavigation = null;
-}
-
-function withNativeBrowserHistory(contents, result) {
-  if (!result || typeof result !== 'object') return result;
-  if (contents.isDestroyed()) return result;
-  const history = contents.navigationHistory;
-  if (!history || !result.snapshot) return result;
-  return {
-    ...result,
-    snapshot: {
-      ...result.snapshot,
-      canGoBack: history.canGoBack(),
-      canGoForward: history.canGoForward(),
-    },
-  };
-}
-
-function observeAgentNavigation(contents, timeoutMs = 7_000) {
-  let didStart = false;
-  let settled = false;
-  let timeout;
-  let resolveCompletion;
-  const completion = new Promise((resolve) => {
-    resolveCompletion = resolve;
-  });
-  const finish = () => {
-    if (settled) return;
-    settled = true;
-    resolveCompletion();
-  };
-  timeout = setTimeout(finish, timeoutMs);
-  const onStart = (_event, _url, _isInPlace, isMainFrame) => {
-    if (!isMainFrame || didStart) return;
-    didStart = true;
-  };
-  const onFinish = () => {
-    if (didStart) finish();
-  };
-  const onFail = (_event, errorCode, _description, _url, isMainFrame) => {
-    if (isMainFrame && errorCode !== -3) finish();
-  };
-  const onDestroyed = () => finish();
-  contents.on('did-start-navigation', onStart);
-  contents.on('did-finish-load', onFinish);
-  contents.on('did-fail-load', onFail);
-  contents.on('destroyed', onDestroyed);
-  return {
-    started: () => didStart,
-    wait: () => completion,
-    dispose: () => {
-      clearTimeout(timeout);
-      contents.removeListener('did-start-navigation', onStart);
-      contents.removeListener('did-finish-load', onFinish);
-      contents.removeListener('did-fail-load', onFail);
-      contents.removeListener('destroyed', onDestroyed);
-    },
-  };
-}
-
-function isNavigationExecutionError(err) {
-  const message = String(err?.message || err).toLowerCase();
-  return (
-    message.includes('script execution was interrupted') ||
-    message.includes('execution context was destroyed') ||
-    message.includes('frame was disposed') ||
-    message.includes('object has been destroyed')
-  );
-}
-
-// Agent-blind login: the saved secret is decrypted and injected here in the
-// main process. The request and the result never carry the values, and the
-// returned snapshot has password fields redacted by the preload.
-async function fillCredentialsForAgent(entry, contents, request) {
-  const expectedOrigin = new URL(contents.getURL()).origin;
-  const expectedView = entry.view;
-  const expectedGeneration = entry.documentGeneration;
-  let credential;
-  try {
-    credential = await browserSettings.credentialForAgent(contents.getURL());
-  } catch (error) {
-    return {
-      requestId: request.requestId,
-      ok: false,
-      error: error?.message || 'Saved-login use was not authorized.',
-    };
-  }
-  if (
-    entry.view !== expectedView ||
-    entry.documentGeneration !== expectedGeneration ||
-    safeWebContents(entry.view) !== contents ||
-    contents.isDestroyed() ||
-    new URL(contents.getURL()).origin !== expectedOrigin
-  ) {
-    return {
-      requestId: request.requestId,
-      ok: false,
-      error: 'The page changed while saved-login use was being approved. Nothing was filled.',
-    };
-  }
-  const fill = await contents
-    .executeJavaScript(
-      `location.origin === ${JSON.stringify(expectedOrigin)}
-        ? window.__DROIDMAXX_FILL_CREDENTIALS?.(${JSON.stringify(credential)})
-        : ({ ok: false, error: 'The login origin changed before fill.' });`,
-      true,
-    )
-    .catch(() => undefined);
-  if (!fill || !fill.ok) {
-    return {
-      requestId: request.requestId,
-      ok: false,
-      error: (fill && fill.error) || 'Could not find a login form to fill on this page.',
-    };
-  }
-  entry.authenticationCapability = {
-    origin: expectedOrigin,
-    documentGeneration: expectedGeneration,
-    expiresAt: Date.now() + 120_000,
-  };
-  entry.networkEvents.length = 0;
-  entry.consoleEvents.length = 0;
-  const probe = await contents
-    .executeJavaScript(
-      `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify({ ...request, action: 'snapshot' })});`,
-      true,
-    )
-    .catch(() => undefined);
-  return { requestId: request.requestId, ok: true, snapshot: probe?.snapshot };
-}
-
-async function captureNativeBrowser(browserSessionId, box, options = {}) {
-  const entry = await restoreNativeBrowserForAction(browserSessionId);
-  const contents = safeWebContents(entry.view);
-  if (!contents) throw new Error(`${APP_NAME} browser is not open.`);
-  contents.setBackgroundThrottling(false);
-  await setSensitiveFieldMask(contents, true);
-  try {
-    const fullPage = Boolean(options?.fullPage);
-    const scale =
-      typeof options?.deviceScaleFactor === 'number' && options.deviceScaleFactor > 0
-        ? options.deviceScaleFactor
-        : 2;
-    // A box crop is always already on-screen (the user just selected/sketched
-    // it). Capture the composited frame directly: capturePage never re-renders
-    // the page off-screen the way CDP's captureBeyondViewport does, so the live
-    // pane no longer flickers on every selection or sketch.
-    if (box && !fullPage) {
-      const rect = normalizeCaptureRect(entry, box);
-      if (!rect) throw new Error('Requested capture region is empty or out of bounds.');
-      const cropped = await contents.capturePage(rect).catch(() => undefined);
-      if (cropped && !cropped.isEmpty()) return cropped.toPNG().toString('base64');
-    }
-    const data = await captureNativeBrowserViaCdp(contents, { fullPage, scale, box }).catch(
-      (err) => {
-        console.error(`cdp capture failed, falling back to viewport: ${err.message}`);
-        return undefined;
-      },
-    );
-    if (data) return data;
-    const rect = normalizeCaptureRect(entry, box);
-    // A supplied box that normalizes away is an empty/out-of-bounds crop; fail
-    // rather than silently returning the full viewport (unintended content).
-    if (box && !rect) throw new Error('Requested capture region is empty or out of bounds.');
-    const image = rect ? await contents.capturePage(rect) : await contents.capturePage();
-    return image.isEmpty() ? undefined : image.toPNG().toString('base64');
-  } finally {
-    await setSensitiveFieldMask(contents, false);
-    restoreNativeBrowserBackgroundThrottling(contents, entry);
-    nativeBrowserHost.scheduleIdle(entry);
-  }
-}
-
-function restoreNativeBrowserBackgroundThrottling(contents, entry) {
-  if (entry.attached && entry.visible) return;
-  try {
-    if (!contents.isDestroyed()) contents.setBackgroundThrottling(true);
-  } catch {
-    // Cleanup is best-effort when the browser closes during an action.
-  }
-}
-
-async function captureNativeBrowserViaCdp(contents, { fullPage, scale, box }) {
-  return runWithWebContentsDebugger(contents, async (dbg) => {
-    const params = { format: 'png', captureBeyondViewport: Boolean(fullPage) || Boolean(box) };
-    const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
-    const viewport = metrics.cssVisualViewport || metrics.visualViewport;
-    const content = metrics.cssContentSize || metrics.contentSize;
-    if (box) {
-      // Selection boxes are viewport CSS coordinates; clips beyond the
-      // viewport are in page coordinates, so offset by the current scroll.
-      const x = (viewport.pageX || 0) + Math.max(0, box.x);
-      const y = (viewport.pageY || 0) + Math.max(0, box.y);
-      const width = Math.min(box.width, content.width - x);
-      const height = Math.min(box.height, content.height - y);
-      if (width <= 0 || height <= 0)
-        throw new Error('Requested capture region is empty or out of bounds.');
-      params.clip = { x, y, width, height, scale };
-    } else if (fullPage) {
-      if (content.width > 0 && content.height > 0) {
-        params.clip = { x: 0, y: 0, width: content.width, height: content.height, scale };
-      }
-    } else if (viewport.clientWidth > 0 && viewport.clientHeight > 0) {
-      params.clip = {
-        x: 0,
-        y: 0,
-        width: viewport.clientWidth,
-        height: viewport.clientHeight,
-        scale,
-      };
-    }
-    const result = await dbg.sendCommand('Page.captureScreenshot', params);
-    return result?.data || undefined;
-  });
-}
-
-const DESIGN_CAPTURE_PADDING = 32;
-
-// Capture the prompt's selection region with surrounding context while the
-// in-page annotations are still visible.
-async function captureDesignSelection(senderContents, selection) {
-  const box = selection?.anchor?.box;
-  if (!box || !(box.width > 0) || !(box.height > 0)) return undefined;
-  const entry = findNativeBrowserEntryForWebContents(senderContents);
-  const contents = safeWebContents(entry?.view);
-  if (!contents) return undefined;
-  const padded = {
-    x: Math.max(0, box.x - DESIGN_CAPTURE_PADDING),
-    y: Math.max(0, box.y - DESIGN_CAPTURE_PADDING),
-    width: box.width + DESIGN_CAPTURE_PADDING * 2,
-    height: box.height + DESIGN_CAPTURE_PADDING * 2,
-  };
-  // Crop the on-screen composited frame (annotations are visible DOM overlays)
-  // instead of a CDP captureBeyondViewport screenshot, which re-rasters the
-  // page off-screen and flickers the pane on every send.
-  await setSensitiveFieldMask(contents, true);
-  try {
-    const rect = normalizeCaptureRect(entry, padded);
-    if (rect) {
-      const image = await contents.capturePage(rect).catch(() => undefined);
-      if (image && !image.isEmpty())
-        return { base64: image.toPNG().toString('base64'), box: padded };
-    }
-    const base64 = await captureNativeBrowserViaCdp(contents, { scale: 2, box: padded }).catch(
-      () => undefined,
-    );
-    return base64 ? { base64, box: padded } : undefined;
-  } finally {
-    await setSensitiveFieldMask(contents, false);
-  }
-}
-
-async function setSensitiveFieldMask(contents, active) {
-  if (!contents || contents.isDestroyed()) return;
-  await contents
-    .executeJavaScript(`window.__DROIDMAXX_MASK_SENSITIVE_FIELDS?.(${active});`, true)
-    .catch(() => undefined);
-}
-
-function findNativeBrowserEntryForWebContents(contents) {
-  for (const entry of nativeBrowserHost.entries()) {
-    if (safeWebContents(entry.view) === contents) return entry;
-  }
-  return undefined;
-}
-
-function recordNativeBrowserNetworkEvent(details) {
-  if (!browserSettings.areDiagnosticsEnabled()) return;
-  const entry = nativeBrowserHost.findEntry(
-    (candidate) => safeWebContents(candidate.view)?.id === details.webContentsId,
-  );
-  if (!entry) return;
-  entry.networkEvents.push({
-    timestamp: Date.now(),
-    method: String(details.method || 'GET').slice(0, 16),
-    url: redactBrowserDiagnosticUrl(details.url),
-    resourceType: details.resourceType ? String(details.resourceType) : undefined,
-    status: Number.isFinite(details.statusCode) ? details.statusCode : undefined,
-    error: details.error ? String(details.error).slice(0, 200) : undefined,
-  });
-  if (entry.networkEvents.length > 100) {
-    entry.networkEvents.splice(0, entry.networkEvents.length - 100);
-  }
-}
-
-function clearAllNativeBrowserDiagnostics() {
-  for (const entry of nativeBrowserHost.entries()) {
-    entry.networkEvents.length = 0;
-    entry.consoleEvents.length = 0;
-  }
-}
-
-function normalizeCaptureRect(entry, box) {
-  if (!box) return undefined;
-  const bounds = entry.view?.getBounds?.() ?? { width: 0, height: 0 };
-  const maxWidth = bounds.width || Number.MAX_SAFE_INTEGER;
-  const maxHeight = bounds.height || Number.MAX_SAFE_INTEGER;
-  const x = Math.max(0, Math.round(box.x));
-  const y = Math.max(0, Math.round(box.y));
-  const width = Math.min(Math.round(box.width), maxWidth - x);
-  const height = Math.min(Math.round(box.height), maxHeight - y);
-  if (width <= 0 || height <= 0) return undefined;
-  return { x, y, width, height };
-}
-
-function applyNativeBrowserDesignState(entry) {
-  const contents = safeWebContents(entry?.view);
-  if (!contents) return undefined;
-  return contents
-    .executeJavaScript(
-      `window.__DROIDMAXX_APPLY_DESIGN_STATE?.(${JSON.stringify(entry.state)});`,
-      true,
-    )
-    .catch((err) => console.error(`failed to apply browser design state: ${err.message}`));
-}
-
-function emitNativeBrowserLoaded(entry, url) {
-  if (!isWindowUsable(mainWindow)) return;
-  const history = safeWebContents(entry.view)?.navigationHistory;
-  mainWindow.webContents.send('native-browser-loaded', {
-    browserSessionId: entry.browserSessionId,
-    url: userVisibleBrowserUrl(url),
-    canGoBack: history?.canGoBack() ?? false,
-    canGoForward: history?.canGoForward() ?? false,
-  });
-}
-
-function emitNativeBrowserLoadFailed(entry, url, error) {
-  if (!isWindowUsable(mainWindow)) return;
-  mainWindow.webContents.send('native-browser-load-failed', {
-    browserSessionId: entry.browserSessionId,
-    url: redactBrowserDiagnosticUrl(url),
-    error,
-  });
-}
-
-// Bare hosts are normalized to https by the renderer; local dev servers are
-// usually plain http. Retry once over http for private/loopback hosts instead
-// of stranding the pane on a blank error page. Only fall back on
-// ERR_CONNECTION_REFUSED: that unambiguously means nothing is listening on
-// https, so there is no secure connection to downgrade. Certificate or TLS
-// handshake failures mean a real HTTPS server is present, so retrying those
-// over plain http would silently weaken a secure connection.
-function httpFallbackUrl(url, errorCode) {
-  const retryableCodes = new Set([
-    -102, // ERR_CONNECTION_REFUSED  (no server listening on https)
-  ]);
-  if (!retryableCodes.has(errorCode)) return undefined;
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:') return undefined;
-    if (!isPrivateHost(parsed.hostname)) return undefined;
-    parsed.protocol = 'http:';
-    return parsed.href;
-  } catch {
-    return undefined;
-  }
-}
-
-function isPrivateHost(hostname) {
-  const host = String(hostname || '').toLowerCase();
-  if (isLoopbackHost(host)) return true;
-  if (host.endsWith('.local') || host.endsWith('.test') || host.endsWith('.localhost')) return true;
-  if (!host.includes('.')) return true;
-  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
-}
-
-async function loadNativeBrowserUrl(entry, url, options = {}) {
-  url = normalizeNativeBrowserUrl(entry, url);
-  validateUrl(url);
-  const contents = safeWebContents(entry.view);
-  if (!contents) return;
-  if (url === 'about:blank' && contents.getURL() === 'about:blank') return;
-  if (!options.force && contents.getURL() === url) return;
-  if (entry.loadingUrl === url && entry.loadingPromise) return entry.loadingPromise;
-  entry.targetUrl = url;
-  const load = contents
-    .loadURL(url)
-    .catch((err) => {
-      if (
-        isExpectedSupersededLoad({
-          error: err,
-          requestedUrl: url,
-          targetUrl: entry.targetUrl,
-          currentUrl: contents.getURL(),
-        })
-      ) {
-        return;
-      }
-      if (entry.targetUrl === url) entry.targetUrl = null;
-      if (!contents.isDestroyed())
-        console.error(`failed to load native browser URL: ${err.message}`);
-      throw err;
-    })
-    .finally(() => {
-      if (entry.loadingPromise === load) {
-        entry.loadingPromise = null;
-        entry.loadingUrl = null;
-      }
-    });
-  entry.loadingUrl = url;
-  entry.loadingPromise = load;
-  return load;
-}
-
-async function restoreNativeBrowserForAction(browserSessionId) {
-  const entry = ensureNativeBrowserView(browserSessionId);
-  if (!entry.attached) {
-    nativeBrowserHost.parkHidden(entry);
-  }
-  const restoreUrl = chooseBrowserRestore({
-    currentUrl: safeWebContents(entry.view)?.getURL(),
-    targetUrl: entry.targetUrl,
-    homePage: browserSettings.homePage(),
-  });
-  if (restoreUrl) await loadNativeBrowserUrl(entry, restoreUrl);
-  return entry;
-}
-
-function normalizeBrowserViewport(viewport) {
-  return {
-    width: Math.max(1, Math.round(Number(viewport?.width) || 1200)),
-    height: Math.max(1, Math.round(Number(viewport?.height) || 800)),
-    deviceScaleFactor: Math.max(0.1, Number(viewport?.deviceScaleFactor) || 2),
-  };
-}
-
-function recoverNativeBrowserRenderer(entry, view, details) {
-  const reason = String(details?.reason || 'unknown');
-  const targetUrl = restorableUrlForEntry(entry, entry.targetUrl);
-  const wasAttached = entry.attached;
-  const bounds = view.getBounds();
-  invalidatePendingAgentNavigation(entry);
-  entry.loadingUrl = null;
-  entry.loadingPromise = null;
-  nativeBrowserHost.disposeEntry(entry, false);
-  if (reason === 'clean-exit') return;
-
-  const now = Date.now();
-  entry.rendererCrashes = entry.rendererCrashes.filter((timestamp) => now - timestamp < 30_000);
-  entry.rendererCrashes.push(now);
-  console.error(
-    `Native browser renderer exited: browserSession=${entry.browserSessionId} reason=${reason} exitCode=${details?.exitCode}`,
-  );
-  emitNativeBrowserLoadFailed(
-    entry,
-    targetUrl ?? 'about:blank',
-    `Browser renderer exited (${reason}).`,
-  );
-  if (entry.rendererCrashes.length >= 3) return;
-
-  setTimeout(() => {
-    if (
-      !nativeBrowserHost.hasEntry(entry.browserSessionId) ||
-      entry.view ||
-      !isWindowUsable(mainWindow)
-    )
-      return;
-    try {
-      ensureNativeBrowserView(entry.browserSessionId);
-      if (wasAttached) {
-        nativeBrowserHost.attachToMain(entry);
-        entry.view.setBounds(bounds);
-      } else {
-        nativeBrowserHost.parkHidden(entry);
-      }
-      if (targetUrl) void loadNativeBrowserUrl(entry, targetUrl, { force: true });
-    } catch (err) {
-      console.error(`failed to recover native browser renderer: ${err.message}`);
-    }
-  }, 250);
-}
-
-function closeAllNativeBrowsers() {
-  nativeBrowserHost.closeAll();
-}
-
-function suspendAllNativeBrowsers() {
-  nativeBrowserHost.suspendAll();
-}
-
-function normalizeNativeBrowserSessionId(browserSessionId) {
-  const value = String(browserSessionId || '').trim();
-  if (!value) throw new Error(`${APP_NAME} browser session id is required.`);
-  return value;
-}
-
-function nativeBrowserUrlsMatch(left, right) {
-  if (!left || !right) return false;
-  try {
-    return new URL(left).href === new URL(right).href;
-  } catch {
-    return left === right;
-  }
-}
-
-function restorableUrlForEntry(entry, url) {
-  if (!url) return undefined;
-  const value = normalizeNativeBrowserUrl(entry, url);
-  return value === 'about:blank' ||
-    isChromeErrorUrl(value) ||
-    nativeBrowserUrlsMatch(entry.failedRestoreUrl, value)
-    ? undefined
-    : value;
-}
-
-function rememberFailedRestoreUrl(entry, url) {
-  if (entry.failedRestoreUrl) return;
-  const restoreUrl = normalizeNativeBrowserUrl(entry, url);
-  if (restoreUrl !== 'about:blank' && !isChromeErrorUrl(restoreUrl)) {
-    entry.failedRestoreUrl = restoreUrl;
-  }
-}
-
-function nativeBrowserSessionIdForWebContents(contents) {
-  return findNativeBrowserEntryForWebContents(contents)?.browserSessionId;
-}
-
-function withNativeBrowserSession(event, payload) {
-  return { ...payload, browserSessionId: nativeBrowserSessionIdForWebContents(event.sender) };
-}
-
 function isWindowUsable(window) {
   return Boolean(window && !window.isDestroyed());
-}
-
-function safeWebContents(view) {
-  try {
-    if (!view) return null;
-    const contents = view.webContents;
-    if (!contents || contents.isDestroyed()) return null;
-    return contents;
-  } catch {
-    return null;
-  }
-}
-
-function isBrowserViewUsable(view) {
-  return Boolean(view && safeWebContents(view));
-}
-
-function normalizeNativeBrowserUrl(entry, url) {
-  const value = String(url || 'about:blank');
-  if (isHostAppUrl(value)) return 'about:blank';
-  if (!isChromeErrorUrl(value)) return value;
-  return entry?.targetUrl && !isChromeErrorUrl(entry.targetUrl) ? entry.targetUrl : 'about:blank';
-}
-
-function rejectHostAppUrl(url) {
-  if (isHostAppUrl(url)) {
-    throw new Error(
-      `Cannot open the ${APP_NAME} shell inside its own browser pane. Use a different local app port.`,
-    );
-  }
-}
-
-function isChromeErrorUrl(url) {
-  return String(url || '').startsWith('chrome-error://');
-}
-
-function isHostAppUrl(url) {
-  const host = localAppEndpoint(process.env.ELECTRON_START_URL || mainWindow?.webContents.getURL());
-  const target = localAppEndpoint(url);
-  if (!host || !target) return false;
-  if (host.port !== target.port) return false;
-  return host.local && target.local;
-}
-
-function localAppEndpoint(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
-    return {
-      local: isLoopbackHost(parsed.hostname),
-      port: parsed.port || (parsed.protocol === 'https:' ? '443' : '80'),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function isLoopbackHost(hostname) {
-  const value = String(hostname || '').toLowerCase();
-  return value === 'localhost' || value === '127.0.0.1' || value === '::1' || value === '[::1]';
-}
-
-function validateUrl(value) {
-  const parsed = new URL(value);
-  if (parsed.protocol === 'about:' && parsed.href === 'about:blank') return;
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-    throw new Error('Browser URLs must use http(s) without embedded credentials.');
-  }
-}
-
-function isCrossOriginNavigation(currentUrl, requestedUrl) {
-  try {
-    const current = new URL(currentUrl);
-    const requested = new URL(requestedUrl);
-    return current.origin !== requested.origin;
-  } catch {
-    return true;
-  }
-}
-
-function normalizeBounds(bounds) {
-  return {
-    x: Math.round(bounds?.x ?? 0),
-    y: Math.round(bounds?.y ?? 0),
-    width: Math.max(1, Math.round(bounds?.width ?? 1)),
-    height: Math.max(1, Math.round(bounds?.height ?? 1)),
-  };
 }
 
 async function getApiKey() {

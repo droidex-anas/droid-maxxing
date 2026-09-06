@@ -16,11 +16,7 @@ const {
   scaleCursorHotspot,
   validateBrowserAgentCursorSize,
 } = require('./browserAgentCursorGeometry.cjs');
-const {
-  canPresentOverlay,
-  isUsableWindow,
-  requireUsableWindow,
-} = require('./browserAgentCursorWindow.cjs');
+const { isUsableHost } = require('./nativeBrowserHost.cjs');
 
 const CURSOR_FRAME_MS = 16;
 const CURSOR_MIN_MOVE_MS = 160;
@@ -102,7 +98,7 @@ function createBrowserAgentCursorController(options) {
     const current = attachment;
     if (!current || current.browserSessionId !== input?.browserSessionId) return false;
     const point = normalizePoint(input, current.bounds);
-    if (!point || !isUsableWindow(current.hostWindow)) return false;
+    if (!point || !isUsableHost(current.hostWindow)) return false;
     if (!enabled || !canPresentOverlay(current.hostWindow)) {
       movementGeneration += 1;
       current.point = point;
@@ -119,8 +115,8 @@ function createBrowserAgentCursorController(options) {
       attachment !== current ||
       generation !== expectedGeneration ||
       overlay !== window ||
-      !isUsableWindow(window) ||
-      !isUsableWindow(current.hostWindow)
+      !isUsableHost(window) ||
+      !isUsableHost(current.hostWindow)
     ) {
       return false;
     }
@@ -221,7 +217,7 @@ function createBrowserAgentCursorController(options) {
     style = nextStyle;
     generation += 1;
     movementGeneration += 1;
-    if (!isUsableWindow(overlay)) return true;
+    if (!isUsableHost(overlay)) return true;
 
     const window = overlay;
     overlayReady = loadCursorDocument(window, style);
@@ -233,7 +229,7 @@ function createBrowserAgentCursorController(options) {
     const nextSize = validateBrowserAgentCursorSize(value);
     if (nextSize === size) return false;
     size = nextSize;
-    if (!isUsableWindow(overlay)) return true;
+    if (!isUsableHost(overlay)) return true;
     const dimension = cursorOverlayDimension(size);
     overlay.setSize(dimension, dimension, false);
     if (attachment?.overlayVisible && attachment.point) positionOverlay(overlay, attachment);
@@ -241,7 +237,7 @@ function createBrowserAgentCursorController(options) {
   }
 
   function ensureOverlay(hostWindow) {
-    if (isUsableWindow(overlay) && overlayHost === hostWindow) return overlay;
+    if (isUsableHost(overlay) && overlayHost === hostWindow) return overlay;
     destroyOverlay();
 
     const window = new options.BrowserWindow({
@@ -327,7 +323,7 @@ function createBrowserAgentCursorController(options) {
         attachment !== current ||
         generation !== expectedGeneration ||
         movementGeneration !== moveGeneration ||
-        !isUsableWindow(window)
+        !isUsableHost(window)
       ) {
         return false;
       }
@@ -404,7 +400,7 @@ function createBrowserAgentCursorController(options) {
   }
 
   function positionOverlay(window, current) {
-    if (!isUsableWindow(window) || !current.point) return;
+    if (!isUsableHost(window) || !current.point) return;
     const contentBounds = current.hostWindow.getContentBounds();
     const hotspot = scaleCursorHotspot(size);
     const dimension = cursorOverlayDimension(size);
@@ -425,7 +421,7 @@ function createBrowserAgentCursorController(options) {
 
   function hideOverlay() {
     if (attachment) attachment.overlayVisible = false;
-    if (isUsableWindow(overlay)) overlay.hide();
+    if (isUsableHost(overlay)) overlay.hide();
   }
 
   function destroyOverlay() {
@@ -438,7 +434,7 @@ function createBrowserAgentCursorController(options) {
     listeners?.hostWindow.removeListener?.('focus', listeners.onFocus);
     listeners?.hostWindow.removeListener?.('blur', listeners.onBlur);
     listeners?.hostWindow.removeListener?.('closed', listeners.onClosed);
-    if (isUsableWindow(window)) window.destroy();
+    if (isUsableHost(window)) window.destroy();
   }
 
   return {
@@ -458,6 +454,19 @@ function createBrowserAgentCursorController(options) {
 
 function cursorOverlayDimension(size) {
   return size + CURSOR_GLOW_PADDING * 2;
+}
+
+function requireUsableWindow(window) {
+  if (!isUsableHost(window) || typeof window.getContentBounds !== 'function') {
+    throw new Error('Browser agent cursor requires a live host window.');
+  }
+  return window;
+}
+
+function canPresentOverlay(hostWindow) {
+  if (!isUsableHost(hostWindow)) return false;
+  if (typeof hostWindow.isVisible === 'function' && !hostWindow.isVisible()) return false;
+  return typeof hostWindow.isFocused !== 'function' || hostWindow.isFocused();
 }
 
 function defaultWaitForFrame(delayMs) {

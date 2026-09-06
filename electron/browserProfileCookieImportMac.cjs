@@ -271,6 +271,7 @@ function normalizeChromeRow(row, key, nowMs) {
     return undefined;
   }
   try {
+    // eslint-disable-next-line no-control-regex -- Cookie values containing control bytes are unsafe to import.
     if (/[\u0000-\u001f\u007f]/.test(UTF8_DECODER.decode(value))) {
       value.fill(0);
       return undefined;
@@ -385,6 +386,7 @@ function normalizeProfileLabel(label, fallback) {
     typeof label !== 'string' ||
     !label.trim() ||
     label.length > 80 ||
+    // eslint-disable-next-line no-control-regex -- Persisted profile labels must reject control bytes.
     /[\u0000-\u001f\u007f]/.test(label)
   ) {
     return fallback;
@@ -395,6 +397,7 @@ function normalizeProfileLabel(label, fallback) {
 function normalizeChromeHostname(hostKey) {
   if (typeof hostKey !== 'string') return undefined;
   const hostname = hostKey.replace(/^\./, '').toLowerCase();
+  // eslint-disable-next-line no-control-regex -- Imported hostnames must reject control bytes.
   if (!hostname || hostname.length > 253 || /[\s\u0000-\u001f\u007f/@\\]/.test(hostname)) {
     return undefined;
   }
@@ -410,7 +413,8 @@ function normalizeCookieName(value) {
     typeof value !== 'string' ||
     !value ||
     value.length > 256 ||
-    /[\u0000-\u001f\u007f()<>@,;:\\"/\[\]?={} \t]/.test(value)
+    // eslint-disable-next-line no-control-regex -- Cookie names must reject control bytes and separator characters.
+    /[\u0000-\u001f\u007f()<>@,;:\\"/[\]?={} \t]/.test(value)
   ) {
     return undefined;
   }
@@ -422,6 +426,7 @@ function normalizeCookiePath(value) {
     typeof value !== 'string' ||
     !value.startsWith('/') ||
     value.length > 2_048 ||
+    // eslint-disable-next-line no-control-regex -- Cookie paths must reject control bytes.
     /[\u0000-\u001f\u007f]/.test(value)
   ) {
     return undefined;

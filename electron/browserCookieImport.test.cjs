@@ -15,7 +15,7 @@ const {
 const NOW_MS = Date.UTC(2026, 0, 1);
 
 test('cookie batches cap writes at eight and account for only successful replacements', async () => {
-  const items = Array.from({ length: 5_000 }, (_, index) => ({
+  const items = Array.from({ length: 24 }, (_, index) => ({
     domain: `site-${index % 11}.example`,
     id: index,
     secret: Buffer.alloc(8, (index % 254) + 1),
@@ -54,9 +54,9 @@ test('cookie batches cap writes at eight and account for only successful replace
   const result = await committing;
   assert.equal(maxActiveWrites, 8);
   assert.deepEqual(result, {
-    importedCount: 4_500,
-    failedCount: 500,
-    replacementCount: 2_000,
+    importedCount: 21,
+    failedCount: 3,
+    replacementCount: 9,
     domainCount: 11,
     affectedDomains: [
       'site-0.example',

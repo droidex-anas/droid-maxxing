@@ -39,7 +39,7 @@ function redactBrowserDiagnosticUrl(value, baseUrl) {
     url.hash = '';
     return url.href;
   } catch {
-    return String(value || '').slice(0, 1000);
+    return '[invalid URL]';
   }
 }
 

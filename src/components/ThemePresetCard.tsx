@@ -6,13 +6,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
-import {
-  persistCustomThemes,
-  shallowEqual,
-  useStoreDispatch,
-  useStoreSelector,
-  type ThemeConfig,
-} from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import { persistCustomThemes, type ThemeConfig } from '../hooks/persistedThemePreferences';
 import {
   applyTheme,
   BUILT_IN_THEMES,

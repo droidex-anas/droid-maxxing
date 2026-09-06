@@ -1,5 +1,14 @@
 import type { UtilityTool } from '../../lib/utilityPanel';
+import { preloadLazySurface } from '../../lib/chunkPreloader';
+import type { LazySurface } from '../../lib/lazySurfaces';
 import { utilityToolOption } from './utilityToolOptions';
+
+const TOOL_SURFACES: Record<UtilityTool, LazySurface> = {
+  review: 'review',
+  browser: 'browser',
+  terminal: 'terminal',
+  files: 'files',
+};
 
 export function UtilityToolPicker({
   tools,
@@ -24,6 +33,12 @@ export function UtilityToolPicker({
             key={tool}
             type="button"
             role="menuitem"
+            onPointerEnter={() => {
+              preloadLazySurface(TOOL_SURFACES[tool]);
+            }}
+            onFocus={() => {
+              preloadLazySurface(TOOL_SURFACES[tool]);
+            }}
             onClick={() => {
               onSelect(tool);
             }}

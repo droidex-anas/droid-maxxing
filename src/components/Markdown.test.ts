@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createElement } from 'react';
+import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Markdown } from './Markdown';
+
+interface MarkdownProps {
+  children: string;
+  specMode?: boolean;
+  autoPlayAppBlocks?: boolean;
+}
 
 test('disabled diagrams render fenced SVG as escaped code', () => {
   const source = '```svg\n<svg onload="globalThis.pwned=true"></svg>\n```';
@@ -185,6 +191,59 @@ test('completed App fences inside quotes and lists keep their completed streamin
   }
 });
 
+// The fence scan is deliberately simpler than a full CommonMark parser, so a
+// fence nested deeper than it follows is missing from its list. An unfinished
+// one must still not be mistaken for a finished app and auto-played.
+test('a streaming App fence nested past the fence scan keeps building', () => {
+  const source = [
+    '```app',
+    '<main>Complete</main>',
+    '```',
+    '',
+    '- item',
+    '  - nested',
+    '',
+    '      ```app',
+    '      <main>Still streaming',
+  ].join('\n');
+  const html = renderToStaticMarkup(
+    createElement(Markdown, { autoPlayAppBlocks: true, buildingAppBlocks: true }, source),
+  );
+
+  assert.equal(html.match(/<iframe/g)?.length, 1);
+  assert.equal(html.match(/>Building interactive app</g)?.length, 1);
+});
+
+test('a streaming response keeps the same element types across renders', () => {
+  // react-markdown uses each `components` entry as the JSX element type, so a
+  // map rebuilt per render makes React remount the whole response on every
+  // streamed token: App iframes reload, Mermaid diagrams restart, and anything
+  // the reader is interacting with is thrown away.
+  const renderMarkdown = (Markdown as unknown as { type: (props: MarkdownProps) => ReactElement })
+    .type;
+  const childOf = (element: ReactElement) => (element.props as { children: ReactElement }).children;
+  const componentsFor = (props: MarkdownProps) => {
+    const shell = renderMarkdown(props);
+    const tree = childOf(shell);
+    const renderedTree = (tree.type as (treeProps: unknown) => ReactElement)(tree.props);
+    const markdown = childOf(renderedTree);
+    return (markdown.props as { components: Record<string, unknown> }).components;
+  };
+
+  const source = '```app\n<main>Live app</main>\n```\n';
+  const first = componentsFor({ children: source, autoPlayAppBlocks: true });
+  const second = componentsFor({
+    children: `${source}\nTrailing prose while the answer streams.`,
+    autoPlayAppBlocks: true,
+  });
+
+  assert.equal(first, second);
+  assert.equal(first.code, second.code);
+  assert.equal(first.p, second.p);
+  // Spec mode is a different presentation, and so a different stable map.
+  assert.notEqual(first, componentsFor({ children: source, specMode: true }));
+});
+
 test('copy gracefully declines when the Clipboard API is unavailable', async () => {
   const markdown = (await import('./Markdown')) as unknown as {
     copyMarkdownCode?: (
@@ -193,4 +252,20 @@ test('copy gracefully declines when the Clipboard API is unavailable', async () 
     ) => Promise<boolean>;
   };
   assert.equal(await markdown.copyMarkdownCode?.(undefined, 'sample'), false);
+});
+
+test('small JSON fences keep token highlighting and large ones stay plain', async () => {
+  const { JSON_HIGHLIGHT_MAX_CHARS } = await import('./Markdown');
+  const small = '```json\n{"accent": true, "count": 3}\n```';
+  const largeObject = Object.fromEntries(
+    Array.from({ length: 1200 }, (_, index) => [`k${String(index)}`, index]),
+  );
+  const large = `\`\`\`json\n${JSON.stringify(largeObject)}\n\`\`\``;
+  assert.ok(JSON.stringify(largeObject).length > JSON_HIGHLIGHT_MAX_CHARS);
+
+  const smallHtml = renderToStaticMarkup(createElement(Markdown, null, small));
+  const largeHtml = renderToStaticMarkup(createElement(Markdown, null, large));
+  assert.match(smallHtml, /--droid-green/);
+  assert.doesNotMatch(largeHtml, /--droid-green/);
+  assert.match(largeHtml, /k1199/);
 });

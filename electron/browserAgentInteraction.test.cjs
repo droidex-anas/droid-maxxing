@@ -4,12 +4,54 @@ const {
   blockBrowserAgentSensitiveTyping,
   executeBrowserAgentInteraction,
 } = require('./browserAgentInteraction.cjs');
+const { runWithWebContentsDebugger } = require('./nativeBrowserEmulation.cjs');
 
 const PAGE_CONTEXT = {
   documentId: 'document-1',
   snapshotId: 'document-1:4',
   urlHash: 'url-1',
 };
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function hoverContents(onMouseMoved = async () => ({})) {
+  const commands = [];
+  const scripts = [];
+  let attached = false;
+  const contents = {
+    debugger: {
+      attach() {
+        attached = true;
+      },
+      isAttached: () => attached,
+      async sendCommand(name, params) {
+        commands.push({ name, params });
+        return onMouseMoved();
+      },
+    },
+    executeJavaScript: async (script) => {
+      scripts.push(script);
+      if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 120, y: 84 };
+      if (script.includes('"action":"hover"')) return { requestId: 'request-hover', ok: true };
+      return {
+        requestId: 'request-hover',
+        ok: true,
+        snapshot: { url: 'https://example.test/', refs: [] },
+      };
+    },
+    isDestroyed: () => false,
+    sendInputEvent() {
+      throw new Error('hover must not require a focused BrowserWindow');
+    },
+  };
+  return { commands, contents, scripts };
+}
 
 test('clicks resolve live refs and run in the isolated page without stealing app focus', async () => {
   const scripts = [];
@@ -43,6 +85,104 @@ test('clicks resolve live refs and run in the isolated page without stealing app
   assert.match(scripts[1], /"action":"click"/);
   assert.match(scripts[1], /"x":120/);
   assert.match(scripts[1], /"__droidexContext":\{"documentId":"document-1"/);
+});
+
+test('hover uses one focus-neutral Chromium mouse move and returns its resulting snapshot', async () => {
+  const { commands, contents, scripts } = hoverContents();
+
+  const result = await executeBrowserAgentInteraction(
+    contents,
+    { requestId: 'request-hover', action: 'hover', selector: '#account' },
+    {
+      isCurrent: () => true,
+      showCursor: async () => true,
+      pageContext: PAGE_CONTEXT,
+      viewportBounds: { width: 300, height: 200 },
+    },
+  );
+
+  assert.deepEqual(commands, [
+    {
+      name: 'Input.dispatchMouseEvent',
+      params: {
+        type: 'mouseMoved',
+        x: 120,
+        y: 84,
+        button: 'none',
+        buttons: 0,
+        clickCount: 0,
+        pointerType: 'mouse',
+      },
+    },
+  ]);
+  assert.equal(result.snapshot.url, 'https://example.test/');
+  assert.equal(
+    scripts.filter(
+      (script) =>
+        script.includes('__DROIDMAXX_AGENT_ACTION') && script.includes('"action":"hover"'),
+    ).length,
+    1,
+  );
+  assert.equal(scripts.filter((script) => script.includes('"action":"snapshot"')).length, 1);
+});
+
+test('hover sends no snapshot request after the page changes during Chromium dispatch', async () => {
+  let current = true;
+  const { contents, scripts } = hoverContents(async () => {
+    current = false;
+    return {};
+  });
+
+  await assert.rejects(
+    executeBrowserAgentInteraction(
+      contents,
+      { requestId: 'request-hover', action: 'hover', selector: '#account' },
+      {
+        isCurrent: () => current,
+        showCursor: async () => true,
+        pageContext: PAGE_CONTEXT,
+        viewportBounds: { width: 300, height: 200 },
+      },
+    ),
+    /page changed before the browser action completed/i,
+  );
+  assert.equal(scripts.filter((script) => script.includes('"action":"snapshot"')).length, 0);
+});
+
+test('queued hover rechecks the page before validation or Chromium dispatch', async () => {
+  const debuggerStarted = deferred();
+  const releaseDebugger = deferred();
+  const cursorPlaced = deferred();
+  let current = true;
+  const { commands, contents, scripts } = hoverContents();
+  const blocker = runWithWebContentsDebugger(contents, async () => {
+    debuggerStarted.resolve();
+    await releaseDebugger.promise;
+  });
+  await debuggerStarted.promise;
+
+  const action = executeBrowserAgentInteraction(
+    contents,
+    { requestId: 'request-hover', action: 'hover', selector: '#account' },
+    {
+      isCurrent: () => current,
+      showCursor: async () => {
+        cursorPlaced.resolve();
+        return true;
+      },
+      pageContext: PAGE_CONTEXT,
+      viewportBounds: { width: 300, height: 200 },
+    },
+  );
+  await cursorPlaced.promise;
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+  current = false;
+  releaseDebugger.resolve();
+  await blocker;
+
+  await assert.rejects(action, /page changed before the browser action completed/i);
+  assert.deepEqual(commands, []);
+  assert.equal(scripts.filter((script) => script.includes('__DROIDMAXX_AGENT_ACTION')).length, 0);
 });
 
 test('agent-authored text cannot enter password or one-time-code fields', async () => {

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type * as Protocol from '../protocol.js';
+import type { SessionFileChange } from '../sessionFileCache.js';
 import type { SessionManagerDependencies } from '../SessionManager.js';
 import {
   applyCachedSummary,
@@ -10,7 +11,6 @@ import {
   type HistoricalSummaryFilter,
   type PersistedChildSession,
 } from '../history.js';
-import { filterSessionListSummaries } from '../sessionListFilter.js';
 import type { RecordedCall } from './fakeFactoryRuntime.js';
 import { providerSessionJsonl } from './providerSessionFixtures.js';
 
@@ -58,12 +58,13 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
 
   constructor(private readonly calls: RecordedCall[]) {}
 
-  syncSummaries(summaries: Protocol.SessionSummary[]): void {
+  syncSummaries(summaries: Protocol.SessionSummary[]): boolean | undefined {
     const error = this.nextSyncError;
     delete this.nextSyncError;
     if (error) throw error;
     this.seedSummaries(summaries);
     this.calls.push({ target: 'history', method: 'syncSummaries', args: [summaries] });
+    return undefined;
   }
 
   seedSummaries(summaries: Protocol.SessionSummary[]): void {
@@ -121,52 +122,68 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
     const rows = loadHistoricalSessions();
     if (!options.workspaceCwds && options.includePlainChats === undefined) return rows;
     const { patches } = this.summaryPatchesAndHidden();
-    const summaries = rows.map((row) => applyCachedSummary(row.summary, patches));
-    return filterSessionListSummaries(summaries, options).map((summary) => ({
-      summary,
-      progress: [],
-    }));
+    const workspaceCwds = new Set(options.workspaceCwds ?? []);
+    return rows
+      .map((row) => applyCachedSummary(row.summary, patches))
+      .filter((summary) =>
+        summary.cwd ? workspaceCwds.has(summary.cwd) : Boolean(options.includePlainChats),
+      )
+      .map((summary) => ({ summary, progress: [] }));
   }
 
   // The fake does not scan transcripts; tests that exercise the
   // sessions.search command seed the results they expect back.
   nextSearchResults: Protocol.SessionSearchResult[] = [];
+  nextIndexingIncomplete = false;
   lastSearchQuery: string | null = null;
 
   // Mirrors the production contract: records the query for assertions and
   // returns nothing once the scan has been superseded.
-  searchSessions(query?: string, isStale?: () => boolean): Promise<Protocol.SessionSearchResult[]> {
+  searchSessions(query?: string, isStale?: () => boolean): Promise<Protocol.HistorySearchReply> {
     this.lastSearchQuery = query ?? null;
-    return Promise.resolve(isStale?.() ? [] : this.nextSearchResults);
+    return Promise.resolve({
+      results: isStale?.() ? [] : this.nextSearchResults,
+      indexingIncomplete: this.nextIndexingIncomplete,
+    });
   }
 
-  // The fake has no sqlite cache: it reports an empty cache so boot takes the
-  // synchronous populate path, and reconciles are counted no-ops because the
-  // fake's listHistoricalSessions already scans the disk on every call.
+  readonly indexingIdleStates: boolean[] = [];
+
+  setIndexingIdle(isIdle: boolean): Promise<void> {
+    this.indexingIdleStates.push(isIdle);
+    return Promise.resolve();
+  }
+
+  // The fake has no SQLite cache. Reconciles are counted no-ops because its
+  // listHistoricalSessions implementation already scans the test directory.
   // Counters stay out of the recorded-call log so strict call-sequence
-  // assertions are unaffected by the boot reconcile. Tests can set a nonzero
-  // sessionFileCacheSize to exercise the warm-cache background boot reconcile.
+  // assertions are unaffected by the boot reconcile. Tests may set a nonzero
+  // sessionFileCacheSize to characterize a previously populated cache.
   fullReconcileCalls = 0;
-  readonly targetedReconcileCalls: { providerSessionId: string; path: string }[][] = [];
+  readonly targetedReconcileCalls: SessionFileChange[][] = [];
   sessionFileCacheSize = 0;
   // When set, the next full reconcile throws it once, so tests can exercise
   // the boot gate's resilience to a failed reconcile.
   failNextReconcile: Error | null = null;
+  failNextTargetedReconcile: Error | null = null;
 
-  reconcileSessionFiles(): number {
+  reconcileSessionFiles(): Promise<number> {
     this.fullReconcileCalls += 1;
     const failure = this.failNextReconcile;
     this.failNextReconcile = null;
-    if (failure) throw failure;
-    return 0;
+    if (failure) return Promise.reject(failure);
+    return Promise.resolve(0);
   }
 
-  reconcileSessionFilePaths(changes: { providerSessionId: string; path: string }[]): number {
+  reconcileSessionFilePaths(changes: SessionFileChange[]): Promise<number> {
     this.targetedReconcileCalls.push(changes);
-    return 0;
+    const failure = this.failNextTargetedReconcile;
+    this.failNextTargetedReconcile = null;
+    if (failure) return Promise.reject(failure);
+    return Promise.resolve(0);
   }
 
-  upsertChildSession(child: PersistedChildSession): void {
+  upsertChildSession(child: PersistedChildSession): boolean | undefined {
     const children =
       this.childrenByParent.get(child.parentAppSessionId) ??
       new Map<string, PersistedChildSession>();
@@ -177,6 +194,7 @@ export class FakeHistoryIndex implements SessionHistoryDependencies {
       method: 'upsertChildSession',
       args: [child],
     });
+    return undefined;
   }
 
   childSessions(parentAppSessionId: string): PersistedChildSession[] {

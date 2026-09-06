@@ -25,11 +25,6 @@ export interface NativeBrowserRuntimeOptions {
 
 export class NativeBrowserRuntime implements BrowserRuntime {
   private viewport: BrowserViewport;
-  private lastSnapshot: BrowserSnapshot = {
-    url: 'about:blank',
-    scroll: { x: 0, y: 0 },
-    refs: [],
-  };
 
   constructor(private readonly options: NativeBrowserRuntimeOptions) {
     this.viewport = options.viewport;
@@ -40,15 +35,15 @@ export class NativeBrowserRuntime implements BrowserRuntime {
   }
 
   async reload(source?: BrowserInputSource): Promise<BrowserSnapshot> {
-    return this.navigationSnapshotFrom(await this.send({ action: 'reload', source }));
+    return this.snapshotFrom(await this.send({ action: 'reload', source }), 'navigation');
   }
 
   async goBack(): Promise<BrowserSnapshot> {
-    return this.navigationSnapshotFrom(await this.send({ action: 'goBack' }));
+    return this.snapshotFrom(await this.send({ action: 'goBack' }), 'navigation');
   }
 
   async goForward(): Promise<BrowserSnapshot> {
-    return this.navigationSnapshotFrom(await this.send({ action: 'goForward' }));
+    return this.snapshotFrom(await this.send({ action: 'goForward' }), 'navigation');
   }
 
   async setViewport(viewport: BrowserViewport, source?: BrowserInputSource): Promise<void> {
@@ -150,25 +145,18 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     });
   }
 
-  private snapshotFrom(result: BrowserNativeResult): BrowserSnapshot {
-    if (!result.ok) throw new Error(result.error ?? 'Native browser action failed.');
-    if (result.snapshot && isBrowserPageUrl(result.snapshot.url)) {
-      this.lastSnapshot = result.snapshot;
-      return this.lastSnapshot;
-    }
-    throw new Error('Native browser action completed without a fresh page snapshot.');
-  }
-
-  private navigationSnapshotFrom(result: BrowserNativeResult): BrowserSnapshot {
-    if (!result.ok) throw new Error(result.error ?? 'Native browser navigation failed.');
-    if (!result.snapshot) {
-      throw new Error('Native browser navigation completed without a fresh page snapshot.');
+  private snapshotFrom(
+    result: BrowserNativeResult,
+    kind: 'action' | 'navigation' = 'action',
+  ): BrowserSnapshot {
+    if (!result.ok) throw new Error(result.error ?? `Native browser ${kind} failed.`);
+    if (!result.snapshot || (kind === 'action' && !isBrowserPageUrl(result.snapshot.url))) {
+      throw new Error(`Native browser ${kind} completed without a fresh page snapshot.`);
     }
     if (!isBrowserPageUrl(result.snapshot.url)) {
       throw new Error('Native browser navigation returned an invalid page snapshot.');
     }
-    this.lastSnapshot = result.snapshot;
-    return this.lastSnapshot;
+    return result.snapshot;
   }
 }
 

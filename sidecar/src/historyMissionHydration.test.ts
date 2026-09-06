@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { SessionSummary } from './protocol.js';
+import { persistTestChild, persistTestSummaries } from './testing/historyPersistenceFixture.js';
 
 const originalHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), 'droid-mission-history-'));
@@ -50,8 +51,8 @@ test('Mission hydration restores logical child progress beneath the exact parent
   );
 
   const history = new HistoryIndex();
-  history.syncSummaries([missionSummary()]);
-  history.upsertChildSession({
+  persistTestSummaries([missionSummary()]);
+  persistTestChild({
     parentAppSessionId: 'parent-app',
     childSessionId: 'child-stable',
     providerSessionId: 'provider-current',
@@ -62,7 +63,7 @@ test('Mission hydration restores logical child progress beneath the exact parent
     transcriptAvailable: true,
     updatedAt: 2,
   });
-  history.upsertChildSession({
+  persistTestChild({
     parentAppSessionId: 'other-parent',
     childSessionId: 'child-stable',
     providerSessionId: 'provider-old',

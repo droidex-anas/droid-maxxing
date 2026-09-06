@@ -18,7 +18,6 @@ import {
   onNativeBrowserLoadFailed,
   onNativeBrowserLoaded,
   onNativeBrowserSelection,
-  runNativeBrowserAgentAction,
   setNativeBrowserBounds,
   setNativeBrowserDesignMode,
   setNativeBrowserPencilMode,
@@ -30,7 +29,6 @@ import {
   type NativeBrowserSelection,
 } from '../../lib/nativeBrowser';
 import { registerNativeBrowserController } from '../../lib/nativeBrowserAgent';
-import { nativeBrowserRequestTargetsVisibleSurface } from '../../lib/browserSessionIdentity';
 import type {
   BrowserNativeRequest,
   BrowserNativeResult,
@@ -79,12 +77,14 @@ export function retryNativeBrowserAttach(options: {
       },
       (error: unknown) => {
         if (disposed) return;
-        const retryDelayMs = NATIVE_ATTACH_RETRY_DELAYS_MS[attemptIndex];
-        if (retryDelayMs === undefined) {
+        if (attemptIndex >= NATIVE_ATTACH_RETRY_DELAYS_MS.length) {
           options.onFailed(error);
           return;
         }
-        timer = schedule(() => attempt(attemptIndex + 1), retryDelayMs);
+        const retryDelayMs = NATIVE_ATTACH_RETRY_DELAYS_MS[attemptIndex];
+        timer = schedule(() => {
+          attempt(attemptIndex + 1);
+        }, retryDelayMs);
       },
     );
   };
@@ -129,18 +129,6 @@ export function NativeBrowserSurface({
   const onPromptRef = useRef(onPrompt);
   const onLoadFailedRef = useRef(onLoadFailed);
   const obscuredRef = useRef(obscured);
-  const controllerStateRef = useRef({
-    browserKey,
-    obscured,
-    url,
-    visibleBrowserSessionId,
-  });
-  controllerStateRef.current = {
-    browserKey,
-    obscured,
-    url,
-    visibleBrowserSessionId,
-  };
   const urlRef = useRef(url);
   urlRef.current = url;
   const native = isDesktop();
@@ -158,7 +146,7 @@ export function NativeBrowserSurface({
         pendingBounds.current = null;
         if (!pending) return;
         lastBounds.current = pending.bounds;
-        setNativeBrowserBounds(pending.browserSessionId, pending.bounds).catch(() => {});
+        setNativeBrowserBounds(pending.browserSessionId, pending.bounds).catch(() => undefined);
       });
     },
     [],
@@ -189,12 +177,14 @@ export function NativeBrowserSurface({
     Promise.all([
       setNativeBrowserDesignMode(visibleBrowserSessionId, designActive),
       setNativeBrowserPencilMode(visibleBrowserSessionId, designActive && pencilMode),
-    ]).catch(() => {});
+    ]).catch(() => undefined);
   }, [designMode, obscured, pencilMode, visibleBrowserSessionId]);
 
   useEffect(() => {
     let disposed = false;
     const unlisteners: (() => void)[] = [];
+    const matchesVisibleSession = (browserSessionId?: string) =>
+      !browserSessionId || browserSessionId === visibleBrowserSessionId;
     const track = (promise: Promise<() => void>) => {
       void promise.then((unlisten) => {
         if (disposed) {
@@ -207,38 +197,32 @@ export function NativeBrowserSurface({
 
     track(
       onNativeBrowserSelection((selection) => {
-        if (selection.browserSessionId && selection.browserSessionId !== visibleBrowserSessionId)
-          return;
+        if (!matchesVisibleSession(selection.browserSessionId)) return;
         onSelectionRef.current(selection);
       }),
     );
     track(
       onNativeBrowserDesignPrompt((prompt) => {
-        if (
-          prompt.selection.browserSessionId &&
-          prompt.selection.browserSessionId !== visibleBrowserSessionId
-        )
-          return;
+        if (!matchesVisibleSession(prompt.selection.browserSessionId)) return;
         onPromptRef.current(prompt);
       }),
     );
     track(
       onNativeBrowserLoaded((event) => {
-        if (event.browserSessionId && event.browserSessionId !== visibleBrowserSessionId) return;
+        if (!matchesVisibleSession(event.browserSessionId)) return;
         onLoadedRef.current(event);
       }),
     );
     track(
       onNativeBrowserLoadFailed((failure) => {
-        if (failure.browserSessionId && failure.browserSessionId !== visibleBrowserSessionId)
-          return;
+        if (!matchesVisibleSession(failure.browserSessionId)) return;
         onLoadFailedRef.current?.(failure);
       }),
     );
 
     return () => {
       disposed = true;
-      unlisteners.forEach((unlisten) => unlisten());
+      for (const unlisten of unlisteners) unlisten();
     };
   }, [visibleBrowserSessionId]);
 
@@ -246,21 +230,24 @@ export function NativeBrowserSurface({
     if (native) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
-    let detachDesignMode = () => {};
+    let detachDesignMode: () => void = () => undefined;
     const attach = () => {
       detachDesignMode();
       try {
         detachDesignMode = attachIframeDesignMode(iframe, {
           designMode,
           pencilMode,
-          onSelection: (selection) => onSelectionRef.current(selection),
+          onSelection: (selection) => {
+            onSelectionRef.current(selection);
+          },
         });
         onLoadedRef.current({
           browserSessionId: visibleBrowserSessionId ?? browserKey,
           url: readIframeUrl(iframe) ?? url,
         });
       } catch {
-        detachDesignMode = () => {};
+        // Cross-origin pages still render but cannot expose iframe design controls.
+        detachDesignMode = () => undefined;
       }
     };
     attach();
@@ -273,22 +260,19 @@ export function NativeBrowserSurface({
 
   useLayoutEffect(() => {
     if (!native) return;
-    if (visibleBrowserSessionId) {
-      setNativeBrowserVisible(visibleBrowserSessionId, !obscured).catch(() => {});
-    }
+    if (!visibleBrowserSessionId) return;
+    setNativeBrowserVisible(visibleBrowserSessionId, !obscured).catch(() => undefined);
   }, [native, obscured, visibleBrowserSessionId]);
 
   useEffect(() => {
     if (!native) return;
-    if (obscured) {
-      return;
-    }
+    if (obscured) return;
     if (!surfaceReady) return;
     const bounds = boundsFor(slotRef);
     if (!bounds) return;
     if (!visibleBrowserSessionId) {
       pendingBounds.current = null;
-      detachNativeBrowser().catch(() => {});
+      detachNativeBrowser().catch(() => undefined);
       attachedSessionRef.current = undefined;
       attachingSessionRef.current = undefined;
       lastBounds.current = null;
@@ -305,7 +289,7 @@ export function NativeBrowserSurface({
           attachingSessionRef.current = undefined;
           lastBounds.current = bounds;
           if (obscuredRef.current) {
-            setNativeBrowserVisible(target, false).catch(() => {});
+            setNativeBrowserVisible(target, false).catch(() => undefined);
           }
         },
         onFailed: (error) => {
@@ -338,40 +322,23 @@ export function NativeBrowserSurface({
     visibleBrowserSessionId,
   ]);
 
-  useEffect(
-    () =>
-      registerNativeBrowserController({
-        perform: async (request) => {
-          const current = controllerStateRef.current;
-          return native
-            ? performNativeRequest(request, {
-                currentUrl: current.url,
-                browserKey: current.browserKey,
-                visibleBrowserSessionId: current.visibleBrowserSessionId,
-                obscured: current.obscured,
-                bounds: () => boundsFor(slotRef),
-                markAttached: (bounds) => {
-                  lastBounds.current = bounds;
-                  if (current.visibleBrowserSessionId) {
-                    attachedSessionRef.current = current.visibleBrowserSessionId;
-                    attachingSessionRef.current = undefined;
-                  }
-                },
-              })
-            : performIframeRequest(request, {
-                currentUrl: current.url,
-                iframe: iframeRef,
-                onLoaded: (url) =>
-                  onLoadedRef.current({ browserSessionId: request.browserSessionId, url }),
-              });
-        },
-      }),
-    [native],
-  );
+  useEffect(() => {
+    if (native) return;
+    return registerNativeBrowserController({
+      perform: (request) =>
+        performIframeRequest(request, {
+          currentUrl: urlRef.current,
+          iframe: iframeRef,
+          onLoaded: (url) => {
+            onLoadedRef.current({ browserSessionId: request.browserSessionId, url });
+          },
+        }),
+    });
+  }, [native]);
 
   useEffect(() => {
     return () => {
-      if (native) detachNativeBrowser(visibleBrowserSessionId).catch(() => {});
+      if (native) detachNativeBrowser(visibleBrowserSessionId).catch(() => undefined);
     };
   }, [native, visibleBrowserSessionId]);
 
@@ -411,50 +378,6 @@ function readIframeUrl(iframe: HTMLIFrameElement): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-async function performNativeRequest(
-  request: BrowserNativeRequest,
-  options: {
-    currentUrl: string;
-    browserKey: string;
-    visibleBrowserSessionId?: string;
-    obscured: boolean;
-    bounds: () => NativeBrowserBounds | null;
-    markAttached: (bounds: NativeBrowserBounds) => void;
-  },
-): Promise<BrowserNativeResult> {
-  try {
-    const bounds = options.bounds();
-    // While a full-screen overlay (settings or a spec/question modal)
-    // obscures the pane, the BrowserView is detached; treat the surface as not
-    // visible so an `open`/`reload` doesn't reattach the OS layer over the overlay.
-    const visible =
-      !options.obscured &&
-      nativeBrowserRequestTargetsVisibleSurface({
-        browserKey: options.browserKey,
-        visibleBrowserSessionId: options.visibleBrowserSessionId,
-        requestAppSessionId: request.appSessionId,
-        requestBrowserSessionId: request.browserSessionId,
-      });
-    const visibleBounds = visible ? requireNativeBrowserBounds(bounds) : undefined;
-    const result = await runNativeBrowserAgentAction(request, undefined, visibleBounds);
-    if (visibleBounds && result.ok) options.markAttached(visibleBounds);
-    return result;
-  } catch (err) {
-    return {
-      requestId: request.requestId,
-      appSessionId: request.appSessionId,
-      browserSessionId: request.browserSessionId,
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-function requireNativeBrowserBounds(bounds: NativeBrowserBounds | null): NativeBrowserBounds {
-  if (!bounds) throw new Error('DROIDEX Browser pane is not laid out yet.');
-  return bounds;
 }
 
 async function performIframeRequest(
@@ -524,7 +447,13 @@ async function performIframeRequest(
     } else if (request.action !== 'snapshot') {
       throw new Error(`Unsupported browser action: ${request.action}`);
     }
-    await settleFrame();
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
     return {
       requestId: request.requestId,
       appSessionId: request.appSessionId,
@@ -582,12 +511,6 @@ function safeIframeSnapshot(iframe: HTMLIFrameElement, fallbackUrl: string) {
   } catch {
     return { url: readIframeUrl(iframe) ?? fallbackUrl, scroll: { x: 0, y: 0 }, refs: [] };
   }
-}
-
-function settleFrame(): Promise<void> {
-  return new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-  );
 }
 
 function surfaceLayout(

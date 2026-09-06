@@ -107,10 +107,10 @@ function looksLikeWebsiteAddress(value: string): boolean {
 }
 
 function normalizeBareIpv6Loopback(value: string): string | null {
-  const match = /^::1(?::(\d+))?(\/.*)?$/i.exec(value);
+  const match = /^::1(?::(\d+))?(\/.*|)$/i.exec(value);
   if (!match) return null;
   const port = match[1] ? `:${match[1]}` : '';
-  const path = match[2] ?? '';
+  const path = match[2];
   return `http://[::1]${port}${path}`;
 }
 

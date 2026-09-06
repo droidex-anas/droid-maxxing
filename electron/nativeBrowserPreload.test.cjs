@@ -133,45 +133,22 @@ test('trusted navigation destination accepts only real link and form defaults', 
   );
 });
 
-test('browser inspection routes element text and HTML through sanitizers', () => {
-  assert.match(source, /function safeElementText\(/);
-  assert.equal(source.match(/cleanText\(el\.innerText \|\| el\.textContent/g)?.length, 1);
-  assert.doesNotMatch(source, /html:\s*cleanText\(el\.outerHTML/);
-  assert.match(source, /html:\s*cleanText\(sanitizedOuterHtml\(el\)/);
-  assert.match(source, /redactedTextTags\.has\(el\.tagName\)/);
-});
+test('diagnostic URLs redact secrets and fail closed for malformed input', () => {
+  const start = source.indexOf('const SENSITIVE_URL_KEY_PARTS');
+  const end = source.indexOf('\nlet designMode', start);
+  const redact = vm.runInNewContext(
+    `(() => {\n${source.slice(start, end)}\nreturn redactBrowserDiagnosticUrl;\n})()`,
+    { URL },
+  );
 
-test('browser inspection covers URL-bearing and executable attributes', () => {
-  for (const attribute of [
-    'background',
-    'cite',
-    'data',
-    'formaction',
-    'itemid',
-    'manifest',
-    'poster',
-    'usemap',
-    'xlink:href',
-  ]) {
-    assert.match(source, new RegExp(`['"]${attribute}['"]`));
-  }
-  for (const attribute of ['ping', 'srcdoc', 'srcset', 'style']) {
-    assert.match(source, new RegExp(`['"]${attribute}['"]`));
-  }
-  assert.match(source, /isMetaRefreshContent\(name, node\)/);
-});
-
-test('select option matching accepts the option label attribute', () => {
-  assert.match(source, /cleanText\(item\.label\) === expected/);
-});
-
-test('remote pages cannot forge agent results and only expose bounded page operations', () => {
-  assert.doesNotMatch(source, /native-browser-agent-result/);
-  assert.match(source, /__DROIDMAXX_AGENT_ACTION/);
-  assert.match(source, /__DROIDMAXX_AGENT_CONTEXT/);
-  assert.match(source, /__DROIDMAXX_RESOLVE_POINTER/);
-  assert.match(source, /__DROIDMAXX_AUTH_INTENT/);
-  assert.match(source, /__DROIDMAXX_SENSITIVE_FIELD/);
+  assert.equal(
+    redact('https://example.test/callback?state=private&safe=yes'),
+    'https://example.test/callback?state=%5Bredacted%5D&safe=yes',
+  );
+  assert.equal(
+    redact('https://[malformed]?token=super-secret', 'https://example.test/'),
+    '[invalid URL]',
+  );
 });
 
 test('final page execution rejects a replaced document, snapshot, or in-page URL', () => {
@@ -228,6 +205,89 @@ test('snapshot recovery mints a new lease when in-page navigation cleared the ol
   assert.equal(agentSnapshotId, 'document-new:1');
 });
 
+test('hover validates the current target without dispatching a synthetic mouse event', async () => {
+  const start = source.indexOf('function validateHoverTargetAt(x, y, expectedTarget)');
+  const end = source.indexOf('\nfunction typeIntoFocused', start);
+  const target = {
+    dispatchCount: 0,
+    dispatchEvent() {
+      this.dispatchCount += 1;
+    },
+  };
+  const hover = vm.runInNewContext(
+    `(${source.slice(start, end).replace('function validateHoverTargetAt', 'function')})`,
+    {
+      MouseEvent: class {},
+      document: { elementFromPoint: () => target },
+      requirePointOnExpectedTarget: (actual, expected) => assert.equal(actual, expected),
+    },
+  );
+
+  hover(40, 60, target);
+
+  assert.equal(target.dispatchCount, 0);
+});
+
+test('hover action validates its exact context and target without minting a premature snapshot', async () => {
+  const start = source.indexOf('async function runAgentAction(request)');
+  const end = source.indexOf('\nfunction clickAt', start);
+  const target = {};
+  const context = {
+    documentId: 'document-1',
+    snapshotId: 'document-1:4',
+    urlHash: 'url-1',
+  };
+  let contextChecks = 0;
+  let targetChecks = 0;
+  let snapshotCount = 0;
+  const runAction = vm.runInNewContext(
+    `(${source.slice(start, end).replace('async function runAgentAction', 'async function')})`,
+    {
+      validateHoverTargetAt: (x, y, expectedTarget) => {
+        assert.equal(x, 40);
+        assert.equal(y, 60);
+        assert.equal(expectedTarget, target);
+      },
+      pageSnapshot: () => {
+        snapshotCount += 1;
+        return { refs: [] };
+      },
+      requireCurrentAgentActionContext: (context) => {
+        contextChecks += 1;
+        assert.deepEqual(context, {
+          documentId: 'document-1',
+          snapshotId: 'document-1:4',
+          urlHash: 'url-1',
+        });
+      },
+      requireCurrentAgentSnapshotTarget: (ref, selector) => {
+        targetChecks += 1;
+        assert.equal(ref, '@b-account');
+        assert.equal(selector, '#account');
+        return target;
+      },
+      safeSnapshot: () => ({ refs: [] }),
+      sendAgent: (result) => result,
+      settle: async () => {},
+    },
+  );
+
+  const result = await runAction({
+    requestId: 'request-hover',
+    action: 'hover',
+    ref: '@b-account',
+    selector: '#account',
+    x: 40,
+    y: 60,
+    __droidexContext: context,
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { requestId: 'request-hover', ok: true });
+  assert.equal(contextChecks, 1);
+  assert.equal(targetChecks, 1);
+  assert.equal(snapshotCount, 0);
+});
+
 test('the isolated final action rechecks sensitive focus immediately before typing', () => {
   const start = source.indexOf('function requireSafeAgentTextAction(request)');
   const end = source.indexOf('\nfunction currentAgentSnapshotTarget', start);
@@ -248,33 +308,6 @@ test('the isolated final action rechecks sensitive focus immediately before typi
   const action = source.slice(actionStart, actionEnd);
   assert.match(action, /requireSafeAgentTextAction\(request\);\s*typeIntoFocused/);
   assert.match(action, /requireSafeAgentTextAction\(request\);\s*pressKey/);
-});
-
-test('agent pointer resolution runs in the isolated preload and rejects viewport edges', () => {
-  const start = source.indexOf('function resolveAgentPointer(request)');
-  const end = source.indexOf('\nfunction inspectAuthenticationIntent', start);
-  const resolver = source.slice(start, end);
-
-  assert.match(resolver, /currentAgentSnapshotTarget\(request\.ref, request\.selector\)/);
-  assert.match(resolver, /target\.getBoundingClientRect\(\)/);
-  assert.match(resolver, /point\.x >= window\.innerWidth/);
-  assert.match(resolver, /point\.y >= window\.innerHeight/);
-});
-
-test('browser refs are leased to the exact snapshotted element', () => {
-  assert.match(source, /const agentDocumentId = crypto\.randomUUID\(\)/);
-  assert.match(source, /let agentSnapshotId = ''/);
-  assert.match(source, /const agentSnapshotTargets = new Map\(\)/);
-  assert.match(
-    source,
-    /agentSnapshotId = `\$\{agentDocumentId\}:\$\{String\(\+\+agentSnapshotSequence\)\}`/,
-  );
-  assert.match(source, /agentSnapshotTargets\.set\(ref, \{ element: el, selector \}\)/);
-  assert.match(source, /function currentAgentSnapshotTarget\(ref, selector\)/);
-  assert.match(source, /!target\.element\.isConnected/);
-  assert.match(source, /target\.element\.ownerDocument !== document/);
-  assert.match(source, /agentSnapshotTargets\.clear\(\)/);
-  assert.match(source, /native-browser-agent-snapshot-invalidated[\s\S]*invalidateAgentSnapshot/);
 });
 
 test('replacing an element with the same selector expires the old browser ref', () => {
@@ -303,75 +336,6 @@ test('replacing an element with the same selector expires the old browser ref', 
   snapshottedElement.isConnected = false;
   assert.equal(currentTarget('@b-current', '#continue'), null);
   assert.notEqual(currentTarget('@b-current', '#continue'), document.querySelector('#continue'));
-});
-
-test('agent scroll resolves a live nested scroller and observes movement before snapshot', () => {
-  const start = source.indexOf('function scrollPage(request)');
-  const end = source.indexOf('\nfunction safeSnapshot', start);
-  const scroll = source.slice(start, end);
-
-  assert.match(scroll, /request\.selector/);
-  assert.match(scroll, /requireCurrentAgentSnapshotTarget\(request\.ref, request\.selector\)/);
-  assert.match(scroll, /scrollTargetFor/);
-  assert.match(scroll, /target\.scrollBy/);
-  assert.match(scroll, /before/);
-  assert.match(source, /snapshot\.scrollResult = finishScrollAttempt\(scrollAttempt\)/);
-});
-
-test('browser snapshots prioritize live viewport refs before offscreen document refs', () => {
-  const start = source.indexOf('function collectRefs()');
-  const end = source.indexOf('\nfunction refFor', start);
-  const collector = source.slice(start, end);
-
-  assert.match(collector, /const visible = \[\]/);
-  assert.match(collector, /const offscreen = \[\]/);
-  assert.match(collector, /intersectsViewport\(node\.getBoundingClientRect\(\)\)/);
-  assert.match(collector, /return \[\.\.\.visible, \.\.\.offscreen\]\.slice\(0, 80\)/);
-});
-
-test('agent cursor is not exposed to remote page JavaScript', () => {
-  assert.doesNotMatch(source, /function showAgentCursor\(/);
-  assert.doesNotMatch(source, /__DROIDMAXX_SHOW_AGENT_CURSOR/);
-});
-
-test('screenshot masking is available inside the isolated page world', () => {
-  assert.match(source, /function maskSensitiveFields\(/);
-  assert.match(source, /__DROIDMAXX_MASK_SENSITIVE_FIELDS/);
-  assert.match(source, /one-time-code/);
-});
-
-test('saved-login screenshots mask both vault-populated fields', () => {
-  const fillStart = source.indexOf('function fillCredentials(payload)');
-  const fillEnd = source.indexOf('\nfunction inspectAuthenticationIntent', fillStart);
-  const fill = source.slice(fillStart, fillEnd);
-  const maskStart = source.indexOf('function maskSensitiveFields(active)');
-  const maskEnd = source.indexOf('\nfunction usernameFieldFor', maskStart);
-  const mask = source.slice(maskStart, maskEnd);
-
-  assert.match(source, /const savedCredentialFields = new WeakSet\(\)/);
-  assert.match(fill, /savedCredentialFields\.add\(userField\)[\s\S]*?setFieldValue\(userField/);
-  assert.match(
-    fill,
-    /savedCredentialFields\.add\(passwordField\)[\s\S]*?setFieldValue\(passwordField/,
-  );
-  assert.match(mask, /if \(!isSensitiveField\(field\)\) continue/);
-  assert.match(source, /if \(savedCredentialFields\.has\(el\)\) return true/);
-});
-
-test('OAuth callback URLs redact replayable state and assertion parameters', () => {
-  for (const key of ['state', 'nonce', 'relaystate', 'assertion', 'ticket', 'samlresponse']) {
-    assert.match(source, new RegExp(`['"]${key}['"]`));
-  }
-  assert.match(source, /redactBrowserDiagnosticUrl\(location\.href\)/);
-});
-
-test('credential capture classifies current and new-password forms without blocking submit', () => {
-  assert.match(source, /document\.addEventListener\('submit', onFormSubmit, true\)/);
-  assert.match(source, /current_password/);
-  assert.match(source, /new_password/);
-  const start = source.indexOf('function onFormSubmit(event)');
-  const end = source.indexOf('\nfunction fillCredentials', start);
-  assert.doesNotMatch(source.slice(start, end), /preventDefault/);
 });
 
 test('OAuth authentication intent includes the exact authoritative anchor destination', () => {

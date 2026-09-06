@@ -38,7 +38,7 @@ function redactBrowserDiagnosticUrl(value, baseUrl) {
     url.hash = '';
     return url.href;
   } catch {
-    return String(value || '').slice(0, 1_000);
+    return '[invalid URL]';
   }
 }
 
@@ -808,12 +808,17 @@ async function runAgentAction(request) {
         inspection: inspectElement(request.selector, request.ref),
       });
     }
-    if (action === 'click' || action === 'hover') {
+    if (action === 'click') {
       const target = request.selector
         ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
         : undefined;
-      if (action === 'click') clickAt(Number(request.x), Number(request.y), target);
-      else hoverAt(Number(request.x), Number(request.y), target);
+      clickAt(Number(request.x), Number(request.y), target);
+    } else if (action === 'hover') {
+      const target = request.selector
+        ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
+        : undefined;
+      validateHoverTargetAt(Number(request.x), Number(request.y), target);
+      return sendAgent({ requestId: request.requestId, ok: true });
     } else if (action === 'selectOption')
       selectOption(request.selector, request.text || '', request.ref);
     else if (action === 'type') {
@@ -850,13 +855,10 @@ function clickAt(x, y, expectedTarget) {
   }
 }
 
-function hoverAt(x, y, expectedTarget) {
+function validateHoverTargetAt(x, y, expectedTarget) {
   const target = document.elementFromPoint(x, y);
   if (!target) throw new Error(`No element at ${x},${y}`);
   requirePointOnExpectedTarget(target, expectedTarget);
-  target.dispatchEvent(
-    new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: x, clientY: y }),
-  );
 }
 
 function typeIntoFocused(text) {

@@ -56,7 +56,9 @@ export function createAppHeightScheduler(
 }
 
 export const DEFAULT_APP_HEIGHT = 360;
-const MIN_APP_HEIGHT = 240;
+// Only a floor against a report taken mid-layout, small enough that a compact
+// widget keeps the frame it measured instead of sitting in empty space.
+const MIN_APP_HEIGHT = 96;
 const MAX_APP_HEIGHT = 12_000;
 const MAX_APP_MATH_CHARS = 20_000;
 export const MAX_APP_MATH_REQUESTS = 64;

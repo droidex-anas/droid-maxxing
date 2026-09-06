@@ -149,11 +149,14 @@ function accountLabel(account, index) {
 
 function cleanAccountLabel(value) {
   if (typeof value !== 'string') return '';
-  return value
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 80);
+  return (
+    value
+      // eslint-disable-next-line no-control-regex -- Account labels must sanitize control bytes before display.
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80)
+  );
 }
 
 function normalizeRelyingPartyId(value) {

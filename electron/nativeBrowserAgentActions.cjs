@@ -1,0 +1,329 @@
+const { requireFreshBrowserSnapshot } = require('./browserPageState.cjs');
+const { setBrowserActionActive } = require('./nativeBrowserHost.cjs');
+
+function createNativeBrowserAgentActions({
+  appName,
+  ensureView,
+  getEntry,
+  restoreForAction,
+  openBrowser,
+  reloadBrowser,
+  closeBrowser,
+  resizeBrowser,
+  page,
+  navigation,
+  credentials,
+  browserSettings,
+  cursor,
+  interaction,
+  safeWebContents,
+  scheduleIdleClose,
+}) {
+  async function run(request) {
+    if (request.action === 'close') {
+      const existing = getEntry(request.browserSessionId);
+      if (existing) bindAppSession(existing, request.appSessionId);
+      closeBrowser(request.browserSessionId);
+      return { requestId: request.requestId, ok: true };
+    }
+
+    const entry = ensureView(request.browserSessionId);
+    bindAppSession(entry, request.appSessionId);
+    if (entry.agentActionActive || entry.userNavigationActive) {
+      throw new Error('A browser operation is already active for this session.');
+    }
+    const isUserNavigation = request.source === 'user';
+    const reservedView = entry.view;
+    entry.agentRequest = isUserNavigation ? null : request;
+    entry.agentActionActive = !isUserNavigation;
+    entry.userNavigationActive = isUserNavigation;
+    let actionContents;
+    try {
+      if (!isUserNavigation) {
+        await browserSettings.authorizeAgentRequest(request);
+        if (
+          getEntry(request.browserSessionId) !== entry ||
+          entry.view !== reservedView ||
+          !safeWebContents(reservedView)
+        ) {
+          throw new Error('The browser changed while agent authorization was pending.');
+        }
+      }
+
+      if (request.action === 'open') {
+        await openBrowser(request.browserSessionId, request.url, request.viewport);
+        if (entry.view !== reservedView || !safeWebContents(reservedView)) {
+          throw new Error('The browser view changed while the page was opening.');
+        }
+        actionContents = requireContents(entry);
+        setBrowserActionActive(entry, true);
+        await navigation.consumePendingApproval(entry);
+        return snapshotAfterNavigation(actionContents, request);
+      }
+
+      const restoredEntry = await restoreForAction(request.browserSessionId);
+      actionContents = requireContents(restoredEntry);
+      const actionView = restoredEntry.view;
+      const actionDocumentGeneration = restoredEntry.documentGeneration;
+      const isCurrentActionTarget = () =>
+        restoredEntry.view === actionView &&
+        safeWebContents(actionView) === actionContents &&
+        !actionContents.isDestroyed() &&
+        restoredEntry.documentGeneration === actionDocumentGeneration;
+      const assertCurrentActionTarget = () => {
+        if (!isCurrentActionTarget()) {
+          throw new Error(
+            'The page changed before the browser action completed. No input was sent.',
+          );
+        }
+      };
+      setBrowserActionActive(restoredEntry, true);
+
+      if (request.action === 'capture') {
+        const image = await page.capture(request.browserSessionId, request.box, {
+          fullPage: request.fullPage,
+          deviceScaleFactor: request.deviceScaleFactor,
+        });
+        return { requestId: request.requestId, ok: true, image };
+      }
+      if (request.action === 'resize') {
+        await resizeBrowser(restoredEntry, request.viewport);
+        return { requestId: request.requestId, ok: true };
+      }
+      if (request.action === 'network') {
+        const networkEvents = restoredEntry.networkEvents.slice();
+        if (request.clearNetworkLog) restoredEntry.networkEvents.length = 0;
+        return { requestId: request.requestId, ok: true, networkEvents };
+      }
+      if (request.action === 'console') {
+        const consoleEvents = restoredEntry.consoleEvents.slice();
+        if (request.clearConsoleLog) restoredEntry.consoleEvents.length = 0;
+        return { requestId: request.requestId, ok: true, consoleEvents };
+      }
+      if (request.action === 'fillCredentials') {
+        return withBrowserHistory(
+          actionContents,
+          await credentials.fillForAgent(restoredEntry, actionContents, request),
+        );
+      }
+      if (request.action === 'snapshot') {
+        return snapshotAfterNavigation(actionContents, request);
+      }
+
+      const observedNavigation = observeNavigation(actionContents);
+      try {
+        if (request.action === 'reload') {
+          await reloadBrowser(request.browserSessionId);
+          await observedNavigation.wait();
+          await navigation.consumePendingApproval(restoredEntry);
+          return snapshotAfterNavigation(actionContents, request);
+        }
+        if (request.action === 'goBack' || request.action === 'goForward') {
+          return runHistoryAction(
+            restoredEntry,
+            actionContents,
+            request,
+            observedNavigation,
+            assertCurrentActionTarget,
+          );
+        }
+
+        const pageContext = await actionContents.executeJavaScript(
+          'window.__DROIDMAXX_AGENT_CONTEXT?.();',
+          true,
+        );
+        assertCurrentActionTarget();
+        requirePageContext(pageContext);
+        await credentials.authorizeAuthentication(restoredEntry, actionContents, request);
+        assertCurrentActionTarget();
+        await interaction.blockBrowserAgentSensitiveTyping(actionContents, request);
+        assertCurrentActionTarget();
+
+        const execution = interaction
+          .executeBrowserAgentInteraction(actionContents, request, {
+            isCurrent: isCurrentActionTarget,
+            pageContext,
+            showCursor: ({ x, y, pressed }) => showAgentCursor(restoredEntry, { x, y, pressed }),
+            viewportBounds: actionView.getBounds(),
+          })
+          .then(
+            (result) => ({ type: 'result', result }),
+            (error) => ({ type: 'error', error }),
+          );
+        const outcome = await Promise.race([
+          execution,
+          observedNavigation.wait().then(() => ({ type: 'navigation' })),
+        ]);
+        if (await navigation.consumePendingApproval(restoredEntry)) {
+          return snapshotAfterNavigation(actionContents, request);
+        }
+        if (outcome.type === 'navigation') {
+          return snapshotAfterNavigation(actionContents, request);
+        }
+        if (outcome.type === 'error') {
+          if (!observedNavigation.started() || !isNavigationExecutionError(outcome.error)) {
+            throw outcome.error;
+          }
+          await observedNavigation.wait();
+          return snapshotAfterNavigation(actionContents, request);
+        }
+        return withBrowserHistory(actionContents, outcome.result);
+      } finally {
+        observedNavigation.dispose();
+      }
+    } finally {
+      if (actionContents) setBrowserActionActive(entry, false);
+      entry.agentRequest = null;
+      entry.agentActionActive = false;
+      entry.userNavigationActive = false;
+      if (getEntry(request.browserSessionId) === entry) scheduleIdleClose(entry);
+    }
+  }
+
+  function requireContents(entry) {
+    const contents = safeWebContents(entry.view);
+    if (!contents) throw new Error(`${appName} browser is not open.`);
+    return contents;
+  }
+
+  function bindAppSession(entry, appSessionId) {
+    if (entry.appSessionId && entry.appSessionId !== appSessionId) {
+      throw new Error('Browser session belongs to a different DROIDEX chat.');
+    }
+    entry.appSessionId = appSessionId;
+  }
+
+  function requirePageContext(pageContext) {
+    if (
+      !pageContext ||
+      typeof pageContext.documentId !== 'string' ||
+      typeof pageContext.snapshotId !== 'string' ||
+      typeof pageContext.urlHash !== 'string' ||
+      !pageContext.documentId ||
+      !pageContext.snapshotId ||
+      !pageContext.urlHash
+    ) {
+      throw new Error('The browser page has no current action snapshot. Refresh and try again.');
+    }
+  }
+
+  async function runHistoryAction(
+    entry,
+    contents,
+    request,
+    observedNavigation,
+    assertCurrentActionTarget,
+  ) {
+    const history = contents.navigationHistory;
+    const offset = request.action === 'goBack' ? -1 : 1;
+    if (!history?.canGoToOffset(offset)) return snapshotAfterNavigation(contents, request);
+    const target = history.getEntryAtIndex(history.getActiveIndex() + offset);
+    if (target?.url && isCrossOriginNavigation(contents.getURL(), target.url)) {
+      await browserSettings.authorizeAgentOrigin(target.url, request.autonomy);
+    }
+    assertCurrentActionTarget();
+    history.goToOffset(offset);
+    await observedNavigation.wait();
+    await navigation.consumePendingApproval(entry);
+    return snapshotAfterNavigation(contents, request);
+  }
+
+  async function snapshotAfterNavigation(contents, request) {
+    const result = await contents.executeJavaScript(
+      `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify({
+        requestId: request.requestId,
+        action: 'snapshot',
+      })});`,
+      true,
+    );
+    return withBrowserHistory(contents, requireFreshBrowserSnapshot(result, request.requestId));
+  }
+
+  function withBrowserHistory(contents, result) {
+    if (!result || typeof result !== 'object' || contents.isDestroyed()) return result;
+    const history = contents.navigationHistory;
+    if (!history || !result.snapshot) return result;
+    return {
+      ...result,
+      snapshot: {
+        ...result.snapshot,
+        canGoBack: history.canGoBack(),
+        canGoForward: history.canGoForward(),
+      },
+    };
+  }
+
+  function showAgentCursor(entry, point) {
+    if (!entry.attached || !entry.visible) {
+      return cursor.park({
+        browserSessionId: entry.browserSessionId,
+        bounds: entry.view.getBounds(),
+        ...point,
+      });
+    }
+    return cursor.show({ browserSessionId: entry.browserSessionId, ...point });
+  }
+
+  function observeNavigation(contents, timeoutMs = 7_000) {
+    let didStart = false;
+    let settled = false;
+    let resolveCompletion;
+    const completion = new Promise((resolve) => {
+      resolveCompletion = resolve;
+    });
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolveCompletion();
+    };
+    const timeout = setTimeout(finish, timeoutMs);
+    timeout.unref?.();
+    const onStart = (_event, _url, _isInPlace, isMainFrame) => {
+      if (isMainFrame) didStart = true;
+    };
+    const onFinish = () => {
+      if (didStart) finish();
+    };
+    const onFail = (_event, errorCode, _description, _url, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) finish();
+    };
+    const onDestroyed = () => finish();
+    contents.on('did-start-navigation', onStart);
+    contents.on('did-finish-load', onFinish);
+    contents.on('did-fail-load', onFail);
+    contents.on('destroyed', onDestroyed);
+    return {
+      started: () => didStart,
+      wait: () => completion,
+      dispose: () => {
+        clearTimeout(timeout);
+        contents.removeListener('did-start-navigation', onStart);
+        contents.removeListener('did-finish-load', onFinish);
+        contents.removeListener('did-fail-load', onFail);
+        contents.removeListener('destroyed', onDestroyed);
+      },
+    };
+  }
+
+  function isNavigationExecutionError(error) {
+    const message = String(error?.message || error).toLowerCase();
+    return (
+      message.includes('script execution was interrupted') ||
+      message.includes('execution context was destroyed') ||
+      message.includes('frame was disposed') ||
+      message.includes('object has been destroyed')
+    );
+  }
+
+  return { run };
+}
+
+function isCrossOriginNavigation(currentUrl, nextUrl) {
+  try {
+    return new URL(currentUrl).origin !== new URL(nextUrl).origin;
+  } catch {
+    return true;
+  }
+}
+
+module.exports = { createNativeBrowserAgentActions };

@@ -41,13 +41,7 @@ export default function OnboardingWizard({
 
   return (
     <MotionConfig reducedMotion="user">
-      <motion.div
-        className="fixed inset-0 z-50 flex flex-col bg-droid-bg text-droid-text"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.35 }}
-      >
+      <div className="flex h-full min-h-0 flex-col">
         <header
           data-electron-drag-region
           className="h-11 shrink-0 flex items-center justify-end px-5 select-none"
@@ -121,7 +115,7 @@ export default function OnboardingWizard({
         </main>
 
         <footer className="h-8 shrink-0" />
-      </motion.div>
+      </div>
     </MotionConfig>
   );
 }

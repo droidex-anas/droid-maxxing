@@ -1,0 +1,307 @@
+const { EventEmitter } = require('node:events');
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { createNativeBrowserAgentActions } = require('./nativeBrowserAgentActions.cjs');
+const interaction = require('./browserAgentInteraction.cjs');
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function harness(overrides = {}) {
+  const calls = {
+    agentApproval: [],
+    close: [],
+    open: [],
+    resize: [],
+    originApproval: [],
+    scripts: [],
+  };
+  const contents = new EventEmitter();
+  Object.assign(contents, {
+    isDestroyed: () => false,
+    getURL: () => 'https://site.test/page',
+    setBackgroundThrottling() {},
+    executeJavaScript: async (script) => {
+      calls.scripts.push(script);
+      if (script.includes('__DROIDMAXX_AGENT_CONTEXT')) {
+        return { documentId: 'doc-1', snapshotId: 'snapshot-1', urlHash: 'url-1' };
+      }
+      if (script.includes('__DROIDMAXX_SENSITIVE_FIELD')) return null;
+      if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 10, y: 12 };
+      if (script.includes('__DROIDMAXX_AGENT_ACTION')) {
+        if (overrides.execution && !script.includes('"action":"snapshot"')) {
+          return overrides.execution.promise;
+        }
+        return {
+          requestId: 'request-1',
+          ok: true,
+          snapshot: { url: 'https://site.test/page' },
+        };
+      }
+      return undefined;
+    },
+    navigationHistory: {
+      canGoBack: () => true,
+      canGoForward: () => false,
+      canGoToOffset: () => false,
+      getActiveIndex: () => 0,
+      getEntryAtIndex: () => undefined,
+      goToOffset() {},
+    },
+    ...overrides.contents,
+  });
+  const view = {
+    webContents: contents,
+    getBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+  };
+  const entry = {
+    browserSessionId: 'browser-1',
+    appSessionId: null,
+    view,
+    attached: false,
+    visible: true,
+    viewport: { width: 800, height: 600, deviceScaleFactor: 2 },
+    networkEvents: [],
+    consoleEvents: [],
+    documentGeneration: 1,
+    agentActionActive: false,
+    userNavigationActive: false,
+    agentRequest: null,
+  };
+  let currentEntry = entry;
+  const actions = createNativeBrowserAgentActions({
+    appName: 'DROIDEX',
+    ensureView: () => currentEntry ?? entry,
+    getEntry: () => currentEntry,
+    restoreForAction: async () => entry,
+    openBrowser: async (id, url, viewport) => {
+      calls.open.push({ id, url, viewport });
+      if (overrides.open) await overrides.open.promise;
+    },
+    reloadBrowser: async () => {},
+    closeBrowser: (id) => {
+      calls.close.push(id);
+      currentEntry = null;
+    },
+    resizeBrowser: (_entry, viewport) => calls.resize.push(viewport),
+    page: { capture: async () => 'image' },
+    navigation: {
+      consumePendingApproval: async () => false,
+      ...overrides.navigation,
+    },
+    credentials: {
+      authorizeAuthentication: async () => {
+        if (overrides.authentication) await overrides.authentication.promise;
+      },
+      fillForAgent: async (_entry, _contents, request) => ({
+        requestId: request.requestId,
+        ok: true,
+        snapshot: { url: 'https://site.test/page' },
+      }),
+    },
+    browserSettings: {
+      authorizeAgentRequest: async (request) => {
+        calls.agentApproval.push(request);
+        if (overrides.agentApproval) await overrides.agentApproval.promise;
+      },
+      authorizeAgentOrigin: async (url, autonomy) => {
+        calls.originApproval.push({ url, autonomy });
+        if (overrides.originApproval) await overrides.originApproval.promise;
+      },
+    },
+    cursor: {
+      park: () => true,
+      show: async () => true,
+    },
+    interaction,
+    safeWebContents: (candidate) => candidate?.webContents ?? null,
+    scheduleIdleClose: () => {},
+  });
+  return { actions, calls, contents, entry, getCurrentEntry: () => currentEntry, view };
+}
+
+function request(action, fields = {}) {
+  return {
+    requestId: 'request-1',
+    browserSessionId: 'browser-1',
+    appSessionId: 'app-1',
+    autonomy: 'medium',
+    action,
+    ...fields,
+  };
+}
+
+test('open pins agent activity before loading and never attaches the browser view', async () => {
+  const open = deferred();
+  const { actions, calls, entry } = harness({ open });
+
+  const result = actions.run(
+    request('open', { url: 'https://site.test/page', viewport: { width: 900, height: 700 } }),
+  );
+  await Promise.resolve();
+
+  assert.equal(entry.agentActionActive, true);
+  assert.equal(entry.attached, false);
+  assert.deepEqual(calls.open, [
+    {
+      id: 'browser-1',
+      url: 'https://site.test/page',
+      viewport: { width: 900, height: 700 },
+    },
+  ]);
+  open.resolve();
+  assert.equal((await result).ok, true);
+  assert.equal(entry.agentActionActive, false);
+});
+
+test('close during agent authorization cannot reopen the browser after approval', async () => {
+  const agentApproval = deferred();
+  const { actions, calls, entry, getCurrentEntry } = harness({ agentApproval });
+  const opening = actions.run(request('open', { url: 'https://site.test/page' }));
+  await Promise.resolve();
+
+  assert.equal(entry.agentActionActive, true);
+  assert.deepEqual(calls.agentApproval, [request('open', { url: 'https://site.test/page' })]);
+  assert.deepEqual(calls.open, []);
+
+  await actions.run(request('close'));
+  assert.equal(getCurrentEntry(), null);
+  agentApproval.resolve();
+
+  await assert.rejects(opening, /browser.*changed while.*authorization/i);
+  assert.deepEqual(calls.open, []);
+  assert.equal(getCurrentEntry(), null);
+});
+
+test('direct user navigation skips agent policy authorization inside admission', async () => {
+  const { actions, calls } = harness();
+
+  await actions.run(request('open', { source: 'user', url: 'https://site.test/page' }));
+
+  assert.deepEqual(calls.agentApproval, []);
+  assert.equal(calls.open.length, 1);
+});
+
+test('page replacement during authentication approval prevents final agent input', async () => {
+  const authentication = deferred();
+  const { actions, calls, entry } = harness({ authentication });
+  const result = actions.run(request('click', { ref: 'ref-1' }));
+  await Promise.resolve();
+  await Promise.resolve();
+  entry.documentGeneration += 1;
+  authentication.resolve();
+
+  await assert.rejects(result, /page changed before the browser action completed/i);
+  assert.equal(
+    calls.scripts.filter((script) => script.includes('__DROIDMAXX_AGENT_ACTION')).length,
+    0,
+  );
+});
+
+test('navigation that wins the action race returns a fresh snapshot', async () => {
+  const execution = deferred();
+  const { actions, contents } = harness({ execution });
+  const result = actions.run(request('click', { ref: 'ref-1' }));
+  await Promise.resolve();
+  await Promise.resolve();
+  contents.emit('did-start-navigation', {}, 'https://site.test/next', false, true);
+  contents.emit('did-finish-load');
+
+  assert.deepEqual(await result, {
+    requestId: 'request-1',
+    ok: true,
+    snapshot: {
+      url: 'https://site.test/page',
+      canGoBack: true,
+      canGoForward: false,
+    },
+  });
+});
+
+test('resize delegates semantic viewport handling without attaching', async () => {
+  const { actions, calls, entry } = harness();
+  const viewport = { width: 640, height: 480, deviceScaleFactor: 2 };
+
+  assert.deepEqual(await actions.run(request('resize', { viewport })), {
+    requestId: 'request-1',
+    ok: true,
+  });
+  assert.deepEqual(calls.resize, [viewport]);
+  assert.equal(entry.attached, false);
+});
+
+test('browser sessions stay bound to their owning app session', async () => {
+  const { actions, entry } = harness();
+  entry.appSessionId = 'another-app';
+
+  await assert.rejects(actions.run(request('snapshot')), /belongs to a different DROIDEX chat/i);
+});
+
+test('overlapping browser operations are rejected without clearing the active operation', async () => {
+  const open = deferred();
+  const { actions, entry } = harness({ open });
+  const active = actions.run(request('open', { url: 'https://site.test/page' }));
+  await Promise.resolve();
+
+  await assert.rejects(actions.run(request('snapshot')), /browser operation is already active/i);
+  assert.equal(entry.agentActionActive, true);
+  open.resolve();
+  await active;
+});
+
+test('history navigation is canceled when the page changes during origin approval', async () => {
+  const originApproval = deferred();
+  let historyNavigations = 0;
+  const { actions, contents, entry } = harness({
+    originApproval,
+    contents: {
+      navigationHistory: {
+        canGoBack: () => true,
+        canGoForward: () => false,
+        canGoToOffset: () => true,
+        getActiveIndex: () => 1,
+        getEntryAtIndex: () => ({ url: 'https://other.test/page' }),
+        goToOffset: () => {
+          historyNavigations += 1;
+        },
+      },
+    },
+  });
+  const navigation = actions.run(request('goBack'));
+  await Promise.resolve();
+  await Promise.resolve();
+  entry.documentGeneration += 1;
+  originApproval.resolve();
+
+  await assert.rejects(navigation, /page changed before the browser action completed/i);
+  assert.equal(historyNavigations, 0);
+  contents.emit('destroyed');
+});
+
+test('open rejects a replacement view instead of snapshotting the wrong page', async () => {
+  const open = deferred();
+  const { actions, entry } = harness({ open });
+  const result = actions.run(request('open', { url: 'https://site.test/page' }));
+  await Promise.resolve();
+  entry.view = {
+    webContents: {
+      isDestroyed: () => false,
+      getURL: () => 'https://wrong.test/page',
+      executeJavaScript: async () => ({
+        requestId: 'request-1',
+        ok: true,
+        snapshot: { url: 'https://wrong.test/page' },
+      }),
+      navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+      setBackgroundThrottling() {},
+    },
+  };
+  open.resolve();
+
+  await assert.rejects(result, /browser view changed while the page was opening/i);
+});

@@ -56,7 +56,7 @@ function defaultProfileId(discovery: BrowserCookieProfileDiscovery): string {
   if (discovery.chrome.status !== 'available') return '';
   return (
     discovery.chrome.profiles.find((profile) => profile.isLastUsed)?.id ??
-    discovery.chrome.profiles[0]?.id ??
+    discovery.chrome.profiles.at(0)?.id ??
     ''
   );
 }

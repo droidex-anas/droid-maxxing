@@ -4,12 +4,8 @@
 // directly; they become an unsaved "custom" look until saved as a theme.
 
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
-import {
-  shallowEqual,
-  useStoreDispatch,
-  useStoreSelector,
-  type ThemeConfig,
-} from '../hooks/useStore';
+import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import type { ThemeConfig } from '../hooks/persistedThemePreferences';
 import {
   applyTheme,
   DEFAULT_THEME,

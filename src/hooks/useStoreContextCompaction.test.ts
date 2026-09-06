@@ -272,6 +272,7 @@ test('child runtime replacement clears only the prior exact-child context snapsh
           status: 'running',
           modelId: 'model-child',
           transcriptAvailable: true,
+          streamFidelity: 'state',
         },
       },
     },
@@ -312,6 +313,7 @@ test('child runtime unavailability clears a same-generation context snapshot', (
     status: 'paused' as const,
     modelId: 'model-child',
     transcriptAvailable: true,
+    streamFidelity: 'state',
   };
   const start: AppState = {
     ...initialState,

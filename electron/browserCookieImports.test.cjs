@@ -18,6 +18,7 @@ const preview = Object.freeze({
 function fixture(response = 0, prepareErrorCode, overrides = {}) {
   const calls = [];
   const receipts = [];
+  const timers = [];
   let latestReceipt = null;
   const plan = Object.freeze({ preview });
   const controller = createBrowserCookieImports({
@@ -39,7 +40,11 @@ function fixture(response = 0, prepareErrorCode, overrides = {}) {
     beforeCommit: overrides.beforeCommit,
     afterCommit: overrides.afterCommit,
     nextPlanId: () => 'opaque-plan-1',
-    setTimeout: () => ({ id: 'timer' }),
+    setTimeout: (callback, timeoutMs) => {
+      const timer = { callback, timeoutMs };
+      timers.push(timer);
+      return timer;
+    },
     clearTimeout: () => undefined,
     profileImport: {
       discoverBrowserCookieProfiles: async () => ({ chrome: { status: 'available' } }),
@@ -65,7 +70,7 @@ function fixture(response = 0, prepareErrorCode, overrides = {}) {
       },
     },
   });
-  return { calls, controller, receipts };
+  return { calls, controller, receipts, timers };
 }
 
 test('file recovery is explicitly Chrome-only and has no browser source selector', async () => {
@@ -141,6 +146,18 @@ test('profile plans commit or discard exactly once through their opaque id', asy
   assert.equal(discarded.controller.discardProfile('opaque-plan-1'), true);
   assert.equal(discarded.controller.discardProfile('opaque-plan-1'), false);
   assert.deepEqual(discarded.calls, ['prepare:Default', 'discard']);
+});
+
+test('profile plans expire and discard decrypted cookie data', async () => {
+  const { calls, controller, timers } = fixture(0);
+  await controller.prepareProfile('Default');
+
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].timeoutMs, 120_000);
+  timers[0].callback();
+
+  assert.deepEqual(calls, ['prepare:Default', 'discard']);
+  await assert.rejects(controller.commitProfile('opaque-plan-1'), /invalid or expired/);
 });
 
 test('partial profile commits record failed counts before returning the sanitized error', async () => {

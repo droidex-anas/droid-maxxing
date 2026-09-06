@@ -20,6 +20,7 @@ function child(
     modelId: 'droid-core',
     transcriptAvailable: true,
     startedAt: seq,
+    streamFidelity: 'state',
     ...overrides,
   };
 }

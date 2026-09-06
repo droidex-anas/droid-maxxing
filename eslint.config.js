@@ -97,7 +97,7 @@ export default tseslint.config(
   },
 
   {
-    files: ['electron/**/*.cjs'],
+    files: ['electron/**/*.cjs', 'electron-builder.config.cjs'],
     languageOptions: {
       globals: { ...globals.node },
       sourceType: 'commonjs',

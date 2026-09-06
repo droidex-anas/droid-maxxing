@@ -1,4 +1,4 @@
-import type { DiffStyle } from '../hooks/useStore';
+import type { DiffStyle } from '../hooks/persistedThemePreferences';
 
 export interface DiffPalette {
   addFg: string;

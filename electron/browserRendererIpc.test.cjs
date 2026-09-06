@@ -57,7 +57,7 @@ test('every DROIDEX browser renderer command authenticates the main frame', asyn
   assert.ok(authorized.every((authorizedEvent) => authorizedEvent === event));
 });
 
-test('agent action authorization and execution stay in one trusted transaction', async () => {
+test('agent action validation precedes native browser admission', async () => {
   const { calls, handlers } = harness();
   const request = {
     requestId: 'request-1',
@@ -69,10 +69,9 @@ test('agent action authorization and execution stay in one trusted transaction',
 
   const result = await handlers.get('native-browser-agent-action')({}, { request, bounds: {} });
 
-  assert.deepEqual(calls.slice(0, 3), [
+  assert.deepEqual(calls.slice(0, 2), [
     { owner: 'settings', method: 'validateRequest', args: [request] },
-    { owner: 'settings', method: 'authorizeAgentRequest', args: [request] },
-    { owner: 'native', method: 'runAgentAction', args: [request, {}] },
+    { owner: 'native', method: 'runAgentAction', args: [request] },
   ]);
   assert.deepEqual(result, {
     owner: 'native',
@@ -96,7 +95,7 @@ test('physical user navigation does not invoke agent origin authorization', asyn
 
   assert.deepEqual(calls, [
     { owner: 'settings', method: 'validateRequest', args: [request] },
-    { owner: 'native', method: 'runAgentAction', args: [request, undefined] },
+    { owner: 'native', method: 'runAgentAction', args: [request] },
   ]);
 });
 

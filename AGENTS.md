@@ -293,6 +293,14 @@ npm run build
 `npm run lint` is currently non-blocking because of existing backlog. New and
 changed files remain responsible for their diagnostics.
 
+Performance changes are validated with the deterministic replay harness
+(`npm run perf:replay -- --scenario <smoke|idle|streaming|multi-agent|agents-4|agents-16|agents-27|long-history|long-tail|session-switch|soak>`)
+instead of intuition; artifacts land in `reports/perf/`. Compare `origin/main`
+against this branch with `npm run perf:compare` / `npm run perf:report`. Fail
+deterministic invariants with `npm run perf:gates` (also `npm run quality:perf-gates`).
+Convenience aliases: `npm run perf:multi-agent`, `npm run perf:long-session`,
+`npm run perf:soak`. Bundle budgets remain `npm run quality:bundle-budgets`.
+
 ## Project map
 
 - `src/`: React UI, state, hooks, and frontend tests

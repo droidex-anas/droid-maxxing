@@ -5,21 +5,22 @@
 // (SessionRow, marquee, inline rename) already lives in SidebarSessionRow.tsx;
 // further splitting was rejected because the remaining handlers are composition
 // glue that fail the deletion test (extracting them would only forward store
-// state), and the Expand/WorkspaceFolderIcon primitives are too small to
-// justify their own modules. Reviewed ceiling: ~750 lines; extract the
+// state), and Expand is too small to justify its own module. The workspace
+// heading (collapse, new chat, context-menu remove) lives in
+// SidebarWorkspaceRow.tsx. Reviewed ceiling: ~750 lines; extract the
 // workspace section if it grows past that.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { useDocumentVisible } from '../hooks/useDocumentVisible';
 import { pickDirectory } from '../lib/desktop';
 import { dismissSidebarCard, loadSidebarCardSeen } from '../lib/sidebarCards';
+import { bindLazySurfaceIntent } from '../lib/chunkPreloader';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import {
   CirclePlus,
-  Folder,
   FolderOpen,
   Plus,
   Search,
@@ -36,11 +37,13 @@ import {
   SIDEBAR_VISIBLE_SESSION_LIMIT,
   type WorkspaceScope,
 } from '../lib/workspaces';
+import { SidebarSessionList } from './SidebarSessionList';
 import { chatDisplayTitle, isChatHidden, isChatPinned, pinnedChats } from '../lib/chatMetadata';
 import { exportSessionMarkdown, renameSession } from '../lib/commands';
 import { toast } from '../lib/toast';
 import { SessionContextMenu } from './SessionContextMenu';
 import { SessionRow } from './SidebarSessionRow';
+import { SidebarWorkspaceRow } from './SidebarWorkspaceRow';
 import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
 import { sessionAttention } from '../lib/sessionAttention';
 import type { SessionSummary } from '../types/bridge';
@@ -102,40 +105,20 @@ function Expand({ open, children }: { open: boolean; children: ReactNode }) {
   );
 }
 
-// The workspace folder glyph doubles as the collapse indicator: closed while
-// the workspace is collapsed, open while expanded, crossfading between states.
-function WorkspaceFolderIcon({ open }: { open: boolean }) {
-  const reduceMotion = useReducedMotion();
-  const duration = reduceMotion ? 0 : 0.15;
-  return (
-    <span className="relative block w-4 h-4 shrink-0 text-droid-text-muted">
-      <motion.span
-        className="absolute inset-0 flex items-center justify-center"
-        initial={false}
-        animate={{ opacity: open ? 0 : 1 }}
-        transition={{ duration, ease: EASE }}
-      >
-        <Folder className="w-4 h-4" />
-      </motion.span>
-      <motion.span
-        className="absolute inset-0 flex items-center justify-center"
-        initial={false}
-        animate={{ opacity: open ? 1 : 0 }}
-        transition={{ duration, ease: EASE }}
-      >
-        <FolderOpen className="w-4 h-4" />
-      </motion.span>
-    </span>
-  );
-}
-
-export default function Sidebar({ workspaceScopes }: { workspaceScopes: WorkspaceScope[] }) {
+export default function Sidebar({
+  workspaceScopes,
+  onShowEarlierSessions,
+}: {
+  workspaceScopes: WorkspaceScope[];
+  onShowEarlierSessions: (executionCwds: readonly string[]) => void;
+}) {
   const dispatch = useStoreDispatch();
   const state = useStoreSelector(
     (current) => ({
       activeAppSessionId: current.activeAppSessionId,
       chatMetadata: current.chatMetadata,
       draftChat: current.draftChat,
+      earlierSessionsByCwd: current.earlierSessionsByCwd,
       mainView: current.mainView,
       pendingPermissions: current.pendingPermissions,
       pendingQuestions: current.pendingQuestions,
@@ -162,6 +145,9 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
     null,
   );
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
 
   const documentVisible = useDocumentVisible();
   const [now, setNow] = useState(() => Date.now());
@@ -295,14 +281,22 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
     const sections = buildWorkspaceSections(
       workspaceScopes.map((scope) => scope.cwd),
       sessions,
-      { executionCwds },
+      { executionCwds, earlierSessionsByCwd: state.earlierSessionsByCwd },
     );
     // In unread-only mode, drop read sessions and workspaces left empty.
     if (!unreadOnly) return sections;
     return sections
       .map((ws) => ({ ...ws, sessions: ws.sessions.filter(isUnread) }))
       .filter((ws) => ws.sessions.length > 0);
-  }, [state.sessionOrder, state.sessions, workspaceScopes, unreadOnly, isUnread, isListedNormally]);
+  }, [
+    state.sessionOrder,
+    state.sessions,
+    state.earlierSessionsByCwd,
+    workspaceScopes,
+    unreadOnly,
+    isUnread,
+    isListedNormally,
+  ]);
 
   const handleSelectSession = useCallback(
     (appSessionId: string) => {
@@ -389,54 +383,26 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
     />
   );
 
-  // Show the latest sessions and tuck the rest behind a "Show more" toggle. The
-  // active session is always kept visible so selecting an older one never hides
-  // it on the next render.
-  const renderSessionList = (sectionKey: string, sessions: SessionSummary[]) => {
-    const total = sessions.length;
-    const count = Math.min(visibleCountFor(sectionKey), total);
-    let visible = sessions.slice(0, count);
-    // Keep the active session visible even if it sits below the paged window so
-    // selecting an older chat never hides it on the next render.
-    if (
-      activeSession &&
-      sessions.some((m) => m.appSessionId === activeSession.appSessionId) &&
-      !visible.some((m) => m.appSessionId === activeSession.appSessionId)
-    ) {
-      visible = [...visible, state.sessions[activeSession.appSessionId]];
-    }
-    const remaining = total - count;
-    const isExpanded = count > SIDEBAR_VISIBLE_SESSION_LIMIT;
-    return (
-      <div className="mt-0.5 space-y-0.5">
-        {visible.map(renderRow)}
-        {(remaining > 0 || isExpanded) && (
-          <div className="flex items-center gap-3 pl-3 pr-2 pt-0.5">
-            {remaining > 0 && (
-              <button
-                onClick={() => {
-                  showMore(sectionKey);
-                }}
-                className="text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
-              >
-                Show more
-              </button>
-            )}
-            {isExpanded && (
-              <button
-                onClick={() => {
-                  showLess(sectionKey);
-                }}
-                className="text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
-              >
-                Show less
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
+  const renderSessionList = (
+    sectionKey: string,
+    sessions: SessionSummary[],
+    earlier?: { count: number; onShow: () => void },
+  ) => (
+    <SidebarSessionList
+      sessions={sessions}
+      visibleCount={visibleCountFor(sectionKey)}
+      activeAppSessionId={state.activeAppSessionId}
+      renderRow={renderRow}
+      onShowMore={() => {
+        showMore(sectionKey);
+      }}
+      onShowLess={() => {
+        showLess(sectionKey);
+      }}
+      earlierSessionCount={earlier?.count}
+      onShowEarlier={earlier?.onShow}
+    />
+  );
 
   return (
     <aside
@@ -607,32 +573,29 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
                   {workspaces.map((ws) => {
                     const wsOpen = !collapsed.has(ws.cwd);
                     return (
-                      <div key={ws.cwd}>
-                        <div className="group flex items-center gap-1 px-1 py-1">
-                          <button
-                            onClick={() => {
-                              toggleCollapse(ws.cwd);
-                            }}
-                            aria-expanded={wsOpen}
-                            className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-lg px-1 py-0.5 hover:bg-droid-elevated/40 transition-colors"
-                          >
-                            <WorkspaceFolderIcon open={wsOpen} />
-                            <span className="min-w-0 flex-1 truncate text-[13.5px] text-droid-text">
-                              {ws.name}
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              startChat(ws.cwd);
-                            }}
-                            title="New chat here"
-                            className="p-0.5 rounded-md text-droid-text-muted/0 group-hover:text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <Expand open={wsOpen}>{renderSessionList(ws.cwd, ws.sessions)}</Expand>
-                      </div>
+                      <SidebarWorkspaceRow
+                        key={ws.cwd}
+                        name={ws.name}
+                        open={wsOpen}
+                        onToggle={() => {
+                          toggleCollapse(ws.cwd);
+                        }}
+                        onNewChat={() => {
+                          startChat(ws.cwd);
+                        }}
+                        onRemove={() => {
+                          dispatch({ type: 'REMOVE_WORKSPACE', cwd: ws.cwd });
+                        }}
+                      >
+                        <Expand open={wsOpen}>
+                          {renderSessionList(ws.cwd, ws.sessions, {
+                            count: ws.earlierSessionCount,
+                            onShow: () => {
+                              onShowEarlierSessions(ws.executionCwds);
+                            },
+                          })}
+                        </Expand>
+                      </SidebarWorkspaceRow>
                     );
                   })}
 
@@ -704,6 +667,7 @@ export default function Sidebar({ workspaceScopes }: { workspaceScopes: Workspac
         </AnimatePresence>
         <div className="flex items-center gap-1">
           <button
+            ref={settingsButtonRef}
             onClick={() => {
               dispatch({ type: 'TOGGLE_SETTINGS' });
             }}

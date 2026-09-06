@@ -53,6 +53,16 @@ test('browser network diagnostics remove URL credentials and sensitive parameter
   );
 });
 
+test('browser URL diagnostics fail closed for malformed secret-bearing values', () => {
+  const malformed = 'https://user:private-value@[::1/path?access_token=private-value';
+
+  assert.equal(redactBrowserDiagnosticUrl(malformed), '[invalid URL]');
+  assert.equal(
+    redactBrowserDiagnosticUrl('/?authorization=private-value', 'not a valid base URL'),
+    '[invalid URL]',
+  );
+});
+
 test('browser console redaction stays bounded on adversarial quoted input', () => {
   const value = `password="${'\\\\'.repeat(20_000)}secret" safe=visible`;
   const redacted = redactBrowserDiagnosticText(value);

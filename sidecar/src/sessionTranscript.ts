@@ -8,7 +8,6 @@
 // pages and reopens cheap. Because offsets are absolute, every message of an
 // arbitrarily large session stays reachable by cursor.
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
-import { open as openAsync, readFile as readFileAsync } from 'node:fs/promises';
 import {
   event,
   parseSessionLineEvents,
@@ -21,9 +20,9 @@ import type { SessionRole, TranscriptEvent } from './protocol.js';
 // the history path's import stays stable.
 export type { StoredMessageLine, StoredSessionStart } from './sessionTranscriptParser.js';
 
-// Byte cap for the EAGER readers only (transcript search and the legacy
-// history.page full parse): they materialize file text, so oversized files
-// are tail-windowed. The lazy SessionTranscriptReader has no such cap.
+// Byte cap for the eager history.page parser: it materializes file text, so
+// oversized files are tail-windowed. The lazy SessionTranscriptReader and
+// worker-owned search index have no whole-file materialization cap.
 export const MAX_SESSION_BYTES = 5_000_000;
 // seq band per line: a line yields one event per content block, so (line,
 // event-in-line) maps to a unique, stable, monotonically increasing seq
@@ -72,30 +71,6 @@ export function readSessionRawWindow(
     };
   } finally {
     closeSync(fd);
-  }
-}
-
-// Async twin of readSessionRawWindow for callers that must not block the
-// event loop (transcript content search answers bridge commands inline).
-export async function readSessionRawWindowAsync(
-  path: string,
-  size: number,
-): Promise<{ text: string; trimmed: boolean }> {
-  if (size <= MAX_SESSION_BYTES) {
-    return { text: await readFileAsync(path, 'utf8'), trimmed: false };
-  }
-  const handle = await openAsync(path, 'r');
-  try {
-    const buffer = Buffer.alloc(MAX_SESSION_BYTES);
-    await handle.read(buffer, 0, MAX_SESSION_BYTES, size - MAX_SESSION_BYTES);
-    const raw = buffer.toString('utf8');
-    const firstNewline = raw.indexOf('\n');
-    return {
-      text: firstNewline >= 0 ? raw.slice(firstNewline + 1) : raw,
-      trimmed: true,
-    };
-  } finally {
-    await handle.close();
   }
 }
 

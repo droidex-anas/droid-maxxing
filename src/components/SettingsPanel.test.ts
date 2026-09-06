@@ -131,13 +131,12 @@ test('settings renders when the persisted active session is absent from the snap
     workspaceCwds: ['/workspace'],
   };
 
-  assert.doesNotThrow(() =>
-    renderToStaticMarkup(
-      createElement(
-        StaticStoreProvider,
-        { state, dispatch: () => undefined },
-        createElement(SettingsPanel),
-      ),
+  const html = renderToStaticMarkup(
+    createElement(
+      StaticStoreProvider,
+      { state, dispatch: () => undefined },
+      createElement(SettingsPanel),
     ),
   );
+  assert.match(html, /Back to app/);
 });

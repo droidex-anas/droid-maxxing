@@ -75,6 +75,15 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   ]),
   e('General', 'Diff view', ['unified', 'split', 'side by side', 'diff layout']),
   e('General', 'Diff theme', ['soft', 'focused', 'diff contrast', 'diff colors']),
+  e('General', 'Hardware acceleration', [
+    'gpu',
+    'graphics',
+    'rendering',
+    'performance',
+    'flicker',
+    'blank screen',
+    'driver',
+  ]),
   e('General', 'Compaction model', ['compact', 'summarize', 'compaction']),
   e('General', 'Token limit', ['context limit', 'compaction limit', 'tokens']),
   e('General', 'Per-model token limits', [

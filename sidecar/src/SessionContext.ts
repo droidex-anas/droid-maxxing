@@ -1,5 +1,11 @@
 import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
 import {
+  ContextPollHost,
+  contextPollIntervalMs,
+  type BackgroundWorkTier,
+  type ContextPollerCounts,
+} from './contextPollScheduler.js';
+import {
   applyExactUsage,
   cappedContextSnapshot,
   contextBreakdownSnapshot,
@@ -54,11 +60,8 @@ interface SessionContextDependencies {
   // Reports the context window the provider itself measured for a model, so
   // compaction limits can be clamped even for models missing from the catalog.
   noteContextWindow: (modelId: string, contextWindowTokens: number) => void;
-}
-
-interface ContextPoller {
-  timer: ReturnType<typeof setInterval>;
-  session: FactorySession;
+  setIntervalFn?: typeof setInterval;
+  clearIntervalFn?: typeof clearInterval;
 }
 
 export class SessionContext {
@@ -84,10 +87,22 @@ export class SessionContext {
   private readonly pendingCompactionResets = new Set<string>();
   private readonly recordedCompactions = new Map<string, Map<string, number>>();
   private readonly usagePersistenceRetries = new Set<string>();
-  private readonly pollers = new Map<string, ContextPoller>();
+  private readonly pollers: ContextPollHost<ContextOperationTarget>;
+  private backgroundWorkTier: BackgroundWorkTier = 'interactive';
+  private focusedAppSessionId: string | null = null;
   private epoch = 0;
 
-  constructor(private readonly dependencies: SessionContextDependencies) {}
+  constructor(private readonly dependencies: SessionContextDependencies) {
+    this.pollers = new ContextPollHost({
+      setIntervalFn: dependencies.setIntervalFn,
+      clearIntervalFn: dependencies.clearIntervalFn,
+      cadenceFor: (target) => this.pollIntervalMs(target),
+      poll: (target) => {
+        if (!target.isCurrent()) return;
+        void this.refresh(target, { persist: false });
+      },
+    });
+  }
 
   recordUsage(appSessionId: string, sourceSessionId: string, usage: NormalizedTokenUsage): void {
     const liveSession = this.dependencies.registry.getLive(appSessionId);
@@ -168,24 +183,32 @@ export class SessionContext {
   }
 
   startPolling(target: ContextOperationTarget): void {
-    const key = contextResourceKey(target);
-    if (this.pollers.has(key) || !target.isCurrent()) return;
-    const epoch = this.epoch;
-    const poll = () => {
-      if (epoch !== this.epoch || !target.isCurrent()) return;
-      void this.refresh(target, { persist: false });
-    };
-    const timer = setInterval(poll, 2_500);
-    this.pollers.set(key, { timer, session: target.session });
-    poll();
+    if (!target.isCurrent()) return;
+    this.pollers.start(contextResourceKey(target), target);
   }
 
   stopPolling(target: ContextOperationTarget): void {
-    const key = contextResourceKey(target);
-    const poller = this.pollers.get(key);
-    if (poller?.session !== target.session) return;
-    clearInterval(poller.timer);
-    this.pollers.delete(key);
+    this.pollers.stop(contextResourceKey(target), target.session);
+  }
+
+  setBackgroundWork(tier: BackgroundWorkTier, focusedAppSessionId?: string | null): void {
+    const nextFocus =
+      focusedAppSessionId === undefined ? this.focusedAppSessionId : focusedAppSessionId;
+    if (this.backgroundWorkTier === tier && this.focusedAppSessionId === nextFocus) return;
+    this.backgroundWorkTier = tier;
+    this.focusedAppSessionId = nextFocus;
+    this.pollers.reschedule();
+  }
+
+  // The session the renderer reports as on screen. Owned here because poll
+  // cadence already keys off it; other policies read it rather than tracking
+  // their own copy.
+  focusedSession(): string | null {
+    return this.focusedAppSessionId;
+  }
+
+  pollerCounts(): ContextPollerCounts {
+    return this.pollers.counts();
   }
 
   async refresh(
@@ -316,8 +339,7 @@ export class SessionContext {
 
   clearAll(): void {
     this.epoch += 1;
-    for (const poller of this.pollers.values()) clearInterval(poller.timer);
-    this.pollers.clear();
+    this.pollers.clearAll();
     this.snapshots.clear();
     this.compactions.clear();
     this.providerUsageBaselines.clear();
@@ -333,10 +355,16 @@ export class SessionContext {
   }
 
   private stopPollingKey(key: string): void {
-    const poller = this.pollers.get(key);
-    if (!poller) return;
-    clearInterval(poller.timer);
-    this.pollers.delete(key);
+    this.pollers.stop(key);
+  }
+
+  private pollIntervalMs(target: ContextOperationTarget): number {
+    return contextPollIntervalMs({
+      tier: this.backgroundWorkTier,
+      isChild: isChildTarget(target),
+      focusedAppSessionId: this.focusedAppSessionId,
+      appSessionId: target.appSessionId,
+    });
   }
 
   private publishSnapshot(

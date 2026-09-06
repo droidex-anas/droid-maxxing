@@ -131,6 +131,7 @@ function validateCookieImportReceipt(value) {
     typeof value.profileLabel !== 'string' ||
     !value.profileLabel.trim() ||
     value.profileLabel.length > 80 ||
+    // eslint-disable-next-line no-control-regex -- Persisted profile labels must reject control bytes.
     /[\u0000-\u001f\u007f]/.test(value.profileLabel)
   ) {
     throw new Error('Invalid browser settings: cookie import profile label is invalid.');

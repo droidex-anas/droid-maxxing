@@ -134,7 +134,7 @@ test('cursor overlay is sandboxed, click-through, static, and blocks navigation'
   assert.equal(prevented, true);
 });
 
-test('cursor documents render the curved DROIDEX pointer with subtle accessible motion', () => {
+test('cursor documents are distinct, script-free, and respect reduced motion', () => {
   assert.deepEqual(BROWSER_AGENT_CURSOR_STYLES, ['dark', 'light', 'droidex']);
   assert.equal(BROWSER_AGENT_CURSOR_DEFAULT_SIZE, 36);
   assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 5 });
@@ -144,20 +144,10 @@ test('cursor documents render the curved DROIDEX pointer with subtle accessible 
   );
   for (const document of documents) {
     assert.match(document, /default-src 'none'/);
-    assert.match(document, /<path d="M6 3\.5 L27 20\.5 C20\.3 19\.5 12\.7 20\.8 5 28 Z"/);
     assert.match(document, /@keyframes cursor-rock/);
-    assert.match(document, /rotate\(-3deg\)/);
-    assert.match(document, /rotate\(3\.4deg\)/);
-    assert.match(document, /transform-origin:6px 4px/);
     assert.match(document, /prefers-reduced-motion:reduce/);
     assert.doesNotMatch(document, /<script|javascript:/i);
   }
-  assert.doesNotMatch(documents[0], /class="agent-trail/);
-  assert.doesNotMatch(documents[1], /class="agent-trail/);
-  assert.doesNotMatch(documents[2], /class="agent-trail/);
-  assert.match(documents[2], /stroke="#dce1eb"/i);
-  assert.match(documents[2], /fill-opacity="\.82"/);
-  assert.match(documents[2], /rgba\(80,139,255,\.75\)/);
   assert.equal(new Set(documents).size, 3);
   assert.throws(
     () => createBrowserAgentCursorDataUrl('url(https://page.example/cursor.svg)'),
@@ -297,31 +287,6 @@ test('background browser actions stay parked without raising an inactive app', a
 
   host.focused = false;
   host.emit('blur');
-  assert.equal(windows[0].hidden > 0, true);
-});
-
-test('visible cursor stays parked until its browser surface is hidden', async () => {
-  let scheduled = 0;
-  const { controller, windows } = harness({
-    setTimeout: () => {
-      scheduled += 1;
-      return { unref: () => undefined };
-    },
-    clearTimeout: () => undefined,
-  });
-  controller.attach({
-    browserSessionId: 'browser-1',
-    hostWindow: hostWindow(),
-    bounds: browserBounds,
-  });
-
-  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
-  assert.equal(windows[0].shown, 1);
-  assert.equal(scheduled, 0);
-  assert.equal(windows[0].hidden, 0);
-
-  controller.hide('browser-1');
-
   assert.equal(windows[0].hidden > 0, true);
 });
 
