@@ -34,6 +34,7 @@ function makeProps(overrides: Partial<SessionRowProps> = {}): SessionRowProps {
     unread: false,
     running: false,
     attention: null,
+    activityStatus: 'ready',
     renaming: false,
     now: 5_000,
     onSelect: () => undefined,

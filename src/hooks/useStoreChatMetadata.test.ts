@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { initialState, reducer, type AppState } from './useStore';
+import { chatMatchesPullRequest, loadChatMetadata, saveChatMetadata } from '../lib/chatMetadata';
 import type { SessionSummary } from '../types/bridge';
 
 function makeSession(appSessionId: string, updatedAt = 1): SessionSummary {
@@ -148,4 +149,65 @@ test('SESSION_LIST prunes metadata only for confirmed sessions it no longer repo
     kept: { pinnedAt: 100 },
     local: { pinnedAt: 200 },
   });
+});
+
+test('detected PR links persist, keep earlier PRs, and reject a stale worktree result', () => {
+  let state = stateWithSessions('s1', 's2');
+  state = {
+    ...state,
+    sessions: {
+      s1: { ...state.sessions.s1, cwd: '/worktree/one' },
+      s2: { ...state.sessions.s2, cwd: '/worktree/two' },
+    },
+  };
+  const pr = {
+    number: 42,
+    url: 'https://github.com/team/repo/pull/42',
+    title: 'Sidebar',
+    state: 'OPEN',
+    isDraft: false,
+    headRefName: 'sidebar',
+  };
+  const action = {
+    type: 'LINK_CHATS_PR' as const,
+    appSessionIds: ['s1', 's2'],
+    cwd: '/worktree/one',
+    pr,
+  };
+  assert.equal(reducer(state, { ...action, cwd: '/old-worktree' }), state);
+  state = reducer(state, action);
+  assert.equal(state.chatMetadata.s2, undefined);
+  assert.equal(reducer(state, action), state);
+  state = reducer(state, { ...action, appSessionIds: ['s2'], cwd: '/worktree/two' });
+  state = reducer(state, { ...action, pr: { ...pr, state: 'MERGED' } });
+  assert.equal(state.chatMetadata.s2.pullRequests?.[0]?.state, 'MERGED');
+  state = reducer(state, {
+    ...action,
+    pr: { ...pr, number: 43, url: 'https://github.com/team/repo/pull/43' },
+  });
+  assert.equal(state.chatMetadata.s1.pullRequests?.length, 2);
+  assert.equal(chatMatchesPullRequest(state.chatMetadata.s1, '#42'), true);
+  assert.equal(chatMatchesPullRequest(state.chatMetadata.s1, '420'), false);
+  assert.equal(
+    chatMatchesPullRequest(state.chatMetadata.s1, 'https://github.com/other/repo/pull/42'),
+    false,
+  );
+  const saved = new Map<string, string>();
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        saved.set(key, value);
+      },
+    },
+  });
+  try {
+    saveChatMetadata(state.chatMetadata);
+    assert.deepEqual(loadChatMetadata(), state.chatMetadata);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
 });

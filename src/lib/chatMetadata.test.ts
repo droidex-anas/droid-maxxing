@@ -8,6 +8,7 @@ import {
   isChatHidden,
   isChatPinned,
   loadChatMetadata,
+  linkChatsPullRequest,
   MAX_CHAT_TITLE_LENGTH,
   pinChat,
   pinnedChats,
@@ -325,4 +326,27 @@ test('loadChatMetadata sanitizes corrupt payloads', () => {
   assert.deepEqual(loadChatMetadata(), {});
   data.set('droid-chat-metadata', '[1,2]');
   assert.deepEqual(loadChatMetadata(), {});
+});
+
+test('automatic PR discovery preserves names and pins and does not churn a full cache', () => {
+  const pr = {
+    number: 42,
+    url: 'https://github.com/team/repo/pull/42',
+    title: 'Sidebar',
+    state: 'OPEN',
+    isDraft: false,
+    headRefName: 'sidebar',
+  };
+  const original: ChatMetadataMap = { important: { displayTitle: 'Keep this name', pinnedAt: 1 } };
+  const ids = Array.from({ length: 1100 }, (_, index) => `chat-${String(index)}`);
+  const linked = linkChatsPullRequest(original, ids, pr);
+  assert.ok(linked);
+  assert.equal(Object.keys(linked).length, 1000);
+  assert.deepEqual(linked.important, original.important);
+  assert.equal(linkChatsPullRequest(linked, ids, pr), null);
+  const renamed = renameChat(linked, 'another', 'Explicit name');
+  assert.ok(renamed);
+  assert.deepEqual(renamed.important, original.important);
+  assert.equal(renamed.another.displayTitle, 'Explicit name');
+  assert.equal(Object.keys(renamed).length, 1000);
 });

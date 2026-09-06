@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { useSidebarContentSearch } from '../hooks/useSidebarContentSearch';
 import { shallowEqual, useStoreSelector } from '../hooks/useStore';
-import { chatDisplayTitle, isChatHidden } from '../lib/chatMetadata';
+import {
+  chatDisplayTitle,
+  chatMatchesPullRequest,
+  isChatHidden,
+  type ChatMetadataMap,
+} from '../lib/chatMetadata';
 import { sidebarSearchNotice } from '../lib/sidebarSearchStatus';
 import { formatRelativeTime } from '../lib/time';
 import type { SessionSearchMatch, SessionSummary } from '../types/bridge';
@@ -34,6 +39,7 @@ export default function SidebarSearch({
     }),
     shallowEqual,
   );
+  const metadata: Partial<ChatMetadataMap> = state.chatMetadata;
   const [query, setQuery] = useState('');
   const { pending, contentResults, searchUnavailable, indexingIncomplete } =
     useSidebarContentSearch(query);
@@ -56,7 +62,8 @@ export default function SidebarSearch({
     for (const session of sessions) {
       const titleHit = session.title.toLowerCase().includes(trimmed);
       const contentMatches = contentResults.get(session.appSessionId);
-      if (!titleHit && !contentMatches) continue;
+      const prHit = chatMatchesPullRequest(state.chatMetadata[session.appSessionId], trimmed);
+      if (!titleHit && !contentMatches && !prHit) continue;
       byId.set(session.appSessionId, { session, matches: contentMatches ?? [] });
     }
     return [...byId.values()].slice(0, MAX_ENTRIES);
@@ -90,10 +97,10 @@ export default function SidebarSearch({
       query={query}
       onQueryChange={setQuery}
       onKeyDown={handleKeyDown}
-      placeholder="Search sessions and messages..."
-      inputAriaLabel="Search sessions and messages"
+      placeholder="Search chats, messages, or PRs…"
+      inputAriaLabel="Search chats, messages, and PRs"
       enterHint="Open session"
-      footerRight={trimmed ? 'Titles and message text' : 'Recent sessions'}
+      footerRight={trimmed ? 'Titles, messages, and linked PRs' : 'Try a PR number or URL'}
     >
       {notice ? <SidebarSearchNotice kind={notice.kind} layout={notice.layout} /> : null}
       {entries.map((entry, i) => (
@@ -119,6 +126,15 @@ export default function SidebarSearch({
                 {formatRelativeTime(entry.session.updatedAt, now)}
               </span>
             </span>
+            {trimmed &&
+              metadata[entry.session.appSessionId]?.pullRequests?.map((pr) => (
+                <span
+                  key={pr.url}
+                  className="mt-0.5 block truncate text-[11px] text-droid-text-muted"
+                >
+                  #{pr.number} · {pr.title} · {pr.state.toLowerCase()}
+                </span>
+              ))}
             {entry.matches.slice(0, SNIPPETS_PER_ROW).map((m, j) => (
               <span key={j} className="block truncate text-[12px] text-droid-text-muted mt-0.5">
                 {m.author === 'user' ? 'You: ' : ''}

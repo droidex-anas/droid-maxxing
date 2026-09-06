@@ -6,6 +6,7 @@ export interface SidebarSessionListProps {
   sessions: SessionSummary[];
   /** Rows to show before "Show more"; owned by the section, not this list. */
   visibleCount: number;
+  defaultVisibleCount?: number;
   activeAppSessionId: string | null;
   renderRow: (session: SessionSummary) => ReactNode;
   onShowMore: () => void;
@@ -23,6 +24,7 @@ const CONTROL_CLASS = 'text-[12px] text-droid-text-muted hover:text-droid-text t
 export function SidebarSessionList({
   sessions,
   visibleCount,
+  defaultVisibleCount = SIDEBAR_VISIBLE_SESSION_LIMIT,
   activeAppSessionId,
   renderRow,
   onShowMore,
@@ -40,7 +42,7 @@ export function SidebarSessionList({
   if (active && !visible.includes(active)) visible = [...visible, active];
 
   const remaining = sessions.length - count;
-  const isExpanded = count > SIDEBAR_VISIBLE_SESSION_LIMIT;
+  const isExpanded = count > defaultVisibleCount;
   // Revealing also pages the window forward, otherwise the newly loaded
   // sessions land below it and the click looks like it did nothing.
   const showEarlier =

@@ -708,10 +708,9 @@ test('send-now queues without interrupting compaction and reports interrupt reje
   await rejectingProvider.waitForPrompts(2);
 });
 
-test('turn start leaves updatedAt alone and the settled turn moves it', async () => {
-  // updatedAt drives sidebar order and the renderer's unread marker. While a
-  // turn is in flight the session must not read as unread; only the settled
-  // turn (the model's finished response) moves updatedAt.
+test('resuming a turn persists recent activity immediately and completion advances it again', async () => {
+  // Recency survives a restart mid-turn; streaming suppresses unread until
+  // the response completes.
   const harness = createHarness();
   const provider = queueCreate(harness, 'touch');
   await harness.lifecycle.create(createCommand());
@@ -725,13 +724,14 @@ test('turn start leaves updatedAt alone and the settled turn moves it', async ()
   await provider.waitForPrompts(2);
   const mid = harness.registry.getCanonicalSummary('touch');
   assert.equal(mid?.streaming, true);
-  assert.equal(mid?.updatedAt, before);
+  assert.ok(mid !== undefined && mid.updatedAt > before);
+  assert.equal(harness.history.persisted.at(-1)?.updatedAt, mid.updatedAt);
 
   gate.resolve();
   await sending;
   const after = harness.registry.getCanonicalSummary('touch');
   assert.equal(after?.streaming, false);
-  assert.ok(after !== undefined && after.updatedAt > before);
+  assert.ok(after !== undefined && after.updatedAt > mid.updatedAt);
 });
 
 test('queueing sends while streaming leaves updatedAt alone', async () => {
