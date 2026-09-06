@@ -421,6 +421,20 @@ function recordArray(value: unknown): boolean {
   return Array.isArray(value) && value.every(isRecord);
 }
 
+function identifiedRecordArray(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => isRecord(entry) && typeof entry.id === 'string' && entry.id.length > 0)
+  );
+}
+
+function isSessionOriginMap(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return Object.values(value).every(
+    (origin) => isRecord(origin) && typeof origin.runId === 'string' && origin.runId.length > 0,
+  );
+}
+
 function progressArray(value: unknown): boolean {
   return (
     Array.isArray(value) &&
@@ -434,10 +448,10 @@ function progressArray(value: unknown): boolean {
 function isAutomationSnapshot(value: unknown): boolean {
   if (
     !isRecord(value) ||
-    !recordArray(value.automations) ||
-    !recordArray(value.runs) ||
-    !recordArray(value.proposals) ||
-    !isRecord(value.sessionOrigins) ||
+    !identifiedRecordArray(value.automations) ||
+    !identifiedRecordArray(value.runs) ||
+    !identifiedRecordArray(value.proposals) ||
+    !isSessionOriginMap(value.sessionOrigins) ||
     !nonNegativeSafeInteger(value.queuedRunCount) ||
     !nonNegativeSafeInteger(value.activeRunCount) ||
     !isRecord(value.scheduler)

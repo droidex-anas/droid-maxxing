@@ -11,6 +11,7 @@ import {
 import type { FactorySession } from './DroidRuntime.js';
 import { classifyPermission, confirmationType, permissionSignature } from './normalize.js';
 import { shouldAutoApproveAutomationPermission } from './automations/permissionPolicy.js';
+import { isUnattendedAutomationSession } from './automations/AutomationManager.js';
 import {
   isAlwaysOutcome,
   isApprovalOutcome,
@@ -55,39 +56,50 @@ export class SessionInteractions {
   constructor(private readonly dependencies: SessionInteractionsDependencies) {}
 
   makePermissionHandler(ref: { id: string }): PermissionHandler {
-    return (params: RequestPermissionRequestParams) =>
-      new Promise<RequestPermissionHandlerResult>((resolve) => {
-        const liveSession = this.dependencies.getLiveSession(ref.id);
-        if (shouldAutoApproveAutomationPermission(params, liveSession?.summary.autonomy)) {
-          resolve(normalizePermissionOutcome('proceed_once'));
-          return;
-        }
-        const requestId = defaultNextRequestId();
-        const type = confirmationType(params);
-        const request = classifyPermission(ref.id, requestId, params);
-        const signature = permissionSignature(params);
-        const scope = liveSession ? this.scope(liveSession.summary.appSessionId) : undefined;
-        if (scope && signature && scope.permissionGrants.has(signature)) {
-          resolve(normalizePermissionOutcome('proceed_always'));
-          return;
-        }
-        if (liveSession && scope) {
-          scope.pendingPermissions.set(requestId, {
-            resolve,
-            kind: request.kind,
-            ...(signature ? { signature } : {}),
+    return (params: RequestPermissionRequestParams) => this.decidePermission(ref.id, params);
+  }
+
+  private async decidePermission(
+    sessionId: string,
+    params: RequestPermissionRequestParams,
+  ): Promise<RequestPermissionHandlerResult> {
+    const liveSession = this.dependencies.getLiveSession(sessionId);
+    if (
+      shouldAutoApproveAutomationPermission(
+        params,
+        liveSession?.summary.autonomy,
+        await isUnattendedAutomationSession(liveSession?.summary.appSessionId),
+      )
+    ) {
+      return normalizePermissionOutcome('proceed_once');
+    }
+    return await new Promise<RequestPermissionHandlerResult>((resolve) => {
+      const requestId = defaultNextRequestId();
+      const type = confirmationType(params);
+      const request = classifyPermission(sessionId, requestId, params);
+      const signature = permissionSignature(params);
+      const scope = liveSession ? this.scope(liveSession.summary.appSessionId) : undefined;
+      if (scope && signature && scope.permissionGrants.has(signature)) {
+        resolve(normalizePermissionOutcome('proceed_always'));
+        return;
+      }
+      if (liveSession && scope) {
+        scope.pendingPermissions.set(requestId, {
+          resolve,
+          kind: request.kind,
+          ...(signature ? { signature } : {}),
+        });
+        if (type === 'propose_mission') {
+          this.dependencies.updateSummary(sessionId, {
+            phase: 'awaiting_plan_approval',
+            proposal: request.detail,
           });
-          if (type === 'propose_mission') {
-            this.dependencies.updateSummary(ref.id, {
-              phase: 'awaiting_plan_approval',
-              proposal: request.detail,
-            });
-          } else if (type === 'start_mission_run') {
-            this.dependencies.updateSummary(ref.id, { phase: 'awaiting_run_start' });
-          }
+        } else if (type === 'start_mission_run') {
+          this.dependencies.updateSummary(sessionId, { phase: 'awaiting_run_start' });
         }
-        this.dependencies.emit({ type: 'approval.requested', request });
-      });
+      }
+      this.dependencies.emit({ type: 'approval.requested', request });
+    });
   }
 
   makeAskUserHandler(ref: { id: string }): AskUserHandler {

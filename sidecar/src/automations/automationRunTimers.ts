@@ -2,9 +2,6 @@
 const SESSION_CREATE_TIMEOUT_MS = 90_000;
 // The safety limit for a single run, so a stuck chat cannot hold the queue.
 const RUN_LIMIT_MS = 24 * 60 * 60 * 1_000;
-// A turn reports streaming false between tool calls, so settling waits briefly
-// to see whether the run picks the turn back up.
-const TURN_SETTLE_GRACE_MS = 120;
 
 export interface RunTimerHandlers {
   /** No chat arrived for a run that was launched. */
@@ -27,8 +24,14 @@ export class RunTimers {
   private readonly sessionCreate = new Map<string, NodeJS.Timeout>();
   private readonly runLimit = new Map<string, NodeJS.Timeout>();
   private readonly turnSettle = new Map<string, NodeJS.Timeout>();
+  private readonly turnSettleGraceMs: number;
 
-  constructor(private readonly handlers: RunTimerHandlers) {}
+  constructor(
+    private readonly handlers: RunTimerHandlers,
+    turnSettleGraceMs: number,
+  ) {
+    this.turnSettleGraceMs = Math.max(0, turnSettleGraceMs);
+  }
 
   armSessionCreate(runId: string): void {
     this.arm(this.sessionCreate, runId, SESSION_CREATE_TIMEOUT_MS, () => {
@@ -49,7 +52,7 @@ export class RunTimers {
   /** Keeps the first grace period, so a burst of turn ends settles the run once. */
   armTurnSettle(runId: string): void {
     if (this.turnSettle.has(runId)) return;
-    this.arm(this.turnSettle, runId, TURN_SETTLE_GRACE_MS, () => {
+    this.arm(this.turnSettle, runId, this.turnSettleGraceMs, () => {
       this.handlers.turnSettled(runId);
     });
   }

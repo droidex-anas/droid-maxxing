@@ -67,6 +67,7 @@ export default function Sidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const automationsButtonRef = useRef<HTMLButtonElement>(null);
   const automationSnapshot = useAutomationSnapshot();
   const automationRunsById = useMemo(
     () => new Map(automationSnapshot.runs.map((run) => [run.id, run] as const)),
@@ -74,6 +75,7 @@ export default function Sidebar({
   );
 
   useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
+  useEffect(() => bindLazySurfaceIntent('automations', automationsButtonRef.current), []);
 
   const documentVisible = useDocumentVisible();
   const [now, setNow] = useState(() => Date.now());
@@ -357,6 +359,7 @@ export default function Sidebar({
           Pull requests
         </button>
         <button
+          ref={automationsButtonRef}
           data-testid="automations-nav"
           onClick={() => {
             dispatch({ type: 'OPEN_AUTOMATIONS' });

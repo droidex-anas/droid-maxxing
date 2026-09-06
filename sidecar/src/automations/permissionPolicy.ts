@@ -4,6 +4,19 @@ export type AutomationPermissionAutonomy = 'off' | 'low' | 'medium' | 'high';
 
 /** The single MCP server name DROIDEX registers for automation tools. */
 export const AUTOMATION_MCP_SERVER_NAME = 'droidex-automations';
+export const AUTOMATION_RUN_CLIENT_REF_PREFIX = 'automation:';
+
+export function isAutomationRunClientRef(clientRef: string | undefined): boolean {
+  return typeof clientRef === 'string' && clientRef.startsWith(AUTOMATION_RUN_CLIENT_REF_PREFIX);
+}
+
+/** Run chats must not receive automation tools on create (`automation:`) or resume. */
+export function shouldAttachAutomationMcp(
+  clientRef: string | undefined,
+  isRunSession: boolean,
+): boolean {
+  return !isAutomationRunClientRef(clientRef) && !isRunSession;
+}
 
 // The registration guard and this policy must agree on what counts as the
 // automation server, otherwise a configured server differing only by case or
@@ -45,10 +58,11 @@ export function automationToolDisplayTitle(serverName: string, toolName: string)
 export function shouldAutoApproveAutomationPermission(
   params: RequestPermissionRequestParams,
   autonomy: AutomationPermissionAutonomy | undefined,
+  unattended = false,
 ): boolean {
   const target = automationPermissionTarget(params);
   return target
-    ? shouldAutoApproveAutomationTool(target.serverName, target.toolName, autonomy)
+    ? shouldAutoApproveAutomationTool(target.serverName, target.toolName, autonomy, unattended)
     : false;
 }
 
@@ -56,11 +70,13 @@ export function shouldAutoApproveAutomationTool(
   serverName: string,
   toolName: string,
   autonomy: AutomationPermissionAutonomy | undefined,
+  unattended = false,
 ): boolean {
   if (!isAutomationServer(serverName)) return false;
   const tool = automationToolName(toolName);
   if (!tool) return false;
   if (ALWAYS_SAFE.has(tool)) return true;
+  if (unattended) return false;
   return autonomy === 'high' && HIGH_AUTONOMY_SAFE.has(tool);
 }
 

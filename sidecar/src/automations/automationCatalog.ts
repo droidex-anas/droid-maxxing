@@ -5,6 +5,7 @@ import {
   normalizeAutomationInput,
 } from './automationInput.js';
 import { nextRunAfterUpdate } from './automationScheduler.js';
+import { storeHasRunSession } from './automationStore.js';
 import type { AutomationSessionContext } from './sessionContexts.js';
 import type {
   Automation,
@@ -99,9 +100,13 @@ export class AutomationCatalog {
 
   /**
    * Creates an automation on behalf of a chat, inheriting the settings the
-   * caller left out. Only a High autonomy chat may skip the user's review.
+   * caller left out. Only a High autonomy interactive chat may skip the user's
+   * review; an unattended run cannot spawn another automation.
    */
   async createFromSession(input: AutomationInput, sourceAppSessionId: string): Promise<Automation> {
+    if (storeHasRunSession(this.options.store(), sourceAppSessionId)) {
+      throw new Error('Unattended automation runs cannot create DROIDEX automations.');
+    }
     const context = await this.options.sessionContext(sourceAppSessionId);
     if (context?.autonomy !== 'high') {
       throw new Error(

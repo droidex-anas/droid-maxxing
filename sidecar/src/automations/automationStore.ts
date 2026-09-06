@@ -36,6 +36,21 @@ export function emptyAutomationStore(): AutomationStore {
   return { version: STORE_VERSION, automations: [], runs: [], proposals: [], sessionOrigins: {} };
 }
 
+/** Puts a snapshot taken before a mutation back onto the live store object. */
+export function restoreAutomationStore(store: AutomationStore, snapshot: AutomationStore): void {
+  store.automations = snapshot.automations;
+  store.runs = snapshot.runs;
+  store.proposals = snapshot.proposals;
+  store.sessionOrigins = snapshot.sessionOrigins;
+}
+
+/** True when this chat was started by an automation run, even if origins were trimmed. */
+export function storeHasRunSession(store: AutomationStore, appSessionId: string): boolean {
+  if (store.sessionOrigins[appSessionId]) return true;
+  if (store.runs.some((run) => run.appSessionId === appSessionId)) return true;
+  return store.automations.some((automation) => automation.lastAppSessionId === appSessionId);
+}
+
 export function isActiveRunStatus(status: AutomationRunStatus): boolean {
   return status === 'starting' || status === 'running';
 }
@@ -142,16 +157,13 @@ export function parseAutomationStore(value: unknown, now: number): AutomationSto
 
 /** Drops history beyond the retention caps without touching unsettled runs. */
 export function trimAutomationStore(store: AutomationStore): void {
-  store.runs = retainRuns(store.runs);
+  store.runs = retainRuns(store);
   if (store.proposals.length > MAX_PROPOSALS) {
     store.proposals = [...store.proposals]
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .slice(0, MAX_PROPOSALS);
   }
-  const origins = Object.entries(store.sessionOrigins);
-  if (origins.length > MAX_ORIGINS) {
-    store.sessionOrigins = Object.fromEntries(origins.slice(-MAX_ORIGINS));
-  }
+  trimSessionOrigins(store);
 }
 
 export function buildAutomationSnapshot(
@@ -184,9 +196,12 @@ export function buildAutomationSnapshot(
 /**
  * Queued and active runs are live work, never history, so they always survive.
  * Each automation also keeps its most recent settled run so a busy automation
- * cannot erase another one's last result.
+ * cannot erase another one's last result. A settled isolated run still holding
+ * a review chat is not history yet: closing that chat is what releases the
+ * worktree.
  */
-function retainRuns(runs: AutomationRun[]): AutomationRun[] {
+function retainRuns(store: AutomationStore): AutomationRun[] {
+  const runs = store.runs;
   let excess = runs.length - MAX_RUNS;
   if (excess <= 0) return runs;
   const latestSettledPerAutomation = new Map<string, string>();
@@ -196,13 +211,46 @@ function retainRuns(runs: AutomationRun[]): AutomationRun[] {
   const protectedRunIds = new Set(latestSettledPerAutomation.values());
   const retained: AutomationRun[] = [];
   for (const run of runs) {
-    if (excess > 0 && isSettledRunStatus(run.status) && !protectedRunIds.has(run.id)) {
+    if (
+      excess > 0 &&
+      isSettledRunStatus(run.status) &&
+      !protectedRunIds.has(run.id) &&
+      !holdsReviewWorkspace(store, run)
+    ) {
       excess -= 1;
       continue;
     }
     retained.push(run);
   }
   return retained;
+}
+
+function trimSessionOrigins(store: AutomationStore): void {
+  const entries = Object.entries(store.sessionOrigins);
+  if (entries.length <= MAX_ORIGINS) return;
+  // Origins that still have a run are live routing keys, not history.
+  const liveRunIds = new Set(store.runs.map((run) => run.id));
+  const keptRequired: typeof entries = [];
+  const optional: typeof entries = [];
+  for (const entry of entries) {
+    const origin = entry[1];
+    if (!origin) continue;
+    if (liveRunIds.has(origin.runId)) keptRequired.push(entry);
+    else optional.push(entry);
+  }
+  const room = Math.max(0, MAX_ORIGINS - keptRequired.length);
+  store.sessionOrigins = Object.fromEntries([...optional.slice(-room), ...keptRequired]);
+}
+
+/** Isolated worktrees stay until the review chat closes. */
+export function holdsReviewWorkspace(store: AutomationStore, run: AutomationRun): boolean {
+  const appSessionId = run.appSessionId;
+  return (
+    run.automation.executionMode === 'worktree' &&
+    Boolean(run.resolvedCwd?.trim()) &&
+    typeof appSessionId === 'string' &&
+    Boolean(store.sessionOrigins[appSessionId])
+  );
 }
 
 function parseAutomation(value: unknown, now: number): Automation | null {
@@ -247,7 +295,8 @@ function parseAutomation(value: unknown, now: number): Automation | null {
       createdAt: finiteNumber(raw.createdAt, now),
       updatedAt: finiteNumber(raw.updatedAt, now),
     };
-  } catch {
+  } catch (error) {
+    console.error('Dropped an invalid automation record', error);
     return null;
   }
 }
@@ -352,7 +401,8 @@ function parseProposal(
       updatedAt: finiteNumber(raw.updatedAt, now),
       confirmedAt: finiteNumberOrNull(raw.confirmedAt),
     };
-  } catch {
+  } catch (error) {
+    console.error('Dropped an invalid automation proposal', error);
     return null;
   }
 }

@@ -24,7 +24,6 @@ import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import PromptInput from './components/PromptInput';
 import RightPanel from './components/RightPanel';
-import { AutomationsRoute } from './features/automations/AutomationsRoute';
 import EditorOpenMenu from './components/EditorOpenMenu';
 import Toaster from './components/Toaster';
 import { useRepoStatus } from './hooks/useRepoStatus';
@@ -59,9 +58,11 @@ import { SettingsLazyHost } from './components/SettingsLazyHost';
 import {
   CommandPaletteSkeleton,
   MissionControlSkeleton,
+  PanelSkeleton,
   PullRequestsSkeleton,
 } from './components/skeletons/WorkspaceSkeletons';
 import {
+  LazyAutomationsRoute,
   LazyBrowserFocusWorkspace,
   LazyCommandPalette,
   LazyFilesWorkspace,
@@ -574,10 +575,12 @@ export default function App() {
                   <LazyPullRequestsView />
                 </Suspense>
               ) : !embedded && state.mainView === 'automations' ? (
-                <AutomationsRoute
-                  workspaceScopes={workspaceScopes}
-                  workspaceScopesReady={workspaceScopesReady}
-                />
+                <Suspense fallback={<PanelSkeleton title="automations" />}>
+                  <LazyAutomationsRoute
+                    workspaceScopes={workspaceScopes}
+                    workspaceScopesReady={workspaceScopesReady}
+                  />
+                </Suspense>
               ) : isMissionControlView ? (
                 <motion.div
                   key="mission-control"

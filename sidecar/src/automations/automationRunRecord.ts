@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ClientCommand } from '../protocol.js';
 import { assertModelSelection, isReasoningEffort } from './automationInput.js';
-import { isActiveRunStatus } from './automationStore.js';
+import { isActiveRunStatus, isSettledRunStatus } from './automationStore.js';
 import type {
   Automation,
   AutomationRun,
@@ -175,6 +175,17 @@ export function failInterruptedRuns(store: AutomationStore, now: number): Interr
         executionMode: run.automation.executionMode,
       });
     }
+  }
+  // A review chat that already closed may have persisted the origin deletion
+  // before the worktree was removed. Releasing again is how that crash recovers.
+  for (const run of store.runs) {
+    if (!isSettledRunStatus(run.status)) continue;
+    if (run.automation.executionMode !== 'worktree' || !run.resolvedCwd?.trim()) continue;
+    if (run.appSessionId && store.sessionOrigins[run.appSessionId]) continue;
+    cleanup.workspaces.push({
+      resolvedCwd: run.resolvedCwd,
+      executionMode: run.automation.executionMode,
+    });
   }
   return cleanup;
 }

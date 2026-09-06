@@ -10,6 +10,8 @@ import {
   AutomationStoreFile,
   buildAutomationSnapshot,
   emptyAutomationStore,
+  restoreAutomationStore,
+  storeHasRunSession,
   trimAutomationStore,
 } from './automationStore.js';
 import {
@@ -30,8 +32,10 @@ import type {
   AutomationStore,
 } from './types.js';
 import {
-  prepareAutomationWorkspace,
+  createAutomationWorkspace,
   releaseAutomationWorkspace,
+  resolveAutomationWorkspace,
+  type AutomationWorkspaceCreator,
   type AutomationWorkspacePreparer,
   type AutomationWorkspaceReleaser,
 } from './workspace.js';
@@ -42,6 +46,7 @@ interface AutomationManagerOptions {
   launchSession: (command: SessionCreateCommand) => Promise<void>;
   closeSession?: (appSessionId: string) => Promise<void>;
   prepareWorkspace?: AutomationWorkspacePreparer;
+  createWorkspace?: AutomationWorkspaceCreator;
   releaseWorkspace?: AutomationWorkspaceReleaser;
   resolveSessionContext?: (appSessionId: string) => Promise<AutomationSessionContext | null>;
   validateSelection?: (
@@ -53,6 +58,8 @@ interface AutomationManagerOptions {
   schedulerRecheckMs?: number;
   /** Delay between launch retries. Tests shorten it. */
   launchRetryMs?: number;
+  /** Grace after a turn stops streaming. Tests shorten it. */
+  turnSettleGraceMs?: number;
 }
 
 let configuredManager: AutomationManager | null = null;
@@ -68,6 +75,19 @@ export function getAutomationManager(): AutomationManager {
   return configuredManager;
 }
 
+export async function isUnattendedAutomationSession(
+  appSessionId: string | undefined,
+): Promise<boolean> {
+  if (!appSessionId) return false;
+  try {
+    const manager = getAutomationManager();
+    await manager.waitUntilReady();
+    return manager.isRunSession(appSessionId);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The automations feature: one entry point for the bridge, the MCP tools, and
  * the session events that drive a run.
@@ -77,9 +97,9 @@ export function getAutomationManager(): AutomationManager {
  * `AutomationScheduler` for when they run next, `AutomationRuns` for the runs and
  * the summary they project onto an automation, and `AutomationProposals` for the
  * review cards in chat. This class holds the pieces they share - the persisted
- * store, the transaction that undoes a mutation when its write fails, the
- * published snapshot, and the load and shutdown sequences - and gates every
- * public operation on the store being loaded.
+ * store, the single writer that persists a mutation or restores it when the
+ * write fails, the published snapshot, and the load and shutdown sequences - and
+ * gates every public operation on the store being loaded.
  */
 export class AutomationManager {
   private readonly storeFile: AutomationStoreFile;
@@ -96,6 +116,7 @@ export class AutomationManager {
   private readonly proposals: AutomationProposals;
   private readonly ready: Promise<void>;
   private readonly inFlight = new Set<Promise<void>>();
+  private mutationTail: Promise<void> = Promise.resolve();
   private closed = false;
 
   constructor(options: AutomationManagerOptions) {
@@ -113,22 +134,27 @@ export class AutomationManager {
     this.runs = new AutomationRuns({
       ...shared,
       isClosed: () => this.closed,
-      persist: () => this.persistAndPublish(),
+      persist: (apply) => this.persistMutation(apply),
       launchSession: options.launchSession,
       closeSession: options.closeSession ?? (() => Promise.resolve()),
-      prepareWorkspace: options.prepareWorkspace ?? prepareAutomationWorkspace,
+      prepareWorkspace: options.prepareWorkspace ?? resolveAutomationWorkspace,
+      // Tests inject a fake resolver and skip `git worktree add`.
+      createWorkspace:
+        options.createWorkspace ??
+        (options.prepareWorkspace ? () => Promise.resolve() : createAutomationWorkspace),
       releaseWorkspace: options.releaseWorkspace ?? releaseAutomationWorkspace,
       rearmScheduler: () => {
         this.scheduler.arm();
       },
       launchRetryMs: options.launchRetryMs,
+      turnSettleGraceMs: options.turnSettleGraceMs,
     });
     this.scheduler = new AutomationScheduler({
       store: shared.store,
       now: shared.now,
       isClosed: () => this.closed,
       runs: this.runs,
-      persist: () => this.persistAndPublish(),
+      flushDue: () => this.flushDue(),
       recheckMs: options.schedulerRecheckMs,
     });
     this.catalog = new AutomationCatalog({
@@ -155,6 +181,15 @@ export class AutomationManager {
   async snapshot(): Promise<AutomationSnapshot> {
     await this.ready;
     return this.snapshotNow();
+  }
+
+  async waitUntilReady(): Promise<void> {
+    await this.ready;
+  }
+
+  /** True when this chat was started by an automation run. */
+  isRunSession(appSessionId: string): boolean {
+    return storeHasRunSession(this.store, appSessionId);
   }
 
   async publishSnapshot(): Promise<void> {
@@ -188,14 +223,17 @@ export class AutomationManager {
   async remove(id: string): Promise<void> {
     await this.ready;
     this.catalog.require(id);
-    if (this.runs.hasActiveFor(id)) {
-      throw new Error('Wait for the active automation run to finish before deleting it.');
-    }
     const previousAutomations = this.catalog.capture();
     const previousRuns = this.runs.capture();
     const previousProposals = this.proposals.capturedForAutomation(id);
     await this.commit(
       () => {
+        if (this.runs.hasActiveFor(id)) {
+          throw new Error('Wait for the active automation run to finish before deleting it.');
+        }
+        if (this.runs.hasReviewWorkspaceFor(id)) {
+          throw new Error('Close the automation review chat before deleting it.');
+        }
         this.catalog.discard(id);
         this.proposals.unlinkAutomation(id, this.now());
       },
@@ -227,11 +265,19 @@ export class AutomationManager {
    * shutdown waits for tracked work instead of exiting mid-teardown.
    *
    * `event.appended` is the streaming hot path. An ordinary chat is one origin
-   * lookup and never enters the async observer.
+   * lookup and never enters the async observer. A chat a run is still adopting
+   * is queued so transcript tokens are not dropped before the origin exists.
    */
   observeSessionEvent(event: ServerEvent): Promise<void> {
     if (this.closed) return Promise.resolve();
-    if (event.type === 'event.appended' && !this.store.sessionOrigins[event.event.appSessionId]) {
+    if (event.type === 'session.created' && this.runs.hasStartingClientRef(event.clientRef)) {
+      this.runs.rememberPendingAdopt(event.session.appSessionId);
+    }
+    if (
+      event.type === 'event.appended' &&
+      !this.store.sessionOrigins[event.event.appSessionId] &&
+      !this.runs.isAdopting(event.event.appSessionId)
+    ) {
       return Promise.resolve();
     }
     return this.track(this.handleSessionEvent(event));
@@ -316,6 +362,7 @@ export class AutomationManager {
    */
   private async settleInFlightWork(): Promise<void> {
     for (let pass = 0; pass < 5; pass += 1) {
+      await this.mutationTail;
       const pending = [...this.inFlight];
       const drain = this.runs.pending();
       if (drain) pending.push(drain);
@@ -353,24 +400,76 @@ export class AutomationManager {
   }
 
   /**
-   * Applies a store mutation and undoes it when the write fails, so a rejected
-   * request cannot leave a record that exists only in memory. Undo restores the
-   * records this operation touched; scheduling progress recomputed for other
-   * automations stays consistent with the runs held in memory.
+   * One writer for every store mutation. Commit, due flushes, and run persists
+   * take turns so a failed write cannot restore a snapshot that another writer
+   * has already replaced.
+   */
+  private runExclusive<T>(work: () => Promise<T>): Promise<T> {
+    const done = this.mutationTail.then(work, work);
+    this.mutationTail = done.then(
+      () => undefined,
+      () => undefined,
+    );
+    return done;
+  }
+
+  /**
+   * Applies a store mutation and restores the whole store when the write fails.
+   * `processDue` can advance other automations and queue their runs in the same
+   * turn, so the caller's undo is not enough on its own.
    */
   private async commit(apply: () => void, undo: () => void): Promise<void> {
-    apply();
     try {
-      this.scheduler.processDue();
-      trimAutomationStore(this.store);
-      await this.persistAndPublish();
-      this.scheduler.arm();
-      this.runs.startQueued();
-    } catch (error) {
-      undo();
-      this.emit({ type: 'automations.snapshot', snapshot: this.snapshotNow() });
-      throw error;
+      await this.runExclusive(async () => {
+        const previous = structuredClone(this.store);
+        try {
+          apply();
+          this.scheduler.processDue();
+          trimAutomationStore(this.store);
+          await this.persistAndPublish();
+        } catch (error) {
+          undo();
+          restoreAutomationStore(this.store, previous);
+          this.emit({ type: 'automations.snapshot', snapshot: this.snapshotNow() });
+          throw error;
+        }
+      });
+    } finally {
+      if (!this.closed) this.scheduler.arm();
     }
+    this.runs.startQueued();
+  }
+
+  private persistMutation(apply: () => void): Promise<void> {
+    return this.runExclusive(async () => {
+      const previous = structuredClone(this.store);
+      try {
+        apply();
+        await this.persistAndPublish();
+      } catch (error) {
+        restoreAutomationStore(this.store, previous);
+        this.emit({ type: 'automations.snapshot', snapshot: this.snapshotNow() });
+        throw error;
+      }
+    });
+  }
+
+  private async flushDue(): Promise<void> {
+    const queued = await this.runExclusive(async () => {
+      if (this.closed) return false;
+      const previous = structuredClone(this.store);
+      try {
+        if (!this.scheduler.processDue()) return false;
+        trimAutomationStore(this.store);
+        await this.persistAndPublish();
+        return true;
+      } catch (error) {
+        restoreAutomationStore(this.store, previous);
+        this.emit({ type: 'automations.snapshot', snapshot: this.snapshotNow() });
+        throw error;
+      }
+    });
+    if (queued) this.runs.startQueued();
   }
 
   private async persistAndPublish(): Promise<void> {

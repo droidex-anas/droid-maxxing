@@ -12,7 +12,13 @@ import {
   type SessionCreateCommand,
 } from './automationRunRecord.js';
 import { RunTimers } from './automationRunTimers.js';
-import { isActiveRunStatus, isSettledRunStatus, trimAutomationStore } from './automationStore.js';
+import {
+  holdsReviewWorkspace,
+  isActiveRunStatus,
+  isSettledRunStatus,
+  trimAutomationStore,
+} from './automationStore.js';
+import { AUTOMATION_RUN_CLIENT_REF_PREFIX } from './permissionPolicy.js';
 import type {
   Automation,
   AutomationReasoningEffort,
@@ -20,7 +26,11 @@ import type {
   AutomationRunStatus,
   AutomationStore,
 } from './types.js';
-import type { AutomationWorkspacePreparer, AutomationWorkspaceReleaser } from './workspace.js';
+import type {
+  AutomationWorkspaceCreator,
+  AutomationWorkspacePreparer,
+  AutomationWorkspaceReleaser,
+} from './workspace.js';
 
 // A timed-out run whose chat has not arrived yet leaves its reference behind so
 // the late chat can be closed. The bound keeps a long uptime from growing the set.
@@ -28,6 +38,10 @@ const MAX_ABANDONED_REFS = 32;
 const MAX_LAUNCH_ATTEMPTS = 3;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const DEFAULT_LAUNCH_RETRY_MS = 400;
+// Lifecycle keeps `streaming` true for the whole turn, including tool calls.
+// This grace only debounces the turn-end update and covers a brief flicker
+// after the stream closes (compaction, a late summary patch).
+const DEFAULT_TURN_SETTLE_GRACE_MS = 30_000;
 
 type SessionSummary = Extract<ServerEvent, { type: 'session.updated' }>['session'];
 type SessionErrorEvent = Extract<ServerEvent, { type: 'error' }>;
@@ -36,19 +50,23 @@ export interface AutomationRunsOptions {
   store: () => AutomationStore;
   now: () => number;
   isClosed: () => boolean;
-  /** Writes the store and publishes the snapshot. */
-  persist: () => Promise<void>;
+  /** Applies a store mutation and persists it on the manager's single writer. */
+  persist: (apply: () => void) => Promise<void>;
   /** Applies a store mutation and undoes it when the write fails. */
   commit: (apply: () => void, undo: () => void) => Promise<void>;
   launchSession: (command: SessionCreateCommand) => Promise<void>;
   closeSession: (appSessionId: string) => Promise<void>;
+  /** Resolves the run directory. Isolated worktrees are created after this path is persisted. */
   prepareWorkspace: AutomationWorkspacePreparer;
+  createWorkspace: AutomationWorkspaceCreator;
   releaseWorkspace: AutomationWorkspaceReleaser;
   validateSelection: (modelId: string, reasoningEffort: AutomationReasoningEffort) => Promise<void>;
   /** A settled run frees the schedule, so the next wake is recomputed. */
   rearmScheduler: () => void;
   /** Delay between launch retries. Tests shorten it. */
   launchRetryMs?: number;
+  /** Grace after streaming stops before the run completes. Tests shorten it. */
+  turnSettleGraceMs?: number;
 }
 
 /**
@@ -70,33 +88,38 @@ export class AutomationRuns {
   private readonly launchRetryMs: number;
   private recovered: InterruptedRunCleanup = { appSessionIds: [], workspaces: [] };
   private drainPromise: Promise<void> | null = null;
+  private eventTail: Promise<void> = Promise.resolve();
+  private readonly pendingAdopts = new Set<string>();
 
   constructor(private readonly options: AutomationRunsOptions) {
     this.launchRetryMs = Math.max(0, options.launchRetryMs ?? DEFAULT_LAUNCH_RETRY_MS);
-    this.timers = new RunTimers({
-      sessionCreateTimedOut: (runId) => {
-        void this.retryOrFail(
-          runId,
-          'DROIDEX did not create the automation chat before the startup timeout.',
-        ).catch((error: unknown) => {
-          console.error('Could not retry automation launch', error);
-        });
+    this.timers = new RunTimers(
+      {
+        sessionCreateTimedOut: (runId) => {
+          void this.retryOrFail(
+            runId,
+            'DROIDEX did not create the automation chat before the startup timeout.',
+          ).catch((error: unknown) => {
+            console.error('Could not retry automation launch', error);
+          });
+        },
+        runLimitReached: (runId) => {
+          this.timeOut(
+            runId,
+            'The automation run exceeded the 24-hour safety limit and was stopped in DROIDEX.',
+          );
+        },
+        turnSettled: (runId) => {
+          const failure = this.runFailures.get(runId);
+          void this.finish(runId, failure ? 'failed' : 'completed', failure ?? null).catch(
+            (error: unknown) => {
+              console.error('Could not settle automation run', error);
+            },
+          );
+        },
       },
-      runLimitReached: (runId) => {
-        this.timeOut(
-          runId,
-          'The automation run exceeded the 24-hour safety limit and was stopped in DROIDEX.',
-        );
-      },
-      turnSettled: (runId) => {
-        const failure = this.runFailures.get(runId);
-        void this.finish(runId, failure ? 'failed' : 'completed', failure ?? null).catch(
-          (error: unknown) => {
-            console.error('Could not settle automation run', error);
-          },
-        );
-      },
-    });
+      options.turnSettleGraceMs ?? DEFAULT_TURN_SETTLE_GRACE_MS,
+    );
   }
 
   /** Queues this occurrence unless this automation already has work open. */
@@ -159,6 +182,17 @@ export class AutomationRuns {
 
   /** Advances the run that owns this session event, if any. */
   async applySessionEvent(event: ServerEvent): Promise<void> {
+    // Created/updated/appended can race in from the bridge; adopt must finish
+    // before turn settlement can see the origin.
+    const dispatched = this.eventTail.then(() => this.dispatchSessionEvent(event));
+    this.eventTail = dispatched.then(
+      () => undefined,
+      () => undefined,
+    );
+    await dispatched;
+  }
+
+  private async dispatchSessionEvent(event: ServerEvent): Promise<void> {
     switch (event.type) {
       case 'session.created':
         await this.adoptSession(event.clientRef, event.session);
@@ -168,6 +202,12 @@ export class AutomationRuns {
         return;
       case 'event.appended':
         this.observeActivity(event.event.appSessionId);
+        return;
+      case 'approval.requested':
+        this.observeActivity(event.request.appSessionId);
+        return;
+      case 'question.requested':
+        this.observeActivity(event.question.appSessionId);
         return;
       case 'error':
         await this.applyError(event);
@@ -192,6 +232,24 @@ export class AutomationRuns {
 
   hasOpenFor(automationId: string): boolean {
     return this.openRunFor(automationId) !== undefined;
+  }
+
+  hasReviewWorkspaceFor(automationId: string): boolean {
+    return this.runs.some(
+      (run) => run.automationId === automationId && holdsReviewWorkspace(this.store, run),
+    );
+  }
+
+  hasStartingClientRef(clientRef: string | undefined): boolean {
+    return this.runs.some((run) => run.clientRef === clientRef && run.status === 'starting');
+  }
+
+  rememberPendingAdopt(appSessionId: string): void {
+    this.pendingAdopts.add(appSessionId);
+  }
+
+  isAdopting(appSessionId: string): boolean {
+    return this.pendingAdopts.has(appSessionId);
   }
 
   private openRunFor(automationId: string): AutomationRun | undefined {
@@ -250,7 +308,16 @@ export class AutomationRuns {
   }
 
   dropAllFor(automationId: string): void {
+    const droppedIds = new Set(
+      this.runs.filter((run) => run.automationId === automationId).map((run) => run.id),
+    );
     this.store.runs = this.runs.filter((run) => run.automationId !== automationId);
+    for (const [appSessionId, origin] of Object.entries(this.store.sessionOrigins)) {
+      if (!origin) continue;
+      if (droppedIds.has(origin.runId) || origin.automationId === automationId) {
+        Reflect.deleteProperty(this.store.sessionOrigins, appSessionId);
+      }
+    }
   }
 
   /** Fails the runs a previous process left in flight. */
@@ -281,6 +348,7 @@ export class AutomationRuns {
     this.runFailures.clear();
     this.abandonedClientRefs.clear();
     this.launchAttempts.clear();
+    this.pendingAdopts.clear();
   }
 
   private async drain(): Promise<void> {
@@ -289,7 +357,7 @@ export class AutomationRuns {
       const run = this.nextQueuedRun();
       if (!run) return;
       await this.startRun(run);
-      if (isActiveRunStatus(run.status)) return;
+      if (this.activeRun()) return;
     }
   }
 
@@ -302,21 +370,32 @@ export class AutomationRuns {
       return;
     }
     const now = this.options.now();
-    run.status = 'starting';
-    run.startedAt = now;
-    run.finishedAt = null;
-    run.appSessionId = null;
-    run.resolvedCwd = null;
-    run.error = null;
-    this.projectRun(run, 'starting', now);
     try {
-      await this.options.persist();
-      const resolvedCwd = await this.options.prepareWorkspace({
-        cwd: run.automation.workspaceCwd,
-        executionMode: run.automation.executionMode,
-        title: run.automation.title,
-        runId: run.id,
+      await this.options.persist(() => {
+        if (this.runById(run.id)?.status !== 'queued') return;
+        run.status = 'starting';
+        run.startedAt = now;
+        run.finishedAt = null;
+        run.appSessionId = null;
+        run.resolvedCwd = null;
+        run.error = null;
+        this.projectRun(run, 'starting', now);
       });
+    } catch (error) {
+      await this.finish(run.id, 'failed', errorMessage(error));
+      return;
+    }
+    const currentAfterPersist = this.runById(run.id);
+    if (currentAfterPersist?.status !== 'starting') return;
+    const workspaceInput = {
+      cwd: run.automation.workspaceCwd,
+      executionMode: run.automation.executionMode,
+      title: run.automation.title,
+      runId: run.id,
+    };
+    let resolvedCwd = '';
+    try {
+      resolvedCwd = await this.options.prepareWorkspace(workspaceInput);
       const current = this.runById(run.id);
       if (this.options.isClosed() || current?.status !== 'starting') {
         await this.options.releaseWorkspace({
@@ -325,9 +404,41 @@ export class AutomationRuns {
         });
         return;
       }
-      current.resolvedCwd = resolvedCwd;
+      await this.options.persist(() => {
+        const live = this.runById(run.id);
+        if (live?.status !== 'starting') return;
+        live.resolvedCwd = resolvedCwd;
+      });
+      const persisted = this.runById(run.id);
+      if (
+        this.options.isClosed() ||
+        persisted?.status !== 'starting' ||
+        persisted.resolvedCwd !== resolvedCwd
+      ) {
+        await this.options.releaseWorkspace({
+          resolvedCwd,
+          executionMode: run.automation.executionMode,
+        });
+        return;
+      }
+      await this.options.createWorkspace(workspaceInput, resolvedCwd);
     } catch (error) {
+      const live = this.runById(run.id);
+      if (live?.resolvedCwd !== resolvedCwd) {
+        await this.options.releaseWorkspace({
+          resolvedCwd,
+          executionMode: run.automation.executionMode,
+        });
+      }
       await this.finish(run.id, 'failed', errorMessage(error));
+      return;
+    }
+    const materialized = this.runById(run.id);
+    if (materialized?.status !== 'starting' || materialized.resolvedCwd !== resolvedCwd) {
+      await this.options.releaseWorkspace({
+        resolvedCwd,
+        executionMode: run.automation.executionMode,
+      });
       return;
     }
     await this.launchChat(run.id);
@@ -339,7 +450,7 @@ export class AutomationRuns {
     const attempt = (this.launchAttempts.get(runId) ?? 0) + 1;
     this.launchAttempts.set(runId, attempt);
     if (run.clientRef) this.abandonClientRef(run.clientRef);
-    run.clientRef = `automation:${runId}:${randomUUID()}`;
+    run.clientRef = `${AUTOMATION_RUN_CLIENT_REF_PREFIX}${runId}:${randomUUID()}`;
     this.timers.armSessionCreate(runId);
     try {
       await this.options.launchSession(sessionCommandForRun(run));
@@ -368,37 +479,58 @@ export class AutomationRuns {
     clientRef: string | undefined,
     session: SessionSummary,
   ): Promise<void> {
-    const run = this.runs.find(
-      (candidate) => candidate.clientRef === clientRef && candidate.status === 'starting',
-    );
-    if (!run) {
-      // The run this chat belongs to already gave up on it, so nothing owns the
-      // chat and it must not keep running unattended.
-      if (clientRef && this.abandonedClientRefs.delete(clientRef)) {
-        await this.closeSessionQuietly(session.appSessionId);
+    try {
+      const run = this.runs.find(
+        (candidate) => candidate.clientRef === clientRef && candidate.status === 'starting',
+      );
+      if (!run) {
+        // The run this chat belongs to already gave up on it, so nothing owns the
+        // chat and it must not keep running unattended.
+        if (clientRef && this.abandonedClientRefs.delete(clientRef)) {
+          await this.closeSessionQuietly(session.appSessionId);
+        }
+        return;
       }
-      return;
+      this.timers.clearSessionCreate(run.id);
+      try {
+        await this.options.persist(() => {
+          const current = this.runById(run.id);
+          if (current?.status !== 'starting') return;
+          const now = this.options.now();
+          current.status = 'running';
+          current.appSessionId = session.appSessionId;
+          current.error = null;
+          this.applySelectionAudit(current, session);
+          this.store.sessionOrigins[session.appSessionId] = {
+            automationId: current.automationId,
+            automationTitle: current.automation.title,
+            runId: current.id,
+            trigger: current.trigger,
+          };
+          this.projectRun(current, 'running', now);
+        });
+      } catch (error) {
+        if (this.runById(run.id)?.status === 'starting') this.timers.armSessionCreate(run.id);
+        console.error('Could not persist the automation session', error);
+        return;
+      }
+      const adopted = this.runById(run.id);
+      if (adopted?.status !== 'running') {
+        if (adopted?.status === 'starting') this.timers.armSessionCreate(run.id);
+        return;
+      }
+      this.timers.armRunLimit(adopted.id);
+      this.observeTurn(session);
+    } finally {
+      this.pendingAdopts.delete(session.appSessionId);
     }
-    this.timers.clearSessionCreate(run.id);
-    const now = this.options.now();
-    run.status = 'running';
-    run.appSessionId = session.appSessionId;
-    run.error = null;
-    this.applySelectionAudit(run, session);
-    this.timers.armRunLimit(run.id);
-    this.store.sessionOrigins[session.appSessionId] = {
-      automationId: run.automationId,
-      automationTitle: run.automation.title,
-      runId: run.id,
-      trigger: run.trigger,
-    };
-    this.projectRun(run, 'running', now);
-    await this.options.persist();
   }
 
   /**
-   * A turn that stopped streaming ends the run, but only once the run has been
-   * seen streaming: the first update can arrive before the chat starts working.
+   * A lifecycle turn that stopped streaming ends the run. `streaming` stays true
+   * for the whole turn, including tool calls; the grace only covers the turn-end
+   * update. Approval and transcript activity still cancel that grace if they
+   * arrive first.
    */
   private observeTurn(session: SessionSummary): void {
     const run = this.runForSession(session.appSessionId);
@@ -436,24 +568,35 @@ export class AutomationRuns {
   }
 
   private async applySessionClosed(appSessionId: string): Promise<void> {
-    const run = this.runForSession(appSessionId);
-    if (!run || !isActiveRunStatus(run.status)) return;
-    const failure = this.runFailures.get(run.id);
-    if (failure) {
-      await this.finish(run.id, 'failed', failure);
-      return;
+    const run = this.runOwningSession(appSessionId);
+    if (run && isActiveRunStatus(run.status)) {
+      const failure = this.runFailures.get(run.id);
+      if (failure) {
+        await this.finish(run.id, 'failed', failure);
+      } else if (this.timers.isTurnSettleArmed(run.id)) {
+        await this.finish(run.id, 'completed', null);
+      } else {
+        await this.finish(
+          run.id,
+          'failed',
+          this.streamingSeen.has(run.id)
+            ? 'The automation chat closed before its turn finished.'
+            : 'The automation chat closed before its first turn finished.',
+        );
+      }
     }
-    if (this.timers.isTurnSettleArmed(run.id)) {
-      await this.finish(run.id, 'completed', null);
-      return;
+    const owned = this.runOwningSession(appSessionId);
+    if (this.store.sessionOrigins[appSessionId]) {
+      await this.options.persist(() => {
+        Reflect.deleteProperty(this.store.sessionOrigins, appSessionId);
+      });
     }
-    await this.finish(
-      run.id,
-      'failed',
-      this.streamingSeen.has(run.id)
-        ? 'The automation chat closed before its turn finished.'
-        : 'The automation chat closed before its first turn finished.',
-    );
+    if (owned) {
+      await this.options.releaseWorkspace({
+        resolvedCwd: owned.resolvedCwd,
+        executionMode: owned.automation.executionMode,
+      });
+    }
   }
 
   private async finish(
@@ -464,28 +607,37 @@ export class AutomationRuns {
     const run = this.runById(runId);
     if (!run || isSettledRunStatus(run.status)) return;
 
+    const clientRef = run.clientRef;
+    const appSessionId = run.appSessionId;
+    const resolvedCwd = run.resolvedCwd;
+    const executionMode = run.automation.executionMode;
+    await this.options.persist(() => {
+      const current = this.runById(runId);
+      if (!current || isSettledRunStatus(current.status)) return;
+      const now = this.options.now();
+      current.status = status;
+      current.finishedAt = now;
+      current.error = status === 'failed' ? clip(error ?? 'Automation run failed.', 2_000) : null;
+      const automation = this.automationFor(current.automationId);
+      if (automation) projectSettledRun(automation, current, now);
+      if (status === 'failed') this.pauseAfterConsecutiveFailures(current.automationId);
+      trimAutomationStore(this.store);
+    });
+
     this.timers.clearRun(runId);
     this.streamingSeen.delete(runId);
     this.runFailures.delete(runId);
     this.launchAttempts.delete(runId);
-
-    const now = this.options.now();
-    const clientRef = run.clientRef;
-    run.status = status;
-    run.finishedAt = now;
-    run.error = status === 'failed' ? clip(error ?? 'Automation run failed.', 2_000) : null;
-    const automation = this.automationFor(run.automationId);
-    if (automation) projectSettledRun(automation, run, now);
-    if (status === 'failed') this.pauseAfterConsecutiveFailures(run.automationId);
-    if (status === 'failed' && !run.appSessionId && clientRef) {
+    if (status === 'failed' && !appSessionId && clientRef) {
       this.abandonClientRef(clientRef);
     }
-    trimAutomationStore(this.store);
-    await this.options.persist();
-    await this.options.releaseWorkspace({
-      resolvedCwd: run.resolvedCwd,
-      executionMode: run.automation.executionMode,
-    });
+    // A completed run leaves its chat open for review; session.closed releases the worktree.
+    if (!appSessionId) {
+      await this.options.releaseWorkspace({
+        resolvedCwd,
+        executionMode,
+      });
+    }
     this.options.rearmScheduler();
     this.startQueued();
   }
@@ -560,6 +712,19 @@ export class AutomationRuns {
       if (!next || run.requestedAt < next.requestedAt) next = run;
     }
     return next;
+  }
+
+  /**
+   * The live run that owns a chat, if the chat belongs to one at all.
+   *
+   * `sessionOrigins` records that link when a run adopts its chat, so an event
+   * from an ordinary chat - the common case, and by far the most frequent event
+   * in DROIDEX - costs one lookup instead of a walk over the run history.
+   */
+  private runOwningSession(appSessionId: string): AutomationRun | undefined {
+    const origin = this.store.sessionOrigins[appSessionId];
+    if (origin) return this.runById(origin.runId);
+    return this.runs.find((run) => run.appSessionId === appSessionId);
   }
 
   /**

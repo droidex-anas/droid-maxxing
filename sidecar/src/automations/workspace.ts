@@ -26,16 +26,21 @@ export type AutomationWorkspacePreparer = (
   input: PrepareAutomationWorkspaceInput,
 ) => Promise<string>;
 
+export type AutomationWorkspaceCreator = (
+  input: PrepareAutomationWorkspaceInput,
+  resolvedCwd: string,
+) => Promise<void>;
+
 export type AutomationWorkspaceReleaser = (
   workspace: ReleasableAutomationWorkspace,
 ) => Promise<void>;
 
 /**
- * Resolve the directory used by a scheduled run. Local runs use the selected
- * checkout directly. Isolated runs create a detached worktree without going
- * through renderer IPC, so they can start while the Automations screen is closed.
+ * Chooses the directory a run will use. Isolated worktrees are not created yet:
+ * the path is persisted first so a crash during `git worktree add` can still
+ * release it on the next start.
  */
-export async function prepareAutomationWorkspace(
+export async function resolveAutomationWorkspace(
   input: PrepareAutomationWorkspaceInput,
 ): Promise<string> {
   const selected = input.cwd?.trim() ?? '';
@@ -58,17 +63,35 @@ export async function prepareAutomationWorkspace(
 
   await ensureWorktreeDirectoryIgnored(root);
   await requireRealDirectoryPath(root, target);
+  return target;
+}
+
+/** Creates the isolated worktree at a path that is already stored on the run. */
+export async function createAutomationWorkspace(
+  input: PrepareAutomationWorkspaceInput,
+  resolvedCwd: string,
+): Promise<void> {
+  const target = resolvedCwd.trim();
+  if (!target || input.executionMode !== 'worktree') return;
+  const selected = input.cwd?.trim() ?? '';
+  if (!selected) return;
+  const root = await git(selected, ['rev-parse', '--show-toplevel']).catch(() => '');
+  if (!root) {
+    throw new Error('An isolated worktree can only be created for a Git repository.');
+  }
+  const commit = await git(root, ['rev-parse', '--verify', 'HEAD^{commit}']).catch(() => '');
+  if (!commit) throw new Error('The selected repository does not have a commit to run from.');
+  await requireRealDirectoryPath(root, target);
   await mkdir(dirname(target), { recursive: true });
   try {
     await git(root, ['worktree', 'add', '--detach', target, commit], 90_000);
   } catch (error) {
     throw new Error(`Could not create the automation worktree: ${errorMessage(error)}`);
   }
-  return target;
 }
 
 /**
- * Removes a run's isolated worktree once it has settled. A worktree holding
+ * Removes a run's isolated worktree once its chat is gone. A worktree holding
  * uncommitted or untracked work is kept: the automation's output lives there and
  * DROIDEX must not delete it.
  */

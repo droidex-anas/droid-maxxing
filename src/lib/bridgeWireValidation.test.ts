@@ -84,6 +84,60 @@ test('rejects malformed features in session summaries and mission updates', () =
   );
 });
 
+test('rejects automation snapshots whose records lack identities', () => {
+  const snapshot = {
+    automations: [],
+    runs: [],
+    proposals: [],
+    sessionOrigins: {},
+    queuedRunCount: 0,
+    activeRunCount: 0,
+    scheduler: { ready: true, nextWakeAt: null, activeRunId: null },
+  };
+  assert.ok(serverWireMessage(batch({ type: 'automations.snapshot', snapshot })));
+  assert.ok(
+    serverWireMessage(
+      batch({
+        type: 'automations.snapshot',
+        snapshot: {
+          ...snapshot,
+          automations: [{ id: 'automation-1' }],
+          runs: [{ id: 'run-1' }],
+          proposals: [{ id: 'proposal-1' }],
+          sessionOrigins: { 'session-1': { runId: 'run-1' } },
+        },
+      }),
+    ),
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'automations.snapshot',
+        snapshot: { ...snapshot, automations: [{}] },
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'automations.snapshot',
+        snapshot: { ...snapshot, runs: [{ id: '' }] },
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'automations.snapshot',
+        snapshot: { ...snapshot, sessionOrigins: { 'session-1': {} } },
+      }),
+    ),
+    null,
+  );
+});
+
 test('rejects object payloads that are actually arrays', () => {
   assert.equal(serverWireMessage(batch({ type: 'settings.defaults', defaults: [] })), null);
   assert.ok(serverWireMessage(batch({ type: 'settings.defaults', defaults: {} })));

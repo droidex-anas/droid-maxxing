@@ -26,8 +26,8 @@ export interface AutomationSchedulerOptions {
   now: () => number;
   isClosed: () => boolean;
   runs: ScheduledRunQueue;
-  /** Writes the store and publishes the snapshot after a due run is queued. */
-  persist: () => Promise<void>;
+  /** Queues due runs and persists them on the manager's single writer. */
+  flushDue: () => Promise<void>;
   /** How often the scheduler re-reads the clock while waiting. Tests shorten it. */
   recheckMs?: number;
 }
@@ -113,22 +113,20 @@ export class AutomationScheduler {
   private wake(): void {
     // A wake that only re-reads the clock costs one comparison per automation:
     // no store write, no snapshot, and no queue to drain, because nothing can
-    // have become due without `processDue` recording it.
-    if (!this.processDue()) {
+    // have become due without `processDue` recording it. Flushing due runs goes
+    // through the manager so it cannot overlap a commit or run persist.
+    const nextRunAt = this.nextWakeAt();
+    if (nextRunAt === null || nextRunAt > this.options.now()) {
       this.arm();
       return;
     }
-    // The timer is the only thing that wakes the scheduler, so it is re-armed
-    // even when the write fails; otherwise one failed write would stall every
-    // later run until an unrelated command happened to arrive.
     void this.options
-      .persist()
+      .flushDue()
       .catch((error: unknown) => {
         console.error('Automation scheduler failed', error);
       })
       .finally(() => {
         this.arm();
-        this.options.runs.startQueued();
       });
   }
 

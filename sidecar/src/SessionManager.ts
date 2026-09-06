@@ -61,7 +61,11 @@ import { mergeModelCatalog } from './modelCatalog.js';
 import { readDroidCliModelCatalog, readDroidCliModelCatalogCache } from './DroidCliCatalog.js';
 import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
 import { createAutomationMcpServer } from './automations/automationMcpServer.js';
-import { normalizeMcpServerName } from './automations/permissionPolicy.js';
+import { isUnattendedAutomationSession } from './automations/AutomationManager.js';
+import {
+  normalizeMcpServerName,
+  shouldAttachAutomationMcp,
+} from './automations/permissionPolicy.js';
 import { createBrowserMcpServer } from './browser/browserMcpServer.js';
 import { isDesignPrompt } from './browser/designPromptPacks.js';
 import { SessionRegistry } from './SessionRegistry.js';
@@ -967,13 +971,13 @@ export class SessionManager {
   }
 
   private async startLocalMcpServers(
-    ref: { id: string },
+    ref: { id: string; clientRef?: string },
     cwd?: string,
   ): Promise<StartedLocalMcpResources> {
-    const servers = [
-      this.createLocalMcpResource(() => ref.id),
-      this.createAutomationMcpResource(() => ref.id),
-    ];
+    const servers = [this.createLocalMcpResource(() => ref.id)];
+    if (shouldAttachAutomationMcp(ref.clientRef, await isUnattendedAutomationSession(ref.id))) {
+      servers.push(this.createAutomationMcpResource(() => ref.id));
+    }
     const configuredCwd = cwd?.trim();
     const configured = this.loadConfiguredMcpServers(
       configuredCwd === undefined || configuredCwd.length === 0 ? homedir() : configuredCwd,
