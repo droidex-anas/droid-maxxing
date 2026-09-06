@@ -40,9 +40,11 @@ export function useSidebarActivity(
     const settled = pruneSettledSessions(preferences.settled, state.sessions, state.chatMetadata);
     if (settled === preferences.settled) return;
     const next = { ...preferences, settled };
+    // Pruning is authoritative in memory even when persistence is unavailable.
+    // This makes the reactive effect converge instead of retrying on every token.
+    setPreferences(next);
     try {
       saveSidebarActivity(window.localStorage, next);
-      setPreferences(next);
     } catch {
       toast.error('Could not save sidebar preferences. Check available disk space and try again.');
     }

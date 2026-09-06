@@ -2256,14 +2256,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   useEffect(() => {
+    saveChatMetadata(state.chatMetadata);
+  }, [state.chatMetadata]);
+
+  useEffect(() => {
     savePersistedUiState(state);
     saveSessionLastSeen(state.sessionLastSeen);
     saveSessionNotes(state.sessionNotes);
-    saveChatMetadata(state.chatMetadata);
   }, [
     state.sessionLastSeen,
     state.sessionNotes,
-    state.chatMetadata,
     state.activeAppSessionId,
     state.browserOpenKeys,
     state.browsers,

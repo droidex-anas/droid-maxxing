@@ -86,7 +86,8 @@ Markers for hidden chats and newer activity are removed automatically.
 **Pull request** grouping and the search button beside notifications use PRs detected for the chat’s
 worktree automatically, including chats you have not opened. Discovery runs on
 startup and every minute while the app is visible, independently of the Context
-panel. GitHub CLI must be signed in. Lookups time out after 10 seconds and retry on the next refresh.
+panel. GitHub CLI must be signed in. Lookups stop waiting after 10 seconds. If the underlying operation is still running,
+discovery waits for it to finish before retrying; restarting the app clears a stuck IPC call.
 Each chat retains its 10 most recently detected PRs. At the 1,000-chat metadata limit,
 opening a chat can replace an older automatic PR entry; names, pins, and hidden-chat markers take priority. Search linked PRs by number, URL, title, or
 branch. Links survive restarts and branch changes; detected PR status refreshes
