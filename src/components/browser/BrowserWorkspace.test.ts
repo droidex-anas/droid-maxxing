@@ -4,6 +4,11 @@ import test from 'node:test';
 
 const source = fs.readFileSync(new URL('./BrowserWorkspace.tsx', import.meta.url), 'utf8');
 
+test('address bar search and scheme checks use omnibox normalization', () => {
+  assert.match(source, /normalizedUrl = normalizeBrowserOmniboxInput\(urlInput\)/);
+  assert.doesNotMatch(source, /normalizeUrl\(urlInput\)/);
+});
+
 test('reload controls target the restored browser session instead of reopening its saved URL', () => {
   assert.match(
     source,

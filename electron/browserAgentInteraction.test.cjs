@@ -238,6 +238,10 @@ for (const selector of ['#results', undefined]) {
     const sent = vm.runInNewContext(scripts.at(-1), {
       window: { __DROIDMAXX_AGENT_ACTION: (request) => request },
     });
+    assert.match(scripts[0], /__DROIDMAXX_RESOLVE_POINTER/);
+    assert.match(scripts[0], /"ref":"@b-current-results"/);
+    assert.match(scripts[0], /"x":12.3/);
+    assert.match(scripts[0], /"y":45.8/);
     assert.equal(sent.action, 'scroll');
     assert.equal(sent.ref, '@b-current-results');
     assert.equal(sent.selector, selector);

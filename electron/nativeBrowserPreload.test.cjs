@@ -333,9 +333,69 @@ test('replacing an element with the same selector expires the old browser ref', 
   );
 
   assert.equal(currentTarget('@b-current', '#continue'), snapshottedElement);
+  assert.equal(currentTarget('@b-current'), snapshottedElement);
+  assert.equal(currentTarget('@b-current', '#stale'), null);
   snapshottedElement.isConnected = false;
   assert.equal(currentTarget('@b-current', '#continue'), null);
   assert.notEqual(currentTarget('@b-current', '#continue'), document.querySelector('#continue'));
+});
+
+test('agent pointer resolution uses live refs without requiring a selector, then snapshot x/y', () => {
+  const start = source.indexOf('function resolveAgentPointer(request)');
+  const end = source.indexOf('\nfunction inspectAuthenticationIntent', start);
+  const scrolled = [];
+  const liveTarget = {
+    scrollIntoView: (options) => scrolled.push(options),
+    getBoundingClientRect: () => ({ left: 8, top: 20, width: 40, height: 24 }),
+  };
+  const resolve = vm.runInNewContext(
+    `(${source.slice(start, end).replace('function resolveAgentPointer', 'function')})`,
+    {
+      currentAgentSnapshotTarget: (ref, selector) =>
+        ref === '@b-results' && (selector === undefined || selector === '#results')
+          ? liveTarget
+          : null,
+      window: { innerWidth: 300, innerHeight: 200 },
+    },
+  );
+
+  assert.deepEqual(resolve({ ref: '@b-results', x: 12.3, y: 45.8 }), { x: 28, y: 32 });
+  assert.deepEqual(scrolled, [{ block: 'center', inline: 'center', behavior: 'auto' }]);
+  assert.deepEqual(resolve({ x: 12.3, y: 45.8 }), { x: 12, y: 46 });
+  assert.equal(resolve({ selector: '#missing', x: 12.3, y: 45.8 }), null);
+});
+
+test('ref-targeted scroll without a selector uses the live snapshot element', () => {
+  const start = source.indexOf('function scrollTargetFor(request, horizontal)');
+  const end = source.indexOf('\nfunction safeSnapshot()', start);
+  class Element {}
+  const nested = Object.assign(Object.create(Element.prototype), {
+    parentElement: null,
+    scrollWidth: 40,
+    clientWidth: 40,
+    scrollHeight: 800,
+    clientHeight: 120,
+  });
+  const scrollTargetFor = vm.runInNewContext(
+    `(${source.slice(start, end).replace('function scrollTargetFor', 'function')})`,
+    {
+      Element,
+      currentAgentSnapshotTarget: (ref) => (ref === '@b-results' ? nested : null),
+      requireCurrentAgentSnapshotTarget: () => {
+        throw new Error('selector-less scroll must not require a selector');
+      },
+      document: {
+        elementFromPoint: () => {
+          throw new Error('live ref scroll must not fall back to viewport hit-testing');
+        },
+        scrollingElement: { id: 'document' },
+        documentElement: { id: 'document' },
+      },
+      getComputedStyle: () => ({ overflowX: 'visible', overflowY: 'auto' }),
+    },
+  );
+
+  assert.equal(scrollTargetFor({ ref: '@b-results', x: 12, y: 46 }, false), nested);
 });
 
 test('OAuth authentication intent includes the exact authoritative anchor destination', () => {

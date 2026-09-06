@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -139,4 +140,12 @@ test('settings renders when the persisted active session is absent from the snap
     ),
   );
   assert.match(html, /Back to app/);
+  assert.match(html, /<span class="truncate">Browser<\/span>/);
+  assert.doesNotMatch(html, /Browser settings are coming soon/);
+});
+
+test('Browser settings tab mounts the real section instead of a placeholder', () => {
+  const source = fs.readFileSync(new URL('./SettingsPanel.tsx', import.meta.url), 'utf8');
+  assert.match(source, /case 'Browser':\s*content = <BrowserSettings \/>;/);
+  assert.doesNotMatch(source, /case 'Browser':\s*content = <PlaceholderSection/);
 });

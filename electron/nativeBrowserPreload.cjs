@@ -616,9 +616,8 @@ function fillCredentials(payload) {
 function resolveAgentPointer(request) {
   try {
     let point;
-    if (typeof request?.selector === 'string' && request.selector) {
-      const target = currentAgentSnapshotTarget(request.ref, request.selector);
-      if (!target) return null;
+    const target = currentAgentSnapshotTarget(request?.ref, request?.selector);
+    if (target) {
       target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
       const box = target.getBoundingClientRect();
       if (box.width <= 0 || box.height <= 0) return null;
@@ -626,6 +625,8 @@ function resolveAgentPointer(request) {
         x: Math.round(box.left + box.width / 2),
         y: Math.round(box.top + box.height / 2),
       };
+    } else if (request?.selector) {
+      return null;
     } else {
       point = { x: Math.round(Number(request?.x)), y: Math.round(Number(request?.y)) };
     }
@@ -936,7 +937,8 @@ function finishScrollAttempt(attempt) {
 function scrollTargetFor(request, horizontal) {
   let target = request.selector
     ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
-    : document.elementFromPoint(Number(request.x), Number(request.y));
+    : currentAgentSnapshotTarget(request.ref, request.selector) ||
+      document.elementFromPoint(Number(request.x), Number(request.y));
   while (target instanceof Element) {
     const style = getComputedStyle(target);
     const overflow = horizontal ? style.overflowX : style.overflowY;
@@ -1058,11 +1060,11 @@ function requireSafeAgentTextAction(request) {
 }
 
 function currentAgentSnapshotTarget(ref, selector) {
-  if (!agentSnapshotId || !ref || !selector) return null;
+  if (!agentSnapshotId || !ref) return null;
   const target = agentSnapshotTargets.get(ref);
   if (
     !target ||
-    target.selector !== selector ||
+    (selector && target.selector !== selector) ||
     !(target.element instanceof Element) ||
     !target.element.isConnected ||
     target.element.ownerDocument !== document
