@@ -206,3 +206,17 @@ test('SessionRow: the title rests truncated inside an overflow viewport, marquee
   assert.match(html, /truncate/);
   assert.doesNotMatch(html, /title-marquee/);
 });
+
+test('activity status changes invalidate the row memo and expose readable status text', () => {
+  const props = makeProps({ ...STABLE });
+  assert.equal(areSessionRowPropsEqual(props, { ...props }), true);
+  for (const activityStatus of ['review', 'failed'] as const) {
+    const next = { ...props, activityStatus };
+    assert.equal(areSessionRowPropsEqual(props, next), false);
+    const label = activityStatus === 'review' ? 'Needs review' : 'Failed';
+    const html = render(next);
+    assert.ok(html.includes(`title="Build the thing · ${label}"`));
+    assert.ok(html.includes(`sr-only">${label}:</span>`));
+    assert.doesNotMatch(html, /aria-label="(?:Needs review|Failed)"/);
+  }
+});

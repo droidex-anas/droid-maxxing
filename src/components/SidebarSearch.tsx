@@ -5,6 +5,7 @@ import { shallowEqual, useStoreSelector } from '../hooks/useStore';
 import {
   chatDisplayTitle,
   chatMatchesPullRequest,
+  pullRequestMatchesQuery,
   isChatHidden,
   type ChatMetadataMap,
 } from '../lib/chatMetadata';
@@ -127,14 +128,16 @@ export default function SidebarSearch({
               </span>
             </span>
             {trimmed &&
-              metadata[entry.session.appSessionId]?.pullRequests?.map((pr) => (
-                <span
-                  key={pr.url}
-                  className="mt-0.5 block truncate text-[11px] text-droid-text-muted"
-                >
-                  #{pr.number} · {pr.title} · {pr.state.toLowerCase()}
-                </span>
-              ))}
+              metadata[entry.session.appSessionId]?.pullRequests
+                ?.filter((pr) => pullRequestMatchesQuery(pr, trimmed))
+                .map((pr) => (
+                  <span
+                    key={pr.url}
+                    className="mt-0.5 block truncate text-[11px] text-droid-text-muted"
+                  >
+                    #{pr.number} · {pr.title} · {pr.state.toLowerCase()}
+                  </span>
+                ))}
             {entry.matches.slice(0, SNIPPETS_PER_ROW).map((m, j) => (
               <span key={j} className="block truncate text-[12px] text-droid-text-muted mt-0.5">
                 {m.author === 'user' ? 'You: ' : ''}

@@ -1,3 +1,4 @@
+import { canSettleSession } from '../lib/sidebarActivity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
@@ -415,7 +416,7 @@ export default function Sidebar({
           y={rowMenu.y}
           settled={rowMenuSession ? statusFor(rowMenuSession) === 'settled' : false}
           onToggleSettled={
-            rowMenuSession && !['working', 'approval', 'input'].includes(statusFor(rowMenuSession))
+            rowMenuSession && canSettleSession(statusFor(rowMenuSession))
               ? () => {
                   if (statusFor(rowMenuSession) === 'settled') activity.reopen(rowMenuSession);
                   else activity.settle(rowMenuSession);

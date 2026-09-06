@@ -1,10 +1,12 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { AppState } from './useStore';
 import type { SessionSummary } from '../types/bridge';
 import { sessionAttention } from '../lib/sessionAttention';
 import { sessionIsUnread } from '../lib/sessions';
 import { toast } from '../lib/toast';
 import {
+  canSettleSession,
+  pruneSettledSessions,
   DEFAULT_SIDEBAR_PREFERENCES,
   loadSidebarActivity,
   saveSidebarActivity,
@@ -16,7 +18,12 @@ import {
 export function useSidebarActivity(
   state: Pick<
     AppState,
-    'pendingPermissions' | 'pendingQuestions' | 'activeAppSessionId' | 'sessionLastSeen'
+    | 'pendingPermissions'
+    | 'pendingQuestions'
+    | 'activeAppSessionId'
+    | 'sessionLastSeen'
+    | 'sessions'
+    | 'chatMetadata'
   >,
 ) {
   const [preferences, setPreferences] = useState<SidebarActivityPreferences>(() => {
@@ -28,6 +35,18 @@ export function useSidebarActivity(
       return { ...DEFAULT_SIDEBAR_PREFERENCES, settled: {} };
     }
   });
+
+  useEffect(() => {
+    const settled = pruneSettledSessions(preferences.settled, state.sessions, state.chatMetadata);
+    if (settled === preferences.settled) return;
+    const next = { ...preferences, settled };
+    try {
+      saveSidebarActivity(window.localStorage, next);
+      setPreferences(next);
+    } catch {
+      toast.error('Could not save sidebar preferences. Check available disk space and try again.');
+    }
+  }, [preferences, state.sessions, state.chatMetadata]);
 
   function update(next: SidebarActivityPreferences) {
     try {
@@ -70,7 +89,7 @@ export function useSidebarActivity(
     statusFor,
     settle: (session: SessionSummary) => {
       const status = statusFor(session);
-      if (status === 'working' || status === 'approval' || status === 'input') return;
+      if (!canSettleSession(status)) return;
       update({
         ...preferences,
         settled: { ...preferences.settled, [session.appSessionId]: session.updatedAt },

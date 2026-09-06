@@ -38,7 +38,12 @@ test('automatic discovery deduplicates worktrees and ignores moved chats and can
       authenticated: true,
       installMethod: 'manual' as const,
     }),
-    getGitEnvironment: async () => ({ isRepo: true, isGitHub: true, branch: 'sidebar' }),
+    getGitEnvironment: async () => ({
+      isRepo: true,
+      isGitHub: true,
+      branch: 'sidebar',
+      worktreePath: '/worktree',
+    }),
     detectPullRequest: async (cwd: string, branch?: string) => {
       calls++;
       assert.equal(cwd, '/worktree');
@@ -73,4 +78,91 @@ test('automatic discovery deduplicates worktrees and ignores moved chats and can
       },
     },
   );
+});
+
+const available = async () => ({
+  installed: true,
+  authenticated: true,
+  installMethod: 'manual' as const,
+});
+const environment = async () => ({
+  isRepo: true,
+  isGitHub: true,
+  branch: 'sidebar',
+  worktreePath: '/worktree',
+});
+
+test('subdirectories share one canonical worktree lookup and retain original cwd targeting', async () => {
+  let calls = 0;
+  const targets = [
+    { appSessionId: 'root', cwd: '/worktree' },
+    { appSessionId: 'sub', cwd: '/worktree/src' },
+  ];
+  const linked: string[] = [];
+  await discoverChatPullRequests(
+    () => targets,
+    (cwd) => linked.push(cwd),
+    () => false,
+    {
+      getGithubAvailability: available,
+      getGitEnvironment: environment,
+      detectPullRequest: async (cwd) => {
+        calls++;
+        assert.equal(cwd, '/worktree');
+        return { ok: true, pr };
+      },
+    },
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(linked, ['/worktree', '/worktree/src']);
+});
+
+test('a hung lookup times out and the next worktree still discovers links', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(console, 'warn', () => {});
+  let started!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const linked: string[] = [];
+  const run = discoverChatPullRequests(
+    () => [
+      { appSessionId: 'hung', cwd: '/hung' },
+      { appSessionId: 'good', cwd: '/worktree' },
+    ],
+    (cwd) => linked.push(cwd),
+    () => false,
+    {
+      getGithubAvailability: available,
+      getGitEnvironment: async (cwd) => {
+        if (cwd === '/hung') {
+          started();
+          return new Promise<never>(() => {});
+        }
+        return environment();
+      },
+      detectPullRequest: async () => ({ ok: true, pr }),
+    },
+  );
+  await waiting;
+  t.mock.timers.tick(10_000);
+  await run;
+  assert.deepEqual(linked, ['/worktree']);
+});
+
+test('cancellation releases a hung availability lookup without linking late results', async () => {
+  const controller = new AbortController();
+  const run = discoverChatPullRequests(
+    () => [{ appSessionId: 'one', cwd: '/worktree' }],
+    () => assert.fail('linked cancelled discovery'),
+    () => controller.signal.aborted,
+    {
+      getGithubAvailability: () => new Promise<never>(() => {}),
+      getGitEnvironment: environment,
+      detectPullRequest: async () => ({ ok: true, pr }),
+    },
+    controller.signal,
+  );
+  controller.abort();
+  await assert.rejects(run, /cancelled/);
 });

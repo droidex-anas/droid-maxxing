@@ -81,11 +81,14 @@ Settling is an organizational action, not cancellation or deletion.
 
 The customize menu also controls ordering, tasks shown per group, and status
 filters. **Last active** keeps resumed older chats near the top, including after
-restarting. Sidebar preferences and settled tasks are saved per local profile.
+restarting. Sidebar preferences and the latest 1,000 settled task markers are saved per local profile.
+Markers for hidden chats and newer activity are removed automatically.
 **Pull request** grouping and the search button beside notifications use PRs detected for the chat’s
 worktree automatically, including chats you have not opened. Discovery runs on
 startup and every minute while the app is visible, independently of the Context
-panel. GitHub CLI must be signed in. Search linked PRs by number, URL, title, or
+panel. GitHub CLI must be signed in. Lookups time out after 10 seconds and retry on the next refresh.
+Each chat retains its 10 most recently detected PRs. At the 1,000-chat metadata limit,
+opening a chat can replace an older automatic PR entry; names, pins, and hidden-chat markers take priority. Search linked PRs by number, URL, title, or
 branch. Links survive restarts and branch changes; detected PR status refreshes
 automatically. A full PR URL distinguishes repositories that use the same number.
 

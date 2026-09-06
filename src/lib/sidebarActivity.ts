@@ -1,5 +1,5 @@
 import type { SessionSummary } from '../types/bridge';
-import { chatDisplayTitle, type ChatMetadataMap } from './chatMetadata';
+import { chatDisplayTitle, isChatHidden, type ChatMetadataMap } from './chatMetadata';
 import type { SessionAttentionKind } from './sessionAttention';
 import { sessionIsLive } from './sessions';
 
@@ -38,7 +38,7 @@ export interface SidebarActivityPreferences {
   view: 'activity' | 'workspaces' | 'pull-requests';
   settled: Record<string, number>;
   order: 'recent' | 'oldest' | 'title';
-  filter: 'all' | 'attention' | 'working' | 'settled';
+  filter: 'all' | 'attention' | 'working' | 'ready' | 'settled';
   limit: number;
 }
 
@@ -57,7 +57,13 @@ export function isSidebarOrder(value: unknown): value is SidebarActivityPreferen
 }
 
 export function isSidebarFilter(value: unknown): value is SidebarActivityPreferences['filter'] {
-  return value === 'all' || value === 'attention' || value === 'working' || value === 'settled';
+  return (
+    value === 'all' ||
+    value === 'attention' ||
+    value === 'working' ||
+    value === 'ready' ||
+    value === 'settled'
+  );
 }
 
 export function loadSidebarActivity(storage: Pick<Storage, 'getItem'>): SidebarActivityPreferences {
@@ -96,7 +102,7 @@ export function loadSidebarActivity(storage: Pick<Storage, 'getItem'>): SidebarA
   }
   return {
     view: value.view,
-    settled,
+    settled: pruneSettledSessions(settled, {}, {}),
     order: value.order,
     filter: value.filter,
     limit: value.limit,
@@ -135,4 +141,22 @@ export function matchesActivityFilter(
   if (filter === 'all') return true;
   if (filter === 'attention') return ['approval', 'input', 'failed', 'review'].includes(status);
   return status === filter;
+}
+
+export function canSettleSession(status: SessionActivityStatus): boolean {
+  return status !== 'working' && status !== 'approval' && status !== 'input';
+}
+
+// Keep unloaded history markers, but discard known hidden or superseded entries.
+// Retain the newest 1,000 markers so paging through history cannot grow storage forever.
+export function pruneSettledSessions(
+  settled: Record<string, number>,
+  sessions: Partial<Record<string, SessionSummary>>,
+  metadata: ChatMetadataMap,
+): Record<string, number> {
+  const entries = Object.entries(settled).filter(
+    ([id, at]) => !isChatHidden(metadata[id]) && (sessions[id]?.updatedAt ?? at) <= at,
+  );
+  if (entries.length === Object.keys(settled).length && entries.length <= 1000) return settled;
+  return Object.fromEntries(entries.sort((a, b) => b[1] - a[1]).slice(0, 1000));
 }

@@ -178,12 +178,15 @@ export const SessionRow = memo(function SessionRow({
         >
           {!attention && running ? <WorkingSpinner /> : null}
           {!attention && !running && activityStatus === 'review' && (
-            <span className="h-1.5 w-1.5 rounded-full bg-droid-accent" aria-label="Needs review" />
+            <span className="h-1.5 w-1.5 rounded-full bg-droid-accent" aria-hidden="true" />
           )}
           {!attention && activityStatus === 'failed' && (
-            <span className="h-1.5 w-1.5 rounded-full bg-droid-red" aria-label="Failed" />
+            <span className="h-1.5 w-1.5 rounded-full bg-droid-red" aria-hidden="true" />
           )}
         </span>
+        {!attention && !running && (activityStatus === 'review' || activityStatus === 'failed') && (
+          <span className="sr-only">{ACTIVITY_LABELS[activityStatus]}:</span>
+        )}
         {unread && <span className="sr-only">Unread:</span>}
         {attention && (
           <span className="sr-only">

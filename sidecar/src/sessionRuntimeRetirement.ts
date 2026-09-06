@@ -67,7 +67,8 @@ export function isDueForRetirement(
   now: number,
   idleMs: number,
 ): boolean {
-  return isRetirableSession(facts) && now - facts.idleSince >= idleMs;
+  // Monotonic activity timestamps can lead the wall clock by a tick.
+  return isRetirableSession(facts) && Math.max(0, now - facts.idleSince) >= idleMs;
 }
 
 // A sidecar restart takes every provider process, browser, and pending edit

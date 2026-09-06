@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Search, X } from 'lucide-react';
+import { pushEscapeLayer } from './environment/usePopover';
 
 // Shared chrome for the command-palette overlays (⌘K command palette,
 // sidebar session search): backdrop, animated panel, search input row, and
@@ -29,11 +30,44 @@ export default function PaletteShell({
   footerRight: string;
   children: ReactNode;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const opener = document.activeElement;
+    const panel = panelRef.current;
     inputRef.current?.focus();
+    let focusInside = true;
+    const trackFocus = () => {
+      focusInside = !!panel?.contains(document.activeElement);
+    };
+    document.addEventListener('focusin', trackFocus);
+    return () => {
+      document.removeEventListener('focusin', trackFocus);
+      if (focusInside && opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
+
+  useEffect(() => pushEscapeLayer(onClose), [onClose]);
+
+  const trapTab = (event: React.KeyboardEvent) => {
+    if (event.key !== 'Tab') return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const focusable = panel.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return createPortal(
     <motion.div
@@ -44,6 +78,9 @@ export default function PaletteShell({
       onClick={onClose}
     >
       <motion.div
+        ref={panelRef}
+        onKeyDown={trapTab}
+        style={{ zoom: 'var(--ui-zoom, 1)' }}
         role="dialog"
         aria-modal="true"
         aria-label={inputAriaLabel}

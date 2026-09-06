@@ -29,11 +29,17 @@ function copyChatAsMarkdown(appSessionId: string, title: string): void {
 // Nullable on purpose: the menu's target session can vanish between the click
 // and render (archive from another surface); a cleanup effect in the component
 // closes the menu a frame later.
-function rowMenuTarget(
+export function rowMenuTarget(
   sessions: Record<string, SessionSummary>,
   rowMenu: { appSessionId: string } | null,
+  metadata: ChatMetadataMap,
 ): SessionSummary | null {
-  if (!rowMenu || !Object.hasOwn(sessions, rowMenu.appSessionId)) return null;
+  if (
+    !rowMenu ||
+    !Object.hasOwn(sessions, rowMenu.appSessionId) ||
+    isChatHidden(metadata[rowMenu.appSessionId])
+  )
+    return null;
   return sessions[rowMenu.appSessionId];
 }
 
@@ -92,7 +98,7 @@ export function useSidebarRowActions(
     setRenamingId(null);
   }, []);
 
-  const rowMenuSession = rowMenuTarget(sessions, rowMenu);
+  const rowMenuSession = rowMenuTarget(sessions, rowMenu, chatMetadata);
 
   const handleCopyMarkdown = useCallback(
     (appSessionId: string) => {
@@ -104,7 +110,7 @@ export function useSidebarRowActions(
   );
 
   return {
-    rowMenu,
+    rowMenu: rowMenuSession ? rowMenu : null,
     renamingId,
     rowMenuSession,
     handleRowMenu,

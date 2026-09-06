@@ -976,7 +976,12 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'LINK_CHATS_PR': {
       const sessions: Partial<AppState['sessions']> = state.sessions;
       const ids = action.appSessionIds.filter((id) => sessions[id]?.cwd === action.cwd);
-      const chatMetadata = linkChatsPullRequest(state.chatMetadata, ids, action.pr);
+      const chatMetadata = linkChatsPullRequest(
+        state.chatMetadata,
+        ids,
+        action.pr,
+        state.activeAppSessionId,
+      );
       return chatMetadata ? { ...state, chatMetadata } : state;
     }
 

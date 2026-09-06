@@ -241,9 +241,9 @@ export function SessionContextMenuPanel({
           }}
         >
           {settled ? (
-            <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
+            <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.5} />
           ) : (
-            <CircleCheck className="h-3.5 w-3.5" strokeWidth={1.5} />
+            <CircleCheck aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.5} />
           )}
           {settled ? 'Reopen task' : 'Mark as settled'}
         </button>

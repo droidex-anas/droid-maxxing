@@ -29,7 +29,8 @@ export function useSidebarPagination(limit: number) {
   const defaultVisibleCount = limit === 0 ? Number.MAX_SAFE_INTEGER : limit;
   return {
     defaultVisibleCount,
-    visibleCountFor: (group: string) => counts.get(group) ?? defaultVisibleCount,
+    visibleCountFor: (group: string) =>
+      limit === 0 ? defaultVisibleCount : (counts.get(group) ?? defaultVisibleCount),
     showMore: (group: string) => {
       dispatch({ type: 'more', group, limit });
     },

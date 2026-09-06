@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import type { SessionAttentionKind } from './sessionAttention';
 import type { SessionSummary } from '../types/bridge';
 import {
+  canSettleSession,
+  pruneSettledSessions,
+  isSidebarFilter,
   DEFAULT_SIDEBAR_PREFERENCES,
   loadSidebarActivity,
   saveSidebarActivity,
@@ -84,4 +87,30 @@ test('name ordering uses displayed titles and a stable identity tie-break', () =
       .map((row) => row.appSessionId),
     ['a', 'b'],
   );
+});
+
+test('Ready is a valid filter and settlement excludes work awaiting a response', () => {
+  assert.equal(isSidebarFilter('ready'), true);
+  assert.equal(matchesActivityFilter('ready', 'ready'), true);
+  assert.equal(matchesActivityFilter('review', 'ready'), false);
+  for (const status of ['working', 'approval', 'input'] as const)
+    assert.equal(canSettleSession(status), false);
+  for (const status of ['ready', 'review', 'failed', 'settled'] as const)
+    assert.equal(canSettleSession(status), true);
+});
+
+test('settled markers prune hidden and superseded sessions, preserve unloaded history, and stay bounded', () => {
+  const settled = { unloaded: 5, archived: 5, deleted: 5, changed: 5, current: 100 };
+  const result = pruneSettledSessions(
+    settled,
+    { changed: session, current: session },
+    { archived: { archivedAt: 10 }, deleted: { deletedAt: 10 } },
+  );
+  assert.deepEqual(result, { current: 100, unloaded: 5 });
+  assert.equal(pruneSettledSessions(result, {}, {}), result);
+  const many = Object.fromEntries(Array.from({ length: 1002 }, (_, i) => [String(i), i]));
+  const bounded = pruneSettledSessions(many, {}, {});
+  assert.equal(Object.keys(bounded).length, 1000);
+  assert.equal(bounded['0'], undefined);
+  assert.equal(bounded['1001'], 1001);
 });

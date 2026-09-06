@@ -14,6 +14,7 @@
 // map instead of breaking the sidebar.
 
 import type { SessionSummary } from '../types/bridge';
+import { toast } from './toast';
 import type { PullRequest } from '../types/vcs';
 
 export type ChatPullRequest = Pick<
@@ -35,6 +36,7 @@ const CHAT_METADATA_STORAGE_KEY = 'droid-chat-metadata';
 // Bounds so a corrupt or ever-growing payload cannot bloat storage.
 const MAX_TRACKED_CHATS = 1000;
 export const MAX_CHAT_TITLE_LENGTH = 200;
+export const MAX_CHAT_PULL_REQUESTS = 10;
 
 function getLocalStorage(): Storage | undefined {
   if (typeof window !== 'undefined') return window.localStorage;
@@ -60,9 +62,12 @@ function sanitizeMetadata(value: unknown): ChatMetadata | null {
   if (archivedAt !== undefined) out.archivedAt = archivedAt;
   if (deletedAt !== undefined) out.deletedAt = deletedAt;
   if (Array.isArray(raw.pullRequests)) {
-    const pullRequests = raw.pullRequests
-      .map(sanitizePullRequest)
-      .filter((pr): pr is ChatPullRequest => pr !== null);
+    const pullRequests: ChatPullRequest[] = [];
+    for (const value of raw.pullRequests) {
+      const pr = sanitizePullRequest(value);
+      if (pr && !pullRequests.some((other) => other.url === pr.url)) pullRequests.push(pr);
+      if (pullRequests.length === MAX_CHAT_PULL_REQUESTS) break;
+    }
     if (pullRequests.length > 0) out.pullRequests = pullRequests;
   }
   return Object.keys(out).length > 0 ? out : null;
@@ -109,7 +114,7 @@ export function saveChatMetadata(map: ChatMetadataMap): void {
   try {
     getLocalStorage()?.setItem(CHAT_METADATA_STORAGE_KEY, JSON.stringify(map));
   } catch {
-    /* ignore */
+    toast.error('Could not save chat organization. Check available disk space and try again.');
   }
 }
 
@@ -291,6 +296,7 @@ function sanitizePullRequest(value: unknown): ChatPullRequest | null {
     value.number < 1 ||
     !('url' in value) ||
     typeof value.url !== 'string' ||
+    value.url.length > 2048 ||
     !/^https?:\/\/[^\s]+\/pull\/[1-9]\d*$/.test(value.url) ||
     !('title' in value) ||
     typeof value.title !== 'string' ||
@@ -305,10 +311,10 @@ function sanitizePullRequest(value: unknown): ChatPullRequest | null {
   return {
     number: value.number,
     url: value.url,
-    title: value.title,
-    state: value.state,
+    title: value.title.slice(0, MAX_CHAT_TITLE_LENGTH),
+    state: value.state.slice(0, 32),
     isDraft: value.isDraft,
-    headRefName: value.headRefName,
+    headRefName: value.headRefName?.slice(0, 256) ?? null,
   };
 }
 
@@ -318,6 +324,7 @@ export function linkChatsPullRequest(
   map: ChatMetadataMap,
   appSessionIds: readonly string[],
   detected: ChatPullRequest,
+  activeAppSessionId: string | null = null,
 ): ChatMetadataMap | null {
   const pr = sanitizePullRequest(detected);
   const targets = new Set(appSessionIds.filter((id) => !isChatHidden(map[id])));
@@ -333,13 +340,27 @@ export function linkChatsPullRequest(
       return [id, meta];
     }
     changed = true;
-    return [id, { ...meta, pullRequests: [pr, ...links.filter((link) => link.url !== pr.url)] }];
+    return [
+      id,
+      {
+        ...meta,
+        pullRequests: [pr, ...links.filter((link) => link.url !== pr.url)].slice(
+          0,
+          MAX_CHAT_PULL_REQUESTS,
+        ),
+      },
+    ];
   });
   for (const id of targets) {
-    // Discovery must neither evict user choices nor churn a full PR cache on
-    // every poll. Explicit organization actions can still replace PR-only entries.
-    if (entries.length >= MAX_TRACKED_CHATS) break;
     if (Object.hasOwn(map, id)) continue;
+    if (entries.length >= MAX_TRACKED_CHATS) {
+      // Opening a chat gives its links priority over passive discovery. Never
+      // evict names, pins, or tombstones, and never churn the cache on polling.
+      if (id !== activeAppSessionId) continue;
+      const expendable = entries.findIndex(([, meta]) => metadataRetentionPriority(meta) === 0);
+      if (expendable < 0) continue;
+      entries.splice(expendable, 1);
+    }
     entries.push([id, { pullRequests: [pr] }]);
     changed = true;
   }
@@ -347,16 +368,18 @@ export function linkChatsPullRequest(
 }
 
 export function chatMatchesPullRequest(meta: ChatMetadata | undefined, query: string): boolean {
+  return (meta?.pullRequests ?? []).some((pr) => pullRequestMatchesQuery(pr, query));
+}
+
+export function pullRequestMatchesQuery(pr: ChatPullRequest, query: string): boolean {
   const term = query.trim().toLowerCase();
   const number = /^(?:pr:\s*)?#?([1-9]\d*)$/.exec(term)?.[1];
-  return (meta?.pullRequests ?? []).some((pr) => {
-    if (number) return String(pr.number) === number;
-    if (/^https?:\/\//.test(term)) return pr.url.toLowerCase() === term.replace(/\/$/, '');
-    return (
-      !term ||
-      pr.title.toLowerCase().includes(term) ||
-      pr.url.toLowerCase().includes(term) ||
-      (pr.headRefName?.toLowerCase().includes(term) ?? false)
-    );
-  });
+  if (number) return String(pr.number) === number;
+  if (/^https?:\/\//.test(term)) return pr.url.toLowerCase() === term.replace(/\/$/, '');
+  return (
+    !term ||
+    pr.title.toLowerCase().includes(term) ||
+    pr.url.toLowerCase().includes(term) ||
+    (pr.headRefName?.toLowerCase().includes(term) ?? false)
+  );
 }

@@ -1,3 +1,4 @@
+import { MAX_CHAT_PULL_REQUESTS, pullRequestMatchesQuery } from './chatMetadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -349,4 +350,71 @@ test('automatic PR discovery preserves names and pins and does not churn a full 
   assert.deepEqual(renamed.important, original.important);
   assert.equal(renamed.another.displayTitle, 'Explicit name');
   assert.equal(Object.keys(renamed).length, 1000);
+});
+
+test('PR history and titles stay bounded at runtime and on reload', () => {
+  fakeStorage();
+  let map: ChatMetadataMap = {};
+  for (let number = 1; number <= 20; number++) {
+    map =
+      linkChatsPullRequest(map, ['chat'], {
+        number,
+        url: `https://github.com/team/repo/pull/${number}`,
+        title: 'x'.repeat(500),
+        state: 'OPEN',
+        isDraft: false,
+        headRefName: 'branch',
+      }) ?? map;
+  }
+  assert.equal(map.chat.pullRequests?.length, MAX_CHAT_PULL_REQUESTS);
+  assert.equal(map.chat.pullRequests?.[0].number, 20);
+  assert.equal(map.chat.pullRequests?.[0].title.length, 200);
+  saveChatMetadata(map);
+  assert.deepEqual(loadChatMetadata(), map);
+  const matching = map.chat.pullRequests?.filter((pr) => pullRequestMatchesQuery(pr, '#19'));
+  assert.deepEqual(
+    matching?.map((pr) => pr.number),
+    [19],
+  );
+});
+
+test('opening a chat can replace passive PR metadata at capacity without evicting user organization', () => {
+  const pr = {
+    number: 1,
+    url: 'https://github.com/team/repo/pull/1',
+    title: 'PR',
+    state: 'OPEN',
+    isDraft: false,
+    headRefName: 'branch',
+  };
+  const full: ChatMetadataMap = { pinned: { pinnedAt: 1 }, hidden: { deletedAt: 2 } };
+  for (let i = 0; i < 998; i++) full[`cached-${i}`] = { pullRequests: [pr] };
+  assert.equal(linkChatsPullRequest(full, ['active'], pr), null);
+  const next = linkChatsPullRequest(full, ['active'], pr, 'active');
+  assert.ok(next);
+  assert.equal(Object.keys(next).length, 1000);
+  assert.deepEqual(next.active.pullRequests, [pr]);
+  assert.deepEqual(next.pinned, full.pinned);
+  assert.deepEqual(next.hidden, full.hidden);
+  assert.equal(next['cached-0'], undefined);
+});
+
+test('loading oversized PR history deduplicates and caps provider payloads', () => {
+  const storage = fakeStorage();
+  const pullRequests = Array.from({ length: 30 }, (_, i) => ({
+    number: i + 1,
+    url: `https://github.com/team/repo/pull/${i + 1}`,
+    title: 'x'.repeat(500),
+    state: 'OPEN',
+    isDraft: false,
+    headRefName: 'branch',
+  }));
+  storage.set(
+    'droid-chat-metadata',
+    JSON.stringify({ chat: { pullRequests: [pullRequests[0], ...pullRequests] } }),
+  );
+  const links = loadChatMetadata().chat.pullRequests;
+  assert.equal(links?.length, MAX_CHAT_PULL_REQUESTS);
+  assert.equal(links?.[0].title.length, 200);
+  assert.equal(new Set(links?.map((pr) => pr.url)).size, MAX_CHAT_PULL_REQUESTS);
 });
