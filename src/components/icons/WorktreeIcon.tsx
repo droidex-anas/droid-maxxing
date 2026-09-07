@@ -1,3 +1,5 @@
+// A worktree forks the checkout in two: a trunk on the left splitting into
+// diagonal arrows, the same glyph shape Codex draws for worktrees.
 export function WorktreeIcon({ className }: { className?: string }) {
   return (
     <svg

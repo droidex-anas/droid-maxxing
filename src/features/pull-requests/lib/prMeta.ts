@@ -1,6 +1,5 @@
-import type { ChecksSummary } from '../../../lib/github';
+import type { PrBadge } from '../../../lib/github';
 import type { PullRequest } from '../../../types/vcs';
-import type { PrBadge, PrTone } from './prTimeline';
 
 export type ReviewerState =
   | 'approved'
@@ -51,19 +50,6 @@ export const REVIEWER_STATE_LABEL: Record<ReviewerState, string> = {
   pending: 'review pending',
 };
 
-export function reviewDecisionBadge(pr: PullRequest | null): PrBadge | null {
-  switch (pr?.reviewDecision) {
-    case 'approved':
-      return { label: 'Approved', tone: 'success' };
-    case 'changes_requested':
-      return { label: 'Changes requested', tone: 'danger' };
-    case 'review_required':
-      return { label: 'Review required', tone: 'neutral' };
-    default:
-      return null;
-  }
-}
-
 // `mergeable` is gh's mergeability, which is only meaningful while the PR is
 // open; a merged or closed PR reports its own state instead.
 export function mergeStateBadge(pr: PullRequest | null): PrBadge | null {
@@ -96,36 +82,3 @@ export function hasMergeConflicts(pr: PullRequest | null): boolean {
   const state = (pr.state || '').toLowerCase();
   return state === 'open' && pr.mergeable === 'conflicting';
 }
-
-export function checksBadge(summary: ChecksSummary): PrBadge | null {
-  if (summary.total === 0) return null;
-  if (summary.fail > 0) {
-    return { label: `${String(summary.fail)} failing`, tone: 'danger' };
-  }
-  if (summary.pending > 0) {
-    return { label: `${String(summary.pending)} running`, tone: 'neutral' };
-  }
-  if (summary.pass === summary.total) {
-    return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'success' };
-  }
-  if (summary.pass > 0) {
-    return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'neutral' };
-  }
-  if (summary.skipped === summary.total) {
-    return { label: `${String(summary.skipped)} skipped`, tone: 'neutral' };
-  }
-  if (summary.neutral === summary.total) {
-    return { label: `${String(summary.neutral)} neutral`, tone: 'neutral' };
-  }
-  if (summary.unknown === summary.total) {
-    return { label: `${String(summary.unknown)} unknown`, tone: 'neutral' };
-  }
-  return { label: `${String(summary.total)} checks completed`, tone: 'neutral' };
-}
-
-export const TONE_TEXT_CLASS: Record<PrTone, string> = {
-  neutral: 'text-droid-text-secondary',
-  success: 'text-[var(--diff-add-fg)]',
-  danger: 'text-[var(--diff-del-fg)]',
-  accent: 'text-[#a371f7]',
-};

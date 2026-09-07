@@ -10,6 +10,20 @@ import {
 import { createPortal } from 'react-dom';
 import { pushEscapeLayer } from './usePopover';
 
+// The app scales its UI with a CSS zoom on #root (the UI font size setting),
+// but this panel portals to <body>, outside that zoom. Anchor rects are
+// measured in scaled pixels, so the positioning math converts the panel's
+// footprint and available space by the same factor, and the content box
+// applies the zoom itself to render at the app's scale. applyTheme sets the
+// variable inline on #root, so read it there — the portal inherits only the
+// :root default from <body>.
+function uiZoomFactor(): number {
+  const owner = document.getElementById('root') ?? document.documentElement;
+  const raw = getComputedStyle(owner).getPropertyValue('--ui-zoom');
+  const factor = Number.parseFloat(raw);
+  return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+
 // A dropdown panel rendered into <body> via a portal so it escapes the Context
 // panel's `overflow` clipping. It stays anchored to its trigger and reflows on
 // scroll/resize, and clamps to the viewport so it is never cropped.
@@ -38,6 +52,9 @@ export function Popover({
     bottom?: number;
     left: number;
     maxHeight: number;
+    // Captured at measure time so the content box renders at exactly the
+    // zoom the positioning math used.
+    zoom: number;
   } | null>(null);
   // Drives the enter transition: mount at opacity-0/scale-95, then flip on the
   // next frame so the CSS transition has a starting state to animate from.
@@ -48,8 +65,12 @@ export function Popover({
       setEntered(false);
       return;
     }
-    const raf = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(raf);
+    const raf = requestAnimationFrame(() => {
+      setEntered(true);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+    };
   }, [open]);
 
   // If focus is inside the panel when it closes (Escape from the search input,
@@ -93,24 +114,31 @@ export function Popover({
     const update = () => {
       const anchor = anchorRef.current;
       if (!anchor) return;
+      const zoom = uiZoomFactor();
       const r = anchor.getBoundingClientRect();
-      const rawLeft = align === 'right' ? r.right - width : r.left;
-      const left = Math.min(Math.max(margin, rawLeft), window.innerWidth - width - margin);
+      // The content box is zoomed, so its on-screen footprint is width*zoom;
+      // top/left/bottom stay in viewport pixels because the positioning shell
+      // is not zoomed.
+      const visualWidth = width * zoom;
+      const rawLeft = align === 'right' ? r.right - visualWidth : r.left;
+      const left = Math.min(Math.max(margin, rawLeft), window.innerWidth - visualWidth - margin);
       const spaceBelow = window.innerHeight - r.bottom - margin;
       const spaceAbove = r.top - margin;
       // Flip above the anchor when there isn't enough room below (e.g. the
       // composer pickers sit at the bottom of the window).
       // Cap maxHeight to the room actually available on the chosen side (never a
       // fixed floor that could exceed it) so the panel is never pushed partly
-      // off-screen; its content scrolls within whatever space remains.
+      // off-screen; its content scrolls within whatever space remains. The cap
+      // is expressed in the zoomed box's own units, hence the division.
       if (spaceBelow < 240 && spaceAbove > spaceBelow) {
         setPos({
           bottom: window.innerHeight - r.top + 4,
           left,
-          maxHeight: Math.max(0, spaceAbove),
+          maxHeight: Math.max(0, spaceAbove / zoom),
+          zoom,
         });
       } else {
-        setPos({ top: r.bottom + 4, left, maxHeight: Math.max(0, spaceBelow) });
+        setPos({ top: r.bottom + 4, left, maxHeight: Math.max(0, spaceBelow / zoom), zoom });
       }
     };
     update();
@@ -127,8 +155,17 @@ export function Popover({
     };
     window.addEventListener('scroll', schedule, true);
     window.addEventListener('resize', schedule);
+    // A UI zoom change lands as an inline-style mutation on #root (applyTheme)
+    // and fires neither resize nor scroll, so observe the owner directly to
+    // keep an open panel glued to its anchor at the new scale.
+    const zoomOwner = document.getElementById('root');
+    const zoomObserver = zoomOwner ? new MutationObserver(schedule) : null;
+    if (zoomOwner) {
+      zoomObserver?.observe(zoomOwner, { attributes: true, attributeFilter: ['style'] });
+    }
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      zoomObserver?.disconnect();
       window.removeEventListener('scroll', schedule, true);
       window.removeEventListener('resize', schedule);
     };
@@ -160,7 +197,13 @@ export function Popover({
     const focusables = panel.querySelectorAll<HTMLElement>(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     );
-    if (focusables.length === 0) return;
+    if (focusables.length === 0) {
+      // Every row can be disabled (e.g. subagent placeholders awaiting
+      // registration); focus then rests on the panel itself and Tab must not
+      // walk out of the open dialog into the page.
+      e.preventDefault();
+      return;
+    }
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
     const active = document.activeElement;
@@ -186,15 +229,18 @@ export function Popover({
         top: pos.top,
         bottom: pos.bottom,
         left: pos.left,
-        width,
-        maxHeight: pos.maxHeight,
         transformOrigin: pos.top !== undefined ? 'top' : 'bottom',
       }}
-      className={`z-[1000] flex flex-col overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50 transition-[opacity,transform] duration-150 ease-out ${
+      className={`z-[1000] transition-[opacity,transform] duration-150 ease-out ${
         entered ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
-      } ${className}`}
+      }`}
     >
-      {children}
+      <div
+        style={{ zoom: pos.zoom, width, maxHeight: pos.maxHeight }}
+        className={`flex flex-col overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50 ${className}`}
+      >
+        {children}
+      </div>
     </div>,
     document.body,
   );

@@ -1,5 +1,6 @@
 import { useMemo, useState, type RefObject } from 'react';
-import { Check, ChevronLeft, GitBranch, Loader2, Plus, Search } from 'lucide-react';
+import { Check, ChevronLeft, Loader2, Plus, Search } from 'lucide-react';
+import { GitBranchIcon } from './GithubIcons';
 import { Popover } from './Popover';
 import { checkoutGitBranch, createGitBranch, stripRemotePrefix } from '../../lib/git';
 import { useGitFetchOnOpen } from '../../hooks/useGitFetchOnOpen';
@@ -226,7 +227,7 @@ export function StartBranchMenu({
                 aria-pressed={b.name === selected}
                 className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
-                <GitBranch className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                <GitBranchIcon size={14} className="shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12.5px] text-droid-text">{b.name}</span>
                   {b.name === selected ? (
@@ -265,7 +266,7 @@ export function StartBranchMenu({
                 aria-pressed={r.name === selected}
                 className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
-                <GitBranch className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                <GitBranchIcon size={14} className="shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
                   {r.name}
                 </span>

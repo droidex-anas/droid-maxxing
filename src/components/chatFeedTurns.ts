@@ -188,16 +188,27 @@ function mergeAssistantMessages(
   };
 }
 
+// A compaction marker announces the turn's context snapshot. It folds into the
+// Worked group with the rest of the activity — except when a run holds nothing
+// else (a bare /compact), where it stays top-level: there is no work to fold it
+// into, and a one-item "Worked for 0s" disclosure would hide the boundary.
+function isCompactionMarker(it: FeedItem): boolean {
+  return (
+    it.type === 'status' &&
+    (it.event.kind === 'compaction' || isCompactionCompleteStatus(it.event.text))
+  );
+}
+
 // Collapse a completed assistant turn: everything the turn did — thinking,
 // tool/file activity, statuses, compaction dividers, child-session lines, and
 // the assistant's mid-turn notes — folds into ONE "Worked for …" group between
 // the prompt and the answer, so a settled turn reads prompt → Worked → final
-// response and expanding the fold replays the whole turn (compaction dividers
-// included) at the configured density. Keep top-level:
-// turn's final answer (its last assistant message, plus earlier fragments
-// split off purely by todo/plan reconciliation, #19), compaction markers, and errors, so failures
-// remain visible. Invariant (#18): the final answer itself is never nested
-// inside a Worked group, no matter what trailing work or status follows it.
+// response and expanding the fold replays the whole turn (compaction divider
+// included) at the configured density. Keep top-level: the turn's final answer
+// (its last assistant message, plus earlier fragments split off purely by
+// todo/plan reconciliation, #19) and errors, so failures remain visible.
+// Invariant (#18): the final answer itself is never nested inside a Worked
+// group, no matter what trailing work or status follows it.
 function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
   if (run.length === 0) return [];
   const out: FeedItem[] = [];
@@ -249,8 +260,11 @@ function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
   // when work continues past the last assistant text, so a turn never shatters
   // into several folds. The group renders before the turn's top-level
   // survivors (the answer and any errors, kept in transcript order).
-  const foldables: FeedItem[] = [];
+  // Foldables carry their run index so compaction markers land at their
+  // transcript position inside the fold.
+  const foldables: { index: number; item: FeedItem }[] = [];
   const survivors: FeedItem[] = [];
+  const markers: { index: number; item: FeedItem }[] = [];
   let answerPushed = false;
   for (let i = 0; i < run.length; i++) {
     if (dropIdx.has(i)) continue;
@@ -264,28 +278,35 @@ function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
       }
       continue;
     }
-    if (
-      it.type === 'error' ||
-      (it.type === 'status' &&
-        (it.event.kind === 'compaction' || isCompactionCompleteStatus(it.event.text)))
-    ) {
+    if (it.type === 'error') {
       // A failed tool/result must stay visible after the turn completes instead
       // of being buried in a collapsed "Worked for …" group (classifier intent).
       survivors.push(it);
+    } else if (isCompactionMarker(it)) {
+      // Provisional: the marker moves into the fold when the run has real work.
+      markers.push({ index: i, item: it });
+      survivors.push(it);
     } else if (!(it.type === 'message' && isSpecBody(it.event.text))) {
-      foldables.push(it);
+      foldables.push({ index: i, item: it });
     }
   }
   if (foldables.length > 0) {
-    const { start, end } = spanOf(foldables);
+    const folded = [...foldables, ...markers]
+      .sort((a, b) => a.index - b.index)
+      .map((entry) => entry.item);
+    const { start, end } = spanOf(folded);
     out.push({
       type: 'worked',
-      key: `worked-${foldables[0].key}`,
-      items: foldables,
+      key: `worked-${folded[0].key}`,
+      items: folded,
       durationMs: Math.max(0, end - start),
     });
+    // Markers moved into the fold; drop their provisional top-level copies.
+    out.push(...survivors.filter((it) => !isCompactionMarker(it)));
+  } else {
+    // No work to fold: survivors already hold any markers in transcript order.
+    out.push(...survivors);
   }
-  out.push(...survivors);
   return out;
 }
 

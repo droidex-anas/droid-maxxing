@@ -245,6 +245,23 @@ export function prKindLabel(kind: PrKind): string {
   }
 }
 
+// A PR fact rendered as a small colored label (checks rollup, review
+// decision). Shared by the PR workspace and the context panel's PR row so both
+// phrase and color the same fact identically.
+export type PrTone = 'neutral' | 'success' | 'danger' | 'accent';
+
+export interface PrBadge {
+  label: string;
+  tone: PrTone;
+}
+
+export const PR_TONE_TEXT_CLASS: Record<PrTone, string> = {
+  neutral: 'text-droid-text-secondary',
+  success: 'text-[var(--diff-add-fg)]',
+  danger: 'text-[var(--diff-del-fg)]',
+  accent: 'text-[#a371f7]',
+};
+
 export type CheckStatus = 'success' | 'failure' | 'pending' | 'neutral';
 
 export function bucketToStatus(bucket: string): CheckStatus {
@@ -302,4 +319,43 @@ export function checksSummary(checks: PrCheck[]): ChecksSummary {
   else if (summary.pass > 0) summary.status = 'success';
   else summary.status = 'neutral';
   return summary;
+}
+
+export function checksBadge(summary: ChecksSummary): PrBadge | null {
+  if (summary.total === 0) return null;
+  if (summary.fail > 0) {
+    return { label: `${String(summary.fail)} failing`, tone: 'danger' };
+  }
+  if (summary.pending > 0) {
+    return { label: `${String(summary.pending)} running`, tone: 'neutral' };
+  }
+  if (summary.pass === summary.total) {
+    return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'success' };
+  }
+  if (summary.pass > 0) {
+    return { label: `${String(summary.pass)}/${String(summary.total)} passed`, tone: 'neutral' };
+  }
+  if (summary.skipped === summary.total) {
+    return { label: `${String(summary.skipped)} skipped`, tone: 'neutral' };
+  }
+  if (summary.neutral === summary.total) {
+    return { label: `${String(summary.neutral)} neutral`, tone: 'neutral' };
+  }
+  if (summary.unknown === summary.total) {
+    return { label: `${String(summary.unknown)} unknown`, tone: 'neutral' };
+  }
+  return { label: `${String(summary.total)} checks completed`, tone: 'neutral' };
+}
+
+export function reviewDecisionBadge(pr: PullRequest | null): PrBadge | null {
+  switch (pr?.reviewDecision) {
+    case 'approved':
+      return { label: 'Approved', tone: 'success' };
+    case 'changes_requested':
+      return { label: 'Changes requested', tone: 'danger' };
+    case 'review_required':
+      return { label: 'Review required', tone: 'neutral' };
+    default:
+      return null;
+  }
 }

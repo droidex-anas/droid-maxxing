@@ -719,8 +719,20 @@ test('#18 a final answer followed by compaction stays a top-level message', () =
   assert.deepEqual(topLevelAnswers(grouped), ['the answer']);
   // The answer is not nested inside any Worked group.
   assert.ok(!workedChildren(grouped).some((c) => c.type === 'message'));
+  // The compaction divider folds into the turn's Worked group with the rest of
+  // the activity instead of lingering as a loose divider below the answer.
+  assert.ok(!grouped.some((it) => it.type === 'status'));
+  assert.ok(workedChildren(grouped).some((c) => c.type === 'status'));
+  assert.equal(grouped.at(-1)?.type, 'message');
+});
+
+test('a bare compaction turn keeps its divider top-level', () => {
+  // No work to fold — a lone /compact must not become a one-item "Worked for
+  // 0s" disclosure that hides the boundary the divider announces.
+  const events = [userMsg('/compact'), compaction()];
+  const grouped = groupTurns(buildFeed(events), false);
+  assert.ok(!grouped.some((it) => it.type === 'worked'));
   assert.equal(grouped.at(-1)?.type, 'status');
-  assert.ok(!workedChildren(grouped).some((c) => c.type === 'status'));
 });
 
 test('a pinned spec alone never produces an empty Worked disclosure', () => {

@@ -18,10 +18,20 @@ import type {
 const NO_REPO: GitEnvironment = { isRepo: false };
 const EMPTY_BRANCHES: GitBranchList = { current: null, detached: true, local: [], remote: [] };
 
+// The preload bridge only exists in the desktop shell. Every call site is
+// guarded by isDesktop() (and the read wrappers catch), but the type system
+// can't see that — resolve the bridge in one place instead of asserting at
+// every call.
+function bridge(): NonNullable<Window['droidControl']> {
+  const api = window.droidControl;
+  if (!api) throw new Error('droidControl bridge unavailable');
+  return api;
+}
+
 export async function getGitEnvironment(dir: string): Promise<GitEnvironment> {
   if (!isDesktop() || !dir) return NO_REPO;
   try {
-    return await window.droidControl!.gitEnvironment(dir);
+    return await bridge().gitEnvironment(dir);
   } catch {
     return NO_REPO;
   }
@@ -30,7 +40,7 @@ export async function getGitEnvironment(dir: string): Promise<GitEnvironment> {
 export async function getGitBranches(dir: string): Promise<GitBranchList> {
   if (!isDesktop() || !dir) return EMPTY_BRANCHES;
   try {
-    return await window.droidControl!.gitBranches(dir);
+    return await bridge().gitBranches(dir);
   } catch {
     return EMPTY_BRANCHES;
   }
@@ -39,7 +49,7 @@ export async function getGitBranches(dir: string): Promise<GitBranchList> {
 export async function getGitWorktrees(dir: string): Promise<GitWorktree[]> {
   if (!isDesktop() || !dir) return [];
   try {
-    return await window.droidControl!.gitWorktrees(dir);
+    return await bridge().gitWorktrees(dir);
   } catch {
     return [];
   }
@@ -48,7 +58,7 @@ export async function getGitWorktrees(dir: string): Promise<GitWorktree[]> {
 export async function getGitDiffStat(dir: string, mode: DiffStatMode): Promise<GitDiffStat | null> {
   if (!isDesktop() || !dir) return null;
   try {
-    return await window.droidControl!.gitDiffStat(dir, { mode });
+    return await bridge().gitDiffStat(dir, { mode });
   } catch {
     return null;
   }
@@ -61,7 +71,7 @@ export async function getGitDiffFiles(
 ): Promise<DiffFileList> {
   if (!isDesktop() || !dir) return { mode, base: null, files: [] };
   try {
-    return await window.droidControl!.gitDiffFiles(dir, { mode, appSessionId });
+    return await bridge().gitDiffFiles(dir, { mode, appSessionId });
   } catch {
     return { mode, base: null, files: [] };
   }
@@ -76,7 +86,7 @@ export async function getGitFileDiff(
 ): Promise<FileDiffResult> {
   if (!isDesktop() || !dir) return { path, diff: '', binary: false };
   try {
-    return await window.droidControl!.gitFileDiff(dir, {
+    return await bridge().gitFileDiff(dir, {
       mode,
       path,
       ignoreWhitespace,
@@ -90,7 +100,7 @@ export async function getGitFileDiff(
 export async function markGitTurnStart(dir: string, appSessionId?: string): Promise<void> {
   if (!isDesktop() || !dir) return;
   try {
-    await window.droidControl!.gitMarkTurnStart(dir, appSessionId);
+    await bridge().gitMarkTurnStart(dir, appSessionId);
   } catch {
     // best-effort baseline; the Last turn scope falls back to HEAD
   }
@@ -114,47 +124,49 @@ export async function createGitBranch(
   dir: string,
   options: CreateBranchOptions,
 ): Promise<GitActionResult> {
-  return action(() => window.droidControl!.gitCreateBranch(dir, options));
+  return action(() => bridge().gitCreateBranch(dir, options));
 }
 
 export async function checkoutGitBranch(
   dir: string,
   options: { ref: string; allowDirty?: boolean },
 ): Promise<GitActionResult> {
-  return action(() => window.droidControl!.gitCheckout(dir, options));
+  return action(() => bridge().gitCheckout(dir, options));
 }
 
 export async function createGitWorktree(
   dir: string,
   options: CreateWorktreeOptions,
 ): Promise<GitActionResult> {
-  return action(() => window.droidControl!.gitCreateWorktree(dir, options));
+  return action(() => bridge().gitCreateWorktree(dir, options));
 }
 
 export async function removeGitWorktree(
   dir: string,
   options: { path: string; force?: boolean },
 ): Promise<GitActionResult> {
-  return action(() => window.droidControl!.gitRemoveWorktree(dir, options));
+  return action(() => bridge().gitRemoveWorktree(dir, options));
 }
 
 export async function gitCommit(dir: string, options: CommitOptions): Promise<GitActionResult> {
-  return action(() => window.droidControl!.gitCommit(dir, options));
+  return action(() => bridge().gitCommit(dir, options));
 }
 
 export async function gitPush(dir: string, options: PushOptions): Promise<GitActionResult> {
-  return action(() => window.droidControl!.gitPush(dir, options));
+  return action(() => bridge().gitPush(dir, options));
 }
 
 export async function gitFetch(dir: string): Promise<GitActionResult> {
   if (!dir) return failure('no_dir');
-  return action(() => window.droidControl!.gitFetch(dir));
+  return action(() => bridge().gitFetch(dir));
 }
 
 // ---- Pure helpers (unit-tested) -------------------------------------------
 
 export function diffModeLabel(mode: DiffStatMode, baseRef?: string | null): string {
-  if (mode === 'branch') return `Branch vs ${baseRef || 'origin/main'}`;
+  // No resolved base means no comparison is running; name the mode alone
+  // rather than inventing an origin/main baseline.
+  if (mode === 'branch') return baseRef ? `Branch vs ${baseRef}` : 'Branch';
   if (mode === 'uncommitted') return 'Uncommitted';
   return 'Worktree';
 }
@@ -220,7 +232,7 @@ export function isWorktreeInUse(worktreePath: string, sessionCwds: Iterable<stri
 
 export function aheadBehindLabel(ahead = 0, behind = 0): string | null {
   const parts: string[] = [];
-  if (ahead > 0) parts.push(`↑${ahead}`);
-  if (behind > 0) parts.push(`↓${behind}`);
+  if (ahead > 0) parts.push(`↑${String(ahead)}`);
+  if (behind > 0) parts.push(`↓${String(behind)}`);
   return parts.length ? parts.join(' ') : null;
 }
