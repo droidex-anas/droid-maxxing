@@ -679,39 +679,43 @@ test('a restarted sidecar releases a worktree after its review origin was droppe
   }
 });
 
-test('a failed store write does not keep scheduler advances in memory', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
-  let clock = Date.UTC(2026, 0, 1, 8, 0, 0);
-  const dueAt = clock + 60_000;
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
-    launchSession: async () => undefined,
-    now: () => clock,
-  });
+test(
+  'a failed store write does not keep scheduler advances in memory',
+  { skip: process.platform === 'win32' },
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+    let clock = Date.UTC(2026, 0, 1, 8, 0, 0);
+    const dueAt = clock + 60_000;
+    const manager = new AutomationManager({
+      dataDir: directory,
+      turnSettleGraceMs: 80,
+      emit: () => undefined,
+      prepareWorkspace: async ({ cwd }) => cwd ?? '',
+      launchSession: async () => undefined,
+      now: () => clock,
+    });
 
-  try {
-    const once = await manager.create(
-      task({ schedule: { kind: 'once', runAt: dueAt }, title: 'Once report' }),
-    );
-    clock = dueAt + 1_000;
-    await chmod(directory, 0o555);
-    await assert.rejects(manager.create(task({ title: 'Later' })));
-    const snapshot = await manager.snapshot();
-    await chmod(directory, 0o755);
-    assert.equal(snapshot.automations.length, 1);
-    assert.equal(snapshot.automations[0]?.id, once.id);
-    assert.equal(snapshot.automations[0]?.enabled, true);
-    assert.equal(snapshot.automations[0]?.nextRunAt, dueAt);
-    assert.equal(snapshot.queuedRunCount, 0);
-  } finally {
-    await chmod(directory, 0o755).catch(() => undefined);
-    await manager.shutdown();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+    try {
+      const once = await manager.create(
+        task({ schedule: { kind: 'once', runAt: dueAt }, title: 'Once report' }),
+      );
+      clock = dueAt + 1_000;
+      await chmod(directory, 0o555);
+      await assert.rejects(manager.create(task({ title: 'Later' })));
+      const snapshot = await manager.snapshot();
+      await chmod(directory, 0o755);
+      assert.equal(snapshot.automations.length, 1);
+      assert.equal(snapshot.automations[0]?.id, once.id);
+      assert.equal(snapshot.automations[0]?.enabled, true);
+      assert.equal(snapshot.automations[0]?.nextRunAt, dueAt);
+      assert.equal(snapshot.queuedRunCount, 0);
+    } finally {
+      await chmod(directory, 0o755).catch(() => undefined);
+      await manager.shutdown();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 test('overlapping creates both persist', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));

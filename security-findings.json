@@ -1,46 +1,51 @@
 {
-  "scan_id": "scan-2026-08-07-responsive-worktree-settings",
-  "scan_date": "2026-08-07T16:48:10Z",
-  "scan_type": "working",
-  "commit_range": "HEAD..working-tree",
-  "pr_number": null,
+  "scan_id": "scan-2026-09-07-pr-128-automations",
+  "scan_date": "2026-09-07T07:51:07Z",
+  "scan_type": "pr",
+  "commit_range": "origin/main...feat/automations (including working tree at scan time)",
+  "pr_number": 128,
   "threat_model_version": "1.0.0",
   "findings": [],
   "reviewed_candidates": [
     {
-      "id": "dirty-worktree-force-removal-tampering",
+      "id": "automation-permission-escalation",
       "disposition": "mitigated",
-      "reason": "The UI derives the removal path from Git's registered worktree list, checks the target for uncommitted files, and only sends force=true after a second explicit Delete anyway action. The existing Electron Git boundary rejects targets that are not registered non-main worktrees."
+      "reason": "Only proposal and list tools auto-approve in unattended sessions. Mutations never auto-approve unattended, interactive mutations require High autonomy, deletion still requires an explicit permission decision, and direct MCP creation independently enforces High autonomy."
     },
     {
-      "id": "unmerged-branch-destruction",
+      "id": "reserved-mcp-name-spoofing",
       "disposition": "mitigated",
-      "reason": "Forced worktree deletion does not force branch deletion. Cleanup continues to use git branch -d, and the integration test verifies that a dirty worktree can be explicitly removed while its unmerged branch remains."
+      "reason": "MCP registration and permission recognition share case- and separator-normalized server-name matching, preventing a configured lookalike server from inheriting automation trust."
     },
     {
-      "id": "worktree-metadata-xss",
+      "id": "persistent-permission-overbreadth",
       "disposition": "mitigated",
-      "reason": "Worktree paths, branch names, pull request state, and conversation titles are rendered as ordinary React text. The redesign adds no raw HTML, URL navigation, shell construction, or executable interpolation."
+      "reason": "Automation mutation grants include a bounded stable digest of the mutation arguments, so an Always allow decision for one target or payload does not authorize unrelated automation mutations, while secret-like values are omitted from the stored signature."
     },
     {
-      "id": "dirty-preflight-toctou",
-      "disposition": "accepted",
-      "reason": "The uncommitted-file count is a preflight snapshot and can become stale before confirmation. This does not cross an authorization boundary: dirty removal always requires the explicit destructive confirmation, and the main process revalidates the registered worktree target immediately before removal."
-    },
-    {
-      "id": "stale-dirty-check-result",
+      "id": "offline-command-replay",
       "disposition": "mitigated",
-      "reason": "Each dirty-status preflight captures a request generation. Canceling the dialog or starting a newer check invalidates older results before they can update or authorize the current confirmation."
+      "reason": "Renderer mutation commands use sendIfConnected and reject immediately while disconnected, so create, update, delete, enable, run-now, and confirmation commands cannot be replayed after reconnect."
     },
     {
-      "id": "pull-request-enrichment-resource-use",
+      "id": "automation-worktree-path-traversal",
       "disposition": "mitigated",
-      "reason": "Core worktree inventory renders before optional pull-request metadata. Metadata lookups are bounded to six concurrent requests, operate only on Git-registered worktrees, and use the existing load generation to prevent stale results from replacing newer state."
+      "reason": "Worktree names are sanitized, Git is invoked with array arguments, the target must remain lexically inside the selected repository, and every existing target path component is rejected if it is a symbolic link or non-directory."
     },
     {
-      "id": "progressive-reveal-resource-use",
-      "disposition": "accepted",
-      "reason": "The initial view renders only five worktrees per repository. Explicitly expanding a repository performs local matching over its registered worktrees and in-memory sessions; no new listener, polling loop, or attacker-controlled allocation is introduced."
+      "id": "automation-worktree-destructive-cleanup",
+      "disposition": "mitigated",
+      "reason": "Cleanup derives the repository from Git worktree metadata, refuses the main checkout, refuses dirty worktrees, and uses git worktree remove without force. Cleanup failures are reported rather than falling back to recursive deletion."
+    },
+    {
+      "id": "automation-store-tampering",
+      "disposition": "mitigated",
+      "reason": "Stored definitions, run snapshots, schedules, reasoning levels, and autonomy values are parsed and normalized before use; unknown schema versions are refused and unreadable stores are quarantined rather than executed."
+    },
+    {
+      "id": "automation-input-resource-exhaustion",
+      "disposition": "mitigated",
+      "reason": "Agent-facing MCP inputs use Zod length and range limits, cron strings are bounded, snapshots and histories are trimmed, and scheduler/run timers have bounded queues and retry intervals."
     }
   ],
   "summary": {
@@ -59,11 +64,15 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 8
+    "files_analyzed": 74
   },
   "thresholds": {
     "block_merge": ["CRITICAL"],
     "require_review": ["HIGH", "CRITICAL"],
     "triggered": []
-  }
+  },
+  "notes": [
+    "Pre-existing codebase risks documented in .factory/threat-model.md were not counted unless PR #128 introduced or materially worsened them.",
+    "The four final cleanup edits are test portability and complexity refactors and do not add new trust boundaries or privileged sinks."
+  ]
 }

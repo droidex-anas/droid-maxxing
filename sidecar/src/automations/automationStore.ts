@@ -255,28 +255,10 @@ export function holdsReviewWorkspace(store: AutomationStore, run: AutomationRun)
 
 function parseAutomation(value: unknown, now: number): Automation | null {
   const raw = recordValue(value);
-  if (
-    !raw ||
-    typeof raw.id !== 'string' ||
-    typeof raw.title !== 'string' ||
-    typeof raw.prompt !== 'string' ||
-    !recordValue(raw.schedule)
-  ) {
-    return null;
-  }
+  if (!raw || typeof raw.id !== 'string') return null;
+  const input = parseStoredAutomationInput(raw);
+  if (!input) return null;
   try {
-    const input: AutomationInput = {
-      title: raw.title,
-      prompt: raw.prompt,
-      workspaceCwd: typeof raw.workspaceCwd === 'string' ? raw.workspaceCwd : null,
-      executionMode: raw.executionMode === 'worktree' ? 'worktree' : 'local',
-      enabled: raw.enabled !== false,
-      schedule: raw.schedule as AutomationInput['schedule'],
-      modelId: typeof raw.modelId === 'string' ? raw.modelId : null,
-      reasoningEffort: isReasoningEffort(raw.reasoningEffort) ? raw.reasoningEffort : null,
-      autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : undefined,
-    };
-    if (typeof raw.timezone === 'string') input.timezone = raw.timezone;
     const normalized = normalizeAutomationInput(input);
     const storedNextRunAt = finiteNumberOrNull(raw.nextRunAt);
     return {
@@ -288,9 +270,9 @@ function parseAutomation(value: unknown, now: number): Automation | null {
           : storedNextRunAt,
       lastRunAt: finiteNumberOrNull(raw.lastRunAt),
       lastRunStatus: parseRunStatus(raw.lastRunStatus),
-      lastRunError: typeof raw.lastRunError === 'string' ? raw.lastRunError : null,
+      lastRunError: stringOrNull(raw.lastRunError),
       lastRunDurationMs: finiteNumberOrNull(raw.lastRunDurationMs),
-      lastAppSessionId: typeof raw.lastAppSessionId === 'string' ? raw.lastAppSessionId : null,
+      lastAppSessionId: stringOrNull(raw.lastAppSessionId),
       completedAt: finiteNumberOrNull(raw.completedAt),
       createdAt: finiteNumber(raw.createdAt, now),
       updatedAt: finiteNumber(raw.updatedAt, now),
@@ -303,45 +285,24 @@ function parseAutomation(value: unknown, now: number): Automation | null {
 
 function parseRun(value: unknown, now: number): AutomationRun | null {
   const raw = recordValue(value);
-  const snapshot = raw ? recordValue(raw.automation) : null;
-  if (
-    !raw ||
-    !snapshot ||
-    typeof raw.id !== 'string' ||
-    typeof raw.automationId !== 'string' ||
-    typeof snapshot.id !== 'string' ||
-    typeof snapshot.title !== 'string' ||
-    typeof snapshot.prompt !== 'string'
-  ) {
-    return null;
-  }
+  if (!raw || typeof raw.id !== 'string' || typeof raw.automationId !== 'string') return null;
+  const snapshot = parseRunAutomationSnapshot(raw.automation);
+  if (!snapshot) return null;
   return {
     id: raw.id,
     automationId: raw.automationId,
-    automation: {
-      id: snapshot.id,
-      title: snapshot.title,
-      prompt: snapshot.prompt,
-      workspaceCwd: typeof snapshot.workspaceCwd === 'string' ? snapshot.workspaceCwd : null,
-      executionMode: snapshot.executionMode === 'worktree' ? 'worktree' : 'local',
-      timezone: typeof snapshot.timezone === 'string' ? snapshot.timezone : 'UTC',
-      modelId: typeof snapshot.modelId === 'string' ? snapshot.modelId : null,
-      reasoningEffort: isReasoningEffort(snapshot.reasoningEffort)
-        ? snapshot.reasoningEffort
-        : null,
-      autonomy: isAutonomy(snapshot.autonomy) ? snapshot.autonomy : 'low',
-    },
+    automation: snapshot,
     scheduledAt: finiteNumber(raw.scheduledAt, now),
     requestedAt: finiteNumber(raw.requestedAt, now),
     trigger: raw.trigger === 'manual' ? 'manual' : 'schedule',
     status: parseRunStatus(raw.status) ?? 'failed',
     startedAt: finiteNumberOrNull(raw.startedAt),
     finishedAt: finiteNumberOrNull(raw.finishedAt),
-    clientRef: typeof raw.clientRef === 'string' ? raw.clientRef : null,
-    appSessionId: typeof raw.appSessionId === 'string' ? raw.appSessionId : null,
-    resolvedCwd: typeof raw.resolvedCwd === 'string' ? raw.resolvedCwd : null,
-    error: typeof raw.error === 'string' ? raw.error : null,
-    effectiveModelId: typeof raw.effectiveModelId === 'string' ? raw.effectiveModelId : null,
+    clientRef: stringOrNull(raw.clientRef),
+    appSessionId: stringOrNull(raw.appSessionId),
+    resolvedCwd: stringOrNull(raw.resolvedCwd),
+    error: stringOrNull(raw.error),
+    effectiveModelId: stringOrNull(raw.effectiveModelId),
     effectiveReasoningEffort: isReasoningEffort(raw.effectiveReasoningEffort)
       ? raw.effectiveReasoningEffort
       : null,
@@ -360,28 +321,14 @@ function parseProposal(
     !raw ||
     !draftRaw ||
     typeof raw.id !== 'string' ||
-    typeof raw.sourceAppSessionId !== 'string' ||
-    typeof draftRaw.title !== 'string' ||
-    typeof draftRaw.prompt !== 'string' ||
-    !recordValue(draftRaw.schedule)
+    typeof raw.sourceAppSessionId !== 'string'
   ) {
     return null;
   }
+  const input = parseStoredAutomationInput(draftRaw);
+  if (!input) return null;
   try {
-    const draft = normalizeAutomationInput({
-      title: draftRaw.title,
-      prompt: draftRaw.prompt,
-      workspaceCwd: typeof draftRaw.workspaceCwd === 'string' ? draftRaw.workspaceCwd : null,
-      executionMode: draftRaw.executionMode === 'worktree' ? 'worktree' : 'local',
-      enabled: draftRaw.enabled !== false,
-      schedule: draftRaw.schedule as AutomationInput['schedule'],
-      ...(typeof draftRaw.timezone === 'string' ? { timezone: draftRaw.timezone } : {}),
-      modelId: typeof draftRaw.modelId === 'string' ? draftRaw.modelId : null,
-      reasoningEffort: isReasoningEffort(draftRaw.reasoningEffort)
-        ? draftRaw.reasoningEffort
-        : null,
-      autonomy: isAutonomy(draftRaw.autonomy) ? draftRaw.autonomy : undefined,
-    });
+    const draft = normalizeAutomationInput(input);
     const storedAutomationId =
       typeof raw.automationId === 'string' && automationIds.has(raw.automationId)
         ? raw.automationId
@@ -405,6 +352,52 @@ function parseProposal(
     console.error('Dropped an invalid automation proposal', error);
     return null;
   }
+}
+
+function parseStoredAutomationInput(raw: Record<string, unknown>): AutomationInput | null {
+  if (
+    typeof raw.title !== 'string' ||
+    typeof raw.prompt !== 'string' ||
+    !recordValue(raw.schedule)
+  ) {
+    return null;
+  }
+  const input: AutomationInput = {
+    title: raw.title,
+    prompt: raw.prompt,
+    workspaceCwd: stringOrNull(raw.workspaceCwd),
+    executionMode: raw.executionMode === 'worktree' ? 'worktree' : 'local',
+    enabled: raw.enabled !== false,
+    schedule: raw.schedule as AutomationInput['schedule'],
+    modelId: stringOrNull(raw.modelId),
+    reasoningEffort: isReasoningEffort(raw.reasoningEffort) ? raw.reasoningEffort : null,
+    autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : undefined,
+  };
+  if (typeof raw.timezone === 'string') input.timezone = raw.timezone;
+  return input;
+}
+
+function parseRunAutomationSnapshot(value: unknown): AutomationRun['automation'] | null {
+  const raw = recordValue(value);
+  if (
+    !raw ||
+    typeof raw.id !== 'string' ||
+    typeof raw.title !== 'string' ||
+    typeof raw.prompt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    id: raw.id,
+    title: raw.title,
+    prompt: raw.prompt,
+    workspaceCwd: stringOrNull(raw.workspaceCwd),
+    executionMode: raw.executionMode === 'worktree' ? 'worktree' : 'local',
+    timezone: typeof raw.timezone === 'string' ? raw.timezone : 'UTC',
+    modelId: stringOrNull(raw.modelId),
+    reasoningEffort: isReasoningEffort(raw.reasoningEffort) ? raw.reasoningEffort : null,
+    autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : 'low',
+  };
 }
 
 function parseSessionOrigins(value: unknown): AutomationStore['sessionOrigins'] {
@@ -456,6 +449,10 @@ function finiteNumber(value: unknown, fallback: number): number {
 
 function finiteNumberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 function isMissingFile(error: unknown): boolean {

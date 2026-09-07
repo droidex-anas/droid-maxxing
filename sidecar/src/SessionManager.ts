@@ -869,19 +869,12 @@ export class SessionManager {
     const [defaults, models] = await Promise.all([this.getFactoryDefaults(), this.getModels()]);
     const mode = defaultsModeForSummary(summary);
     const modelId = summary.modelId ?? defaultModelForAgent('primary', mode, defaults) ?? null;
-    const model = modelId ? models.find((candidate) => candidate.id === modelId) : undefined;
     const defaultReasoning =
       mode === 'spec' ? defaults.specReasoningEffort : defaults.reasoningEffort;
-    const reasoningEffort =
-      summary.reasoningEffort ??
-      validReasoning(modelId ?? undefined, defaultReasoning, models) ??
-      model?.defaultReasoningEffort ??
-      model?.supportedReasoningEfforts?.at(0) ??
-      null;
     return {
       cwd: summary.cwd.trim() || null,
       modelId,
-      reasoningEffort,
+      reasoningEffort: resolveAutomationReasoningEffort(summary, modelId, defaultReasoning, models),
       autonomy: summary.autonomy,
     };
   }
@@ -1912,6 +1905,22 @@ function runtimeFactoryDefaultsWithoutCatalog(
 
 function validModelId(modelId: string | undefined, models: ModelInfo[]): string | undefined {
   return modelId && models.some((model) => model.id === modelId) ? modelId : undefined;
+}
+
+function resolveAutomationReasoningEffort(
+  summary: SessionSummary,
+  modelId: string | null,
+  defaultReasoning: ReasoningEffort | undefined,
+  models: ModelInfo[],
+): ReasoningEffort | null {
+  if (summary.reasoningEffort) return summary.reasoningEffort;
+  const model = modelId ? models.find((candidate) => candidate.id === modelId) : undefined;
+  return (
+    validReasoning(modelId ?? undefined, defaultReasoning, models) ??
+    model?.defaultReasoningEffort ??
+    model?.supportedReasoningEfforts?.at(0) ??
+    null
+  );
 }
 
 function validReasoning(
