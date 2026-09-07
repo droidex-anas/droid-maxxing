@@ -1,35 +1,8 @@
-import {
-  File,
-  FileArchive,
-  FileAudio,
-  FileCode,
-  FileImage,
-  FileJson,
-  FileSpreadsheet,
-  FileText,
-  FileVideo,
-  Presentation,
-  X,
-  type LucideIcon,
-} from 'lucide-react';
+import { FileText, X } from 'lucide-react';
 import { attachmentDisplayName, fileKindInfo, type FileKind } from '../../lib/fileKind';
 
-const ICON_BY_KIND: Record<FileKind, LucideIcon> = {
-  pdf: FileText,
-  document: FileText,
-  spreadsheet: FileSpreadsheet,
-  presentation: Presentation,
-  text: FileText,
-  data: FileJson,
-  code: FileCode,
-  image: FileImage,
-  video: FileVideo,
-  audio: FileAudio,
-  archive: FileArchive,
-  file: File,
-};
-
-// Icon-tile hues per type family, kept theme-aware through the droid palette.
+// One shared glyph; the tile color and subtitle carry the type. Extra Lucide
+// file icons were pulling the initial renderer over its bundle budget.
 const TILE_BY_KIND: Record<FileKind, string> = {
   pdf: 'bg-red-500/15 text-red-400',
   document: 'bg-sky-500/15 text-sky-400',
@@ -63,7 +36,6 @@ export function FileChip({
 }) {
   const displayName = name !== undefined && name.length > 0 ? name : attachmentDisplayName(path);
   const info = fileKindInfo(displayName);
-  const Icon = ICON_BY_KIND[info.kind];
   return (
     <span
       className="group relative flex max-w-60 items-center gap-2.5 rounded-xl border border-droid-border bg-droid-bg/60 py-2 pl-2 pr-2.5"
@@ -72,7 +44,7 @@ export function FileChip({
       <span
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${TILE_BY_KIND[info.kind]}`}
       >
-        <Icon className="h-4 w-4" />
+        <FileText className="h-4 w-4" />
       </span>
       <span className="min-w-0 leading-tight">
         <span className="block truncate text-[12px] font-medium text-droid-text">
