@@ -9,7 +9,7 @@ import { bindLazySurfaceIntent } from '../lib/chunkPreloader';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
-import { CirclePlus, Clock, Search, Settings, SquarePen } from 'lucide-react';
+import { CirclePlus, Search, Settings, SquarePen } from 'lucide-react';
 import { GitPullRequestIcon } from './environment/GithubIcons';
 import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { UnreadFilterActions } from './UnreadFilterActions';
@@ -20,7 +20,6 @@ import { SidebarActivity } from './SidebarActivity';
 import { useSidebarActivity } from '../hooks/useSidebarActivity';
 import { compareSidebarSessions, matchesActivityFilter } from '../lib/sidebarActivity';
 import { SidebarWorkspaceList } from './SidebarWorkspaceList';
-import { useAutomationSnapshot } from '../features/automations/client';
 import {
   chatDisplayTitle,
   isChatHidden,
@@ -68,11 +67,6 @@ export default function Sidebar({
   const [unreadOnly, setUnreadOnly] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const automationsButtonRef = useRef<HTMLButtonElement>(null);
-  const automationSnapshot = useAutomationSnapshot();
-  const automationRunsById = useMemo(
-    () => new Map(automationSnapshot.runs.map((run) => [run.id, run] as const)),
-    [automationSnapshot.runs],
-  );
 
   useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
   useEffect(() => bindLazySurfaceIntent('automations', automationsButtonRef.current), []);
@@ -231,8 +225,6 @@ export default function Sidebar({
   const renderRow = (m: SessionSummary) => {
     const status = statusFor(m);
     const inbox = view === 'activity';
-    const origin = automationSnapshot.sessionOrigins[m.appSessionId];
-    const automationRun = origin ? automationRunsById.get(origin.runId) : undefined;
     return (
       <SessionRow
         key={m.appSessionId}
@@ -250,8 +242,6 @@ export default function Sidebar({
           state.pendingPermissions,
           state.pendingQuestions,
         )}
-        automationTitle={origin?.automationTitle}
-        automationStatus={automationRun?.status}
         renaming={renamingId === m.appSessionId}
         now={now}
         onSelect={handleSelectSession}
@@ -371,13 +361,9 @@ export default function Sidebar({
               : 'text-droid-text hover:bg-droid-elevated'
           }`}
         >
-          <Clock
-            className={`h-4 w-4 shrink-0 transition-colors ${
-              state.mainView === 'automations'
-                ? 'text-droid-text'
-                : 'text-droid-text-secondary group-hover:text-droid-text'
-            }`}
-            strokeWidth={1.75}
+          <span
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 rounded-full border border-droid-text-secondary"
           />
           Automations
         </button>

@@ -9,6 +9,7 @@ import type {
   ServerWireMessage,
   StreamFidelity,
 } from '../types/bridge';
+import { isAutomationSnapshot } from '../features/automations/wireValidation';
 
 export function serverWireMessage(value: unknown): ServerWireMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
@@ -421,20 +422,6 @@ function recordArray(value: unknown): boolean {
   return Array.isArray(value) && value.every(isRecord);
 }
 
-function identifiedRecordArray(value: unknown): boolean {
-  return (
-    Array.isArray(value) &&
-    value.every((entry) => isRecord(entry) && typeof entry.id === 'string' && entry.id.length > 0)
-  );
-}
-
-function isSessionOriginMap(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  return Object.values(value).every(
-    (origin) => isRecord(origin) && typeof origin.runId === 'string' && origin.runId.length > 0,
-  );
-}
-
 function progressArray(value: unknown): boolean {
   return (
     Array.isArray(value) &&
@@ -442,27 +429,6 @@ function progressArray(value: unknown): boolean {
       (entry) =>
         isRecord(entry) && typeof entry.type === 'string' && typeof entry.timestamp === 'string',
     )
-  );
-}
-
-function isAutomationSnapshot(value: unknown): boolean {
-  if (
-    !isRecord(value) ||
-    !identifiedRecordArray(value.automations) ||
-    !identifiedRecordArray(value.runs) ||
-    !identifiedRecordArray(value.proposals) ||
-    !isSessionOriginMap(value.sessionOrigins) ||
-    !nonNegativeSafeInteger(value.queuedRunCount) ||
-    !nonNegativeSafeInteger(value.activeRunCount) ||
-    !isRecord(value.scheduler)
-  ) {
-    return false;
-  }
-  const scheduler = value.scheduler;
-  return (
-    typeof scheduler.ready === 'boolean' &&
-    (scheduler.nextWakeAt === null || typeof scheduler.nextWakeAt === 'number') &&
-    (scheduler.activeRunId === null || typeof scheduler.activeRunId === 'string')
   );
 }
 
