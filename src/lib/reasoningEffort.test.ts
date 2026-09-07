@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveReasoningEffortDisplay } from './reasoningEffort';
+import { isReasoningEffort, resolveReasoningEffortDisplay } from './reasoningEffort';
+
+test('recognizes only supported reasoning efforts', () => {
+  assert.equal(isReasoningEffort('dynamic'), true);
+  assert.equal(isReasoningEffort('unsupported'), false);
+  assert.equal(isReasoningEffort(null), false);
+});
 
 test('session-pinned effort wins over the global default', () => {
   assert.equal(

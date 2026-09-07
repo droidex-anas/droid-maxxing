@@ -1,17 +1,19 @@
 import type { ModelInfo, ReasoningEffort } from '../types/bridge';
 
+const REASONING_EFFORTS: Readonly<Record<ReasoningEffort, true>> = {
+  off: true,
+  none: true,
+  minimal: true,
+  low: true,
+  medium: true,
+  high: true,
+  xhigh: true,
+  max: true,
+  dynamic: true,
+};
+
 export function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return (
-    value === 'off' ||
-    value === 'none' ||
-    value === 'minimal' ||
-    value === 'low' ||
-    value === 'medium' ||
-    value === 'high' ||
-    value === 'xhigh' ||
-    value === 'max' ||
-    value === 'dynamic'
-  );
+  return typeof value === 'string' && Object.hasOwn(REASONING_EFFORTS, value);
 }
 
 // Shared rule for the reasoning effort shown next to a model (composer badge
