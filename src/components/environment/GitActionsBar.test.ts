@@ -31,11 +31,11 @@ const pr = (overrides: Partial<PullRequest> = {}): PullRequest => ({
   ...overrides,
 });
 
-function render(githubReady: boolean, ahead = 0): string {
+function render(githubReady: boolean, envOverrides: Partial<GitEnvironment> = {}): string {
   return renderToStaticMarkup(
     createElement(GitActionsBar, {
       cwd: '/repo',
-      env: { ...env, ahead },
+      env: { ...env, ...envOverrides },
       branches: null,
       isGitHub: true,
       githubReady,
@@ -99,9 +99,29 @@ test('a merged or closed PR leaves the create action available', () => {
 });
 
 test('the push pill only appears while ahead of upstream', () => {
-  assert.doesNotMatch(render(true, 0), /Push \d+ commits/);
-  assert.match(render(true, 2), /title="Push 2 commits"/);
-  assert.match(render(true, 1), /title="Push 1 commit"/);
+  // The fixture branch has no upstream and no remotes, so a flat ahead=0 has
+  // nothing to publish.
+  assert.doesNotMatch(render(true, { ahead: 0 }), /aria-label="Push/);
+  assert.match(render(true, { ahead: 2 }), /aria-label="Push 2 commits"/);
+  assert.match(render(true, { ahead: 1 }), /aria-label="Push 1 commit"/);
+});
+
+test('a branch that was never pushed still offers push, which sets the upstream', () => {
+  // Git reports ahead=0 until an upstream exists; without the pill the panel
+  // would never offer the push that creates one.
+  const html = render(true, { upstream: null, remotes: ['origin'], ahead: 0 });
+  assert.match(html, /aria-label="Push branch and set upstream"/);
+});
+
+test('a branch with no remote has nowhere to push to', () => {
+  assert.doesNotMatch(render(true, { upstream: null, remotes: [], ahead: 0 }), /aria-label="Push/);
+});
+
+test('the create-PR row exposes its disclosure state', () => {
+  const html = render(true);
+  const buttons = html.match(/<button[^>]*>.*?<\/button>/gs) ?? [];
+  const prRow = buttons.find((button) => button.includes('Create pull request'));
+  assert.ok(prRow?.includes('aria-expanded="false"'));
 });
 
 test('an open PR sheet closes when GitHub readiness is lost', () => {

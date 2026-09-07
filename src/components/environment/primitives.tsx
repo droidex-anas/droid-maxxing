@@ -49,6 +49,34 @@ export function Row({
   title?: string;
   disabled?: boolean;
 }) {
+  const content = (
+    <>
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-droid-text">
+        {label}
+      </span>
+      {meta && (
+        <span className="shrink-0 rounded-md bg-droid-elevated px-1.5 py-0.5 text-[10.5px] font-medium capitalize leading-none text-droid-text-secondary tabular-nums">
+          {meta}
+        </span>
+      )}
+      {trailing}
+    </>
+  );
+  // A row without an action is a readout (the model line), not a control:
+  // render plain markup rather than a focusable button that does nothing.
+  if (!onClick) {
+    return (
+      <div
+        title={title}
+        className="group flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left"
+      >
+        {content}
+      </div>
+    );
+  }
   return (
     <button
       ref={ref}
@@ -62,18 +90,7 @@ export function Row({
         active ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
       }`}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-droid-text">
-        {label}
-      </span>
-      {meta && (
-        <span className="shrink-0 rounded-md bg-droid-elevated px-1.5 py-0.5 text-[10.5px] font-medium capitalize leading-none text-droid-text-secondary tabular-nums">
-          {meta}
-        </span>
-      )}
-      {trailing}
+      {content}
     </button>
   );
 }

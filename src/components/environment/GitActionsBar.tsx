@@ -69,9 +69,17 @@ export function GitActionsBar({
     }
   };
 
-  // Only commits ahead of upstream are publishable; a behind-only branch has
-  // nothing to push, so the push pill only surfaces for a real ahead count.
+  // Git only reports ahead/behind once the branch has an upstream, so a
+  // branch that was never pushed reads ahead=0 — yet it is still publishable:
+  // the push sets the upstream (doPush passes setUpstream). With no remote
+  // configured there is nowhere to push, so the pill stays hidden.
   const aheadCount = env?.ahead ?? 0;
+  const publishable =
+    !!env && (aheadCount > 0 || (!env.detached && !env.upstream && (env.remotes?.length ?? 0) > 0));
+  let pushLabel = 'Push branch and set upstream';
+  if (env?.detached) pushLabel = 'Detached HEAD — checkout a branch first';
+  else if (aheadCount > 0)
+    pushLabel = `Push ${String(aheadCount)} commit${aheadCount === 1 ? '' : 's'}`;
 
   return (
     <div>
@@ -96,16 +104,13 @@ export function GitActionsBar({
             Commit or push
           </span>
         </button>
-        {aheadCount > 0 && (
+        {publishable && (
           <button
             type="button"
             onClick={() => void doPush()}
-            disabled={pushing || !!env?.detached}
-            title={
-              env?.detached
-                ? 'Detached HEAD — checkout a branch first'
-                : `Push ${String(aheadCount)} commit${aheadCount === 1 ? '' : 's'}`
-            }
+            disabled={pushing || !!env.detached}
+            title={pushLabel}
+            aria-label={pushLabel}
             className="mr-1.5 flex shrink-0 items-center gap-1 rounded-md border border-droid-border/70 bg-droid-surface px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:cursor-not-allowed disabled:opacity-40"
           >
             {pushing ? (
@@ -113,7 +118,7 @@ export function GitActionsBar({
             ) : (
               <Upload className="h-3 w-3" />
             )}
-            ↑{aheadCount}
+            {aheadCount > 0 ? `↑${String(aheadCount)}` : 'Push'}
           </button>
         )}
       </div>
@@ -152,6 +157,7 @@ export function GitActionsBar({
             icon={<GitHubMarkIcon size={16} />}
             label="Create pull request"
             active={sheet === 'pr'}
+            expanded={sheet === 'pr'}
             onClick={() => {
               toggle('pr');
             }}

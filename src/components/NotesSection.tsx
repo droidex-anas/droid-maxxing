@@ -109,7 +109,11 @@ export function NotesPanel({
   // Collapsed by default: notes are a supporting tool, and opening the panel
   // should never reshuffle the layout because a textarea mounted.
   const [open, setOpen] = useState(defaultOpen);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const [anchorRect, setAnchorRect] = useState<{
+    top: number;
+    left: number;
+    height: number;
+  } | null>(null);
   const used = notes.filter((note) => note.usedAt !== null).length;
 
   // Pad @ autocomplete: while the whole draft is just a @token, the menu lists
@@ -141,7 +145,16 @@ export function NotesPanel({
   useEffect(() => {
     if (!introVisible) return;
     const measure = () => {
-      setAnchorRect(sectionRef.current?.getBoundingClientRect() ?? null);
+      const el = sectionRef.current;
+      if (!el) {
+        setAnchorRect(null);
+        return;
+      }
+      // The section spans the panel edge to edge while its rows sit on the
+      // px-3 gutter; anchoring to the raw rect would push the floating intro
+      // 12px too far left and detach its caret from the Notes row.
+      const rect = el.getBoundingClientRect();
+      setAnchorRect({ top: rect.top, left: rect.left + 12, height: rect.height });
     };
     measure();
     window.addEventListener('resize', measure);

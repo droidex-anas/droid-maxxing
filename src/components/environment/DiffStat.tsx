@@ -11,9 +11,11 @@ const DEL_COLOR = 'var(--diff-del-fg)';
 
 // What the meter sums, phrased as a quiet qualifier next to "Changes"; the
 // popover keeps the full mode labels. The default worktree scope gets no
-// qualifier — the bare label already means it.
+// qualifier — the bare label already means it — and neither does branch mode
+// without a resolved base: claiming "vs origin/main" would invent a
+// comparison that isn't running.
 function modeQualifier(mode: DiffStatMode, baseRef?: string | null): string {
-  if (mode === 'branch') return baseRef ? `vs ${baseRef}` : 'vs origin/main';
+  if (mode === 'branch') return baseRef ? `vs ${baseRef}` : '';
   if (mode === 'uncommitted') return 'uncommitted';
   return '';
 }
@@ -91,7 +93,9 @@ export function DiffStat({
         </button>
         <button
           type="button"
-          onClick={() => { setOpen((v) => !v); }}
+          onClick={() => {
+            setOpen((v) => !v);
+          }}
           title="Choose which changes are counted"
           aria-haspopup="menu"
           aria-expanded={open}
@@ -103,7 +107,9 @@ export function DiffStat({
 
       <Popover
         open={open}
-        onClose={() => { setOpen(false); }}
+        onClose={() => {
+          setOpen(false);
+        }}
         anchorRef={anchorRef}
         label="Diff mode"
         align="right"

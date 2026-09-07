@@ -109,8 +109,9 @@ export default function RightPanel() {
       )
     : undefined;
 
-  // Folderless chats have no git environment to load — the panel is just the
-  // model row and the session-scoped sections, so nothing spins forever.
+  // Folderless chats have no git environment to load — the panel skips the
+  // Environment section so nothing spins forever. Subagents, spec, and notes
+  // deliberately stay: they are session-scoped and work without a folder.
   const hasFolder = cwd !== '';
 
   // The model row lives inside Environment for folder-backed sessions and gets
