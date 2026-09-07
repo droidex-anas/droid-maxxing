@@ -1,14 +1,3 @@
-import {
-  Eye,
-  FilePlus,
-  FilePen,
-  Terminal,
-  FileText,
-  Search,
-  Globe,
-  Boxes,
-  Bot,
-} from 'lucide-react';
 import type { TranscriptEvent } from '../types/bridge';
 import { isChildSessionTool } from './childSessionEvents';
 export { childSessionInfo, isChildSessionTool } from './childSessionEvents';
@@ -24,19 +13,6 @@ export type ToolCat =
   | 'task'
   | 'subagent'
   | 'other';
-
-export const CAT_ICON: Record<ToolCat, React.ElementType> = {
-  read: Eye,
-  create: FilePlus,
-  edit: FilePen,
-  exec: Terminal,
-  search: Search,
-  web: Globe,
-  skill: Boxes,
-  task: Bot,
-  subagent: Bot,
-  other: FileText,
-};
 
 export const CAT_LABEL: Record<ToolCat, string> = {
   read: 'Read',
@@ -443,18 +419,18 @@ export function webSourceName(url: string): string {
   }
 }
 
-// A small favicon URL for a result's domain, or undefined if the URL is unusable.
-export function faviconUrl(url: string): string | undefined {
-  try {
-    const host = new URL(url).hostname;
-    return `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(host)}`;
-  } catch {
-    return undefined;
-  }
+function toolArgRecord(args: unknown): Record<string, unknown> {
+  return args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
+}
+
+export function toolArgString(args: unknown, key: string): string | undefined {
+  const value = toolArgRecord(args)[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 export function toolArgStringArray(args: unknown, key: string): string[] {
-  const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
-  const v = a[key];
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  const value = toolArgRecord(args)[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }

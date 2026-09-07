@@ -292,11 +292,11 @@ function readColors(value: unknown): ThemeColors | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   const colors = {
-    bg: raw['bg'],
-    fg: raw['fg'],
-    surface: raw['surface'],
-    border: raw['border'],
-    accent: raw['accent'],
+    bg: raw.bg,
+    fg: raw.fg,
+    surface: raw.surface,
+    border: raw.border,
+    accent: raw.accent,
   };
   for (const v of Object.values(colors)) {
     if (typeof v !== 'string' || !HEX_COLOR.test(v)) return null;
@@ -445,6 +445,10 @@ export function applyTheme(theme: ThemeSettings) {
   root.style.setProperty(
     '--droid-shadow',
     bgIsDark ? '0 10px 40px rgba(0, 0, 0, 0.35)' : '0 10px 30px rgba(28, 25, 23, 0.1)',
+  );
+  root.style.setProperty(
+    '--droid-shadow-sm',
+    bgIsDark ? '0 4px 16px rgba(0, 0, 0, 0.28)' : '0 4px 14px rgba(28, 25, 23, 0.08)',
   );
   // Semantic status colors are FIXED, never accent-derived, so success/warning
   // and diff add/remove always read as green/amber/red even when the accent is a

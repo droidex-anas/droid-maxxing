@@ -1,5 +1,6 @@
-import { droidexHistoryDir } from './droidexPaths.js';
 import { dirname, join } from 'node:path';
+
+import { droidexHistoryDir } from './droidexPaths.js';
 
 import {
   HistoryIndex,

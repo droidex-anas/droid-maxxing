@@ -187,6 +187,65 @@ export function shouldBindConversationContentResize(options: {
   );
 }
 
+export interface DisclosureAnchor {
+  element: HTMLElement;
+  viewportTop: number;
+  expiresAt: number;
+}
+
+// Long enough to cover the 240 ms expand transition plus a few frames of
+// chunked body mounts; refreshed while resizes keep arriving.
+const DISCLOSURE_ANCHOR_MS = 900;
+const DISCLOSURE_SETTLE_MS = 400;
+
+/**
+ * A disclosure the reader just clicked owns the viewport while it opens or
+ * closes: the header they aimed at stays put instead of the feed snapping to
+ * the tail or restoring a prose anchor behind their back. Captured during the
+ * click's capture phase, before React applies the toggle.
+ */
+export function captureDisclosureAnchor(
+  container: HTMLElement,
+  button: HTMLElement | null,
+  now: number,
+): DisclosureAnchor | null {
+  if (!button || !container.contains(button)) return null;
+  return {
+    element: button,
+    viewportTop: button.getBoundingClientRect().top - container.getBoundingClientRect().top,
+    expiresAt: now + DISCLOSURE_ANCHOR_MS,
+  };
+}
+
+export type DisclosureAnchorAction =
+  | { mode: 'release' }
+  | { mode: 'hold' }
+  | { mode: 'adjust'; delta: number };
+
+// Chunked body mounts keep resizing after the first adjustment; each applied
+// adjustment extends the anchor's life until the panel settles.
+export function touchDisclosureAnchor(anchor: DisclosureAnchor, now: number): void {
+  anchor.expiresAt = now + DISCLOSURE_SETTLE_MS;
+}
+
+/**
+ * The scrollTop adjustment that keeps the clicked disclosure's header at its
+ * captured viewport position. `hold` when the header did not move (growth
+ * landed below it), `release` when the anchor expired or its element left the
+ * DOM, `adjust` with the pixel delta otherwise.
+ */
+export function disclosureAnchorDelta(
+  container: HTMLElement,
+  anchor: DisclosureAnchor,
+  now: number,
+): DisclosureAnchorAction {
+  if (now > anchor.expiresAt || !anchor.element.isConnected) return { mode: 'release' };
+  const viewportTop =
+    anchor.element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  const delta = viewportTop - anchor.viewportTop;
+  return Math.abs(delta) <= 0.5 ? { mode: 'hold' } : { mode: 'adjust', delta };
+}
+
 export function shouldCompensateConversationContentResize(options: {
   isPinned: boolean;
   isSettlingHistoryPrepend: boolean;

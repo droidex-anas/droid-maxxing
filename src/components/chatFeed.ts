@@ -52,20 +52,83 @@ export type FeedItem =
   | { type: 'worked'; key: string; items: FeedItem[]; durationMs: number }
   | TurnChangesItem;
 
+function sameFileChange(a: FileChange, b: FileChange): boolean {
+  return (
+    a.path === b.path &&
+    a.verb === b.verb &&
+    a.added === b.added &&
+    a.removed === b.removed &&
+    a.ops.length === b.ops.length &&
+    a.ops.every((op, i) => op.type === b.ops[i].type && op.text === b.ops[i].text)
+  );
+}
+
+function sameTurnFile(a: TurnFile, b: TurnFile): boolean {
+  return (
+    a.path === b.path &&
+    a.added === b.added &&
+    a.removed === b.removed &&
+    a.verb === b.verb &&
+    sameFileChange(a.change, b.change)
+  );
+}
+
+// Two feed items render identically when they wrap the same underlying transcript
+// event objects. The store keeps prior events referentially stable and only swaps
+// the streaming tail event for a new object, so this ref check is enough: every
+// other FeedItem field (diff stats, durations, summaries) is a pure function of
+// these events. turnChanges is derived on each rebuild, so those rows compare by
+// value rather than object identity.
+export function sameFeedEvents(a: FeedItem, b: FeedItem): boolean {
+  if (a.type !== b.type || a.key !== b.key) return false;
+  if (a.type === 'tools' && b.type === 'tools') {
+    return a.events.length === b.events.length && a.events.every((e, i) => e === b.events[i]);
+  }
+  if (a.type === 'diffs' && b.type === 'diffs') {
+    return (
+      a.changes.length === b.changes.length &&
+      a.changes.every((c, i) => c.event === b.changes[i].event)
+    );
+  }
+  if (a.type === 'child_sessions' && b.type === 'child_sessions') {
+    return a.events.length === b.events.length && a.events.every((e, i) => e === b.events[i]);
+  }
+  if (a.type === 'worked' && b.type === 'worked') {
+    return (
+      a.durationMs === b.durationMs &&
+      a.items.length === b.items.length &&
+      a.items.every((item, i) => sameFeedEvents(item, b.items[i]))
+    );
+  }
+  if (a.type === 'turnChanges' && b.type === 'turnChanges') {
+    return (
+      a.tailEventId === b.tailEventId &&
+      a.added === b.added &&
+      a.removed === b.removed &&
+      a.files.length === b.files.length &&
+      a.files.every((file, i) => sameTurnFile(file, b.files[i]))
+    );
+  }
+  if (a.type === 'thinking' && b.type === 'thinking') {
+    return a.event === b.event && a.durationMs === b.durationMs;
+  }
+  // message | status | error | diff | child session each carry one event.
+  return (a as { event: TranscriptEvent }).event === (b as { event: TranscriptEvent }).event;
+}
+
 // Collect the files a turn's run edited, folding repeated edits to the same
-// path into a single entry (summed line counts). Order follows first touch.
+// path into its latest captured change. Counts and verb describe that same diff.
+// Order follows first touch.
 export function collectTurnFiles(run: FeedItem[]): TurnFile[] {
   const byPath = new Map<string, TurnFile>();
   const consider = (c: FileChange) => {
-    const cur = byPath.get(c.path);
-    if (cur) {
-      cur.added += c.added;
-      cur.removed += c.removed;
-      // A file created then edited in one turn reads best as a creation.
-      if (c.verb === 'create') cur.verb = 'create';
-    } else {
-      byPath.set(c.path, { path: c.path, added: c.added, removed: c.removed, verb: c.verb });
-    }
+    byPath.set(c.path, {
+      path: c.path,
+      added: c.added,
+      removed: c.removed,
+      verb: c.verb,
+      change: c,
+    });
   };
   for (const it of run) {
     if (it.type === 'diff') consider(it.change);

@@ -1,4 +1,3 @@
-import { droidexHistoryDir } from './droidexPaths.js';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
@@ -38,6 +37,7 @@ import {
 } from './sessionTranscript.js';
 import { decodeProviderSessionIdList } from './historyProviderIds.js';
 import { readSessionFileHead, readSessionStart } from './sessionFileHead.js';
+import { droidexHistoryDir } from './droidexPaths.js';
 
 interface StoredMissionState {
   missionId?: string;
