@@ -35,23 +35,22 @@ async function waitForLookup<T>(operation: Promise<T>, signal?: AbortSignal): Pr
 
 const discoveryApi = { getGitEnvironment, detectPullRequest, getGithubAvailability };
 
-// Owns the underlying operation across refreshes and effect cancellation. IPC
-// cannot be cancelled by the renderer: a deadline ends the wait, not the work.
-// Until that work settles, no subsequent scan may start another operation.
+// Owns in-flight Git/GitHub IPC across refreshes and effect cancellation.
+// A deadline ends the wait, not the work: timed-out lookups stay counted until
+// they settle so a later scan cannot pile onto a hung call. Other worktrees in
+// the same scan still continue.
 export class ChatPullRequestDiscovery {
-  private pending: Promise<unknown> | null = null;
+  private inFlight = 0;
 
   constructor(private readonly api = discoveryApi) {}
 
   private async lookup<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) throw new Error('PR discovery cancelled.');
-    if (this.pending) throw new Error('PR discovery is waiting for its previous lookup to finish.');
     const operation = run();
-    this.pending = operation;
-    const settled = () => {
-      this.pending = null;
-    };
-    void operation.then(settled, settled);
+    this.inFlight += 1;
+    void operation.finally(() => {
+      this.inFlight -= 1;
+    });
     return waitForLookup(operation, signal);
   }
 
@@ -63,6 +62,7 @@ export class ChatPullRequestDiscovery {
     isCancelled: () => boolean,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (this.inFlight > 0) return;
     const api = this.api;
     const targets = getTargets();
     const directories = new Set(targets.map((target) => target.cwd).filter(Boolean));
@@ -102,7 +102,6 @@ export class ChatPullRequestDiscovery {
         if (ids.length > 0) onDetected(cwd, ids, result.pr);
       } catch (error) {
         if (isCancelled() || signal?.aborted) return;
-        if (this.pending) throw error;
         console.warn('Automatic chat PR discovery failed; retrying on the next refresh.', error);
       }
     }

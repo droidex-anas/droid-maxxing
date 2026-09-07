@@ -127,12 +127,12 @@ test('subdirectories share one canonical worktree lookup and retain original cwd
   assert.deepEqual(linked, ['/worktree', '/worktree/src']);
 });
 
-test('timeout blocks further IPC until the original operation settles, then polling recovers', async (t) => {
+test('a timed-out worktree does not abort later worktrees or throw on the next poll', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(console, 'warn', () => undefined);
   const started = Promise.withResolvers<void>();
-  const original = Promise.withResolvers<Awaited<ReturnType<typeof environment>>>();
+  const hung = Promise.withResolvers<Awaited<ReturnType<typeof environment>>>();
   const calls: string[] = [];
-  let first = true;
   const discovery = new ChatPullRequestDiscovery({
     getGithubAvailability: async () => {
       calls.push('availability');
@@ -140,21 +140,25 @@ test('timeout blocks further IPC until the original operation settles, then poll
     },
     getGitEnvironment: (cwd) => {
       calls.push(cwd);
-      if (first) {
-        first = false;
+      if (cwd === '/hung') {
         started.resolve();
-        return original.promise;
+        return hung.promise;
       }
-      return environment();
+      return Promise.resolve({
+        isRepo: true,
+        isGitHub: true,
+        branch: 'sidebar',
+        worktreePath: cwd,
+      });
     },
-    detectPullRequest: async () => {
-      calls.push('pr');
+    detectPullRequest: async (cwd) => {
+      calls.push(`pr:${cwd}`);
       return { ok: true, pr };
     },
   });
   const targets = () => [
-    { appSessionId: 'one', cwd: '/worktree' },
-    { appSessionId: 'two', cwd: '/worktree/sub' },
+    { appSessionId: 'one', cwd: '/hung' },
+    { appSessionId: 'two', cwd: '/ready' },
   ];
   const linked: string[] = [];
   const run = discovery.discover(
@@ -164,22 +168,27 @@ test('timeout blocks further IPC until the original operation settles, then poll
     },
     () => false,
   );
-  const timedOut = assert.rejects(run, /timed out/);
   await started.promise;
   t.mock.timers.tick(10_000);
-  await timedOut;
-  assert.deepEqual(calls, ['availability', '/worktree']);
-  await assert.rejects(
-    discovery.discover(
-      targets,
-      () => assert.fail('late link'),
-      () => false,
-    ),
-    /previous lookup/,
+  await run;
+  assert.deepEqual(linked, ['/ready']);
+  assert.equal(calls.filter((call) => call === 'pr:/ready').length, 1);
+  await discovery.discover(
+    targets,
+    () => assert.fail('late link'),
+    () => false,
   );
-  assert.deepEqual(calls, ['availability', '/worktree']);
-  original.resolve(await environment());
-  await original.promise;
+  assert.deepEqual(
+    calls.filter((call) => call === 'availability'),
+    ['availability'],
+  );
+  hung.resolve({
+    isRepo: true,
+    isGitHub: true,
+    branch: 'sidebar',
+    worktreePath: '/hung',
+  });
+  await hung.promise;
   await discovery.discover(
     targets,
     (cwd) => {
@@ -187,8 +196,7 @@ test('timeout blocks further IPC until the original operation settles, then poll
     },
     () => false,
   );
-  assert.deepEqual(linked, ['/worktree', '/worktree/sub']);
-  assert.equal(calls.filter((call) => call === 'pr').length, 1);
+  assert.deepEqual(linked, ['/ready', '/hung', '/ready']);
 });
 
 test('cancellation releases a hung availability lookup without linking late results', async () => {
@@ -233,13 +241,10 @@ test('aborting a scan does not release its underlying operation for a replacemen
   await started.promise;
   controller.abort();
   await cancelled;
-  await assert.rejects(
-    discovery.discover(
-      targets,
-      () => assert.fail('overlap'),
-      () => false,
-    ),
-    /previous lookup/,
+  await discovery.discover(
+    targets,
+    () => assert.fail('overlap'),
+    () => false,
   );
   assert.equal(calls, 1);
   original.resolve(await available());
