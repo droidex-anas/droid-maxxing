@@ -159,17 +159,25 @@ export function NotesPanel({
     measure();
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
-    // Sibling sections above can expand inline (commit/PR sheets) and the pad
-    // grows with the draft, neither of which fires resize or scroll; watch
-    // the section and its siblings so the floating card re-anchors on those
-    // layout shifts.
+    // Sections above Notes can expand inline (commit/PR sheets) and the pad
+    // grows with the draft, neither of which fires resize or scroll. The
+    // section sits inside single-purpose wrappers (this component's root and
+    // the panel's per-section slot), so watch every sibling group on the way
+    // up to the scroll container to catch the layout shifts that move Notes
+    // without resizing it.
     let observer: ResizeObserver | null = null;
     const section = sectionRef.current;
     if (section && typeof ResizeObserver === 'function') {
       observer = new ResizeObserver(measure);
-      observer.observe(section);
-      for (const sibling of section.parentElement?.children ?? []) {
-        if (sibling !== section) observer.observe(sibling);
+      for (let el: HTMLElement | null = section; el; el = el.parentElement) {
+        observer.observe(el);
+        const parent: HTMLElement | null = el.parentElement;
+        if (!parent) break;
+        for (const sibling of parent.children) {
+          if (sibling !== el) observer.observe(sibling);
+        }
+        const overflowY = getComputedStyle(parent).overflowY;
+        if (overflowY === 'auto' || overflowY === 'scroll') break;
       }
     }
     return () => {
