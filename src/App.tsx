@@ -27,6 +27,7 @@ import RightPanel from './components/RightPanel';
 import EditorOpenMenu from './components/EditorOpenMenu';
 import Toaster from './components/Toaster';
 import { useRepoStatus } from './hooks/useRepoStatus';
+import { useChatPullRequests } from './hooks/useChatPullRequests';
 import { useDocumentVisible } from './hooks/useDocumentVisible';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
@@ -109,6 +110,7 @@ function childAccessForSelection(
 }
 
 export default function App() {
+  useChatPullRequests();
   const dispatch = useStoreDispatch();
   const store = useStoreApi();
   const state = useStoreSelector((current) => {

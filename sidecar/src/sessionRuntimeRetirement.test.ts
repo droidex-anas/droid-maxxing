@@ -323,3 +323,10 @@ test('the timer is armed only while a session is actually retirable', () => {
     Reflect.set(globalThis, 'clearTimeout', realClearTimeout);
   }
 });
+
+test('a monotonic timestamp ahead of the clock counts as zero elapsed idle time', () => {
+  const idle = [facts('a', 101)];
+  assert.deepEqual(retirableSessions(idle, 100, 0), ['a']);
+  assert.deepEqual(retirableSessions(idle, 100, 1), []);
+  assert.deepEqual(retirableSessions(idle, 102, 1), ['a']);
+});

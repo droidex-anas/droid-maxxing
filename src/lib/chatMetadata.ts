@@ -14,12 +14,20 @@
 // map instead of breaking the sidebar.
 
 import type { SessionSummary } from '../types/bridge';
+import { toast } from './toast';
+import type { PullRequest } from '../types/vcs';
+
+export type ChatPullRequest = Pick<
+  PullRequest,
+  'number' | 'url' | 'title' | 'state' | 'isDraft' | 'headRefName'
+>;
 
 export interface ChatMetadata {
   displayTitle?: string;
   pinnedAt?: number;
   archivedAt?: number;
   deletedAt?: number;
+  pullRequests?: ChatPullRequest[];
 }
 
 export type ChatMetadataMap = Record<string, ChatMetadata>;
@@ -28,6 +36,7 @@ const CHAT_METADATA_STORAGE_KEY = 'droid-chat-metadata';
 // Bounds so a corrupt or ever-growing payload cannot bloat storage.
 const MAX_TRACKED_CHATS = 1000;
 export const MAX_CHAT_TITLE_LENGTH = 200;
+export const MAX_CHAT_PULL_REQUESTS = 10;
 
 function getLocalStorage(): Storage | undefined {
   if (typeof window !== 'undefined') return window.localStorage;
@@ -52,25 +61,30 @@ function sanitizeMetadata(value: unknown): ChatMetadata | null {
   if (pinnedAt !== undefined) out.pinnedAt = pinnedAt;
   if (archivedAt !== undefined) out.archivedAt = archivedAt;
   if (deletedAt !== undefined) out.deletedAt = deletedAt;
+  if (Array.isArray(raw.pullRequests)) {
+    const pullRequests: ChatPullRequest[] = [];
+    for (const value of raw.pullRequests) {
+      const pr = sanitizePullRequest(value);
+      if (pr && !pullRequests.some((other) => other.url === pr.url)) pullRequests.push(pr);
+      if (pullRequests.length === MAX_CHAT_PULL_REQUESTS) break;
+    }
+    if (pullRequests.length > 0) out.pullRequests = pullRequests;
+  }
   return Object.keys(out).length > 0 ? out : null;
 }
 
-// Tombstones (archived/deleted) outlive preference metadata (pins, renames)
-// under the cap: forgetting a preference is harmless, but forgetting a
-// tombstone resurfaces a chat the user hid.
-function isTombstone(meta: ChatMetadata): boolean {
-  return meta.archivedAt !== undefined || meta.deletedAt !== undefined;
+// Automatic PR links are expendable before names/pins; hidden-chat tombstones
+// remain the last entries evicted. Both storage loading and writes use this rule.
+function metadataRetentionPriority(meta: ChatMetadata): number {
+  if (meta.archivedAt !== undefined || meta.deletedAt !== undefined) return 2;
+  return meta.displayTitle !== undefined || meta.pinnedAt !== undefined ? 1 : 0;
 }
 
-// Enforces MAX_TRACKED_CHATS on entries in recency order, dropping the oldest
-// first and tombstones last. One rule for both seams — oversized payloads at
-// load and runtime writes — so neither path can resurrect a hidden chat.
 function capMetadataEntries(entries: [string, ChatMetadata][]): [string, ChatMetadata][] {
   if (entries.length <= MAX_TRACKED_CHATS) return entries;
-  const byEvictionOrder = [
-    ...entries.filter(([, meta]) => !isTombstone(meta)),
-    ...entries.filter(([, meta]) => isTombstone(meta)),
-  ];
+  const byEvictionOrder = [...entries].sort(
+    (a, b) => metadataRetentionPriority(a[1]) - metadataRetentionPriority(b[1]),
+  );
   const dropped = new Set(
     byEvictionOrder.slice(0, entries.length - MAX_TRACKED_CHATS).map(([id]) => id),
   );
@@ -100,7 +114,7 @@ export function saveChatMetadata(map: ChatMetadataMap): void {
   try {
     getLocalStorage()?.setItem(CHAT_METADATA_STORAGE_KEY, JSON.stringify(map));
   } catch {
-    /* ignore */
+    toast.error('Could not save chat organization. Check available disk space and try again.');
   }
 }
 
@@ -175,7 +189,8 @@ function withMetadata(
     meta.displayTitle !== undefined ||
     meta.pinnedAt !== undefined ||
     meta.archivedAt !== undefined ||
-    meta.deletedAt !== undefined;
+    meta.deletedAt !== undefined ||
+    (meta.pullRequests?.length ?? 0) > 0;
   const next = hasContent ? { ...rest, [appSessionId]: meta } : rest;
   // The same bound loadChatMetadata enforces on read, applied here so runtime
   // updates cannot grow storage past it between restarts. The touched id is
@@ -221,6 +236,7 @@ export function unpinChat(map: ChatMetadataMap, appSessionId: string): ChatMetad
   const meta = byId[appSessionId];
   if (meta?.pinnedAt === undefined) return null;
   const next: ChatMetadata = {};
+  if (meta.pullRequests) next.pullRequests = meta.pullRequests;
   if (meta.displayTitle !== undefined) next.displayTitle = meta.displayTitle;
   if (meta.archivedAt !== undefined) next.archivedAt = meta.archivedAt;
   if (meta.deletedAt !== undefined) next.deletedAt = meta.deletedAt;
@@ -238,6 +254,7 @@ export function archiveChat(
   // Archiving a pinned chat unpins it: the Pinned section only lists visible
   // chats.
   const next: ChatMetadata = { archivedAt: now };
+  if (meta?.pullRequests) next.pullRequests = meta.pullRequests;
   if (meta?.displayTitle !== undefined) next.displayTitle = meta.displayTitle;
   if (meta?.deletedAt !== undefined) next.deletedAt = meta.deletedAt;
   return withMetadata(map, appSessionId, next);
@@ -249,6 +266,7 @@ export function restoreChat(map: ChatMetadataMap, appSessionId: string): ChatMet
   if (meta?.archivedAt === undefined) return null;
   // archiveChat drops pinnedAt, so an archived chat never has a pin to carry.
   const next: ChatMetadata = {};
+  if (meta.pullRequests) next.pullRequests = meta.pullRequests;
   if (meta.displayTitle !== undefined) next.displayTitle = meta.displayTitle;
   if (meta.deletedAt !== undefined) next.deletedAt = meta.deletedAt;
   return withMetadata(map, appSessionId, next);
@@ -263,7 +281,105 @@ export function deleteChat(
   const meta = byId[appSessionId];
   if (meta?.deletedAt !== undefined) return null;
   const next: ChatMetadata = { deletedAt: now };
+  if (meta?.pullRequests) next.pullRequests = meta.pullRequests;
   if (meta?.displayTitle !== undefined) next.displayTitle = meta.displayTitle;
   if (meta?.archivedAt !== undefined) next.archivedAt = meta.archivedAt;
   return withMetadata(map, appSessionId, next);
+}
+
+function sanitizePullRequest(value: unknown): ChatPullRequest | null {
+  if (!value || typeof value !== 'object') return null;
+  if (
+    !('number' in value) ||
+    typeof value.number !== 'number' ||
+    !Number.isSafeInteger(value.number) ||
+    value.number < 1 ||
+    !('url' in value) ||
+    typeof value.url !== 'string' ||
+    value.url.length > 2048 ||
+    !/^https?:\/\/[^\s]+\/pull\/[1-9]\d*$/.test(value.url) ||
+    !('title' in value) ||
+    typeof value.title !== 'string' ||
+    !('state' in value) ||
+    typeof value.state !== 'string' ||
+    !('isDraft' in value) ||
+    typeof value.isDraft !== 'boolean' ||
+    !('headRefName' in value) ||
+    (value.headRefName !== null && typeof value.headRefName !== 'string')
+  )
+    return null;
+  return {
+    number: value.number,
+    url: value.url,
+    title: value.title.slice(0, MAX_CHAT_TITLE_LENGTH),
+    state: value.state.slice(0, 32),
+    isDraft: value.isDraft,
+    headRefName: value.headRefName?.slice(0, 256) ?? null,
+  };
+}
+
+// Keep previous PR links when a worktree changes branches. A fresh detection
+// updates the same PR's saved status for every chat already linked to it.
+export function linkChatsPullRequest(
+  map: ChatMetadataMap,
+  appSessionIds: readonly string[],
+  detected: ChatPullRequest,
+  activeAppSessionId: string | null = null,
+): ChatMetadataMap | null {
+  const pr = sanitizePullRequest(detected);
+  const targets = new Set(appSessionIds.filter((id) => !isChatHidden(map[id])));
+  if (!pr || targets.size === 0) return null;
+  let changed = false;
+  const entries: [string, ChatMetadata][] = Object.entries(map).map(([id, meta]) => {
+    const links = meta.pullRequests ?? [];
+    const current = links.find((link) => link.url === pr.url);
+    if (
+      (!targets.has(id) && !current) ||
+      (current && JSON.stringify(current) === JSON.stringify(pr))
+    ) {
+      return [id, meta];
+    }
+    changed = true;
+    return [
+      id,
+      {
+        ...meta,
+        pullRequests: [pr, ...links.filter((link) => link.url !== pr.url)].slice(
+          0,
+          MAX_CHAT_PULL_REQUESTS,
+        ),
+      },
+    ];
+  });
+  for (const id of targets) {
+    if (Object.hasOwn(map, id)) continue;
+    if (entries.length >= MAX_TRACKED_CHATS) {
+      // Opening a chat gives its links priority over passive discovery. Never
+      // evict names, pins, or tombstones, and never churn the cache on polling.
+      if (id !== activeAppSessionId) continue;
+      const expendable = entries.findIndex(([, meta]) => metadataRetentionPriority(meta) === 0);
+      if (expendable < 0) continue;
+      entries.splice(expendable, 1);
+    }
+    entries.push([id, { pullRequests: [pr] }]);
+    changed = true;
+  }
+  return changed ? Object.fromEntries(entries) : null;
+}
+
+export function chatMatchesPullRequest(meta: ChatMetadata | undefined, query: string): boolean {
+  return (meta?.pullRequests ?? []).some((pr) => pullRequestMatchesQuery(pr, query));
+}
+
+export function pullRequestMatchesQuery(pr: ChatPullRequest, query: string): boolean {
+  const term = query.trim().toLowerCase();
+  const number = /^(?:pr:\s*)?#?([1-9]\d*)$/.exec(term)?.[1];
+  if (number) return String(pr.number) === number;
+  if (/^https?:\/\//.test(term)) return pr.url.toLowerCase() === term.replace(/\/$/, '');
+  return (
+    !term ||
+    pr.title.toLowerCase().includes(term) ||
+    pr.url.toLowerCase().includes(term) ||
+    (pr.headRefName?.toLowerCase().includes(term) ?? false)
+  );
 }

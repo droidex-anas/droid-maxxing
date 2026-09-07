@@ -5,6 +5,7 @@ import { formatRelativeTime } from '../lib/time';
 import { SESSION_MENU_WIDTH } from './SessionContextMenu';
 import type { SessionSummary } from '../types/bridge';
 import type { SessionAttentionKind } from '../lib/sessionAttention';
+import { ACTIVITY_LABELS, type SessionActivityStatus } from '../lib/sidebarActivity';
 import { SessionAttentionBadge } from './SessionAttentionBadge';
 
 // Simple, smooth ring spinner shown on the left of a row while its model
@@ -28,6 +29,7 @@ export interface SessionRowProps {
   unread: boolean;
   running: boolean;
   attention: SessionAttentionKind | null;
+  activityStatus: SessionActivityStatus;
   renaming: boolean;
   now: number;
   onSelect: (appSessionId: string) => void;
@@ -45,6 +47,7 @@ export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowP
     prev.unread === next.unread &&
     prev.running === next.running &&
     prev.attention === next.attention &&
+    prev.activityStatus === next.activityStatus &&
     prev.renaming === next.renaming &&
     prev.now === next.now &&
     prev.onSelect === next.onSelect &&
@@ -62,6 +65,7 @@ export const SessionRow = memo(function SessionRow({
   unread,
   running,
   attention,
+  activityStatus,
   renaming,
   now,
   onSelect,
@@ -156,6 +160,7 @@ export const SessionRow = memo(function SessionRow({
         ref={rowButtonRef}
         data-testid="session-row"
         data-app-session-id={session.appSessionId}
+        title={`${title} · ${ACTIVITY_LABELS[activityStatus]}`}
         aria-current={active ? 'true' : undefined}
         onClick={() => {
           onSelect(session.appSessionId);
@@ -172,7 +177,16 @@ export const SessionRow = memo(function SessionRow({
           className={`w-3 flex items-center justify-center shrink-0 ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
         >
           {!attention && running ? <WorkingSpinner /> : null}
+          {!attention && !running && activityStatus === 'review' && (
+            <span className="h-1.5 w-1.5 rounded-full bg-droid-accent" aria-hidden="true" />
+          )}
+          {!attention && activityStatus === 'failed' && (
+            <span className="h-1.5 w-1.5 rounded-full bg-droid-red" aria-hidden="true" />
+          )}
         </span>
+        {!attention && !running && (activityStatus === 'review' || activityStatus === 'failed') && (
+          <span className="sr-only">{ACTIVITY_LABELS[activityStatus]}:</span>
+        )}
         {unread && <span className="sr-only">Unread:</span>}
         {attention && (
           <span className="sr-only">

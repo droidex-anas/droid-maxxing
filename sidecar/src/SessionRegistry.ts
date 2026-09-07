@@ -340,7 +340,9 @@ export class SessionRegistry<TLive extends RegisteredSession> {
     return copySummary({
       ...summary,
       ...withoutIdentityFields(patch),
-      updatedAt: touchActivity ? this.dependencies.now() : summary.updatedAt,
+      updatedAt: touchActivity
+        ? Math.max(summary.updatedAt + 1, this.dependencies.now())
+        : summary.updatedAt,
     });
   }
 

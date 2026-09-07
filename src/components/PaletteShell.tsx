@@ -1,11 +1,14 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Search, X } from 'lucide-react';
+import { pushEscapeLayer } from './environment/usePopover';
 
 // Shared chrome for the command-palette overlays (⌘K command palette,
 // sidebar session search): backdrop, animated panel, search input row, and
 // the keyboard-hint footer. Consumers own their state, filtering, and result
-// rows (rendered as children) via usePaletteNavigation.
+// rows (rendered as children) via usePaletteNavigation. The body portal keeps
+// transformed or clipped ancestors from containing the viewport overlay.
 export default function PaletteShell({
   onClose,
   query,
@@ -27,13 +30,46 @@ export default function PaletteShell({
   footerRight: string;
   children: ReactNode;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const opener = document.activeElement;
+    const panel = panelRef.current;
     inputRef.current?.focus();
+    let focusInside = true;
+    const trackFocus = () => {
+      focusInside = !!panel?.contains(document.activeElement);
+    };
+    document.addEventListener('focusin', trackFocus);
+    return () => {
+      document.removeEventListener('focusin', trackFocus);
+      if (focusInside && opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
 
-  return (
+  useEffect(() => pushEscapeLayer(onClose), [onClose]);
+
+  const trapTab = (event: React.KeyboardEvent) => {
+    if (event.key !== 'Tab') return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const focusable = panel.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -42,6 +78,12 @@ export default function PaletteShell({
       onClick={onClose}
     >
       <motion.div
+        ref={panelRef}
+        onKeyDown={trapTab}
+        style={{ zoom: 'var(--ui-zoom, 1)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={inputAriaLabel}
         initial={{ scale: 0.96, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.96, opacity: 0 }}
@@ -82,13 +124,13 @@ export default function PaletteShell({
         <div className="flex items-center justify-between px-4 py-2 border-t border-droid-border bg-droid-surface/50">
           <div className="flex items-center gap-3 text-[10px] text-droid-text-muted">
             <span className="flex items-center gap-1">
-              <span className="px-1 py-0.5 rounded bg-droid-elevated border border-droid-border font-mono text-[9px]">
+              <span className="px-1 py-0.5 rounded bg-droid-elevated border border-droid-border text-[9px]">
                 ↑↓
               </span>
               Navigate
             </span>
             <span className="flex items-center gap-1">
-              <span className="px-1 py-0.5 rounded bg-droid-elevated border border-droid-border font-mono text-[9px]">
+              <span className="px-1 py-0.5 rounded bg-droid-elevated border border-droid-border text-[9px]">
                 ↵
               </span>
               {enterHint}
@@ -97,6 +139,7 @@ export default function PaletteShell({
           <div className="text-[10px] text-droid-text-muted">{footerRight}</div>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }

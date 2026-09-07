@@ -97,6 +97,8 @@ import {
   archiveChat,
   deleteChat,
   loadChatMetadata,
+  linkChatsPullRequest,
+  type ChatPullRequest,
   pinChat,
   renameChat,
   restoreChat,
@@ -375,6 +377,7 @@ type Action =
   | { type: 'SESSION_CLOSED'; appSessionId: string }
   // App-level chat organization (rename/pin/archive/delete); see lib/chatMetadata.
   // A blank RENAME_CHAT title clears the override back to the generated title.
+  | { type: 'LINK_CHATS_PR'; appSessionIds: readonly string[]; cwd: string; pr: ChatPullRequest }
   | { type: 'RENAME_CHAT'; appSessionId: string; title: string }
   | { type: 'PIN_CHAT'; appSessionId: string }
   | { type: 'UNPIN_CHAT'; appSessionId: string }
@@ -970,6 +973,18 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     // Chat organization transforms return null for no-ops so these cases keep
     // the current state untouched (no re-render, no storage write).
+    case 'LINK_CHATS_PR': {
+      const sessions: Partial<AppState['sessions']> = state.sessions;
+      const ids = action.appSessionIds.filter((id) => sessions[id]?.cwd === action.cwd);
+      const chatMetadata = linkChatsPullRequest(
+        state.chatMetadata,
+        ids,
+        action.pr,
+        state.activeAppSessionId,
+      );
+      return chatMetadata ? { ...state, chatMetadata } : state;
+    }
+
     case 'RENAME_CHAT': {
       const chatMetadata = renameChat(state.chatMetadata, action.appSessionId, action.title);
       return chatMetadata ? { ...state, chatMetadata } : state;
@@ -2241,14 +2256,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   useEffect(() => {
+    saveChatMetadata(state.chatMetadata);
+  }, [state.chatMetadata]);
+
+  useEffect(() => {
     savePersistedUiState(state);
     saveSessionLastSeen(state.sessionLastSeen);
     saveSessionNotes(state.sessionNotes);
-    saveChatMetadata(state.chatMetadata);
   }, [
     state.sessionLastSeen,
     state.sessionNotes,
-    state.chatMetadata,
     state.activeAppSessionId,
     state.browserOpenKeys,
     state.browsers,

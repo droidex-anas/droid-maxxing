@@ -959,3 +959,33 @@ test('a warm cache publishes an authoritative first list before the command reso
     rmSync(freshHome, { recursive: true, force: true });
   }
 });
+
+test('a resumed older chat stays first after reopening the persisted history index', () => {
+  const cwd = join(home, 'workspace-recency');
+  const older = writeSession(home, 'recency-older', cwd);
+  const newer = writeSession(home, 'recency-newer', cwd);
+  utimesSync(older, 100, 100);
+  utimesSync(newer, 200, 200);
+  const first = new HistoryIndex();
+  reconcileHistoryIndex(first);
+  persistTestSummaries([
+    { ...patchFor('recency-older', cwd), updatedAt: 100_000 },
+    { ...patchFor('recency-newer', cwd), updatedAt: 200_000 },
+  ]);
+  first.close();
+  utimesSync(older, 300, 300);
+  const restarted = new HistoryIndex();
+  try {
+    reconcileHistoryIndex(restarted);
+    const rows = restarted.listHistoricalSessions({ workspaceCwds: [cwd] });
+    assert.equal(rows[0]?.summary.appSessionId, 'recency-older');
+    assert.equal(rows[0]?.summary.updatedAt, 300_000);
+    persistTestSummaries([{ ...patchFor('recency-older', cwd), updatedAt: 400_000 }]);
+    assert.equal(
+      restarted.listHistoricalSessions({ workspaceCwds: [cwd] })[0]?.summary.updatedAt,
+      400_000,
+    );
+  } finally {
+    restarted.close();
+  }
+});

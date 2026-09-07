@@ -626,18 +626,14 @@ export class SessionLifecycle {
     const stableAppSessionId = liveSession.summary.appSessionId;
     try {
       liveSession.streaming = true;
-      // Turn start is not user-visible activity: updatedAt (sidebar order and
-      // the renderer's unread marker) must not move until the turn settles,
-      // otherwise background sessions read as unread while the model works.
-      d.registry.updateSummary(
-        stableAppSessionId,
-        {
-          phase: liveSession.summary.sessionPurpose === 'mission-control' ? 'planning' : 'running',
-          streaming: true,
-          queuedSends: liveSession.pendingSends.length,
-        },
-        { touchActivity: false },
-      );
+      // Persist resumed activity immediately so the chat stays near the top
+      // even if the app closes mid-turn. The renderer suppresses unread while
+      // streaming; completion advances the timestamp again for review.
+      d.registry.updateSummary(stableAppSessionId, {
+        phase: liveSession.summary.sessionPurpose === 'mission-control' ? 'planning' : 'running',
+        streaming: true,
+        queuedSends: liveSession.pendingSends.length,
+      });
       await d.runPrimaryTurn(liveSession, prompt);
     } finally {
       liveSession.interruptingForSteer = false;
