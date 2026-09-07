@@ -192,7 +192,9 @@ interface DroidControlApi {
   pickDirectory: () => Promise<string | null>;
   pickFiles: () => Promise<string[]>;
   saveImage: (dataUrl: string) => Promise<string>;
+  saveAttachment: (name: string, dataUrl: string) => Promise<string>;
   discardImage: (path: string) => Promise<void>;
+  pathForFile: (file: File) => string;
   notify: (title: string, body: string, options?: NotifyOptions) => Promise<NotifyResult>;
   onNotificationActivate: (handler: (payload: { appSessionId: string }) => void) => () => void;
   takePendingNotificationSession: () => Promise<{ appSessionId: string } | null>;
@@ -437,6 +439,25 @@ export async function pickFiles(): Promise<string[]> {
 // is what the prompt @-mentions. Only the desktop app can write to disk.
 export async function saveImage(dataUrl: string): Promise<string> {
   return requireDesktopApi('Image attachments need the desktop app.').saveImage(dataUrl);
+}
+
+// Same store for pasted non-image files; the original name is kept (sanitized)
+// in the saved filename so a restored chip still reads like the user's file.
+export async function saveAttachment(name: string, dataUrl: string): Promise<string> {
+  return requireDesktopApi('File attachments need the desktop app.').saveAttachment(name, dataUrl);
+}
+
+// Absolute path behind a dropped or pasted File, or '' when there is none
+// (clipboard snapshot, plain browser). A real path is attached by reference
+// instead of being copied into the temp store.
+export function pathForFile(file: File): string {
+  const api = desktopApi();
+  if (!api?.pathForFile) return '';
+  try {
+    return api.pathForFile(file);
+  } catch {
+    return '';
+  }
 }
 
 export async function discardImage(path: string): Promise<void> {

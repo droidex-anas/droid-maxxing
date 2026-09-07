@@ -5,7 +5,10 @@ import {
   composePrompt,
   isVisualizeCommand,
   parseSlashSkillInvocation,
+  promptDisplayParts,
+  promptDisplayText,
   promptTextWithVisualize,
+  responseFormatForPrompt,
   submitCommandFor,
 } from './composePrompt';
 
@@ -35,18 +38,79 @@ test('multiple selected skills keep the explicit multi-skill instruction', () =>
   );
 });
 
-test('/visualize remains concise when the renderer composes the visible prompt', () => {
-  const composed = composePrompt('/visualize compare renderer timings', [], []);
-
-  assert.equal(composed, '/visualize compare renderer timings');
-  assert.doesNotMatch(composed, /fenced `app` block/);
-  assert.doesNotMatch(composed, /--app-background/);
+test('a multi-skill prompt with no body peels the wrapper for display', () => {
+  const composed = composePrompt('', ['review', 'semgrep'], []);
+  assert.equal(composed, 'Use these skills: "review", "semgrep".');
+  assert.deepEqual(promptDisplayParts(composed), {
+    text: '',
+    skills: ['review', 'semgrep'],
+    visualize: false,
+  });
+  assert.deepEqual(promptDisplayParts(composed, ['review', 'semgrep']), {
+    text: '',
+    skills: ['review', 'semgrep'],
+    visualize: false,
+  });
+  assert.equal(promptDisplayText(composed), 'review, semgrep');
 });
 
-test('/visualize without arguments remains the visible user command', () => {
-  const composed = composePrompt('/visualize', [], []);
+test('promptDisplayParts leaves ordinary Use these skills text alone', () => {
+  const text = 'Use these skills: documentation.';
+  assert.deepEqual(promptDisplayParts(text), {
+    text,
+    skills: [],
+    visualize: false,
+  });
+  assert.equal(promptDisplayText(text), text);
+});
 
-  assert.equal(composed, '/visualize');
+test('composePrompt leaves /visualize as the session payload', () => {
+  assert.equal(
+    composePrompt('/visualize compare renderer timings', [], []),
+    '/visualize compare renderer timings',
+  );
+  assert.equal(composePrompt('/visualize', [], []), '/visualize');
+});
+
+test('promptDisplayParts peels Visualize and slash skills off composed text', () => {
+  for (const example of [
+    {
+      text: '/visualize a histogram',
+      want: { text: 'a histogram', skills: [], visualize: true },
+    },
+    {
+      text: '/visualize',
+      want: { text: '', skills: [], visualize: true },
+    },
+    {
+      text: '/review PR #100',
+      want: { text: 'PR #100', skills: ['review'], visualize: false },
+    },
+    {
+      text: '/review /visualize PR #100',
+      skills: ['review'],
+      want: { text: 'PR #100', skills: ['review'], visualize: true },
+    },
+    {
+      text: 'Use these skills: "review", "semgrep".\n\ninspect this',
+      skills: ['review', 'semgrep'],
+      want: { text: 'inspect this', skills: ['review', 'semgrep'], visualize: false },
+    },
+    {
+      text: 'Use these skills: "review", "semgrep".\n\ninspect this',
+      want: { text: 'inspect this', skills: ['review', 'semgrep'], visualize: false },
+    },
+    {
+      text: '/compact the session',
+      want: { text: '/compact the session', skills: [], visualize: false },
+    },
+    {
+      text: '/settings',
+      want: { text: '/settings', skills: [], visualize: false },
+    },
+  ]) {
+    assert.deepEqual(promptDisplayParts(example.text, example.skills), example.want);
+  }
 });
 
 test('the Visualize chip sends exactly what typing the command sends', () => {
@@ -65,18 +129,7 @@ test('/visualize remains an app command even when a provider skill has the same 
   assert.equal(isVisualizeCommand('/visualizer is a different prompt'), false);
 });
 
-test('an existing App keeps follow-up prompts App-capable without another slash command', async () => {
-  type ResponseFormatForPrompt = (
-    text: string,
-    hasAppContext: boolean,
-  ) => 'app-create' | 'app-followup' | undefined;
-  const promptModule = (await import('./composePrompt')) as unknown as {
-    responseFormatForPrompt?: ResponseFormatForPrompt;
-  };
-  const responseFormatForPrompt = promptModule.responseFormatForPrompt;
-  assert.equal(typeof responseFormatForPrompt, 'function');
-  if (!responseFormatForPrompt) return;
-
+test('an existing App keeps follow-up prompts App-capable without another slash command', () => {
   assert.equal(responseFormatForPrompt('make the points larger', true), 'app-followup');
   assert.equal(responseFormatForPrompt('ordinary question', false), undefined);
   assert.equal(responseFormatForPrompt('/visualize a histogram', false), 'app-create');
@@ -100,4 +153,10 @@ test('anything staged makes the same words a prompt instead of a command', () =>
   assert.equal(submitCommandFor('/mission', { ...nothingStaged, visualizeSelected: true }), null);
   assert.equal(submitCommandFor('/compact', { ...nothingStaged, skillCount: 1 }), null);
   assert.equal(submitCommandFor('/mission', { ...nothingStaged, fileCount: 1 }), null);
+});
+
+test('promptDisplayText keeps Visualize and skill labels when there is no free text', () => {
+  assert.equal(promptDisplayText('/visualize', []), 'Visualize');
+  assert.equal(promptDisplayText('/visualize', ['review']), 'Visualize, review');
+  assert.equal(promptDisplayText('/review', ['review']), 'review');
 });

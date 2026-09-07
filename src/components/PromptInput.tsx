@@ -27,12 +27,14 @@ import {
   pickFiles,
   listFiles,
   isDesktop,
+  pathForFile,
   type FeedbackReportRequest,
 } from '../lib/desktop';
-import { useImageAttachments } from '../hooks/useImageAttachments';
-import { useImageFileDrop } from '../hooks/useImageFileDrop';
+import { pathsInSequence, useImageAttachments } from '../hooks/useImageAttachments';
+import { useFileAttachments } from '../hooks/useFileAttachments';
+import { useComposerFileDrop } from '../hooks/useComposerFileDrop';
 import { ImageChip } from './composer/ImageChip';
-import { AttachedFileChip } from './composer/AttachedFileChip';
+import { FileChip } from './composer/FileChip';
 import { ImageViewerModal } from './composer/ImageViewerModal';
 import { ImageLightbox } from './media/ImageLightbox';
 import { imageSrc, partitionImagePaths } from '../lib/localImage';
@@ -246,7 +248,35 @@ export default function PromptInput({
     setAttachedFilesState(value);
   };
   const imageAttachments = useImageAttachments(state.imagePasteQuality);
-  const fileDrop = useImageFileDrop(imageAttachments.addBlob);
+  const fileAttachments = useFileAttachments();
+  const nextIntakeSeqRef = useRef(0);
+  const attachedFileSeqRef = useRef(new Map<string, number>());
+  const takeIntakeSeq = () => nextIntakeSeqRef.current++;
+  // One entry point for pasted and dropped files: images always get a staged
+  // copy (the fidelity pipeline encodes them); other files attach by reference
+  // when the OS hands us a real path, and fall back to a temp copy when the
+  // clipboard only carries bytes. One intake sequence is shared across all three
+  // stores so a mixed paste keeps its original order at send time.
+  const addComposerFiles = useCallback(
+    (dropped: File[]) => {
+      for (const file of dropped) {
+        const seq = takeIntakeSeq();
+        if (file.type.startsWith('image/')) {
+          imageAttachments.addBlob(file, seq);
+          continue;
+        }
+        const existing = pathForFile(file);
+        if (existing) {
+          if (!attachedFileSeqRef.current.has(existing)) {
+            attachedFileSeqRef.current.set(existing, seq);
+          }
+          setAttachedFiles((prev) => (prev.includes(existing) ? prev : [...prev, existing]));
+        } else fileAttachments.addBlob(file, seq);
+      }
+    },
+    [imageAttachments.addBlob, fileAttachments.addBlob],
+  );
+  const fileDrop = useComposerFileDrop(addComposerFiles);
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
   // A path-only attachment has no staged copy to crop, so it opens the
   // read-only lightbox instead of the composer's image viewer.
@@ -270,7 +300,10 @@ export default function PromptInput({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   // Skills and plugins live on the draft's first line; attachments keep their own
   // row above it. Backspace on an empty draft unwinds both.
-  const hasAttachmentChips = attachedFiles.length > 0 || imageAttachments.images.length > 0;
+  const hasAttachmentChips =
+    attachedFiles.length > 0 ||
+    imageAttachments.images.length > 0 ||
+    fileAttachments.files.length > 0;
   const hasChips = hasSelection || hasAttachmentChips;
 
   const removeLastChip = () => {
@@ -278,6 +311,7 @@ export default function PromptInput({
     const removal = chipRemovedByBackspace({
       visualizeSelected,
       pastedImageIds: imageAttachments.images.map((image) => image.id),
+      pastedFileIds: fileAttachments.files.map((file) => file.id),
       imagePaths: images,
       skillFilePaths: activeSkills.map((skill) => skill.filePath),
       documentPaths: documents,
@@ -285,6 +319,7 @@ export default function PromptInput({
     if (removal === null) return;
     switch (removal.chip) {
       case 'attachment':
+        attachedFileSeqRef.current.delete(removal.path);
         setAttachedFiles((prev) => prev.filter((path) => path !== removal.path));
         return;
       case 'skill':
@@ -292,6 +327,9 @@ export default function PromptInput({
         return;
       case 'pastedImage':
         imageAttachments.remove(removal.id);
+        return;
+      case 'pastedFile':
+        fileAttachments.remove(removal.id);
         return;
       case 'visualize':
         setVisualizeSelected(false);
@@ -641,15 +679,23 @@ export default function PromptInput({
   // images, so their temp files are deleted too. clearAndDiscardImages is
   // useCallback-stable, so this still fires only on a session switch.
   const clearAndDiscardImages = imageAttachments.clearAndDiscard;
+  const clearAndDiscardFiles = fileAttachments.clearAndDiscard;
   useEffect(() => {
     setHistoryIndex(null);
     clearDraftSelections();
+    attachedFileSeqRef.current.clear();
     setAttachedFiles([]);
     // Both viewers show a dropped attachment, so they cannot outlive it.
     setViewerImageId(null);
     setViewerPath(null);
     clearAndDiscardImages();
-  }, [activeSession?.appSessionId, clearAndDiscardImages, clearDraftSelections]);
+    clearAndDiscardFiles();
+  }, [
+    activeSession?.appSessionId,
+    clearAndDiscardImages,
+    clearAndDiscardFiles,
+    clearDraftSelections,
+  ]);
 
   // Welcome-screen suggestion cards and saved notes seed the composer through
   // the store so those surfaces and this input stay decoupled. The pendingCaret
@@ -741,6 +787,9 @@ export default function PromptInput({
   };
 
   const addFile = (path: string) => {
+    if (!attachedFileSeqRef.current.has(path)) {
+      attachedFileSeqRef.current.set(path, takeIntakeSeq());
+    }
     setAttachedFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
     replaceTrigger('');
   };
@@ -756,6 +805,11 @@ export default function PromptInput({
     }
     const paths = await pickFiles();
     if (paths.length > 0) {
+      for (const path of paths) {
+        if (!attachedFileSeqRef.current.has(path)) {
+          attachedFileSeqRef.current.set(path, takeIntakeSeq());
+        }
+      }
       setAttachedFiles((prev) => [...prev, ...paths.filter((p) => !prev.includes(p))]);
     }
   };
@@ -832,11 +886,21 @@ export default function PromptInput({
     // images finish encoding is not part of this prompt — and must survive
     // the post-submit clear below.
     const composerRevision = composerRevisionRef.current;
-    // Pasted/dropped images encode asynchronously; wait out any in-flight adds
-    // so they make this prompt instead of surfacing on the next one via clear().
-    const readyImages = await imageAttachments.whenSettled();
+    // Snapshot intake order before any settle wait: files pasted while earlier
+    // attachments encode belong to the next prompt, not this one.
+    const intakeCutoff = nextIntakeSeqRef.current;
+    const readyImagesPromise = imageAttachments.whenReady(intakeCutoff);
+    const readyFilesPromise = fileAttachments.whenReady(intakeCutoff);
+    const [readyImages, readyFiles] = await Promise.all([readyImagesPromise, readyFilesPromise]);
     if (updateInterruptedSubmit()) return;
-    const allFiles = [...attachedFiles, ...readyImages.map((i) => i.path)];
+    const allFiles = pathsInSequence([
+      ...attachedFiles.map((path, index) => ({
+        path,
+        sequence: attachedFileSeqRef.current.get(path) ?? 1_000_000 + index,
+      })),
+      ...readyFiles,
+      ...readyImages,
+    ]);
     const hasPayload = text || visualizeSelected || activeSkills.length > 0 || allFiles.length > 0;
     if (!hasPayload) return;
     setHistoryIndex(null);
@@ -845,7 +909,8 @@ export default function PromptInput({
       resetComposerAfterSubmit({
         draftUntouched: composerRevisionRef.current === composerRevision,
         clearImages: () => {
-          imageAttachments.clear();
+          imageAttachments.clearReady(intakeCutoff);
+          fileAttachments.clearReady(intakeCutoff);
           // Image chips always clear on submit, so a viewer open over one of them
           // would be showing an attachment the composer no longer holds.
           setViewerImageId(null);
@@ -854,6 +919,7 @@ export default function PromptInput({
         resetDraft: () => {
           setInput('');
           clearDraftSelections();
+          attachedFileSeqRef.current.clear();
           setAttachedFiles([]);
         },
       });
@@ -862,7 +928,7 @@ export default function PromptInput({
     const feedbackDraft = feedbackDraftFromCommand(text);
     if (feedbackDraft !== null) {
       setFeedbackReport(feedbackDraft);
-      if (composerRevisionRef.current === composerRevision) setInput('');
+      clearAfterSubmit();
       return;
     }
 
@@ -1224,13 +1290,16 @@ export default function PromptInput({
 
   const editQueuedInComposer = (p: QueuedPrompt) => {
     if (!activeSession) return;
-    // The queued prompt carries its own files; drop any images pasted after it
-    // was queued so they don't ride along on the edited prompt, and delete
-    // their temp files — no prompt ever referenced them.
+    // The queued prompt carries its own files; drop anything pasted after it
+    // was queued so it doesn't ride along on the edited prompt, and delete
+    // those temp files — no prompt ever referenced them.
     imageAttachments.clearAndDiscard();
+    fileAttachments.clearAndDiscard();
     setInput(p.text);
     // Its own attachments come back as chips: images among them render as
     // thumbnails again, so the restored draft looks like the one that was queued.
+    attachedFileSeqRef.current.clear();
+    for (const path of p.files) attachedFileSeqRef.current.set(path, takeIntakeSeq());
     setAttachedFiles(p.files);
     setActiveSkills(invocableSkills.filter((s) => p.skills.includes(s.name)));
     // A queued App request already carries /visualize in its text, so the chip
@@ -1354,6 +1423,7 @@ export default function PromptInput({
     visualizeSelected ||
     activeSkills.length > 0 ||
     attachedFiles.length > 0 ||
+    fileAttachments.files.length > 0 ||
     imageAttachments.images.length > 0;
 
   return (
@@ -1437,15 +1507,26 @@ export default function PromptInput({
                   }}
                 />
               ))}
+              {fileAttachments.files.map((file) => (
+                <FileChip
+                  key={file.id}
+                  path={file.path}
+                  name={file.name}
+                  onRemove={() => {
+                    fileAttachments.remove(file.id);
+                  }}
+                />
+              ))}
               {attachedImagePaths.map((path) => {
                 const src = imageSrc(path);
                 // No discard on removal: the file was written for an
                 // already-composed prompt, and the attachments store sweeps it.
                 const remove = () => {
+                  attachedFileSeqRef.current.delete(path);
                   setAttachedFiles((prev) => prev.filter((x) => x !== path));
                 };
                 return src === null ? (
-                  <AttachedFileChip key={path} path={path} onRemove={remove} />
+                  <FileChip key={path} path={path} onRemove={remove} />
                 ) : (
                   <ImageChip
                     key={path}
@@ -1459,10 +1540,11 @@ export default function PromptInput({
                 );
               })}
               {attachedDocumentPaths.map((f) => (
-                <AttachedFileChip
+                <FileChip
                   key={f}
                   path={f}
                   onRemove={() => {
+                    attachedFileSeqRef.current.delete(f);
                     setAttachedFiles((prev) => prev.filter((x) => x !== f));
                   }}
                 />
@@ -1519,15 +1601,14 @@ export default function PromptInput({
               }}
               onKeyDown={handleKeyDown}
               onPaste={(e) => {
-                const items = Array.from(e.clipboardData.items).filter(
-                  (it) => it.kind === 'file' && it.type.startsWith('image/'),
-                );
+                const items = Array.from(e.clipboardData.items).filter((it) => it.kind === 'file');
                 if (items.length === 0) return;
                 e.preventDefault();
-                for (const item of items) {
-                  const blob = item.getAsFile();
-                  if (blob) imageAttachments.addBlob(blob);
-                }
+                addComposerFiles(
+                  items
+                    .map((item) => item.getAsFile())
+                    .filter((file): file is File => file !== null),
+                );
               }}
               // A staged skill or plugin already says what this prompt will do,
               // and the hint would only crowd it off the line.
