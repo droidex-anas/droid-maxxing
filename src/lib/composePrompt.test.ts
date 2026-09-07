@@ -54,6 +54,16 @@ test('a multi-skill prompt with no body peels the wrapper for display', () => {
   assert.equal(promptDisplayText(composed), 'review, semgrep');
 });
 
+test('promptDisplayParts leaves ordinary Use these skills text alone', () => {
+  const text = 'Use these skills: documentation.';
+  assert.deepEqual(promptDisplayParts(text), {
+    text,
+    skills: [],
+    visualize: false,
+  });
+  assert.equal(promptDisplayText(text), text);
+});
+
 test('composePrompt leaves /visualize as the session payload', () => {
   assert.equal(
     composePrompt('/visualize compare renderer timings', [], []),

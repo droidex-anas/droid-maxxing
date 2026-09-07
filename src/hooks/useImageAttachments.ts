@@ -55,6 +55,31 @@ export function createPendingAdditions() {
 export type PendingAdditions = ReturnType<typeof createPendingAdditions>;
 
 /**
+ * Crops of already-staged images. Submit waits only for crops whose sequence
+ * is before cutoff, so a crop of a late paste does not stall this send.
+ */
+export function createCropMutations() {
+  const pending = new Set<{ sequence: number; promise: Promise<unknown> }>();
+  return {
+    track(sequence: number, task: Promise<unknown>) {
+      const entry = { sequence, promise: task };
+      pending.add(entry);
+      const done = () => {
+        pending.delete(entry);
+      };
+      void task.then(done, done);
+    },
+    async waitBeforeCutoff(cutoff: number): Promise<void> {
+      let inflight = [...pending].filter((crop) => crop.sequence < cutoff);
+      while (inflight.length > 0) {
+        await Promise.allSettled(inflight.map((crop) => crop.promise));
+        inflight = [...pending].filter((crop) => crop.sequence < cutoff);
+      }
+    },
+  };
+}
+
+/**
  * Writes a fresh image file, then applies the clear() race guard shared by
  * adds and crops: if the composer was cleared while the file was being
  * written, the file would surface out of nowhere on a later prompt, so it is
@@ -120,7 +145,7 @@ export function useImageAttachments(quality: ImagePasteQuality) {
   // Crops mutate an already-staged file. Submit must wait for them even when
   // they start during an in-flight add, or the snapshot keeps the old path
   // that applyCrop then deletes.
-  const [crops] = useState(() => createPendingAdditions());
+  const [crops] = useState(() => createCropMutations());
 
   // useCallback: commit and clear are referenced from PromptInput effects, so
   // they must keep a stable identity across renders.
@@ -200,7 +225,7 @@ export function useImageAttachments(quality: ImagePasteQuality) {
       // After the commit: exactly one deletion of the superseded file.
       void discardImage(existing.path);
     })();
-    crops.track(task);
+    crops.track(target.sequence, task);
     await task;
   };
 
@@ -224,12 +249,12 @@ export function useImageAttachments(quality: ImagePasteQuality) {
 
   /**
    * Submit-path support: wait only for adds already in flight at cutoff, then
-   * wait for any crop of those attachments — including a crop that started
-   * during the add wait — before snapshotting paths.
+   * wait for crops of those attachments — including a crop that started during
+   * the add wait. A crop of a later paste is the next prompt's problem.
    */
   const whenReady = async (cutoff: number): Promise<AttachedImage[]> => {
     await additions.knownSettled();
-    await crops.settled();
+    await crops.waitBeforeCutoff(cutoff);
     return itemsBeforeCutoff(imagesRef.current, sequencesRef.current, cutoff);
   };
 

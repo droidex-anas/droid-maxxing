@@ -100,7 +100,9 @@ export function promptDisplayParts(
     body = vis;
   }
 
-  const multi = /^Use these skills: (.+)\.(?:\n\n([\s\S]*))?$/.exec(body);
+  // Only the quoted list composePrompt emits. "Use these skills: documentation."
+  // is ordinary user text and must stay in the bubble.
+  const multi = /^Use these skills: ("[^"]+"(?:, "[^"]+")*)\.(?:\n\n([\s\S]*))?$/.exec(body);
   if (multi) {
     if (names.length === 0) {
       names = [...multi[1].matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] ? [m[1]] : []));

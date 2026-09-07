@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createCropMutations,
   createPendingAdditions,
   insertBySequence,
   itemsBeforeCutoff,
@@ -114,23 +115,31 @@ test('knownSettled ignores additions that start after the snapshot', async () =>
 
 test('submit waits for a crop that starts while an addition is still encoding', async () => {
   const additions = createPendingAdditions();
-  const crops = createPendingAdditions();
+  const crops = createCropMutations();
   const add = deferred();
   const crop = deferred();
   additions.track(add.promise);
   let ready = false;
   const waiting = (async () => {
     await additions.knownSettled();
-    await crops.settled();
+    await crops.waitBeforeCutoff(1);
     ready = true;
   })();
-  crops.track(crop.promise);
+  crops.track(0, crop.promise);
   add.resolve();
   await tick();
   assert.equal(ready, false);
   crop.resolve();
   await waiting;
   assert.equal(ready, true);
+});
+
+test('submit does not wait for a crop of an attachment past cutoff', async () => {
+  const crops = createCropMutations();
+  const crop = deferred();
+  crops.track(1, crop.promise);
+  await crops.waitBeforeCutoff(1);
+  crop.resolve();
 });
 
 test('itemsBeforeCutoff keeps only attachments reserved before submit', () => {
