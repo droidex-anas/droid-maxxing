@@ -8,7 +8,7 @@ export type AutomationSchedule =
   | { kind: 'weekly'; weekday: number; time: string }
   | { kind: 'cron'; expression: string };
 
-export type AutomationRunStatus = 'queued' | 'starting' | 'running' | 'completed' | 'failed';
+type AutomationRunStatus = 'queued' | 'starting' | 'running' | 'completed' | 'failed';
 
 export interface AutomationDraft {
   title: string;
@@ -66,8 +66,8 @@ export interface AutomationRun {
   selectionVerified: boolean | null;
 }
 
-export type AutomationProposalStatus = 'draft' | 'confirmed';
-export type AutomationProposalMissingField = 'modelId' | 'reasoningEffort';
+type AutomationProposalStatus = 'draft' | 'confirmed';
+type AutomationProposalMissingField = 'modelId' | 'reasoningEffort';
 
 export interface AutomationProposal {
   id: string;

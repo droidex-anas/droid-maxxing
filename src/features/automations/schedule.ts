@@ -225,7 +225,7 @@ export function formatAutomationRunStatus(
   }
 }
 
-export function formatDuration(milliseconds: number): string {
+function formatDuration(milliseconds: number): string {
   const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
   if (seconds < 60) return `${String(seconds)}s`;
   const minutes = Math.floor(seconds / 60);

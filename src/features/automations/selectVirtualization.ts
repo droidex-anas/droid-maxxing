@@ -1,7 +1,7 @@
 export const LARGE_LIST_THRESHOLD = 72;
 export const VIRTUAL_ROW_HEIGHT = 38;
-export const VIRTUAL_LIST_HEIGHT = 288;
-export const VIRTUAL_OVERSCAN = 6;
+const VIRTUAL_LIST_HEIGHT = 288;
+const VIRTUAL_OVERSCAN = 6;
 
 export function virtualOptionWindow(
   count: number,

@@ -229,7 +229,7 @@ function formatDate(value: { year: number; month: number; day: number }): string
   return `${String(value.year).padStart(4, '0')}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`;
 }
 
-export function isCalendarDateBefore(
+function isCalendarDateBefore(
   value: { year: number; month: number; day: number },
   minimum: { year: number; month: number; day: number },
 ): boolean {
