@@ -434,7 +434,11 @@ export class AutomationRuns {
       return;
     }
     const materialized = this.runById(run.id);
-    if (materialized?.status !== 'starting' || materialized.resolvedCwd !== resolvedCwd) {
+    if (
+      this.options.isClosed() ||
+      materialized?.status !== 'starting' ||
+      materialized.resolvedCwd !== resolvedCwd
+    ) {
       await this.options.releaseWorkspace({
         resolvedCwd,
         executionMode: run.automation.executionMode,
@@ -510,6 +514,7 @@ export class AutomationRuns {
           this.projectRun(current, 'running', now);
         });
       } catch (error) {
+        await this.closeSessionQuietly(session.appSessionId);
         if (this.runById(run.id)?.status === 'starting') this.timers.armSessionCreate(run.id);
         console.error('Could not persist the automation session', error);
         return;
@@ -586,16 +591,19 @@ export class AutomationRuns {
       }
     }
     const owned = this.runOwningSession(appSessionId);
-    if (this.store.sessionOrigins[appSessionId]) {
-      await this.options.persist(() => {
-        Reflect.deleteProperty(this.store.sessionOrigins, appSessionId);
-      });
-    }
-    if (owned) {
-      await this.options.releaseWorkspace({
-        resolvedCwd: owned.resolvedCwd,
-        executionMode: owned.automation.executionMode,
-      });
+    try {
+      if (this.store.sessionOrigins[appSessionId]) {
+        await this.options.persist(() => {
+          Reflect.deleteProperty(this.store.sessionOrigins, appSessionId);
+        });
+      }
+    } finally {
+      if (owned) {
+        await this.options.releaseWorkspace({
+          resolvedCwd: owned.resolvedCwd,
+          executionMode: owned.automation.executionMode,
+        });
+      }
     }
   }
 

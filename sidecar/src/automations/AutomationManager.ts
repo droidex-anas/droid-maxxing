@@ -78,13 +78,15 @@ export function getAutomationManager(): AutomationManager {
 export async function isUnattendedAutomationSession(
   appSessionId: string | undefined,
 ): Promise<boolean> {
-  if (!appSessionId) return false;
+  const manager = configuredManager;
+  if (!appSessionId || !manager) return false;
   try {
-    const manager = getAutomationManager();
     await manager.waitUntilReady();
     return manager.isRunSession(appSessionId);
   } catch {
-    return false;
+    // If automation state cannot be loaded, do not grant mutation permissions
+    // or attach automation tools to a session whose origin is unknown.
+    return true;
   }
 }
 

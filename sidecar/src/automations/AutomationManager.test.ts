@@ -316,6 +316,45 @@ test('ordinary chat transcript appends do not persist an automation snapshot', a
   }
 });
 
+test('a failed adoption write closes the unowned automation chat', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  const closed: string[] = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+    closeSession: async (appSessionId) => {
+      closed.push(appSessionId);
+    },
+  });
+
+  try {
+    const automation = await manager.create(task());
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected an automation session launch.');
+    await chmod(directory, 0o555);
+    context.mock.method(console, 'error', () => undefined);
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-orphan' },
+    } as ServerEvent);
+    assert.deepEqual(closed, ['session-orphan']);
+    assert.equal((await manager.snapshot()).runs[0]?.status, 'starting');
+    assert.equal((await manager.snapshot()).sessionOrigins['session-orphan'], undefined);
+  } finally {
+    await chmod(directory, 0o755).catch(() => undefined);
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('a completed run keeps its worktree until the review chat closes', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const worktree = join(directory, 'worktree');
@@ -374,6 +413,68 @@ test('a completed run keeps its worktree until the review chat closes', async ()
   }
 });
 
+test('review-chat close releases its worktree when the origin write fails', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const worktree = join(directory, 'worktree');
+  const launches: SessionCreate[] = [];
+  const released: string[] = [];
+  const manager = new AutomationManager({
+    dataDir: directory,
+    turnSettleGraceMs: 20,
+    emit: () => undefined,
+    prepareWorkspace: async () => worktree,
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+    releaseWorkspace: async ({ resolvedCwd }) => {
+      if (resolvedCwd) released.push(resolvedCwd);
+    },
+  });
+
+  try {
+    const automation = await manager.create(
+      task({ executionMode: 'worktree', workspaceCwd: directory }),
+    );
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected an automation session launch.');
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-review-write-failure' },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-review-write-failure', streaming: true },
+    } as ServerEvent);
+    await manager.observeSessionEvent({
+      type: 'session.updated',
+      session: { appSessionId: 'session-review-write-failure', streaming: false },
+    } as ServerEvent);
+    const storePath = join(directory, 'automations.json');
+    await waitFor(async () => {
+      const store = JSON.parse(await readFile(storePath, 'utf8')) as {
+        runs: Array<{ status: string }>;
+      };
+      return store.runs[0]?.status === 'completed';
+    });
+
+    await chmod(directory, 0o555);
+    await assert.rejects(
+      manager.observeSessionEvent({
+        type: 'session.closed',
+        appSessionId: 'session-review-write-failure',
+      } as ServerEvent),
+    );
+    assert.deepEqual(released, [worktree]);
+  } finally {
+    await chmod(directory, 0o755).catch(() => undefined);
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('an isolated worktree is not created until its path is persisted', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const worktree = join(directory, 'worktree');
@@ -406,6 +507,53 @@ test('an isolated worktree is not created until its path is persisted', async ()
     await waitFor(() => events.includes('launch'));
     assert.deepEqual(events, ['resolve', 'create', 'launch']);
   } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('shutdown releases a worktree materialized before launch', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const worktree = join(directory, 'worktree');
+  const released: string[] = [];
+  const launches: SessionCreate[] = [];
+  let finishMaterializing: () => void = () => undefined;
+  const materializing = new Promise<void>((resolve) => {
+    finishMaterializing = resolve;
+  });
+  let noteMaterializing: () => void = () => undefined;
+  const materializingStarted = new Promise<void>((resolve) => {
+    noteMaterializing = resolve;
+  });
+  const manager = new AutomationManager({
+    dataDir: directory,
+    emit: () => undefined,
+    prepareWorkspace: async () => worktree,
+    createWorkspace: async () => {
+      noteMaterializing();
+      await materializing;
+    },
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+    releaseWorkspace: async ({ resolvedCwd }) => {
+      if (resolvedCwd) released.push(resolvedCwd);
+    },
+  });
+
+  try {
+    const automation = await manager.create(
+      task({ executionMode: 'worktree', workspaceCwd: directory }),
+    );
+    await manager.runNow(automation.id);
+    await materializingStarted;
+    const shutdown = manager.shutdown();
+    finishMaterializing();
+    await shutdown;
+    assert.deepEqual(launches, []);
+    assert.deepEqual(released, [worktree]);
+  } finally {
+    finishMaterializing();
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });
   }

@@ -89,10 +89,16 @@ export class AutomationScheduler {
     const nextRunAt = this.nextWakeAt();
     if (nextRunAt === null) return;
     const delay = Math.max(0, Math.min(this.recheckMs, nextRunAt - this.options.now()));
+    this.armAfter(delay);
+  }
+
+  private armAfter(delayMs: number): void {
+    this.stop();
+    if (this.options.isClosed() || this.nextWakeAt() === null) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.wake();
-    }, delay);
+    }, delayMs);
     this.timer.unref();
   }
 
@@ -120,14 +126,17 @@ export class AutomationScheduler {
       this.arm();
       return;
     }
-    void this.options
-      .flushDue()
-      .catch((error: unknown) => {
-        console.error('Automation scheduler failed', error);
-      })
-      .finally(() => {
+    void this.options.flushDue().then(
+      () => {
         this.arm();
-      });
+      },
+      (error: unknown) => {
+        console.error('Automation scheduler failed', error);
+        // A failed write restores the overdue occurrence. Retrying immediately
+        // would re-arm a zero-delay timer and spin until persistence recovers.
+        this.armAfter(this.recheckMs);
+      },
+    );
   }
 
   private advance(automation: Automation, scheduledAt: number, now: number): void {

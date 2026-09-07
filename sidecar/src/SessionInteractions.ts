@@ -64,12 +64,13 @@ export class SessionInteractions {
     params: RequestPermissionRequestParams,
   ): Promise<RequestPermissionHandlerResult> {
     const liveSession = this.dependencies.getLiveSession(sessionId);
+    const autonomy = liveSession?.summary.autonomy;
+    const safeForUnattended = shouldAutoApproveAutomationPermission(params, autonomy, true);
+    const safeForInteractive = shouldAutoApproveAutomationPermission(params, autonomy);
     if (
-      shouldAutoApproveAutomationPermission(
-        params,
-        liveSession?.summary.autonomy,
-        await isUnattendedAutomationSession(liveSession?.summary.appSessionId),
-      )
+      safeForUnattended ||
+      (safeForInteractive &&
+        !(await isUnattendedAutomationSession(liveSession?.summary.appSessionId)))
     ) {
       return normalizePermissionOutcome('proceed_once');
     }
