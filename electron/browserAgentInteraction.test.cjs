@@ -54,17 +54,37 @@ function hoverContents(onMouseMoved = async () => ({})) {
   return { commands, contents, scripts };
 }
 
-test('clicks resolve live refs and run in the isolated page without stealing app focus', async () => {
+test('click validates in preload and uses one focus-neutral Chromium mouse sequence', async () => {
+  const commands = [];
   const scripts = [];
-  const inputEvents = [];
   const cursorEvents = [];
+  let attached = false;
   const contents = {
+    debugger: {
+      attach() {
+        attached = true;
+      },
+      isAttached: () => attached,
+      async sendCommand(name, params) {
+        commands.push({ name, params });
+      },
+    },
     executeJavaScript: async (script) => {
       scripts.push(script);
       if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 120, y: 84 };
+      if (script.includes('"nativeInputPhase":"complete"')) {
+        return {
+          requestId: 'request-1',
+          ok: true,
+          snapshot: { url: 'https://example.test/', refs: [] },
+        };
+      }
       return { requestId: 'request-1', ok: true };
     },
-    sendInputEvent: (event) => inputEvents.push(event),
+    isDestroyed: () => false,
+    sendInputEvent() {
+      throw new Error('click must not require a focused BrowserWindow');
+    },
   };
 
   const result = await executeBrowserAgentInteraction(
@@ -80,12 +100,162 @@ test('clicks resolve live refs and run in the isolated page without stealing app
     },
   );
 
-  assert.equal(result.ok, true);
+  assert.equal(result.snapshot.url, 'https://example.test/');
   assert.deepEqual(cursorEvents, [{ x: 120, y: 84, pressed: true }]);
-  assert.deepEqual(inputEvents, []);
-  assert.match(scripts[1], /"action":"click"/);
-  assert.match(scripts[1], /"x":120/);
-  assert.match(scripts[1], /"__droidexContext":\{"documentId":"document-1"/);
+  assert.deepEqual(commands, [
+    {
+      name: 'Input.dispatchMouseEvent',
+      params: {
+        type: 'mouseMoved',
+        x: 120,
+        y: 84,
+        button: 'none',
+        buttons: 0,
+        clickCount: 0,
+        pointerType: 'mouse',
+      },
+    },
+    {
+      name: 'Input.dispatchMouseEvent',
+      params: {
+        type: 'mousePressed',
+        x: 120,
+        y: 84,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1,
+        pointerType: 'mouse',
+      },
+    },
+    {
+      name: 'Input.dispatchMouseEvent',
+      params: {
+        type: 'mouseReleased',
+        x: 120,
+        y: 84,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+        pointerType: 'mouse',
+      },
+    },
+  ]);
+  const clickScripts = scripts.filter(
+    (script) => script.includes('__DROIDMAXX_AGENT_ACTION') && script.includes('"action":"click"'),
+  );
+  assert.equal(clickScripts.length, 3);
+  assert.match(clickScripts[0], /"nativeInputPhase":"prepare"/);
+  assert.match(clickScripts[0], /"__droidexContext":\{"documentId":"document-1"/);
+  assert.match(clickScripts[1], /"nativeInputPhase":"complete"/);
+  assert.match(clickScripts[2], /"nativeInputPhase":"cancel"/);
+});
+
+test('click sends no press after the page changes during Chromium pointer movement', async () => {
+  let current = true;
+  const commands = [];
+  const scripts = [];
+  let attached = false;
+  const contents = {
+    debugger: {
+      attach() {
+        attached = true;
+      },
+      isAttached: () => attached,
+      async sendCommand(name, params) {
+        commands.push({ name, params });
+        current = false;
+      },
+    },
+    executeJavaScript: async (script) => {
+      scripts.push(script);
+      if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 120, y: 84 };
+      return { requestId: 'request-stale-move', ok: true };
+    },
+    isDestroyed: () => false,
+  };
+
+  await assert.rejects(
+    executeBrowserAgentInteraction(
+      contents,
+      { requestId: 'request-stale-move', action: 'click', selector: '#continue' },
+      {
+        isCurrent: () => current,
+        showCursor: async () => true,
+        pageContext: PAGE_CONTEXT,
+        viewportBounds: { width: 300, height: 200 },
+      },
+    ),
+    /page changed before the browser action completed/i,
+  );
+
+  assert.deepEqual(
+    commands.map((command) => command.params.type),
+    ['mouseMoved'],
+  );
+  assert.equal(
+    scripts.filter((script) => script.includes('"nativeInputPhase":"complete"')).length,
+    0,
+  );
+  assert.equal(
+    scripts.filter((script) => script.includes('"nativeInputPhase":"cancel"')).length,
+    0,
+  );
+});
+
+test('click releases a pressed button without clicking after the page changes', async () => {
+  let current = true;
+  const commands = [];
+  const scripts = [];
+  let attached = false;
+  const contents = {
+    debugger: {
+      attach() {
+        attached = true;
+      },
+      isAttached: () => attached,
+      async sendCommand(name, params) {
+        commands.push({ name, params });
+        if (params.type === 'mousePressed') current = false;
+      },
+    },
+    executeJavaScript: async (script) => {
+      scripts.push(script);
+      if (script.includes('__DROIDMAXX_RESOLVE_POINTER')) return { x: 120, y: 84 };
+      return { requestId: 'request-stale-press', ok: true };
+    },
+    isDestroyed: () => false,
+  };
+
+  await assert.rejects(
+    executeBrowserAgentInteraction(
+      contents,
+      { requestId: 'request-stale-press', action: 'click', selector: '#continue' },
+      {
+        isCurrent: () => current,
+        showCursor: async () => true,
+        pageContext: PAGE_CONTEXT,
+        viewportBounds: { width: 300, height: 200 },
+      },
+    ),
+    /page changed before the browser action completed/i,
+  );
+
+  assert.deepEqual(
+    commands.map((command) => [command.params.type, command.params.clickCount]),
+    [
+      ['mouseMoved', 0],
+      ['mousePressed', 1],
+      ['mouseReleased', 0],
+    ],
+  );
+  assert.equal(
+    scripts.filter((script) => script.includes('"nativeInputPhase":"complete"')).length,
+    0,
+  );
+  assert.equal(
+    scripts.filter((script) => script.includes('"nativeInputPhase":"cancel"')).length,
+    1,
+  );
 });
 
 test('hover uses one focus-neutral Chromium mouse move and returns its resulting snapshot', async () => {

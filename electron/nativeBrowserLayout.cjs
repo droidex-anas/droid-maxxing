@@ -48,7 +48,7 @@ function createNativeBrowserLayout({
     attachedBrowserSessionId = entry.browserSessionId;
     entry.attached = true;
     setBrowserViewBoundsIfChanged(view, requestedAttachmentBounds);
-    if (entry.visible)
+    if (entry.visible && entry.agentCursorActive)
       cursor.attach({
         browserSessionId: entry.browserSessionId,
         hostWindow: getMainWindow(),
@@ -106,19 +106,21 @@ function createNativeBrowserLayout({
     }
   }
 
-  function setNativeBrowserVisible(browserSessionId, visible) {
+  function setNativeBrowserVisible(browserSessionId, visible, agentCursorActive) {
     const entry = ensureEntry(browserSessionId);
     entry.visible = Boolean(visible);
+    entry.agentCursorActive = agentCursorActive === true;
+    if (!entry.agentCursorActive) cursor.forget(entry.browserSessionId);
     if (!isBrowserViewUsable(entry.view) || !entry.attached) return;
     entry.view.setVisible(entry.visible);
     safeWebContents(entry.view)?.setBackgroundThrottling(!entry.visible);
-    if (entry.visible)
+    if (entry.visible && entry.agentCursorActive)
       cursor.attach({
         browserSessionId: entry.browserSessionId,
         hostWindow: getMainWindow(),
         bounds: entry.view.getBounds(),
       });
-    else cursor.detach(entry.browserSessionId);
+    else if (entry.agentCursorActive) cursor.detach(entry.browserSessionId);
   }
 
   function mountRecovered(entry, bounds, revision) {
@@ -128,7 +130,7 @@ function createNativeBrowserLayout({
       entry.attached = true;
       attachedBrowserSessionId = entry.browserSessionId;
       setBrowserViewBoundsIfChanged(entry.view, recoveredBounds);
-      if (entry.visible)
+      if (entry.visible && entry.agentCursorActive)
         cursor.attach({
           browserSessionId: entry.browserSessionId,
           hostWindow: getMainWindow(),

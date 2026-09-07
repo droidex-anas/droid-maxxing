@@ -13,7 +13,7 @@ export function copyTextForCommand(command: string, output?: string): string {
   return out ? `${command}\n\n${out}` : command;
 }
 
-export function copyTextForFileChange(change: FileChange): string {
+function copyTextForFileChange(change: FileChange): string {
   const body = change.ops.map((op) => `${diffOpPrefix(op.type)}${op.text}`).join('\n');
   return body ? `${change.verb} ${change.path}\n${body}` : `${change.verb} ${change.path}`;
 }

@@ -74,6 +74,7 @@ function createNativeBrowserViewFactory({
       state: { designMode: false, pencilMode: false },
       attached: false,
       visible: true,
+      agentCursorActive: false,
       windowAttached: false,
       hostWindow: null,
       idleTimer: null,

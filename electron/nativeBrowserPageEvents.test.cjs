@@ -12,7 +12,6 @@ function fixture(capture = async () => 'masked-image') {
     credentials: { capture: (...args) => calls.push(args) },
     navigation: {
       recordTrustedUserNavigation: (...args) => calls.push(args),
-      expireTrustedUserNavigation: (...args) => calls.push(args),
     },
   });
   return { entry, sender, events, calls, event: { sender, senderFrame: sender.mainFrame } };
@@ -24,7 +23,6 @@ test('page IPC rejects subframes before credentials, navigation, or design captu
   assert.equal(f.events.selectionForEvent(event, {}), undefined);
   assert.equal(await f.events.prepareDesignPrompt(event, { selection: {} }), undefined);
   f.events.recordUserNavigation(event, {});
-  f.events.expireUserNavigation(event, {});
   await f.events.captureCredential(event, {});
   assert.deepEqual(f.calls, []);
 });

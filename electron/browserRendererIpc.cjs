@@ -17,8 +17,8 @@ function registerBrowserRendererIpc(options) {
   handle('native-browser-set-bounds', ({ browserSessionId, bounds }) =>
     nativeBrowser.setBounds(browserSessionId, bounds),
   );
-  handle('native-browser-visible', ({ browserSessionId, visible }) =>
-    nativeBrowser.setVisible(browserSessionId, visible),
+  handle('native-browser-visible', ({ browserSessionId, visible, agentCursorActive }) =>
+    nativeBrowser.setVisible(browserSessionId, visible, agentCursorActive),
   );
   handle('native-browser-go-back', ({ browserSessionId }) =>
     nativeBrowser.navigateHistory(browserSessionId, 'back'),

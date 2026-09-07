@@ -94,9 +94,10 @@ export async function setNativeBrowserBounds(
 export async function setNativeBrowserVisible(
   browserSessionId: string,
   visible: boolean,
+  agentCursorActive: boolean,
 ): Promise<void> {
   if (!isDesktop()) return;
-  await requireDesktopApi().nativeBrowserSetVisible(browserSessionId, visible);
+  await requireDesktopApi().nativeBrowserSetVisible(browserSessionId, visible, agentCursorActive);
 }
 
 export async function goBackNativeBrowser(browserSessionId: string): Promise<boolean> {

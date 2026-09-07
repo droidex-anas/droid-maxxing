@@ -76,16 +76,21 @@ function createBrowserCookieImports(options) {
     } catch (error) {
       return { status: 'failed', reason: profilePreparationFailureReason(error) };
     }
-    const planId = validateOpaqueId(
-      (options.nextPlanId ?? crypto.randomUUID)(),
-      'Cookie import plan',
-    );
-    const timer = (options.setTimeout ?? setTimeout)(
-      () => discardProfile(planId),
-      options.planTtlMs ?? PROFILE_PLAN_TTL_MS,
-    );
-    preparedProfile = { planId, plan, timer };
-    return { status: 'ready', planId, preview: plan.preview };
+    try {
+      const planId = validateOpaqueId(
+        (options.nextPlanId ?? crypto.randomUUID)(),
+        'Cookie import plan',
+      );
+      const timer = (options.setTimeout ?? setTimeout)(
+        () => discardProfile(planId),
+        options.planTtlMs ?? PROFILE_PLAN_TTL_MS,
+      );
+      preparedProfile = { planId, plan, timer };
+      return { status: 'ready', planId, preview: plan.preview };
+    } catch (error) {
+      profileImport.discardChromeProfileCookieImportPlan(plan);
+      throw error;
+    }
   }
 
   async function commitProfile(planId) {
@@ -143,40 +148,38 @@ function createBrowserCookieImports(options) {
       filePath: result.filePaths[0],
       cookieStore: options.getCookieStore(),
     });
-    const preview = plan.preview;
-    const replacementDetail =
-      preview.replacementCount === null
-        ? ''
-        : ` ${String(preview.replacementCount)} existing ${preview.replacementCount === 1 ? 'cookie' : 'cookies'} will be replaced.`;
-    const confirmation = await options.showPrompt({
-      type: 'warning',
-      buttons: ['Import cookies', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      title: `Import ${preview.profileLabel} cookies?`,
-      message: `Import ${String(preview.importCount)} cookies for ${String(preview.domainCount)} domains?`,
-      detail: `${preview.affectedDomains.slice(0, 12).join(', ')}.${replacementDetail} Cookie values stay inside Electron main. Open browser pages close before import so sites reload against the completed update.`,
-    });
-    if (confirmation.response !== 0) {
-      discardBrowserCookieImportPlan(plan);
-      return { source: 'chrome', canceled: true, snapshot: await options.snapshot() };
-    }
     try {
+      const preview = plan.preview;
+      const replacementDetail =
+        preview.replacementCount === null
+          ? ''
+          : ` ${String(preview.replacementCount)} existing ${preview.replacementCount === 1 ? 'cookie' : 'cookies'} will be replaced.`;
+      const confirmation = await options.showPrompt({
+        type: 'warning',
+        buttons: ['Import cookies', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: `Import ${preview.profileLabel} cookies?`,
+        message: `Import ${String(preview.importCount)} cookies for ${String(preview.domainCount)} domains?`,
+        detail: `${preview.affectedDomains.slice(0, 12).join(', ')}.${replacementDetail} Cookie values stay inside Electron main. Open browser pages close before import so sites reload against the completed update.`,
+      });
+      if (confirmation.response !== 0) {
+        return { source: 'chrome', canceled: true, snapshot: await options.snapshot() };
+      }
       await options.beforeCommit?.();
-    } catch (error) {
+      const { imported, snapshot } = await commitAndFinalize('file', () =>
+        commitBrowserCookieImport(plan, {
+          cookieStore: options.getCookieStore(),
+        }),
+      );
+      return {
+        ...imported,
+        canceled: false,
+        snapshot,
+      };
+    } finally {
       discardBrowserCookieImportPlan(plan);
-      throw error;
     }
-    const { imported, snapshot } = await commitAndFinalize('file', () =>
-      commitBrowserCookieImport(plan, {
-        cookieStore: options.getCookieStore(),
-      }),
-    );
-    return {
-      ...imported,
-      canceled: false,
-      snapshot,
-    };
   }
 
   async function commitAndFinalize(importMethod, commit) {

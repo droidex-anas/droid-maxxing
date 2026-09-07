@@ -42,6 +42,7 @@ interface NativeBrowserSurfaceProps {
   browserKey: string;
   visibleBrowserSessionId?: string;
   obscured?: boolean;
+  isAgentRunning: boolean;
   url: string;
   viewport: BrowserViewport;
   viewportMode: BrowserViewportMode;
@@ -60,6 +61,7 @@ export function NativeBrowserSurface({
   browserKey,
   visibleBrowserSessionId,
   obscured = false,
+  isAgentRunning,
   url,
   viewport,
   viewportMode,
@@ -88,7 +90,7 @@ export function NativeBrowserSurface({
   const onSelectionRef = useRef(onSelection);
   const onPromptRef = useRef(onPrompt);
   const onLoadFailedRef = useRef(onLoadFailed);
-  const obscuredRef = useRef(obscured);
+  const presentationRef = useRef({ obscured, isAgentRunning });
   const urlRef = useRef(url);
   urlRef.current = url;
   const native = isDesktop();
@@ -125,8 +127,8 @@ export function NativeBrowserSurface({
     onSelectionRef.current = onSelection;
     onPromptRef.current = onPrompt;
     onLoadFailedRef.current = onLoadFailed;
-    obscuredRef.current = obscured;
-  }, [obscured, onLoadFailed, onLoaded, onPrompt, onSelection]);
+    presentationRef.current = { obscured, isAgentRunning };
+  }, [obscured, isAgentRunning, onLoadFailed, onLoaded, onPrompt, onSelection]);
 
   useEffect(() => {
     onViewportSizeChange({ width: Math.round(surface.width), height: Math.round(surface.height) });
@@ -222,8 +224,10 @@ export function NativeBrowserSurface({
   useLayoutEffect(() => {
     if (!native) return;
     if (!visibleBrowserSessionId) return;
-    setNativeBrowserVisible(visibleBrowserSessionId, !obscured).catch(() => undefined);
-  }, [native, obscured, visibleBrowserSessionId]);
+    setNativeBrowserVisible(visibleBrowserSessionId, !obscured, isAgentRunning).catch(
+      () => undefined,
+    );
+  }, [native, obscured, isAgentRunning, visibleBrowserSessionId]);
 
   useEffect(() => {
     if (!native) return;
@@ -253,8 +257,10 @@ export function NativeBrowserSurface({
           if (latestBounds && !equalBounds(bounds, latestBounds)) {
             scheduleBoundsUpdate(target, latestBounds);
           }
-          if (obscuredRef.current) {
-            setNativeBrowserVisible(target, false).catch(() => undefined);
+          if (presentationRef.current.obscured) {
+            setNativeBrowserVisible(target, false, presentationRef.current.isAgentRunning).catch(
+              () => undefined,
+            );
           }
         },
         onFailed: (error) => {

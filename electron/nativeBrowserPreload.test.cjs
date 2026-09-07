@@ -6,12 +6,12 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, 'nativeBrowserPreload.cjs'), 'utf8');
 
-test('only a trusted physical action reports an exact, immediately expiring navigation intent', () => {
+test('trusted physical intent cannot expire before native navigation observes it', () => {
   const start = source.indexOf('function reportTrustedUserNavigation(event)');
   const end = source.indexOf('\nfunction trustedUserNavigationDestination', start);
   assert.ok(start >= 0 && end > start, 'trusted user navigation reporter must exist');
   const sent = [];
-  const timers = [];
+  let agentInputSuppressed = true;
   const report = vm.runInNewContext(
     `(${source.slice(start, end).replace('function reportTrustedUserNavigation', 'function')})`,
     {
@@ -20,7 +20,8 @@ test('only a trusted physical action reports an exact, immediately expiring navi
       crypto: { randomUUID: () => 'activation-1' },
       designMode: false,
       ipcRenderer: { send: (...args) => sent.push(args) },
-      setTimeout: (callback, timeoutMs) => timers.push({ callback, timeoutMs }),
+      isAgentInputSuppressed: () => agentInputSuppressed,
+      setTimeout: (callback) => callback(),
       trustedUserNavigationDestination: () => 'https://accounts.example/sign-in',
     },
   );
@@ -28,6 +29,10 @@ test('only a trusted physical action reports an exact, immediately expiring navi
   report({ isTrusted: false });
   assert.deepEqual(sent, []);
 
+  report({ isTrusted: true, type: 'click' });
+  assert.deepEqual(sent, []);
+
+  agentInputSuppressed = false;
   report({ isTrusted: true, type: 'click' });
   assert.deepEqual(sent, [
     [
@@ -37,13 +42,6 @@ test('only a trusted physical action reports an exact, immediately expiring navi
         destinationUrl: 'https://accounts.example/sign-in',
       },
     ],
-  ]);
-  assert.equal(timers.length, 1);
-  assert.equal(timers[0].timeoutMs, 0);
-  timers[0].callback();
-  assert.deepEqual(sent[1], [
-    'native-browser-user-navigation-expired',
-    { activationId: 'activation-1' },
   ]);
 });
 
@@ -59,6 +57,7 @@ test('a programmatic form submit cannot report user navigation without trusted p
       crypto: { randomUUID: () => 'activation-2' },
       designMode: false,
       ipcRenderer: { send: (...args) => sent.push(args) },
+      isAgentInputSuppressed: () => false,
       setTimeout: () => {},
       trustedUserNavigationDestination: () => 'https://accounts.example/sign-in',
     },
@@ -66,6 +65,30 @@ test('a programmatic form submit cannot report user navigation without trusted p
 
   report({ isTrusted: true, type: 'submit', target: {} });
   assert.deepEqual(sent, []);
+});
+
+test('suppressed agent input cannot leave a trusted form activation behind', () => {
+  const start = source.indexOf('function rememberTrustedPhysicalFormActivation(event)');
+  const end = source.indexOf('\nfunction reportTrustedUserNavigation', start);
+  assert.ok(start >= 0 && end > start, 'trusted form activation helpers must exist');
+  let agentInputSuppressed = true;
+  const activation = vm.runInNewContext(
+    `(() => {
+      let trustedPhysicalFormActivation = null;
+      ${source.slice(start, end)}
+      return { rememberTrustedPhysicalFormActivation, consumeTrustedPhysicalFormActivation };
+    })()`,
+    { isAgentInputSuppressed: () => agentInputSuppressed },
+  );
+  const form = {};
+  const event = { isTrusted: true, type: 'pointerdown', button: 0, target: { form } };
+
+  activation.rememberTrustedPhysicalFormActivation(event);
+  agentInputSuppressed = false;
+  assert.equal(activation.consumeTrustedPhysicalFormActivation(form), false);
+
+  activation.rememberTrustedPhysicalFormActivation(event);
+  assert.equal(activation.consumeTrustedPhysicalFormActivation(form), true);
 });
 
 test('trusted navigation destination accepts only real link and form defaults', () => {
@@ -177,7 +200,7 @@ test('final page execution rejects a replaced document, snapshot, or in-page URL
 
 test('snapshot recovery mints a new lease when in-page navigation cleared the old one', async () => {
   const start = source.indexOf('async function runAgentAction(request)');
-  const end = source.indexOf('\nfunction clickAt', start);
+  const end = source.indexOf('\nfunction validateClickTargetAt', start);
   let agentSnapshotId = '';
   let contextChecks = 0;
   const runAction = vm.runInNewContext(
@@ -205,6 +228,83 @@ test('snapshot recovery mints a new lease when in-page navigation cleared the ol
   assert.equal(agentSnapshotId, 'document-new:1');
 });
 
+test('agent input suppression stays fail-closed until its exact request ends', () => {
+  const start = source.indexOf('function beginAgentInputSuppression(requestId)');
+  const end = source.indexOf('\nasync function runAgentAction(request)', start);
+  assert.ok(start >= 0 && end > start, 'agent input suppression helpers must exist');
+  let now = 1_000;
+  const suppression = vm.runInNewContext(
+    `(() => {
+      let agentInputSuppression = null;
+      ${source.slice(start, end)}
+      return { beginAgentInputSuppression, endAgentInputSuppression, isAgentInputSuppressed };
+    })()`,
+    { Date: { now: () => now } },
+  );
+
+  suppression.beginAgentInputSuppression('request-1');
+  assert.equal(suppression.isAgentInputSuppressed(), true);
+  suppression.endAgentInputSuppression('request-2');
+  assert.equal(suppression.isAgentInputSuppressed(), true);
+  suppression.endAgentInputSuppression('request-1');
+  assert.equal(suppression.isAgentInputSuppressed(), false);
+
+  suppression.beginAgentInputSuppression('request-3');
+  now += 10_001;
+  assert.equal(suppression.isAgentInputSuppressed(), true);
+});
+
+test('native click preparation and completion own one suppression lease', async () => {
+  const start = source.indexOf('async function runAgentAction(request)');
+  const end = source.indexOf('\nfunction validateClickTargetAt', start);
+  assert.ok(start >= 0 && end > start, 'native click action must use target validation');
+  const calls = [];
+  const runAction = vm.runInNewContext(
+    `(${source.slice(start, end).replace('async function runAgentAction', 'async function')})`,
+    {
+      beginAgentInputSuppression: (requestId) => calls.push(['begin', requestId]),
+      endAgentInputSuppression: (requestId) => calls.push(['end', requestId]),
+      pageSnapshot: () => ({ url: 'https://example.test/', refs: [] }),
+      requireCurrentAgentActionContext: () => calls.push(['context']),
+      requireCurrentAgentSnapshotTarget: () => ({ id: 'target' }),
+      safeSnapshot: () => ({ refs: [] }),
+      sendAgent: (result) => result,
+      settle: async () => calls.push(['settle']),
+      validateClickTargetAt: () => calls.push(['target']),
+    },
+  );
+
+  const request = {
+    requestId: 'request-click',
+    action: 'click',
+    ref: '@b-target',
+    selector: '#target',
+    x: 40,
+    y: 60,
+    __droidexContext: { documentId: 'document-1' },
+  };
+  const prepared = await runAction({ ...request, nativeInputPhase: 'prepare' });
+  assert.deepEqual(JSON.parse(JSON.stringify(prepared)), {
+    requestId: 'request-click',
+    ok: true,
+  });
+  assert.deepEqual(calls, [['context'], ['target'], ['begin', 'request-click']]);
+
+  calls.length = 0;
+  const completed = await runAction({ ...request, nativeInputPhase: 'complete' });
+  assert.equal(completed.ok, true);
+  assert.equal(completed.snapshot.url, 'https://example.test/');
+  assert.deepEqual(calls, [['end', 'request-click'], ['settle']]);
+
+  calls.length = 0;
+  const canceled = await runAction({ ...request, nativeInputPhase: 'cancel' });
+  assert.deepEqual(JSON.parse(JSON.stringify(canceled)), {
+    requestId: 'request-click',
+    ok: true,
+  });
+  assert.deepEqual(calls, [['end', 'request-click']]);
+});
+
 test('hover validates the current target without dispatching a synthetic mouse event', async () => {
   const start = source.indexOf('function validateHoverTargetAt(x, y, expectedTarget)');
   const end = source.indexOf('\nfunction typeIntoFocused', start);
@@ -230,7 +330,7 @@ test('hover validates the current target without dispatching a synthetic mouse e
 
 test('hover action validates its exact context and target without minting a premature snapshot', async () => {
   const start = source.indexOf('async function runAgentAction(request)');
-  const end = source.indexOf('\nfunction clickAt', start);
+  const end = source.indexOf('\nfunction validateClickTargetAt', start);
   const target = {};
   const context = {
     documentId: 'document-1',
@@ -313,6 +413,7 @@ for (const action of ['click', 'hover']) {
     const runAction = vm.runInNewContext(
       `${source.slice(start, end)}\n${source.slice(leaseStart, leaseEnd)}\nrunAgentAction`,
       {
+        beginAgentInputSuppression: () => {},
         document,
         Element,
         MouseEvent: class {},
@@ -327,14 +428,21 @@ for (const action of ['click', 'hover']) {
         settle: async () => {},
       },
     );
-    const request = { requestId: 'ref-only', action, ref: '@b-current', x: 40, y: 60 };
+    const request = {
+      requestId: 'ref-only',
+      action,
+      ref: '@b-current',
+      x: 40,
+      y: 60,
+      ...(action === 'click' ? { nativeInputPhase: 'prepare' } : {}),
+    };
     const rejected = await runAction(request);
     assert.equal(rejected.ok, false);
     assert.match(rejected.error, /target moved/);
     assert.equal(inputCount, 0);
     hitTarget = leasedTarget;
     assert.equal((await runAction(request)).ok, true);
-    assert.equal(inputCount, action === 'click' ? 3 : 0);
+    assert.equal(inputCount, 0);
   });
 }
 
@@ -354,7 +462,7 @@ test('the isolated final action rechecks sensitive focus immediately before typi
   assert.doesNotThrow(() => requireSafeText({ action: 'keypress', key: 'Enter' }));
 
   const actionStart = source.indexOf('async function runAgentAction(request)');
-  const actionEnd = source.indexOf('\nfunction clickAt', actionStart);
+  const actionEnd = source.indexOf('\nfunction validateClickTargetAt', actionStart);
   const action = source.slice(actionStart, actionEnd);
   assert.match(action, /requireSafeAgentTextAction\(request\);\s*typeIntoFocused/);
   assert.match(action, /requireSafeAgentTextAction\(request\);\s*pressKey/);

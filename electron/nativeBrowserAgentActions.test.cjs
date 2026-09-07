@@ -26,7 +26,15 @@ function harness(overrides = {}) {
     scripts: [],
   };
   const contents = new EventEmitter();
+  let debuggerAttached = false;
   Object.assign(contents, {
+    debugger: {
+      attach() {
+        debuggerAttached = true;
+      },
+      isAttached: () => debuggerAttached,
+      sendCommand: async () => ({}),
+    },
     isDestroyed: () => false,
     getURL: () => 'https://site.test/page',
     setBackgroundThrottling() {},

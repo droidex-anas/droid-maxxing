@@ -763,9 +763,6 @@ function registerIpc() {
   ipcMain.on('native-browser-user-navigation', (event, payload) => {
     nativeBrowserManager.recordUserNavigation(event, payload);
   });
-  ipcMain.on('native-browser-user-navigation-expired', (event, payload) => {
-    nativeBrowserManager.expireUserNavigation(event, payload);
-  });
   ipcMain.on('native-browser-credential-capture', (event, payload) => {
     void nativeBrowserManager
       .captureCredential(event, payload)

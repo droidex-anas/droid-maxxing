@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDesignModeOpen } from '../../hooks/designModeState';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
-import { useSessionLive } from '../../hooks/useSessionLive';
+import { useSessionLive, useSessionWorkActive } from '../../hooks/useSessionLive';
 import {
   addDesignReference,
   openBrowser,
@@ -72,6 +72,7 @@ export default function BrowserWorkspace({
   const browserError = browserKey ? state.browserErrors[browserKey] : state.browserGlobalError;
   const designMode = isDesignModeOpen(state.designModes, browserKey);
   const sessionLive = useSessionLive(requestedChatId ?? null);
+  const sessionWorkActive = useSessionWorkActive(requestedChatId ?? null);
   const nativeBrowser = isDesktop();
   // The native BrowserView is an OS-level layer painted above the React tree,
   // so any full-screen overlay would otherwise be punched through by it. Detach
@@ -503,6 +504,7 @@ export default function BrowserWorkspace({
       <div ref={frameRef} className="relative flex-1 min-h-0 min-w-0">
         {browserKey && frameReady ? (
           <NativeBrowserSurface
+            isAgentRunning={sessionWorkActive}
             browserKey={browserKey}
             visibleBrowserSessionId={browser?.browserSessionId}
             obscured={obscured}

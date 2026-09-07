@@ -4,7 +4,7 @@ import { copyTextForFeedItem } from './transcriptCopy';
 
 export const TRANSCRIPT_FIND_DEBOUNCE_MS = 150;
 
-export interface TranscriptSearchRow {
+interface TranscriptSearchRow {
   rowId: string;
   itemKey: string;
   haystack: string;
@@ -24,7 +24,7 @@ export interface TranscriptFindMatch {
   snippet: string;
 }
 
-export function searchableTextForFeedItem(item: FeedItem): string {
+function searchableTextForFeedItem(item: FeedItem): string {
   return copyTextForFeedItem(item);
 }
 

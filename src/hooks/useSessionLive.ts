@@ -1,4 +1,4 @@
-import { sessionIsLive } from '../lib/sessions';
+import { sessionHasActiveWork, sessionIsLive } from '../lib/sessions';
 import { useStoreSelector } from './useStore';
 
 /**
@@ -12,5 +12,18 @@ export function useSessionLive(appSessionId: string | null): boolean {
   return useStoreSelector((state) => {
     const session = appSessionId ? state.sessions[appSessionId] : null;
     return session ? sessionIsLive(session) : false;
+  });
+}
+
+export function useSessionWorkActive(appSessionId: string | null): boolean {
+  return useStoreSelector((state) => {
+    const session = appSessionId ? state.sessions[appSessionId] : null;
+    return session && appSessionId
+      ? sessionHasActiveWork(
+          session,
+          state.childSessions[appSessionId] ?? {},
+          state.childRuntime[appSessionId] ?? {},
+        )
+      : false;
   });
 }

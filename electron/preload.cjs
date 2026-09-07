@@ -212,8 +212,8 @@ contextBridge.exposeInMainWorld('droidControl', {
     ipcRenderer.invoke('native-browser-detach', { browserSessionId }),
   nativeBrowserSetBounds: (browserSessionId, bounds) =>
     ipcRenderer.invoke('native-browser-set-bounds', { browserSessionId, bounds }),
-  nativeBrowserSetVisible: (browserSessionId, visible) =>
-    ipcRenderer.invoke('native-browser-visible', { browserSessionId, visible }),
+  nativeBrowserSetVisible: (browserSessionId, visible, agentCursorActive) =>
+    ipcRenderer.invoke('native-browser-visible', { browserSessionId, visible, agentCursorActive }),
   nativeBrowserGoBack: (browserSessionId) =>
     ipcRenderer.invoke('native-browser-go-back', { browserSessionId }),
   nativeBrowserGoForward: (browserSessionId) =>

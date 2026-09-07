@@ -81,6 +81,21 @@ test('agent action validation precedes native browser admission', async () => {
   });
 });
 
+test('browser presentation carries run state without changing navigation authorization', async () => {
+  const { calls, handlers } = harness();
+  await handlers.get('native-browser-visible')(
+    {},
+    {
+      browserSessionId: 'browser-1',
+      visible: true,
+      agentCursorActive: false,
+    },
+  );
+  assert.deepEqual(calls, [
+    { owner: 'native', method: 'setVisible', args: ['browser-1', true, false] },
+  ]);
+});
+
 test('physical user navigation does not invoke agent origin authorization', async () => {
   const { calls, handlers } = harness();
   const request = {

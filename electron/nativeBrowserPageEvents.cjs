@@ -40,11 +40,6 @@ function createNativeBrowserPageEvents({ findEntryForContents, page, credentials
     );
   }
 
-  function expireUserNavigation(event, payload) {
-    const entry = entryForEvent(event);
-    if (entry) navigation.expireTrustedUserNavigation(entry, payload?.activationId);
-  }
-
   async function captureCredential(event, payload) {
     const entry = entryForEvent(event);
     if (entry) await credentials.capture(entry, event.sender, event.senderFrame.url, payload);
@@ -54,7 +49,6 @@ function createNativeBrowserPageEvents({ findEntryForContents, page, credentials
     selectionForEvent,
     prepareDesignPrompt,
     recordUserNavigation,
-    expireUserNavigation,
     captureCredential,
   };
 }

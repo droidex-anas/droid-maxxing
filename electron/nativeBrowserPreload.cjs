@@ -63,6 +63,7 @@ let textDragStart = null;
 let textRange = null;
 let clearTimer = null;
 let trustedPhysicalFormActivation = null;
+let agentInputSuppression = null;
 const agentDocumentId = crypto.randomUUID();
 let agentSnapshotSequence = 0;
 let agentSnapshotId = '';
@@ -442,7 +443,7 @@ function onContextMenu(event) {
 }
 
 function rememberTrustedPhysicalFormActivation(event) {
-  if (!event.isTrusted) return;
+  if (!event.isTrusted || isAgentInputSuppressed()) return;
   if (event.type === 'pointerdown' && event.button !== 0) return;
   if (event.type === 'keydown' && event.key !== 'Enter') return;
   const form = event.target?.form || event.target?.closest?.('form');
@@ -456,17 +457,12 @@ function consumeTrustedPhysicalFormActivation(form) {
 }
 
 function reportTrustedUserNavigation(event) {
-  if (!event.isTrusted || designMode || capturePending) return;
+  if (!event.isTrusted || isAgentInputSuppressed() || designMode || capturePending) return;
   if (event.type === 'submit' && !consumeTrustedPhysicalFormActivation(event.target)) return;
   const destinationUrl = trustedUserNavigationDestination(event);
   if (!destinationUrl) return;
   const activationId = crypto.randomUUID();
   ipcRenderer.send('native-browser-user-navigation', { activationId, destinationUrl });
-  // The browser's native default action runs before the next task. Retire the
-  // intent there so delayed page JavaScript cannot reuse a real click.
-  setTimeout(() => {
-    ipcRenderer.send('native-browser-user-navigation-expired', { activationId });
-  }, 0);
 }
 
 function trustedUserNavigationDestination(event) {
@@ -800,9 +796,37 @@ function isVisible(el) {
   return rect.width > 0 && rect.height > 0;
 }
 
+function beginAgentInputSuppression(requestId) {
+  const id = String(requestId || '');
+  if (!id) throw new Error('Native browser click requires a request id.');
+  agentInputSuppression = id;
+}
+
+function endAgentInputSuppression(requestId) {
+  if (agentInputSuppression !== requestId) return false;
+  agentInputSuppression = null;
+  return true;
+}
+
+function isAgentInputSuppressed() {
+  return agentInputSuppression !== null;
+}
+
 async function runAgentAction(request) {
   try {
     const action = request && request.action;
+    const nativeInputPhase = action === 'click' ? request.nativeInputPhase : undefined;
+    if (nativeInputPhase === 'cancel') {
+      endAgentInputSuppression(request.requestId);
+      return sendAgent({ requestId: request.requestId, ok: true });
+    }
+    if (nativeInputPhase === 'complete') {
+      if (!endAgentInputSuppression(request.requestId)) {
+        throw new Error('Native browser click input lease expired before completion.');
+      }
+      await settle();
+      return sendAgent({ requestId: request.requestId, ok: true, snapshot: pageSnapshot() });
+    }
     if (action !== 'snapshot') requireCurrentAgentActionContext(request.__droidexContext);
     let scrollAttempt;
     if (action === 'inspect') {
@@ -813,11 +837,16 @@ async function runAgentAction(request) {
       });
     }
     if (action === 'click') {
+      if (nativeInputPhase !== 'prepare') {
+        throw new Error('Native browser click requires trusted input dispatch.');
+      }
       const target =
         request.ref || request.selector
           ? requireCurrentAgentSnapshotTarget(request.ref, request.selector)
           : undefined;
-      clickAt(Number(request.x), Number(request.y), target);
+      validateClickTargetAt(Number(request.x), Number(request.y), target);
+      beginAgentInputSuppression(request.requestId);
+      return sendAgent({ requestId: request.requestId, ok: true });
     } else if (action === 'hover') {
       const target =
         request.ref || request.selector
@@ -849,16 +878,10 @@ async function runAgentAction(request) {
   }
 }
 
-function clickAt(x, y, expectedTarget) {
+function validateClickTargetAt(x, y, expectedTarget) {
   const target = document.elementFromPoint(x, y);
   if (!target) throw new Error(`No element at ${x},${y}`);
   requirePointOnExpectedTarget(target, expectedTarget);
-  target.focus && target.focus();
-  for (const type of ['mousedown', 'mouseup', 'click']) {
-    target.dispatchEvent(
-      new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }),
-    );
-  }
 }
 
 function validateHoverTargetAt(x, y, expectedTarget) {

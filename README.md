@@ -55,7 +55,9 @@ with a soft blue activity halo and native eased movement at the agent's exact
 hover and click position; its high-contrast style and
 24–64 px size are configurable in Browser settings, and the
 indicator is optional, is hidden when its document changes, and
-never pulls a background task into the visible pane.
+never pulls a background task into the visible pane. It appears only during an
+active primary or child-session run; once no live run remains, finishing,
+stopping, or failing clears the cursor while leaving the browser page open.
 
 Active browser work stays live in the background. Idle hidden pages may be
 suspended to keep memory bounded; returning to one restores its URL, viewport,

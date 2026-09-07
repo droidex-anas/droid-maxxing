@@ -46,12 +46,7 @@ async function executeBrowserAgentInteraction(contents, request, options) {
       if (validation?.ok !== true) return validation;
       return executePageAction(contents, { ...request, action: 'snapshot' }, options);
     }
-    return contents.executeJavaScript(
-      `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(
-        pageActionRequest(request, options, { x, y }),
-      )});`,
-      true,
-    );
+    return dispatchNativeClick(contents, request, options, { x, y });
   }
 
   assertCurrentBrowserAction(options);
@@ -59,6 +54,73 @@ async function executeBrowserAgentInteraction(contents, request, options) {
     `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(pageActionRequest(request, options))});`,
     true,
   );
+}
+
+function dispatchNativeClick(contents, request, options, point) {
+  return runWithWebContentsDebugger(contents, async (debuggerApi) => {
+    assertCurrentBrowserAction(options);
+    await debuggerApi.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      ...point,
+      button: 'none',
+      buttons: 0,
+      clickCount: 0,
+      pointerType: 'mouse',
+    });
+    assertCurrentBrowserAction(options);
+
+    let buttonPressed = false;
+    try {
+      const prepared = await executePageAction(contents, request, options, {
+        ...point,
+        nativeInputPhase: 'prepare',
+      });
+      assertCurrentBrowserAction(options);
+      if (prepared?.ok !== true) return prepared;
+      buttonPressed = true;
+      await debuggerApi.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        ...point,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1,
+        pointerType: 'mouse',
+      });
+      assertCurrentBrowserAction(options);
+      await debuggerApi.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        ...point,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+        pointerType: 'mouse',
+      });
+      buttonPressed = false;
+      return await executePageAction(contents, request, options, {
+        ...point,
+        nativeInputPhase: 'complete',
+      });
+    } finally {
+      if (buttonPressed && !contents.isDestroyed()) {
+        await debuggerApi
+          .sendCommand('Input.dispatchMouseEvent', {
+            type: 'mouseReleased',
+            ...point,
+            button: 'left',
+            buttons: 0,
+            clickCount: 0,
+            pointerType: 'mouse',
+          })
+          .catch(() => undefined);
+      }
+      if (!contents.isDestroyed()) {
+        await executePageAction(contents, request, options, {
+          ...point,
+          nativeInputPhase: 'cancel',
+        }).catch(() => undefined);
+      }
+    }
+  });
 }
 
 function executePageAction(contents, request, options, fields = {}) {

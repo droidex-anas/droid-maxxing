@@ -321,7 +321,11 @@ interface DroidControlApi {
   ) => Promise<void>;
   nativeBrowserDetach: (browserSessionId?: string) => Promise<void>;
   nativeBrowserSetBounds: (browserSessionId: string, bounds: NativeBrowserBounds) => Promise<void>;
-  nativeBrowserSetVisible: (browserSessionId: string, visible: boolean) => Promise<void>;
+  nativeBrowserSetVisible: (
+    browserSessionId: string,
+    visible: boolean,
+    agentCursorActive: boolean,
+  ) => Promise<void>;
   nativeBrowserGoBack: (browserSessionId: string) => Promise<boolean>;
   nativeBrowserGoForward: (browserSessionId: string) => Promise<boolean>;
   nativeBrowserSetDesignMode: (browserSessionId: string, active: boolean) => Promise<void>;

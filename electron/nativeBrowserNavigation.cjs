@@ -34,12 +34,6 @@ function createNativeBrowserNavigation({
     }
   }
 
-  function expireTrustedUserNavigation(entry, activationId) {
-    if (entry.trustedUserNavigation?.activationId !== activationId) return false;
-    entry.trustedUserNavigation = null;
-    return true;
-  }
-
   function clearTrustedUserNavigation(entry) {
     entry.trustedUserNavigation = null;
   }
@@ -178,7 +172,6 @@ function createNativeBrowserNavigation({
     authorizeHistoryTransition,
     clearTrustedUserNavigation,
     consumePendingApproval,
-    expireTrustedUserNavigation,
     finishAgentAction,
     invalidate,
     recordTrustedUserNavigation,

@@ -5,6 +5,7 @@ const { createNativeBrowserLayout } = require('./nativeBrowserLayout.cjs');
 function fixture(restoreSnapshot = async () => {}) {
   const mainWindow = { isDestroyed: () => false, webContents: { isDestroyed: () => false } };
   const mounted = [];
+  const cursorCalls = [];
   const entries = new Map();
   for (const id of ['first', 'second']) {
     const view = {
@@ -24,6 +25,7 @@ function fixture(restoreSnapshot = async () => {}) {
       view,
       attached: false,
       visible: true,
+      agentCursorActive: false,
       state: {},
       viewport: {},
     });
@@ -47,13 +49,69 @@ function fixture(restoreSnapshot = async () => {}) {
       normalizeBounds: (bounds) => bounds,
       restorableUrlForEntry: () => undefined,
     },
-    cursor: { attach: () => {}, detach: () => {}, setBounds: () => {} },
+    cursor: {
+      attach: ({ browserSessionId }) => cursorCalls.push(['attach', browserSessionId]),
+      detach: (id) => cursorCalls.push(['detach', id]),
+      forget: (id) => cursorCalls.push(['forget', id]),
+      setBounds: () => {},
+    },
     applyDesignState: () => {},
     loadUrl: () => assert.fail('unexpected navigation'),
     requireLoaded: () => {},
   });
-  return { layout, entries, mounted };
+  return { layout, entries, mounted, cursorCalls };
 }
+
+test('an idle browser stays attached without presenting an agent cursor', async () => {
+  const f = fixture();
+  await f.layout.attach('first', { width: 800, height: 600 });
+  assert.equal(f.entries.get('first').attached, true);
+  assert.deepEqual(f.cursorCalls, []);
+});
+
+test('ending a run forgets its cursor without hiding the browser page', async () => {
+  const f = fixture();
+  await f.layout.attach('first', { width: 800, height: 600 });
+  f.cursorCalls.length = 0;
+  f.layout.setVisible('first', true, true);
+  f.layout.setVisible('first', true, false);
+  assert.deepEqual(f.cursorCalls, [
+    ['attach', 'first'],
+    ['forget', 'first'],
+  ]);
+  assert.equal(f.entries.get('first').attached, true);
+  assert.equal(f.entries.get('first').visible, true);
+});
+
+test('a stopped run cannot regain its cursor when a pending attach finishes', async () => {
+  let finish;
+  const f = fixture(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  f.entries.get('first').serialized = {};
+  f.layout.setVisible('first', true, true);
+  const pending = f.layout.attach('first', { width: 800, height: 600 });
+  f.layout.setVisible('first', true, false);
+  finish();
+  await pending;
+  assert.deepEqual(f.cursorCalls, [['forget', 'first']]);
+  assert.equal(f.entries.get('first').attached, true);
+});
+
+test('recovery and overlay dismissal do not restore the cursor of a stopped run', async () => {
+  const f = fixture();
+  const bounds = { width: 800, height: 600 };
+  await f.layout.attach('first', bounds);
+  f.layout.setVisible('first', true, true);
+  f.layout.setVisible('first', false, false);
+  f.cursorCalls.length = 0;
+  f.layout.mountRecovered(f.entries.get('first'), bounds, f.layout.revision());
+  f.layout.setVisible('first', true, false);
+  assert.deepEqual(f.cursorCalls, [['forget', 'first']]);
+});
 
 test('pending page restore cannot attach after switching to another pane', async () => {
   let resolve;
