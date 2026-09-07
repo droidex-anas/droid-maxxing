@@ -16,7 +16,10 @@ import {
   BrowserProfileImportPreview,
   BrowserProfileImportSelection,
 } from './BrowserProfileImportContent.js';
-import { browserProfileImportFailureMessage } from './BrowserProfileImportDialog.js';
+import {
+  browserCookieImportCommitFailureMessage,
+  browserProfileImportFailureMessage,
+} from './BrowserProfileImportDialog.js';
 
 const noop = () => undefined;
 
@@ -236,6 +239,32 @@ test('profile preparation failures show specific sanitized recovery without fals
   assert.doesNotMatch(browserProfileImportFailureMessage('database_unavailable'), /Keychain/i);
   assert.match(browserProfileImportFailureMessage('no_importable_cookies'), /no valid, unexpired/);
   assert.match(browserProfileImportFailureMessage('cookie_limit_exceeded'), /5,000 cookies/);
+});
+
+test('post-commit import failures report completed cookies without exposing host errors', () => {
+  const fallback = 'Some cookies may already be imported.';
+  const completedImport = new Error(
+    "Error invoking remote method 'browser-cookie-profile-import-commit': Error: Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.",
+  );
+  const failedSnapshot = new Error(
+    "Error invoking remote method 'browser-cookie-profile-import-commit': Error: Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.",
+  );
+
+  assert.equal(
+    browserCookieImportCommitFailureMessage(completedImport, fallback),
+    'Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.',
+  );
+  assert.equal(
+    browserCookieImportCommitFailureMessage(failedSnapshot, fallback),
+    'Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.',
+  );
+  assert.equal(
+    browserCookieImportCommitFailureMessage(
+      new Error('Cookies were imported, but private settings path'),
+      fallback,
+    ),
+    fallback,
+  );
 });
 
 test('profile import completion summary never includes domains or secret fields', () => {

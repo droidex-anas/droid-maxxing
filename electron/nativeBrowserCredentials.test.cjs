@@ -4,10 +4,12 @@ const { createNativeBrowserCredentials } = require('./nativeBrowserCredentials.c
 
 function deferred() {
   let resolve;
-  const promise = new Promise((settle) => {
+  let reject;
+  const promise = new Promise((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function harness(overrides = {}) {
@@ -29,7 +31,6 @@ function harness(overrides = {}) {
     browserSessionId: 'browser-1',
     view,
     documentGeneration: 3,
-    authenticationCapability: null,
     authenticationPopupCapability: null,
     networkEvents: [{ url: 'https://site.test/private' }],
     consoleEvents: [{ message: 'private' }],
@@ -107,7 +108,7 @@ test('saved-login fill sends nothing after the document changes during approval'
   assert.deepEqual(calls.scripts, []);
 });
 
-test('saved-login fill grants a short authentication capability and clears diagnostics', async () => {
+test('saved-login fill clears diagnostics without returning secrets', async () => {
   const { calls, contents, credentials, entry } = harness();
 
   const result = await credentials.fillForAgent(entry, contents, { requestId: 'request-1' });
@@ -117,15 +118,48 @@ test('saved-login fill grants a short authentication capability and clears diagn
     ok: true,
     snapshot: { url: 'https://site.test/login' },
   });
-  assert.deepEqual(entry.authenticationCapability, {
-    origin: 'https://site.test',
-    documentGeneration: 3,
-    expiresAt: 121_000,
-  });
   assert.deepEqual(entry.networkEvents, []);
   assert.deepEqual(entry.consoleEvents, []);
   assert.equal(JSON.stringify(result).includes('secret'), false);
   assert.equal(calls.scripts.length, 2);
+});
+
+for (const request of [
+  { action: 'click', ref: 'ref-1' },
+  { action: 'keypress', key: 'Enter' },
+]) {
+  test(`saved-login fill does not approve a later sign-in ${request.action}`, async () => {
+    const intent = { kind: 'signin', origin: 'https://site.test', label: 'Sign in' };
+    const approval = deferred();
+    const { calls, contents, credentials, entry } = harness({ intent, approval });
+    assert.equal((await credentials.fillForAgent(entry, contents, { requestId: 'fill' })).ok, true);
+
+    const signIn = credentials.authorizeAuthentication(entry, contents, request);
+    await Promise.resolve();
+    assert.deepEqual(calls.authorize, [{ ...intent, targetUrl: undefined }]);
+    approval.resolve(true);
+    await signIn;
+  });
+}
+
+test('denying sign-in after saved-login fill rejects the authentication action', async () => {
+  const intent = { kind: 'signin', origin: 'https://site.test', label: 'Sign in' };
+  const approval = deferred();
+  const { calls, contents, credentials, entry } = harness({ intent, approval });
+  await credentials.fillForAgent(entry, contents, { requestId: 'fill' });
+  const signIn = credentials.authorizeAuthentication(entry, contents, {
+    action: 'click',
+    ref: 'ref-1',
+  });
+  const rejected = assert.rejects(signIn, /Sign-in was denied/);
+  approval.reject(new Error('Sign-in was denied'));
+  await rejected;
+  assert.equal(calls.authorize.length, 1);
+  assert.equal(
+    calls.scripts.filter((script) => script.includes('__DROIDMAXX_AUTH_INTENT')).length,
+    1,
+  );
+  assert.equal(entry.authenticationPopupCapability, null);
 });
 
 test('authentication approval is document-bound and grants only the inspected popup target', async () => {

@@ -9,8 +9,6 @@ const {
 } = require('./browserAuthenticationPopup.cjs');
 const { createCredentialCaptureGuard } = require('./browserCredentialCapture.cjs');
 
-const SAVED_LOGIN_CAPABILITY_MS = 120_000;
-
 function createNativeBrowserCredentials({
   browserSettings,
   partition,
@@ -71,11 +69,6 @@ function createNativeBrowserCredentials({
         error: fill?.error || 'Could not find a login form to fill on this page.',
       };
     }
-    entry.authenticationCapability = {
-      origin: expectedOrigin,
-      documentGeneration: expectedGeneration,
-      expiresAt: now() + SAVED_LOGIN_CAPABILITY_MS,
-    };
     entry.networkEvents.length = 0;
     entry.consoleEvents.length = 0;
     const probe = await contents
@@ -104,16 +97,7 @@ function createNativeBrowserCredentials({
     if (!inspectedIntent) return;
     const intent = validateAgentAuthenticationIntent(inspectedIntent, contents.getURL());
     const popupTarget = authenticationPopupTarget(intent);
-    const capability = entry.authenticationCapability;
-    const canReuseSavedLoginApproval =
-      intent.kind === 'signin' &&
-      capability?.origin === intent.origin &&
-      capability.documentGeneration === expectedGeneration &&
-      capability.expiresAt > now();
-    entry.authenticationCapability = null;
-    if (!canReuseSavedLoginApproval) {
-      await browserSettings.authorizeAuthenticationAction(intent);
-    }
+    await browserSettings.authorizeAuthenticationAction(intent);
     if (!isCurrentDocument(entry, expectedView, contents, expectedGeneration, intent.origin)) {
       throw new Error('The page changed while authentication was being approved.');
     }
@@ -151,7 +135,6 @@ function createNativeBrowserCredentials({
   }
 
   function invalidate(entry) {
-    entry.authenticationCapability = null;
     entry.authenticationPopupCapability = null;
   }
 

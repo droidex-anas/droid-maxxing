@@ -9,13 +9,33 @@ const defaultProfileImport = require('./browserProfileCookieImport.cjs');
 const PROFILE_PLAN_TTL_MS = 120_000;
 
 class BrowserCookieImportFinalizeError extends Error {
-  constructor(result) {
-    super(
-      'Cookies were imported, but browser storage could not be finalized. Restart DROIDEX before relying on the imported session.',
-    );
+  constructor(
+    result,
+    { receiptPersistenceFailed = false, snapshotFailed = false, storageFlushFailed = false },
+  ) {
+    let message;
+    if (receiptPersistenceFailed && storageFlushFailed) {
+      message =
+        'Cookies were imported, but the import receipt could not be saved and browser storage could not be finalized. Restart DROIDEX, then verify the imported sites before retrying.';
+    } else if (receiptPersistenceFailed) {
+      message =
+        'Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.';
+    } else if (storageFlushFailed) {
+      message =
+        'Cookies were imported, but browser storage could not be finalized. Restart DROIDEX before relying on the imported session.';
+    } else if (snapshotFailed) {
+      message =
+        'Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.';
+    } else {
+      throw new Error('Cookie import finalization failure reason is missing.');
+    }
+    super(message);
     this.name = 'BrowserCookieImportFinalizeError';
     this.code = 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED';
     this.result = result;
+    this.receiptPersistenceFailed = receiptPersistenceFailed;
+    this.snapshotFailed = snapshotFailed;
+    this.storageFlushFailed = storageFlushFailed;
   }
 }
 
@@ -190,9 +210,18 @@ function createBrowserCookieImports(options) {
       if (receiptError) commitError.receiptPersistenceFailed = true;
       throw commitError;
     }
-    if (receiptError) throw receiptError;
-    if (finalizeError) throw new BrowserCookieImportFinalizeError(imported);
-    const snapshot = await options.snapshot();
+    if (receiptError || finalizeError) {
+      throw new BrowserCookieImportFinalizeError(imported, {
+        receiptPersistenceFailed: Boolean(receiptError),
+        storageFlushFailed: Boolean(finalizeError),
+      });
+    }
+    let snapshot;
+    try {
+      snapshot = await options.snapshot();
+    } catch {
+      throw new BrowserCookieImportFinalizeError(imported, { snapshotFailed: true });
+    }
     return { imported, snapshot };
   }
 

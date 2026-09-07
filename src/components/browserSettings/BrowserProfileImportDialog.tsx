@@ -47,10 +47,25 @@ const PROFILE_IMPORT_FAILURE_MESSAGES: Record<BrowserCookieProfileImportFailureR
     'This Chrome profile has more than 5,000 cookies. Remove stale site data in Chrome or use a smaller Chrome export.',
 };
 
+const COOKIE_IMPORT_COMMIT_FAILURE_MESSAGES = [
+  'Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.',
+  'Cookies were imported, but the import receipt could not be saved and browser storage could not be finalized. Restart DROIDEX, then verify the imported sites before retrying.',
+  'Cookies were imported, but browser storage could not be finalized. Restart DROIDEX before relying on the imported session.',
+  'Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.',
+];
+
 export function browserProfileImportFailureMessage(
   reason: BrowserCookieProfileImportFailureReason,
 ): string {
   return PROFILE_IMPORT_FAILURE_MESSAGES[reason];
+}
+
+export function browserCookieImportCommitFailureMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  return (
+    COOKIE_IMPORT_COMMIT_FAILURE_MESSAGES.find((message) => error.message.includes(message)) ??
+    fallback
+  );
 }
 
 function defaultProfileId(discovery: BrowserCookieProfileDiscovery): string {
@@ -190,7 +205,7 @@ export function BrowserProfileImportDialog({
         summary: formatCookieProfileImportSummary(result),
         domainCount: result.domainCount,
       });
-    } catch {
+    } catch (error) {
       const planId = pendingPlanId.current;
       pendingPlanId.current = null;
       if (planId) void discardBrowserCookieProfileImport(planId);
@@ -201,7 +216,10 @@ export function BrowserProfileImportDialog({
       }
       setFlow({ kind: 'select', discovery: flow.discovery });
       setError(
-        'DROIDEX could not finish every cookie. Some cookies may already be imported; the pending import was discarded.',
+        browserCookieImportCommitFailureMessage(
+          error,
+          'DROIDEX could not finish every cookie. Some cookies may already be imported; the pending import was discarded.',
+        ),
       );
     } finally {
       if (isMounted.current) setBusy(false);
@@ -221,14 +239,17 @@ export function BrowserProfileImportDialog({
         summary: formatCookieImportSummary(result),
         domainCount: result.affectedDomains.length,
       });
-    } catch {
+    } catch (error) {
       try {
         onSnapshot(await getBrowserSettings());
       } catch {
         // The surrounding Browser page keeps its last authoritative snapshot.
       }
       setError(
-        'DROIDEX could not finish that recovery import. Some cookies may already be imported; check the file and retry.',
+        browserCookieImportCommitFailureMessage(
+          error,
+          'DROIDEX could not finish that recovery import. Some cookies may already be imported; check the file and retry.',
+        ),
       );
     } finally {
       if (isMounted.current) setBusy(false);

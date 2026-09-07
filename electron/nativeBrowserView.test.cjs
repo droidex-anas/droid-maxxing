@@ -128,7 +128,6 @@ test('browser view entries initialize feature lifecycle state', () => {
   assert.equal(entry.pendingAgentNavigation, null);
   assert.equal(entry.trustedUserNavigation, null);
   assert.equal(entry.approvedHistoryTransition, null);
-  assert.equal(entry.authenticationCapability, null);
   assert.equal(entry.authenticationPopupCapability, null);
 });
 

@@ -267,6 +267,63 @@ test('a file lifecycle failure invalidates the parsed plan before rethrowing', a
   );
 });
 
+test('a receipt persistence failure reports the completed import and still flushes storage', async () => {
+  const lifecycle = [];
+  const { controller } = fixture(0, undefined, {
+    recordReceipt: async () => {
+      lifecycle.push('receipt');
+      throw new Error('private settings path');
+    },
+    afterCommit: async () => lifecycle.push('flush'),
+  });
+  await controller.prepareProfile('Default');
+
+  let error;
+  try {
+    await controller.commitProfile('opaque-plan-1');
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.equal(error?.code, 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED');
+  assert.equal(error?.result?.importedCount, 2);
+  assert.equal(error?.result?.failedCount, 0);
+  assert.equal(error?.receiptPersistenceFailed, true);
+  assert.equal(error?.storageFlushFailed, false);
+  assert.match(error?.message, /Cookies were imported/);
+  assert.match(error?.message, /receipt could not be saved/);
+  assert.doesNotMatch(error?.message, /private settings path/);
+  assert.deepEqual(lifecycle, ['receipt', 'flush']);
+});
+
+test('a snapshot failure reports the completed import after receipt and storage flush', async () => {
+  const lifecycle = [];
+  const { controller } = fixture(0, undefined, {
+    recordReceipt: async () => lifecycle.push('receipt'),
+    afterCommit: async () => lifecycle.push('flush'),
+    snapshot: async () => {
+      lifecycle.push('snapshot');
+      throw new Error('private snapshot detail');
+    },
+  });
+  await controller.prepareProfile('Default');
+
+  let error;
+  try {
+    await controller.commitProfile('opaque-plan-1');
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.equal(error?.code, 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED');
+  assert.equal(error?.result?.importedCount, 2);
+  assert.equal(error?.snapshotFailed, true);
+  assert.match(error?.message, /Cookies were imported and recorded/);
+  assert.match(error?.message, /Settings could not be refreshed/);
+  assert.doesNotMatch(error?.message, /private snapshot detail/);
+  assert.deepEqual(lifecycle, ['receipt', 'flush', 'snapshot']);
+});
+
 test('a committed import records its receipt once before a storage flush failure', async () => {
   const { controller, receipts } = fixture(0, undefined, {
     afterCommit: async () => {
