@@ -7,7 +7,7 @@ import { usePullRequest } from '../hooks/usePullRequest';
 import { useGithubSetup } from '../hooks/useGithubSetup';
 import { resolveReasoningEffortDisplay } from '../lib/reasoningEffort';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Loader2, ChevronRight, FileText } from 'lucide-react';
+import { Hash, ChevronRight, FileText } from 'lucide-react';
 import { ModelIcon, providerOf } from './ModelIcon';
 import NotesSection from './NotesSection';
 import { SubagentsSection } from './SubagentsPanel';
@@ -49,7 +49,6 @@ export default function RightPanel() {
   const githubSetup = useGithubSetup(isGitHub, git.env?.repoRoot ?? cwd);
   const pr = usePullRequest(cwd, git.env?.branch ?? null, {
     enabled: isGitHub && githubSetup.isReady,
-    active: false,
   });
 
   const visibleTarget = visibleSessionTarget(
@@ -110,21 +109,47 @@ export default function RightPanel() {
       )
     : undefined;
 
+  // Folderless chats have no git environment to load — the panel is just the
+  // model row and the session-scoped sections, so nothing spins forever.
+  const hasFolder = cwd !== '';
+
+  // The model row lives inside Environment for folder-backed sessions and gets
+  // its own section when the chat has no folder at all.
+  const modelRow = activeSession ? (
+    <Row
+      icon={<ModelIcon provider={providerOf(modelInfo, activeSession.modelId)} size={16} />}
+      label={<span className="font-medium">{modelLabel}</span>}
+      trailing={
+        reasoningEffort ? (
+          <span className="shrink-0 rounded-md border border-droid-border/70 bg-droid-elevated px-1.5 py-0.5 text-[10.5px] font-medium capitalize leading-none text-droid-text-secondary">
+            {reasoningEffort}
+          </span>
+        ) : undefined
+      }
+    />
+  ) : null;
+
   return (
     <div
       data-testid="right-context-panel"
       className="shrink-0 w-[300px] pt-11 pb-3 pr-3 h-full flex items-start"
     >
+      {/* The card hugs its content (capped at the available height). The rows
+          that used to arrive late and grow it — PR detection, notes pad,
+          subagent list — now share fixed slots or start collapsed, so the one
+          remaining height change is the environment rows landing after mount. */}
       <div className="droid-card w-full max-h-full">
         {/* Header (no close button — the top toolbar button toggles this panel) */}
-        <div className="flex items-center justify-between pl-3 pr-3 h-11 shrink-0">
-          <span className="text-[13px] font-semibold text-droid-text">Context</span>
-          {working && <Loader2 className="w-4 h-4 animate-spin text-droid-accent" />}
+        <div className="flex h-11 shrink-0 items-center justify-between border-b border-droid-border/70 pl-4 pr-3">
+          <span className="text-[13px] font-semibold tracking-[-0.01em] text-droid-text">
+            Context
+          </span>
+          {working && <span className="shimmer-text text-[11px] font-medium">Working</span>}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-1.5 pb-2">
-          {/* Environment */}
-          {activeSession && (
+          {/* Environment — git-backed rows only exist for folder-backed chats */}
+          {activeSession && hasFolder && (
             <div>
               <SectionHeader label="Environment" />
               <EnvironmentSection
@@ -162,18 +187,21 @@ export default function RightPanel() {
                 }}
                 onPrCreated={pr.refresh}
               />
-              <Row
-                icon={
-                  <ModelIcon provider={providerOf(modelInfo, activeSession.modelId)} size={16} />
-                }
-                label={modelLabel}
-                meta={reasoningEffort}
-              />
+              {modelRow}
             </div>
           )}
 
-          {/* Subagents — keyed by session so the show-more fold resets on a
-              session switch instead of leaking into the next session. */}
+          {/* Folderless chats skip the git rows entirely — no perpetual
+              "Loading environment…" for a folder that doesn't exist. */}
+          {activeSession && !hasFolder && (
+            <div>
+              <SectionHeader label="Model" />
+              {modelRow}
+            </div>
+          )}
+
+          {/* Subagents — keyed by session so the popover's open state resets
+              on a session switch instead of leaking into the next session. */}
           {activeSession && childSessions.length > 0 && (
             <div>
               <Divider />
@@ -202,16 +230,16 @@ export default function RightPanel() {
           {activeSession && activeSpec && (
             <div>
               <Divider />
-              <button
+              <Row
+                icon={<FileText className="h-4 w-4" />}
+                label="Spec"
                 onClick={() => {
                   dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeSession.appSessionId });
                 }}
-                className="w-full flex items-center gap-1.5 px-3 pt-2 pb-1.5 text-[12.5px] font-medium text-droid-text-muted hover:text-droid-text transition-colors"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                Spec
-                <ChevronRight className="w-3.5 h-3.5 ml-auto" />
-              </button>
+                trailing={
+                  <ChevronRight className="h-3.5 w-3.5 text-droid-text-muted/60 transition-colors group-hover:text-droid-text-secondary" />
+                }
+              />
             </div>
           )}
 
@@ -219,10 +247,13 @@ export default function RightPanel() {
               Keyed by session so the pad's draft and chipped tag reset on a
               session switch instead of leaking into the next session. */}
           {activeSession && (
-            <NotesSection
-              key={activeSession.appSessionId}
-              appSessionId={activeSession.appSessionId}
-            />
+            <div>
+              <Divider />
+              <NotesSection
+                key={activeSession.appSessionId}
+                appSessionId={activeSession.appSessionId}
+              />
+            </div>
           )}
 
           {/* Selected step detail */}

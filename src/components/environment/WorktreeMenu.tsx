@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, ExternalLink, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { Popover } from './Popover';
+import { Row, RowCaret } from './primitives';
 import { useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { createGitWorktree, isWorktreeInUse, removeGitWorktree, worktreeName } from '../../lib/git';
 import { activeSessionCwds } from '../../lib/sessions';
@@ -169,38 +170,20 @@ export function WorktreeMenu({
 
   return (
     <>
-      <button
+      <Row
         ref={anchorRef}
+        icon={<WorktreeIcon className="h-4 w-4" />}
+        label={current ? worktreeName(current) : 'Worktree'}
+        title="Worktrees"
         onClick={() => {
           setOpen((v) => !v);
         }}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        title="Worktrees"
-        className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-          open ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
-        }`}
-      >
-        <span className="shrink-0 text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
-          <WorktreeIcon className="h-4 w-4" />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-droid-text">
-          {current ? worktreeName(current) : 'Worktree'}
-          {env?.isLinkedWorktree && (
-            <span className="ml-1.5 rounded bg-droid-accent/15 px-1 py-0.5 text-[9px] font-medium text-droid-accent">
-              linked
-            </span>
-          )}
-        </span>
-        {worktrees.length > 1 && (
-          <span className="shrink-0 font-mono text-[11px] text-droid-text-muted">
-            {worktrees.length}
-          </span>
-        )}
-        <ChevronDown
-          className={`h-3 w-3 shrink-0 text-droid-text-muted/50 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
+        active={open}
+        expanded={open}
+        hasPopup="dialog"
+        meta={worktrees.length > 1 ? String(worktrees.length) : undefined}
+        trailing={<RowCaret open={open} />}
+      />
 
       <Popover
         open={open}

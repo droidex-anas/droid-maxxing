@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SubagentsSection } from './SubagentsPanel';
+import { SubagentPanelRow, SubagentsSection } from './SubagentsPanel';
 import type { ChildSessionSummary, ChildStatus } from '../types/bridge';
 
 let seq = 0;
@@ -40,118 +40,97 @@ function renderSection(
   );
 }
 
+function renderRow(
+  info: ChildSessionSummary,
+  extra: Partial<Parameters<typeof SubagentPanelRow>[0]> = {},
+): string {
+  return renderToStaticMarkup(
+    createElement(SubagentPanelRow, {
+      child: info,
+      label: info.label ?? info.childSessionId,
+      seed: info.childSessionId,
+      models: [],
+      selected: false,
+      onSelect: () => undefined,
+      ...extra,
+    }),
+  );
+}
+
 // Adjacent text expressions render with comment separators; strip them so text
 // assertions match what a user reads.
 const textOf = (html: string) => html.replace(/<!--.*?-->/g, '');
 
-test('the header stays a plain label without live counts', () => {
+test('the summary line rolls up live counts next to the avatar stack', () => {
   const text = textOf(
     renderSection([child('running'), child('running'), child('pending'), child('completed')]),
   );
   assert.ok(text.includes('Subagents'));
-  assert.ok(!text.includes('3 working'));
-  assert.ok(!text.includes('1 done'));
+  // Running agents count as working; pending ones are not claimed yet.
+  assert.ok(text.includes('2 working'));
+  assert.ok(text.includes('1 done'));
+  // The working readout shimmers instead of spinning or pulsing.
+  const html = renderSection([child('running')]);
+  assert.match(html, /shimmer-text[^"]*">1 working/);
+});
+
+test('the rollup falls back to a plain agent count', () => {
+  const text = textOf(renderSection([child('pending'), child('paused')]));
+  assert.ok(!text.includes('working'));
+  assert.ok(!text.includes('done'));
+  assert.ok(text.includes('2 agents'));
+});
+
+test('the avatar stack caps at four and counts the overflow', () => {
+  const four = textOf(renderSection(Array.from({ length: 4 }, () => child('running'))));
+  assert.ok(!four.includes('+'));
+  const seven = textOf(renderSection(Array.from({ length: 7 }, () => child('running'))));
+  assert.ok(seven.includes('+3'));
+});
+
+test('rows stay out of the panel markup — the list lives in the popover', () => {
+  // The popover is portaled and only positions client-side, so a static
+  // render shows only the stable summary line no matter how many agents run.
+  const html = renderSection([child('running'), child('running'), child('running')]);
+  assert.match(html, /data-testid="subagents-summary"/);
+  assert.doesNotMatch(html, /data-testid="subagent-row"/);
+  assert.match(html, /aria-haspopup="dialog"/);
 });
 
 test('rows render the label and a quiet status readout', () => {
-  const html = renderSection([
-    child('running', { label: 'explorer' }),
-    child('pending', { label: 'fixer' }),
-    child('paused', { label: 'idler' }),
-    child('completed', { label: 'reviewer' }),
-  ]);
-  const text = textOf(html);
-  assert.ok(text.includes('explorer'));
-  assert.ok(text.includes('Working'));
-  assert.ok(text.includes('Awaiting status'));
-  assert.ok(text.includes('Idle'));
-  assert.ok(text.includes('Done'));
-  // The working readout shimmers instead of spinning or pulsing.
-  assert.match(html, /shimmer-text[^"]*">Working/);
+  assert.ok(textOf(renderRow(child('running', { label: 'explorer' }))).includes('explorer'));
+  assert.match(renderRow(child('running')), /shimmer-text[^"]*">Working/);
+  assert.ok(textOf(renderRow(child('pending'))).includes('Awaiting status'));
+  assert.ok(textOf(renderRow(child('paused'))).includes('Idle'));
+  assert.ok(textOf(renderRow(child('completed'))).includes('Done'));
 });
 
-test('rows show the custom-agent name and exact launch model together', () => {
-  const html = renderSection(
-    [
-      child('running', {
-        childSessionId: 'child-stable-id',
-        label: 'worker-2',
-        modelId: 'custom:glm-5.2',
-        reasoningEffort: 'max',
-      }),
-    ],
+test('rows show the exact launch model and effort', () => {
+  const html = renderRow(
+    child('running', {
+      childSessionId: 'child-stable-id',
+      modelId: 'custom:glm-5.2',
+      reasoningEffort: 'max',
+    }),
     {
-      models: [
-        {
-          id: 'custom:glm-5.2',
-          displayName: 'GLM 5.2',
-          isCustom: true,
-        },
-      ],
+      models: [{ id: 'custom:glm-5.2', displayName: 'GLM 5.2', isCustom: true }],
     },
   );
-  const text = textOf(html);
-  assert.ok(text.includes('worker-2'));
-  assert.ok(text.includes('GLM 5.2 (custom:glm-5.2) · max'));
+  assert.ok(textOf(html).includes('GLM 5.2 (custom:glm-5.2) · max'));
   assert.ok(html.includes('Child ID: child-stable-id'));
 });
 
-test('the list folds past five rows behind a show-more button', () => {
-  const children = Array.from({ length: 7 }, () => child('running'));
-  const html = renderSection(children);
-  assert.equal(html.match(/data-testid="subagent-row"/g)?.length, 5);
-  assert.ok(textOf(html).includes('Show 2 more'));
-});
-
-test('no fold at or below the visible limit', () => {
-  const html = renderSection(Array.from({ length: 5 }, () => child('running')));
-  assert.equal(html.match(/data-testid="subagent-row"/g)?.length, 5);
-  assert.ok(!textOf(html).includes('Show'));
-});
-
-test('a working agent stays above the fold when finished agents spawned first', () => {
-  const done = Array.from({ length: 6 }, () => child('completed'));
-  const working = child('running', { label: 'late-worker' });
-  const html = renderSection([...done, working]);
-  const rows = [...html.matchAll(/data-child-session-id="([^"]+)"/g)].map((m) => m[1]);
-  assert.equal(rows.length, 5);
-  // The still-working agent leads the list instead of being pushed behind
-  // "Show 2 more" by the six agents that already finished.
-  assert.equal(rows[0], working.childSessionId);
-  assert.ok(textOf(html).includes('Show 2 more'));
-});
-
 test('a spawn the store has not registered yet renders but cannot be opened', () => {
-  const html = renderSection([
-    child('running', { childSessionId: 'pending-tool-a', label: 'explorer' }),
-  ]);
+  const html = renderRow(child('running', { childSessionId: 'pending-tool-a', label: 'explorer' }));
   assert.ok(textOf(html).includes('explorer'));
   assert.match(html, /<button[^>]*disabled/);
 });
 
-test('the open agent stays visible even when it belongs behind the fold', () => {
-  // Oldest spawn sorts last under the newest-first order, so it lives behind
-  // the fold unless selection keeps it visible.
-  const target = child('completed', { label: 'first-finisher' });
-  const rest = Array.from({ length: 6 }, () => child('completed'));
-  const html = renderSection([...rest, target], {
-    selectedChildSessionId: target.childSessionId,
-  });
-  const rows = [...html.matchAll(/data-child-session-id="([^"]+)"/g)].map((m) => m[1]);
-  // Five rows fit before the fold; the selected sixth is kept alongside them so
-  // the panel never shows an agent's transcript with no row to point at.
-  assert.equal(rows.length, 6);
-  assert.ok(rows.includes(target.childSessionId));
-  assert.ok(textOf(html).includes('Show 1 more'));
-});
-
 test('the selected row is highlighted', () => {
   const target = child('running');
-  const html = renderSection([child('running'), target], {
-    selectedChildSessionId: target.childSessionId,
-  });
+  const html = renderRow(target, { selected: true });
   assert.match(
     html,
-    new RegExp(`data-child-session-id="${target.childSessionId}" class="[^"]*bg-droid-elevated/70`),
+    new RegExp(`data-child-session-id="${target.childSessionId}" class="[^"]*bg-droid-elevated`),
   );
 });

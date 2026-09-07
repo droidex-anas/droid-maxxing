@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { PrCheck, PullRequest } from '../../../types/vcs';
-import { checksSummary } from '../../../lib/github';
-import { checksBadge, mergeBlockReason, reviewerRows } from './prMeta';
+import { checksBadge, checksSummary } from '../../../lib/github';
+import { mergeBlockReason, reviewerRows } from './prMeta';
 
 const pr = (overrides: Partial<PullRequest> = {}): PullRequest => ({
   number: 7,

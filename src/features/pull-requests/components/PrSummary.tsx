@@ -3,7 +3,8 @@ import { bucketToStatus, checksSummary } from '../../../lib/github';
 import { openExternal } from '../../../lib/onboarding';
 import type { PrCheck, PrComment, PrCommit, PullRequest } from '../../../types/vcs';
 import { prCommentBlocks } from '../lib/prCommentBody';
-import { TONE_TEXT_CLASS, checksBadge, hasMergeConflicts } from '../lib/prMeta';
+import { PR_TONE_TEXT_CLASS, checksBadge } from '../../../lib/github';
+import { hasMergeConflicts } from '../lib/prMeta';
 import { prRelativeTime } from '../lib/prTime';
 import { PrBody } from './PrBody';
 import { PrConversation } from './PrConversation';
@@ -186,7 +187,7 @@ export function PrSummary({
         count={checks.length > 0 ? checks.length : undefined}
         meta={
           badge ? (
-            <span className={`text-[12px] ${TONE_TEXT_CLASS[badge.tone]}`}>{badge.label}</span>
+            <span className={`text-[12px] ${PR_TONE_TEXT_CLASS[badge.tone]}`}>{badge.label}</span>
           ) : null
         }
         // Failures, work in progress, and a load error all need to be read

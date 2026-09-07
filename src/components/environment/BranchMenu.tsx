@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, GitBranch, Loader2, Plus, Search, TriangleAlert } from 'lucide-react';
+import { Check, Loader2, Plus, Search, TriangleAlert } from 'lucide-react';
+import { GitBranchIcon, GitCommitIcon } from './GithubIcons';
 import { Popover } from './Popover';
+import { Row, RowCaret } from './primitives';
 import { checkoutGitBranch, createGitBranch, aheadBehindLabel } from '../../lib/git';
 import { useGitFetchOnOpen } from '../../hooks/useGitFetchOnOpen';
 import { useBusyAction } from '../../hooks/useBusyAction';
@@ -30,6 +32,12 @@ export function BranchMenu({
   const fetching = useGitFetchOnOpen(open, cwd, onChanged, env?.repoRoot ?? undefined);
 
   const current = env?.branch ?? null;
+  // Detached HEAD has no branch name; show the short SHA with a commit glyph,
+  // the same readout classic editors use for a checked-out commit.
+  const detachedSha = current ? null : (env?.head?.slice(0, 7) ?? null);
+  let title = 'Detached HEAD';
+  if (current) title = `On branch ${current}`;
+  else if (detachedSha) title = `Detached HEAD at ${detachedSha}`;
 
   const { local, localOverflow, remote, remoteOverflow } = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -63,7 +71,7 @@ export function BranchMenu({
     } else if (res.reason === 'dirty') {
       setDirtyRef(label);
     } else {
-      toast.error(res.message || `Could not switch to ${label}`);
+      toast.error(res.message ?? `Could not switch to ${label}`);
     }
   };
 
@@ -104,7 +112,7 @@ export function BranchMenu({
           close();
           onChanged();
         } else {
-          toast.error(res.message || 'Could not create branch');
+          toast.error(res.message ?? 'Could not create branch');
         }
       } catch {
         toast.error('Could not create branch');
@@ -113,26 +121,20 @@ export function BranchMenu({
 
   return (
     <>
-      <button
+      <Row
         ref={anchorRef}
-        onClick={() => (open ? close() : setOpen(true))}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        title={current ? `On branch ${current}` : 'Detached HEAD'}
-        className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-          open ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
-        }`}
-      >
-        <span className="shrink-0 text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
-          <GitBranch className="h-4 w-4" />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-droid-text">
-          {current ?? 'Detached HEAD'}
-        </span>
-        <ChevronDown
-          className={`h-3 w-3 shrink-0 text-droid-text-muted/50 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
+        icon={current ? <GitBranchIcon size={16} /> : <GitCommitIcon size={16} />}
+        label={current ?? detachedSha ?? 'Detached HEAD'}
+        title={title}
+        onClick={() => {
+          if (open) close();
+          else setOpen(true);
+        }}
+        active={open}
+        expanded={open}
+        hasPopup="dialog"
+        trailing={<RowCaret open={open} />}
+      />
 
       <Popover
         open={open}
@@ -147,7 +149,9 @@ export function BranchMenu({
           <input
             autoFocus
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+            }}
             placeholder="Search branches"
             className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
           />
@@ -161,7 +165,9 @@ export function BranchMenu({
             <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-droid-orange" />
             <span className="flex-1">Uncommitted changes.</span>
             <button
-              onClick={() => doCheckout(dirtyRef, true)}
+              onClick={() => {
+                void doCheckout(dirtyRef, true);
+              }}
               disabled={busy}
               className="rounded-md bg-droid-orange/20 px-2 py-0.5 text-[11px] font-medium text-droid-orange hover:bg-droid-orange/30 disabled:opacity-40"
             >
@@ -181,17 +187,19 @@ export function BranchMenu({
                 key={b.name}
                 onClick={() => {
                   if (busy || fetching || b.current) return;
-                  doCheckout(b.name);
+                  void doCheckout(b.name);
                 }}
                 aria-disabled={busy || fetching}
                 className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
-                <GitBranch className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
+                <GitBranchIcon size={14} className="shrink-0 text-droid-text-muted" />
                 <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text">
                   {b.name}
                 </span>
                 {ab && (
-                  <span className="shrink-0 font-mono text-[10px] text-droid-text-muted">{ab}</span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-droid-text-muted">
+                    {ab}
+                  </span>
                 )}
                 {b.current && (
                   <Check
@@ -220,12 +228,12 @@ export function BranchMenu({
                 key={b.name}
                 onClick={() => {
                   if (busy || fetching) return;
-                  doCheckout(b.name);
+                  void doCheckout(b.name);
                 }}
                 aria-disabled={busy || fetching}
                 className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
-                <GitBranch className="h-3.5 w-3.5 shrink-0 text-droid-text-muted/70" />
+                <GitBranchIcon size={14} className="shrink-0 text-droid-text-muted/70" />
                 <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
                   {b.name}
                 </span>
@@ -245,7 +253,9 @@ export function BranchMenu({
               <input
                 autoFocus
                 value={newName}
-                onChange={(e) => setNewName(e.target.value)}
+                onChange={(e) => {
+                  setNewName(e.target.value);
+                }}
                 onKeyDown={(e) => e.key === 'Enter' && void doCreate()}
                 placeholder="new-branch-name"
                 className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
@@ -261,7 +271,9 @@ export function BranchMenu({
             </div>
           ) : (
             <button
-              onClick={() => setCreating(true)}
+              onClick={() => {
+                setCreating(true);
+              }}
               className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text transition-colors hover:bg-droid-elevated/60"
             >
               <Plus className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />

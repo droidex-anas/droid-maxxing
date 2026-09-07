@@ -1,11 +1,10 @@
-import { ChevronRight, Folders } from 'lucide-react';
+import { Folder } from 'lucide-react';
 import { Row } from './primitives';
 import { DiffStat } from './DiffStat';
 import { BranchMenu } from './BranchMenu';
 import { WorktreeMenu } from './WorktreeMenu';
 import { GitActionsBar } from './GitActionsBar';
 import { GithubSetupCard } from './GithubSetupCard';
-import { PrStateIcon } from './GithubIcons';
 import { openCodebase } from '../EditorOpenMenu';
 import { prKind } from '../../lib/github';
 import type {
@@ -81,7 +80,7 @@ export function EnvironmentSection({
   return (
     <div>
       <Row
-        icon={<Folders className="h-4 w-4" />}
+        icon={<Folder className="h-4 w-4" />}
         label={location}
         title={env?.repoRoot ?? cwd}
         onClick={() => {
@@ -98,14 +97,6 @@ export function EnvironmentSection({
         <div className="px-3 py-1.5 text-[12px] text-droid-text-muted">Not a git repository</div>
       ) : (
         <>
-          <BranchMenu cwd={cwd} env={env} branches={branches} live={live} onChanged={refresh} />
-          <WorktreeMenu
-            cwd={cwd}
-            env={env}
-            worktrees={worktrees}
-            branches={branches}
-            onChanged={refresh}
-          />
           <DiffStat
             stat={diffStat}
             mode={diffMode}
@@ -113,6 +104,14 @@ export function EnvironmentSection({
             onModeChange={onDiffModeChange}
             onOpenReview={onOpenReview}
           />
+          <WorktreeMenu
+            cwd={cwd}
+            env={env}
+            worktrees={worktrees}
+            branches={branches}
+            onChanged={refresh}
+          />
+          <BranchMenu cwd={cwd} env={env} branches={branches} live={live} onChanged={refresh} />
           <GitActionsBar
             cwd={cwd}
             env={env}
@@ -120,6 +119,8 @@ export function EnvironmentSection({
             isGitHub={isGitHub}
             githubReady={githubReady}
             hasPr={githubReady && !!pr && (prKind(pr) === 'open' || prKind(pr) === 'draft')}
+            pr={pr}
+            onOpenPr={onOpenPr}
             onChanged={refresh}
             onPrCreated={onPrCreated}
           />
@@ -136,16 +137,6 @@ export function EnvironmentSection({
               onShowAuthPrompt={onShowGithubAuthPrompt}
               onCloseAuthPrompt={onCloseGithubAuthPrompt}
               onCancelAuthentication={onCancelGithubAuthentication}
-            />
-          )}
-
-          {githubReady && pr && (
-            <Row
-              icon={<PrStateIcon kind={prKind(pr)} size={16} />}
-              label={`#${String(pr.number)} ${pr.title}`}
-              title={`${pr.title} — view checks and comments`}
-              onClick={onOpenPr}
-              trailing={<ChevronRight className="h-3.5 w-3.5 text-droid-text-muted" />}
             />
           )}
         </>

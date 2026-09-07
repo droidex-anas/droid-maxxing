@@ -1,47 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Upload } from 'lucide-react';
-import { GitCommitIcon, GitPullRequestIcon } from './GithubIcons';
+import { ChevronRight, Loader2, Upload } from 'lucide-react';
+import { GitCommitIcon, GitHubMarkIcon, PrStateIcon } from './GithubIcons';
+import { Row } from './primitives';
 import { CommitSheet } from './CommitSheet';
 import { CreatePrSheet } from './CreatePrSheet';
 import { gitPush } from '../../lib/git';
 import { toast } from '../../lib/toast';
+import { prKind } from '../../lib/github';
 import {
   canRenderPrSheet,
   reconcileGitActionSheet,
   type GitActionSheet,
 } from '../../lib/gitActionVisibility';
-import type { GitBranchList, GitEnvironment } from '../../types/vcs';
+import type { GitBranchList, GitEnvironment, PullRequest } from '../../types/vcs';
 
-function ActionButton({
-  icon,
-  label,
-  active,
-  disabled,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        active
-          ? 'bg-droid-elevated text-droid-text'
-          : 'text-droid-text-secondary hover:bg-droid-elevated/60 hover:text-droid-text'
-      }`}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-}
-
+// Git actions in the section's row language: "Commit or push" opens the commit
+// sheet and carries a trailing ↑N pill as the one-click push while ahead;
+// "Create pull request" opens the PR sheet when the branch has none yet.
 export function GitActionsBar({
   cwd,
   env,
@@ -49,6 +24,8 @@ export function GitActionsBar({
   isGitHub,
   githubReady,
   hasPr,
+  pr,
+  onOpenPr,
   onChanged,
   onPrCreated,
 }: {
@@ -58,6 +35,8 @@ export function GitActionsBar({
   isGitHub: boolean;
   githubReady: boolean;
   hasPr: boolean;
+  pr: PullRequest | null;
+  onOpenPr: () => void;
   onChanged: () => void;
   onPrCreated?: () => void;
 }) {
@@ -91,41 +70,51 @@ export function GitActionsBar({
   };
 
   // Only commits ahead of upstream are publishable; a behind-only branch has
-  // nothing to push, so the label must not surface the behind count.
+  // nothing to push, so the push pill only surfaces for a real ahead count.
   const aheadCount = env?.ahead ?? 0;
 
   return (
-    <div className="px-1.5 pt-1">
-      <div className="flex items-center gap-1">
-        <ActionButton
-          icon={<GitCommitIcon size={14} />}
-          label="Commit"
-          active={sheet === 'commit'}
+    <div>
+      <div
+        className={`group flex items-center rounded-lg transition-colors ${
+          sheet === 'commit' ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
+        }`}
+      >
+        <button
+          type="button"
           onClick={() => {
             toggle('commit');
           }}
-        />
-        <ActionButton
-          icon={
-            pushing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          title="Commit or push"
+          aria-expanded={sheet === 'commit'}
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-lg px-3 py-2 text-left"
+        >
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
+            <GitCommitIcon size={16} />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-droid-text">
+            Commit or push
+          </span>
+        </button>
+        {aheadCount > 0 && (
+          <button
+            type="button"
+            onClick={() => void doPush()}
+            disabled={pushing || !!env?.detached}
+            title={
+              env?.detached
+                ? 'Detached HEAD — checkout a branch first'
+                : `Push ${String(aheadCount)} commit${aheadCount === 1 ? '' : 's'}`
+            }
+            className="mr-1.5 flex shrink-0 items-center gap-1 rounded-md border border-droid-border/70 bg-droid-surface px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pushing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
-              <Upload className="h-3.5 w-3.5" />
-            )
-          }
-          label={aheadCount > 0 ? `Push ↑${String(aheadCount)}` : 'Push'}
-          disabled={pushing || !!env?.detached}
-          onClick={() => void doPush()}
-        />
-        {isGitHub && githubReady && !hasPr && !env?.detached && (
-          <ActionButton
-            icon={<GitPullRequestIcon size={14} />}
-            label="Open PR"
-            active={sheet === 'pr'}
-            onClick={() => {
-              toggle('pr');
-            }}
-          />
+              <Upload className="h-3 w-3" />
+            )}
+            ↑{aheadCount}
+          </button>
         )}
       </div>
 
@@ -139,6 +128,35 @@ export function GitActionsBar({
             }}
           />
         </div>
+      )}
+
+      {/* The PR row and the create action share one slot, so detection
+          resolving swaps the label in place instead of pushing the panel
+          down by a row. Only an open (or draft) PR takes the slot — a merged
+          or closed detection leaves the create action available. */}
+      {githubReady && hasPr && pr ? (
+        <Row
+          icon={<PrStateIcon kind={prKind(pr)} size={16} />}
+          label={`#${String(pr.number)} ${pr.title}`}
+          title={`${pr.title} — view checks and comments`}
+          onClick={onOpenPr}
+          trailing={
+            <ChevronRight className="h-3.5 w-3.5 text-droid-text-muted/60 transition-colors group-hover:text-droid-text-secondary" />
+          }
+        />
+      ) : (
+        isGitHub &&
+        githubReady &&
+        !env?.detached && (
+          <Row
+            icon={<GitHubMarkIcon size={16} />}
+            label="Create pull request"
+            active={sheet === 'pr'}
+            onClick={() => {
+              toggle('pr');
+            }}
+          />
+        )
       )}
       {canRenderPrSheet(sheet, isGitHub, githubReady, hasPr, !!env?.detached) && (
         <div className="pt-1.5">
