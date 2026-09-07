@@ -333,15 +333,23 @@ export function correlateResults(events: TranscriptEvent[]): {
   const resultById = new Map<string, TranscriptEvent>();
   for (const e of events)
     if (e.kind === 'tool_result' && e.toolUseId) resultById.set(e.toolUseId, e);
+  let unmatchedIdlessCalls = 0;
   for (let i = 0; i < events.length; i++) {
     const call = events[i];
+    if (call.kind === 'tool_result' && !call.toolUseId) {
+      unmatchedIdlessCalls = Math.max(0, unmatchedIdlessCalls - 1);
+    }
     if (call.kind !== 'tool_call') continue;
     let result: TranscriptEvent | undefined;
     if (call.toolUseId) {
       result = resultById.get(call.toolUseId);
     } else {
+      unmatchedIdlessCalls++;
       const next = events.at(i + 1);
-      if (next?.kind === 'tool_result' && !next.toolUseId) result = next;
+      // Multiple outstanding calls cannot be correlated safely without IDs.
+      if (unmatchedIdlessCalls === 1 && next?.kind === 'tool_result' && !next.toolUseId) {
+        result = next;
+      }
     }
     if (!result || consumed.has(result)) continue;
     // A failed plan result must surface (the checklist cannot convey a failure),
@@ -411,7 +419,13 @@ export function renderToolEvents(
         // a one-line row that expands to it (a live call shimmers until done).
         nodes.push(
           detailed ? (
-            <CommandCard key={e.id} command={command} output={result?.text} error={isError} />
+            <CommandCard
+              key={e.id}
+              command={command}
+              output={result?.text}
+              error={isError}
+              running={running}
+            />
           ) : (
             <CommandLine
               key={e.id}

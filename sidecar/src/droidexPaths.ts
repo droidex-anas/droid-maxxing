@@ -2,9 +2,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 function nonEmptyEnv(value: string | undefined, fallback: string): string {
-  const trimmed = value?.trim();
-  if (!trimmed) return fallback;
-  return trimmed;
+  if (!value?.trim()) return fallback;
+  return value;
 }
 
 export function droidexUserDataDir(): string {

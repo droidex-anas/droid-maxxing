@@ -26,7 +26,7 @@ export interface ReviewFocusFields {
 }
 
 // Store the clicked path and any captured transcript change so Review can
-// render the inline diff when no git scope lists the file.
+// render that exact edit independently of the current Git diff.
 export function applyOpenReviewAt<T extends ReviewFocusFields>(
   state: T,
   action: OpenReviewAtAction,
@@ -59,20 +59,18 @@ export function exhaustedReviewFocus(
 
 export type ReviewFocusPlan =
   | { kind: 'idle' }
-  | { kind: 'wait'; detached: ExhaustedReviewFocus | null }
+  | { kind: 'wait' }
   | { kind: 'jump'; path: string }
   | {
       kind: 'advance';
       path: string;
-      change?: FileChange;
       scope: DiffScope;
       attemptKey: string;
-      detached: ExhaustedReviewFocus | null;
     }
   | { kind: 'detached'; focus: ExhaustedReviewFocus };
 
 // Decide what Review should do with a focus request. A captured transcript
-// change is shown immediately whenever git has not matched the file, so a
+// change is shown immediately regardless of the current Git list, so a
 // folderless session never falls through to the "No current diff" toast.
 export function planReviewFocus(args: {
   focusPath: string | null;
@@ -95,8 +93,10 @@ export function planReviewFocus(args: {
     alreadyTriedKey,
   } = args;
   if (!focusPath) return { kind: 'idle' };
-  const detached = focusChange ? exhaustedReviewFocus(focusChange, focusPath) : null;
-  if (loadingList) return { kind: 'wait', detached };
+  if (focusChange) {
+    return { kind: 'detached', focus: exhaustedReviewFocus(focusChange, focusPath) };
+  }
+  if (loadingList) return { kind: 'wait' };
   const targetPath = matchReviewFocusPath(files, focusPath, cwd);
   if (targetPath) return { kind: 'jump', path: targetPath };
   const nextScope = nextReviewFocusScope(currentScope);
@@ -105,10 +105,8 @@ export function planReviewFocus(args: {
     return {
       kind: 'advance',
       path: focusPath,
-      change: focusChange ?? undefined,
       scope: nextScope,
       attemptKey,
-      detached,
     };
   }
   return { kind: 'detached', focus: exhaustedReviewFocus(focusChange, focusPath) };

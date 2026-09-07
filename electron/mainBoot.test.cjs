@@ -52,3 +52,13 @@ test('main rejects a relative profile override before creating it', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /DROIDEX_USER_DATA_DIR must be an absolute path/);
 });
+
+test('main reports an actionable profile directory creation failure', () => {
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'mainBootEval.cjs'), 'file'], {
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Cannot create the DROIDEX profile directory/);
+  assert.match(result.stderr, /DROIDEX_USER_DATA_DIR to a writable absolute directory/);
+});

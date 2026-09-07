@@ -56,9 +56,9 @@ export function pathFileName(path: string): string {
 // Return a workspace-relative path for the root-bound Files preview API.
 // Its host-side realpath checks also reject symlink escapes before reading.
 export function relativeWorkspaceFilePath(path: string, cwd: string): string {
-  const file = normalizePath(path.trim());
-  const root = withoutTrailingSlash(normalizePath(cwd.trim()));
-  if (!isAbsolutePath(root) || !file || file === '.') {
+  const file = normalizePath(path);
+  const root = withoutTrailingSlash(normalizePath(cwd));
+  if (!path.trim() || !cwd.trim() || !isAbsolutePath(root) || !file || file === '.') {
     throw new Error('A workspace folder and file path are required for preview.');
   }
   const prefix = root.endsWith('/') ? root : `${root}/`;

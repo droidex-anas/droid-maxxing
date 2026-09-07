@@ -10,10 +10,12 @@ export function CommandCard({
   command,
   output,
   error = false,
+  running = false,
 }: {
   command: string;
   output?: string;
   error?: boolean;
+  running?: boolean;
 }) {
   const out = output ? stripAnsi(output).trimEnd() : '';
   return (
@@ -35,6 +37,7 @@ export function CommandCard({
           </span>
           <span className="whitespace-pre-wrap text-droid-text">{command}</span>
         </div>
+        {running && <span className="shimmer-text text-[12.5px] font-medium">Running</span>}
         {out && (
           <pre
             className="mt-2 pt-2 border-t border-droid-border/60 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] break-words text-droid-text-muted"

@@ -45,3 +45,10 @@ test('droidexUserDataDir treats blank DROIDEX_USER_DATA_DIR as unset', () => {
   process.env.DROIDEX_USER_DATA_DIR = '/tmp/isolated-profile';
   assert.equal(droidexUserDataDir(), '/tmp/isolated-profile');
 });
+
+test('configured directory names preserve surrounding whitespace', () => {
+  process.env.DROIDEX_USER_DATA_DIR = '/tmp/profile ';
+  process.env.DROIDEX_HISTORY_DIR = ' history ';
+  assert.equal(droidexUserDataDir(), '/tmp/profile ');
+  assert.equal(droidexHistoryDir(), ' history ');
+});

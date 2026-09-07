@@ -44,3 +44,8 @@ test('compactPath shortens long relative read paths', () => {
   assert.equal(compactPath('src/a/b/c/d.ts'), '…/b/c/d.ts');
   assert.equal(compactPath('src/app.ts'), 'src/app.ts');
 });
+
+test('workspace file previews preserve whitespace in directory and file names', () => {
+  assert.equal(relativeWorkspaceFilePath('/repo / file ', '/repo '), ' file ');
+  assert.equal(relativeWorkspaceFilePath(' file ', '/repo '), ' file ');
+});

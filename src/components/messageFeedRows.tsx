@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useRef, type ComponentType } from 'react';
+import { memo, useEffect, useRef, type ComponentType } from 'react';
 
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
@@ -35,7 +35,7 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
   const ItemView = itemView;
   const animate = useRef(animateOnMount).current;
   const { item } = itemProps;
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (animate) onEnter?.(item.key);
   }, [animate, onEnter, item.key]);
   const isPrompt = item.type === 'message' && item.event.author === 'user';

@@ -16,6 +16,7 @@ import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
 import {
   childSessionTargetFromEvent,
+  findChildSessionForTarget,
   type ChildSessionActivity,
   type ChildSessionTarget,
 } from '../lib/childSessions';
@@ -262,7 +263,7 @@ export function MessageFeed({
 
   // Compaction is in progress when the latest status line announces it and no
   // completion marker has arrived yet. Drives the centered "Compacting…" shimmer.
-  const compacting = last?.type === 'status' && isCompactingStatus(last.event.text);
+  const compacting = pending && last?.type === 'status' && isCompactingStatus(last.event.text);
 
   // A child session line or dock card self-indicates only while it is still
   // running (it shows its own "Running … <timer>"). Once everything completes,
@@ -273,9 +274,13 @@ export function MessageFeed({
     childSessionActivity?.(childSessionTargetFromEvent(last.event))?.status === 'running';
   const lastDockRunning =
     last?.type === 'child_sessions' &&
-    last.events.some(
-      (e) => childSessionActivity?.(childSessionTargetFromEvent(e))?.status === 'running',
-    );
+    last.events.some((event) => {
+      const target = childSessionTargetFromEvent(event);
+      const status =
+        childSessionActivity?.(target)?.status ??
+        findChildSessionForTarget(subagentsDock?.sessions ?? [], target)?.status;
+      return status === 'running';
+    });
   // Working describes the pending turn, while the assistant caret describes
   // token flow. Both intentionally appear during prose streaming; Working
   // remains when the caret idles so a token gap never looks like completion.

@@ -65,10 +65,10 @@ test('planReviewFocus shows the captured change while git lists are loading', ()
     requestId: 1,
     alreadyTriedKey: null,
   });
-  assert.deepEqual(plan, { kind: 'wait', detached: { kind: 'change', change } });
+  assert.deepEqual(plan, { kind: 'detached', focus: { kind: 'change', change } });
 });
 
-test('planReviewFocus jumps when git lists the focused file', () => {
+test('planReviewFocus preserves the captured edit even when Git lists the file', () => {
   const plan = planReviewFocus({
     focusPath: 'src/app.ts',
     focusChange: change,
@@ -78,13 +78,13 @@ test('planReviewFocus jumps when git lists the focused file', () => {
     requestId: 1,
     alreadyTriedKey: null,
   });
-  assert.deepEqual(plan, { kind: 'jump', path: 'src/app.ts' });
+  assert.deepEqual(plan, { kind: 'detached', focus: { kind: 'change', change } });
 });
 
-test('planReviewFocus keeps the captured change while advancing git scopes', () => {
+test('planReviewFocus advances Git scopes for a path-only request', () => {
   const plan = planReviewFocus({
     focusPath: 'src/app.ts',
-    focusChange: change,
+    focusChange: null,
     files: [],
     loadingList: false,
     currentScope: 'last_turn',
@@ -93,9 +93,7 @@ test('planReviewFocus keeps the captured change while advancing git scopes', () 
   });
   assert.equal(plan.kind, 'advance');
   if (plan.kind !== 'advance') return;
-  assert.equal(plan.change, change);
   assert.equal(plan.scope, 'uncommitted');
-  assert.deepEqual(plan.detached, { kind: 'change', change });
 });
 
 test('planReviewFocus uses the captured change when no git scope lists the file', () => {

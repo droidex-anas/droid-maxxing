@@ -72,7 +72,7 @@ const PREVIEW_DIFF: { event: TranscriptEvent; change: FileChange }[] = [
     change: {
       path: 'src/app.tsx',
       verb: 'edit',
-      added: 2,
+      added: 1,
       removed: 1,
       ops: [
         { type: 'ctx', text: 'export function App() {' },

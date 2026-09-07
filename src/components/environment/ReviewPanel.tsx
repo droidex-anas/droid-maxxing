@@ -451,7 +451,8 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   }, [cwd, branch, isGitHub]);
   useEffect(() => {
     setRenderLimit(FILE_RENDER_CAP);
-  }, [cwd, reviewState.reviewScope]);
+    setDetachedFocus(null);
+  }, [cwd, reviewState.reviewScope, setDetachedFocus]);
   const { totalAdd, totalDel } = useMemo(
     () => ({
       totalAdd: review.files.reduce((sum, f) => sum + f.additions, 0),
@@ -552,9 +553,8 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   );
 
   // Honor a focus request (e.g. a per-turn changes summary clicked in chat).
-  // Prefer a live git match, but show the captured transcript change immediately
-  // whenever the current scope does not list the file so folderless sessions
-  // never land on the "No current diff" toast.
+  // Captured transcript edits open exactly as clicked; path-only requests
+  // search Git scopes before opening a file preview.
   useEffect(() => {
     const plan = planReviewFocus({
       focusPath: reviewState.reviewFocusPath,
@@ -571,7 +571,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
         focusFallbackRef.current = null;
         return;
       case 'wait':
-        setDetachedFocus(plan.detached);
+        setDetachedFocus(null);
         return;
       case 'jump':
         focusFallbackRef.current = null;
@@ -579,9 +579,9 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
         dispatch({ type: 'CLEAR_REVIEW_FOCUS' });
         return;
       case 'advance':
-        setDetachedFocus(plan.detached);
+        setDetachedFocus(null);
         focusFallbackRef.current = plan.attemptKey;
-        dispatch(openReviewAt(plan.path, plan.change, plan.scope));
+        dispatch(openReviewAt(plan.path, undefined, plan.scope));
         return;
       case 'detached':
         focusFallbackRef.current = null;

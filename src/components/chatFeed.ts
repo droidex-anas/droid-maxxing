@@ -109,7 +109,10 @@ export function sameFeedEvents(a: FeedItem, b: FeedItem): boolean {
       a.files.every((file, i) => sameTurnFile(file, b.files[i]))
     );
   }
-  // message | thinking | status | error | diff | child session each carry one event.
+  if (a.type === 'thinking' && b.type === 'thinking') {
+    return a.event === b.event && a.durationMs === b.durationMs;
+  }
+  // message | status | error | diff | child session each carry one event.
   return (a as { event: TranscriptEvent }).event === (b as { event: TranscriptEvent }).event;
 }
 

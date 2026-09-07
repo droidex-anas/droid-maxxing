@@ -728,7 +728,8 @@ function ActionRow({
   const { cat, detail } = toolMeta(event.toolName, event.toolArgs);
   const change = extractFileChange(event.toolName, event.toolArgs);
   const clickable = !!change && !!onOpenDiff;
-  const displayDetail = change || cat === 'read' ? displayPath(detail, cwd) : detail;
+  const displayDetail =
+    change || cat === 'read' ? displayPath(change?.path ?? detail, cwd) : detail;
   return (
     <button
       disabled={!clickable}

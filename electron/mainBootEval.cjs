@@ -131,16 +131,24 @@ function evaluateMain() {
   const appRoot = path.resolve(__dirname, '..');
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'droidex-boot-eval-'));
   const profileCase = process.argv[2] ?? 'existing';
-  const requestedProfile = path.join(userData, 'fresh', 'profile');
+  const requestedProfile = path.join(
+    userData,
+    'fresh',
+    profileCase === 'padded' ? 'profile  ' : 'profile',
+  );
+  if (profileCase === 'file') {
+    fs.mkdirSync(path.dirname(requestedProfile), { recursive: true });
+    fs.writeFileSync(requestedProfile, 'occupied');
+  }
   process.env.DROIDEX_USER_DATA_DIR =
     profileCase === 'relative'
       ? 'relative-profile'
       : profileCase === 'blank'
         ? '   '
-        : profileCase === 'fresh'
+        : profileCase === 'fresh' || profileCase === 'file'
           ? requestedProfile
           : profileCase === 'padded'
-            ? `  ${requestedProfile}  `
+            ? requestedProfile
             : userData;
   const expectedProfile =
     profileCase === 'blank'

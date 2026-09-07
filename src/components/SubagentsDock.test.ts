@@ -660,3 +660,16 @@ test('a polled child shows a working cue and never a typewriter caret', () => {
   assert.equal(html.includes('data-presentation="typewriter"'), false);
   assert.equal(text.includes('Streaming'), false);
 });
+
+test('dock session status suppresses the global cue without an activity callback', () => {
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, {
+      events: [userMsg('go'), spawn('t1', 'explorer')],
+      pending: true,
+      onOpenChildSession: () => {},
+      subagentsDock: { sessions: [childSession('explorer', 't1', 'running')], models: [] },
+    }),
+  );
+  assert.ok(textOf(html).includes('Subagents'));
+  assert.equal(textOf(html).includes('Working'), false);
+});

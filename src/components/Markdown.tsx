@@ -386,14 +386,17 @@ export function MarkdownTree({
   children,
   specMode,
   fenceOptions,
+  allowImages = true,
 }: {
   children: string;
   specMode: boolean;
   fenceOptions: FenceRenderOptions;
+  allowImages?: boolean;
 }) {
   return (
     <FenceOptionsContext.Provider value={fenceOptions}>
       <ReactMarkdown
+        disallowedElements={allowImages ? undefined : ['img']}
         remarkPlugins={REMARK_PLUGINS}
         components={specMode ? SPEC_COMPONENTS : CHAT_COMPONENTS}
       >
@@ -407,6 +410,7 @@ function MarkdownImpl({
   children,
   specMode = false,
   allowGeneratedContent = true,
+  allowImages = true,
   autoPlayAppBlocks = false,
   buildingAppBlocks = false,
   cutOffAppBlocks = false,
@@ -414,6 +418,7 @@ function MarkdownImpl({
   children: string;
   specMode?: boolean;
   allowGeneratedContent?: boolean;
+  allowImages?: boolean;
   autoPlayAppBlocks?: boolean;
   buildingAppBlocks?: boolean;
   cutOffAppBlocks?: boolean;
@@ -426,7 +431,7 @@ function MarkdownImpl({
   });
   return (
     <div className={markdownShellClass(specMode)}>
-      <MarkdownTree specMode={specMode} fenceOptions={fenceOptions}>
+      <MarkdownTree specMode={specMode} fenceOptions={fenceOptions} allowImages={allowImages}>
         {children}
       </MarkdownTree>
     </div>

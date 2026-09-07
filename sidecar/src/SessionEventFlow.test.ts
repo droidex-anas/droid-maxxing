@@ -354,3 +354,11 @@ test('forgetSession clears only the unregistered app terminal state', () => {
     ['forgotten app accepted'],
   );
 });
+
+test('idless Task admission shares the accepted transcript spawn identity', () => {
+  const harness = createHarness();
+  harness.eventFlow.applyStreamEvent('app-1', 'provider-1', 'primary', taskToolCall(''));
+  const event = harness.transcripts[0];
+  assert.ok(event);
+  assert.equal(harness.sideEffects[0]?.value.childSession?.toolUseId, event.id);
+});

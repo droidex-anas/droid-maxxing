@@ -1632,3 +1632,83 @@ test('feed row entrance motion is CSS-only and honors reduced motion', () => {
     /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.feed-row-enter[^}]*animation:\s*none/s,
   );
 });
+
+test('thinking duration changes invalidate the feed row', () => {
+  const event = ev({ kind: 'thinking', text: 'considering' });
+  const before: FeedItem = { type: 'thinking', key: event.id, event, durationMs: 100 };
+  assert.equal(sameFeedEvents(before, { ...before, durationMs: 200 }), false);
+  assert.equal(sameFeedEvents(before, { ...before }), true);
+});
+
+test('ambiguous idless parallel results remain unlinked and visible', () => {
+  const first = ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'first' } });
+  const second = ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'second' } });
+  const firstResult = ev({ kind: 'tool_result', text: 'first output' });
+  const secondResult = ev({ kind: 'tool_result', text: 'second output' });
+  const later = ev({ kind: 'tool_call', toolName: 'Execute', toolArgs: { command: 'later' } });
+  const laterResult = ev({ kind: 'tool_result', text: 'later output' });
+  const { resultByCall, consumed } = correlateResults([
+    first,
+    second,
+    firstResult,
+    secondResult,
+    later,
+    laterResult,
+  ]);
+  assert.equal(resultByCall.has(first), false);
+  assert.equal(resultByCall.has(second), false);
+  assert.equal(consumed.has(firstResult), false);
+  assert.equal(consumed.has(secondResult), false);
+  assert.equal(resultByCall.get(later), laterResult);
+});
+
+test('fetched Markdown never loads remote or local images', () => {
+  const body = `${'Intro text. '.repeat(30)}\n\n![tracking](https://tracker.example/pixel.png)\n![local](/tmp/private.png)`;
+  const html = renderToStaticMarkup(
+    createElement(WebFetchBody, {
+      error: false,
+      hasBody: true,
+      body,
+      url: 'https://example.com',
+      title: 'Example',
+      snippet: 'Intro text.',
+    }),
+  );
+  assert.equal(html.includes('<img'), false);
+  assert.equal(html.includes('rel="preload"'), false);
+});
+
+test('settled compaction history does not show a live shimmer', () => {
+  const event = ev({ kind: 'status', text: 'Compacting…' });
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, {
+      events: [event],
+      items: [{ type: 'status', key: event.id, event }],
+      pending: false,
+    }),
+  );
+  assert.equal(html.includes('shimmer-text'), false);
+});
+
+for (const density of ['compact', 'balanced', 'detailed'] as const) {
+  test(`live commands show an activity cue at ${density} density`, () => {
+    const call = ev({
+      kind: 'tool_call',
+      toolName: 'Execute',
+      toolUseId: 'exec-live',
+      toolArgs: { command: 'npm test' },
+    });
+    const item: FeedItem = { type: 'tools', key: 'exec', events: [call] };
+    const html = renderToStaticMarkup(createElement(FeedItemView, { item, live: true, density }));
+    assert.match(html, density === 'compact' ? /shimmer-text/ : /Running/);
+    const result = ev({ kind: 'tool_result', toolUseId: 'exec-live', text: 'passed' });
+    const settled = renderToStaticMarkup(
+      createElement(FeedItemView, {
+        item: { ...item, events: [call, result] },
+        live: false,
+        density,
+      }),
+    );
+    assert.equal(settled.includes('Running'), false);
+  });
+}

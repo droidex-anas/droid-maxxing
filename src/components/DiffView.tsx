@@ -69,12 +69,10 @@ export function DiffCard({
   change,
   cwd,
   onOpen,
-  openLabel = 'Open in Review',
 }: {
   change: FileChange;
   cwd?: string;
   onOpen?: () => void;
-  openLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const preview = change.ops.slice(0, 14);
@@ -85,9 +83,10 @@ export function DiffCard({
     <div>
       <button
         type="button"
-        aria-expanded={open}
+        aria-expanded={onOpen ? undefined : open}
         onClick={() => {
-          setOpen((o) => !o);
+          if (onOpen) onOpen();
+          else setOpen((o) => !o);
         }}
         className="group flex w-full min-w-0 items-center gap-1.5 text-left"
       >
@@ -112,23 +111,9 @@ export function DiffCard({
           <ToolPanel className="mt-1.5">
             <div className="max-h-56 overflow-auto py-1">
               <DiffLines ops={preview} />
-              {(more > 0 || onOpen) && (
-                <div className="flex items-center gap-3 border-t border-droid-border/60 px-3 py-1.5">
-                  <span className="min-w-0 flex-1 text-[11px] text-droid-text-muted">
-                    {more > 0 ? `+${String(more)} more lines` : 'Preview'}
-                  </span>
-                  {onOpen && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onOpen();
-                      }}
-                      className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-droid-text-secondary transition-colors hover:text-droid-text"
-                    >
-                      {openLabel}
-                      <ChevronRight className="h-3 w-3" />
-                    </button>
-                  )}
+              {more > 0 && (
+                <div className="border-t border-droid-border/60 px-3 py-1.5 text-[11px] text-droid-text-muted">
+                  +{more} more lines
                 </div>
               )}
             </div>
