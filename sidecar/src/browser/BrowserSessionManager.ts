@@ -120,17 +120,9 @@ export class BrowserSessionManager {
       }
       throw error;
     }
-    session.state = {
-      ...session.state,
-      canGoBack: false,
-      canGoForward: false,
-      ...snapshot,
-      viewport: nextViewport,
-      viewportMode: input.viewportMode ?? session.state.viewportMode,
-      scrollResult: snapshot.scrollResult,
-    };
-    this.emitUpdated(session.state);
-    return session.state;
+    const openSnapshot = { canGoBack: false, canGoForward: false, ...snapshot };
+    const nextViewportMode = input.viewportMode ?? session.state.viewportMode;
+    return this.updateFromSnapshot(session, openSnapshot, nextViewport, nextViewportMode);
   }
 
   restore(input: BrowserRestoreState): BrowserState {
@@ -388,13 +380,16 @@ export class BrowserSessionManager {
     const session = this.sessions.get(appSessionId);
     if (!session) return;
     this.sessions.delete(appSessionId);
-    await session.runtime.close();
+    await Promise.all([session.designReferences.dispose(), session.runtime.close()]);
   }
 
   async closeAll(): Promise<void> {
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    const disposals = sessions.map((session) => session.designReferences.dispose());
+    const results = await Promise.allSettled(disposals);
     await Promise.all(sessions.map((session) => session.runtime.close().catch(() => undefined)));
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
   }
 
   private sessionFor(
@@ -451,24 +446,28 @@ export class BrowserSessionManager {
     return session;
   }
 
-  private stateFromSnapshot(
+  private async updateFromSnapshot(
     session: ManagedBrowserSession,
     snapshot: BrowserSnapshot,
-  ): BrowserState {
-    return {
+    viewport = session.state.viewport,
+    viewportMode = session.state.viewportMode,
+  ): Promise<BrowserState> {
+    const nextState = {
       ...session.state,
       ...snapshot,
+      viewport,
+      viewportMode,
       scrollResult: snapshot.scrollResult,
+      screenshotPath: snapshot.url === session.state.url ? session.state.screenshotPath : undefined,
+      screenshotUrl: snapshot.url === session.state.url ? session.state.screenshotUrl : undefined,
     };
-  }
-
-  private updateFromSnapshot(
-    session: ManagedBrowserSession,
-    snapshot: BrowserSnapshot,
-  ): BrowserState {
-    session.state = this.stateFromSnapshot(session, snapshot);
-    this.emitUpdated(session.state);
-    return session.state;
+    session.state = nextState;
+    await session.designReferences.navigate(snapshot.url);
+    if (this.sessions.get(session.appSessionId) !== session || session.state !== nextState) {
+      throw new Error('Browser state update was superseded during design-reference cleanup.');
+    }
+    this.emitUpdated(nextState);
+    return nextState;
   }
 
   private requireRef(session: ManagedBrowserSession, refId: string): BrowserElementRef {

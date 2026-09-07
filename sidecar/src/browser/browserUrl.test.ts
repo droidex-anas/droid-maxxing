@@ -8,6 +8,9 @@ test('normalizeBrowserUrl keeps explicit http and https browser URLs', () => {
 });
 
 test('normalizeBrowserUrl makes bare domains and localhost loadable', () => {
+  assert.equal(normalizeBrowserUrl('localhost:3000?x=1'), 'http://localhost:3000?x=1');
+  assert.equal(normalizeBrowserUrl('example.com:8443#section'), 'https://example.com:8443#section');
+  assert.equal(normalizeBrowserUrl('::1:3000?x=1'), 'http://[::1]:3000?x=1');
   assert.equal(normalizeBrowserUrl('skeina.tech'), 'https://skeina.tech');
   assert.equal(normalizeBrowserUrl('example.com:8443/path'), 'https://example.com:8443/path');
   assert.equal(normalizeBrowserUrl('localhost:1420'), 'http://localhost:1420');

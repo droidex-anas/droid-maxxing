@@ -183,6 +183,26 @@ test('discovery exposes safe Chrome profile metadata and a truthful Safari limit
   assert.ok(Object.isFrozen(discovery.chrome.profiles));
 });
 
+test('discovery keeps the last-used Chrome profile when more than 50 stores exist', async (t) => {
+  const profiles = [
+    { id: 'Default', label: 'Default' },
+    ...Array.from({ length: 50 }, (_, index) => ({
+      id: `Profile ${index + 1}`,
+      label: `Profile ${index + 1}`,
+    })),
+  ];
+  const homeDir = await createChromeProfiles(t, profiles, { last_used: 'Profile 50' });
+
+  const discovery = await discoverBrowserCookieProfiles({ platform: 'darwin', homeDir });
+
+  assert.equal(discovery.chrome.profiles.length, 50);
+  assert.deepEqual(discovery.chrome.profiles[0], {
+    id: 'Profile 50',
+    label: 'Profile 50',
+    isLastUsed: true,
+  });
+});
+
 test('discovery is explicit about unsupported platforms', async () => {
   const discovery = await discoverBrowserCookieProfiles({
     platform: 'win32',
@@ -390,6 +410,41 @@ test('schema validation happens before Keychain access', async (t) => {
       error.code === 'CHROME_COOKIE_SCHEMA_UNSUPPORTED',
   );
   assert.equal(keychainReadCount, 0);
+});
+
+test('oversized Chrome cookie text and blobs are rejected before Keychain access', async (t) => {
+  const malformedRows = [
+    { hostKey: 'text.example', name: 'session', plaintextValue: 'x'.repeat(4_097) },
+    {
+      hostKey: 'blob.example',
+      name: 'session',
+      encryptedValue: Buffer.alloc(4_148, 1),
+      secure: true,
+    },
+  ];
+
+  for (const [index, row] of malformedRows.entries()) {
+    const homeDir = await createChromeProfiles(t, [
+      { id: 'Default', label: `Malformed ${index}`, rows: [row] },
+    ]);
+    let keychainReadCount = 0;
+
+    await assert.rejects(
+      createChromeProfileCookieImportPlan(
+        { profileId: 'Default', platform: 'darwin', homeDir },
+        {
+          readKeychainPassword: async () => {
+            keychainReadCount += 1;
+            return Buffer.from(KEYCHAIN_PASSWORD);
+          },
+        },
+      ),
+      (error) =>
+        error instanceof BrowserProfileCookieImportError &&
+        error.code === 'CHROME_COOKIE_DATABASE_UNAVAILABLE',
+    );
+    assert.equal(keychainReadCount, 0);
+  }
 });
 
 test('Chrome planning reads real 64-bit timestamps without unsafe number coercion', async (t) => {

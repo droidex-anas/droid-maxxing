@@ -174,8 +174,8 @@ test('BrowserSettingsView keeps a persistent secret-free Chrome import receipt v
   assert.doesNotMatch(html, /cookieValue|cookieName|affectedDomains/);
 });
 
-test('commitBrowserSettingsPatch rolls back an optimistic change on failure', async () => {
-  const published: BrowserSettingsSnapshot[] = [];
+test('commitBrowserSettingsPatch reloads host state when saving fails after persistence', async () => {
+  const published: (BrowserSettingsSnapshot | null)[] = [];
   await assert.rejects(
     commitBrowserSettingsPatch(
       SNAPSHOT,
@@ -184,15 +184,16 @@ test('commitBrowserSettingsPatch rolls back an optimistic change on failure', as
       async () => {
         throw new Error('host unavailable');
       },
+      async () => ({ ...SNAPSHOT, diagnosticsEnabled: true }),
     ),
   );
   assert.equal(published.length, 2);
   assert.equal(published[0]?.diagnosticsEnabled, true);
-  assert.deepEqual(published[1], SNAPSHOT);
+  assert.deepEqual(published[1], { ...SNAPSHOT, diagnosticsEnabled: true });
 });
 
 test('commitBrowserSettingsPatch publishes the authoritative saved mutation', async () => {
-  const published: BrowserSettingsSnapshot[] = [];
+  const published: (BrowserSettingsSnapshot | null)[] = [];
   const authoritative = { ...SNAPSHOT, askDownloadLocation: false, cookieCount: 5 };
   await commitBrowserSettingsPatch(
     SNAPSHOT,
@@ -202,6 +203,26 @@ test('commitBrowserSettingsPatch publishes the authoritative saved mutation', as
   );
   assert.equal(published[0]?.askDownloadLocation, false);
   assert.deepEqual(published[1], authoritative);
+});
+
+test('unreachable host clears uncertain optimistic settings so the UI offers reload', async () => {
+  const published: (BrowserSettingsSnapshot | null)[] = [];
+  await assert.rejects(
+    commitBrowserSettingsPatch(
+      SNAPSHOT,
+      { diagnosticsEnabled: true },
+      (snapshot) => published.push(snapshot),
+      async () => {
+        throw new Error('save response lost');
+      },
+      async () => {
+        throw new Error('host unreachable');
+      },
+    ),
+    /save response lost/,
+  );
+  assert.equal(published[0]?.diagnosticsEnabled, true);
+  assert.equal(published[1], null);
 });
 
 test('cookie import result reports counts without exposing cookie values', () => {

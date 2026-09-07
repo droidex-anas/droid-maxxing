@@ -599,7 +599,8 @@ export class SessionManager {
 
   // eslint-disable-next-line complexity -- Public command dispatch is intentionally unchanged in PR 3.
   async handle(cmd: ClientCommand): Promise<void> {
-    if (this.shutdownPromise) throw new Error('Session manager is shutting down.');
+    if (this.shutdownPromise && cmd.type !== 'browser.native.result')
+      throw new Error('Session manager is shutting down.');
     const browserCommand = this.sessionBrowser.handle(cmd);
     if (browserCommand !== false) {
       await browserCommand;
@@ -1658,10 +1659,10 @@ export class SessionManager {
     await run(() => {
       this.compaction.clearAll();
     });
+    await run(() => this.browsers.closeAll());
     await run(() => {
       this.sessionBrowser.shutdown();
     });
-    await run(() => this.browsers.closeAll());
     await run(() => {
       this.timeline.flushStreaming();
     });

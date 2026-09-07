@@ -36,6 +36,7 @@ import type {
   BrowserViewportMode,
 } from '../../types/bridge';
 import type { Size } from '../canvas/canvasMath';
+import { createNativeBrowserAttacher, retryNativeBrowserAttach } from './nativeBrowserAttachment';
 
 interface NativeBrowserSurfaceProps {
   browserKey: string;
@@ -53,47 +54,6 @@ interface NativeBrowserSurfaceProps {
   onPrompt: (prompt: NativeBrowserDesignPrompt) => void;
   onLoadFailed?: (failure: NativeBrowserLoadFailed) => void;
   onViewportSizeChange: (size: Size) => void;
-}
-
-const NATIVE_ATTACH_RETRY_DELAYS_MS = [100, 300] as const;
-
-export function retryNativeBrowserAttach(options: {
-  attach: () => Promise<void>;
-  onAttached: () => void;
-  onFailed: (error: unknown) => void;
-  schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
-  cancel?: (timer: ReturnType<typeof setTimeout>) => void;
-}): () => void {
-  const schedule = options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs));
-  const cancel = options.cancel ?? clearTimeout;
-  let disposed = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const attempt = (attemptIndex: number) => {
-    if (disposed) return;
-    void options.attach().then(
-      () => {
-        if (!disposed) options.onAttached();
-      },
-      (error: unknown) => {
-        if (disposed) return;
-        if (attemptIndex >= NATIVE_ATTACH_RETRY_DELAYS_MS.length) {
-          options.onFailed(error);
-          return;
-        }
-        const retryDelayMs = NATIVE_ATTACH_RETRY_DELAYS_MS[attemptIndex];
-        timer = schedule(() => {
-          attempt(attemptIndex + 1);
-        }, retryDelayMs);
-      },
-    );
-  };
-
-  attempt(0);
-  return () => {
-    disposed = true;
-    if (timer !== undefined) cancel(timer);
-  };
 }
 
 export function NativeBrowserSurface({
@@ -132,6 +92,7 @@ export function NativeBrowserSurface({
   const urlRef = useRef(url);
   urlRef.current = url;
   const native = isDesktop();
+  const attachBrowser = useMemo(() => createNativeBrowserAttacher(attachNativeBrowser), []);
   const surface = useMemo(
     () => surfaceLayout(frameSize, viewport, viewportMode, expanded),
     [expanded, frameSize, viewport, viewportMode],
@@ -282,12 +243,16 @@ export function NativeBrowserSurface({
       const target = visibleBrowserSessionId;
       attachingSessionRef.current = target;
       const cancelAttach = retryNativeBrowserAttach({
-        attach: () => attachNativeBrowser(target, bounds, urlRef.current),
+        attach: () => attachBrowser(target, bounds, urlRef.current),
         onAttached: () => {
           if (attachingSessionRef.current !== target) return;
           attachedSessionRef.current = target;
           attachingSessionRef.current = undefined;
           lastBounds.current = bounds;
+          const latestBounds = boundsFor(slotRef);
+          if (latestBounds && !equalBounds(bounds, latestBounds)) {
+            scheduleBoundsUpdate(target, latestBounds);
+          }
           if (obscuredRef.current) {
             setNativeBrowserVisible(target, false).catch(() => undefined);
           }
@@ -307,7 +272,20 @@ export function NativeBrowserSurface({
         if (attachingSessionRef.current === target) attachingSessionRef.current = undefined;
       };
     }
-    if (!lastBounds.current || !equalBounds(lastBounds.current, bounds)) {
+  }, [
+    attachBrowser,
+    native,
+    obscured,
+    surfaceReady,
+    scheduleBoundsUpdate,
+    visibleBrowserSessionId,
+  ]);
+
+  useEffect(() => {
+    if (!native || obscured || !visibleBrowserSessionId) return;
+    if (attachedSessionRef.current !== visibleBrowserSessionId) return;
+    const bounds = boundsFor(slotRef);
+    if (bounds && (!lastBounds.current || !equalBounds(lastBounds.current, bounds))) {
       scheduleBoundsUpdate(visibleBrowserSessionId, bounds);
     }
   }, [
@@ -325,6 +303,8 @@ export function NativeBrowserSurface({
   useEffect(() => {
     if (native) return;
     return registerNativeBrowserController({
+      appSessionId: browserKey,
+      browserSessionId: visibleBrowserSessionId,
       perform: (request) =>
         performIframeRequest(request, {
           currentUrl: urlRef.current,
@@ -334,7 +314,7 @@ export function NativeBrowserSurface({
           },
         }),
     });
-  }, [native]);
+  }, [browserKey, native, visibleBrowserSessionId]);
 
   useEffect(() => {
     return () => {

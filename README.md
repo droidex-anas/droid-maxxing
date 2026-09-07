@@ -73,6 +73,11 @@ of interrupting the task with a second generic MCP approval; authentication,
 downloads, and new-site boundaries still ask when the selected policy requires
 it.
 
+Mixed tool batches still require SDK approval for their non-browser actions.
+If a browser setting or data-clearing action fails, DROIDEX reloads the current
+host state: the operation may have partially completed. Review the refreshed
+settings before retrying; if the host is unavailable, use Retry to reload them.
+
 The browser address bar accepts either a website or an ordinary search. Text
 that is not a valid website address is sent to Google, while unsafe schemes are
 rejected. Address-bar navigation and reload are treated as direct user actions,

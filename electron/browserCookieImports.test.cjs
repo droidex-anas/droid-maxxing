@@ -1,5 +1,9 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
+const { commitBrowserCookieImport } = require('./browserCookieImport.cjs');
 const { createBrowserCookieImports } = require('./browserCookieImports.cjs');
 
 const preview = Object.freeze({
@@ -204,6 +208,63 @@ test('cookie commits close live browser views before mutation and flush storage 
   await controller.prepareProfile('Default');
   await controller.commitProfile('opaque-plan-1');
   assert.deepEqual(calls, ['close', 'write', 'flush']);
+});
+
+test('a profile lifecycle failure discards the taken plan before rethrowing', async () => {
+  const lifecycleError = new Error('close failed');
+  const { calls, controller } = fixture(0, undefined, {
+    beforeCommit: async () => {
+      throw lifecycleError;
+    },
+  });
+  await controller.prepareProfile('Default');
+
+  await assert.rejects(controller.commitProfile('opaque-plan-1'), lifecycleError);
+
+  assert.deepEqual(calls, ['prepare:Default', 'discard']);
+  await assert.rejects(controller.commitProfile('opaque-plan-1'), /invalid or expired/);
+});
+
+test('a file lifecycle failure invalidates the parsed plan before rethrowing', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'droidex-file-lifecycle-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'cookies.json');
+  await fs.writeFile(
+    filePath,
+    JSON.stringify([{ domain: 'example.com', name: 'session', value: 'private-value' }]),
+  );
+  const lifecycleError = new Error('close failed');
+  const cookieStore = { set: async () => undefined };
+  const controller = createBrowserCookieImports({
+    getCookieStore: () => cookieStore,
+    showOpenDialog: async () => ({ canceled: false, filePaths: [filePath] }),
+    showPrompt: async () => ({ response: 0 }),
+    snapshot: async () => ({}),
+    recordReceipt: async () => undefined,
+    beforeCommit: async () => {
+      throw lifecycleError;
+    },
+  });
+  const freeze = Object.freeze;
+  let parsedPlan;
+  Object.freeze = (value) => {
+    const frozen = freeze(value);
+    if (Object.keys(value).length === 1 && value.preview?.profileLabel === 'Chrome export') {
+      parsedPlan = frozen;
+    }
+    return frozen;
+  };
+  try {
+    await assert.rejects(controller.importFile(), lifecycleError);
+  } finally {
+    Object.freeze = freeze;
+  }
+
+  assert.ok(parsedPlan);
+  await assert.rejects(
+    commitBrowserCookieImport(parsedPlan, { cookieStore }),
+    /invalid, expired, or already used/,
+  );
 });
 
 test('a committed import records its receipt once before a storage flush failure', async () => {

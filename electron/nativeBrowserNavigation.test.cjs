@@ -4,10 +4,12 @@ const { createNativeBrowserNavigation } = require('./nativeBrowserNavigation.cjs
 
 function deferred() {
   let resolve;
-  const promise = new Promise((settle) => {
+  let reject;
+  const promise = new Promise((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function harness(overrides = {}) {
@@ -26,6 +28,7 @@ function harness(overrides = {}) {
     documentGeneration: 4,
     pendingAgentNavigation: null,
     trustedUserNavigation: null,
+    approvedHistoryTransition: null,
     agentActionActive: false,
     userNavigationActive: false,
     agentRequest: { autonomy: 'medium' },
@@ -106,6 +109,69 @@ test('cross-origin transition begins one approval and consumes its successful lo
   assert.equal(await navigation.consumePendingApproval(entry), true);
   assert.deepEqual(loads, [{ url: 'https://next.test/path', options: { force: true } }]);
   assert.equal(entry.pendingAgentNavigation, null);
+});
+
+test('preapproved agent transition is exact and consumed without a second prompt', async () => {
+  const { approvals, entry, navigation, view } = harness();
+
+  await navigation.authorizeHistoryTransition(entry, view, 'https://next.test/path', 'medium');
+
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'navigate', 'https://next.test/path'),
+    true,
+  );
+  assert.equal(approvals.length, 1);
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'navigate', 'https://next.test/path'),
+    false,
+  );
+  assert.equal(approvals.length, 2);
+  assert.equal(await navigation.consumePendingApproval(entry), true);
+});
+
+test('preapproved agent transition does not authorize a different destination', async () => {
+  const { approvals, entry, navigation, view } = harness();
+  await navigation.authorizeHistoryTransition(entry, view, 'https://next.test/approved', 'medium');
+
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'navigate', 'https://next.test/different'),
+    false,
+  );
+  assert.deepEqual(approvals, [
+    { url: 'https://next.test/approved', autonomy: 'medium' },
+    { url: 'https://next.test/different', autonomy: 'medium' },
+  ]);
+  navigation.finishAgentAction(entry);
+});
+
+test('preapproved history transition cannot authorize a popup', async () => {
+  const { approvals, entry, navigation, view } = harness();
+  await navigation.authorizeHistoryTransition(entry, view, 'https://next.test/path', 'medium');
+
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'popup', 'https://next.test/path'),
+    false,
+  );
+  assert.equal(approvals.length, 2);
+  navigation.finishAgentAction(entry);
+});
+
+test('finishing an agent action invalidates its unconsumed failed navigation approval', async () => {
+  const approval = deferred();
+  const { approvals, entry, navigation, view } = harness({ approval });
+  navigation.authorizeTransition(entry, view, 'navigate', 'https://next.test/path');
+  const failed = entry.pendingAgentNavigation;
+  approval.reject(new Error('approval failed'));
+  await assert.rejects(failed.promise, /approval failed/);
+
+  navigation.finishAgentAction(entry);
+
+  assert.equal(entry.pendingAgentNavigation, null);
+  assert.equal(entry.navigationGeneration, 3);
+  navigation.authorizeTransition(entry, view, 'navigate', 'https://next.test/path');
+  assert.equal(approvals.length, 2);
+  assert.notEqual(entry.pendingAgentNavigation, failed);
+  navigation.finishAgentAction(entry);
 });
 
 test('failed approved navigation rejects instead of reporting success', async () => {

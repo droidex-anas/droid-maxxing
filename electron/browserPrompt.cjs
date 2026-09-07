@@ -82,9 +82,21 @@ function createBrowserPromptController(options) {
     active = null;
     (options.clearTimeout || clearTimeout)(pending.timeout);
     removeAbortListener(pending);
-    if (dismiss) options.dismiss?.(requestId);
+    if (dismiss) dismissBestEffort(requestId);
     pending.resolve({ response });
     showNext();
+  }
+
+  function dismissBestEffort(requestId) {
+    try {
+      options.dismiss?.(requestId);
+    } catch (error) {
+      try {
+        (options.logError ?? console.error)('Failed to dismiss browser prompt.', error);
+      } catch {
+        // Prompt settlement must survive a broken diagnostic sink.
+      }
+    }
   }
 
   function abortPending(pending) {
@@ -127,7 +139,7 @@ function createBrowserPromptController(options) {
       active = null;
       (options.clearTimeout || clearTimeout)(pending.timeout);
       removeAbortListener(pending);
-      options.dismiss?.(pending.requestId);
+      dismissBestEffort(pending.requestId);
       pending.resolve({ response: pending.prompt.cancelId });
     }
     while (queue.length > 0) {

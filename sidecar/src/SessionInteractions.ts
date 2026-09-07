@@ -83,8 +83,17 @@ export class SessionInteractions {
         const requestId = defaultNextRequestId();
         const type = confirmationType(params);
         const request = classifyPermission(ref.id, requestId, params);
-        const signature = permissionSignature(params);
-        if (isDroidexBrowserPolicyDeferredPermission(signature)) {
+        // A batch cannot inherit either browser deferral or a cached grant from
+        // its first tool: that would also approve unrelated commands in it.
+        const signature = params.toolUses.length === 1 ? permissionSignature(params) : '';
+        if (
+          params.toolUses.length > 0 &&
+          params.toolUses.every((toolUse) =>
+            isDroidexBrowserPolicyDeferredPermission(
+              permissionSignature({ ...params, toolUses: [toolUse] }),
+            ),
+          )
+        ) {
           // The first-party browser is reserved by SessionManager. Electron main
           // still enforces agent access, autonomy, exact-origin navigation,
           // authentication, downloads, and site permissions for every action.

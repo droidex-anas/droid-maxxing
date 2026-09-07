@@ -689,7 +689,10 @@ function inspectAuthenticationIntent(request) {
     )
       kind = 'oauth';
     else if (/sign up|register|create (?:an )?account|join now/.test(context)) kind = 'signup';
-    else if (hasPassword && (isEnter || control !== target || control.matches?.('button,input'))) {
+    else if (
+      hasPassword &&
+      (isEnter || control.matches?.('button,input[type="submit"],input[type="button"]'))
+    ) {
       kind = 'signin';
     }
     if (!kind) return null;

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -9,6 +10,8 @@ import {
   type BrowserScrollAction,
   type BrowserSessionManagerOptions,
 } from './BrowserSessionManager.js';
+import { BrowserDesignReferences } from './BrowserDesignReferences.js';
+import { writeDesignPromptPack } from './designPromptPacks.js';
 import type {
   BrowserBox,
   BrowserElementRef,
@@ -530,6 +533,162 @@ test('addReference captures an anchor crop and current browser context', async (
   assert.equal(reference.anchor.id, reference.id);
   assert.ok(reference.anchor.screenshotPath, 'expected an auto-captured crop path');
   assert.deepEqual(runtime.captures.at(-1), buttonAnchor().box);
+});
+
+test('URL navigation invalidates design references and deletes their pending crops', async () => {
+  const manager = createManager();
+  await manager.open({ appSessionId: 'navigation-ref', url: 'https://example.com/first' });
+  const reference = await manager.addReference('navigation-ref', { anchor: buttonAnchor() });
+  const cropPath = reference.anchor.screenshotPath;
+  const screenshotPath = await manager.screenshot('navigation-ref');
+  assert.ok(cropPath);
+  assert.equal((await readFile(cropPath, 'utf8')).length > 0, true);
+  assert.equal((await readFile(screenshotPath, 'utf8')).length > 0, true);
+
+  await manager.open({ appSessionId: 'navigation-ref', url: 'https://example.com/second' });
+
+  assert.deepEqual(manager.designContext('navigation-ref').references, []);
+  assert.equal(manager.state('navigation-ref')?.screenshotPath, undefined);
+  assert.equal(manager.state('navigation-ref')?.screenshotUrl, undefined);
+  await assert.rejects(readFile(cropPath), /ENOENT/);
+  await assert.rejects(readFile(screenshotPath), /ENOENT/);
+});
+
+test('design context keeps only the newest 32 pending references and crops', async () => {
+  const manager = createManager();
+  await manager.open({ appSessionId: 'bounded-refs', url: 'https://example.com' });
+  let oldestCropPath = '';
+  for (let index = 0; index < 33; index += 1) {
+    const anchor = buttonAnchor();
+    const reference = await manager.addReference('bounded-refs', {
+      anchor: {
+        ...anchor,
+        id: `@ref-${index}`,
+        box: { ...anchor.box, x: index },
+      },
+    });
+    if (index === 0) oldestCropPath = reference.anchor.screenshotPath ?? '';
+  }
+
+  const references = manager.designContext('bounded-refs').references;
+  assert.equal(references.length, 32);
+  assert.equal(
+    references.some((reference) => reference.id === '@ref-0'),
+    false,
+  );
+  assert.equal(references.at(-1)?.id, '@ref-32');
+  await assert.rejects(readFile(oldestCropPath), /ENOENT/);
+});
+
+test('replacing a pending design reference deletes its superseded crop', async () => {
+  const manager = createManager();
+  await manager.open({ appSessionId: 'replacement-ref', url: 'https://example.com' });
+  const first = await manager.addReference('replacement-ref', { anchor: buttonAnchor() });
+  const replacementAnchor = buttonAnchor();
+  replacementAnchor.box = { ...replacementAnchor.box, x: 99 };
+  const replacement = await manager.addReference('replacement-ref', {
+    anchor: replacementAnchor,
+  });
+  assert.ok(first.anchor.screenshotPath);
+  assert.ok(replacement.anchor.screenshotPath);
+
+  assert.deepEqual(
+    manager.designContext('replacement-ref').references.map((reference) => reference.id),
+    ['@live-button'],
+  );
+  await assert.rejects(readFile(first.anchor.screenshotPath), /ENOENT/);
+  assert.equal((await readFile(replacement.anchor.screenshotPath)).length > 0, true);
+});
+
+test('closing a session deletes pending crops but preserves saved prompt-pack assets', async () => {
+  const manager = createManager({
+    writePack: (options) => writeDesignPromptPack({ ...options, baseDir: dataDir }),
+  });
+  await manager.open({ appSessionId: 'pack-retention', url: 'https://example.com' });
+  const packed = await manager.addReference('pack-retention', { anchor: buttonAnchor() });
+  const pendingAnchor = buttonAnchor();
+  pendingAnchor.id = '@pending';
+  pendingAnchor.box = { ...pendingAnchor.box, x: 99 };
+  const pending = await manager.addReference('pack-retention', { anchor: pendingAnchor });
+  assert.ok(packed.anchor.screenshotPath);
+  assert.ok(pending.anchor.screenshotPath);
+  const promptPack = await manager.designPrompt({
+    appSessionId: 'pack-retention',
+    instruction: 'Refine the saved button',
+    referenceIds: [packed.id],
+  });
+
+  await manager.close('pack-retention');
+
+  assert.equal((await readFile(promptPack.path, 'utf8')).length > 0, true);
+  assert.equal((await readFile(packed.anchor.screenshotPath)).length > 0, true);
+  await assert.rejects(readFile(pending.anchor.screenshotPath), /ENOENT/);
+});
+
+test('fixed-clock captures use unique paths and preserve an earlier prompt-pack image', async (t) => {
+  t.mock.method(Date, 'now', () => 123_456);
+  let captureCount = 0;
+  const manager = createManager({
+    runtimeFactory: (_id, viewport) => {
+      const runtime = new FakeRuntime(viewport);
+      runtime.capture = async (box) => {
+        runtime.captures.push(box);
+        captureCount += 1;
+        return Buffer.from(`crop-${captureCount}`).toString('base64');
+      };
+      return runtime;
+    },
+    writePack: (options) => writeDesignPromptPack({ ...options, baseDir: dataDir }),
+  });
+  await manager.open({ appSessionId: 'unique-image-paths', url: 'https://example.com' });
+  const first = await manager.addReference('unique-image-paths', { anchor: buttonAnchor() });
+  assert.ok(first.anchor.screenshotPath);
+  const promptPack = await manager.designPrompt({
+    appSessionId: 'unique-image-paths',
+    instruction: 'Preserve this version',
+    referenceIds: [first.id],
+  });
+
+  const replacement = await manager.addReference('unique-image-paths', {
+    anchor: buttonAnchor(),
+  });
+  assert.ok(replacement.anchor.screenshotPath);
+  const firstScreenshot = await manager.screenshot('unique-image-paths');
+  const secondScreenshot = await manager.screenshot('unique-image-paths');
+
+  assert.notEqual(replacement.anchor.screenshotPath, first.anchor.screenshotPath);
+  assert.notEqual(secondScreenshot, firstScreenshot);
+  assert.equal(await readFile(first.anchor.screenshotPath, 'utf8'), 'crop-1');
+  assert.equal(await readFile(replacement.anchor.screenshotPath, 'utf8'), 'crop-2');
+  assert.equal(
+    (await readFile(promptPack.path, 'utf8')).includes(first.anchor.screenshotPath),
+    true,
+  );
+});
+
+test('closeAll closes every runtime when one design cleanup fails', async (t) => {
+  let disposeCount = 0;
+  t.mock.method(BrowserDesignReferences.prototype, 'dispose', async () => {
+    disposeCount += 1;
+    if (disposeCount === 1) throw new Error('cleanup failed');
+  });
+  const closed: string[] = [];
+  const manager = createManager({
+    runtimeFactory: (_id, viewport, appSessionId) => {
+      const runtime = new FakeRuntime(viewport);
+      runtime.close = async () => {
+        closed.push(appSessionId);
+      };
+      return runtime;
+    },
+  });
+  await manager.open({ appSessionId: 'cleanup-one', url: 'https://one.example' });
+  await manager.open({ appSessionId: 'cleanup-two', url: 'https://two.example' });
+
+  await assert.rejects(manager.closeAll(), /cleanup failed/);
+
+  assert.equal(disposeCount, 2);
+  assert.deepEqual(closed.sort(), ['cleanup-one', 'cleanup-two']);
 });
 
 test('referenceDetail returns the stored reference with detail', async () => {

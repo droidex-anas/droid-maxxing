@@ -54,7 +54,7 @@ function harness(options = {}) {
       this.loadedUrl = url;
       this.loadedUrls ??= [];
       this.loadedUrls.push(url);
-      return load?.promise ?? Promise.resolve();
+      return (typeof load === 'function' ? load() : load?.promise) ?? Promise.resolve();
     }
 
     setBounds(bounds, animate) {
@@ -232,6 +232,34 @@ test('controller accepts only trusted styles and can reload a live overlay', asy
     bounds: browserBounds,
   });
   assert.match(decodeURIComponent(light.windows[0].loadedUrl), /fill="#ffffff"/i);
+});
+
+test('failed cursor document reload shows the replacement overlay', async () => {
+  let loadCount = 0;
+  const { controller, windows } = harness({
+    load: () => {
+      loadCount += 1;
+      return loadCount === 2
+        ? Promise.reject(new Error('cursor document failed to load'))
+        : Promise.resolve();
+    },
+  });
+  controller.attach({
+    browserSessionId: 'browser-1',
+    hostWindow: hostWindow(),
+    bounds: browserBounds,
+  });
+  await controller.show({ browserSessionId: 'browser-1', x: 20, y: 30 });
+  assert.equal(windows[0].shown, 1);
+
+  controller.setStyle('dark');
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(windows[0].destroyed, true);
+
+  assert.equal(await controller.show({ browserSessionId: 'browser-1', x: 40, y: 50 }), true);
+  assert.equal(windows.length, 2);
+  assert.equal(windows[1].shown, 1);
 });
 
 test('main can position the cursor above the attached browser session', async () => {

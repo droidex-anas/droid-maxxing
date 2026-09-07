@@ -21,6 +21,36 @@ function nativeRequests(events: ServerEvent[]): NativeBrowserRequestEvent[] {
   );
 }
 
+test(
+  'shutdown closes restored native browsers before stopping their transport',
+  { concurrency: false },
+  async () => {
+    const h = createNativeBrowserTestContext();
+    try {
+      await h.handle({
+        type: 'browser.restore',
+        state: {
+          appSessionId: 'restored-chat',
+          browserSessionId: 'restored-browser',
+          url: 'https://example.test/',
+          viewport: { width: 1200, height: 800, deviceScaleFactor: 1 },
+          viewportMode: 'fit',
+          scroll: { x: 0, y: 0 },
+        },
+      });
+      const shutdown = h.dispose();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const request = nativeRequests(h.events).at(-1)?.request;
+      assert.equal(request?.action, 'close');
+      assert.ok(request);
+      await h.handle({ type: 'browser.native.result', result: { ...request, ok: true } });
+      await shutdown;
+    } finally {
+      await h.dispose();
+    }
+  },
+);
+
 test('[B1] Browser command routing', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
   const viewport = { width: 1024, height: 768, deviceScaleFactor: 1 };

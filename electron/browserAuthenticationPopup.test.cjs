@@ -37,7 +37,7 @@ test('authentication popup capabilities are one-use, view-bound, and short-lived
   );
 
   grantAuthenticationPopup(entry, view, 'https://accounts.example/signin', 1_000);
-  assert.equal(
+  assert.deepEqual(
     consumeAuthenticationPopup(
       entry,
       {},
@@ -45,10 +45,10 @@ test('authentication popup capabilities are one-use, view-bound, and short-lived
       'persist:droidex-browser',
       1_001,
     ),
-    undefined,
+    { action: 'deny' },
   );
   grantAuthenticationPopup(entry, view, 'https://accounts.example/signin', 1_000);
-  assert.equal(
+  assert.deepEqual(
     consumeAuthenticationPopup(
       entry,
       view,
@@ -56,7 +56,7 @@ test('authentication popup capabilities are one-use, view-bound, and short-lived
       'persist:droidex-browser',
       11_001,
     ),
-    undefined,
+    { action: 'deny' },
   );
 });
 
@@ -65,7 +65,7 @@ test('authentication popup capability rejects a different safe destination and i
   const entry = { documentGeneration: 2, authenticationPopupCapability: null };
   grantAuthenticationPopup(entry, view, 'https://accounts.example/authorize?client=droidex', 1_000);
 
-  assert.equal(
+  assert.deepEqual(
     consumeAuthenticationPopup(
       entry,
       view,
@@ -73,7 +73,7 @@ test('authentication popup capability rejects a different safe destination and i
       'persist:droidex-browser',
       1_001,
     ),
-    undefined,
+    { action: 'deny' },
   );
   assert.equal(entry.authenticationPopupCapability, null);
 });
@@ -88,7 +88,7 @@ test('authentication popups reject unsafe URLs and prevent unsafe child navigati
   const view = {};
   const entry = { documentGeneration: 1, authenticationPopupCapability: null };
   grantAuthenticationPopup(entry, view, 'https://accounts.example/signin', 1_000);
-  assert.equal(
+  assert.deepEqual(
     consumeAuthenticationPopup(
       entry,
       view,
@@ -96,7 +96,7 @@ test('authentication popups reject unsafe URLs and prevent unsafe child navigati
       'persist:droidex-browser',
       1_001,
     ),
-    undefined,
+    { action: 'deny' },
   );
 
   const handlers = new Map();

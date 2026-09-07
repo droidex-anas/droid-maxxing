@@ -1,11 +1,13 @@
 import { AlertTriangle, KeyRound } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer } from 'react';
+import { isDesktop } from '../lib/desktop';
 import {
   onBrowserPermissionPrompt,
   onBrowserPermissionPromptDismiss,
   type BrowserPermissionPrompt as BrowserPermissionPromptValue,
 } from '../lib/browserPrompt';
 import { settleBrowserPermissionPrompt } from './browserPermissionPromptCompletion';
+import { browserPromptReducer, emptyBrowserPromptState } from './browserPermissionPromptState';
 import { BrowserSettingsDialogFrame } from './browserSettings/BrowserSettingsDialogFrame';
 
 export function BrowserPermissionPromptHost({
@@ -13,18 +15,19 @@ export function BrowserPermissionPromptHost({
 }: {
   onOpenChange?: (open: boolean) => void;
 }) {
-  const [prompt, setPrompt] = useState<BrowserPermissionPromptValue | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [{ prompt, pending, error }, dispatch] = useReducer(
+    browserPromptReducer,
+    emptyBrowserPromptState,
+  );
+  const busy = pending !== null;
 
   useEffect(() => {
+    if (!isDesktop()) return;
     const stopShow = onBrowserPermissionPrompt((nextPrompt) => {
-      setError(null);
-      setPrompt(nextPrompt);
+      dispatch({ type: 'show', prompt: nextPrompt });
     });
     const stopDismiss = onBrowserPermissionPromptDismiss((requestId) => {
-      setError(null);
-      setPrompt((current) => (current?.requestId === requestId ? null : current));
+      dispatch({ type: 'dismiss', requestId });
     });
     return () => {
       stopShow();
@@ -41,23 +44,12 @@ export function BrowserPermissionPromptHost({
   const choose = async (response: number) => {
     if (!prompt || busy) return;
     const selectedPrompt = prompt;
-    setBusy(true);
-    setError(null);
-    try {
-      const failure = await settleBrowserPermissionPrompt(selectedPrompt.requestId, response, {
-        close: () => {
-          setPrompt((current) =>
-            current?.requestId === selectedPrompt.requestId ? null : current,
-          );
-        },
-      });
-      if (failure) {
-        setPrompt((current) => current ?? selectedPrompt);
-        setError(failure);
-      }
-    } finally {
-      setBusy(false);
-    }
+    const failure = await settleBrowserPermissionPrompt(selectedPrompt.requestId, response, {
+      close: () => {
+        dispatch({ type: 'choose', requestId: selectedPrompt.requestId });
+      },
+    });
+    dispatch({ type: 'settled', requestId: selectedPrompt.requestId, error: failure });
   };
 
   if (!prompt) return null;

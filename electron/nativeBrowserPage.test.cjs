@@ -213,6 +213,28 @@ test('capture rejects an image produced after the document changes', async () =>
   assert.equal(entry.captureActivityCount, 0);
 });
 
+test('same-document navigation does not leave sensitive fields masked after capture', async () => {
+  const captured = deferred();
+  const maskStates = [];
+  const { entry, page } = harness({
+    contents: {
+      executeJavaScript: async (script) => {
+        maskStates.push(script.includes('(true)'));
+        return true;
+      },
+      capturePage: () => captured.promise,
+    },
+  });
+
+  const capture = page.capture('browser-1', { x: 0, y: 0, width: 100, height: 100 });
+  await Promise.resolve();
+  entry.documentGeneration += 1;
+  captured.resolve(image('stale-capture'));
+
+  await assert.rejects(capture, /page changed before the screenshot completed/i);
+  assert.deepEqual(maskStates, [true, false]);
+});
+
 test('design mode disables pencil mode and applies the canonical state', async () => {
   const applied = [];
   const { entry, page } = harness({

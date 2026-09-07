@@ -215,6 +215,70 @@ test('Chrome Netscape recovery supports HttpOnly cookies without exposing their 
   assert.doesNotMatch(JSON.stringify(result), /sid|private-value/);
 });
 
+test('JSON URL cookies preserve an explicit insecure flag', async (t) => {
+  const filePath = await writeExport(
+    t,
+    JSON.stringify([
+      {
+        url: 'https://example.com/account',
+        name: 'session',
+        value: 'private-value',
+        secure: false,
+      },
+    ]),
+  );
+  const writes = [];
+  const plan = await createBrowserCookieImportPlan({ filePath, now: () => NOW_MS });
+
+  await commitBrowserCookieImport(plan, {
+    cookieStore: { set: async (cookie) => writes.push(cookie) },
+  });
+
+  assert.equal(writes[0].secure, false);
+  assert.equal(writes[0].url, 'http://example.com/');
+});
+
+test('JSON exports preserve Electron unspecified SameSite cookies', async (t) => {
+  const filePath = await writeExport(
+    t,
+    JSON.stringify([
+      {
+        domain: 'example.com',
+        name: 'session',
+        value: 'private-value',
+        sameSite: 'unspecified',
+      },
+    ]),
+  );
+  const writes = [];
+  const plan = await createBrowserCookieImportPlan({ filePath, now: () => NOW_MS });
+
+  await commitBrowserCookieImport(plan, {
+    cookieStore: { set: async (cookie) => writes.push(cookie) },
+  });
+
+  assert.equal(writes[0].sameSite, 'unspecified');
+});
+
+test('JSON exports enforce the combined 4096-byte cookie name and value limit', async (t) => {
+  const filePath = await writeExport(
+    t,
+    JSON.stringify([
+      { domain: 'example.com', name: 'session', value: 'é'.repeat(2_045) },
+      { domain: 'example.com', name: 'id', value: 'é'.repeat(2_047) },
+    ]),
+  );
+  const writes = [];
+  const plan = await createBrowserCookieImportPlan({ filePath, now: () => NOW_MS });
+
+  assert.equal(plan.preview.importCount, 1);
+  assert.equal(plan.preview.skippedCount, 1);
+  await commitBrowserCookieImport(plan, {
+    cookieStore: { set: async (cookie) => writes.push(cookie) },
+  });
+  assert.equal(writes[0].name, 'id');
+});
+
 test('planning strictly skips unsupported or unsafe cookie attributes', async (t) => {
   const filePath = await writeExport(
     t,

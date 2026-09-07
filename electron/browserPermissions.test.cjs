@@ -125,6 +125,27 @@ test('forged and malformed app prompt responses fail closed', async () => {
   }
 });
 
+test('an approval cannot override a policy changed to deny while the prompt is open', async () => {
+  const contents = browserContents();
+  const prompt = deferred();
+  const siteDecisions = new Map();
+  const { controller } = controllerFor(contents, {
+    siteDecisions,
+    requestPermission: () => prompt.promise,
+  });
+  const decision = requestDecision(controller, contents, {
+    securityOrigin: 'https://camera.example',
+    mediaTypes: ['video'],
+  });
+  await Promise.resolve();
+
+  siteDecisions.set('https://camera.example\0video', 'deny');
+  prompt.resolve({ promptId: 'prompt-1', decision: 'allow_once' });
+
+  assert.equal(await decision, false);
+  assert.equal(canAccess(controller, contents, 'https://camera.example', 'video'), false);
+});
+
 test('an embedded or navigated origin cannot use another site permission', async () => {
   const contents = browserContents('https://top-level.example');
   const siteDecisions = new Map([['https://camera.example\0video', 'allow']]);

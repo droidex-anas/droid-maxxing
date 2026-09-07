@@ -32,14 +32,15 @@ function createNativeBrowserAgentActions({
     if (entry.agentActionActive || entry.userNavigationActive) {
       throw new Error('A browser operation is already active for this session.');
     }
-    const isUserNavigation = request.source === 'user';
+    const isUserRequest = request.source === 'user';
+    const isUserNavigation = isUserRequest && request.action !== 'resize';
     const reservedView = entry.view;
-    entry.agentRequest = isUserNavigation ? null : request;
+    entry.agentRequest = isUserRequest ? null : request;
     entry.agentActionActive = !isUserNavigation;
     entry.userNavigationActive = isUserNavigation;
     let actionContents;
     try {
-      if (!isUserNavigation) {
+      if (!isUserRequest) {
         await browserSettings.authorizeAgentRequest(request);
         if (
           getEntry(request.browserSessionId) !== entry ||
@@ -110,35 +111,38 @@ function createNativeBrowserAgentActions({
         return snapshotAfterNavigation(actionContents, request);
       }
 
-      const observedNavigation = observeNavigation(actionContents);
-      try {
-        if (request.action === 'reload') {
-          await reloadBrowser(request.browserSessionId);
-          await observedNavigation.wait();
+      if (request.action === 'reload') {
+        const observedNavigation = observeNavigation(actionContents);
+        try {
+          await Promise.all([reloadBrowser(request.browserSessionId), observedNavigation.wait()]);
           await navigation.consumePendingApproval(restoredEntry);
           return snapshotAfterNavigation(actionContents, request);
+        } finally {
+          observedNavigation.dispose();
         }
-        if (request.action === 'goBack' || request.action === 'goForward') {
-          return runHistoryAction(
-            restoredEntry,
-            actionContents,
-            request,
-            observedNavigation,
-            assertCurrentActionTarget,
-          );
-        }
-
-        const pageContext = await actionContents.executeJavaScript(
-          'window.__DROIDMAXX_AGENT_CONTEXT?.();',
-          true,
+      }
+      if (request.action === 'goBack' || request.action === 'goForward') {
+        return await runHistoryAction(
+          restoredEntry,
+          actionContents,
+          request,
+          assertCurrentActionTarget,
         );
-        assertCurrentActionTarget();
-        requirePageContext(pageContext);
-        await credentials.authorizeAuthentication(restoredEntry, actionContents, request);
-        assertCurrentActionTarget();
-        await interaction.blockBrowserAgentSensitiveTyping(actionContents, request);
-        assertCurrentActionTarget();
+      }
 
+      const pageContext = await actionContents.executeJavaScript(
+        'window.__DROIDMAXX_AGENT_CONTEXT?.();',
+        true,
+      );
+      assertCurrentActionTarget();
+      requirePageContext(pageContext);
+      await credentials.authorizeAuthentication(restoredEntry, actionContents, request);
+      assertCurrentActionTarget();
+      await interaction.blockBrowserAgentSensitiveTyping(actionContents, request);
+      assertCurrentActionTarget();
+
+      const observedNavigation = observeNavigation(actionContents);
+      try {
         const execution = interaction
           .executeBrowserAgentInteraction(actionContents, request, {
             isCurrent: isCurrentActionTarget,
@@ -173,6 +177,7 @@ function createNativeBrowserAgentActions({
       }
     } finally {
       if (actionContents) setBrowserActionActive(entry, false);
+      if (entry.agentActionActive) navigation.finishAgentAction(entry);
       entry.agentRequest = null;
       entry.agentActionActive = false;
       entry.userNavigationActive = false;
@@ -207,25 +212,24 @@ function createNativeBrowserAgentActions({
     }
   }
 
-  async function runHistoryAction(
-    entry,
-    contents,
-    request,
-    observedNavigation,
-    assertCurrentActionTarget,
-  ) {
+  async function runHistoryAction(entry, contents, request, assertCurrentActionTarget) {
     const history = contents.navigationHistory;
     const offset = request.action === 'goBack' ? -1 : 1;
     if (!history?.canGoToOffset(offset)) return snapshotAfterNavigation(contents, request);
     const target = history.getEntryAtIndex(history.getActiveIndex() + offset);
     if (target?.url && isCrossOriginNavigation(contents.getURL(), target.url)) {
-      await browserSettings.authorizeAgentOrigin(target.url, request.autonomy);
+      await navigation.authorizeHistoryTransition(entry, entry.view, target.url, request.autonomy);
     }
     assertCurrentActionTarget();
-    history.goToOffset(offset);
-    await observedNavigation.wait();
-    await navigation.consumePendingApproval(entry);
-    return snapshotAfterNavigation(contents, request);
+    const observedNavigation = observeNavigation(contents);
+    try {
+      history.goToOffset(offset);
+      await observedNavigation.wait();
+      await navigation.consumePendingApproval(entry);
+      return snapshotAfterNavigation(contents, request);
+    } finally {
+      observedNavigation.dispose();
+    }
   }
 
   async function snapshotAfterNavigation(contents, request) {
@@ -268,15 +272,23 @@ function createNativeBrowserAgentActions({
     let didStart = false;
     let settled = false;
     let resolveCompletion;
-    const completion = new Promise((resolve) => {
+    let rejectCompletion;
+    const completion = new Promise((resolve, reject) => {
       resolveCompletion = resolve;
+      rejectCompletion = reject;
     });
     const finish = () => {
       if (settled) return;
       settled = true;
       resolveCompletion();
     };
-    const timeout = setTimeout(finish, timeoutMs);
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const error = new Error('Browser navigation timed out before the page finished loading.');
+      error.code = 'ERR_BROWSER_NAVIGATION_TIMEOUT';
+      rejectCompletion(error);
+    }, timeoutMs);
     timeout.unref?.();
     const onStart = (_event, _url, _isInPlace, isMainFrame) => {
       if (isMainFrame) didStart = true;

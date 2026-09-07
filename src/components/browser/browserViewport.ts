@@ -50,7 +50,9 @@ export function normalizeUrl(value: string): string {
   if (!trimmed) throw new Error('Enter a website address to open.');
 
   const bareHostWithPort =
-    /^(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z\d-]+(?:\.[a-z\d-]+)+):\d+(?:\/|$)/i.test(trimmed);
+    /^(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z\d-]+(?:\.[a-z\d-]+)+):\d+(?:[/?#]|$)/i.test(
+      trimmed,
+    );
   const explicitScheme = bareHostWithPort
     ? undefined
     : /^([a-z][a-z\d+.-]*):/i.exec(trimmed)?.[1]?.toLowerCase();
@@ -64,7 +66,7 @@ export function normalizeUrl(value: string): string {
   else {
     const ipv6Loopback = normalizeBareIpv6Loopback(trimmed);
     if (ipv6Loopback) normalized = ipv6Loopback;
-    else if (/^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?(\/|$)/i.test(trimmed))
+    else if (/^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?([/?#]|$)/i.test(trimmed))
       normalized = `http://${trimmed}`;
     else normalized = `https://${trimmed}`;
   }
@@ -101,13 +103,13 @@ export function normalizeBrowserOmniboxInput(value: string): string {
 
 function looksLikeWebsiteAddress(value: string): boolean {
   if (/^https?:\/\//i.test(value) || value.startsWith('//')) return true;
-  if (/^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?(?:\/|$)/i.test(value)) return true;
+  if (/^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?(?:[/?#]|$)/i.test(value)) return true;
   if (/\s|@/.test(value)) return false;
-  return /^(?:[a-z\d-]+\.)+[a-z\d-]+(?::\d+)?(?:\/|$)/i.test(value);
+  return /^(?:[a-z\d-]+\.)+[a-z\d-]+(?::\d+)?(?:[/?#]|$)/i.test(value);
 }
 
 function normalizeBareIpv6Loopback(value: string): string | null {
-  const match = /^::1(?::(\d+))?(\/.*|)$/i.exec(value);
+  const match = /^::1(?::(\d+))?([/?#].*|)$/i.exec(value);
   if (!match) return null;
   const port = match[1] ? `:${match[1]}` : '';
   const path = match[2];

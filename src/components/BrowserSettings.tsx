@@ -93,7 +93,9 @@ export function BrowserSettings() {
     try {
       await commitBrowserSettingsPatch(snapshot, patch, setSnapshot);
     } catch {
-      setError('Could not save that browser setting. Your previous setting was restored.');
+      setError(
+        'Could not confirm that browser setting. It may have been saved. Review the current settings or retry loading them.',
+      );
     } finally {
       setIsSaving(false);
     }
@@ -126,7 +128,15 @@ export function BrowserSettings() {
       }
       setConfirmTarget(null);
     } catch {
-      setConfirmError('DROIDEX could not complete this action. Nothing was changed.');
+      const message =
+        'DROIDEX could not complete this action. Some data may have changed and browser pages may have closed. Review the current settings before retrying.';
+      setConfirmError(message);
+      try {
+        setSnapshot(await getBrowserSettings());
+      } catch {
+        setSnapshot(null);
+        setError(`${message} Settings could not be refreshed; retry loading them.`);
+      }
     } finally {
       setIsSaving(false);
     }

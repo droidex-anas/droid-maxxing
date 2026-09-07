@@ -334,10 +334,16 @@ function validateHomePage(value) {
 }
 
 function weakensBrowserProtection(current, patch) {
+  const navigationApprovalWeakens =
+    (current.navigationApproval === 'always_ask' &&
+      ['new_sites', 'follow_autonomy', 'never_ask'].includes(patch.navigationApproval)) ||
+    (current.navigationApproval === 'new_sites' &&
+      ['follow_autonomy', 'never_ask'].includes(patch.navigationApproval)) ||
+    (patch.navigationApproval === 'never_ask' && current.navigationApproval !== 'never_ask');
   return (
     (patch.agentAccessEnabled === true && !current.agentAccessEnabled) ||
     (patch.diagnosticsEnabled === true && !current.diagnosticsEnabled) ||
-    (patch.navigationApproval === 'never_ask' && current.navigationApproval !== 'never_ask') ||
+    navigationApprovalWeakens ||
     (patch.loginFillApproval === 'always_ask' && current.loginFillApproval === 'never') ||
     (patch.sitePermissionMode === 'ask' && current.sitePermissionMode === 'block') ||
     (patch.askDownloadLocation === false && current.askDownloadLocation)

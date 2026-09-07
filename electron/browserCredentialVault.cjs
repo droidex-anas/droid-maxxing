@@ -79,7 +79,9 @@ class BrowserCredentialVault {
     });
     if (response.response !== 0) throw new Error(`Saved-login use was denied for ${origin}.`);
     await this.promptTouchId(new URL(origin).hostname);
-    return this.decrypt(origin, row);
+    const credential = await this.read(origin);
+    if (!credential) throw new Error(`No saved login is available for ${origin}.`);
+    return credential;
   }
 
   async delete(origin) {
@@ -88,22 +90,27 @@ class BrowserCredentialVault {
   }
 
   async upsert(origin, username, password) {
-    const encrypted = await this.options.safeStorage.encryptStringAsync(
-      JSON.stringify({ username, password }),
-    );
-    const enc = encrypted.toString('base64');
-    await this.queueWrite((rows) => [
-      ...rows.filter((row) => row.origin !== origin),
-      { origin, enc },
-    ]);
+    await this.queueStorageOperation(async () => {
+      const encrypted = await this.options.safeStorage.encryptStringAsync(
+        JSON.stringify({ username, password }),
+      );
+      const rows = await readRows(this.filePath);
+      await writeRows(this.filePath, [
+        ...rows.filter((row) => row.origin !== origin),
+        { origin, enc: encrypted.toString('base64') },
+      ]);
+    });
   }
 
   async read(origin) {
-    const row = (await readRows(this.filePath)).find((candidate) => candidate.origin === origin);
-    return row ? await this.decrypt(origin, row) : undefined;
+    return this.queueStorageOperation(async () => {
+      const rows = await readRows(this.filePath);
+      const row = rows.find((candidate) => candidate.origin === origin);
+      return row ? await this.decrypt(origin, row, rows) : undefined;
+    });
   }
 
-  async decrypt(origin, row) {
+  async decrypt(origin, row, rows) {
     try {
       const decrypted = await this.options.safeStorage.decryptStringAsync(
         Buffer.from(row.enc, 'base64'),
@@ -111,7 +118,15 @@ class BrowserCredentialVault {
       const parsed = JSON.parse(decrypted.result);
       if (typeof parsed?.username !== 'string' || typeof parsed?.password !== 'string')
         throw new Error();
-      if (decrypted.shouldReEncrypt) await this.upsert(origin, parsed.username, parsed.password);
+      if (decrypted.shouldReEncrypt) {
+        const encrypted = await this.options.safeStorage.encryptStringAsync(
+          JSON.stringify({ username: parsed.username, password: parsed.password }),
+        );
+        await writeRows(this.filePath, [
+          ...rows.filter((candidate) => candidate.origin !== origin),
+          { origin, enc: encrypted.toString('base64') },
+        ]);
+      }
       return parsed;
     } catch {
       throw new Error(
@@ -121,10 +136,14 @@ class BrowserCredentialVault {
   }
 
   queueWrite(update) {
-    const run = this.writeQueue.then(async () => {
+    return this.queueStorageOperation(async () => {
       const rows = update(await readRows(this.filePath));
       await writeRows(this.filePath, rows);
     });
+  }
+
+  queueStorageOperation(operation) {
+    const run = this.writeQueue.then(operation);
     this.writeQueue = run.catch(() => {});
     return run;
   }

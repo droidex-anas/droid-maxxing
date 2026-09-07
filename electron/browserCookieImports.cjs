@@ -70,7 +70,12 @@ function createBrowserCookieImports(options) {
 
   async function commitProfile(planId) {
     const prepared = takePreparedProfile(planId);
-    await options.beforeCommit?.();
+    try {
+      await options.beforeCommit?.();
+    } catch (error) {
+      profileImport.discardChromeProfileCookieImportPlan(prepared.plan);
+      throw error;
+    }
     const { imported, snapshot } = await commitAndFinalize('profile', () =>
       profileImport.commitChromeProfileCookieImport(prepared.plan, {
         cookieStore: options.getCookieStore(),
@@ -136,7 +141,12 @@ function createBrowserCookieImports(options) {
       discardBrowserCookieImportPlan(plan);
       return { source: 'chrome', canceled: true, snapshot: await options.snapshot() };
     }
-    await options.beforeCommit?.();
+    try {
+      await options.beforeCommit?.();
+    } catch (error) {
+      discardBrowserCookieImportPlan(plan);
+      throw error;
+    }
     const { imported, snapshot } = await commitAndFinalize('file', () =>
       commitBrowserCookieImport(plan, {
         cookieStore: options.getCookieStore(),

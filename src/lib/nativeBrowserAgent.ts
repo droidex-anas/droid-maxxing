@@ -3,6 +3,8 @@ import { isDesktop } from './desktop';
 import { performDesktopNativeBrowserRequest } from './nativeBrowser';
 
 export interface NativeBrowserController {
+  appSessionId: string;
+  browserSessionId?: string;
   perform(request: BrowserNativeRequest): Promise<BrowserNativeResult>;
 }
 
@@ -32,6 +34,12 @@ export async function performNativeBrowserRequest(
     return performDesktopNativeBrowserRequest(request);
   }
   const active = controller ?? (await waitForController(timeoutMs));
+  const matchesBrowser = active.browserSessionId
+    ? active.browserSessionId === request.browserSessionId
+    : request.action === 'open';
+  if (controller !== active || active.appSessionId !== request.appSessionId || !matchesBrowser) {
+    throw new Error('The requested DROIDEX Browser pane is no longer active.');
+  }
   return active.perform(request);
 }
 

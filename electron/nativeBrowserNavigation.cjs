@@ -51,6 +51,9 @@ function createNativeBrowserNavigation({
     const contents = safeWebContents(view);
     if (!contents || entry.view !== view) return false;
     if (!isCrossOriginNavigation(contents.getURL(), destinationUrl)) return true;
+    if (consumeApprovedHistoryTransition(entry, view, kind, destinationUrl)) {
+      return true;
+    }
     const trustedUserTransition =
       entry.userNavigationActive ||
       (kind !== 'redirect' && consumeTrustedPhysicalNavigation(entry, view, destinationUrl));
@@ -70,6 +73,40 @@ function createNativeBrowserNavigation({
       documentGeneration: entry.documentGeneration,
       now: now(),
     });
+  }
+
+  async function authorizeHistoryTransition(entry, view, destinationUrl, autonomy) {
+    const exactDestinationUrl = safeHttpUrl(destinationUrl);
+    if (!exactDestinationUrl) {
+      throw new Error('Agent browser navigation requires an exact HTTP(S) target.');
+    }
+    entry.approvedHistoryTransition = null;
+    const navigationGeneration = entry.navigationGeneration;
+    const documentGeneration = entry.documentGeneration;
+    await browserSettings.authorizeAgentOrigin(exactDestinationUrl, autonomy);
+    assertCurrentNavigation(entry, view, navigationGeneration);
+    if (entry.documentGeneration !== documentGeneration) {
+      throw new Error('Browser navigation was canceled because the browser page changed.');
+    }
+    entry.approvedHistoryTransition = {
+      view,
+      navigationGeneration,
+      documentGeneration,
+      destinationUrl: exactDestinationUrl,
+    };
+  }
+
+  function consumeApprovedHistoryTransition(entry, view, kind, destinationUrl) {
+    const approval = entry.approvedHistoryTransition;
+    entry.approvedHistoryTransition = null;
+    return Boolean(
+      approval &&
+      kind === 'navigate' &&
+      approval.view === view &&
+      approval.navigationGeneration === entry.navigationGeneration &&
+      approval.documentGeneration === entry.documentGeneration &&
+      approval.destinationUrl === safeHttpUrl(destinationUrl),
+    );
   }
 
   function beginAgentNavigationApproval(entry, view, requestedUrl) {
@@ -124,17 +161,25 @@ function createNativeBrowserNavigation({
     }
   }
 
+  function finishAgentAction(entry) {
+    entry.approvedHistoryTransition = null;
+    if (entry.pendingAgentNavigation) invalidate(entry);
+  }
+
   function invalidate(entry) {
     entry.navigationGeneration += 1;
     entry.pendingAgentNavigation = null;
     entry.trustedUserNavigation = null;
+    entry.approvedHistoryTransition = null;
   }
 
   return {
     authorizeTransition,
+    authorizeHistoryTransition,
     clearTrustedUserNavigation,
     consumePendingApproval,
     expireTrustedUserNavigation,
+    finishAgentAction,
     invalidate,
     recordTrustedUserNavigation,
   };
@@ -145,6 +190,16 @@ function isCrossOriginNavigation(currentUrl, nextUrl) {
     return new URL(currentUrl).origin !== new URL(nextUrl).origin;
   } catch {
     return true;
+  }
+}
+
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
   }
 }
 

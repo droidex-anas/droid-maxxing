@@ -1,5 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { calculatePopoverPosition } from './popoverPosition';
+
+test('offscreen anchors keep vertical popover edges inside the viewport', () => {
+  for (const top of [-100, 800]) {
+    const position = calculatePopoverPosition({
+      anchor: { top, bottom: top + 36, left: 20, right: 180, width: 160 },
+      viewport: { width: 800, height: 600 },
+      width: 'anchor',
+      align: 'left',
+    });
+    assert.equal(position.top ?? position.bottom, 8);
+    assert.equal(position.maxHeight, 584);
+  }
+});
 
 test('anchor-width popovers escape a clipping card while staying inside the viewport', async () => {
   const module = await import('./popoverPosition');

@@ -219,6 +219,34 @@ test('unknown tools cannot gain first-party browser permission deferral by name 
   assert.equal(approvalRequests(harness.emitted).length, 1);
 });
 
+test('browser-first mixed batches require approval and cannot cache the first tool as a grant', async () => {
+  const harness = createHarness();
+  harness.addLiveSession('app-1');
+  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
+  const browser = droidexBrowserPermissionInput('browser', 'hover');
+  const batch = {
+    ...browser,
+    toolUses: [...browser.toolUses, ...permissionInput('exec').toolUses],
+  };
+  for (const outcome of ['proceed_always', 'cancel']) {
+    const pending = Promise.resolve(handler(batch));
+    const request = latestApprovalRequest(harness.emitted);
+    await harness.interactions.respondToApproval('app-1', request.requestId, outcome);
+    await pending;
+  }
+  assert.equal(approvalRequests(harness.emitted).length, 2);
+  assert.equal(
+    await handler({
+      ...browser,
+      toolUses: [
+        ...browser.toolUses,
+        ...droidexBrowserPermissionInput('snapshot', 'snapshot').toolUses,
+      ],
+    }),
+    ToolConfirmationOutcome.ProceedOnce,
+  );
+});
+
 test('ProceedAlways bypasses only an equivalent later permission signature', async () => {
   const harness = createHarness();
   harness.addLiveSession('app-1');

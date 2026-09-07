@@ -24,10 +24,12 @@ function createNativeBrowserLayout({
   let attachedBrowserSessionId = null;
   let attachmentRevision = 0;
   let requestedAttachmentId = null;
+  let requestedAttachmentBounds = null;
 
   async function attachNativeBrowser(browserSessionId, bounds, attachOptions = {}) {
     const revision = ++attachmentRevision;
     requestedAttachmentId = urls.normalizeNativeBrowserSessionId(browserSessionId);
+    requestedAttachmentBounds = urls.normalizeBounds(bounds);
     const entry = ensureView(browserSessionId);
     const view = entry.view;
     if (entry.serialized) await restoreSnapshot(entry);
@@ -45,13 +47,12 @@ function createNativeBrowserLayout({
     viewHost.attachToMainWindow(entry);
     attachedBrowserSessionId = entry.browserSessionId;
     entry.attached = true;
-    const normalizedBounds = urls.normalizeBounds(bounds);
-    setBrowserViewBoundsIfChanged(view, normalizedBounds);
+    setBrowserViewBoundsIfChanged(view, requestedAttachmentBounds);
     if (entry.visible)
       cursor.attach({
         browserSessionId: entry.browserSessionId,
         hostWindow: getMainWindow(),
-        bounds: normalizedBounds,
+        bounds: requestedAttachmentBounds,
       });
     eviction.touch(entry);
     if (entry.state.designMode) applyDesignState(entry);
@@ -77,6 +78,7 @@ function createNativeBrowserLayout({
     if (invalidateAttachment && requestedAttachmentId === targetBrowserSessionId) {
       attachmentRevision += 1;
       requestedAttachmentId = null;
+      requestedAttachmentBounds = null;
     }
     if (!targetBrowserSessionId) return;
     const entry = findEntry(targetBrowserSessionId);
@@ -92,9 +94,13 @@ function createNativeBrowserLayout({
   }
 
   function setNativeBrowserBounds(browserSessionId, bounds) {
-    const entry = findEntry(urls.normalizeNativeBrowserSessionId(browserSessionId));
-    if (!entry?.attached || !isBrowserViewUsable(entry.view)) return;
+    const normalizedBrowserSessionId = urls.normalizeNativeBrowserSessionId(browserSessionId);
     const normalizedBounds = urls.normalizeBounds(bounds);
+    if (requestedAttachmentId === normalizedBrowserSessionId) {
+      requestedAttachmentBounds = normalizedBounds;
+    }
+    const entry = findEntry(normalizedBrowserSessionId);
+    if (!entry?.attached || !isBrowserViewUsable(entry.view)) return;
     if (setBrowserViewBoundsIfChanged(entry.view, normalizedBounds)) {
       cursor.setBounds(entry.browserSessionId, normalizedBounds);
     }
@@ -117,15 +123,16 @@ function createNativeBrowserLayout({
 
   function mountRecovered(entry, bounds, revision) {
     if (attachmentRevision === revision && requestedAttachmentId === entry.browserSessionId) {
+      const recoveredBounds = requestedAttachmentBounds ?? bounds;
       viewHost.attachToMainWindow(entry);
       entry.attached = true;
       attachedBrowserSessionId = entry.browserSessionId;
-      setBrowserViewBoundsIfChanged(entry.view, bounds);
+      setBrowserViewBoundsIfChanged(entry.view, recoveredBounds);
       if (entry.visible)
         cursor.attach({
           browserSessionId: entry.browserSessionId,
           hostWindow: getMainWindow(),
-          bounds,
+          bounds: recoveredBounds,
         });
     } else {
       viewHost.setHiddenBounds(entry, entry.viewport);
@@ -140,6 +147,7 @@ function createNativeBrowserLayout({
 
   function invalidate() {
     requestedAttachmentId = null;
+    requestedAttachmentBounds = null;
     attachedBrowserSessionId = null;
     attachmentRevision += 1;
   }

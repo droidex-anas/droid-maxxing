@@ -22,13 +22,19 @@ function prepareMacEntitlements(options) {
     path.join(options.projectRoot, BASE_ENTITLEMENTS_PATH),
     'utf8',
   );
-  if (!baseEntitlements.includes('</dict>')) {
-    throw new Error('DROIDEX macOS entitlements are malformed: missing the closing dictionary.');
+  const rootDictionaryClose = /(^|\r?\n)([\t ]*)<\/dict>(\s*<\/plist>\s*)$/;
+  const rootDictionaryMatch = baseEntitlements.match(rootDictionaryClose);
+  if (!rootDictionaryMatch) {
+    throw new Error(
+      'DROIDEX macOS entitlements are malformed: missing the root dictionary closing tag.',
+    );
   }
-
+  const [, lineStart, dictionaryIndent, plistClose] = rootDictionaryMatch;
+  const newline = lineStart === '\r\n' ? '\r\n' : '\n';
+  const entryIndent = `${dictionaryIndent}  `;
   const signedEntitlements = baseEntitlements.replace(
-    '  </dict>',
-    `    <key>keychain-access-groups</key>\n    <array>\n      <string>${webAuthnKeychainAccessGroup}</string>\n    </array>\n  </dict>`,
+    rootDictionaryClose,
+    `${lineStart}${entryIndent}<key>keychain-access-groups</key>${newline}${entryIndent}<array>${newline}${entryIndent}  <string>${webAuthnKeychainAccessGroup}</string>${newline}${entryIndent}</array>${newline}${dictionaryIndent}</dict>${plistClose}`,
   );
   const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'droidex-entitlements-'));
   const entitlementsPath = path.join(outputDirectory, 'entitlements.mac.plist');

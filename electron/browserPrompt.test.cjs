@@ -11,7 +11,8 @@ function createFixture(overrides = {}) {
     isAvailable: () => true,
     randomUUID: () => `prompt-${++sequence}`,
     send: (prompt) => sent.push(prompt),
-    dismiss: (requestId) => dismissed.push(requestId),
+    dismiss: overrides.dismiss ?? ((requestId) => dismissed.push(requestId)),
+    logError: overrides.logError,
     maxQueuedPrompts: overrides.maxQueuedPrompts,
     now: overrides.now,
     timeoutMs: overrides.timeoutMs,
@@ -85,6 +86,28 @@ test('aborting one permission prompt closes only that prompt and advances the qu
   assert.equal(sent[1].requestId, 'prompt-2');
   assert.equal(controller.resolve('prompt-2', 0), true);
   assert.deepEqual(await second, { response: 0 });
+});
+
+test('a renderer dismissal failure still settles the prompt and advances the queue', async () => {
+  const errors = [];
+  const abort = new AbortController();
+  const { controller, sent } = createFixture({
+    dismiss: () => {
+      throw new Error('renderer destroyed');
+    },
+    logError: (message, error) => errors.push({ message, error }),
+  });
+  const first = controller.request(prompt, { signal: abort.signal });
+  const second = controller.request(prompt);
+
+  assert.doesNotThrow(() => abort.abort());
+  assert.deepEqual(await first, { response: 2 });
+  assert.equal(sent[1].requestId, 'prompt-2');
+  assert.equal(controller.resolve('prompt-2', 0), true);
+  assert.deepEqual(await second, { response: 0 });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /dismiss/i);
+  assert.match(errors[0].error.message, /renderer destroyed/);
 });
 
 test('queued prompts expire from enqueue time without ever being displayed', async () => {

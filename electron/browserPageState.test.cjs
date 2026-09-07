@@ -79,6 +79,18 @@ test('reload preserves an in-flight navigation instead of reverting to the previ
   );
 });
 
+test('reload ignores a superseded loading URL after the newer target commits', () => {
+  assert.deepEqual(
+    chooseBrowserReload({
+      currentUrl: 'https://example.com/new-page',
+      loadingUrl: 'https://example.com/superseded',
+      targetUrl: 'https://example.com/new-page',
+      homePage: 'https://www.google.com/',
+    }),
+    { kind: 'reload', url: 'https://example.com/new-page' },
+  );
+});
+
 test('reload recovers a blank renderer from the last valid page', () => {
   assert.deepEqual(
     chooseBrowserReload({

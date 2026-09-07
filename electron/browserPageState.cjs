@@ -1,12 +1,14 @@
 function chooseBrowserReload({ currentUrl, failedRestoreUrl, loadingUrl, targetUrl, homePage }) {
+  const activeLoadingUrl =
+    isBrowserPageUrl(loadingUrl) && browserPageUrlsMatch(loadingUrl, targetUrl) ? loadingUrl : null;
   if (
-    isBrowserPageUrl(loadingUrl) &&
-    (!isBrowserPageUrl(currentUrl) || !browserPageUrlsMatch(loadingUrl, currentUrl))
+    activeLoadingUrl &&
+    (!isBrowserPageUrl(currentUrl) || !browserPageUrlsMatch(activeLoadingUrl, currentUrl))
   ) {
-    return { kind: 'load', url: loadingUrl };
+    return { kind: 'load', url: activeLoadingUrl };
   }
   if (isBrowserPageUrl(currentUrl)) return { kind: 'reload', url: currentUrl };
-  for (const url of [failedRestoreUrl, loadingUrl, targetUrl, homePage]) {
+  for (const url of [failedRestoreUrl, activeLoadingUrl, targetUrl, homePage]) {
     if (isBrowserPageUrl(url)) return { kind: 'load', url };
   }
   throw new Error('DROIDEX Browser has no valid page to reload.');

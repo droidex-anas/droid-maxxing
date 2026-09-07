@@ -84,6 +84,8 @@ test('desktop requests bypass a mounted renderer controller', async () => {
     return { ...request, ok: true };
   });
   const unregister = registerNativeBrowserController({
+    appSessionId: 'app-1',
+    browserSessionId: 'browser-1',
     perform: async (request) => {
       controllerRequests.push(request);
       return { ...request, ok: true };
@@ -124,6 +126,8 @@ test('iframe requests wait deterministically for their renderer controller', asy
       };
       const pending = performNativeBrowserRequest(request, { timeoutMs: 100 });
       unregister = registerNativeBrowserController({
+        appSessionId: 'app-1',
+        browserSessionId: 'browser-1',
         perform: async (received) => {
           controllerRequests.push(received);
           return { ...received, ok: true };
@@ -144,6 +148,8 @@ test('background requests never target a mounted renderer controller', async () 
   const controllerRequests: BrowserNativeRequest[] = [];
   const fake = fakeBrowserWindow();
   const unregister = registerNativeBrowserController({
+    appSessionId: 'app-1',
+    browserSessionId: 'browser-1',
     perform: async (request) => {
       controllerRequests.push(request);
       return { ...request, ok: true };
@@ -169,6 +175,76 @@ test('background requests never target a mounted renderer controller', async () 
   } finally {
     unregister();
   }
+});
+
+test('a controller replaced while a request waits cannot receive the old chat action', async () => {
+  const fake = fakeBrowserWindow();
+  const received: BrowserNativeRequest[] = [];
+  await withBrowserWindow(async () => {
+    const pending = performNativeBrowserRequest({
+      requestId: 'waiting',
+      appSessionId: 'app-1',
+      browserSessionId: 'browser-1',
+      action: 'click',
+    });
+    const first = registerNativeBrowserController({
+      appSessionId: 'app-1',
+      browserSessionId: 'browser-1',
+      perform: async (request) => {
+        received.push(request);
+        return { ...request, ok: true };
+      },
+    });
+    first();
+    const second = registerNativeBrowserController({
+      appSessionId: 'app-2',
+      browserSessionId: 'browser-2',
+      perform: async (request) => {
+        received.push(request);
+        return { ...request, ok: true };
+      },
+    });
+    try {
+      await assert.rejects(pending, /no longer active/);
+      assert.deepEqual(received, []);
+    } finally {
+      second();
+    }
+  }, fake.value);
+});
+
+test('a chat-owned iframe can open its first browser before a browser snapshot exists', async () => {
+  const fake = fakeBrowserWindow();
+  const received: BrowserNativeRequest[] = [];
+  await withBrowserWindow(async () => {
+    const unregister = registerNativeBrowserController({
+      appSessionId: 'app-1',
+      perform: async (request) => {
+        received.push(request);
+        return { ...request, ok: true };
+      },
+    });
+    const request: BrowserNativeRequest = {
+      requestId: 'first-open',
+      appSessionId: 'app-1',
+      browserSessionId: 'browser-new',
+      action: 'open',
+    };
+    try {
+      assert.equal((await performNativeBrowserRequest(request)).ok, true);
+      await assert.rejects(
+        performNativeBrowserRequest({ ...request, appSessionId: 'app-2' }),
+        /no longer active/,
+      );
+      await assert.rejects(
+        performNativeBrowserRequest({ ...request, action: 'click' }),
+        /no longer active/,
+      );
+      assert.deepEqual(received, [request]);
+    } finally {
+      unregister();
+    }
+  }, fake.value);
 });
 
 test('desktop policy failures remain visible in the browser result', async () => {

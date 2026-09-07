@@ -11,11 +11,13 @@ function createNativeBrowserPage({
   runWithWebContentsDebugger,
   findEntryForContents,
 }) {
+  function currentCaptureContents(entry, view, contents) {
+    return entry.view === view && safeWebContents(view) === contents && !contents.isDestroyed();
+  }
+
   function currentCapture(entry, view, contents, documentGeneration) {
     return (
-      entry.view === view &&
-      safeWebContents(view) === contents &&
-      !contents.isDestroyed() &&
+      currentCaptureContents(entry, view, contents) &&
       entry.documentGeneration === documentGeneration
     );
   }
@@ -160,7 +162,7 @@ function createNativeBrowserPage({
       assertCurrentCapture(target);
       return image.isEmpty() ? undefined : image.toPNG().toString('base64');
     } finally {
-      if (currentCapture(entry, target.view, target.contents, target.documentGeneration)) {
+      if (currentCaptureContents(entry, target.view, target.contents)) {
         await setSensitiveFieldMask(target.contents, false).catch(() => undefined);
       }
       restoreBackgroundThrottling(target.contents, entry);
@@ -204,7 +206,7 @@ function createNativeBrowserPage({
       }
       return base64 ? { base64, box: padded } : undefined;
     } finally {
-      if (currentCapture(entry, target.view, target.contents, target.documentGeneration)) {
+      if (currentCaptureContents(entry, target.view, target.contents)) {
         await setSensitiveFieldMask(target.contents, false).catch(() => undefined);
       }
       finishCapture(entry);

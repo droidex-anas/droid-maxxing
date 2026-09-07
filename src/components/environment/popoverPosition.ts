@@ -29,17 +29,22 @@ export function calculatePopoverPosition({
   const spaceBelow = viewport.height - anchor.bottom - margin;
   const spaceAbove = anchor.top - margin;
   if (spaceBelow < 240 && spaceAbove > spaceBelow) {
+    const bottom = Math.max(
+      margin,
+      Math.min(viewport.height - margin, viewport.height - anchor.top + offset),
+    );
     return {
-      bottom: viewport.height - anchor.top + offset,
+      bottom,
       left,
       width: resolvedWidth,
-      maxHeight: Math.max(0, spaceAbove - offset),
+      maxHeight: Math.max(0, viewport.height - bottom - margin),
     };
   }
+  const top = Math.max(margin, Math.min(viewport.height - margin, anchor.bottom + offset));
   return {
-    top: anchor.bottom + offset,
+    top,
     left,
     width: resolvedWidth,
-    maxHeight: Math.max(0, spaceBelow - offset),
+    maxHeight: Math.max(0, viewport.height - top - margin),
   };
 }

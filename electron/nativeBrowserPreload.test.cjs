@@ -499,6 +499,72 @@ test('OAuth authentication intent includes the exact authoritative anchor destin
   );
 });
 
+test('focusing a credential field is not treated as submitting a sign-in form', () => {
+  const start = source.indexOf('function inspectAuthenticationIntent(request)');
+  const end = source.indexOf('\nfunction authoritativeAuthenticationTarget', start);
+  class Element {
+    constructor(tagName, type = '') {
+      this.tagName = tagName;
+      this.type = type;
+    }
+
+    matches(selector) {
+      return selector.split(',').some((candidate) => {
+        const value = candidate.trim();
+        if (value === 'button') return this.tagName === 'BUTTON';
+        if (value === 'a') return this.tagName === 'A';
+        if (value === 'input') return this.tagName === 'INPUT';
+        if (value === 'input[type="submit"]') {
+          return this.tagName === 'INPUT' && this.type === 'submit';
+        }
+        if (value === 'input[type="button"]') {
+          return this.tagName === 'INPUT' && this.type === 'button';
+        }
+        return false;
+      });
+    }
+
+    closest(selector) {
+      if (selector === 'form') return this.form;
+      return this.matches(selector) ? this : null;
+    }
+
+    getAttribute(name) {
+      return name === 'aria-label' ? 'Email' : '';
+    }
+  }
+  class HTMLIFrameElement extends Element {}
+  class HTMLAnchorElement extends Element {}
+  const form = {
+    textContent: 'Email Password',
+    getAttribute: () => '',
+    querySelector: (selector) => (selector === 'input[type="password"]' ? {} : null),
+  };
+  const username = new Element('INPUT', 'text');
+  username.form = form;
+  username.value = '';
+  username.textContent = '';
+  const inspect = vm.runInNewContext(
+    `(${source.slice(start, end).replace('function inspectAuthenticationIntent', 'function')})`,
+    {
+      Element,
+      HTMLAnchorElement,
+      HTMLIFrameElement,
+      authoritativeAuthenticationTarget: () => null,
+      cleanText: (value, limit) =>
+        String(value || '')
+          .trim()
+          .slice(0, limit),
+      currentAgentSnapshotTarget: () => username,
+      document: { elementFromPoint: () => username },
+      location: { href: 'https://app.example/login', origin: 'https://app.example' },
+      URL,
+    },
+  );
+
+  assert.equal(inspect({ action: 'click', ref: '@b-email', selector: '#email' }), null);
+});
+
 test('browser snapshots stop scanning after a bounded number of DOM nodes', () => {
   const ceilingMatch = source.match(/const MAX_SNAPSHOT_VISITED_NODES = ([\d_]+);/);
   assert.ok(ceilingMatch, 'snapshot node ceiling must be explicit');

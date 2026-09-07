@@ -46,10 +46,12 @@ export function restorePersistedBrowserSessions(
   restore: (state: BrowserRestoreState) => void = restoreBrowser,
 ): void {
   for (const [appSessionId, browser] of Object.entries(browsers)) {
+    const url = sanitizePersistedBrowserUrl(browser.url);
+    if (!url) continue;
     restore({
       browserSessionId: browser.browserSessionId,
       appSessionId,
-      url: browser.url,
+      url,
       title: browser.title,
       viewport: browser.viewport,
       viewportMode: browser.viewportMode,

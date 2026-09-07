@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createBrowserCredentialVault } = require('./browserCredentialVault.cjs');
-const { reserveDownloadPath } = require('./browserDownloads.cjs');
+const { downloadReservationKey, reserveDownloadPath } = require('./browserDownloads.cjs');
 const { createBrowserPermissionController } = require('./browserPermissions.cjs');
 const { browserPromptFromDialogOptions } = require('./browserPrompt.cjs');
 const { createBrowserCookieImports } = require('./browserCookieImports.cjs');
@@ -331,7 +331,7 @@ class BrowserSettingsController {
       item.getFilename(),
       this.reservedDownloadPaths,
     );
-    item.once('done', () => this.reservedDownloadPaths.delete(savePath));
+    item.once('done', () => this.reservedDownloadPaths.delete(downloadReservationKey(savePath)));
     item.setSavePath(savePath);
   }
 

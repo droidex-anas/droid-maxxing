@@ -7,6 +7,18 @@ import {
   viewportFromFrame,
 } from './browserViewport';
 
+test('addresses accept a query or fragment immediately after a host and port', () => {
+  for (const [input, expected] of [
+    ['localhost:3000?x=1', 'http://localhost:3000?x=1'],
+    ['example.com:8443#section', 'https://example.com:8443#section'],
+    ['::1:3000?x=1', 'http://[::1]:3000?x=1'],
+    ['example.com?x=1', 'https://example.com?x=1'],
+  ]) {
+    assert.equal(normalizeUrl(input), expected);
+    assert.equal(normalizeBrowserOmniboxInput(input), expected);
+  }
+});
+
 test('viewportFromFrame matches the fit browser surface inside the canvas frame', () => {
   assert.deepEqual(viewportFromFrame({ width: 1325, height: 857 }), {
     width: 1289,

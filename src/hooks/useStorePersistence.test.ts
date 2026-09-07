@@ -129,7 +129,7 @@ test('startup restoration preserves each persisted browser task identity', () =>
       'app-background': {
         browserSessionId: 'browser-background',
         appSessionId: 'wrong-stale-owner',
-        url: 'https://background.example.test',
+        url: 'https://background.example.test?code=secret#access_token=secret',
         viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
         viewportMode: 'fit',
         scroll: { x: 0, y: 10 },
@@ -144,6 +144,15 @@ test('startup restoration preserves each persisted browser task identity', () =>
         scroll: { x: 0, y: 0 },
         refs: [],
       },
+      'app-invalid': {
+        browserSessionId: 'browser-invalid',
+        appSessionId: 'app-invalid',
+        url: 'not a valid URL',
+        viewport: { width: 390, height: 844, deviceScaleFactor: 2 },
+        viewportMode: 'mobile',
+        scroll: { x: 0, y: 0 },
+        refs: [],
+      },
     },
     (state) => restored.push(state),
   );
@@ -151,8 +160,8 @@ test('startup restoration preserves each persisted browser task identity', () =>
   assert.deepEqual(
     restored.map((state) => [state.appSessionId, state.browserSessionId, state.url]),
     [
-      ['app-background', 'browser-background', 'https://background.example.test'],
-      ['app-visible', 'browser-visible', 'https://visible.example.test'],
+      ['app-background', 'browser-background', 'https://background.example.test/'],
+      ['app-visible', 'browser-visible', 'https://visible.example.test/'],
     ],
   );
 });

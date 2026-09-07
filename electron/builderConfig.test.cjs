@@ -1,8 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join } = require('node:path');
+const { dirname, join } = require('node:path');
+const { prepareMacEntitlements } = require('./macosEntitlements.cjs');
 
 const sparkleBridgeSource = require('node:fs').readFileSync(
   join(__dirname, '..', 'native', 'sparkle-updater', 'src', 'sparkle_updater.mm'),
@@ -151,6 +152,31 @@ test('release builds emit canonical update artifacts', () => {
     repo: 'droidex-releases',
     releaseType: 'release',
   });
+});
+
+test('release entitlements support structurally valid root dictionary indentation', (t) => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'droidex-entitlements-source-'));
+  const brandDirectory = join(projectRoot, 'assets', 'brand');
+  mkdirSync(brandDirectory, { recursive: true });
+  t.after(() => rmSync(projectRoot, { recursive: true, force: true }));
+
+  for (const closingIndent of ['', '\t']) {
+    writeFileSync(
+      join(brandDirectory, 'entitlements.mac.plist'),
+      `<?xml version="1.0"?>\n<plist version="1.0">\n<dict>\n${closingIndent}</dict>\n</plist>\n`,
+    );
+    const result = prepareMacEntitlements({
+      isReleaseBuild: true,
+      projectRoot,
+      teamId: 'A1B2C3D4E5',
+    });
+    t.after(() => rmSync(dirname(result.entitlementsPath), { recursive: true, force: true }));
+
+    assert.match(
+      readFileSync(result.entitlementsPath, 'utf8'),
+      /<key>keychain-access-groups<\/key>[\s\S]*A1B2C3D4E5\.app\.droidex\.webauthn/,
+    );
+  }
 });
 
 test('release builds require crash reporting configuration', () => {

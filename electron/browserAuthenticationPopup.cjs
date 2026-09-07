@@ -23,7 +23,7 @@ function consumeAuthenticationPopup(entry, view, url, partition, now = Date.now(
     capability.expiresAt <= now ||
     capability.targetUrl !== safeWebUrl(url)
   ) {
-    return undefined;
+    return capability ? { action: 'deny' } : undefined;
   }
   return {
     action: 'allow',

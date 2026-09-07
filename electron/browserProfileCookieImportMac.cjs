@@ -9,6 +9,8 @@ const CHROME_TO_UNIX_EPOCH_MICROSECONDS = 11_644_473_600_000_000n;
 const MICROSECONDS_PER_SECOND = 1_000_000n;
 const CHROME_PROFILE_LIMIT = 50;
 const COOKIE_LIMIT = 5_000;
+const COOKIE_LIMIT_BYTES = 4_096;
+const ENCRYPTED_COOKIE_LIMIT_BYTES = 4_147;
 const LOCAL_STATE_LIMIT_BYTES = 5 * 1024 * 1024;
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 
@@ -26,9 +28,13 @@ async function discoverChromeProfiles(homeDir) {
   const infoCache = localState?.profile?.info_cache;
   if (!infoCache || typeof infoCache !== 'object' || Array.isArray(infoCache)) return [];
   const lastUsed = localState.profile.last_used;
+  const profileEntries = Object.entries(infoCache).sort(
+    ([leftId], [rightId]) => Number(rightId === lastUsed) - Number(leftId === lastUsed),
+  );
   const profiles = [];
-  for (const [profileId, info] of Object.entries(infoCache)) {
-    if (profiles.length >= CHROME_PROFILE_LIMIT || !isChromeProfileId(profileId)) continue;
+  for (const [profileId, info] of profileEntries) {
+    if (profiles.length >= CHROME_PROFILE_LIMIT) break;
+    if (!isChromeProfileId(profileId)) continue;
     const cookieDatabasePath = await findChromeCookieDatabasePath(root, profileId);
     if (!cookieDatabasePath) continue;
     profiles.push(
@@ -63,9 +69,7 @@ async function findChromeCookieDatabasePath(root, profileId) {
 
 async function readChromeProfileCookies({ profileId, homeDir, nowMs }, dependencies = {}) {
   assertChromeProfileId(profileId);
-  const profile = (await discoverChromeProfiles(homeDir)).find(
-    (candidate) => candidate.id === profileId,
-  );
+  const profile = (await discoverChromeProfiles(homeDir)).find(({ id }) => id === profileId);
   if (!profile) {
     throw profileError(
       'CHROME_PROFILE_NOT_FOUND',
@@ -109,6 +113,27 @@ function readChromeCookieRows(databasePath, Database = DatabaseSync) {
       );
     }
     assertCookieColumns(database);
+    const oversizedRow = database
+      .prepare(
+        `SELECT 1 FROM cookies
+          WHERE length(CAST(host_key AS BLOB)) > 254
+             OR COALESCE(length(CAST(name AS BLOB)), 0) +
+                COALESCE(length(CAST(value AS BLOB)), 0) > ${COOKIE_LIMIT_BYTES}
+             OR length(CAST(encrypted_value AS BLOB)) > ${ENCRYPTED_COOKIE_LIMIT_BYTES}
+             OR length(CAST(path AS BLOB)) > 8192
+             OR length(CAST(expires_utc AS BLOB)) > 20
+             OR length(CAST(top_frame_site_key AS BLOB)) > ${COOKIE_LIMIT_BYTES}
+             OR typeof(has_expires) <> 'integer' OR typeof(is_secure) <> 'integer'
+             OR typeof(is_httponly) <> 'integer' OR typeof(samesite) <> 'integer'
+          LIMIT 1`,
+      )
+      .get();
+    if (oversizedRow) {
+      throw profileError(
+        'CHROME_COOKIE_DATABASE_UNAVAILABLE',
+        'Chrome cookie data is malformed. Clear the affected Chrome site data or use a cookie export.',
+      );
+    }
     const rows = database
       .prepare(
         `SELECT host_key, name, value, encrypted_value, path,

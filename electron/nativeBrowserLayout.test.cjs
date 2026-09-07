@@ -98,3 +98,22 @@ test('recovered background view cannot reclaim a changed layout lease', async ()
   assert.equal(f.entries.get('first').attached, false);
   assert.equal(f.entries.get('second').attached, true);
 });
+
+test('recovered attached view uses bounds updated during the recovery delay', async () => {
+  const f = fixture();
+  const initialBounds = { x: 0, y: 0, width: 800, height: 600 };
+  const latestBounds = { x: 20, y: 30, width: 960, height: 720 };
+  await f.layout.attach('first', initialBounds);
+  const revision = f.layout.revision();
+  const entry = f.entries.get('first');
+  const replacementView = entry.view;
+
+  entry.view = null;
+  entry.attached = false;
+  f.layout.release(entry);
+  f.layout.setBounds('first', latestBounds);
+  entry.view = replacementView;
+  f.layout.mountRecovered(entry, initialBounds, revision);
+
+  assert.deepEqual(entry.view.getBounds(), latestBounds);
+});

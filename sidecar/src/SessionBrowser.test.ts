@@ -5,6 +5,31 @@ import { SessionBrowser } from './SessionBrowser.js';
 import type { ServerEvent } from './protocol.js';
 import { FakeBrowserSessionManager } from './testing/browserCharacterizationSupport.js';
 
+test('restore reports a missing chat identity through browser error events', async () => {
+  const events: ServerEvent[] = [];
+  const browser = new SessionBrowser({
+    browsers: new FakeBrowserSessionManager(() => undefined),
+    emit: (event) => events.push(event),
+    getAutonomy: () => undefined,
+    sendPrompt: () => Promise.resolve(),
+  });
+  await browser.handle({
+    type: 'browser.restore',
+    state: {
+      browserSessionId: 'browser-1',
+      appSessionId: '',
+      url: 'https://example.test',
+      viewport: { width: 1200, height: 800, deviceScaleFactor: 1 },
+      viewportMode: 'fit',
+      scroll: { x: 0, y: 0 },
+    },
+  });
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['browser.error', 'error'],
+  );
+});
+
 test('shutdown rejects pending native browser work and blocks future requests', async () => {
   const events: ServerEvent[] = [];
   const sessionBrowser = new SessionBrowser({

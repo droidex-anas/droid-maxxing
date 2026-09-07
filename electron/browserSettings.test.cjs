@@ -89,6 +89,23 @@ function deferred() {
   return { promise, resolve };
 }
 
+function downloadItem(filename) {
+  let done;
+  let savePath;
+  return {
+    getFilename: () => filename,
+    once: (event, listener) => {
+      assert.equal(event, 'done');
+      done = listener;
+    },
+    setSavePath: (value) => {
+      savePath = value;
+    },
+    finish: () => done(),
+    savePath: () => savePath,
+  };
+}
+
 test('browser settings default to global autonomy policy, Google, and visible cursor', async () => {
   await withController(
     async ({ appliedCursorSizes, appliedCursorStyles, appliedCursorVisibility, controller }) => {
@@ -342,6 +359,41 @@ test('protection-reducing settings require a main-owned native confirmation', as
     responses.push(0);
     snapshot = await controller.update({ navigationApproval: 'never_ask' });
     assert.equal(snapshot.navigationApproval, 'never_ask');
+  });
+});
+
+test('each navigation approval reduction requires a main-owned native confirmation', async () => {
+  await withController(async ({ controller, prompts, responses }) => {
+    await controller.update({ navigationApproval: 'always_ask' });
+
+    let snapshot = await controller.update({ navigationApproval: 'new_sites' });
+    assert.equal(snapshot.navigationApproval, 'always_ask');
+    snapshot = await controller.update({ navigationApproval: 'follow_autonomy' });
+    assert.equal(snapshot.navigationApproval, 'always_ask');
+
+    responses.push(0);
+    snapshot = await controller.update({ navigationApproval: 'new_sites' });
+    assert.equal(snapshot.navigationApproval, 'new_sites');
+    snapshot = await controller.update({ navigationApproval: 'follow_autonomy' });
+    assert.equal(snapshot.navigationApproval, 'new_sites');
+
+    assert.equal(prompts.length, 4);
+    assert.ok(prompts.every((prompt) => prompt.defaultId === 1));
+  });
+});
+
+test('completed downloads release their case-insensitive path reservation', async () => {
+  await withController(async ({ controller, responses }) => {
+    responses.push(0);
+    await controller.update({ askDownloadLocation: false });
+    const first = downloadItem('Report.pdf');
+    controller.prepareDownload(first);
+    first.finish();
+
+    const next = downloadItem('REPORT.pdf');
+    controller.prepareDownload(next);
+
+    assert.equal(path.basename(next.savePath()), 'REPORT.pdf');
   });
 });
 

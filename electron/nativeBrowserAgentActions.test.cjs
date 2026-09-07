@@ -6,17 +6,21 @@ const interaction = require('./browserAgentInteraction.cjs');
 
 function deferred() {
   let resolve;
-  const promise = new Promise((settle) => {
+  let reject;
+  const promise = new Promise((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function harness(overrides = {}) {
   const calls = {
     agentApproval: [],
+    authentication: [],
     close: [],
     open: [],
+    reload: [],
     resize: [],
     originApproval: [],
     scripts: [],
@@ -72,6 +76,8 @@ function harness(overrides = {}) {
     agentActionActive: false,
     userNavigationActive: false,
     agentRequest: null,
+    pendingAgentNavigation: null,
+    approvedHistoryTransition: null,
   };
   let currentEntry = entry;
   const actions = createNativeBrowserAgentActions({
@@ -83,19 +89,34 @@ function harness(overrides = {}) {
       calls.open.push({ id, url, viewport });
       if (overrides.open) await overrides.open.promise;
     },
-    reloadBrowser: async () => {},
+    reloadBrowser: async () => {
+      calls.reload.push('browser-1');
+      if (overrides.reload) await overrides.reload.promise;
+    },
     closeBrowser: (id) => {
       calls.close.push(id);
       currentEntry = null;
     },
-    resizeBrowser: (_entry, viewport) => calls.resize.push(viewport),
+    resizeBrowser: async (_entry, viewport) => {
+      calls.resize.push(viewport);
+      if (overrides.resize) await overrides.resize.promise;
+    },
     page: { capture: async () => 'image' },
     navigation: {
+      authorizeHistoryTransition: async (_entry, _view, url, autonomy) => {
+        calls.originApproval.push({ url, autonomy });
+        if (overrides.originApproval) await overrides.originApproval.promise;
+      },
       consumePendingApproval: async () => false,
+      finishAgentAction: (candidate) => {
+        candidate.pendingAgentNavigation = null;
+        candidate.approvedHistoryTransition = null;
+      },
       ...overrides.navigation,
     },
     credentials: {
       authorizeAuthentication: async () => {
+        calls.authentication.push('browser-1');
         if (overrides.authentication) await overrides.authentication.promise;
       },
       fillForAgent: async (_entry, _contents, request) => ({
@@ -178,6 +199,19 @@ test('close during agent authorization cannot reopen the browser after approval'
   assert.equal(getCurrentEntry(), null);
 });
 
+test('failed agent action releases its pending navigation approval before retry', async () => {
+  const open = deferred();
+  const { actions, entry } = harness({ open });
+  const opening = actions.run(request('open', { url: 'https://site.test/page' }));
+  await Promise.resolve();
+  entry.pendingAgentNavigation = { promise: Promise.reject(new Error('origin denied')) };
+  void entry.pendingAgentNavigation.promise.catch(() => undefined);
+  open.reject(new Error('page open failed'));
+
+  await assert.rejects(opening, /page open failed/);
+  assert.equal(entry.pendingAgentNavigation, null);
+});
+
 test('direct user navigation skips agent policy authorization inside admission', async () => {
   const { actions, calls } = harness();
 
@@ -203,12 +237,38 @@ test('page replacement during authentication approval prevents final agent input
   );
 });
 
+test('authentication approval does not consume the navigation timeout', async (t) => {
+  const timers = [];
+  t.mock.method(globalThis, 'setTimeout', (callback, timeoutMs) => {
+    const timer = { callback, timeoutMs, cleared: false, unref() {} };
+    timers.push(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, 'clearTimeout', (timer) => {
+    timer.cleared = true;
+  });
+  const authentication = deferred();
+  const { actions, calls } = harness({ authentication });
+  const result = actions.run(request('click', { ref: 'ref-1' }));
+  while (calls.authentication.length === 0) await Promise.resolve();
+
+  assert.equal(
+    timers.some(({ timeoutMs }) => timeoutMs === 7_000),
+    false,
+  );
+  authentication.resolve();
+
+  assert.equal((await result).ok, true);
+  const navigationTimer = timers.find(({ timeoutMs }) => timeoutMs === 7_000);
+  assert.ok(navigationTimer);
+  assert.equal(navigationTimer.cleared, true);
+});
+
 test('navigation that wins the action race returns a fresh snapshot', async () => {
   const execution = deferred();
   const { actions, contents } = harness({ execution });
   const result = actions.run(request('click', { ref: 'ref-1' }));
-  await Promise.resolve();
-  await Promise.resolve();
+  while (contents.listenerCount('did-start-navigation') === 0) await Promise.resolve();
   contents.emit('did-start-navigation', {}, 'https://site.test/next', false, true);
   contents.emit('did-finish-load');
 
@@ -223,6 +283,27 @@ test('navigation that wins the action race returns a fresh snapshot', async () =
   });
 });
 
+test('reload timeout rejects instead of returning a stale snapshot', async (t) => {
+  const timers = [];
+  t.mock.method(globalThis, 'setTimeout', (callback, timeoutMs) => {
+    const timer = { callback, timeoutMs, cleared: false, unref() {} };
+    timers.push(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, 'clearTimeout', (timer) => {
+    timer.cleared = true;
+  });
+  const { actions, calls } = harness();
+  const reload = actions.run(request('reload'));
+  while (calls.reload.length === 0) await Promise.resolve();
+
+  const navigationTimer = timers.find(({ timeoutMs }) => timeoutMs === 7_000);
+  assert.ok(navigationTimer);
+  navigationTimer.callback();
+
+  await assert.rejects(reload, /navigation timed out/i);
+});
+
 test('resize delegates semantic viewport handling without attaching', async () => {
   const { actions, calls, entry } = harness();
   const viewport = { width: 640, height: 480, deviceScaleFactor: 2 };
@@ -233,6 +314,26 @@ test('resize delegates semantic viewport handling without attaching', async () =
   });
   assert.deepEqual(calls.resize, [viewport]);
   assert.equal(entry.attached, false);
+});
+
+test('direct user resize skips agent policy without granting navigation trust', async () => {
+  const resize = deferred();
+  const { actions, calls, entry } = harness({ resize });
+  const resizing = actions.run(
+    request('resize', {
+      source: 'user',
+      viewport: { width: 640, height: 480, deviceScaleFactor: 2 },
+    }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(calls.agentApproval, []);
+  assert.equal(entry.userNavigationActive, false);
+  assert.equal(entry.agentActionActive, true);
+
+  resize.resolve();
+  await resizing;
 });
 
 test('browser sessions stay bound to their owning app session', async () => {
@@ -257,7 +358,7 @@ test('overlapping browser operations are rejected without clearing the active op
 test('history navigation is canceled when the page changes during origin approval', async () => {
   const originApproval = deferred();
   let historyNavigations = 0;
-  const { actions, contents, entry } = harness({
+  const { actions, calls, contents, entry } = harness({
     originApproval,
     contents: {
       navigationHistory: {
@@ -275,12 +376,62 @@ test('history navigation is canceled when the page changes during origin approva
   const navigation = actions.run(request('goBack'));
   await Promise.resolve();
   await Promise.resolve();
+  assert.deepEqual(calls.originApproval, [{ url: 'https://other.test/page', autonomy: 'medium' }]);
   entry.documentGeneration += 1;
   originApproval.resolve();
 
   await assert.rejects(navigation, /page changed before the browser action completed/i);
   assert.equal(historyNavigations, 0);
   contents.emit('destroyed');
+});
+
+test('history approval does not consume or detach the navigation timeout', async (t) => {
+  const timers = [];
+  t.mock.method(globalThis, 'setTimeout', (callback, timeoutMs) => {
+    const timer = { callback, timeoutMs, cleared: false, unref() {} };
+    timers.push(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, 'clearTimeout', (timer) => {
+    timer.cleared = true;
+  });
+  const originApproval = deferred();
+  let historyNavigations = 0;
+  const { actions, calls, contents, entry } = harness({
+    originApproval,
+    contents: {
+      navigationHistory: {
+        canGoBack: () => true,
+        canGoForward: () => false,
+        canGoToOffset: () => true,
+        getActiveIndex: () => 1,
+        getEntryAtIndex: () => ({ url: 'https://other.test/page' }),
+        goToOffset: () => {
+          historyNavigations += 1;
+        },
+      },
+    },
+  });
+  const result = actions.run(request('goBack'));
+  while (calls.originApproval.length === 0) await Promise.resolve();
+
+  assert.equal(
+    timers.some(({ timeoutMs }) => timeoutMs === 7_000),
+    false,
+  );
+  assert.equal(entry.agentActionActive, true);
+  originApproval.resolve();
+  while (historyNavigations === 0) await Promise.resolve();
+
+  const navigationTimer = timers.find(({ timeoutMs }) => timeoutMs === 7_000);
+  assert.ok(navigationTimer);
+  assert.equal(entry.agentActionActive, true);
+  contents.emit('did-start-navigation', {}, 'https://other.test/page', false, true);
+  contents.emit('did-finish-load');
+
+  assert.equal((await result).ok, true);
+  assert.equal(navigationTimer.cleared, true);
+  assert.equal(entry.agentActionActive, false);
 });
 
 test('open rejects a replacement view instead of snapshotting the wrong page', async () => {

@@ -90,6 +90,7 @@ function createNativeBrowserViewFactory({
       documentGeneration: 0,
       pendingAgentNavigation: null,
       trustedUserNavigation: null,
+      approvedHistoryTransition: null,
       authenticationCapability: null,
       authenticationPopupCapability: null,
       captureActivityCount: 0,

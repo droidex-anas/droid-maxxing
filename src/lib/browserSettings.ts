@@ -226,14 +226,19 @@ export function chooseBrowserDownloadDirectory(): Promise<BrowserSettingsSnapsho
 export async function commitBrowserSettingsPatch(
   current: BrowserSettingsSnapshot,
   patch: BrowserSettingsPatch,
-  publish: (snapshot: BrowserSettingsSnapshot) => void,
+  publish: (snapshot: BrowserSettingsSnapshot | null) => void,
   save = updateBrowserSettings,
+  reload = getBrowserSettings,
 ): Promise<void> {
   publish({ ...current, ...patch });
   try {
     publish(await save(patch));
   } catch (error) {
-    publish(current);
+    try {
+      publish(await reload());
+    } catch {
+      publish(null);
+    }
     throw error;
   }
 }

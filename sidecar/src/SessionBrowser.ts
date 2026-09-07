@@ -139,9 +139,11 @@ export class SessionBrowser {
   }
 
   async restore(cmd: Extract<ClientCommand, { type: 'browser.restore' }>): Promise<void> {
-    const appSessionId = this.requireBrowserAppSessionId(cmd.state.appSessionId);
-    await this.handleBrowser(appSessionId, () =>
-      this.d.browsers.restore({ ...cmd.state, appSessionId }),
+    await this.handleBrowser(cmd.state.appSessionId, () =>
+      this.d.browsers.restore({
+        ...cmd.state,
+        appSessionId: this.requireBrowserAppSessionId(cmd.state.appSessionId),
+      }),
     );
   }
 
@@ -343,7 +345,7 @@ export class SessionBrowser {
   }
 
   private requireBrowserAppSessionId(appSessionId?: string): string {
-    if (!appSessionId) {
+    if (typeof appSessionId !== 'string' || !appSessionId.trim()) {
       throw new Error(
         'Browser sessions are scoped to a Droid chat. Select or create a chat before opening the browser.',
       );

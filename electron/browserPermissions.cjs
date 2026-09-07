@@ -119,6 +119,9 @@ function createBrowserPermissionController(options) {
         ) {
           return false;
         }
+        if (unresolvedMediaTypes.some((mediaType) => siteDecision(origin, mediaType) === 'deny')) {
+          return false;
+        }
 
         if (response.decision === 'allow_once') {
           addGrants(state.grants, origin, unresolvedMediaTypes);

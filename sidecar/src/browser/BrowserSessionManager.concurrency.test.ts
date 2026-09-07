@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { BrowserDesignReferences } from './BrowserDesignReferences.js';
 import { BrowserSessionManager, type BrowserRuntime } from './BrowserSessionManager.js';
 import type { BrowserSnapshot } from './types.js';
 
@@ -17,8 +18,9 @@ test('browser actions execute in request order within one managed session', asyn
 
   assert.deepEqual(runtime.actions, ['open', 'type:first']);
 
+  const firstRejected = assert.rejects(first, /superseded/);
   typeResult.resolve(snapshot('https://example.test/typed'));
-  await first;
+  await firstRejected;
   await second;
 
   assert.deepEqual(runtime.actions, ['open', 'type:first', 'keypress:Enter']);
@@ -73,6 +75,68 @@ test('close invalidates active and queued actions before a replacement is create
 
   assert.equal(updates.length, updateCount);
   assert.equal(manager.state('chat-1')?.url, 'https://new.example.test');
+});
+
+test('a newer navigation rejects an older update still awaiting design cleanup', async (t) => {
+  const runtime = new ControlledRuntime();
+  const updates: string[] = [];
+  const manager = new BrowserSessionManager({
+    emit: (event) => {
+      if (event.type === 'browser.updated') updates.push(event.state.url);
+    },
+    runtimeFactory: () => runtime,
+  });
+  await manager.open({ appSessionId: 'chat-1', url: 'https://example.test' });
+  const cleanupStarted = deferred<void>();
+  const finishCleanup = deferred<void>();
+  t.mock.method(BrowserDesignReferences.prototype, 'navigate', async (url: string) => {
+    if (!url.endsWith('/slow')) return;
+    cleanupStarted.resolve();
+    await finishCleanup.promise;
+  });
+  const slowResult = deferred<BrowserSnapshot>();
+  runtime.nextTypeResult = slowResult;
+
+  const staleUpdate = manager.type('chat-1', 'slow');
+  slowResult.resolve(snapshot('https://example.test/slow'));
+  await cleanupStarted.promise;
+  await manager.keypress('chat-1', 'Enter');
+  finishCleanup.resolve();
+
+  await assert.rejects(staleUpdate, /superseded/);
+  assert.equal(manager.state('chat-1')?.url, 'https://example.test/keypressed');
+  assert.deepEqual(updates, ['https://example.test', 'https://example.test/keypressed']);
+});
+
+test('closing a session rejects an update still awaiting design cleanup', async (t) => {
+  const runtime = new ControlledRuntime();
+  const updates: string[] = [];
+  const manager = new BrowserSessionManager({
+    emit: (event) => {
+      if (event.type === 'browser.updated') updates.push(event.state.url);
+    },
+    runtimeFactory: () => runtime,
+  });
+  await manager.open({ appSessionId: 'chat-1', url: 'https://example.test' });
+  const cleanupStarted = deferred<void>();
+  const finishCleanup = deferred<void>();
+  t.mock.method(BrowserDesignReferences.prototype, 'navigate', async (url: string) => {
+    if (!url.endsWith('/slow')) return;
+    cleanupStarted.resolve();
+    await finishCleanup.promise;
+  });
+  const slowResult = deferred<BrowserSnapshot>();
+  runtime.nextTypeResult = slowResult;
+
+  const staleUpdate = manager.type('chat-1', 'slow');
+  slowResult.resolve(snapshot('https://example.test/slow'));
+  await cleanupStarted.promise;
+  await manager.close('chat-1');
+  finishCleanup.resolve();
+
+  await assert.rejects(staleUpdate, /superseded/);
+  assert.equal(manager.state('chat-1'), undefined);
+  assert.deepEqual(updates, ['https://example.test']);
 });
 
 class ControlledRuntime implements BrowserRuntime {

@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 
 const COOKIE_EXPORT_LIMIT_BYTES = 10 * 1024 * 1024;
 const COOKIE_EXPORT_LIMIT_ROWS = 5_000;
+const COOKIE_LIMIT_BYTES = 4_096;
 const COOKIE_WRITE_CONCURRENCY = 8;
 const PLAN_SECRETS = new WeakMap();
 
@@ -252,9 +253,10 @@ function parseNetscapeRows(text) {
 function normalizeCookie(row, nowMs) {
   if (!row || typeof row !== 'object' || hasUnsupportedPartition(row)) return undefined;
   const name = normalizeCookieName(row.name);
-  const value = boundedCookieText(row.value, 4_096, true);
+  const value = boundedCookieText(row.value, COOKIE_LIMIT_BYTES, true);
   const cookiePath = normalizeCookiePath(row.path);
   if (!name || value === undefined || !cookiePath) return undefined;
+  if (Buffer.byteLength(name) + Buffer.byteLength(value) > COOKIE_LIMIT_BYTES) return undefined;
   if (!isOptionalBoolean(row.secure) || !isOptionalBoolean(row.httpOnly)) return undefined;
   if (!isOptionalBoolean(row.hostOnly)) return undefined;
 
@@ -304,9 +306,9 @@ function normalizeCookieTarget(row) {
         return undefined;
       }
       return {
-        url: `${parsed.protocol}//${parsed.host}/`,
+        url: `${secure ? 'https' : 'http'}://${parsed.host}/`,
         domain: parsed.hostname,
-        secure: secure || parsed.protocol === 'https:',
+        secure,
       };
     } catch {
       return undefined;
@@ -375,6 +377,7 @@ function normalizeSameSite(value) {
   if (normalized === 'strict') return 'strict';
   if (normalized === 'lax') return 'lax';
   if (normalized === 'none' || normalized === 'norestriction') return 'no_restriction';
+  if (normalized === 'unspecified') return 'unspecified';
   return undefined;
 }
 

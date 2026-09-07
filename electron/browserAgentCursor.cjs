@@ -427,6 +427,7 @@ function createBrowserAgentCursorController(options) {
   function destroyOverlay() {
     const window = overlay;
     const listeners = overlayHostListeners;
+    if (attachment) attachment.overlayVisible = false;
     overlay = null;
     overlayHost = null;
     overlayHostListeners = null;

@@ -1,6 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { retryNativeBrowserAttach } from './NativeBrowserSurface';
+import { createNativeBrowserAttacher, retryNativeBrowserAttach } from './nativeBrowserAttachment';
+
+test('effect restarts share one pending native attach per target', async () => {
+  const calls: string[] = [];
+  let finish: () => void = () => {};
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const attach = createNativeBrowserAttacher(async (target) => {
+    calls.push(target);
+    await pending;
+  });
+  const bounds = { x: 0, y: 0, width: 700, height: 500 };
+  const first = attach('browser-1', bounds);
+  const resized = attach('browser-1', { ...bounds, width: 900 });
+  const switched = attach('browser-2', bounds);
+  const returned = attach('browser-1', bounds);
+  assert.equal(first, resized);
+  assert.equal(first, returned);
+  assert.deepEqual(calls, ['browser-1', 'browser-2']);
+  finish();
+  await Promise.all([first, resized, switched, returned]);
+  await attach('browser-1', bounds);
+  assert.deepEqual(calls, ['browser-1', 'browser-2', 'browser-1']);
+});
 
 test('native surface attachment retries twice before surfacing the failure', async () => {
   const scheduled: { callback: () => void; delayMs: number }[] = [];

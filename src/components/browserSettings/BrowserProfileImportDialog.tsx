@@ -22,6 +22,7 @@ import {
 
 type ImportFlow =
   | { kind: 'loading' }
+  | { kind: 'discovery_failed' }
   | { kind: 'select'; discovery: BrowserCookieProfileDiscovery }
   | {
       kind: 'preview';
@@ -88,7 +89,7 @@ export function BrowserProfileImportDialog({
           setError(
             'DROIDEX could not discover browser profiles. Retry or use file recovery below.',
           );
-          setFlow({ kind: 'loading' });
+          setFlow({ kind: 'discovery_failed' });
         }
       });
     return () => {
@@ -109,6 +110,7 @@ export function BrowserProfileImportDialog({
       setFlow({ kind: 'select', discovery });
     } catch {
       setError('DROIDEX could not discover browser profiles. Retry or use file recovery below.');
+      setFlow({ kind: 'discovery_failed' });
     } finally {
       if (isMounted.current) setBusy(false);
     }
@@ -208,10 +210,11 @@ export function BrowserProfileImportDialog({
 
   const importChromeRecoveryFile = async () => {
     setBusy(true);
-    setError('');
+    if (flow.kind !== 'discovery_failed') setError('');
     try {
       const result = await importBrowserCookies();
       if (result.canceled) return;
+      setError('');
       onSnapshot(result.snapshot);
       setFlow({
         kind: 'complete',
@@ -272,7 +275,7 @@ export function BrowserProfileImportDialog({
               Cancel
             </button>
           )}
-          {flow.kind === 'loading' && error && (
+          {flow.kind === 'discovery_failed' && (
             <button
               type="button"
               disabled={busy}
@@ -318,7 +321,7 @@ export function BrowserProfileImportDialog({
         </>
       }
     >
-      {flow.kind === 'loading' && !error && (
+      {flow.kind === 'loading' && (
         <div
           role="status"
           className="flex items-center gap-2 py-8 text-[11.5px] text-droid-text-muted"
@@ -326,7 +329,7 @@ export function BrowserProfileImportDialog({
           <Loader2 className="h-4 w-4 animate-spin" /> Discovering Chrome profiles…
         </div>
       )}
-      {flow.kind === 'loading' && error && (
+      {flow.kind === 'discovery_failed' && (
         <div className="rounded-xl border border-droid-border bg-droid-bg/45 p-3.5">
           <p className="text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
             File recovery
