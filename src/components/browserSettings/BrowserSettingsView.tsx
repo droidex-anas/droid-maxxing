@@ -405,7 +405,7 @@ export function BrowserSettingsView({
             <BrowserSettingRow
               border
               label="Camera and microphone"
-              description="Ask in DROIDEX, then remember allow or block choices for each exact site. HID and USB devices remain blocked."
+              description="Allow each site here and approve macOS access separately. If macOS blocks access, enable DROIDEX in System Settings > Privacy & Security > Camera or Microphone, then restart. HID and USB remain blocked."
             >
               <Dropdown
                 value={snapshot.sitePermissionMode}
@@ -451,7 +451,7 @@ export function BrowserSettingsView({
           <BrowserSettingsCard>
             <BrowserSettingRow
               label="Signups, OAuth, and passkeys"
-              description={passkeyCapabilityDescription(snapshot)}
+              description={`${passkeyCapabilityDescription(snapshot)} OAuth support depends on the provider; Google does not allow embedded sign-in. Use a supported website login or import a Chrome session.`}
             >
               <span className="text-[11px] text-droid-green">User approval required</span>
             </BrowserSettingRow>

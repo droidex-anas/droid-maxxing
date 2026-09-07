@@ -127,6 +127,14 @@ and ad-hoc builds report passkeys as unavailable instead of presenting a fake
 capability. Provider consent, platform passkey prompts, account choice,
 one-time codes, and saved-password fills remain user controlled.
 
+OAuth availability also depends on the provider: Google prohibits OAuth in
+embedded user agents, and other providers may reject embedded sign-in. A
+sandboxed popup is not the system browser and cannot override that restriction.
+Use a supported direct website login or explicitly import a Chrome session;
+opening an external browser does not transfer its login back into DROIDEX.
+See [browser authentication and permission checks](docs/runbooks.md#browser-authentication-and-permission-checks)
+for release prerequisites and the signed-build acceptance checklist.
+
 Remote browser pages are sandboxed. Cross-origin popups, redirects, history
 changes, and delayed page navigation all pass through the same main-process
 policy; renderer prompts are not treated as the security boundary. Permission

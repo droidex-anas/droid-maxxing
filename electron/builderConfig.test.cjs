@@ -286,6 +286,26 @@ test('macOS protected resources have truthful permission descriptions', () => {
   assert.match(config.mac.extendInfo.NSMicrophoneUsageDescription, /only after you approve/);
 });
 
+test('signed browser builds carry camera and audio-input entitlements into helpers', () => {
+  const config = loadConfig({
+    DROIDEX_RELEASE_BUILD: '1',
+    CSC_LINK: 'base64-certificate',
+    APPLE_TEAM_ID: 'A1B2C3D4E5',
+    APPLE_API_KEY: '/tmp/AuthKey.p8',
+    APPLE_API_KEY_ID: 'KEYID',
+    APPLE_API_ISSUER: 'ISSUER',
+    SENTRY_DSN: canonicalSentryDsn,
+  });
+  for (const file of [config.mac.entitlements, config.mac.entitlementsInherit]) {
+    const entitlements = readFileSync(file, 'utf8');
+    assert.match(entitlements, /<key>com\.apple\.security\.device\.camera<\/key>\s*<true\s*\/>/);
+    assert.match(
+      entitlements,
+      /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/,
+    );
+  }
+});
+
 test('website DMG includes a direct Privacy & Security shortcut', () => {
   const config = loadConfig({});
 
