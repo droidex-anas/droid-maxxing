@@ -14,9 +14,12 @@ import { pushEscapeLayer } from './usePopover';
 // but this panel portals to <body>, outside that zoom. Anchor rects are
 // measured in scaled pixels, so the positioning math converts the panel's
 // footprint and available space by the same factor, and the content box
-// applies the zoom itself to render at the app's scale.
+// applies the zoom itself to render at the app's scale. applyTheme sets the
+// variable inline on #root, so read it there — the portal inherits only the
+// :root default from <body>.
 function uiZoomFactor(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom');
+  const owner = document.getElementById('root') ?? document.documentElement;
+  const raw = getComputedStyle(owner).getPropertyValue('--ui-zoom');
   const factor = Number.parseFloat(raw);
   return Number.isFinite(factor) && factor > 0 ? factor : 1;
 }
@@ -49,6 +52,9 @@ export function Popover({
     bottom?: number;
     left: number;
     maxHeight: number;
+    // Captured at measure time so the content box renders at exactly the
+    // zoom the positioning math used.
+    zoom: number;
   } | null>(null);
   // Drives the enter transition: mount at opacity-0/scale-95, then flip on the
   // next frame so the CSS transition has a starting state to animate from.
@@ -129,9 +135,10 @@ export function Popover({
           bottom: window.innerHeight - r.top + 4,
           left,
           maxHeight: Math.max(0, spaceAbove / zoom),
+          zoom,
         });
       } else {
-        setPos({ top: r.bottom + 4, left, maxHeight: Math.max(0, spaceBelow / zoom) });
+        setPos({ top: r.bottom + 4, left, maxHeight: Math.max(0, spaceBelow / zoom), zoom });
       }
     };
     update();
@@ -148,8 +155,17 @@ export function Popover({
     };
     window.addEventListener('scroll', schedule, true);
     window.addEventListener('resize', schedule);
+    // A UI zoom change lands as an inline-style mutation on #root (applyTheme)
+    // and fires neither resize nor scroll, so observe the owner directly to
+    // keep an open panel glued to its anchor at the new scale.
+    const zoomOwner = document.getElementById('root');
+    const zoomObserver = zoomOwner ? new MutationObserver(schedule) : null;
+    if (zoomOwner) {
+      zoomObserver?.observe(zoomOwner, { attributes: true, attributeFilter: ['style'] });
+    }
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      zoomObserver?.disconnect();
       window.removeEventListener('scroll', schedule, true);
       window.removeEventListener('resize', schedule);
     };
@@ -220,7 +236,7 @@ export function Popover({
       }`}
     >
       <div
-        style={{ zoom: 'var(--ui-zoom, 1)', width, maxHeight: pos.maxHeight }}
+        style={{ zoom: pos.zoom, width, maxHeight: pos.maxHeight }}
         className={`flex flex-col overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50 ${className}`}
       >
         {children}

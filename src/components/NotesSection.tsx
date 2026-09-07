@@ -159,7 +159,21 @@ export function NotesPanel({
     measure();
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
+    // Sibling sections above can expand inline (commit/PR sheets) and the pad
+    // grows with the draft, neither of which fires resize or scroll; watch
+    // the section and its siblings so the floating card re-anchors on those
+    // layout shifts.
+    let observer: ResizeObserver | null = null;
+    const section = sectionRef.current;
+    if (section && typeof ResizeObserver === 'function') {
+      observer = new ResizeObserver(measure);
+      observer.observe(section);
+      for (const sibling of section.parentElement?.children ?? []) {
+        if (sibling !== section) observer.observe(sibling);
+      }
+    }
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
