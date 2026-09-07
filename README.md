@@ -35,14 +35,28 @@ npm run dev
 ```
 
 To run a second dev instance beside your main app, isolate both its profile and
-history writer (raw Factory transcripts are still discovered):
+history writer (raw Factory transcripts are still discovered). Electron places
+the isolated history database in `<profile>/history`; a bare sidecar can set
+`DROIDEX_HISTORY_DIR` explicitly. The default app keeps `~/.factory/droidex`:
 
 ```bash
 ELECTRON_START_URL=http://127.0.0.1:1421 BRIDGE_PORT=8766 \
 DROIDEX_USER_DATA_DIR="$HOME/Library/Application Support/DROIDEX-dev" \
-DROIDEX_HISTORY_DIR="$HOME/Library/Application Support/DROIDEX-dev/history" \
 npm run electron
 ```
+
+## Tool activity and review
+
+Settings → Tool activity controls how much detail appears inside tool runs:
+compact summaries, balanced expandable rows, or detailed output. Completed turns
+keep one Worked disclosure followed by the final answer at every density.
+Read output is available inside the disclosure; compaction markers stay visible.
+The streaming caret indicates arriving text, while Working stays visible until
+the turn finishes, including gaps between tokens.
+
+Click a changed file to open Review with its captured diff. Repeated edits show
+the latest captured change and its matching line counts. Path-only previews use
+the workspace Files permissions and reject paths or symlinks outside that folder.
 
 ## GitHub pull requests
 

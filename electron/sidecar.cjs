@@ -144,8 +144,8 @@ function createSidecarSupervisor(options) {
     // provided one (a dev instance beside the main app); otherwise the sidecar
     // keeps the shared ~/.factory/droidex default and any ambient
     // DROIDEX_HISTORY_DIR must not leak through.
-    const stateDir = options.stateDir?.();
-    if (stateDir) env.DROIDEX_HISTORY_DIR = stateDir;
+    const historyDir = options.historyDir?.();
+    if (historyDir) env.DROIDEX_HISTORY_DIR = historyDir;
     else delete env.DROIDEX_HISTORY_DIR;
     const nextChild = spawnProcess(process.execPath, [options.entryPath()], {
       cwd: options.cwd(),

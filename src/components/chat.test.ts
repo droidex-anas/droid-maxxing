@@ -714,6 +714,83 @@ test('#18 a final answer followed by compaction stays a top-level message', () =
   assert.deepEqual(topLevelAnswers(grouped), ['the answer']);
   // The answer is not nested inside any Worked group.
   assert.ok(!workedChildren(grouped).some((c) => c.type === 'message'));
+  assert.equal(grouped.at(-1)?.type, 'status');
+  assert.ok(!workedChildren(grouped).some((c) => c.type === 'status'));
+});
+
+test('a pinned spec alone never produces an empty Worked disclosure', () => {
+  const spec = '# Plan\n\nImplement the feature';
+  const events = [userMsg('plan'), asst(spec)];
+  const grouped = groupTurns(buildFeed(events), false, spec);
+  assert.equal(grouped.length, 1);
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, {
+      events,
+      pending: false,
+      specContent: spec,
+    }),
+  );
+  assert.doesNotMatch(html, /Worked/);
+});
+
+test('real tool work keeps assistant fragments separate from the final answer', () => {
+  const grouped = groupTurns(
+    buildFeed([userMsg('go'), asst('Investigating'), grep(), asst('Done')]),
+    false,
+  );
+  assert.deepEqual(topLevelAnswers(grouped), ['Done']);
+  assert.ok(
+    workedChildren(grouped).some(
+      (item) => item.type === 'message' && item.event.text === 'Investigating',
+    ),
+  );
+});
+
+test('Read output is visible in detailed density and expandable in balanced density', () => {
+  const call = ev({
+    kind: 'tool_call',
+    toolName: 'Read',
+    toolUseId: 'read-1',
+    toolArgs: { file_path: 'src/app.ts' },
+  });
+  const result = ev({
+    kind: 'tool_result',
+    toolName: 'Read',
+    toolUseId: 'read-1',
+    text: 'export const inspected = true;',
+  });
+  const item: FeedItem = { type: 'tools', key: 'read', events: [call, result] };
+  const detailed = renderToStaticMarkup(
+    createElement(FeedItemView, { item, live: false, density: 'detailed' }),
+  );
+  const balanced = renderToStaticMarkup(
+    createElement(FeedItemView, { item, live: false, density: 'balanced' }),
+  );
+  assert.match(detailed, /export const inspected = true;/);
+  assert.match(balanced, /aria-expanded="false"/);
+  assert.match(balanced, /inert=""/);
+});
+
+test('settled compact tool summaries render their non-streaming label', () => {
+  const item: FeedItem = { type: 'tools', key: 'search', events: [grep()] };
+  const html = renderToStaticMarkup(
+    createElement(FeedItemView, { item, live: false, density: 'compact' }),
+  );
+  assert.match(html, /<span class="[^"]*text-droid-text-muted[^"]*">Explored 1 search</);
+});
+
+test('web result source rows render a local icon without a remote favicon request', () => {
+  const html = renderToStaticMarkup(
+    createElement(WebFetchBody, {
+      url: 'https://example.com/private-topic',
+      body: 'A useful page body',
+      title: 'Page',
+      hasBody: true,
+      error: false,
+      snippet: 'Useful page',
+    }),
+  );
+  assert.doesNotMatch(html, /<img|google\.com/);
 });
 
 test('#18 pre-answer work folds into Worked but the answer never does', () => {
@@ -1074,14 +1151,14 @@ const editFile = (path: string, adds: number, id: string) =>
     toolUseId: id,
   });
 
-test('#27 collectTurnFiles folds repeated edits to one path with summed counts', () => {
+test('#27 collectTurnFiles keeps repeated edits aligned with the latest captured diff', () => {
   const run = buildFeed([editFile('src/a.ts', 2, 'e1'), editFile('src/a.ts', 3, 'e2')], {
     childSessionCards: true,
   });
   const files = collectTurnFiles(run);
   assert.equal(files.length, 1);
   assert.equal(files[0].path, 'src/a.ts');
-  assert.equal(files[0].added, 5);
+  assert.equal(files[0].added, 3);
   assert.equal(files[0].change.path, 'src/a.ts');
   assert.equal(files[0].change.added, 3);
 });

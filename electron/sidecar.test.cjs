@@ -27,6 +27,7 @@ function harness(children, extras = {}) {
     entryPath: () => '/app/sidecar.mjs',
     cwd: () => '/app',
     userData: () => '/profiles/droidex',
+    historyDir: extras.historyDir,
     stdout: new PassThrough(),
     stderr: extras.stderr || new PassThrough(),
     now: () => nowMs,
@@ -93,6 +94,23 @@ test('sidecar binds an OS-assigned port and shares one concurrent startup', asyn
   assert.deepEqual(await first, await second);
   assert.equal((await first).port, 43123);
   assert.equal(supervisor.snapshot().lifecycle, 'healthy');
+});
+
+test('history isolation uses the launcher directory and strips ambient overrides otherwise', async (t) => {
+  const previous = process.env.DROIDEX_HISTORY_DIR;
+  t.after(() => {
+    if (previous === undefined) delete process.env.DROIDEX_HISTORY_DIR;
+    else process.env.DROIDEX_HISTORY_DIR = previous;
+  });
+  process.env.DROIDEX_HISTORY_DIR = '/ambient/history';
+  for (const historyDir of [undefined, () => '/profiles/dev/history']) {
+    const child = fakeChild();
+    const { supervisor, calls } = harness([child], { historyDir });
+    const started = supervisor.start();
+    assert.equal(calls[0].options.env.DROIDEX_HISTORY_DIR, historyDir?.());
+    child.stdout.write('SIDECAR_READY 43123\n');
+    await started;
+  }
 });
 
 test('sidecar startup reports stderr when the child exits before ready', async () => {

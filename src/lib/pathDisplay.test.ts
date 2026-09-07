@@ -1,22 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compactPath, displayPath, resolveWorkspaceFilePath } from './pathDisplay';
+import { compactPath, displayPath, relativeWorkspaceFilePath } from './pathDisplay';
 
-test('resolveWorkspaceFilePath joins relative review paths to the session folder', () => {
-  assert.equal(resolveWorkspaceFilePath('src/app.ts', '/repo'), '/repo/src/app.ts');
-  assert.equal(resolveWorkspaceFilePath('./src/app.ts', '/repo'), '/repo/src/app.ts');
-  assert.equal(
-    resolveWorkspaceFilePath('../shared/foo.ts', '/repo/packages/web'),
-    '/repo/packages/shared/foo.ts',
-  );
+test('relativeWorkspaceFilePath joins relative review paths to the session folder', () => {
+  assert.equal(relativeWorkspaceFilePath('src/app.ts', '/repo'), 'src/app.ts');
+  assert.equal(relativeWorkspaceFilePath('./src/app.ts', '/repo'), 'src/app.ts');
 });
 
-test('resolveWorkspaceFilePath keeps absolute transcript paths unchanged', () => {
-  assert.equal(resolveWorkspaceFilePath('/abs/src/app.ts', '/repo'), '/abs/src/app.ts');
+test('workspace previews reject paths outside their root', () => {
+  for (const file of [
+    '../shared/foo.ts',
+    '/repository/file.ts',
+    '/etc/passwd',
+    'src/../../outside.ts',
+  ]) {
+    assert.throws(() => relativeWorkspaceFilePath(file, '/repo'), /outside/);
+  }
+  assert.throws(() => relativeWorkspaceFilePath('file.ts', ''), /required/);
 });
 
-test('resolveWorkspaceFilePath preserves a filesystem-root session folder', () => {
-  assert.equal(resolveWorkspaceFilePath('etc/hosts', '/'), '/etc/hosts');
+test('workspace previews accept absolute descendants and root folders', () => {
+  assert.equal(relativeWorkspaceFilePath('/repo/src/app.ts', '/repo'), 'src/app.ts');
+  assert.equal(relativeWorkspaceFilePath('etc/hosts', '/'), 'etc/hosts');
+  assert.equal(relativeWorkspaceFilePath('C:/Repo/src/app.ts', 'c:/repo'), 'src/app.ts');
 });
 
 test('displayPath relativizes descendants of a filesystem-root session folder', () => {
@@ -28,6 +34,10 @@ test('displayPath relativizes descendants of a filesystem-root session folder', 
 test('displayPath treats drive-letter case as the same session folder', () => {
   assert.equal(displayPath('C:/Repo/src/app.ts', 'c:/repo'), 'src/app.ts');
   assert.equal(displayPath('c:/repo', 'C:/Repo'), '.');
+});
+
+test('displayPath does not treat a sibling directory with the same prefix as a descendant', () => {
+  assert.equal(displayPath('/repository/src/app.ts', '/repo'), 'repository/src/app.ts');
 });
 
 test('compactPath shortens long relative read paths', () => {

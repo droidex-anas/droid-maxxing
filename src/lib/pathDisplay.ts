@@ -28,7 +28,9 @@ export function displayPath(path: string, cwd?: string): string {
   const root = cwd ? withoutTrailingSlash(normalizePath(cwd)) : '';
   if (root && comparablePath(normalized) === comparablePath(root)) return '.';
   const prefix = root && (root.endsWith('/') ? root : `${root}/`);
-  if (prefix && comparablePath(normalized).startsWith(comparablePath(prefix))) {
+  const comparedRoot = comparablePath(root);
+  const comparedPrefix = comparedRoot.endsWith('/') ? comparedRoot : `${comparedRoot}/`;
+  if (prefix && comparablePath(normalized).startsWith(comparedPrefix)) {
     return normalized.slice(prefix.length);
   }
   if (!isAbsolutePath(normalized)) return normalized;
@@ -51,13 +53,20 @@ export function pathFileName(path: string): string {
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
 }
 
-// Resolve a transcript or review-focus path against the session folder so a
-// relative click does not read from Electron's process cwd.
-export function resolveWorkspaceFilePath(path: string, cwd: string): string {
+// Return a workspace-relative path for the root-bound Files preview API.
+// Its host-side realpath checks also reject symlink escapes before reading.
+export function relativeWorkspaceFilePath(path: string, cwd: string): string {
   const file = normalizePath(path.trim());
-  if (isAbsolutePath(file)) return file;
-  const root = normalizePath(cwd.trim());
-  if (!file || file === '.') return root;
+  const root = withoutTrailingSlash(normalizePath(cwd.trim()));
+  if (!isAbsolutePath(root) || !file || file === '.') {
+    throw new Error('A workspace folder and file path are required for preview.');
+  }
   const prefix = root.endsWith('/') ? root : `${root}/`;
-  return normalizePath(`${prefix}${file}`);
+  const target = isAbsolutePath(file) ? file : normalizePath(`${prefix}${file}`);
+  const comparedRoot = comparablePath(root);
+  const comparedPrefix = comparedRoot.endsWith('/') ? comparedRoot : `${comparedRoot}/`;
+  if (!comparablePath(target).startsWith(comparedPrefix)) {
+    throw new Error('File preview path is outside the workspace.');
+  }
+  return target.slice(prefix.length);
 }

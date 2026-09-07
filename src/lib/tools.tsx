@@ -419,16 +419,6 @@ export function webSourceName(url: string): string {
   }
 }
 
-// A small favicon URL for a result's domain, or undefined if the URL is unusable.
-export function faviconUrl(url: string): string | undefined {
-  try {
-    const host = new URL(url).hostname;
-    return `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(host)}`;
-  } catch {
-    return undefined;
-  }
-}
-
 function toolArgRecord(args: unknown): Record<string, unknown> {
   return args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
 }

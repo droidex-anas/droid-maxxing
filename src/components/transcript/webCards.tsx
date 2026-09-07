@@ -9,28 +9,10 @@ import {
   looksLikeHtml,
   formatCharCount,
   webSourceName,
-  faviconUrl,
   toolArgString,
   toolArgStringArray,
 } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, httpHref, linkify, openLink, RED, RED_TINT } from './primitives';
-
-function Favicon({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  const src = faviconUrl(url);
-  if (failed || !src) return <Globe className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />;
-  return (
-    <img
-      src={src}
-      alt=""
-      loading="lazy"
-      className="h-3.5 w-3.5 shrink-0 rounded-sm"
-      onError={() => {
-        setFailed(true);
-      }}
-    />
-  );
-}
 
 /* ── Shared source-row chrome for web search results + fetched pages ── */
 function WebSourceRow({
@@ -67,7 +49,7 @@ function WebSourceRow({
       )}
       {url && (
         <div className="mt-1.5 flex items-center gap-1.5">
-          <Favicon url={url} />
+          <Globe aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
           <span className="truncate text-[11px] text-droid-text-secondary">
             {webSourceName(url)}
           </span>

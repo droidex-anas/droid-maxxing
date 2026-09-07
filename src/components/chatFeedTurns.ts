@@ -6,6 +6,7 @@ import {
   buildFeed,
   collectTurnFiles,
   isCancellationArtifact,
+  isCompactionCompleteStatus,
   type BuildFeedOptions,
   type FeedItem,
 } from './chatFeed';
@@ -191,9 +192,9 @@ function mergeAssistantMessages(
 // the assistant's mid-turn notes — folds into ONE "Worked for …" group between
 // the prompt and the answer, so a settled turn reads prompt → Worked → final
 // response and expanding the fold replays the whole turn (compaction dividers
-// included) at the configured density. Only two things stay top-level: the
+// included) at the configured density. Keep top-level:
 // turn's final answer (its last assistant message, plus earlier fragments
-// split off purely by todo/plan reconciliation, #19) and errors, so failures
+// split off purely by todo/plan reconciliation, #19), compaction markers, and errors, so failures
 // remain visible. Invariant (#18): the final answer itself is never nested
 // inside a Worked group, no matter what trailing work or status follows it.
 function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
@@ -262,11 +263,15 @@ function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
       }
       continue;
     }
-    if (it.type === 'error') {
+    if (
+      it.type === 'error' ||
+      (it.type === 'status' &&
+        (it.event.kind === 'compaction' || isCompactionCompleteStatus(it.event.text)))
+    ) {
       // A failed tool/result must stay visible after the turn completes instead
       // of being buried in a collapsed "Worked for …" group (classifier intent).
       survivors.push(it);
-    } else {
+    } else if (!(it.type === 'message' && isSpecBody(it.event.text))) {
       foldables.push(it);
     }
   }

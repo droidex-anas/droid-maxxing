@@ -318,7 +318,7 @@ Start from `.env.example` for local overrides.
 - `BRIDGE_TOKEN`: packaged Electron bridge token
 - `DROIDEX_USER_DATA_DIR`: optional Electron profile directory override so a
   second dev instance can run beside the main one; its sidecar then also gets
-  an isolated history state dir (`<profile>/state`) instead of competing for
+  an isolated history state dir (`<profile>/history`) instead of competing for
   the shared history writer lease
 - `DROIDEX_HISTORY_DIR`: explicit history state directory for a bare sidecar
   running beside the main app (Electron derives it from the profile override)

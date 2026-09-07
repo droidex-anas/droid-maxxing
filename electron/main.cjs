@@ -80,7 +80,7 @@ const sidecarSupervisor = createSidecarSupervisor({
   entryPath: sidecarEntry,
   cwd: () => (app.isPackaged ? process.resourcesPath : appRoot()),
   userData: () => app.getPath('userData'),
-  stateDir: () => (userDataOverride ? path.join(userDataOverride, 'state') : undefined),
+  historyDir: () => (userDataOverride ? path.join(userDataOverride, 'history') : undefined),
   onUnexpectedExit: (error) => diagnostics.captureException(error, { process: 'sidecar' }),
 });
 // subscribe() replays the current status synchronously, so mainWindow must

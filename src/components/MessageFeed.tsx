@@ -272,9 +272,10 @@ export function MessageFeed({
     last.events.some(
       (e) => childSessionActivity?.(childSessionTargetFromEvent(e))?.status === 'running',
     );
-  // Thinking, status, and running-child tails animate themselves. An assistant
-  // message does not: its caret only blinks while tokens are flowing, so the
-  // Working cue must cover the idle gap while the turn is still pending.
+  // Working describes the pending turn, while the assistant caret describes
+  // token flow. Both intentionally appear during prose streaming; Working
+  // remains when the caret idles so a token gap never looks like completion.
+  // Thinking, status, and running-child tails already convey pending work.
   const tailSelfIndicates =
     !!last &&
     (last.type === 'thinking' ||

@@ -114,26 +114,18 @@ export function sameFeedEvents(a: FeedItem, b: FeedItem): boolean {
 }
 
 // Collect the files a turn's run edited, folding repeated edits to the same
-// path into a single entry (summed line counts). Order follows first touch.
+// path into its latest captured change. Counts and verb describe that same diff.
+// Order follows first touch.
 export function collectTurnFiles(run: FeedItem[]): TurnFile[] {
   const byPath = new Map<string, TurnFile>();
   const consider = (c: FileChange) => {
-    const cur = byPath.get(c.path);
-    if (cur) {
-      cur.added += c.added;
-      cur.removed += c.removed;
-      // A file created then edited in one turn reads best as a creation.
-      if (c.verb === 'create') cur.verb = 'create';
-      cur.change = c;
-    } else {
-      byPath.set(c.path, {
-        path: c.path,
-        added: c.added,
-        removed: c.removed,
-        verb: c.verb,
-        change: c,
-      });
-    }
+    byPath.set(c.path, {
+      path: c.path,
+      added: c.added,
+      removed: c.removed,
+      verb: c.verb,
+      change: c,
+    });
   };
   for (const it of run) {
     if (it.type === 'diff') consider(it.change);

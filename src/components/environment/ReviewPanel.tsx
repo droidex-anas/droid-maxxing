@@ -31,9 +31,9 @@ import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/us
 import { toast } from '../../lib/toast';
 import { detectPullRequest } from '../../lib/github';
 import { REVIEW_SCOPE_OPTIONS, reviewScopeLabel } from '../../lib/reviewScopes';
-import { displayPath, resolveWorkspaceFilePath } from '../../lib/pathDisplay';
+import { displayPath, relativeWorkspaceFilePath } from '../../lib/pathDisplay';
 import { openReviewAt, planReviewFocus } from '../../lib/reviewFocus';
-import { readFile } from '../../lib/desktop';
+import { authorizeFilesRoot, readFilePreview } from '../../lib/desktop';
 import type { FileChange } from '../../lib/diff';
 import type { DiffFile } from '../../types/vcs';
 import { FileTypeIcon } from '../FileTypeIcon';
@@ -366,17 +366,24 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   useEffect(() => {
     if (detachedFocus?.kind !== 'preview' || detachedFocus.content !== null) return;
     const path = detachedFocus.path;
-    const workspacePath = resolveWorkspaceFilePath(path, cwd);
     let stale = false;
-    void readFile(workspacePath).then((content) => {
-      if (stale) return;
-      if (content === null) {
+    const isStale = () => stale;
+    void Promise.resolve()
+      .then(async () => {
+        const relative = relativeWorkspaceFilePath(path, cwd);
+        const accessToken = await authorizeFilesRoot(cwd);
+        if (isStale()) return;
+        const preview = await readFilePreview(accessToken, relative);
+        if (preview.category !== 'text' || preview.text === undefined) {
+          throw new Error('This file has no text preview. Open it from Files.');
+        }
+        if (!isStale()) setDetachedFocus({ kind: 'preview', path, content: preview.text });
+      })
+      .catch((error: unknown) => {
+        if (stale) return;
         setDetachedFocus(null);
-        toast.info(`No current diff for ${path.replace(/\\/g, '/').split('/').pop() ?? path}`);
-        return;
-      }
-      setDetachedFocus({ kind: 'preview', path, content });
-    });
+        toast.error(error instanceof Error ? error.message : 'Could not preview this file.');
+      });
     return () => {
       stale = true;
     };

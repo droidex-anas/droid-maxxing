@@ -8,7 +8,6 @@ import {
   looksLikeHtml,
   formatCharCount,
   webSourceName,
-  faviconUrl,
   toolArgString,
   toolArgStringArray,
   latestTodoSnapshot,
@@ -234,11 +233,6 @@ test('webSourceName derives a capitalized registrable label', () => {
   assert.equal(webSourceName('https://www.theregister.com/2026/01/01/x'), 'Theregister');
   assert.equal(webSourceName('https://docs.sentry.io/platforms'), 'Sentry');
   assert.equal(webSourceName('not a url'), 'not a url');
-});
-
-test('faviconUrl builds a favicon endpoint for a valid URL', () => {
-  assert.match(faviconUrl('https://github.com/x') ?? '', /favicons.*domain=github\.com/);
-  assert.equal(faviconUrl('not a url'), undefined);
 });
 
 test('toolArgString reads a string arg and ignores other values', () => {

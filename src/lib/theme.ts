@@ -292,11 +292,11 @@ function readColors(value: unknown): ThemeColors | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   const colors = {
-    bg: raw['bg'],
-    fg: raw['fg'],
-    surface: raw['surface'],
-    border: raw['border'],
-    accent: raw['accent'],
+    bg: raw.bg,
+    fg: raw.fg,
+    surface: raw.surface,
+    border: raw.border,
+    accent: raw.accent,
   };
   for (const v of Object.values(colors)) {
     if (typeof v !== 'string' || !HEX_COLOR.test(v)) return null;

@@ -31,10 +31,10 @@ export function useSmoothStreamingText(source: string, live: boolean): string {
   const [shown, setShown] = useState(source);
   const shownRef = useRef(source);
   const sourceRef = useRef(source);
-  sourceRef.current = source;
   const frameRef = useRef(0);
 
   useEffect(() => {
+    sourceRef.current = source;
     if (!live || typeof requestAnimationFrame !== 'function') {
       if (frameRef.current) {
         cancelAnimationFrame(frameRef.current);

@@ -48,17 +48,16 @@ export function Caret({ open }: { open: boolean }) {
 /* ── Animated expand/collapse, no chrome. Children stay mounted once opened so
    re-expanding is instant and inner state (scroll, selection) survives. ── */
 export function Expand({ open, children }: { open: boolean; children: React.ReactNode }) {
-  const cachedChildren = useRef<React.ReactNode>(null);
-  const hasOpened = useRef(open);
-  if (open) {
-    hasOpened.current = true;
-    if (children != null) cachedChildren.current = children;
-  }
-  const renderedChildren = hasOpened.current ? (open ? children : cachedChildren.current) : null;
+  const [cachedChildren, setCachedChildren] = useState<React.ReactNode>(null);
+  useEffect(() => {
+    if (open) setCachedChildren(children);
+  }, [open, children]);
+  const renderedChildren = open ? children : cachedChildren;
 
   return (
     <div
       aria-hidden={!open}
+      inert={!open}
       className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
         open
           ? 'pointer-events-auto grid-rows-[1fr] opacity-100'
@@ -218,9 +217,9 @@ export function WorkingIndicator({
   const elapsed = useElapsed(startTs, true);
   const suffix = startTs != null && elapsed >= 1000 ? ` ${formatDuration(elapsed)}` : '';
   return (
-    <span className="shimmer-text text-[13px] font-medium tracking-tight" aria-live="polite">
-      {label}
-      {suffix}…
+    <span className="shimmer-text text-[13px] font-medium tracking-tight">
+      <span aria-live="polite">{label}</span>
+      <span aria-hidden="true">{suffix}…</span>
     </span>
   );
 }

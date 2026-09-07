@@ -1,7 +1,8 @@
 import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
-import { useOpenReviewFile } from '../hooks/useOpenReviewFile';
+import { openReviewAt, type OpenReviewFileHandler } from '../lib/reviewFocus';
+import type { FileChange } from '../lib/diff';
 import type { SessionRestore } from '../hooks/storeChildSession';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -290,7 +291,18 @@ export default function ChatView({
     [childSessions, dispatch],
   );
 
-  const { openReviewFile, openDiff } = useOpenReviewFile();
+  const openReviewFile = useCallback<OpenReviewFileHandler>(
+    (path, change) => {
+      dispatch(openReviewAt(path, change));
+    },
+    [dispatch],
+  );
+  const openDiff = useCallback(
+    (change: FileChange) => {
+      openReviewFile(change.path, change);
+    },
+    [openReviewFile],
+  );
 
   // Latest activity for a spawn line's inline disclosure: the child's status,
   // start time (for the timer), and its newest meaningful transcript event.

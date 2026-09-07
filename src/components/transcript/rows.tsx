@@ -256,9 +256,9 @@ function ToolLine({
       </div>
     );
   }
-  // web/fetch tools render via WebFetchCard; only generic search/other tools
-  // keep a raw output dump, folded behind the line until expanded.
-  const hasBody = (cat === 'other' || cat === 'search') && out.length > 0;
+  // Web and command tools have dedicated cards. Other tool outputs, including
+  // successful Read contents, stay available behind their disclosure.
+  const hasBody = out.length > 0;
   if (!hasBody) {
     return (
       <div className="flex items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0">
