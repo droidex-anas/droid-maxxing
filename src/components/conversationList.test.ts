@@ -23,7 +23,7 @@ import {
   measuredConversationRowSize,
   shouldAdjustConversationRowOnSizeChange,
   syncMeasureConversationList,
-  takeFeedRowEntrance,
+  shouldAnimateFeedRow,
 } from './conversationListState';
 import { applyConversationContentResize } from '../hooks/conversationScrollWindow';
 import {
@@ -471,9 +471,15 @@ test('resize restore uses virtual content offsets without a mounted row', () => 
 test('entrance animation fires once per append and not when a settled row remounts', () => {
   const entered = new Set<string>();
   const appended = new Set(['new-tail']);
-  assert.equal(takeFeedRowEntrance('new-tail', appended, entered), true);
-  assert.equal(takeFeedRowEntrance('new-tail', appended, entered), false);
-  assert.equal(takeFeedRowEntrance('old-row', appended, entered), false);
+  assert.equal(shouldAnimateFeedRow('new-tail', appended, entered), true);
+  assert.equal(
+    shouldAnimateFeedRow('new-tail', appended, entered),
+    true,
+    'discarded renders must not consume entrance',
+  );
+  entered.add('new-tail'); // The mounted row records its committed entrance.
+  assert.equal(shouldAnimateFeedRow('new-tail', appended, entered), false);
+  assert.equal(shouldAnimateFeedRow('old-row', appended, entered), false);
 });
 
 test('row mount identity follows FeedItem.key while viewport identity follows feedRowId', () => {

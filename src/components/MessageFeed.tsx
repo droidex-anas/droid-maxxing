@@ -1,4 +1,13 @@
-import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
 import type { TranscriptEvent } from '../types/bridge';
@@ -14,7 +23,7 @@ import { DEFAULT_TOOL_ACTIVITY, type ToolActivityDensity } from '../lib/toolActi
 import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
 import { asChunkedSequence } from '../lib/chunkedSequence';
 import { ConversationList, type ConversationListHandle } from './ConversationList';
-import { takeFeedRowEntrance } from './conversationListState';
+import { shouldAnimateFeedRow } from './conversationListState';
 import { FeedRow, optionalFeedRowProps, type FeedRowsSharedProps } from './messageFeedRows';
 import { WorktreeCreatedCard } from './WorktreeCreatedCard';
 import {
@@ -157,11 +166,12 @@ export function MessageFeed({
   // unchanged items instead of re-rendering the whole feed on every token. Keep
   // them undefined when the parent supplies no handler, so absent affordances
   // (e.g. non-clickable diffs in the chat feed) stay absent.
-  const cbRef = useRef({ onOpenDiff, onOpenReviewFile, onOpenChildSession, childSessionActivity });
-  cbRef.current = { onOpenDiff, onOpenReviewFile, onOpenChildSession, childSessionActivity };
+  const cbRef = useRef({ onOpenDiff, onOpenReviewFile, onOpenChildSession });
+  useLayoutEffect(() => {
+    cbRef.current = { onOpenDiff, onOpenReviewFile, onOpenChildSession };
+  }, [onOpenDiff, onOpenReviewFile, onOpenChildSession]);
   const hasOpenDiff = !!onOpenDiff;
   const hasOpenReviewFile = !!onOpenReviewFile;
-  const hasChildSessionActivity = !!childSessionActivity;
   const stableOnOpenDiff = useMemo(
     () => (hasOpenDiff ? (c: FileChange) => cbRef.current.onOpenDiff?.(c) : undefined),
     [hasOpenDiff],
@@ -176,13 +186,6 @@ export function MessageFeed({
   const stableOnOpenChildSession = useMemo(
     () => (rich ? (t: ChildSessionTarget) => cbRef.current.onOpenChildSession?.(t) : undefined),
     [rich],
-  );
-  const stableChildSessionActivity = useMemo(
-    () =>
-      hasChildSessionActivity
-        ? (t: ChildSessionTarget) => cbRef.current.childSessionActivity?.(t)
-        : undefined,
-    [hasChildSessionActivity],
   );
 
   // With the subagents dock, each contiguous run of spawns becomes one wave
@@ -231,12 +234,13 @@ export function MessageFeed({
     updateKind,
     rebuiltFromItemIndex,
   );
-  const enteredKeysRef = useRef(new Set<string>());
-  const enteredIdentityRef = useRef(feedIdentity);
-  if (enteredIdentityRef.current !== feedIdentity) {
-    enteredKeysRef.current = new Set();
-    enteredIdentityRef.current = feedIdentity;
-  }
+  const enteredKeys = useMemo(() => new Set<string>(), [feedIdentity]);
+  const recordEntrance = useCallback(
+    (key: string) => {
+      enteredKeys.add(key);
+    },
+    [enteredKeys],
+  );
 
   // The copy button appears only on a turn's final model response.
   const finalResponseStateRef = useRef<FinalResponseKeyState | null>(null);
@@ -307,7 +311,7 @@ export function MessageFeed({
       onOpenDiff: stableOnOpenDiff,
       onOpenReviewFile: stableOnOpenReviewFile,
       onOpenChildSession: stableOnOpenChildSession,
-      childSessionActivity: stableChildSessionActivity,
+      childSessionActivity,
       subagentsDock,
       liveTiming: rich,
       specContent,
@@ -320,7 +324,7 @@ export function MessageFeed({
       stableOnOpenDiff,
       stableOnOpenReviewFile,
       stableOnOpenChildSession,
-      stableChildSessionActivity,
+      childSessionActivity,
       subagentsDock,
       rich,
       specContent,
@@ -353,7 +357,8 @@ export function MessageFeed({
               item={item}
               itemView={FeedItemView}
               areItemPropsEqual={feedItemPropsEqual}
-              animateOnMount={takeFeedRowEntrance(item.key, animateKeys, enteredKeysRef.current)}
+              animateOnMount={shouldAnimateFeedRow(item.key, animateKeys, enteredKeys)}
+              onEnter={recordEntrance}
               live={pending && index === lastIdx && !subagentPollActive}
               autoPlayAppBlocks={
                 item.type === 'message' &&

@@ -31,9 +31,9 @@ import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/us
 import { toast } from '../../lib/toast';
 import { detectPullRequest } from '../../lib/github';
 import { REVIEW_SCOPE_OPTIONS, reviewScopeLabel } from '../../lib/reviewScopes';
-import { displayPath, relativeWorkspaceFilePath } from '../../lib/pathDisplay';
+import { displayPath } from '../../lib/pathDisplay';
 import { openReviewAt, planReviewFocus } from '../../lib/reviewFocus';
-import { authorizeFilesRoot, readFilePreview } from '../../lib/desktop';
+import { createReviewPreviewRequest } from '../../lib/reviewPreview';
 import type { FileChange } from '../../lib/diff';
 import type { DiffFile } from '../../types/vcs';
 import { FileTypeIcon } from '../FileTypeIcon';
@@ -294,7 +294,7 @@ function DetachedFocusPane({
           </div>
         ) : focus.content === null ? (
           <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+            <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> Loading…
           </div>
         ) : (
           <DetachedFilePreview path={focus.path} content={focus.content} />
@@ -358,7 +358,15 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   const focusFallbackRef = useRef<string | null>(null);
   // A focus request that no git scope could satisfy still opens something
   // useful: the change captured in the transcript, or the file on disk.
-  const [detachedFocus, setDetachedFocus] = useState<DetachedFocus | null>(null);
+  const [previewRequest] = useState(createReviewPreviewRequest);
+  const [detachedFocus, updateDetachedFocus] = useState<DetachedFocus | null>(null);
+  const setDetachedFocus = useCallback(
+    (focus: DetachedFocus | null) => {
+      previewRequest.cancel();
+      updateDetachedFocus(focus);
+    },
+    [previewRequest],
+  );
 
   // Resolve a path-only focus (e.g. a per-turn changes row) by reading the
   // file from disk; folders/markdown render as documents, everything else as
@@ -366,28 +374,18 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
   useEffect(() => {
     if (detachedFocus?.kind !== 'preview' || detachedFocus.content !== null) return;
     const path = detachedFocus.path;
-    let stale = false;
-    const isStale = () => stale;
-    void Promise.resolve()
-      .then(async () => {
-        const relative = relativeWorkspaceFilePath(path, cwd);
-        const accessToken = await authorizeFilesRoot(cwd);
-        if (isStale()) return;
-        const preview = await readFilePreview(accessToken, relative);
-        if (preview.category !== 'text' || preview.text === undefined) {
-          throw new Error('This file has no text preview. Open it from Files.');
-        }
-        if (!isStale()) setDetachedFocus({ kind: 'preview', path, content: preview.text });
-      })
-      .catch((error: unknown) => {
-        if (stale) return;
+    void previewRequest.load(cwd, path, (result) => {
+      if ('error' in result) {
         setDetachedFocus(null);
-        toast.error(error instanceof Error ? error.message : 'Could not preview this file.');
-      });
+        toast.error(result.error);
+      } else {
+        setDetachedFocus({ kind: 'preview', path, content: result.content });
+      }
+    });
     return () => {
-      stale = true;
+      previewRequest.cancel();
     };
-  }, [cwd, detachedFocus]);
+  }, [cwd, detachedFocus, previewRequest, setDetachedFocus]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -534,21 +532,24 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
     setExpanded(allExpanded ? new Set() : new Set(review.files.map((f) => f.path)));
   };
 
-  const jumpTo = useCallback((path: string) => {
-    setActivePath(path);
-    setDetachedFocus(null);
-    if (narrowRef.current) setFilesOpen(false);
-    const idx = filesRef.current.findIndex((f) => f.path === path);
-    if (idx >= 0) setRenderLimit((cur) => (idx < cur ? cur : idx + FILE_RENDER_JUMP_BUFFER));
-    setExpanded((cur) => (cur.has(path) ? cur : new Set(cur).add(path)));
-    // Two frames: the first lets React commit a raised render limit so the
-    // target section exists before scrollIntoView runs.
-    requestAnimationFrame(() =>
+  const jumpTo = useCallback(
+    (path: string) => {
+      setActivePath(path);
+      setDetachedFocus(null);
+      if (narrowRef.current) setFilesOpen(false);
+      const idx = filesRef.current.findIndex((f) => f.path === path);
+      if (idx >= 0) setRenderLimit((cur) => (idx < cur ? cur : idx + FILE_RENDER_JUMP_BUFFER));
+      setExpanded((cur) => (cur.has(path) ? cur : new Set(cur).add(path)));
+      // Two frames: the first lets React commit a raised render limit so the
+      // target section exists before scrollIntoView runs.
       requestAnimationFrame(() =>
-        sectionRefs.current.get(path)?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
-      ),
-    );
-  }, []);
+        requestAnimationFrame(() =>
+          sectionRefs.current.get(path)?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+        ),
+      );
+    },
+    [setDetachedFocus],
+  );
 
   // Honor a focus request (e.g. a per-turn changes summary clicked in chat).
   // Prefer a live git match, but show the captured transcript change immediately
@@ -668,7 +669,10 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
         />
         {onClose && (
           <button
-            onClick={onClose}
+            onClick={() => {
+              setDetachedFocus(null);
+              onClose();
+            }}
             title="Close review"
             className="rounded-md p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
           >
@@ -835,7 +839,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
             <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
               {review.loadingList ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                  <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> Loading…
                 </>
               ) : (
                 'No changes in this scope'

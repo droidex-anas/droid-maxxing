@@ -1,4 +1,4 @@
-import { memo, useRef, type ComponentType } from 'react';
+import { memo, useLayoutEffect, useRef, type ComponentType } from 'react';
 
 import { feedRowId } from '../hooks/conversationViewportAnchor';
 import {
@@ -15,6 +15,7 @@ import type { SubagentsDockData } from './SubagentsDock';
 
 export interface FeedRowProps extends FeedItemViewProps {
   animateOnMount: boolean;
+  onEnter?: (key: string) => void;
   itemView: ComponentType<FeedItemViewProps>;
   areItemPropsEqual: (previous: FeedItemViewProps, next: FeedItemViewProps) => boolean;
 }
@@ -22,17 +23,21 @@ export interface FeedRowProps extends FeedItemViewProps {
 export function areFeedRowPropsEqual(previous: FeedRowProps, next: FeedRowProps): boolean {
   return (
     previous.itemView === next.itemView &&
+    previous.onEnter === next.onEnter &&
     previous.areItemPropsEqual === next.areItemPropsEqual &&
     next.areItemPropsEqual(previous, next)
   );
 }
 
 export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
-  const { animateOnMount, itemView, areItemPropsEqual, ...itemProps } = props;
+  const { animateOnMount, onEnter, itemView, areItemPropsEqual, ...itemProps } = props;
   void areItemPropsEqual;
   const ItemView = itemView;
   const animate = useRef(animateOnMount).current;
   const { item } = itemProps;
+  useLayoutEffect(() => {
+    if (animate) onEnter?.(item.key);
+  }, [animate, onEnter, item.key]);
   const isPrompt = item.type === 'message' && item.event.author === 'user';
   const isWideAppResponse =
     item.type === 'message' && item.event.author !== 'user' && hasAppBlock(item.event.text ?? '');

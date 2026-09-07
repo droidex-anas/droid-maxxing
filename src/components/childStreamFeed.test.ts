@@ -185,6 +185,28 @@ test('feedItemPropsEqual rerenders a worked fold when nested dock data changes',
   );
 });
 
+test('activity selectors refresh child rows without invalidating unrelated prose', () => {
+  const before = () => ({ status: 'running' as const });
+  const after = () => ({ status: 'completed' as const });
+  const wave = childItem('wave', [spawn('child', 3)]);
+  const worked: FeedItem = { type: 'worked', key: 'worked', durationMs: 10, items: [wave] };
+  assert.equal(
+    feedItemPropsEqual(
+      viewProps(worked, { childSessionActivity: before }),
+      viewProps(worked, { childSessionActivity: after }),
+    ),
+    false,
+  );
+  const prose = messageItem(user('prompt', 1));
+  assert.equal(
+    feedItemPropsEqual(
+      viewProps(prose, { childSessionActivity: before }),
+      viewProps(prose, { childSessionActivity: after }),
+    ),
+    true,
+  );
+});
+
 test('expanding a child preview preserves the parent viewport anchor', () => {
   const items: FeedItem[] = [
     messageItem(user('user-1', 1)),

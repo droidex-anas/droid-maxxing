@@ -134,14 +134,18 @@ function inlineDiffsOf(props: FeedItemViewProps): boolean {
   return props.inlineDiffs ?? DEFAULT_TOOL_ACTIVITY.inlineDiffs;
 }
 
-function itemUsesSubagentsDock(item: FeedItem): boolean {
-  if (item.type === 'child_sessions') return true;
-  if (item.type === 'worked') return item.items.some(itemUsesSubagentsDock);
+function itemUsesChildSessions(item: FeedItem): boolean {
+  if (item.type === 'child_session' || item.type === 'child_sessions') return true;
+  if (item.type === 'worked') return item.items.some(itemUsesChildSessions);
   return false;
 }
 
-function sameSubagentsDock(prev: FeedItemViewProps, next: FeedItemViewProps): boolean {
-  return !itemUsesSubagentsDock(next.item) || prev.subagentsDock === next.subagentsDock;
+function sameChildSessionInputs(prev: FeedItemViewProps, next: FeedItemViewProps): boolean {
+  return (
+    !itemUsesChildSessions(next.item) ||
+    (prev.subagentsDock === next.subagentsDock &&
+      prev.childSessionActivity === next.childSessionActivity)
+  );
 }
 
 // Lets memo skip the many static items while a response streams, re-rendering
@@ -177,8 +181,7 @@ export function feedItemPropsEqual(prev: FeedItemViewProps, next: FeedItemViewPr
     prev.onOpenDiff === next.onOpenDiff &&
     prev.onOpenReviewFile === next.onOpenReviewFile &&
     prev.onOpenChildSession === next.onOpenChildSession &&
-    prev.childSessionActivity === next.childSessionActivity &&
-    sameSubagentsDock(prev, next) &&
+    sameChildSessionInputs(prev, next) &&
     sameFeedEvents(prev.item, next.item)
   );
 }

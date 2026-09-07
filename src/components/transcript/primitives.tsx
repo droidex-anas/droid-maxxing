@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Copy, FoldVertical } from 'lucide-react';
 import { useDocumentVisible } from '../../hooks/useDocumentVisible';
 import { formatDuration } from '../../lib/tools';
@@ -48,11 +48,11 @@ export function Caret({ open }: { open: boolean }) {
 /* ── Animated expand/collapse, no chrome. Children stay mounted once opened so
    re-expanding is instant and inner state (scroll, selection) survives. ── */
 export function Expand({ open, children }: { open: boolean; children: React.ReactNode }) {
-  const [cachedChildren, setCachedChildren] = useState<React.ReactNode>(null);
-  useEffect(() => {
-    if (open) setCachedChildren(children);
+  const cachedChildren = useRef<React.ReactNode>(null);
+  useLayoutEffect(() => {
+    if (open) cachedChildren.current = children;
   }, [open, children]);
-  const renderedChildren = open ? children : cachedChildren;
+  const renderedChildren = open ? children : cachedChildren.current;
 
   return (
     <div
