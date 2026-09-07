@@ -44,6 +44,16 @@ export function projectFinalResponseKeys(
   return { identity, latestPromptEvent, settledKeys, liveKeys };
 }
 
+// Copy the turn's settled final response even while a later turn is streaming.
+// The in-flight answer stays in liveKeys until the session is idle.
+export function isCopyableFinalResponse(
+  key: string,
+  state: FinalResponseKeyState,
+  pending: boolean,
+): boolean {
+  return state.settledKeys.has(key) || (!pending && state.liveKeys.has(key));
+}
+
 function reuseLiveKeys(
   previous: FinalResponseKeyState | null,
   identity: string,

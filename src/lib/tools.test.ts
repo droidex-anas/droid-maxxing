@@ -9,6 +9,7 @@ import {
   formatCharCount,
   webSourceName,
   faviconUrl,
+  toolArgString,
   toolArgStringArray,
   latestTodoSnapshot,
   activeTodoIndex,
@@ -238,6 +239,12 @@ test('webSourceName derives a capitalized registrable label', () => {
 test('faviconUrl builds a favicon endpoint for a valid URL', () => {
   assert.match(faviconUrl('https://github.com/x') ?? '', /favicons.*domain=github\.com/);
   assert.equal(faviconUrl('not a url'), undefined);
+});
+
+test('toolArgString reads a string arg and ignores other values', () => {
+  assert.equal(toolArgString({ query: 'droidex' }, 'query'), 'droidex');
+  assert.equal(toolArgString({ query: 1 }, 'query'), undefined);
+  assert.equal(toolArgString({}, 'query'), undefined);
 });
 
 test('toolArgStringArray reads a string array arg, ignoring non-strings', () => {

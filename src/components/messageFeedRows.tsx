@@ -7,6 +7,8 @@ import {
 } from '../features/transcript-reach/transcriptReachContext';
 import type { ChildSessionActivity, ChildSessionTarget } from '../lib/childSessions';
 import type { FileChange } from '../lib/diff';
+import type { OpenReviewFileHandler } from '../lib/reviewFocus';
+import type { ToolActivityDensity } from '../lib/toolActivity';
 import { hasAppBlock } from './appBlockRuntime';
 import type { FeedItemViewProps } from './chat';
 import type { SubagentsDockData } from './SubagentsDock';
@@ -77,16 +79,21 @@ export interface FeedRowsSharedProps {
   pending: boolean;
   cwd?: string;
   onOpenDiff?: (change: FileChange) => void;
-  onOpenReviewFile?: (path: string) => void;
+  onOpenReviewFile?: OpenReviewFileHandler;
   onOpenChildSession?: (target: ChildSessionTarget) => void;
   childSessionActivity?: (target: ChildSessionTarget) => ChildSessionActivity | undefined;
   subagentsDock?: SubagentsDockData;
   liveTiming: boolean;
   specContent?: string;
+  // Render-only tool-activity settings, applied to every row.
+  density: ToolActivityDensity;
+  inlineDiffs: boolean;
 }
 
 export function optionalFeedRowProps(shared: FeedRowsSharedProps): Partial<FeedItemViewProps> {
   return {
+    density: shared.density,
+    inlineDiffs: shared.inlineDiffs,
     ...(shared.cwd !== undefined ? { cwd: shared.cwd } : {}),
     ...(shared.onOpenDiff !== undefined ? { onOpenDiff: shared.onOpenDiff } : {}),
     ...(shared.onOpenReviewFile !== undefined ? { onOpenReviewFile: shared.onOpenReviewFile } : {}),

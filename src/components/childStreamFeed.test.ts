@@ -148,6 +148,41 @@ test('feedItemPropsEqual isolates a child_sessions card from sibling feed rows',
   const previousMessage = viewProps(messageItem(userEvent));
   const nextMessage = viewProps(messageItem(userEvent), { sessionLive: true });
   assert.equal(feedItemPropsEqual(previousMessage, nextMessage), true);
+
+  assert.equal(
+    feedItemPropsEqual(
+      viewProps(messageItem(userEvent), { subagentsDock: dock }),
+      viewProps(messageItem(userEvent), { subagentsDock: nextDock }),
+    ),
+    true,
+  );
+});
+
+test('feedItemPropsEqual rerenders a worked fold when nested dock data changes', () => {
+  const wave = childItem('child-sessions-t1', [spawn('t1', 3)]);
+  const worked: FeedItem = {
+    type: 'worked',
+    key: 'worked-1',
+    durationMs: 1_000,
+    items: [wave],
+  };
+  const dock = { sessions: [] as ChildSessionSummary[], models: [] };
+  const previous = viewProps(worked, { subagentsDock: dock });
+  assert.equal(feedItemPropsEqual(previous, viewProps(worked, { subagentsDock: dock })), true);
+  assert.equal(
+    feedItemPropsEqual(
+      previous,
+      viewProps(worked, { subagentsDock: { sessions: [], models: [] } }),
+    ),
+    false,
+  );
+  assert.equal(
+    feedItemPropsEqual(
+      viewProps(worked, { subagentsDock: dock, sessionLive: false }),
+      viewProps(worked, { subagentsDock: dock, sessionLive: true }),
+    ),
+    false,
+  );
 });
 
 test('expanding a child preview preserves the parent viewport anchor', () => {

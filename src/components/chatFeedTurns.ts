@@ -6,7 +6,6 @@ import {
   buildFeed,
   collectTurnFiles,
   isCancellationArtifact,
-  isCompactionCompleteStatus,
   type BuildFeedOptions,
   type FeedItem,
 } from './chatFeed';
@@ -29,30 +28,6 @@ function turnLabel(text?: string): string {
 export interface ConversationAnchor {
   id: string;
   label: string;
-}
-
-// One anchor per turn: the turn's final model response (its summary). The id is
-// the feed item key, which MessageFeed also stamps onto the rendered row so the
-// timeline can scroll to it.
-export function finalResponseAnchorsFromItems(items: FeedItem[]): ConversationAnchor[] {
-  const out: ConversationAnchor[] = [];
-  let pendingKey: string | null = null;
-  let pendingText: string | undefined;
-  const flush = () => {
-    if (pendingKey !== null) out.push({ id: pendingKey, label: turnLabel(pendingText) });
-    pendingKey = null;
-    pendingText = undefined;
-  };
-  for (const it of items) {
-    if (isUserMessage(it)) {
-      flush();
-    } else if (it.type === 'message' && it.event.author !== 'user') {
-      pendingKey = it.key;
-      pendingText = it.event.text;
-    }
-  }
-  flush();
-  return out;
 }
 
 // One anchor per user prompt for the conversation timeline: the dot previews the
@@ -211,84 +186,100 @@ function mergeAssistantMessages(
   };
 }
 
-// Collapse a completed assistant turn: thinking/tool/file activity folds into
-// "Worked for …" groups while assistant chat messages, child session cards, and
-// compaction dividers stay top-level. Invariant (#18): an assistant message is
-// ALWAYS a top-level boundary and can never be nested inside a Worked group,
-// no matter what trailing compaction/tool status follows it.
+// Collapse a completed assistant turn: everything the turn did — thinking,
+// tool/file activity, statuses, compaction dividers, child-session lines, and
+// the assistant's mid-turn notes — folds into ONE "Worked for …" group between
+// the prompt and the answer, so a settled turn reads prompt → Worked → final
+// response and expanding the fold replays the whole turn (compaction dividers
+// included) at the configured density. Only two things stay top-level: the
+// turn's final answer (its last assistant message, plus earlier fragments
+// split off purely by todo/plan reconciliation, #19) and errors, so failures
+// remain visible. Invariant (#18): the final answer itself is never nested
+// inside a Worked group, no matter what trailing work or status follows it.
 function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
   if (run.length === 0) return [];
   const out: FeedItem[] = [];
   // A fragment equal to the pinned spec is suppressed by FeedItemView only when
   // its whole text matches the spec, so it must never be merged into prose (that
-  // would defeat the match and render the spec body twice).
+  // would defeat the match and render the spec body twice) nor serve as the
+  // turn's answer (the pinned spec card already renders it).
   const spec = specContent?.trim();
   const isSpecBody = (text: string | undefined) => !!spec && (text ?? '').trim() === spec;
-  // Fold contiguous work into "Worked for …" groups. Per-spawn child_session
-  // lines stay top-level so they remain visible (and navigable) after a turn,
-  // while child_sessions wave cards fold with the rest of the turn — they exist
-  // only in dock mode, where a finished wave's job is done.
-  let buf: FeedItem[] = [];
-  const flush = () => {
-    if (buf.length === 0) return;
-    if (buf.some((it) => it.type === 'message')) {
-      // Should never happen: assistant chat must stay top-level (#18).
-      console.warn('[transcript] assistant message folded into Worked activity group');
+  const isAnswerCandidate = (it: FeedItem): it is Extract<FeedItem, { type: 'message' }> =>
+    it.type === 'message' && it.event.author !== 'user' && !isSpecBody(it.event.text);
+
+  // Find the final answer: the run's last answer candidate, extended backwards
+  // across gaps holding only todo/plan reconciliation — the model emitted its
+  // answer, updated the checklist, then finished the sentence, so those
+  // fragments are one response (#19). The internal reconciliation items are
+  // dropped, not folded.
+  let lastMsg = -1;
+  for (let i = run.length - 1; i >= 0; i--) {
+    if (isAnswerCandidate(run[i])) {
+      lastMsg = i;
+      break;
     }
-    const { start, end } = spanOf(buf);
-    out.push({
-      type: 'worked',
-      key: `worked-${buf[0].key}`,
-      items: buf,
-      durationMs: Math.max(0, end - start),
-    });
-    buf = [];
-  };
-  for (const it of run) {
-    if (it.type === 'message') {
-      // Assistant chat (user messages were already split out by groupTurns).
-      // #19: when only a todo/plan reconciliation separates this fragment from
-      // the running answer, the model emitted its answer, updated the checklist,
-      // then finished the sentence, so it's one final response. Merge the
-      // fragments and drop the internal reconciliation so the turn renders a
-      // single final answer instead of burying it behind a "Worked" group.
-      const prev = out[out.length - 1];
-      if (
-        it.event.author !== 'user' &&
-        !isSpecBody(it.event.text) &&
-        buf.length > 0 &&
-        buf.every(isReconciliationItem) &&
-        prev?.type === 'message' &&
-        prev.event.author !== 'user' &&
-        !isSpecBody(prev.event.text)
-      ) {
-        out[out.length - 1] = mergeAssistantMessages(prev, it);
-        buf = [];
-        continue;
+  }
+  const answerIdx: number[] = [];
+  const dropIdx = new Set<number>();
+  if (lastMsg >= 0) {
+    answerIdx.push(lastMsg);
+    let s = lastMsg;
+    while (s > 0) {
+      let j = s - 1;
+      while (j >= 0 && isReconciliationItem(run[j])) j--;
+      // Only a reconciliation gap (at least one reconciliation item) followed
+      // by another answer candidate extends the final answer backwards.
+      if (j === s - 1 || j < 0 || !isAnswerCandidate(run[j])) break;
+      for (let k = j + 1; k < s; k++) dropIdx.add(k);
+      answerIdx.unshift(j);
+      s = j;
+    }
+  }
+  const answerSet = new Set(answerIdx);
+  let answer: Extract<FeedItem, { type: 'message' }> | undefined;
+  for (const i of answerIdx) {
+    const fragment = run[i] as Extract<FeedItem, { type: 'message' }>;
+    answer = answer ? mergeAssistantMessages(answer, fragment) : fragment;
+  }
+
+  // One fold per turn: every foldable item joins the same Worked group even
+  // when work continues past the last assistant text, so a turn never shatters
+  // into several folds. The group renders before the turn's top-level
+  // survivors (the answer and any errors, kept in transcript order).
+  const foldables: FeedItem[] = [];
+  const survivors: FeedItem[] = [];
+  let answerPushed = false;
+  for (let i = 0; i < run.length; i++) {
+    if (dropIdx.has(i)) continue;
+    const it = run[i];
+    if (answerSet.has(i)) {
+      // All fragments collapse into the one answer, emitted where the answer
+      // started; later fragments were already merged into it.
+      if (!answerPushed && answer) {
+        survivors.push(answer);
+        answerPushed = true;
       }
-      flush();
-      out.push(it);
-    } else if (it.type === 'child_session') {
-      flush();
-      out.push(it);
-    } else if (it.type === 'error') {
+      continue;
+    }
+    if (it.type === 'error') {
       // A failed tool/result must stay visible after the turn completes instead
       // of being buried in a collapsed "Worked for …" group (classifier intent).
-      flush();
-      out.push(it);
-    } else if (it.type === 'status' && it.event.kind === 'compaction') {
-      flush();
-      out.push(it);
-    } else if (
-      it.type === 'status' &&
-      isCompactionCompleteStatus(it.event.text) &&
-      it.event.compactType === 'manual'
-    ) {
-      flush();
-      out.push(it);
-    } else buf.push(it);
+      survivors.push(it);
+    } else {
+      foldables.push(it);
+    }
   }
-  flush();
+  if (foldables.length > 0) {
+    const { start, end } = spanOf(foldables);
+    out.push({
+      type: 'worked',
+      key: `worked-${foldables[0].key}`,
+      items: foldables,
+      durationMs: Math.max(0, end - start),
+    });
+  }
+  out.push(...survivors);
   return out;
 }
 

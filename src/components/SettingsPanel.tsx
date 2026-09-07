@@ -22,7 +22,7 @@ import { DiagnosticsSettings } from './DiagnosticsSettings';
 import { McpServersSettings } from './McpServersSettings';
 import { NotificationsSettings } from './NotificationsSettings';
 import { WorktreesSettings } from './WorktreesSettings';
-import { Dropdown, GroupLabel, SectionTitle } from './settingsKit';
+import { Dropdown, GroupLabel, SectionTitle, SettingRow } from './settingsKit';
 import { HardwareAccelerationSetting } from './HardwareAccelerationSetting';
 import { ArchivedChatsSettings } from './ArchivedChatsSettings';
 import {
@@ -31,6 +31,7 @@ import {
   tabMatchesQuery,
   type SettingsSearchHit,
 } from '../lib/settingsSearch';
+import { ToolActivitySettings } from './ToolActivitySettings';
 
 interface NavItem {
   label: string;
@@ -330,29 +331,6 @@ function CompactionModelPicker({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ── settings row: label + description on the left, control on the right ── */
-function SettingRow({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3">
-      <div className="min-w-0">
-        <div className="text-[13px] text-droid-text">{label}</div>
-        {description && (
-          <div className="text-[11px] text-droid-text-muted mt-0.5">{description}</div>
-        )}
-      </div>
-      {children}
     </div>
   );
 }
@@ -743,6 +721,8 @@ function ConfigurationSection() {
   return (
     <div className="max-w-2xl mx-auto">
       <SectionTitle title="Configuration" />
+      <GroupLabel>Transcript</GroupLabel>
+      <ToolActivitySettings />
       <GroupLabel>Sessions</GroupLabel>
       <div className="rounded-xl border border-droid-border bg-droid-surface divide-y divide-droid-border mb-8">
         <SettingRow

@@ -446,6 +446,10 @@ export function applyTheme(theme: ThemeSettings) {
     '--droid-shadow',
     bgIsDark ? '0 10px 40px rgba(0, 0, 0, 0.35)' : '0 10px 30px rgba(28, 25, 23, 0.1)',
   );
+  root.style.setProperty(
+    '--droid-shadow-sm',
+    bgIsDark ? '0 4px 16px rgba(0, 0, 0, 0.28)' : '0 4px 14px rgba(28, 25, 23, 0.08)',
+  );
   // Semantic status colors are FIXED, never accent-derived, so success/warning
   // and diff add/remove always read as green/amber/red even when the accent is a
   // neutral monochrome tone.
