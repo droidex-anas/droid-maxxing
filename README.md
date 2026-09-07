@@ -54,7 +54,8 @@ Read output is available inside the disclosure; compaction markers stay visible.
 The streaming caret indicates arriving text, while Working stays visible until
 the turn finishes, including gaps between tokens.
 
-Click a changed file to open Review with its captured diff. Repeated edits show
+Click a changed file to open Review with its captured diff; its disclosure arrow
+opens an inline preview. Repeated edits show
 the latest captured change and its matching line counts, even when Git has a
 different cumulative diff. Selecting a Review scope returns to its live Git changes. Path-only previews use
 the workspace Files permissions and reject paths or symlinks outside that folder.

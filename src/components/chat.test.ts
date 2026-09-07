@@ -1712,3 +1712,22 @@ for (const density of ['compact', 'balanced', 'detailed'] as const) {
     assert.equal(settled.includes('Running'), false);
   });
 }
+
+test('an ID-bearing result cannot settle an unrelated idless call by adjacency', () => {
+  const identified = ev({ kind: 'tool_call', toolName: 'Execute', toolUseId: 'known' });
+  const unknown = ev({ kind: 'tool_call', toolName: 'Execute' });
+  const knownResult = ev({ kind: 'tool_result', toolUseId: 'known', text: 'known output' });
+  const later = ev({ kind: 'tool_call', toolName: 'Execute' });
+  const ambiguousResult = ev({ kind: 'tool_result', text: 'unknown output' });
+  const { resultByCall, consumed } = correlateResults([
+    identified,
+    unknown,
+    knownResult,
+    later,
+    ambiguousResult,
+  ]);
+  assert.equal(resultByCall.get(identified), knownResult);
+  assert.equal(resultByCall.has(unknown), false);
+  assert.equal(resultByCall.has(later), false);
+  assert.equal(consumed.has(ambiguousResult), false);
+});

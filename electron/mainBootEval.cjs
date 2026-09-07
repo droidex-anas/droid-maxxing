@@ -145,11 +145,9 @@ function evaluateMain() {
       ? 'relative-profile'
       : profileCase === 'blank'
         ? '   '
-        : profileCase === 'fresh' || profileCase === 'file'
+        : ['fresh', 'file', 'padded'].includes(profileCase)
           ? requestedProfile
-          : profileCase === 'padded'
-            ? requestedProfile
-            : userData;
+          : userData;
   const expectedProfile =
     profileCase === 'blank'
       ? path.join(userData, 'appData', 'DROIDEX')

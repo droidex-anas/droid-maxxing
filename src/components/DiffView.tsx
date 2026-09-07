@@ -81,31 +81,42 @@ export function DiffCard({
 
   return (
     <div>
-      <button
-        type="button"
-        aria-expanded={onOpen ? undefined : open}
-        onClick={() => {
-          if (onOpen) onOpen();
-          else setOpen((o) => !o);
-        }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left"
-      >
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 text-droid-text-muted/50 transition-transform duration-200 group-hover:text-droid-text-muted ${open ? 'rotate-90' : ''}`}
-        />
-        <span className="shrink-0 text-[13px] font-medium text-droid-text-secondary">
-          {VERB_LABEL[change.verb]}
-        </span>
-        <span title={change.path} className="min-w-0 truncate text-[12px] text-droid-text-muted">
-          {label}
-        </span>
-        <span className="ml-auto text-[11px] tabular-nums shrink-0" style={{ color: ADD_FG }}>
-          +{change.added}
-        </span>
-        <span className="text-[11px] tabular-nums shrink-0" style={{ color: DEL_FG }}>
-          −{change.removed}
-        </span>
-      </button>
+      <div className="flex w-full min-w-0 items-center gap-1.5">
+        <button
+          type="button"
+          aria-label={`Preview ${label}`}
+          aria-expanded={open}
+          onClick={() => {
+            setOpen((value) => !value);
+          }}
+          className="group flex shrink-0 items-center justify-center"
+        >
+          <ChevronRight
+            className={`w-3 h-3 text-droid-text-muted/50 transition-transform duration-200 group-hover:text-droid-text-muted ${open ? 'rotate-90' : ''}`}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (onOpen) onOpen();
+            else setOpen((value) => !value);
+          }}
+          className="group flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
+          <span className="shrink-0 text-[13px] font-medium text-droid-text-secondary">
+            {VERB_LABEL[change.verb]}
+          </span>
+          <span title={change.path} className="min-w-0 truncate text-[12px] text-droid-text-muted">
+            {label}
+          </span>
+          <span className="ml-auto text-[11px] tabular-nums shrink-0" style={{ color: ADD_FG }}>
+            +{change.added}
+          </span>
+          <span className="text-[11px] tabular-nums shrink-0" style={{ color: DEL_FG }}>
+            −{change.removed}
+          </span>
+        </button>
+      </div>
       <Expand open={open}>
         {open ? (
           <ToolPanel className="mt-1.5">
