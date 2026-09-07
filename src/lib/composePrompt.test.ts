@@ -38,6 +38,22 @@ test('multiple selected skills keep the explicit multi-skill instruction', () =>
   );
 });
 
+test('a multi-skill prompt with no body peels the wrapper for display', () => {
+  const composed = composePrompt('', ['review', 'semgrep'], []);
+  assert.equal(composed, 'Use these skills: "review", "semgrep".');
+  assert.deepEqual(promptDisplayParts(composed), {
+    text: '',
+    skills: ['review', 'semgrep'],
+    visualize: false,
+  });
+  assert.deepEqual(promptDisplayParts(composed, ['review', 'semgrep']), {
+    text: '',
+    skills: ['review', 'semgrep'],
+    visualize: false,
+  });
+  assert.equal(promptDisplayText(composed), 'review, semgrep');
+});
+
 test('composePrompt leaves /visualize as the session payload', () => {
   assert.equal(
     composePrompt('/visualize compare renderer timings', [], []),

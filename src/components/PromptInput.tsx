@@ -267,7 +267,9 @@ export default function PromptInput({
         }
         const existing = pathForFile(file);
         if (existing) {
-          attachedFileSeqRef.current.set(existing, seq);
+          if (!attachedFileSeqRef.current.has(existing)) {
+            attachedFileSeqRef.current.set(existing, seq);
+          }
           setAttachedFiles((prev) => (prev.includes(existing) ? prev : [...prev, existing]));
         } else fileAttachments.addBlob(file, seq);
       }
@@ -317,6 +319,7 @@ export default function PromptInput({
     if (removal === null) return;
     switch (removal.chip) {
       case 'attachment':
+        attachedFileSeqRef.current.delete(removal.path);
         setAttachedFiles((prev) => prev.filter((path) => path !== removal.path));
         return;
       case 'skill':
@@ -1295,6 +1298,8 @@ export default function PromptInput({
     setInput(p.text);
     // Its own attachments come back as chips: images among them render as
     // thumbnails again, so the restored draft looks like the one that was queued.
+    attachedFileSeqRef.current.clear();
+    for (const path of p.files) attachedFileSeqRef.current.set(path, takeIntakeSeq());
     setAttachedFiles(p.files);
     setActiveSkills(invocableSkills.filter((s) => p.skills.includes(s.name)));
     // A queued App request already carries /visualize in its text, so the chip
@@ -1517,6 +1522,7 @@ export default function PromptInput({
                 // No discard on removal: the file was written for an
                 // already-composed prompt, and the attachments store sweeps it.
                 const remove = () => {
+                  attachedFileSeqRef.current.delete(path);
                   setAttachedFiles((prev) => prev.filter((x) => x !== path));
                 };
                 return src === null ? (
@@ -1538,6 +1544,7 @@ export default function PromptInput({
                   key={f}
                   path={f}
                   onRemove={() => {
+                    attachedFileSeqRef.current.delete(f);
                     setAttachedFiles((prev) => prev.filter((x) => x !== f));
                   }}
                 />

@@ -117,6 +117,10 @@ export function useImageAttachments(quality: ImagePasteQuality) {
   const nextSeqRef = useRef(0);
   // Stable per-mount instance; not React state in the render sense.
   const [additions] = useState(() => createPendingAdditions());
+  // Crops mutate an already-staged file. Submit must wait for them even when
+  // they start during an in-flight add, or the snapshot keeps the old path
+  // that applyCrop then deletes.
+  const [crops] = useState(() => createPendingAdditions());
 
   // useCallback: commit and clear are referenced from PromptInput effects, so
   // they must keep a stable identity across renders.
@@ -171,8 +175,8 @@ export function useImageAttachments(quality: ImagePasteQuality) {
   const applyCrop = async (id: string, rect: CropRect) => {
     const target = imagesRef.current.find((i) => i.id === id);
     if (!target) return;
-    // Tracked like an add: whenReady() must wait for an in-flight crop, or a
-    // crop landing mid-submit could delete a path the prompt references.
+    // Tracked as a mutation of an existing chip, not a new add: whenReady
+    // waits for crops that start while an earlier encode is still in flight.
     const stamp = additions.stamp();
     const task = (async () => {
       const cropped = await cropImage(target.preview, rect, quality);
@@ -196,7 +200,7 @@ export function useImageAttachments(quality: ImagePasteQuality) {
       // After the commit: exactly one deletion of the superseded file.
       void discardImage(existing.path);
     })();
-    additions.track(task);
+    crops.track(task);
     await task;
   };
 
@@ -220,11 +224,12 @@ export function useImageAttachments(quality: ImagePasteQuality) {
 
   /**
    * Submit-path support: wait only for adds already in flight at cutoff, then
-   * return those attachments. A paste that starts during the wait stays staged
-   * for the next prompt.
+   * wait for any crop of those attachments — including a crop that started
+   * during the add wait — before snapshotting paths.
    */
   const whenReady = async (cutoff: number): Promise<AttachedImage[]> => {
     await additions.knownSettled();
+    await crops.settled();
     return itemsBeforeCutoff(imagesRef.current, sequencesRef.current, cutoff);
   };
 

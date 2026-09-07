@@ -100,12 +100,12 @@ export function promptDisplayParts(
     body = vis;
   }
 
-  const multi = /^Use these skills: (.+)\.\n\n([\s\S]*)$/.exec(body);
+  const multi = /^Use these skills: (.+)\.(?:\n\n([\s\S]*))?$/.exec(body);
   if (multi) {
     if (names.length === 0) {
       names = [...multi[1].matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] ? [m[1]] : []));
     }
-    body = multi[2];
+    body = multi.at(2) ?? '';
   } else if (names.length > 0) {
     for (const skill of names) {
       const rest = afterSlash(body, skill);

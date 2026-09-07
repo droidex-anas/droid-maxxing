@@ -134,14 +134,19 @@ function capAttachmentName(cleaned) {
   }
   const maxChars = MAX_ATTACHMENT_NAME_CHARS - ext.length;
   const maxBytes = MAX_ATTACHMENT_NAME_BYTES - Buffer.byteLength(ext, 'utf8');
-  let out = stem;
-  while (out.length > maxChars || Buffer.byteLength(out, 'utf8') > maxBytes) {
-    const chars = [...out];
-    if (chars.length === 0) break;
-    chars.pop();
-    out = chars.join('');
+  // Walk once from the start so a megabyte-scale pasted name cannot copy the
+  // remaining stem on every popped character.
+  let usedChars = 0;
+  let usedBytes = 0;
+  let end = 0;
+  for (const char of stem) {
+    const charBytes = Buffer.byteLength(char, 'utf8');
+    if (usedChars + char.length > maxChars || usedBytes + charBytes > maxBytes) break;
+    usedChars += char.length;
+    usedBytes += charBytes;
+    end += char.length;
   }
-  const name = out + ext;
+  const name = stem.slice(0, end) + ext;
   return name.length === 0 ? null : name;
 }
 

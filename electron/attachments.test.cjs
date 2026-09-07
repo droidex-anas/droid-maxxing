@@ -298,3 +298,9 @@ test('sanitizeAttachmentName caps UTF-8 byte length for non-ASCII names', () => 
   assert.ok(cleaned.length <= 120);
   assert.ok(Buffer.byteLength(cleaned, 'utf8') <= 200);
 });
+
+test('sanitizeAttachmentName caps a very long stem in one pass', () => {
+  const cleaned = sanitizeAttachmentName(`${'a'.repeat(20_000)}.pdf`);
+  assert.equal(cleaned.length, 120);
+  assert.ok(cleaned.endsWith('.pdf'));
+});

@@ -112,6 +112,27 @@ test('knownSettled ignores additions that start after the snapshot', async () =>
   second.resolve();
 });
 
+test('submit waits for a crop that starts while an addition is still encoding', async () => {
+  const additions = createPendingAdditions();
+  const crops = createPendingAdditions();
+  const add = deferred();
+  const crop = deferred();
+  additions.track(add.promise);
+  let ready = false;
+  const waiting = (async () => {
+    await additions.knownSettled();
+    await crops.settled();
+    ready = true;
+  })();
+  crops.track(crop.promise);
+  add.resolve();
+  await tick();
+  assert.equal(ready, false);
+  crop.resolve();
+  await waiting;
+  assert.equal(ready, true);
+});
+
 test('itemsBeforeCutoff keeps only attachments reserved before submit', () => {
   const sequences = new Map([
     ['a', 0],
