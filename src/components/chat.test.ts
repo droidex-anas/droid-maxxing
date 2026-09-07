@@ -1742,7 +1742,9 @@ test('both inline diff toggles expose expansion when no review handler exists', 
     ops: [{ type: 'add' as const, text: 'added' }],
   };
   const inline = renderToStaticMarkup(createElement(DiffCard, { change }));
+  assert.equal((inline.match(/aria-expanded=/g) ?? []).length, 2);
   assert.equal((inline.match(/aria-expanded="false"/g) ?? []).length, 2);
   const review = renderToStaticMarkup(createElement(DiffCard, { change, onOpen: () => {} }));
+  assert.equal((review.match(/aria-expanded=/g) ?? []).length, 1);
   assert.equal((review.match(/aria-expanded="false"/g) ?? []).length, 1);
 });
