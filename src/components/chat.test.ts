@@ -15,6 +15,7 @@ import {
   FeedItemView,
 } from './chat';
 import { MessageFeed } from './MessageFeed';
+import { DiffCard } from './DiffView';
 import { buildFeed, collectTurnFiles, isResultFor, type FeedItem } from './chatFeed';
 import { conversationAnchors, groupTurns } from './chatFeedTurns';
 import {
@@ -1730,4 +1731,18 @@ test('an ID-bearing result cannot settle an unrelated idless call by adjacency',
   assert.equal(resultByCall.has(unknown), false);
   assert.equal(resultByCall.has(later), false);
   assert.equal(consumed.has(ambiguousResult), false);
+});
+
+test('both inline diff toggles expose expansion when no review handler exists', () => {
+  const change = {
+    path: 'src/app.ts',
+    verb: 'edit' as const,
+    added: 1,
+    removed: 0,
+    ops: [{ type: 'add' as const, text: 'added' }],
+  };
+  const inline = renderToStaticMarkup(createElement(DiffCard, { change }));
+  assert.equal((inline.match(/aria-expanded="false"/g) ?? []).length, 2);
+  const review = renderToStaticMarkup(createElement(DiffCard, { change, onOpen: () => {} }));
+  assert.equal((review.match(/aria-expanded="false"/g) ?? []).length, 1);
 });

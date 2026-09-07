@@ -97,6 +97,7 @@ export function DiffCard({
         </button>
         <button
           type="button"
+          aria-expanded={onOpen ? undefined : open}
           onClick={() => {
             if (onOpen) onOpen();
             else setOpen((value) => !value);
