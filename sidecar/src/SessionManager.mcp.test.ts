@@ -167,3 +167,34 @@ test('MCP catalog publishes tools after a connecting server settles', async () =
   assert.equal(catalogs[1]?.summary.connected, 1);
   assert.equal(catalogs[1]?.tools[0]?.name, 'echo');
 });
+
+test('MCP catalog republishes after connecting servers exhaust the settle budget', async () => {
+  const session = new FakeFactorySession('mcp-settle-timeout', {}, []);
+  session.nextMcpServers = {
+    servers: [
+      {
+        name: 'stuck-tools',
+        status: McpServerStatus.Connecting,
+        source: SettingsLevel.User,
+        isManaged: false,
+        serverType: McpServerType.Stdio,
+      },
+    ],
+    summary: { total: 1, connected: 0, connecting: 1, failed: 0, disabled: 0 },
+  };
+  const events: ServerEvent[] = [];
+  const settings = new McpSettings(
+    async () => session,
+    { add: async () => undefined, remove: async () => undefined },
+    (event) => events.push(event),
+    async () => undefined,
+  );
+
+  await settings.handle({ type: 'mcp.list', requestId: 'settle-timeout-1' });
+
+  const catalogs = events.filter((event) => event.type === 'mcp.catalog');
+  assert.equal(catalogs.length, 2);
+  assert.equal(catalogs[0]?.summary.connecting, 1);
+  assert.equal(catalogs[1]?.summary.connecting, 1);
+  assert.equal(catalogs[1]?.servers[0]?.status, 'connecting');
+});

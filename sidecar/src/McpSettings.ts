@@ -114,6 +114,7 @@ export class McpSettings {
       this.emitCatalogResult(serverResult, toolResult, requestId, cwd);
       return;
     }
+    await this.emitCatalog(session, requestId, cwd);
   }
 
   private emitCatalogResult(
