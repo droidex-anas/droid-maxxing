@@ -113,10 +113,36 @@ function sanitizeAttachmentName(name) {
     .replace(/^\.+/, '')
     .trim();
   if (cleaned.length === 0 || cleaned === '.' || cleaned === '..') return null;
-  if (cleaned.length <= 120) return cleaned;
+  return capAttachmentName(cleaned);
+}
+
+// Readable chip names stay short; the on-disk name also has to leave room for
+// saveFile's `file-<ts>-<hex>-` prefix under a 255-byte filesystem component.
+const MAX_ATTACHMENT_NAME_CHARS = 120;
+const MAX_ATTACHMENT_NAME_BYTES = 200;
+
+function capAttachmentName(cleaned) {
   const dot = cleaned.lastIndexOf('.');
-  const ext = dot > 0 ? cleaned.slice(dot) : '';
-  return cleaned.slice(0, 120 - ext.length) + ext;
+  let ext = dot > 0 ? cleaned.slice(dot) : '';
+  let stem = ext ? cleaned.slice(0, dot) : cleaned;
+  if (
+    ext.length >= MAX_ATTACHMENT_NAME_CHARS ||
+    Buffer.byteLength(ext, 'utf8') >= MAX_ATTACHMENT_NAME_BYTES
+  ) {
+    ext = '';
+    stem = cleaned;
+  }
+  const maxChars = MAX_ATTACHMENT_NAME_CHARS - ext.length;
+  const maxBytes = MAX_ATTACHMENT_NAME_BYTES - Buffer.byteLength(ext, 'utf8');
+  let out = stem;
+  while (out.length > maxChars || Buffer.byteLength(out, 'utf8') > maxBytes) {
+    const chars = [...out];
+    if (chars.length === 0) break;
+    chars.pop();
+    out = chars.join('');
+  }
+  const name = out + ext;
+  return name.length === 0 ? null : name;
 }
 
 // Creates the attachments root owner-only and verifies it is a real directory

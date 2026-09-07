@@ -100,7 +100,13 @@ export function promptDisplayParts(
     body = vis;
   }
 
-  if (names.length > 0) {
+  const multi = /^Use these skills: (.+)\.\n\n([\s\S]*)$/.exec(body);
+  if (multi) {
+    if (names.length === 0) {
+      names = [...multi[1].matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] ? [m[1]] : []));
+    }
+    body = multi[2];
+  } else if (names.length > 0) {
     for (const skill of names) {
       const rest = afterSlash(body, skill);
       if (rest !== null) {
@@ -109,16 +115,10 @@ export function promptDisplayParts(
       }
     }
   } else {
-    const multi = /^Use these skills: (.+)\.\n\n([\s\S]*)$/.exec(body);
-    if (multi) {
-      names = [...multi[1].matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] ? [m[1]] : []));
-      body = multi[2];
-    } else {
-      const slash = /^\/([A-Za-z][\w-]*)\s*([\s\S]*)$/.exec(body.trim());
-      if (slash && !RESERVED_SLASH.has(slash[1].toLowerCase())) {
-        names = [slash[1]];
-        body = slash[2];
-      }
+    const slash = /^\/([A-Za-z][\w-]*)\s*([\s\S]*)$/.exec(body.trim());
+    if (slash && !RESERVED_SLASH.has(slash[1].toLowerCase())) {
+      names = [slash[1]];
+      body = slash[2];
     }
   }
 
@@ -137,6 +137,6 @@ export function promptDisplayText(text: string, skills?: readonly string[]): str
   const display = promptDisplayParts(text, skills);
   return (
     display.text.replace(/\s+/g, ' ').trim() ||
-    (display.visualize ? 'Visualize' : display.skills.join(', '))
+    [display.visualize ? 'Visualize' : '', ...display.skills].filter(Boolean).join(', ')
   );
 }

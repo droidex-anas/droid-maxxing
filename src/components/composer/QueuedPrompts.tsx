@@ -10,6 +10,7 @@ import {
 import type { QueuedPrompt } from '../../hooks/useStore';
 import { promptDisplayText } from '../../lib/composePrompt';
 import { imageSrc, partitionImagePaths, pathBaseName } from '../../lib/localImage';
+import { FileChip } from './FileChip';
 import { queuedPromptPreview } from './queuedPromptPreview';
 
 // Queued attachments are a reminder, not a gallery: one tiny thumbnail stands in
@@ -89,7 +90,7 @@ export function QueuedPrompts({
         Queued · sends after the current turn
       </div>
       {queue.map((p, i) => {
-        const images = partitionImagePaths(p.files).images;
+        const { images, files } = partitionImagePaths(p.files);
         return (
           <div
             key={p.id}
@@ -125,6 +126,9 @@ export function QueuedPrompts({
                 {queuedPromptPreview(promptDisplayText(p.text, p.skills)) || '(empty)'}
               </span>
               {images.length > 0 && <QueuedImages paths={images} />}
+              {files.map((file) => (
+                <FileChip key={file} path={file} />
+              ))}
               {p.design && p.design.references.length > 0 && (
                 <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-black/20 px-1.5 py-0.5 text-[10px] text-droid-text-muted">
                   <MousePointerSquareDashed className="w-3 h-3" />

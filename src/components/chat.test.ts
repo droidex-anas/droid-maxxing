@@ -85,7 +85,9 @@ test('parent liveness cannot make paused historical child activity look running'
 
 test('a sent prompt shows Visualize and skill chips instead of slash text', () => {
   const html = renderToStaticMarkup(
-    createElement(UserBubble, { event: { text: '/visualize PR #100', skills: ['review'] } }),
+    createElement(UserBubble, {
+      event: { text: '/visualize /review PR #100', skills: ['review'] },
+    }),
   );
   assert.equal(html.includes('/visualize') || html.includes('/review'), false);
   assert.ok(html.includes('Visualize'));

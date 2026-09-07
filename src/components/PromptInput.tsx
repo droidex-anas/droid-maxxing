@@ -30,7 +30,7 @@ import {
   pathForFile,
   type FeedbackReportRequest,
 } from '../lib/desktop';
-import { useImageAttachments } from '../hooks/useImageAttachments';
+import { pathsInSequence, useImageAttachments } from '../hooks/useImageAttachments';
 import { useFileAttachments } from '../hooks/useFileAttachments';
 import { useComposerFileDrop } from '../hooks/useComposerFileDrop';
 import { ImageChip } from './composer/ImageChip';
@@ -249,21 +249,27 @@ export default function PromptInput({
   };
   const imageAttachments = useImageAttachments(state.imagePasteQuality);
   const fileAttachments = useFileAttachments();
+  const nextIntakeSeqRef = useRef(0);
+  const attachedFileSeqRef = useRef(new Map<string, number>());
+  const takeIntakeSeq = () => nextIntakeSeqRef.current++;
   // One entry point for pasted and dropped files: images always get a staged
   // copy (the fidelity pipeline encodes them); other files attach by reference
   // when the OS hands us a real path, and fall back to a temp copy when the
-  // clipboard only carries bytes.
+  // clipboard only carries bytes. One intake sequence is shared across all three
+  // stores so a mixed paste keeps its original order at send time.
   const addComposerFiles = useCallback(
     (dropped: File[]) => {
       for (const file of dropped) {
+        const seq = takeIntakeSeq();
         if (file.type.startsWith('image/')) {
-          imageAttachments.addBlob(file);
+          imageAttachments.addBlob(file, seq);
           continue;
         }
         const existing = pathForFile(file);
-        if (existing)
+        if (existing) {
+          attachedFileSeqRef.current.set(existing, seq);
           setAttachedFiles((prev) => (prev.includes(existing) ? prev : [...prev, existing]));
-        else fileAttachments.addBlob(file);
+        } else fileAttachments.addBlob(file, seq);
       }
     },
     [imageAttachments.addBlob, fileAttachments.addBlob],
@@ -674,6 +680,7 @@ export default function PromptInput({
   useEffect(() => {
     setHistoryIndex(null);
     clearDraftSelections();
+    attachedFileSeqRef.current.clear();
     setAttachedFiles([]);
     // Both viewers show a dropped attachment, so they cannot outlive it.
     setViewerImageId(null);
@@ -777,6 +784,9 @@ export default function PromptInput({
   };
 
   const addFile = (path: string) => {
+    if (!attachedFileSeqRef.current.has(path)) {
+      attachedFileSeqRef.current.set(path, takeIntakeSeq());
+    }
     setAttachedFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
     replaceTrigger('');
   };
@@ -792,6 +802,11 @@ export default function PromptInput({
     }
     const paths = await pickFiles();
     if (paths.length > 0) {
+      for (const path of paths) {
+        if (!attachedFileSeqRef.current.has(path)) {
+          attachedFileSeqRef.current.set(path, takeIntakeSeq());
+        }
+      }
       setAttachedFiles((prev) => [...prev, ...paths.filter((p) => !prev.includes(p))]);
     }
   };
@@ -868,17 +883,21 @@ export default function PromptInput({
     // images finish encoding is not part of this prompt — and must survive
     // the post-submit clear below.
     const composerRevision = composerRevisionRef.current;
-    // Pasted/dropped attachments encode asynchronously; wait out any in-flight
-    // adds so they make this prompt instead of surfacing on the next one via
-    // clear().
-    const readyImages = await imageAttachments.whenSettled();
-    const readyFiles = await fileAttachments.whenSettled();
+    // Snapshot intake order before any settle wait: files pasted while earlier
+    // attachments encode belong to the next prompt, not this one.
+    const intakeCutoff = nextIntakeSeqRef.current;
+    const readyImagesPromise = imageAttachments.whenReady(intakeCutoff);
+    const readyFilesPromise = fileAttachments.whenReady(intakeCutoff);
+    const [readyImages, readyFiles] = await Promise.all([readyImagesPromise, readyFilesPromise]);
     if (updateInterruptedSubmit()) return;
-    const allFiles = [
-      ...attachedFiles,
-      ...readyFiles.map((f) => f.path),
-      ...readyImages.map((i) => i.path),
-    ];
+    const allFiles = pathsInSequence([
+      ...attachedFiles.map((path, index) => ({
+        path,
+        sequence: attachedFileSeqRef.current.get(path) ?? 1_000_000 + index,
+      })),
+      ...readyFiles,
+      ...readyImages,
+    ]);
     const hasPayload = text || visualizeSelected || activeSkills.length > 0 || allFiles.length > 0;
     if (!hasPayload) return;
     setHistoryIndex(null);
@@ -887,8 +906,8 @@ export default function PromptInput({
       resetComposerAfterSubmit({
         draftUntouched: composerRevisionRef.current === composerRevision,
         clearImages: () => {
-          imageAttachments.clear();
-          fileAttachments.clear();
+          imageAttachments.clearReady(intakeCutoff);
+          fileAttachments.clearReady(intakeCutoff);
           // Image chips always clear on submit, so a viewer open over one of them
           // would be showing an attachment the composer no longer holds.
           setViewerImageId(null);
@@ -897,6 +916,7 @@ export default function PromptInput({
         resetDraft: () => {
           setInput('');
           clearDraftSelections();
+          attachedFileSeqRef.current.clear();
           setAttachedFiles([]);
         },
       });
@@ -905,7 +925,7 @@ export default function PromptInput({
     const feedbackDraft = feedbackDraftFromCommand(text);
     if (feedbackDraft !== null) {
       setFeedbackReport(feedbackDraft);
-      if (composerRevisionRef.current === composerRevision) setInput('');
+      clearAfterSubmit();
       return;
     }
 

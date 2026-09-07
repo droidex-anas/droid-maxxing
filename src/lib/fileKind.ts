@@ -3,6 +3,8 @@
 // Pure mapping from the file name (extension first, MIME as fallback) so the
 // same logic serves pasted blobs, picker paths, and queued-prompt restores.
 
+import { pathFileName } from './pathDisplay';
+
 export type FileKind =
   | 'pdf'
   | 'document'
@@ -136,7 +138,8 @@ export function fileKindInfo(name: string, mime?: string): FileKindInfo {
 const TEMP_FILE_PREFIX = /^file-\d+-[0-9a-f]{8}-/;
 
 export function attachmentDisplayName(path: string): string {
-  const slash = path.lastIndexOf('/');
-  const base = slash >= 0 ? path.slice(slash + 1) : path;
-  return TEMP_FILE_PREFIX.test(base) ? base.replace(TEMP_FILE_PREFIX, '') : base;
+  const base = pathFileName(path);
+  if (!TEMP_FILE_PREFIX.test(base)) return base;
+  const original = base.replace(TEMP_FILE_PREFIX, '');
+  return original.length > 0 ? original : base;
 }

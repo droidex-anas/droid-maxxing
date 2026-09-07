@@ -6,6 +6,7 @@ import {
   isVisualizeCommand,
   parseSlashSkillInvocation,
   promptDisplayParts,
+  promptDisplayText,
   promptTextWithVisualize,
   responseFormatForPrompt,
   submitCommandFor,
@@ -66,6 +67,11 @@ test('promptDisplayParts peels Visualize and slash skills off composed text', ()
     },
     {
       text: 'Use these skills: "review", "semgrep".\n\ninspect this',
+      skills: ['review', 'semgrep'],
+      want: { text: 'inspect this', skills: ['review', 'semgrep'], visualize: false },
+    },
+    {
+      text: 'Use these skills: "review", "semgrep".\n\ninspect this',
       want: { text: 'inspect this', skills: ['review', 'semgrep'], visualize: false },
     },
     {
@@ -121,4 +127,10 @@ test('anything staged makes the same words a prompt instead of a command', () =>
   assert.equal(submitCommandFor('/mission', { ...nothingStaged, visualizeSelected: true }), null);
   assert.equal(submitCommandFor('/compact', { ...nothingStaged, skillCount: 1 }), null);
   assert.equal(submitCommandFor('/mission', { ...nothingStaged, fileCount: 1 }), null);
+});
+
+test('promptDisplayText keeps Visualize and skill labels when there is no free text', () => {
+  assert.equal(promptDisplayText('/visualize', []), 'Visualize');
+  assert.equal(promptDisplayText('/visualize', ['review']), 'Visualize, review');
+  assert.equal(promptDisplayText('/review', ['review']), 'review');
 });

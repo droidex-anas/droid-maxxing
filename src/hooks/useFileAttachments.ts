@@ -5,6 +5,7 @@ import { toast } from '../lib/toast';
 import {
   createPendingAdditions,
   insertBySequence,
+  itemsBeforeCutoff,
   saveImageUnlessStale,
 } from './useImageAttachments';
 
@@ -14,6 +15,8 @@ export interface AttachedFile {
   path: string;
   /** The pasted file's original name, for the chip label. */
   name: string;
+  /** Composer-intake order, shared with pasted images so mixed drops stay in order. */
+  sequence: number;
 }
 
 // Mirrors MAX_ATTACHMENT_BYTES in electron/attachments.cjs: checked locally so
@@ -41,7 +44,7 @@ export function useFileAttachments() {
     setFiles(next);
   }, []);
 
-  const addBlob = (file: File) => {
+  const addBlob = (file: File, sequence?: number) => {
     if (!isDesktop()) {
       toast.error('File attachments need the desktop app');
       return;
@@ -50,7 +53,8 @@ export function useFileAttachments() {
       toast.error('That file is too large to paste. Drop it onto the composer instead.');
       return;
     }
-    const seq = nextSeqRef.current++;
+    const seq = sequence ?? nextSeqRef.current;
+    if (sequence === undefined || sequence >= nextSeqRef.current) nextSeqRef.current = seq + 1;
     const stamp = additions.stamp();
     const task = (async () => {
       try {
@@ -62,7 +66,7 @@ export function useFileAttachments() {
           discardImage,
         );
         if (path === null) return; // cleared while encoding; fresh file deleted
-        const attached = { id: crypto.randomUUID(), path, name: file.name };
+        const attached = { id: crypto.randomUUID(), path, name: file.name, sequence: seq };
         sequencesRef.current.set(attached.id, seq);
         commit(insertBySequence(filesRef.current, attached, sequencesRef.current));
       } catch (error) {
@@ -97,10 +101,22 @@ export function useFileAttachments() {
     clear();
   }, [clear]);
 
-  const whenSettled = async (): Promise<AttachedFile[]> => {
-    await additions.settled();
-    return filesRef.current;
+  const whenReady = async (cutoff: number): Promise<AttachedFile[]> => {
+    await additions.knownSettled();
+    return itemsBeforeCutoff(filesRef.current, sequencesRef.current, cutoff);
   };
 
-  return { files, addBlob, remove, clear, clearAndDiscard, whenSettled };
+  const clearReady = (cutoff: number) => {
+    const keep = filesRef.current.filter(
+      (file) => (sequencesRef.current.get(file.id) ?? Number.MAX_SAFE_INTEGER) >= cutoff,
+    );
+    for (const file of filesRef.current) {
+      if ((sequencesRef.current.get(file.id) ?? Number.MAX_SAFE_INTEGER) < cutoff) {
+        sequencesRef.current.delete(file.id);
+      }
+    }
+    commit(keep);
+  };
+
+  return { files, addBlob, remove, clear, clearAndDiscard, whenReady, clearReady };
 }

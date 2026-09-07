@@ -1,4 +1,5 @@
-import { Blocks, MousePointer2, PenLine, type ComponentType } from 'lucide-react';
+import { type ComponentType } from 'react';
+import { Blocks, MousePointer2, PenLine } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../../types/bridge';
 import { ImageAttachmentChip } from '../media/ImageAttachmentChip';
 import { FileChip } from '../composer/FileChip';
@@ -63,8 +64,6 @@ export function UserBubble({
   // as, so attachments are recovered from its trailing @mention block.
   const message = userMessageAttachments(event.text, event.files);
   const display = promptDisplayParts(message.text, event.skills);
-  const images = message.files.filter((f) => isImagePath(f));
-  const files = message.files.filter((f) => !isImagePath(f));
   const hasAttachments = message.files.length > 0 || browserRefs.length > 0;
   const hasPrompt = Boolean(display.text) || display.skills.length > 0 || display.visualize;
   return (
@@ -90,12 +89,13 @@ export function UserBubble({
           {browserRefs.map((reference) => (
             <BrowserReferenceChip key={`${reference.kind}:${reference.id}`} reference={reference} />
           ))}
-          {images.map((f) => (
-            <ImageAttachmentChip key={f} path={f} />
-          ))}
-          {files.map((f) => (
-            <FileChip key={f} path={f} />
-          ))}
+          {message.files.map((f) =>
+            isImagePath(f) ? (
+              <ImageAttachmentChip key={f} path={f} />
+            ) : (
+              <FileChip key={f} path={f} />
+            ),
+          )}
         </div>
       )}
       {hasPrompt && (

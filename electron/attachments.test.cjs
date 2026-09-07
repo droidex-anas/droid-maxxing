@@ -284,3 +284,17 @@ test('sanitizeAttachmentName caps length without losing the extension', () => {
   assert.equal(cleaned.length, 120);
   assert.ok(cleaned.endsWith('.pdf'));
 });
+
+test('sanitizeAttachmentName bounds an over-long extension instead of expanding', () => {
+  const ext = `.${'x'.repeat(200)}`;
+  const cleaned = sanitizeAttachmentName(`a${ext}`);
+  assert.ok(cleaned.length <= 120);
+  assert.ok(Buffer.byteLength(cleaned, 'utf8') <= 200);
+});
+
+test('sanitizeAttachmentName caps UTF-8 byte length for non-ASCII names', () => {
+  const cleaned = sanitizeAttachmentName(`${'测'.repeat(120)}.pdf`);
+  assert.ok(cleaned.endsWith('.pdf'));
+  assert.ok(cleaned.length <= 120);
+  assert.ok(Buffer.byteLength(cleaned, 'utf8') <= 200);
+});

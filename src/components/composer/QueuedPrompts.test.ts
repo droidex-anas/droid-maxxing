@@ -52,7 +52,9 @@ test('several queued images collapse to one thumbnail with a count badge', () =>
   assert.match(html, /text-\[8px\][^>]*">3</);
 });
 
-test('a prompt with no images shows no thumbnail', () => {
-  const html = render([prompt({ files: ['/src/index.ts'] })]);
+test('a queued non-image file renders a FileChip', () => {
+  const html = render([prompt({ files: ['/tmp/notes.pdf'] })]);
+  assert.match(html, /notes\.pdf/);
+  assert.match(html, />PDF</);
   assert.doesNotMatch(html, /droidex-img/);
 });
