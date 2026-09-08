@@ -186,7 +186,7 @@ async function withRecentHome(
   const home = mkdtempSync(join(tmpdir(), 'droidex-index-pacing-'));
   const previousHome = process.env['HOME'];
   process.env['HOME'] = home;
-  const databaseDirectory = join(home, '.factory', 'droidex');
+  const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
   const sessionsDirectory = join(home, '.factory', 'sessions');
   mkdirSync(databaseDirectory, { recursive: true });
   mkdirSync(sessionsDirectory, { recursive: true });

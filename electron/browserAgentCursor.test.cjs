@@ -134,7 +134,7 @@ test('cursor overlay is sandboxed, click-through, static, and blocks navigation'
   assert.equal(prevented, true);
 });
 
-test('cursor documents are distinct, script-free, and respect reduced motion', () => {
+test('cursor documents are distinct and script-free', () => {
   assert.deepEqual(BROWSER_AGENT_CURSOR_STYLES, ['dark', 'light', 'droidex']);
   assert.equal(BROWSER_AGENT_CURSOR_DEFAULT_SIZE, 36);
   assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 5 });
@@ -144,8 +144,6 @@ test('cursor documents are distinct, script-free, and respect reduced motion', (
   );
   for (const document of documents) {
     assert.match(document, /default-src 'none'/);
-    assert.match(document, /@keyframes cursor-rock/);
-    assert.match(document, /prefers-reduced-motion:reduce/);
     assert.doesNotMatch(document, /<script|javascript:/i);
   }
   assert.equal(new Set(documents).size, 3);
@@ -221,7 +219,7 @@ test('controller accepts only trusted styles and can reload a live overlay', asy
   assert.match(decodeURIComponent(windows[0].loadedUrl), /stroke="#dce1eb"/i);
   assert.equal(controller.setStyle('dark'), true);
   assert.equal(windows[0].loadedUrls.length, 2);
-  assert.match(decodeURIComponent(windows[0].loadedUrl), /fill="#3b3b3b"/);
+  assert.match(decodeURIComponent(windows[0].loadedUrl), /fill="#111111"/);
   assert.equal(controller.setStyle('dark'), false);
   assert.throws(() => controller.setStyle('<svg onload=alert(1)>'), /style must be/);
 

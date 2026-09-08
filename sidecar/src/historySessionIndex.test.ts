@@ -25,7 +25,9 @@ function reconcileHistoryIndex(
   index: HistoryIndexType,
   changes?: Array<{ providerSessionId: string; path: string }>,
 ): number {
-  const db = new DatabaseSync(join(home, '.factory', 'droidex', SESSION_SEARCH_INDEX_FILENAME));
+  const db = new DatabaseSync(
+    join(home, 'Library', 'Application Support', 'DROIDEX', SESSION_SEARCH_INDEX_FILENAME),
+  );
   try {
     const cache = createHistorySessionFileCache(db);
     const result = changes ? cache.reconcilePathChanges(changes) : cache.reconcileChanges();

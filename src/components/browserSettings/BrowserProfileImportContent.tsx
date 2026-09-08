@@ -1,4 +1,4 @@
-import { Globe, FileUp, KeyRound, RotateCcw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Globe, KeyRound, RotateCcw } from 'lucide-react';
 import type {
   BrowserCookieProfileDiscovery,
   BrowserCookieProfileImportPreview,
@@ -82,23 +82,14 @@ export function BrowserProfileImportSelection({
         {discovery.chrome.status === 'available' && (
           <div className="mt-2.5 flex items-start gap-2 rounded-lg bg-droid-bg/35 px-3 py-2.5 text-[10.5px] leading-4 text-droid-text-muted">
             <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Continuing may show macOS Keychain approval. Cookie values stay in Electron main and are
-            never sent to this settings page.
+            macOS may ask you to allow Chrome Keychain access. Passwords are not imported.
           </div>
         )}
       </section>
 
-      <section aria-labelledby="recovery-heading">
-        <div className="mb-2.5 flex items-center gap-2">
-          <FileUp className="h-3.5 w-3.5 text-droid-text-muted" />
-          <h3
-            id="recovery-heading"
-            className="text-[11px] font-medium uppercase tracking-wider text-droid-text-muted"
-          >
-            Recovery
-          </h3>
-        </div>
-        <div className="space-y-2">
+      <details className="text-[11px] text-droid-text-muted">
+        <summary className="cursor-pointer py-2">Other import options</summary>
+        <div className="mt-2 space-y-2">
           <div className="rounded-xl border border-droid-border bg-droid-bg/45 p-3.5">
             <p className="text-[12px] font-medium text-droid-text">Safari</p>
             <p className="mt-0.5 text-[10.5px] leading-4 text-droid-text-muted">
@@ -124,7 +115,7 @@ export function BrowserProfileImportSelection({
             </button>
           </div>
         </div>
-      </section>
+      </details>
     </div>
   );
 }
@@ -158,7 +149,7 @@ export function BrowserProfileImportPreview({
             </dd>
           </div>
           <div>
-            <dt className="text-droid-text-muted">Skipped safely</dt>
+            <dt className="text-droid-text-muted">Skipped</dt>
             <dd className="mt-0.5 font-medium text-droid-text-secondary">
               {String(preview.skippedCount)}
             </dd>
@@ -177,10 +168,36 @@ export function BrowserProfileImportPreview({
         </div>
       )}
       <p className="text-[10.5px] leading-4 text-droid-text-muted">
-        Only the counts and domains shown above reached this page. Cookie names and values remain
-        private to Electron main. Current open browser pages close before import so sites reload
-        against one completed cookie update.
+        Open browser pages will close during import. Some sites may still ask you to sign in.
       </p>
+    </div>
+  );
+}
+
+export function BrowserProfileImportResult({
+  summary,
+  domainCount,
+  failedCount,
+}: {
+  summary: string;
+  domainCount: number;
+  failedCount: number;
+}) {
+  const Icon = failedCount > 0 ? AlertCircle : CheckCircle2;
+  return (
+    <div role="status" className="rounded-xl border border-droid-border bg-droid-bg/45 p-4">
+      <div className="flex items-start gap-3">
+        <Icon
+          className={`mt-0.5 h-4 w-4 shrink-0 ${failedCount > 0 ? 'text-amber-300' : 'text-droid-green'}`}
+        />
+        <div>
+          <p className="text-[12.5px] font-medium text-droid-text">{summary}</p>
+          <p className="mt-1 text-[11px] leading-5 text-droid-text-muted">
+            {String(domainCount)} {domainCount === 1 ? 'site' : 'sites'} updated. Open a site to
+            check your sign-in.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

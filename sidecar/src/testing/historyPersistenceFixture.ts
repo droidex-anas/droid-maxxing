@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { droidexUserDataDir } from '../droidexPaths.js';
 import { DatabaseSync } from 'node:sqlite';
 
 import { HistoryIndex, SESSION_INDEX_FILENAME, type PersistedChildSession } from '../history.js';
@@ -36,7 +36,7 @@ export function persistTestChild(child: PersistedChildSession): void {
 }
 
 function persistTestBatch(batch: HistoryPersistenceBatch): void {
-  const path = join(homedir(), '.factory', 'droidex', SESSION_INDEX_FILENAME);
+  const path = join(droidexUserDataDir(), SESSION_INDEX_FILENAME);
   assertCanonicalHistorySchema(path);
   const database = new HistoryPersistenceDatabase(path);
   try {

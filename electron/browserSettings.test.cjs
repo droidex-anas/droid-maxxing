@@ -277,8 +277,12 @@ test('partial Chrome recovery persists imported and failed counts without cookie
       openDialogResponses.push({ canceled: false, filePaths: [exportPath] });
       responses.push(0);
 
-      await assert.rejects(controller.importCookies(), /partially|stopped/i);
+      const result = await controller.importCookies();
+      assert.equal(result.canceled, false);
+      assert.equal(result.importedCount, 1);
+      assert.equal(result.failedCount, 1);
       const receipt = (await controller.snapshot()).lastCookieImport;
+      assert.deepEqual(result.snapshot.lastCookieImport, receipt);
       assert.deepEqual(receipt, {
         importedAt: '2026-08-16T12:34:56.000Z',
         source: 'chrome',

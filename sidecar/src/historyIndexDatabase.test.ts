@@ -143,7 +143,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-progressive-index-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -246,7 +246,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-progressive-index-retry-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -292,7 +292,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-progressive-index-isolated-retry-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -333,7 +333,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-progressive-index-priority-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -380,7 +380,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-progressive-index-race-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -471,7 +471,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-progressive-index-tail-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -520,7 +520,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-progressive-index-delete-race-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -588,7 +588,7 @@ test('indexing does not arm a slice timer when there is nothing to index', async
   const home = mkdtempSync(join(tmpdir(), 'droidex-index-idle-empty-'));
   const previousHome = process.env['HOME'];
   process.env['HOME'] = home;
-  const databaseDirectory = join(home, '.factory', 'droidex');
+  const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
   mkdirSync(databaseDirectory, { recursive: true });
   mkdirSync(join(home, '.factory', 'sessions'), { recursive: true });
   const dbPath = join(databaseDirectory, 'session-index.sqlite');
@@ -622,7 +622,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-index-idle-pace-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -662,7 +662,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-index-archive-idle-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });

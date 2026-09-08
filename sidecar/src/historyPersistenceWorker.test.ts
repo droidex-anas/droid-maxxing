@@ -211,7 +211,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-history-index-worker-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions', '2026', '08');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -267,7 +267,7 @@ test(
     const home = mkdtempSync(join(tmpdir(), 'droidex-history-index-backfill-'));
     const previousHome = process.env['HOME'];
     process.env['HOME'] = home;
-    const databaseDirectory = join(home, '.factory', 'droidex');
+    const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
     const sessionsDirectory = join(home, '.factory', 'sessions');
     mkdirSync(databaseDirectory, { recursive: true });
     mkdirSync(sessionsDirectory, { recursive: true });
@@ -323,7 +323,7 @@ test('missing FTS5 degrades search without affecting canonical persistence', asy
   const home = mkdtempSync(join(tmpdir(), 'droidex-history-fts5-unavailable-'));
   const previousHome = process.env['HOME'];
   process.env['HOME'] = home;
-  const databaseDirectory = join(home, '.factory', 'droidex');
+  const databaseDirectory = join(home, 'Library', 'Application Support', 'DROIDEX');
   mkdirSync(databaseDirectory, { recursive: true });
   const dbPath = join(databaseDirectory, SESSION_INDEX_FILENAME);
   const unhandled: unknown[] = [];

@@ -208,7 +208,11 @@ function createBrowserCookieImports(options) {
       finalizeError = error;
     }
 
-    if (commitError) {
+    const partialImport =
+      imported &&
+      (commitError?.code === 'BROWSER_PROFILE_COOKIE_IMPORT_PARTIAL' ||
+        commitError?.code === 'BROWSER_COOKIE_IMPORT_PARTIAL');
+    if (commitError && !partialImport) {
       if (finalizeError) commitError.storageFlushFailed = true;
       if (receiptError) commitError.receiptPersistenceFailed = true;
       throw commitError;

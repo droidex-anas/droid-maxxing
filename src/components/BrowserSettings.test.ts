@@ -98,7 +98,7 @@ test('BrowserSettingsView renders real safety controls without unexpected secret
   assert.match(html, /aria-label="Agent cursor size"/);
   assert.match(html, /36 px/);
   assert.match(html, />DROIDEX</);
-  assert.match(html, /M6 3L27 23\.7/);
+  assert.match(html, /M7\.01 3\.99 Q6\.2 3\.4/);
   assert.match(html, /Signups, OAuth, and passkeys/);
   assert.match(html, /Touch ID passkeys are available in this signed DROIDEX build/);
   assert.match(html, /https:\/\/docs\.example\.com/);
@@ -168,7 +168,8 @@ test('BrowserSettingsView keeps a persistent secret-free Chrome import receipt v
 
   assert.match(html, /Last Chrome import/);
   assert.match(html, /Personal profile/);
-  assert.match(html, /42 imported/);
+  assert.match(html, /42 cookies imported/);
+  assert.match(html, /role="status"/);
   assert.match(html, /3 skipped/);
   assert.match(html, /8 sites/);
   assert.doesNotMatch(html, /cookieValue|cookieName|affectedDomains/);

@@ -224,7 +224,7 @@ async function smokePackagedRuntime(architecture) {
     'sparkle_updater.node',
   );
   const temporaryHome = mkdtempSync(join(tmpdir(), `droidex-${name}-runtime-`));
-  const databasePath = join(temporaryHome, '.factory', 'droidex', 'session-index.sqlite');
+  const databasePath = join(temporaryHome, 'Library', 'Application Support', 'DROIDEX', 'session-index.sqlite');
   const child = spawn(executablePath, [sidecarPath], {
     env: {
       ...process.env,

@@ -13,7 +13,7 @@
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 36
+      "count": 32
     },
     "@typescript-eslint/restrict-template-expressions": {
       "count": 4

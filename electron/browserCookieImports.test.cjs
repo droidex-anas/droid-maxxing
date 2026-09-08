@@ -164,13 +164,14 @@ test('profile plans expire and discard decrypted cookie data', async () => {
   await assert.rejects(controller.commitProfile('opaque-plan-1'), /invalid or expired/);
 });
 
-test('partial profile commits record failed counts before returning the sanitized error', async () => {
+test('partial profile commits return counts and a receipt so the UI can show the completed import', async () => {
   const partialResult = {
     ...preview,
     importedCount: 1,
     failedCount: 1,
   };
   const partialError = new Error('private failure details');
+  partialError.code = 'BROWSER_PROFILE_COOKIE_IMPORT_PARTIAL';
   partialError.result = partialResult;
   const { controller, receipts } = fixture(0, undefined, {
     profileCommit: () => {
@@ -179,7 +180,12 @@ test('partial profile commits record failed counts before returning the sanitize
   });
   await controller.prepareProfile('Default');
 
-  await assert.rejects(controller.commitProfile('opaque-plan-1'), partialError);
+  const result = await controller.commitProfile('opaque-plan-1');
+  assert.equal(result.importedCount, 1);
+  assert.equal(result.failedCount, 1);
+  assert.deepEqual(result.snapshot.lastCookieImport, receipts[0]);
+  assert.doesNotMatch(JSON.stringify(result), /private failure details/);
+  await assert.rejects(controller.commitProfile('opaque-plan-1'), /invalid or expired/);
   assert.deepEqual(receipts, [
     {
       source: 'chrome',
@@ -208,6 +214,45 @@ test('cookie commits close live browser views before mutation and flush storage 
   await controller.prepareProfile('Default');
   await controller.commitProfile('opaque-plan-1');
   assert.deepEqual(calls, ['close', 'write', 'flush']);
+});
+
+test('a partial import still fails when its receipt cannot be saved', async () => {
+  const partialError = Object.assign(new Error('private host error'), {
+    code: 'BROWSER_PROFILE_COOKIE_IMPORT_PARTIAL',
+    result: { ...preview, importedCount: 1, failedCount: 1 },
+  });
+  const { controller } = fixture(0, undefined, {
+    profileCommit: () => {
+      throw partialError;
+    },
+    recordReceipt: () => {
+      throw new Error('private storage path');
+    },
+  });
+  await controller.prepareProfile('Default');
+  await assert.rejects(controller.commitProfile('opaque-plan-1'), (error) => {
+    assert.equal(error.code, 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED');
+    assert.equal(error.receiptPersistenceFailed, true);
+    assert.equal(error.result.importedCount, 1);
+    assert.doesNotMatch(error.message, /private/);
+    return true;
+  });
+});
+
+test('an import with no stored cookies remains a failure, not partial success', async () => {
+  const error = Object.assign(new Error('Cookie import failed for 2 cookies.'), {
+    code: 'BROWSER_PROFILE_COOKIE_IMPORT_FAILED',
+    result: { ...preview, importedCount: 0, failedCount: 2 },
+  });
+  const { controller, receipts } = fixture(0, undefined, {
+    profileCommit: () => {
+      throw error;
+    },
+  });
+  await controller.prepareProfile('Default');
+  await assert.rejects(controller.commitProfile('opaque-plan-1'), error);
+  assert.equal(receipts[0].importedCount, 0);
+  assert.equal(receipts[0].failedCount, 2);
 });
 
 test('a profile lifecycle failure discards the taken plan before rethrowing', async () => {

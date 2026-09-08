@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
+import { AlertCircle, Loader2, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   commitBrowserCookieProfileImport,
@@ -17,6 +17,7 @@ import {
 import { BrowserSettingsDialogFrame } from './BrowserSettingsDialogFrame';
 import {
   BrowserProfileImportPreview,
+  BrowserProfileImportResult,
   BrowserProfileImportSelection,
 } from './BrowserProfileImportContent';
 
@@ -30,7 +31,7 @@ type ImportFlow =
       planId: string;
       preview: BrowserCookieProfileImportPreview;
     }
-  | { kind: 'complete'; summary: string; domainCount: number };
+  | { kind: 'complete'; summary: string; domainCount: number; failedCount: number };
 
 const PROFILE_IMPORT_FAILURE_MESSAGES: Record<BrowserCookieProfileImportFailureReason, string> = {
   keychain_denied:
@@ -204,6 +205,7 @@ export function BrowserProfileImportDialog({
         kind: 'complete',
         summary: formatCookieProfileImportSummary(result),
         domainCount: result.domainCount,
+        failedCount: result.failedCount,
       });
     } catch (error) {
       const planId = pendingPlanId.current;
@@ -238,6 +240,7 @@ export function BrowserProfileImportDialog({
         kind: 'complete',
         summary: formatCookieImportSummary(result),
         domainCount: result.affectedDomains.length,
+        failedCount: result.failedCount,
       });
     } catch (error) {
       try {
@@ -256,16 +259,15 @@ export function BrowserProfileImportDialog({
     }
   };
 
-  const title =
-    flow.kind === 'preview'
-      ? 'Confirm Chrome import'
-      : flow.kind === 'complete'
-        ? 'Import complete'
-        : 'Import browser sign-ins';
-  const description =
-    flow.kind === 'preview'
-      ? 'Review exactly which sites will change before cookies enter the shared DROIDEX browser.'
-      : 'Chrome profiles are detected automatically. File import is only for an existing JSON or Netscape cookie export.';
+  let title = 'Import from Chrome';
+  let description = 'Choose the Chrome profile you use to sign in.';
+  if (flow.kind === 'preview') {
+    title = 'Confirm Chrome import';
+    description = 'Check the sites and counts below.';
+  } else if (flow.kind === 'complete') {
+    title = flow.failedCount > 0 ? 'Imported with issues' : 'Import complete';
+    description = 'Your import result is also saved in Browser settings.';
+  }
 
   return (
     <BrowserSettingsDialogFrame
@@ -314,7 +316,7 @@ export function BrowserProfileImportDialog({
               className="flex min-w-[142px] items-center justify-center gap-2 rounded-lg bg-droid-accent px-3.5 py-2 text-[12px] font-semibold text-droid-bg disabled:opacity-50"
             >
               {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Continue with Chrome
+              {busy ? 'Reading Chrome cookies…' : 'Continue'}
             </button>
           )}
           {flow.kind === 'preview' && (
@@ -326,7 +328,7 @@ export function BrowserProfileImportDialog({
               className="flex min-w-[128px] items-center justify-center gap-2 rounded-lg bg-droid-accent px-3.5 py-2 text-[12px] font-semibold text-droid-bg disabled:opacity-50"
             >
               {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Import {String(flow.preview.importCount)}
+              {busy ? 'Importing…' : `Import ${String(flow.preview.importCount)} cookies`}
             </button>
           )}
           {flow.kind === 'complete' && (
@@ -384,19 +386,11 @@ export function BrowserProfileImportDialog({
       )}
       {flow.kind === 'preview' && <BrowserProfileImportPreview preview={flow.preview} />}
       {flow.kind === 'complete' && (
-        <div role="status" className="rounded-xl border border-droid-border bg-droid-bg/45 p-4">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-            <div>
-              <p className="text-[12.5px] font-medium text-droid-text">{flow.summary}</p>
-              <p className="mt-1 text-[11px] leading-5 text-droid-text-muted">
-                {String(flow.domainCount)} {flow.domainCount === 1 ? 'site domain' : 'site domains'}{' '}
-                updated in the shared DROIDEX browser. Reopen the site so it can rebuild its session
-                from the completed import.
-              </p>
-            </div>
-          </div>
-        </div>
+        <BrowserProfileImportResult
+          summary={flow.summary}
+          domainCount={flow.domainCount}
+          failedCount={flow.failedCount}
+        />
       )}
       {error && (
         <div

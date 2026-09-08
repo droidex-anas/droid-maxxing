@@ -84,10 +84,15 @@ function writeEmptySession(root: string, id: string, cwd: string): string {
 test('compaction summary lookup uses a partial event index instead of scanning all events', () => {
   const history = new HistoryIndex();
   history.close();
-  new HistoryPersistenceDatabase(join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME)).close();
-  const db = new DatabaseSync(join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME), {
-    readOnly: true,
-  });
+  new HistoryPersistenceDatabase(
+    join(home, 'Library', 'Application Support', 'DROIDEX', SESSION_INDEX_FILENAME),
+  ).close();
+  const db = new DatabaseSync(
+    join(home, 'Library', 'Application Support', 'DROIDEX', SESSION_INDEX_FILENAME),
+    {
+      readOnly: true,
+    },
+  );
   try {
     const plan = db
       .prepare(
@@ -152,7 +157,13 @@ function reconcileHistoryIndexPaths(
   changes: Array<{ providerSessionId: string; path: string }>,
 ): number {
   const db = new DatabaseSync(
-    join(process.env.HOME ?? '', '.factory', 'droidex', SESSION_SEARCH_INDEX_FILENAME),
+    join(
+      process.env.HOME ?? '',
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_SEARCH_INDEX_FILENAME,
+    ),
   );
   try {
     const cache = createHistorySessionFileCache(db);
@@ -168,7 +179,13 @@ function reconcileHistoryIndexPaths(
 
 function reconcileHistoryIndexChanges(index: HistoryIndexType) {
   const db = new DatabaseSync(
-    join(process.env.HOME ?? '', '.factory', 'droidex', SESSION_SEARCH_INDEX_FILENAME),
+    join(
+      process.env.HOME ?? '',
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_SEARCH_INDEX_FILENAME,
+    ),
   );
   try {
     const cache = createHistorySessionFileCache(db);
@@ -400,7 +417,13 @@ test('opening the canonical index does not open or mutate the worker-owned deriv
     persistTestSummaries([patchFor('existing-session', '/workspace/existing')]);
     existing.close();
 
-    const databasePath = join(upgradeHome, '.factory', 'droidex', SESSION_INDEX_FILENAME);
+    const databasePath = join(
+      upgradeHome,
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_INDEX_FILENAME,
+    );
     const searchDatabasePath = join(
       upgradeHome,
       '.factory',
@@ -503,7 +526,13 @@ test('a corrupt cache row is dropped and rebuilt on the next boot', () => {
   process.env.HOME = freshHome;
   try {
     writeSession(freshHome, 'corrupt-row', join(freshHome, 'workspace'));
-    const dbPath = join(freshHome, '.factory', 'droidex', SESSION_SEARCH_INDEX_FILENAME);
+    const dbPath = join(
+      freshHome,
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_SEARCH_INDEX_FILENAME,
+    );
 
     const first = new HistoryIndex();
     try {
@@ -574,7 +603,13 @@ test('pre-classification cache rows are discarded so empty sessions are re-evalu
   process.env.HOME = freshHome;
   try {
     writeEmptySession(freshHome, 'previously-cached-empty', join(freshHome, 'workspace'));
-    const dbPath = join(freshHome, '.factory', 'droidex', SESSION_SEARCH_INDEX_FILENAME);
+    const dbPath = join(
+      freshHome,
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_SEARCH_INDEX_FILENAME,
+    );
     const first = new HistoryIndex();
     try {
       assert.equal(reconcileHistoryIndex(first), 1);

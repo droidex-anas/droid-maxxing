@@ -14,6 +14,7 @@ import {
 } from '../../lib/browserSettings.js';
 import {
   BrowserProfileImportPreview,
+  BrowserProfileImportResult,
   BrowserProfileImportSelection,
 } from './BrowserProfileImportContent.js';
 import {
@@ -87,8 +88,9 @@ test('profile selection keeps Safari sign-in separate from Chrome file recovery'
   assert.match(html, /Chrome profiles/);
   assert.match(html, /Personal/);
   assert.match(html, /Last used in Chrome/);
-  assert.match(html, /macOS Keychain approval/);
-  assert.match(html, /Recovery/);
+  assert.match(html, /Chrome Keychain access/);
+  assert.match(html, /<details[^>]*><summary[^>]*>Other import options/);
+  assert.doesNotMatch(html, /<details[^>]*\bopen/);
   assert.match(html, /Safari does not provide a cookie export/);
   assert.match(html, /Sign in to the site once inside DROIDEX/);
   assert.match(html, /Chrome file recovery/);
@@ -149,12 +151,11 @@ test('profile preview renders only confirmation metadata and truncates long doma
   assert.match(html, /12 importable cookies across 5 domains/);
   assert.match(html, /Existing cookies replaced/);
   assert.match(html, />4</);
-  assert.match(html, /Skipped safely/);
+  assert.match(html, /Skipped/);
   assert.match(html, />3</);
   assert.match(html, /a\.example/);
   assert.match(html, /\+1 more/);
-  assert.match(html, /Cookie names and values remain private to Electron main/);
-  assert.match(html, /open browser pages close before import/);
+  assert.match(html, /Open browser pages will close during import/);
   assert.doesNotMatch(html, /session|never-render-this/);
 });
 
@@ -284,4 +285,36 @@ test('profile import completion summary never includes domains or secret fields'
 
   assert.equal(summary, 'Imported 2 cookies from Personal; 1 skipped.');
   assert.doesNotMatch(summary, /private\.example|session|value|secret/);
+});
+
+test('partial import completion shows stored and failed counts with a next step', () => {
+  const summary = formatCookieProfileImportSummary({
+    source: 'chrome',
+    importMethod: 'profile',
+    profileId: 'Default',
+    profileLabel: 'Personal',
+    importedCount: 660,
+    failedCount: 1,
+    skippedCount: 353,
+    replacementCount: 0,
+    domainCount: 142,
+    affectedDomains: ['private.example'],
+    snapshot: SNAPSHOT,
+  });
+  assert.match(summary, /660 cookies/);
+  assert.match(summary, /1 failed/);
+  assert.match(summary, /353 skipped/);
+  assert.doesNotMatch(summary, /private\.example/);
+  const html = renderToStaticMarkup(
+    createElement(BrowserProfileImportResult, {
+      summary,
+      domainCount: 142,
+      failedCount: 1,
+    }),
+  );
+  assert.match(html, /role="status"/);
+  assert.match(html, /660 cookies/);
+  assert.match(html, /1 failed/);
+  assert.match(html, /Open a site/);
+  assert.doesNotMatch(html, /private\.example|Electron main|rebuild its session/);
 });

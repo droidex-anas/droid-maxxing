@@ -247,11 +247,13 @@ export function formatCookieImportSummary(result: BrowserCookieImportResult): st
   if (result.canceled) return '';
   const imported = `${String(result.importedCount)} ${result.importedCount === 1 ? 'cookie' : 'cookies'}`;
   const skipped = result.skippedCount > 0 ? `; ${String(result.skippedCount)} skipped` : '';
-  return `Imported ${imported} from Chrome${skipped}.`;
+  const failed = result.failedCount > 0 ? `; ${String(result.failedCount)} failed` : '';
+  return `Imported ${imported} from Chrome${failed}${skipped}.`;
 }
 
 export function formatCookieProfileImportSummary(result: BrowserCookieProfileImportResult): string {
   const imported = `${String(result.importedCount)} ${result.importedCount === 1 ? 'cookie' : 'cookies'}`;
   const skipped = result.skippedCount > 0 ? `; ${String(result.skippedCount)} skipped` : '';
-  return `Imported ${imported} from ${result.profileLabel}${skipped}.`;
+  const failed = result.failedCount > 0 ? `; ${String(result.failedCount)} failed` : '';
+  return `Imported ${imported} from ${result.profileLabel}${failed}${skipped}.`;
 }

@@ -110,6 +110,46 @@ test('test persistence helpers reject a missing canonical history schema', () =>
   }
 });
 
+test('separate app profiles can persist concurrently without sharing a writer lease or summaries', () => {
+  const { home, restore } = withTemporaryHome('droidex-profile-isolation-');
+  const previousUserDataDir = process.env.DROIDEX_USER_DATA_DIR;
+  const opened: HistoryPersistence[] = [];
+  let closeError: unknown;
+  try {
+    process.env.DROIDEX_USER_DATA_DIR = join(home, 'profile-one');
+    const first = new HistoryPersistence();
+    opened.push(first);
+    assert.equal(first.syncSummaries([summary({ appSessionId: 'first', streaming: false })]), true);
+
+    process.env.DROIDEX_USER_DATA_DIR = join(home, 'profile-two');
+    const second = new HistoryPersistence();
+    opened.push(second);
+    assert.equal(
+      second.syncSummaries([summary({ appSessionId: 'second', streaming: false })]),
+      true,
+    );
+
+    const firstPatches = first.summaryPatchesAndHidden().patches;
+    const secondPatches = second.summaryPatchesAndHidden().patches;
+    assert.equal(firstPatches.has('first'), true);
+    assert.equal(firstPatches.has('second'), false);
+    assert.equal(secondPatches.has('second'), true);
+    assert.equal(secondPatches.has('first'), false);
+  } finally {
+    for (const persistence of opened) {
+      try {
+        persistence.close();
+      } catch (error) {
+        closeError ??= error;
+      }
+    }
+    if (previousUserDataDir === undefined) delete process.env.DROIDEX_USER_DATA_DIR;
+    else process.env.DROIDEX_USER_DATA_DIR = previousUserDataDir;
+    restore();
+  }
+  if (closeError) throw closeError;
+});
+
 test('a failed settlement is held while live transcript output continues until recovery', () => {
   const { home, restore } = withTemporaryHome('droidex-history-persistence-');
   const persistence = new HistoryPersistence();
@@ -138,9 +178,12 @@ test('a failed settlement is held while live transcript output continues until r
     );
     persistence.flushSync();
 
-    const db = new DatabaseSync(join(home, '.factory', 'droidex', 'session-index.sqlite'), {
-      readOnly: true,
-    });
+    const db = new DatabaseSync(
+      join(home, 'Library', 'Application Support', 'DROIDEX', 'session-index.sqlite'),
+      {
+        readOnly: true,
+      },
+    );
     try {
       const row = db
         .prepare('SELECT tokens_out FROM app_sessions WHERE app_session_id = ?')
@@ -169,9 +212,12 @@ test('a failed child settlement is held until a later strict boundary recovers d
     assert.equal(persistence.upsertChildSession(child('paused')), false);
     persistence.flushSync();
 
-    const db = new DatabaseSync(join(home, '.factory', 'droidex', 'session-index.sqlite'), {
-      readOnly: true,
-    });
+    const db = new DatabaseSync(
+      join(home, 'Library', 'Application Support', 'DROIDEX', 'session-index.sqlite'),
+      {
+        readOnly: true,
+      },
+    );
     try {
       const row = db
         .prepare(

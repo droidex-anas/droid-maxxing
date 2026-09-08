@@ -39,7 +39,7 @@ const CURSOR_STYLE_OPTIONS = [
 ];
 
 function AgentCursorStyleIcon({ style }: { style: BrowserAgentCursorStyle }) {
-  const fill = style === 'dark' ? '#3b3b3b' : style === 'light' ? '#ffffff' : '#303743';
+  const fill = style === 'dark' ? '#111111' : style === 'light' ? '#ffffff' : '#303743';
   const stroke = style === 'dark' ? '#ffffff' : style === 'light' ? '#3b3b3b' : '#dce1eb';
   return (
     <svg
@@ -53,12 +53,13 @@ function AgentCursorStyleIcon({ style }: { style: BrowserAgentCursorStyle }) {
       }
     >
       <path
-        d="M6 3L27 23.7c.8.8.3 2.1-.9 2H19c-4 0-7.9 1.2-11.2 3.4l-2.3 1.5c-.9.6-2-.1-1.9-1.2L5 4.5C5.1 3.3 5.7 2.5 6 3Z"
+        d="M7.01 3.99 Q6.2 3.4 6.2 4.4 L6.2 23.4 Q6.2 26 8 27.8 L8.1 27.9 Q9.8 29.6 11.6 28.01 L15.3 24.73 Q16.8 23.4 18.8 23.3 L22.8 23.11 Q25 23 25.62 20.89 L25.7 20.6 Q26.4 18.2 24.3 16.66 Z"
         fill={fill}
-        fillOpacity={style === 'droidex' ? 0.82 : 1}
+        fillOpacity={1}
         stroke={stroke}
-        strokeWidth="2"
+        strokeWidth="2.2"
         strokeLinejoin="round"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -126,7 +127,8 @@ function cookieImportDescription(snapshot: BrowserSettingsSnapshot): string {
 function cookieImportCounts(snapshot: BrowserSettingsSnapshot): string {
   const receipt = snapshot.lastCookieImport;
   if (!receipt) return 'Not imported';
-  const counts = [`${String(receipt.importedCount)} imported`];
+  const cookieLabel = receipt.importedCount === 1 ? 'cookie' : 'cookies';
+  const counts = [`${String(receipt.importedCount)} ${cookieLabel} imported`];
   if (receipt.skippedCount > 0) counts.push(`${String(receipt.skippedCount)} skipped`);
   if (receipt.failedCount > 0) counts.push(`${String(receipt.failedCount)} failed`);
   return counts.join(' · ');
@@ -236,7 +238,7 @@ export function BrowserSettingsView({
           title="General and data"
           action={
             <BrowserActionButton onClick={onImport} disabled={disabled}>
-              Import…
+              Import from Chrome…
             </BrowserActionButton>
           }
         >
@@ -254,7 +256,10 @@ export function BrowserSettingsView({
               label="Last Chrome import"
               description={cookieImportDescription(snapshot)}
             >
-              <span className="max-w-48 text-right text-[11px] text-droid-text-muted">
+              <span
+                role="status"
+                className="block max-w-48 text-right text-[12px] font-medium text-droid-text"
+              >
                 {cookieImportCounts(snapshot)}
               </span>
             </BrowserSettingRow>
@@ -482,11 +487,6 @@ export function BrowserSettingsView({
             </div>
           </BrowserSettingsCard>
         </BrowserSettingsGroup>
-      </div>
-
-      <div className="rounded-xl border border-droid-border bg-droid-surface/60 px-4 py-3 text-[10.5px] leading-4 text-droid-text-muted">
-        DROIDEX never exposes cookie values or saved passwords to the settings renderer. Exact-site
-        decisions can be removed here at any time.
       </div>
     </div>
   );

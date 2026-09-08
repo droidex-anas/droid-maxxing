@@ -114,7 +114,13 @@ test('an origin/main canonical index with a leftover file cache still opens', as
     persistTestSummaries([summary('kept-chat', workspace)]);
     created.close();
 
-    const canonicalPath = join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME);
+    const canonicalPath = join(
+      home,
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_INDEX_FILENAME,
+    );
     const canonical = new DatabaseSync(canonicalPath);
     canonical.exec(ORIGIN_MAIN_SESSION_FILE_CACHE);
     canonical
@@ -164,7 +170,13 @@ test('the first derived index rebuilds the file cache and leaves canonical histo
     persistTestSummaries([summary('kept-chat', workspace)]);
     created.close();
 
-    const canonicalPath = join(home, '.factory', 'droidex', SESSION_INDEX_FILENAME);
+    const canonicalPath = join(
+      home,
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_INDEX_FILENAME,
+    );
     const canonical = new DatabaseSync(canonicalPath);
     canonical.exec(ORIGIN_MAIN_SESSION_FILE_CACHE);
     canonical.close();
@@ -184,7 +196,13 @@ test('the first derived index rebuilds the file cache and leaves canonical histo
       derived.close();
     }
 
-    const searchPath = join(home, '.factory', 'droidex', SESSION_SEARCH_INDEX_FILENAME);
+    const searchPath = join(
+      home,
+      'Library',
+      'Application Support',
+      'DROIDEX',
+      SESSION_SEARCH_INDEX_FILENAME,
+    );
     assert.deepEqual(columnNames(searchPath, 'session_file_cache'), [
       'provider_session_id',
       'path',

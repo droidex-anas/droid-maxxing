@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { droidexUserDataDir } from './droidexPaths.js';
 import { dateMs, numberValue, objectValue, stringValue } from './values.js';
 import type {
   SessionRole,
@@ -153,9 +154,9 @@ export const SESSION_INDEX_FILENAME = 'session-index.sqlite';
 export const SESSION_SEARCH_INDEX_FILENAME = 'session-search.sqlite';
 const HISTORY_SCHEMA_RECOVERY =
   'DROIDEX local history index uses an incompatible schema. Quit DROIDEX, remove ' +
-  `~/.factory/droidex/${SESSION_INDEX_FILENAME}, ` +
-  `~/.factory/droidex/${SESSION_INDEX_FILENAME}-wal, and ` +
-  `~/.factory/droidex/${SESSION_INDEX_FILENAME}-shm, then restart. ` +
+  `${SESSION_INDEX_FILENAME}, ${SESSION_INDEX_FILENAME}-wal, and ` +
+  `${SESSION_INDEX_FILENAME}-shm from the app data directory ` +
+  '(DROIDEX_USER_DATA_DIR; default: ~/Library/Application Support/DROIDEX), then restart. ' +
   'Raw Factory session history is not removed.';
 
 export function loadMissionControlSessions(
@@ -244,7 +245,7 @@ export class HistoryIndex {
   private readonly sessionFiles = new SessionFileMirror();
 
   constructor() {
-    const dir = join(homedir(), '.factory', 'droidex');
+    const dir = droidexUserDataDir();
     mkdirSync(dir, { recursive: true });
     const db = new DatabaseSync(join(dir, SESSION_INDEX_FILENAME));
     try {
@@ -757,7 +758,7 @@ function whenReasoning(
 }
 
 function readStoredSummaryPatches(): Map<string, Partial<SessionSummary>> {
-  const path = join(homedir(), '.factory', 'droidex', SESSION_INDEX_FILENAME);
+  const path = join(droidexUserDataDir(), SESSION_INDEX_FILENAME);
   if (!existsSync(path)) return new Map();
   const db = new DatabaseSync(path);
   try {
@@ -798,7 +799,7 @@ function applyStoredCompactionGenerations(
 }
 
 function readStoredChildSessions(parentAppSessionId: string): PersistedChildSession[] {
-  const path = join(homedir(), '.factory', 'droidex', SESSION_INDEX_FILENAME);
+  const path = join(droidexUserDataDir(), SESSION_INDEX_FILENAME);
   if (!existsSync(path)) return [];
   const db = new DatabaseSync(path);
   try {
