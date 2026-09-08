@@ -151,9 +151,9 @@ notarization, and stapling checks.
 
 The direct-download app is not App Sandbox–restricted. It asks macOS for access
 to Desktop, Documents, or Downloads only when the user selects a protected
-project location. A site in the built-in browser can request camera or
-microphone access only when Browser settings are set to Ask; DROIDEX shows its
-own per-request prompt before macOS can ask for system access. Accessibility,
+project location. Built-in browser camera and microphone requests are covered by
+[browser authentication and permission checks](runbooks.md#browser-authentication-and-permission-checks).
+Accessibility,
 Screen Recording, and Apple Events permissions are not requested because current
 DROIDEX features do not use those system capabilities.
 

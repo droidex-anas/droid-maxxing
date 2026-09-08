@@ -46,121 +46,40 @@ the account is connected.
 
 ## DROIDEX Browser
 
-The built-in DROIDEX Browser gives an agent a reliable native browser session
-with the user in control of sign-ins and sensitive capabilities. Every task
-keeps its own browser session—even while the user views another chat—while
-the authenticated browser profile is shared so sites do not require a fresh
-sign-in per chat. The active pane can show a crisp curved DROIDEX agent cursor
-with a soft blue activity halo and native eased movement at the agent's exact
-hover and click position; its high-contrast style and
-24–64 px size are configurable in Browser settings, and the
-indicator is optional, is hidden when its document changes, and
-never pulls a background task into the visible pane. It appears only during an
-active primary or child-session run; once no live run remains, finishing,
-stopping, or failing clears the cursor while leaving the browser page open.
+DROIDEX includes a native browser an agent can drive while the user keeps
+control of sign-ins and sensitive capabilities. Each task keeps its own browser
+session and background work stays live, while the authenticated profile is
+shared across chats so sites do not ask for a fresh sign-in per chat. An
+optional agent cursor shows where the agent hovers and clicks.
 
-Active browser work stays live in the background. Idle hidden pages may be
-suspended to keep memory bounded; returning to one restores its URL, viewport,
-and scroll position. Unsaved page-local state is not preserved by suspension.
+Opening a site follows the chat's autonomy by default: High opens any safe
+HTTP(S) site, Medium asks for each new origin, and Low or Off asks every time.
+Full site access is a separate setting and still refuses local files, embedded
+credentials, executable URLs, and browser-internal pages.
 
-**Settings → Browser** controls global agent access, autonomy-aware website
-opening, the Google-default home/search page, the agent cursor, saved-login use,
-downloads, camera and microphone requests, and bounded diagnostic tools. With
-the default “Follow autonomy” policy, High can open any safe HTTP(S) site,
-Medium asks for each new exact origin, and Low or Off asks every time. Full site
-access is also an explicit setting and still cannot open local files, embedded
-credentials, executable URLs, or browser-internal pages.
-First-party browser hover, click, and scroll tools defer to this policy instead
-of interrupting the task with a second generic MCP approval; authentication,
-downloads, and new-site boundaries still ask when the selected policy requires
-it.
+**Settings → Browser** owns agent access, the site policy, the home and search
+page, the agent cursor, saved logins, downloads, camera and microphone
+requests, diagnostics, and clearing browser data.
 
-Saved-login approval permits filling the form only. An agent submitting that
-form must separately pass the sign-in approval prompt.
+Sign-in stays user-approved: filling a saved login and submitting an
+authentication form each require their own native approval. On macOS, Settings
+can import current cookies from a local Chrome profile after a DROIDEX
+confirmation and a Chrome Safe Storage Keychain approval; it copies no
+passwords and cannot transfer every session. Safari has no supported import, so
+sign in to those accounts directly in DROIDEX. Google prohibits OAuth in
+embedded browsers, and Touch ID passkeys are unavailable in ad-hoc builds.
 
-Mixed tool batches still require SDK approval for their non-browser actions.
-If a browser setting or data-clearing action fails, DROIDEX reloads the current
-host state: the operation may have partially completed. Review the refreshed
-settings before retrying; if the host is unavailable, use Retry to reload them.
-Cookie-import errors distinguish completed cookie writes from receipt or storage
-finalization failures. If an import receipt could not be saved, Settings may show
-the previous import; verify the imported sites before importing again.
-
-The browser address bar accepts either a website or an ordinary search. Text
-that is not a valid website address is sent to Google, while unsafe schemes are
-rejected. Address-bar navigation and reload are treated as direct user actions,
-not mislabeled as agent requests.
-
-DROIDEX uses one personal browser profile across its chats. On macOS, Settings
-discovers local Chrome profiles and can import their current cookies after an
-explicit DROIDEX confirmation and Chrome Safe Storage Keychain approval. The
-settings page receives only an opaque plan ID plus domain/count/replacement
-metadata; decrypted values live briefly in Electron main memory and are
-zeroed after commit or cancellation. Settings retain a secret-free last-import
-receipt with only the time, Chrome method/profile label, and aggregate counts.
-Import closes current DROIDEX browser pages before updating the shared cookie
-store, flushes completed writes, and asks the user to reopen the site so it can
-rebuild a coherent session. Cookie import is best-effort: it does not copy
-Chrome local storage, device-bound state, or partitioned cookies that Electron
-cannot represent safely. A bounded JSON/Netscape file remains available only
-as Chrome recovery. Safari does not provide a supported API for
-copying live sessions, so Safari accounts are signed in directly inside
-DROIDEX instead of opening a misleading file picker or asking for Full Disk
-Access. Neither Chrome path imports browser passwords.
-
-Logins saved directly in DROIDEX are encrypted with operating-system protected
-storage (macOS Keychain on macOS), remain scoped to an exact HTTPS origin, and
-require native approval each time by default. When macOS makes it available,
-DROIDEX asks for Touch ID immediately before decrypting and filling the saved
-login. Cookie and password values are injected only inside the native browser
-process—they are never returned to the agent or settings renderer.
-
-Agents can prepare signup, sign-in, OAuth, and supported WebAuthn/passkey flows.
-Submitting an authentication action requires a single-use native approval;
-cross-origin iframe authentication is never agent-operable. An approved OAuth
-action may open one short-lived sandboxed provider window only for the exact
-provider destination inspected before approval. The window shares the DROIDEX
-profile and preserves the provider's opener flow, but is not exposed to agent
-controls. Touch ID passkeys are enabled only in a Developer ID-signed macOS
-release carrying its concrete Team-scoped keychain entitlement. Development
-and ad-hoc builds report passkeys as unavailable instead of presenting a fake
-capability. Provider consent, platform passkey prompts, account choice,
-one-time codes, and saved-password fills remain user controlled.
-
-OAuth availability also depends on the provider: Google prohibits OAuth in
-embedded user agents, and other providers may reject embedded sign-in. A
-sandboxed popup is not the system browser and cannot override that restriction.
-Use a supported direct website login or explicitly import a Chrome session;
-opening an external browser does not transfer its login back into DROIDEX.
-See [browser authentication and permission checks](docs/runbooks.md#browser-authentication-and-permission-checks)
-for release prerequisites and the signed-build acceptance checklist.
-
-Remote browser pages are sandboxed. Cross-origin popups, redirects, history
-changes, and delayed page navigation all pass through the same main-process
-policy; renderer prompts are not treated as the security boundary. Permission
-questions appear as rounded DROIDEX sheets with Cancel focused by default.
-Camera and microphone access is blocked by default; Ask mode offers allow once,
-always allow this exact site, block once, and always block this exact site.
-Remembered choices can be removed in Browser settings. macOS may still show its
-mandatory first-use privacy sheet. USB and HID devices remain blocked, and
-agent diagnostics are off by default. Diagnostics expose bounded inspect,
-network, and console views—not raw Chrome DevTools Protocol access. Browser data
-can be cleared from the same settings page at any time.
-
-The current live page is authoritative even when the user navigates manually.
-Agent `snapshot` observes that page without reopening a URL remembered from the
-conversation. Reload recovers the last valid HTTP(S) page—or the configured
-home page—if Chromium temporarily reports a blank/error document. The agent
-cursor is a separate sandboxed click-through overlay above the website, so page
-scripts cannot hide or remove it. Pages can imitate its artwork, so it is an
-activity indicator, not proof that a page or authentication request is trusted.
+Boundaries and module ownership live in
+[docs/architecture.md](docs/architecture.md#native-browser-boundary). Approval
+recovery and release checks live in
+[docs/runbooks.md](docs/runbooks.md#browser-authentication-and-permission-checks).
 
 ## Useful commands
 
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Start the frontend dev server |
-| `npm run electron` | Build the sidecar and launch DROIDEX |
+| `npm run electron` | Build the browser preload bundle and the sidecar, then launch DROIDEX |
 | `npm run build` | Create a production build |
 | `npm run test` | Run app and Electron tests |
 | `npm --prefix sidecar run test` | Run sidecar unit tests |

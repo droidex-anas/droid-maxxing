@@ -177,24 +177,21 @@ are available under **Other import options**.
 
 | Capability | Required approval or release configuration | Recovery / limitation |
 | --- | --- | --- |
-| Chrome profile cookies | Explicit DROIDEX import approval, then macOS access to Chrome Safe Storage when encrypted cookies are present | Cancel or deny imports nothing. Unlock the login Keychain and retry when ready; never grant blanket Keychain access. No Full Disk Access is requested. Import does not copy passwords, local storage, or device-bound sessions. |
+| Chrome profile cookies | Explicit DROIDEX import approval, then macOS access to Chrome Safe Storage when encrypted cookies are present | Cancel or deny imports nothing; unlock the login Keychain and retry. Never grant blanket Keychain or Full Disk Access. |
 | Saved DROIDEX logins | OS-protected encryption available; save approval and per-use fill approval, plus Touch ID when available | If decryption fails, delete only the affected saved login in Browser settings and save it again. Do not reset the user's Keychain. |
-| Touch ID WebAuthn | Not available in the current ad-hoc release | Touch ID passkeys are outside this release's scope. This does not disable OS-protected saved-login storage or its separate per-use Touch ID confirmation. |
-| Website OAuth | Single-use authentication approval and an exact provider-popup target; provider allows embedded sign-in | Google prohibits embedded OAuth. Use a supported direct website login or an explicitly imported Chrome session. External-browser authentication does not automatically transfer session state into DROIDEX. |
+| Touch ID WebAuthn | Not available in the current ad-hoc release | Passkeys are out of scope for this release. OS-protected saved-login storage and its own Touch ID confirmation still work. |
+| Website OAuth | Single-use authentication approval and an exact provider-popup target; provider allows embedded sign-in | Google prohibits embedded OAuth. Use a direct website login or an imported Chrome session; an external browser does not transfer its session into DROIDEX. |
 | Camera / microphone | Browser settings set to Ask, exact-site approval, macOS TCC approval, usage descriptions, and hardened-runtime camera/audio-input entitlements | If OS access is denied, enable DROIDEX under System Settings > Privacy & Security > Camera or Microphone and restart. Site approval cannot override OS denial. |
-| USB, HID, other unsupported website permissions | Not supported; denied by the browser permission controller | Do not add broad device, screen-recording, Accessibility, or Full Disk Access grants to work around unrelated authentication failures. |
+| USB, HID, other unsupported website permissions | Not supported; denied by the browser permission controller | Do not add broad device, screen-recording, Accessibility, or Full Disk Access grants to work around an authentication failure. |
 
 ### Ad-hoc build acceptance
 
-Automated tests verify policy and packaging inputs, not a real user's Keychain,
-Touch ID hardware, provider account, or macOS privacy prompts. Developer ID is
-not a prerequisite for this release. Run these checks on the actual ad-hoc
-artifact, recording which checks passed and which still require user interaction:
+Run these checks on the actual ad-hoc artifact and record which ones still
+need user interaction. Developer ID is not a prerequisite for this release.
 
 1. Verify the app and helper ad-hoc signatures, camera/audio-input entitlements,
    and camera/microphone usage descriptions. Confirm Browser settings report
-   Touch ID passkeys as unavailable. Do not require a Team ID or WebAuthn Keychain
-   access group for this release.
+   Touch ID passkeys as unavailable.
 2. In a disposable test account, deny Chrome Keychain access and confirm nothing
    imports; retry with approval and confirm the receipt and reopened site session.
 3. Save and fill a test login. Check cancel, Touch ID rejection, successful fill,
@@ -202,16 +199,15 @@ artifact, recording which checks passed and which still require user interaction
 4. Test an allowed provider popup through redirect, opener completion, cancellation,
    and closure. Verify provider-rejected embedded OAuth is not advertised as working.
 5. Confirm the UI does not advertise Touch ID passkey registration or use as
-   available. Successful passkey registration is not an ad-hoc acceptance gate.
+   available.
 6. Test camera and microphone with site denial, OS denial, approval, and revocation.
    Use a clean test macOS account when first-use prompts must be reproduced; do not
    reset the user's existing privacy permissions.
 
-An encryption roundtrip across app restarts verifies OS-protected storage, not
-the complete save-and-fill flow. A denied media request with existing macOS
-grants verifies site policy, not OS denial or first-use consent. Synthetic OAuth
-fixtures verify popup mechanics, not acceptance by a real provider. Keep these
-distinctions explicit in release verification results.
+Automated tests cover policy and packaging inputs only: an encryption roundtrip,
+a denied media request, and synthetic OAuth fixtures prove nothing about a real
+Keychain, Touch ID hardware, macOS consent prompt, or provider account. Keep that
+distinction in release verification results.
 
 References: [Apple camera entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.camera),
 [Apple audio-input entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.audio-input),
