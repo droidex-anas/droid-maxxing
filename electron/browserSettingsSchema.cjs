@@ -6,6 +6,11 @@ const {
   BROWSER_AGENT_CURSOR_STYLES,
   validateBrowserAgentCursorSize,
 } = require('./browserAgentCursor.cjs');
+const {
+  MAX_BROWSER_URL_LENGTH,
+  isParsableUrl,
+  parseSafeHttpUrl,
+} = require('./nativeBrowserUrls.cjs');
 
 const SETTINGS_VERSION = 3;
 const COOKIE_IMPORT_METHODS = new Set(['file', 'profile']);
@@ -245,18 +250,11 @@ function validateAgentRequest(request) {
 }
 
 function exactHttpOrigin(value) {
-  if (typeof value !== 'string' || value.length > 8_192) {
+  if (!isParsableUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH })) {
     throw new Error('Agent browser URL is invalid.');
   }
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error('Agent browser URL is invalid.');
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-    throw new Error('Agent browser URLs must use http(s) without embedded credentials.');
-  }
+  const parsed = parseSafeHttpUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH });
+  if (!parsed) throw new Error('Agent browser URLs must use http(s) without embedded credentials.');
   return parsed.origin;
 }
 

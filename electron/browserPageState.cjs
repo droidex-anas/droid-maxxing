@@ -1,15 +1,17 @@
+const { isSafeHttpUrl } = require('./nativeBrowserUrls.cjs');
+
 function chooseBrowserReload({ currentUrl, failedRestoreUrl, loadingUrl, targetUrl, homePage }) {
   const activeLoadingUrl =
-    isBrowserPageUrl(loadingUrl) && browserPageUrlsMatch(loadingUrl, targetUrl) ? loadingUrl : null;
+    isSafeHttpUrl(loadingUrl) && browserPageUrlsMatch(loadingUrl, targetUrl) ? loadingUrl : null;
   if (
     activeLoadingUrl &&
-    (!isBrowserPageUrl(currentUrl) || !browserPageUrlsMatch(activeLoadingUrl, currentUrl))
+    (!isSafeHttpUrl(currentUrl) || !browserPageUrlsMatch(activeLoadingUrl, currentUrl))
   ) {
     return { kind: 'load', url: activeLoadingUrl };
   }
-  if (isBrowserPageUrl(currentUrl)) return { kind: 'reload', url: currentUrl };
+  if (isSafeHttpUrl(currentUrl)) return { kind: 'reload', url: currentUrl };
   for (const url of [failedRestoreUrl, activeLoadingUrl, targetUrl, homePage]) {
-    if (isBrowserPageUrl(url)) return { kind: 'load', url };
+    if (isSafeHttpUrl(url)) return { kind: 'load', url };
   }
   throw new Error('DROIDEX Browser has no valid page to reload.');
 }
@@ -23,34 +25,22 @@ function browserPageUrlsMatch(left, right) {
 }
 
 function chooseBrowserRestore({ currentUrl, targetUrl, homePage }) {
-  if (isBrowserPageUrl(currentUrl)) return null;
-  if (isBrowserPageUrl(targetUrl)) return targetUrl;
-  if (isBrowserPageUrl(homePage)) return homePage;
+  if (isSafeHttpUrl(currentUrl)) return null;
+  if (isSafeHttpUrl(targetUrl)) return targetUrl;
+  if (isSafeHttpUrl(homePage)) return homePage;
   return null;
 }
 
 function browserTargetBeforeViewClose({ currentUrl, loadingUrl, targetUrl }) {
   for (const url of [loadingUrl, currentUrl, targetUrl]) {
-    if (isBrowserPageUrl(url)) return url;
+    if (isSafeHttpUrl(url)) return url;
   }
   return null;
 }
 
-function isBrowserPageUrl(value) {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return (
-      (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password
-    );
-  } catch {
-    return false;
-  }
-}
-
 function userVisibleBrowserUrl(value) {
   if (value === 'about:blank') return value;
-  if (!isBrowserPageUrl(value)) {
+  if (!isSafeHttpUrl(value)) {
     throw new Error('DROIDEX Browser loaded an invalid page URL.');
   }
   return String(value);
@@ -69,7 +59,7 @@ function requireFreshBrowserSnapshot(result, requestId) {
   if (!result.snapshot) {
     throw new Error('DROIDEX Browser did not return a fresh page snapshot.');
   }
-  if (!isBrowserPageUrl(result.snapshot.url)) {
+  if (!isSafeHttpUrl(result.snapshot.url)) {
     throw new Error('DROIDEX Browser returned an invalid page snapshot.');
   }
   return result;
@@ -81,8 +71,8 @@ function isExpectedSupersededLoad({ error, requestedUrl, targetUrl, currentUrl }
     String(error?.message || '').includes('ERR_ABORTED');
   return (
     aborted &&
-    isBrowserPageUrl(currentUrl) &&
-    isBrowserPageUrl(targetUrl) &&
+    isSafeHttpUrl(currentUrl) &&
+    isSafeHttpUrl(targetUrl) &&
     !browserPageUrlsMatch(requestedUrl, targetUrl) &&
     browserPageUrlsMatch(currentUrl, targetUrl)
   );
@@ -93,7 +83,6 @@ module.exports = {
   chooseBrowserReload,
   chooseBrowserRestore,
   isExpectedSupersededLoad,
-  isBrowserPageUrl,
   requireFreshBrowserSnapshot,
   userVisibleBrowserUrl,
 };

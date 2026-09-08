@@ -41,6 +41,21 @@ function createBrowserAgentCursorController(options) {
   let style = validateBrowserAgentCursorStyle(options.style ?? BROWSER_AGENT_CURSOR_DEFAULT_STYLE);
   let size = validateBrowserAgentCursorSize(options.size ?? BROWSER_AGENT_CURSOR_DEFAULT_SIZE);
 
+  function invalidate() {
+    generation += 1;
+    movementGeneration += 1;
+  }
+
+  // The overlay outlives awaits, so every resumed step re-checks that the
+  // attachment, generation and overlay window it started with are still live.
+  function isCurrentOverlay(expectedGeneration, window, current) {
+    return (
+      generation === expectedGeneration &&
+      overlay === window &&
+      (current === undefined || attachment === current)
+    );
+  }
+
   function attach(input) {
     const browserSessionId = normalizeBrowserSessionId(input?.browserSessionId);
     const hostWindow = requireUsableWindow(input?.hostWindow);
@@ -58,8 +73,7 @@ function createBrowserAgentCursorController(options) {
       }
       return true;
     }
-    generation += 1;
-    movementGeneration += 1;
+    invalidate();
     hideOverlay();
     const parkedPoint = parkedPoints.get(browserSessionId);
     const point = parkedPoint && pointInsideBounds(parkedPoint, bounds) ? parkedPoint : null;
@@ -81,8 +95,7 @@ function createBrowserAgentCursorController(options) {
     if (!attachment || attachment.browserSessionId !== browserSessionId) return false;
     const bounds = normalizeBrowserBounds(value);
     if (browserBoundsEqual(attachment.bounds, bounds)) return true;
-    generation += 1;
-    movementGeneration += 1;
+    invalidate();
     attachment.bounds = bounds;
     if (!attachment.visible || !attachment.point) return true;
     if (!pointInsideBounds(attachment.point, attachment.bounds)) {
@@ -112,9 +125,7 @@ function createBrowserAgentCursorController(options) {
     const ready = await overlayReady;
     if (
       !ready ||
-      attachment !== current ||
-      generation !== expectedGeneration ||
-      overlay !== window ||
+      !isCurrentOverlay(expectedGeneration, window, current) ||
       !isUsableHost(window) ||
       !isUsableHost(current.hostWindow)
     ) {
@@ -135,8 +146,7 @@ function createBrowserAgentCursorController(options) {
 
   function hide(browserSessionId) {
     if (!attachment || attachment.browserSessionId !== browserSessionId) return false;
-    generation += 1;
-    movementGeneration += 1;
+    invalidate();
     attachment.visible = false;
     attachment.point = null;
     parkedPoints.delete(browserSessionId);
@@ -152,8 +162,7 @@ function createBrowserAgentCursorController(options) {
     ) {
       return false;
     }
-    generation += 1;
-    movementGeneration += 1;
+    invalidate();
     hideOverlay();
     attachment = null;
     return true;
@@ -176,8 +185,7 @@ function createBrowserAgentCursorController(options) {
 
   function forget(browserSessionId) {
     if (browserSessionId === undefined) {
-      generation += 1;
-      movementGeneration += 1;
+      invalidate();
       parkedPoints.clear();
       hideOverlay();
       attachment = null;
@@ -186,8 +194,7 @@ function createBrowserAgentCursorController(options) {
     const id = normalizeBrowserSessionId(browserSessionId);
     const forgotPoint = parkedPoints.delete(id);
     if (attachment?.browserSessionId !== id) return forgotPoint;
-    generation += 1;
-    movementGeneration += 1;
+    invalidate();
     hideOverlay();
     attachment = null;
     return true;
@@ -204,8 +211,7 @@ function createBrowserAgentCursorController(options) {
   }
 
   function destroy() {
-    generation += 1;
-    movementGeneration += 1;
+    invalidate();
     attachment = null;
     parkedPoints.clear();
     destroyOverlay();
@@ -215,8 +221,7 @@ function createBrowserAgentCursorController(options) {
     const nextStyle = validateBrowserAgentCursorStyle(value);
     if (nextStyle === style) return false;
     style = nextStyle;
-    generation += 1;
-    movementGeneration += 1;
+    invalidate();
     if (!isUsableHost(overlay)) return true;
 
     const window = overlay;
@@ -279,8 +284,7 @@ function createBrowserAgentCursorController(options) {
     };
     const onClosed = () => {
       if (overlayHost !== hostWindow) return;
-      generation += 1;
-      movementGeneration += 1;
+      invalidate();
       if (attachment?.hostWindow === hostWindow) attachment = null;
       destroyOverlay();
     };
@@ -297,7 +301,7 @@ function createBrowserAgentCursorController(options) {
       () => true,
       (error) => {
         options.logError?.('Failed to load the browser agent cursor.', error);
-        if (overlay === window && generation === expectedGeneration) destroyOverlay();
+        if (isCurrentOverlay(expectedGeneration, window)) destroyOverlay();
         return false;
       },
     );
@@ -320,8 +324,7 @@ function createBrowserAgentCursorController(options) {
     for (let frame = 1; frame <= frameCount; frame += 1) {
       await waitForFrame(CURSOR_FRAME_MS);
       if (
-        attachment !== current ||
-        generation !== expectedGeneration ||
+        !isCurrentOverlay(expectedGeneration, window, current) ||
         movementGeneration !== moveGeneration ||
         !isUsableHost(window)
       ) {
@@ -357,9 +360,7 @@ function createBrowserAgentCursorController(options) {
     const ready = await overlayReady;
     if (
       !ready ||
-      attachment !== current ||
-      generation !== expectedGeneration ||
-      overlay !== window ||
+      !isCurrentOverlay(expectedGeneration, window, current) ||
       !canPresentOverlay(current.hostWindow)
     ) {
       return false;
@@ -492,7 +493,6 @@ module.exports = {
   BROWSER_AGENT_CURSOR_MIN_SIZE,
   BROWSER_AGENT_CURSOR_STYLES,
   createBrowserAgentCursorController,
-  createBrowserAgentCursorDataUrl,
   validateBrowserAgentCursorSize,
   validateBrowserAgentCursorStyle,
 };

@@ -1,6 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createNativeBrowserUrlPolicy } = require('./nativeBrowserUrls.cjs');
+const {
+  createNativeBrowserUrlPolicy,
+  isLoopbackHost,
+  isSafeHttpUrl,
+  MAX_BROWSER_URL_LENGTH,
+  parseSafeHttpUrl,
+} = require('./nativeBrowserUrls.cjs');
 
 const urls = createNativeBrowserUrlPolicy({
   appName: 'DROIDEX',
@@ -35,4 +41,35 @@ test('local HTTP retry never downgrades certificate failures or public sites', (
   );
   assert.equal(urls.httpFallbackUrl('https://localhost:3000', -202), undefined);
   assert.equal(urls.httpFallbackUrl('https://example.com', -102), undefined);
+});
+
+test('the shared URL predicate rejects credentials and non-web schemes', () => {
+  assert.equal(parseSafeHttpUrl('https://example.test/a?b=1').href, 'https://example.test/a?b=1');
+  for (const value of [
+    'https://user:example-password@example.test',
+    'https://user@example.test',
+    'file:///tmp/private.txt',
+    'about:blank',
+    'not a url',
+    undefined,
+  ]) {
+    assert.equal(parseSafeHttpUrl(value), null, String(value).slice(0, 40));
+    assert.equal(isSafeHttpUrl(value), false);
+  }
+  assert.deepEqual(['localhost', '127.0.0.1', '::1', '[::1]', 'LOCALHOST'].map(isLoopbackHost), [
+    true,
+    true,
+    true,
+    true,
+    true,
+  ]);
+  assert.equal(isLoopbackHost('example.test'), false);
+});
+
+test('URL length is capped only where a caller opts in', () => {
+  const longUrl = `https://example.test/${'a'.repeat(MAX_BROWSER_URL_LENGTH)}`;
+  assert.equal(parseSafeHttpUrl(longUrl)?.href, longUrl);
+  assert.equal(isSafeHttpUrl(longUrl), true);
+  assert.equal(parseSafeHttpUrl(longUrl, { maxLength: MAX_BROWSER_URL_LENGTH }), null);
+  assert.equal(isSafeHttpUrl(longUrl, { maxLength: MAX_BROWSER_URL_LENGTH }), false);
 });

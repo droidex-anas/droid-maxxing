@@ -1,7 +1,15 @@
+const {
+  isSafeHttpUrl,
+  MAX_BROWSER_URL_LENGTH,
+  parseSafeHttpUrl,
+} = require('./nativeBrowserUrls.cjs');
+
+const POPUP_URL_LIMIT = { maxLength: MAX_BROWSER_URL_LENGTH };
+
 const POPUP_CAPABILITY_TTL_MS = 10_000;
 
 function grantAuthenticationPopup(entry, view, targetUrl, now = Date.now()) {
-  const exactTargetUrl = safeWebUrl(targetUrl);
+  const exactTargetUrl = parseSafeHttpUrl(targetUrl, POPUP_URL_LIMIT)?.href;
   if (!exactTargetUrl) {
     entry.authenticationPopupCapability = null;
     throw new Error('Authentication popups require an exact HTTP(S) target.');
@@ -21,7 +29,7 @@ function consumeAuthenticationPopup(entry, view, url, partition, now = Date.now(
     capability?.view !== view ||
     capability.documentGeneration !== entry.documentGeneration ||
     capability.expiresAt <= now ||
-    capability.targetUrl !== safeWebUrl(url)
+    capability.targetUrl !== parseSafeHttpUrl(url, POPUP_URL_LIMIT)?.href
   ) {
     return capability ? { action: 'deny' } : undefined;
   }
@@ -51,33 +59,16 @@ function hardenAuthenticationPopup(window) {
   const contents = window.webContents;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event, url) => {
-    if (!isSafeWebUrl(url)) event.preventDefault();
+    if (!isSafeHttpUrl(url, POPUP_URL_LIMIT)) event.preventDefault();
   });
   contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
-    if (isMainFrame && !isSafeWebUrl(url)) event.preventDefault();
+    if (isMainFrame && !isSafeHttpUrl(url, POPUP_URL_LIMIT)) event.preventDefault();
   });
   contents.on('will-attach-webview', (event) => event.preventDefault());
-}
-
-function isSafeWebUrl(value) {
-  return Boolean(safeWebUrl(value));
-}
-
-function safeWebUrl(value) {
-  if (typeof value !== 'string' || value.length > 8_192) return false;
-  try {
-    const url = new URL(value);
-    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password)
-      return undefined;
-    return url.href;
-  } catch {
-    return undefined;
-  }
 }
 
 module.exports = {
   consumeAuthenticationPopup,
   grantAuthenticationPopup,
   hardenAuthenticationPopup,
-  isSafeWebUrl,
 };

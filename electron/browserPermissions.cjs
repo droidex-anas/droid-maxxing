@@ -1,4 +1,5 @@
 const { randomUUID } = require('node:crypto');
+const { MAX_BROWSER_URL_LENGTH, parseSafeHttpUrl } = require('./nativeBrowserUrls.cjs');
 
 const MEDIA_TYPES = new Set(['audio', 'video']);
 const SITE_DECISIONS = new Set(['allow', 'ask', 'deny']);
@@ -286,16 +287,7 @@ function removeGrantKeys(grants, origin, mediaTypes) {
 }
 
 function requestingHttpOrigin(value) {
-  if (typeof value !== 'string' || value.length > 8_192) return undefined;
-  try {
-    const parsed = new URL(value);
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-      return undefined;
-    }
-    return parsed.origin;
-  } catch {
-    return undefined;
-  }
+  return parseSafeHttpUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH })?.origin;
 }
 
 function once(callback) {

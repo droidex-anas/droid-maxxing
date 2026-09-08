@@ -1,5 +1,11 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const {
+  isLoopbackHost,
+  isParsableUrl,
+  MAX_BROWSER_URL_LENGTH,
+  parseSafeHttpUrl,
+} = require('./nativeBrowserUrls.cjs');
 
 function createBrowserCredentialVault(options) {
   return new BrowserCredentialVault(options);
@@ -172,23 +178,12 @@ function validateExactOrigin(value) {
 }
 
 function exactHttpOrigin(value) {
-  if (typeof value !== 'string' || value.length > 8_192)
-    throw new Error('Saved login URL is invalid.');
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
+  if (!isParsableUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH })) {
     throw new Error('Saved login URL is invalid.');
   }
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-    throw new Error('Saved login URLs must use HTTP(S) without embedded credentials.');
-  }
+  const parsed = parseSafeHttpUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH });
+  if (!parsed) throw new Error('Saved login URLs must use HTTP(S) without embedded credentials.');
   return parsed.origin;
-}
-
-function isLoopbackHost(hostname) {
-  const value = String(hostname).toLowerCase();
-  return value === 'localhost' || value === '127.0.0.1' || value === '::1' || value === '[::1]';
 }
 
 async function readRows(filePath) {

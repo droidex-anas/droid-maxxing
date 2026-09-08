@@ -1,3 +1,9 @@
+const {
+  MAX_BROWSER_URL_LENGTH,
+  isParsableUrl,
+  parseSafeHttpUrl,
+} = require('./nativeBrowserUrls.cjs');
+
 const AUTHENTICATION_KINDS = new Set(['signup', 'signin', 'oauth', 'passkey']);
 
 function validateAgentAuthenticationIntent(intent, currentUrl) {
@@ -30,16 +36,11 @@ function exactHttpOrigin(value) {
 }
 
 function exactHttpUrl(value) {
-  if (typeof value !== 'string' || value.length > 8_192) {
+  if (!isParsableUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH })) {
     throw new Error('Authentication destination is invalid.');
   }
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error('Authentication destination is invalid.');
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+  const parsed = parseSafeHttpUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH });
+  if (!parsed) {
     throw new Error('Authentication destination must use HTTP(S) without embedded credentials.');
   }
   return parsed.href;

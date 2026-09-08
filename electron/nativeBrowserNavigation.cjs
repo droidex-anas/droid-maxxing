@@ -3,6 +3,7 @@ const {
   consumeTrustedUserNavigation,
   createTrustedUserNavigation,
 } = require('./browserNavigationProvenance.cjs');
+const { parseSafeHttpUrl } = require('./nativeBrowserUrls.cjs');
 
 const TRANSITION_KINDS = new Set(['navigate', 'popup', 'redirect']);
 
@@ -70,7 +71,7 @@ function createNativeBrowserNavigation({
   }
 
   async function authorizeHistoryTransition(entry, view, destinationUrl, autonomy) {
-    const exactDestinationUrl = safeHttpUrl(destinationUrl);
+    const exactDestinationUrl = parseSafeHttpUrl(destinationUrl)?.href;
     if (!exactDestinationUrl) {
       throw new Error('Agent browser navigation requires an exact HTTP(S) target.');
     }
@@ -99,7 +100,7 @@ function createNativeBrowserNavigation({
       approval.view === view &&
       approval.navigationGeneration === entry.navigationGeneration &&
       approval.documentGeneration === entry.documentGeneration &&
-      approval.destinationUrl === safeHttpUrl(destinationUrl),
+      approval.destinationUrl === parseSafeHttpUrl(destinationUrl)?.href,
     );
   }
 
@@ -183,16 +184,6 @@ function isCrossOriginNavigation(currentUrl, nextUrl) {
     return new URL(currentUrl).origin !== new URL(nextUrl).origin;
   } catch {
     return true;
-  }
-}
-
-function safeHttpUrl(value) {
-  try {
-    const url = new URL(value);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
-    return url.href;
-  } catch {
-    return null;
   }
 }
 

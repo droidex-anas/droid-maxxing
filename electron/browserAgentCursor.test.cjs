@@ -6,8 +6,8 @@ const {
   BROWSER_AGENT_CURSOR_HOTSPOT,
   BROWSER_AGENT_CURSOR_STYLES,
   createBrowserAgentCursorController,
-  createBrowserAgentCursorDataUrl,
 } = require('./browserAgentCursor.cjs');
+const { createBrowserAgentCursorDataUrl } = require('./browserAgentCursorDocument.cjs');
 
 function deferred() {
   let resolve;

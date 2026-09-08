@@ -34,6 +34,15 @@ test('trusted renderer navigation accepts only the internal blank page outside H
   assert.throws(() => userVisibleBrowserUrl('javascript:alert(1)'), /invalid page URL/);
 });
 
+test('page URLs longer than 8 KiB stay valid so navigation events keep flowing', () => {
+  const longUrl = `https://dashboard.example/d/board?state=${'a'.repeat(9_000)}`;
+  assert.equal(userVisibleBrowserUrl(longUrl), longUrl);
+  assert.deepEqual(chooseBrowserReload({ currentUrl: longUrl }), {
+    kind: 'reload',
+    url: longUrl,
+  });
+});
+
 test('agent inspection keeps the live page instead of restoring an older remembered site', () => {
   assert.equal(
     chooseBrowserRestore({
