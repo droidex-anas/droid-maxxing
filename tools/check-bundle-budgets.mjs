@@ -7,10 +7,12 @@ import { join } from 'node:path';
 // had only ~300B of headroom left on main.
 // Raised from 1_285_000 for the activity inbox (#217): status derivation,
 // the transcript digest, and the flyout view menu added ~6KB to the entry.
+// Raised from 680_000 for Mermaid 11.16.1's security fixes: its new optional
+// Cynefin diagram chunk is ~691KB; the initial renderer remains unchanged.
 const BUDGETS = {
   initialRendererJsBytes: 1_295_000,
   initialCssBytes: 95_000,
-  largestLazyChunkBytes: 680_000,
+  largestLazyChunkBytes: 700_000,
   duplicatePackageMaxBytes: 120_000,
 };
 
