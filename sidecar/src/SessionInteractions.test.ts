@@ -9,6 +9,7 @@ import {
   type UpdateSessionSettingsRequestParams,
 } from '@factory/droid-sdk';
 
+import { browserMcpToolNames } from './browser/browserMcpToolDefs.js';
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import { SessionInteractions, type InteractionLiveSession } from './SessionInteractions.js';
 
@@ -195,14 +196,18 @@ test('permission requests keep stable identity, exact correlation, and one event
   assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
 });
 
-test('first-party DROIDEX browser tools defer approval to the authoritative browser policy', async () => {
+test('every registered DROIDEX browser tool defers approval to the authoritative browser policy', async () => {
   const harness = createHarness();
   harness.addLiveSession('app-1', 'provider-1');
   const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
+  const toolNames = browserMcpToolNames();
 
-  const outcome = await handler(droidexBrowserPermissionInput('tool-1', 'hover'));
+  assert.ok(toolNames.length > 0);
+  for (const [index, toolName] of toolNames.entries()) {
+    const outcome = await handler(droidexBrowserPermissionInput(`tool-${String(index)}`, toolName));
+    assert.equal(outcome, ToolConfirmationOutcome.ProceedOnce, toolName);
+  }
 
-  assert.equal(outcome, ToolConfirmationOutcome.ProceedOnce);
   assert.equal(approvalRequests(harness.emitted).length, 0);
 });
 

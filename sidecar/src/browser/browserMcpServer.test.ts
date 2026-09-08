@@ -1,37 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createBrowserMcpServer } from './browserMcpServer.js';
+import { browserMcpToolNames } from './browserMcpToolDefs.js';
 import type { BrowserSessionManager } from './BrowserSessionManager.js';
 
 test('browser MCP server exposes agent-facing names and typed inputs', () => {
   const server = createBrowserMcpServer({} as BrowserSessionManager, () => 'm1');
+  const registeredNames = server.tools.map((tool) => tool.name);
 
   assert.equal(server.name, 'droidex-browser');
-  assert.deepEqual(
-    server.tools.map((tool) => tool.name),
-    [
-      'open',
-      'snapshot',
-      'reload',
-      'back',
-      'forward',
-      'screenshot',
-      'click',
-      'hover',
-      'select',
-      'type',
-      'keypress',
-      'resize',
-      'scroll',
-      'wait',
-      'inspect',
-      'network',
-      'console',
-      'fill_login',
-      'design_context',
-      'design_reference',
-    ],
-  );
+  assert.deepEqual(registeredNames, [
+    'open',
+    'snapshot',
+    'reload',
+    'back',
+    'forward',
+    'screenshot',
+    'click',
+    'hover',
+    'select',
+    'type',
+    'keypress',
+    'resize',
+    'scroll',
+    'wait',
+    'inspect',
+    'network',
+    'console',
+    'fill_login',
+    'design_context',
+    'design_reference',
+  ]);
+  assert.deepEqual([...browserMcpToolNames()], registeredNames);
   assert.ok(server.tools.find((tool) => tool.name === 'open')?.inputSchema?.url);
   assert.ok(
     server.tools.find((tool) => tool.name === 'screenshot')?.inputSchema?.deviceScaleFactor,

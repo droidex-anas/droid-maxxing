@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { ServerEvent } from './protocol.js';
+import type { BrowserNativeRequest, ServerEvent } from './protocol.js';
 import {
   nativeSnapshot,
   nativeSuccess,
@@ -15,10 +15,12 @@ import {
 
 type NativeBrowserRequestEvent = Extract<ServerEvent, { type: 'browser.native.request' }>;
 
-function nativeRequests(events: ServerEvent[]): NativeBrowserRequestEvent[] {
-  return events.filter(
-    (event): event is NativeBrowserRequestEvent => event.type === 'browser.native.request',
-  );
+function latestNativeRequest(events: ServerEvent[]): BrowserNativeRequest {
+  const request = events
+    .filter((event): event is NativeBrowserRequestEvent => event.type === 'browser.native.request')
+    .at(-1)?.request;
+  assert.ok(request);
+  return request;
 }
 
 test(
@@ -40,9 +42,8 @@ test(
       });
       const shutdown = h.dispose();
       await new Promise<void>((resolve) => setImmediate(resolve));
-      const request = nativeRequests(h.events).at(-1)?.request;
-      assert.equal(request?.action, 'close');
-      assert.ok(request);
+      const request = latestNativeRequest(h.events);
+      assert.equal(request.action, 'close');
       await h.handle({ type: 'browser.native.result', result: { ...request, ok: true } });
       await shutdown;
     } finally {
@@ -228,8 +229,7 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
       opened = true;
     });
     await Promise.resolve();
-    const request = nativeRequests(h.events).at(-1)?.request;
-    assert.ok(request);
+    const request = latestNativeRequest(h.events);
     assert.match(
       request.requestId,
       /^browser-native-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
@@ -286,8 +286,7 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
 
     const reload = h.handle({ type: 'browser.reload', appSessionId: 'app-b2' });
     await Promise.resolve();
-    const timedOutRequest = nativeRequests(h.events).at(-1)?.request;
-    assert.ok(timedOutRequest);
+    const timedOutRequest = latestNativeRequest(h.events);
     assert.ok(
       (timeouts.currentDelay() ?? Number.POSITIVE_INFINITY) < 60_000,
       'non-interactive reload must fail promptly instead of waiting for an approval window',
@@ -313,8 +312,7 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
 
     const close = h.handle({ type: 'browser.close', appSessionId: 'app-b2' });
     await Promise.resolve();
-    const closeRequest = nativeRequests(h.events).at(-1)?.request;
-    assert.ok(closeRequest);
+    const closeRequest = latestNativeRequest(h.events);
     await h.handle({ type: 'browser.native.result', result: nativeSuccess(closeRequest) });
     await close;
   } finally {
@@ -336,8 +334,7 @@ test(
         url: 'https://example.test',
       });
       await Promise.resolve();
-      const openRequest = nativeRequests(h.events).at(-1)?.request;
-      assert.ok(openRequest);
+      const openRequest = latestNativeRequest(h.events);
       await h.handle({
         type: 'browser.native.result',
         result: nativeSuccess(openRequest, nativeSnapshot('https://example.test')),
@@ -346,14 +343,12 @@ test(
 
       const reload = h.handle({ type: 'browser.reload', appSessionId: 'app-close-race' });
       await Promise.resolve();
-      const reloadRequest = nativeRequests(h.events).at(-1)?.request;
-      assert.ok(reloadRequest);
+      const reloadRequest = latestNativeRequest(h.events);
 
       const close = h.handle({ type: 'browser.close', appSessionId: 'app-close-race' });
       await Promise.resolve();
       await reload;
-      const closeRequest = nativeRequests(h.events).at(-1)?.request;
-      assert.ok(closeRequest);
+      const closeRequest = latestNativeRequest(h.events);
       assert.equal(closeRequest.action, 'close');
       assert.equal(
         h.events.some(

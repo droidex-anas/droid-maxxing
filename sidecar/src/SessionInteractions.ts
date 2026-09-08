@@ -8,6 +8,7 @@ import {
   type RequestPermissionRequestParams,
 } from '@factory/droid-sdk';
 
+import { browserMcpToolNames } from './browser/browserMcpToolDefs.js';
 import type { FactorySession } from './DroidRuntime.js';
 import { classifyPermission, confirmationType, permissionSignature } from './normalize.js';
 import {
@@ -48,28 +49,10 @@ let requestSequence = 0;
 const defaultNextRequestId = () =>
   `req-${Date.now().toString(36)}-${(requestSequence++).toString(36)}`;
 const DROIDEX_BROWSER_PERMISSION_PREFIX = 'mcp::droidex-browser::';
-const DROIDEX_BROWSER_POLICY_DEFERRED_TOOLS = new Set([
-  'back',
-  'click',
-  'console',
-  'design_context',
-  'design_reference',
-  'fill_login',
-  'forward',
-  'hover',
-  'inspect',
-  'keypress',
-  'network',
-  'open',
-  'reload',
-  'resize',
-  'screenshot',
-  'scroll',
-  'select',
-  'snapshot',
-  'type',
-  'wait',
-]);
+// Every tool the first-party browser server registers defers to the browser's
+// own policy; the names come from the shared tool definitions the server
+// registers from, so the two cannot drift.
+const DROIDEX_BROWSER_POLICY_DEFERRED_TOOLS = new Set(browserMcpToolNames());
 
 export class SessionInteractions {
   private readonly scopes = new Map<string, InteractionScope>();

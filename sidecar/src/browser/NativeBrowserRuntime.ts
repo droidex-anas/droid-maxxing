@@ -150,11 +150,15 @@ export class NativeBrowserRuntime implements BrowserRuntime {
     kind: 'action' | 'navigation' = 'action',
   ): BrowserSnapshot {
     if (!result.ok) throw new Error(result.error ?? `Native browser ${kind} failed.`);
-    if (!result.snapshot || (kind === 'action' && !isBrowserPageUrl(result.snapshot.url))) {
+    if (!result.snapshot) {
       throw new Error(`Native browser ${kind} completed without a fresh page snapshot.`);
     }
     if (!isBrowserPageUrl(result.snapshot.url)) {
-      throw new Error('Native browser navigation returned an invalid page snapshot.');
+      throw new Error(
+        kind === 'action'
+          ? 'Native browser action completed without a fresh page snapshot.'
+          : 'Native browser navigation returned an invalid page snapshot.',
+      );
     }
     return result.snapshot;
   }

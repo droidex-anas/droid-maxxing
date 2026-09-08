@@ -1,3 +1,8 @@
+// The wire contract owns the scroll result; the browser layer reuses it verbatim.
+import type { BrowserScrollResult } from '../protocol.js';
+
+export type { BrowserScrollResult };
+
 export interface BrowserViewport {
   width: number;
   height: number;
@@ -71,14 +76,6 @@ export interface BrowserSnapshot {
   canGoBack?: boolean;
   canGoForward?: boolean;
   scrollResult?: BrowserScrollResult;
-}
-
-export interface BrowserScrollResult {
-  x: number;
-  y: number;
-  moved: boolean;
-  atBoundary: boolean;
-  requested: { x: number; y: number };
 }
 
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right';

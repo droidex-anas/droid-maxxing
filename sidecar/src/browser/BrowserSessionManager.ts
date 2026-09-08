@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { BrowserRestoreState } from '../protocol.js';
 import { BrowserDesignReferences } from './BrowserDesignReferences.js';
 import { normalizeBrowserUrl } from './browserUrl.js';
 import type { writeDesignPromptPack } from './designPromptPacks.js';
@@ -87,12 +88,9 @@ export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = {
   deviceScaleFactor: 2,
 };
 
-export type BrowserRestoreState = Omit<
-  BrowserState,
-  'appSessionId' | 'refs' | 'screenshotPath' | 'screenshotUrl' | 'agentCursor' | 'error'
-> & {
-  appSessionId: string;
-};
+// The wire contract owns the restore payload. restore() below rebuilds a
+// BrowserState from it, so the compiler catches any drift between the two.
+export type { BrowserRestoreState };
 
 export class BrowserSessionManager {
   private readonly sessions = new Map<string, ManagedBrowserSession>();

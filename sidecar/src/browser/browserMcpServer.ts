@@ -1,18 +1,9 @@
 import { createSdkMcpServer, tool } from '@factory/droid-sdk';
 import { readFile } from 'node:fs/promises';
-import { z } from 'zod';
 import type { BrowserSessionManager } from './BrowserSessionManager.js';
+import { browserMcpToolDefs as defs } from './browserMcpToolDefs.js';
 import type { BrowserState, DesignReference } from './types.js';
 import { jsonResult, safeTool, type ToolHandlerResult } from '../mcpToolUtils.js';
-
-const viewportSchema = z.object({
-  width: z.number().int().min(240).max(4096),
-  height: z.number().int().min(240).max(4096),
-  deviceScaleFactor: z.number().positive().max(4).optional(),
-});
-
-const viewportModeSchema = z.enum(['fit', 'desktop', 'laptop', 'tablet', 'mobile', 'custom']);
-const scrollDirectionSchema = z.enum(['up', 'down', 'left', 'right']);
 
 export function createBrowserMcpServer(
   manager: BrowserSessionManager,
@@ -30,25 +21,8 @@ export function createBrowserMcpServer(
     tools: [
       tool(
         'open',
-        [
-          'Navigate the live DROIDEX browser pane for this chat session to a URL explicitly requested by the user or required by the task.',
-          'This is the browser the user can see and control in DROIDEX.',
-          'Use snapshot—not open—when the user asks to check, inspect, explain, or continue from the current or already-open browser.',
-          'Never reopen a URL from conversation memory; the user may have navigated elsewhere since the last tool call.',
-          'If the user names a domain without a scheme, pass it directly; DROIDEX will load it as https.',
-          'Do not ask the user for a URL when they already named a site or domain.',
-          'Do not use Read, FetchUrl, curl, or agent-browser as a substitute for browser work.',
-        ].join(' '),
-        {
-          url: z
-            .string()
-            .min(1)
-            .describe(
-              'Absolute URL to open, such as https://example.com or http://127.0.0.1:1421/.',
-            ),
-          viewport: viewportSchema.optional().describe('Optional explicit browser viewport.'),
-          viewportMode: viewportModeSchema.optional().describe('Viewport preset label for the UI.'),
-        },
+        defs.open.description,
+        defs.open.input,
         safeTool(async (input) => {
           const state = await manager.open({
             appSessionId: appSessionId(),
@@ -67,8 +41,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'snapshot',
-        'Observe the authoritative live page and refresh compact DOM refs. Use this first whenever the user refers to the current or already-open browser, because they may have navigated manually since the last tool call. Snapshot never navigates or reopens a remembered URL.',
-        {},
+        defs.snapshot.description,
+        defs.snapshot.input,
         safeTool(async () => {
           const state = await manager.refresh(appSessionId());
           return jsonResult(stateForTool(state));
@@ -76,8 +50,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'reload',
-        'Reload the current live DROIDEX browser page. The result already includes fresh page refs.',
-        {},
+        defs.reload.description,
+        defs.reload.input,
         safeTool(async () => {
           const state = await manager.reload(appSessionId());
           return jsonResult(stateForTool(state));
@@ -85,8 +59,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'back',
-        'Go back one page in the live DROIDEX browser history and return fresh page refs.',
-        {},
+        defs.back.description,
+        defs.back.input,
         safeTool(async () => {
           const state = await manager.goBack(appSessionId());
           return jsonResult(stateForTool(state));
@@ -94,8 +68,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'forward',
-        'Go forward one page in the live DROIDEX browser history and return fresh page refs.',
-        {},
+        defs.forward.description,
+        defs.forward.input,
         safeTool(async () => {
           const state = await manager.goForward(appSessionId());
           return jsonResult(stateForTool(state));
@@ -103,21 +77,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'screenshot',
-        'Capture the current live DROIDEX browser viewport as a high-detail PNG image for visual inspection. Use snapshot for normal navigation refs.',
-        {
-          fullPage: z
-            .boolean()
-            .optional()
-            .describe('Capture the full page instead of only the visible viewport.'),
-          deviceScaleFactor: z
-            .number()
-            .positive()
-            .max(4)
-            .optional()
-            .describe(
-              'Temporary screenshot scale. Defaults to the current high-detail viewport scale.',
-            ),
-        },
+        defs.screenshot.description,
+        defs.screenshot.input,
         safeTool(async (input) => {
           const path = await manager.screenshot(appSessionId(), {
             fullPage: input.fullPage ?? false,
@@ -128,15 +89,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'click',
-        'Move the agent cursor and click in the live DROIDEX browser by ref or viewport coordinates. Prefer refs returned by snapshot.',
-        {
-          ref: z
-            .string()
-            .optional()
-            .describe('Element ref returned by snapshot. Preferred when available.'),
-          x: z.number().optional().describe('Viewport x coordinate when clicking by coordinate.'),
-          y: z.number().optional().describe('Viewport y coordinate when clicking by coordinate.'),
-        },
+        defs.click.description,
+        defs.click.input,
         safeTool(async (input) => {
           const state = await manager.click({
             appSessionId: appSessionId(),
@@ -149,12 +103,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'hover',
-        'Move the trusted browser pointer over an element by ref or viewport coordinates, then return fresh page refs.',
-        {
-          ref: z.string().optional().describe('Element ref returned by snapshot.'),
-          x: z.number().optional().describe('Viewport x coordinate when hovering by coordinate.'),
-          y: z.number().optional().describe('Viewport y coordinate when hovering by coordinate.'),
-        },
+        defs.hover.description,
+        defs.hover.input,
         safeTool(async (input) => {
           const state = await manager.hover({
             appSessionId: appSessionId(),
@@ -167,11 +117,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'select',
-        'Choose an option in a native select element by ref. The value may be the option value or visible label.',
-        {
-          ref: z.string().describe('Select element ref returned by snapshot.'),
-          value: z.string().describe('Option value or exact visible label to select.'),
-        },
+        defs.select.description,
+        defs.select.input,
         safeTool(async (input) => {
           const state = await manager.selectOption(appSessionId(), input.ref, input.value);
           return jsonResult(stateForTool(state));
@@ -179,10 +126,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'type',
-        'Type text into the currently focused element in the live DROIDEX browser. Click or focus an input first.',
-        {
-          text: z.string().describe('Text to type into the currently focused browser element.'),
-        },
+        defs.type.description,
+        defs.type.input,
         safeTool(async (input) => {
           const state = await manager.type(appSessionId(), input.text);
           return jsonResult(stateForTool(state));
@@ -190,13 +135,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'keypress',
-        'Press a key in the live DROIDEX browser.',
-        {
-          key: z
-            .string()
-            .min(1)
-            .describe('Key name to press, such as Enter, Escape, Tab, ArrowDown.'),
-        },
+        defs.keypress.description,
+        defs.keypress.input,
         safeTool(async (input) => {
           const state = await manager.keypress(appSessionId(), input.key);
           return jsonResult(stateForTool(state));
@@ -204,11 +144,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'resize',
-        'Resize the viewport of the live DROIDEX browser. Use this to check responsive layouts or to match a specific screen size.',
-        {
-          viewport: viewportSchema.describe('New viewport dimensions.'),
-          viewportMode: viewportModeSchema.optional().describe('Viewport preset label.'),
-        },
+        defs.resize.description,
+        defs.resize.input,
         safeTool(async (input) => {
           const state = await manager.resizeViewport({
             appSessionId: appSessionId(),
@@ -223,12 +160,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'scroll',
-        'Scroll the live DROIDEX browser page. The result already includes fresh page refs.',
-        {
-          direction: scrollDirectionSchema.describe('Direction to scroll.'),
-          pixels: z.number().positive().max(4000).optional().describe('Scroll amount in pixels.'),
-          ref: z.string().optional().describe('Optional ref inside a nested scroll container.'),
-        },
+        defs.scroll.description,
+        defs.scroll.input,
         safeTool(async (input) => {
           const state = await manager.scroll(
             appSessionId(),
@@ -242,19 +175,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'wait',
-        'Wait for browser text, a ref, or a URL fragment before continuing. With no condition, waits for the requested duration.',
-        {
-          text: z.string().optional().describe('Visible ref text or accessible name to wait for.'),
-          ref: z.string().optional().describe('Element ref to wait for.'),
-          urlIncludes: z.string().optional().describe('URL fragment to wait for.'),
-          timeoutMs: z
-            .number()
-            .int()
-            .min(0)
-            .max(15_000)
-            .optional()
-            .describe('Maximum wait in milliseconds. Defaults to 5000.'),
-        },
+        defs.wait.description,
+        defs.wait.input,
         safeTool(async (input) => {
           const state = await manager.wait(appSessionId(), input);
           return jsonResult(stateForTool(state));
@@ -262,16 +184,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'inspect',
-        [
-          'Inspect one element without enabling Design Mode or taking another full-page snapshot.',
-          'Returns bounded HTML, sanitized attributes, geometry, and iframe source/accessibility metadata.',
-          'Use a ref from the latest browser response when possible, or provide a CSS selector.',
-          'Credential values, auth tokens, and sensitive URL parameters are redacted.',
-        ].join(' '),
-        {
-          ref: z.string().optional().describe('Element ref from the latest browser response.'),
-          selector: z.string().optional().describe('CSS selector when no ref is available.'),
-        },
+        defs.inspect.description,
+        defs.inspect.input,
         safeTool(async (input) => {
           const inspection = await manager.inspect(appSessionId(), input);
           return jsonResult({ ok: true, inspection });
@@ -279,17 +193,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'network',
-        [
-          'Read the latest bounded network diagnostics for this browser session.',
-          'Returns at most 100 completed or failed requests with method, URL, resource type, status, and error.',
-          'Headers and response bodies are never captured; credentials and sensitive URL parameters are redacted.',
-        ].join(' '),
-        {
-          clear: z
-            .boolean()
-            .optional()
-            .describe('Return the current events and clear the retained buffer afterward.'),
-        },
+        defs.network.description,
+        defs.network.input,
         safeTool(async (input) => {
           const events = await manager.network(appSessionId(), input.clear ?? false);
           return jsonResult({ ok: true, events });
@@ -297,17 +202,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'console',
-        [
-          'Read the latest bounded JavaScript console diagnostics for this browser session.',
-          'Returns at most 100 entries with level, message, line, and source.',
-          'Messages and source URLs are length-limited and credential-like values are redacted.',
-        ].join(' '),
-        {
-          clear: z
-            .boolean()
-            .optional()
-            .describe('Return the current entries and clear the retained buffer afterward.'),
-        },
+        defs.console.description,
+        defs.console.input,
         safeTool(async (input) => {
           const events = await manager.console(appSessionId(), input.clear ?? false);
           return jsonResult({ ok: true, events });
@@ -315,13 +211,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'fill_login',
-        [
-          'Fill the saved login for the current site in the live DROIDEX browser.',
-          'You never see the username or password: the values are injected securely in the app and are redacted from every snapshot. This lets you authorize a sign-in without reading the secret.',
-          'Saved logins are strictly opt-in. Use only when a sign-in form is visible and the user has previously enabled saved logins and saved a credential for this site.',
-          'Returns an error if saved logins are disabled or no credential is saved; in that case ask the user to sign in once and accept the save-login prompt. After filling, submit with click or keypress; DROIDEX will request the required one-use authentication approval.',
-        ].join(' '),
-        {},
+        defs.fill_login.description,
+        defs.fill_login.input,
         safeTool(async () => {
           const state = await manager.fillCredentials(appSessionId());
           return jsonResult(stateForTool(state));
@@ -329,19 +220,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'design_context',
-        [
-          'Read the current Design Mode browser context for this chat only.',
-          'Use after the user selects, clicks, or sketches an area in the live DROIDEX browser pane.',
-          'Returns compact source-anchored references: each has an @id, label, kind, tag/role/name/text, box, resolved source (framework/component/file), a verified CSS selector, and a cropped screenshotPath.',
-          'When you need the full element detail (all attributes, computed styles, ancestor chain, outerHTML), call design_reference with the @id instead of asking the user.',
-          'Design Mode is for visual/UI work only: change the referenced elements and their styling, and do not modify backend, data, or business logic. If achieving the requested look requires a backend or data change, stop and tell the user what is needed and why instead of changing it yourself or spawning subagents.',
-        ].join(' '),
-        {
-          instruction: z
-            .string()
-            .optional()
-            .describe('Optional user design instruction to keep alongside the returned context.'),
-        },
+        defs.design_context.description,
+        defs.design_context.input,
         safeTool(async (input) => {
           const id = appSessionId();
           await manager.refresh(id);
@@ -371,18 +251,8 @@ export function createBrowserMcpServer(
       ),
       tool(
         'design_reference',
-        [
-          'Fetch the full source-anchored detail for one Design Mode reference by its @id.',
-          'Use the @id values returned by design_context to inspect the exact verified selector, attributes, computed styles, ancestor chain, resolved source component/file, and the cropped screenshot path before editing code.',
-        ].join(' '),
-        {
-          id: z
-            .string()
-            .min(1)
-            .describe(
-              'Design reference id returned by design_context, e.g. @live-ab12cd or @region-...',
-            ),
-        },
+        defs.design_reference.description,
+        defs.design_reference.input,
         safeTool(async (input) => {
           const id = appSessionId();
           await manager.refresh(id);
