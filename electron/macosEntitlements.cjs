@@ -39,6 +39,7 @@ function prepareMacEntitlements(options) {
   const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'droidex-entitlements-'));
   const entitlementsPath = path.join(outputDirectory, 'entitlements.mac.plist');
   fs.writeFileSync(entitlementsPath, signedEntitlements, { mode: 0o600 });
+  process.once('exit', () => fs.rmSync(outputDirectory, { recursive: true, force: true }));
 
   return { entitlementsPath, webAuthnKeychainAccessGroup };
 }

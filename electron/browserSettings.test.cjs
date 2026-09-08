@@ -368,9 +368,12 @@ test('protection-reducing settings require a main-owned native confirmation', as
 
 test('each navigation approval reduction requires a main-owned native confirmation', async () => {
   await withController(async ({ controller, prompts, responses }) => {
+    let snapshot = await controller.update({ navigationApproval: 'new_sites' });
+    assert.equal(snapshot.navigationApproval, 'follow_autonomy');
+
     await controller.update({ navigationApproval: 'always_ask' });
 
-    let snapshot = await controller.update({ navigationApproval: 'new_sites' });
+    snapshot = await controller.update({ navigationApproval: 'new_sites' });
     assert.equal(snapshot.navigationApproval, 'always_ask');
     snapshot = await controller.update({ navigationApproval: 'follow_autonomy' });
     assert.equal(snapshot.navigationApproval, 'always_ask');
@@ -381,7 +384,7 @@ test('each navigation approval reduction requires a main-owned native confirmati
     snapshot = await controller.update({ navigationApproval: 'follow_autonomy' });
     assert.equal(snapshot.navigationApproval, 'new_sites');
 
-    assert.equal(prompts.length, 4);
+    assert.equal(prompts.length, 5);
     assert.ok(prompts.every((prompt) => prompt.defaultId === 1));
   });
 });
@@ -516,5 +519,25 @@ test('slow settings snapshots do not block exact-origin or permission persistenc
     cookieRead.resolve([]);
     const snapshot = await rendererUpdate;
     assert.equal(snapshot.askDownloadLocation, true);
+  });
+});
+
+test('saved-login filling and authentication actions fail closed', async () => {
+  await withController(async ({ controller, prompts }) => {
+    await controller.update({ loginFillApproval: 'never' });
+    await assert.rejects(
+      controller.credentialForAgent('https://bank.example/login'),
+      /Saved-login filling is off/,
+    );
+    assert.deepEqual(prompts, []);
+
+    await assert.rejects(
+      controller.authorizeAuthenticationAction({
+        kind: 'signin',
+        origin: 'https://accounts.example',
+      }),
+      /denied for https:\/\/accounts\.example/,
+    );
+    assert.equal(prompts.at(-1).buttons.length, 2);
   });
 });

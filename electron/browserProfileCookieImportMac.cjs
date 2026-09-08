@@ -250,7 +250,7 @@ function normalizeChromeRows(rows, key, nowMs) {
       skippedCount += 1;
       continue;
     }
-    const cookieId = `${cookie.hostname}\0${cookie.details.path}\0${cookie.details.name}`;
+    const cookieId = `${cookie.hostname}\0${cookie.details.domain ?? ''}\0${cookie.details.path}\0${cookie.details.name}`;
     const previous = cookiesByKey.get(cookieId);
     if (previous) {
       previous.value.fill(0);

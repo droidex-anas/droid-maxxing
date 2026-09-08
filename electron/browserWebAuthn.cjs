@@ -152,7 +152,7 @@ function cleanAccountLabel(value) {
   return (
     value
       // eslint-disable-next-line no-control-regex -- Account labels must sanitize control bytes before display.
-      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 80)

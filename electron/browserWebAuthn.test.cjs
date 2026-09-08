@@ -90,14 +90,16 @@ test('WebAuthn account selection is native, cancel-default, and returns only the
   controller.initialize();
   const selections = [];
 
-  await handlers.get('select-webauthn-account')({}, accountDetails(), (credentialId) => {
+  const details = accountDetails();
+  details.accounts[0].displayName = 'Ali\u202Ece';
+  await handlers.get('select-webauthn-account')({}, details, (credentialId) => {
     selections.push(credentialId ?? null);
   });
 
   assert.deepEqual(selections, ['credential-two']);
   assert.equal(prompts.length, 1);
   assert.deepEqual(prompts[0].buttons, [
-    'Alice — alice@example.com',
+    'Ali ce — alice@example.com',
     'Bob — bob@example.com',
     'Cancel',
   ]);

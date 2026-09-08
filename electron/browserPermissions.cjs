@@ -176,26 +176,6 @@ function createBrowserPermissionController(options) {
     states.delete(contents);
   }
 
-  function revokeTemporaryOrigin(contents, value) {
-    const origin = requestingHttpOrigin(value);
-    const state = contents && states.get(contents);
-    if (!origin || !state) return false;
-    state.generation += 1;
-    cancelPendingPrompt(state);
-    return removeGrantKeys(state.grants, origin, [...MEDIA_TYPES]) > 0;
-  }
-
-  function consume(contents, value, mediaTypes) {
-    const origin = requestingHttpOrigin(value);
-    const state = contents && states.get(contents);
-    const normalizedTypes = normalizeRequestedMediaTypes(mediaTypes);
-    if (!origin || !state || normalizedTypes.length === 0) return false;
-    const keys = normalizedTypes.map((mediaType) => grantKey(origin, mediaType));
-    if (keys.some((key) => !state.grants.has(key))) return false;
-    for (const key of keys) state.grants.delete(key);
-    return true;
-  }
-
   function siteDecision(origin, mediaType) {
     try {
       const decision = options.getSiteDecision(origin, mediaType);
@@ -235,11 +215,9 @@ function createBrowserPermissionController(options) {
 
   return {
     canAccess,
-    consume,
     handleRequest,
     revokeForContents,
     revokeForNavigation,
-    revokeTemporaryOrigin,
     setSiteDecision,
   };
 }

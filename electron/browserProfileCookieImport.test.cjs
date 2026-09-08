@@ -238,6 +238,14 @@ test('Chrome planning asks Keychain once, writes nothing, dedupes, and hides sec
           sameSite: 1,
         },
         {
+          hostKey: 'example.com',
+          name: 'session',
+          encryptedValue: encryptedCookieValue('example.com', 'host-only-secret'),
+          secure: true,
+          httpOnly: true,
+          sameSite: 1,
+        },
+        {
           hostKey: 'plain.example',
           name: 'plain',
           plaintextValue: 'plain-secret',
@@ -303,7 +311,7 @@ test('Chrome planning asks Keychain once, writes nothing, dedupes, and hides sec
     importMethod: 'profile',
     profileId: 'Default',
     profileLabel: 'Personal',
-    importCount: 2,
+    importCount: 3,
     skippedCount: 5,
     replacementCount: 2,
     domainCount: 2,
@@ -322,10 +330,11 @@ test('Chrome planning asks Keychain once, writes nothing, dedupes, and hides sec
     writes.map((cookie) => [cookie.name, cookie.value]),
     [
       ['session', 'new-secret'],
+      ['session', 'host-only-secret'],
       ['plain', 'plain-secret'],
     ],
   );
-  assert.equal(result.importedCount, 2);
+  assert.equal(result.importedCount, 3);
   assert.equal(result.failedCount, 0);
   assert.doesNotMatch(JSON.stringify(result), /session|new-secret|plain-secret/);
   await assert.rejects(
@@ -499,6 +508,7 @@ test('partial commits are secret-free, continue safely, and consume the plan', a
     get: async () => [
       { domain: 'a.example', path: '/', name: 'first' },
       { domain: 'b.example', path: '/', name: 'second' },
+      { domain: 'c.example', path: '/', name: 'third', partitionKey: 'https://x.example' },
     ],
     set: async (cookie) => {
       attemptedNames.push(cookie.name);

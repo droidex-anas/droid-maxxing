@@ -160,7 +160,6 @@ class BrowserSettingsController {
     if (DIAGNOSTIC_ACTIONS.has(action) && !settings.diagnosticsEnabled) {
       throw new Error('Agent browser diagnostics are off. Enable them in Settings > Browser.');
     }
-    if (request.url !== undefined) exactHttpOrigin(request.url);
     if (action !== 'close' && !AUTONOMY_LEVELS.has(request.autonomy)) {
       throw new Error('Agent browser request is missing its current autonomy level.');
     }

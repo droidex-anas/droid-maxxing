@@ -317,6 +317,9 @@ function updateSitePermissions(rules, { origin, mediaTypes, decision }) {
     : [...rules.filter((candidate) => candidate.origin !== origin), next];
 }
 
+const AUTONOMY_LEVELS = ['high', 'medium', 'low'];
+const NAVIGATION_STRENGTH = { always_ask: 2, new_sites: 1, never_ask: 0 };
+
 function effectiveNavigationApproval(configured, autonomy) {
   if (configured !== 'follow_autonomy') return configured;
   if (autonomy === 'high') return 'never_ask';
@@ -333,11 +336,12 @@ function validateHomePage(value) {
 
 function weakensBrowserProtection(current, patch) {
   const navigationApprovalWeakens =
-    (current.navigationApproval === 'always_ask' &&
-      ['new_sites', 'follow_autonomy', 'never_ask'].includes(patch.navigationApproval)) ||
-    (current.navigationApproval === 'new_sites' &&
-      ['follow_autonomy', 'never_ask'].includes(patch.navigationApproval)) ||
-    (patch.navigationApproval === 'never_ask' && current.navigationApproval !== 'never_ask');
+    patch.navigationApproval !== undefined &&
+    AUTONOMY_LEVELS.some(
+      (autonomy) =>
+        NAVIGATION_STRENGTH[effectiveNavigationApproval(patch.navigationApproval, autonomy)] <
+        NAVIGATION_STRENGTH[effectiveNavigationApproval(current.navigationApproval, autonomy)],
+    );
   return (
     (patch.agentAccessEnabled === true && !current.agentAccessEnabled) ||
     (patch.diagnosticsEnabled === true && !current.diagnosticsEnabled) ||

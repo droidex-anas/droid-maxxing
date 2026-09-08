@@ -220,6 +220,36 @@ test('saved login storage uses only non-blocking operating-system encryption', a
   );
 });
 
+test('a failed opportunistic re-encryption still returns the saved login', async () => {
+  let refuseEncryption = false;
+  const safeStorage = {
+    ...protectedStorage(),
+    encryptStringAsync: async (value) => {
+      if (refuseEncryption) throw new Error('credential store busy');
+      return Buffer.from(value, 'utf8');
+    },
+    decryptStringAsync: async (value) => ({
+      result: value.toString('utf8'),
+      shouldReEncrypt: true,
+    }),
+  };
+  await withVault(
+    async ({ vault }) => {
+      await vault.capture({
+        url: 'https://example.com/login',
+        username: 'user@example.com',
+        password: 'secret',
+      });
+      refuseEncryption = true;
+      assert.deepEqual(await vault.credentialForAgent('https://example.com/login'), {
+        username: 'user@example.com',
+        password: 'secret',
+      });
+    },
+    { responses: [0, 0], safeStorage },
+  );
+});
+
 test('saved login storage fails closed when async operating-system encryption is unavailable', async () => {
   await withVault(
     async ({ vault, prompts }) => {

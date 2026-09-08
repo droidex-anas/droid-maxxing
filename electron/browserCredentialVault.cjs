@@ -47,7 +47,7 @@ class BrowserCredentialVault {
     if (!(await this.isAvailable()) || this.promptActive) return false;
     this.promptActive = true;
     try {
-      const existing = await this.read(origin);
+      const existing = await this.read(origin).catch(() => undefined);
       if (existing?.username === username && existing.password === password) return false;
       const response = await this.options.showMessageBox({
         type: 'question',
@@ -117,14 +117,23 @@ class BrowserCredentialVault {
   }
 
   async decrypt(origin, row, rows) {
+    let parsed;
+    let shouldReEncrypt;
     try {
       const decrypted = await this.options.safeStorage.decryptStringAsync(
         Buffer.from(row.enc, 'base64'),
       );
-      const parsed = JSON.parse(decrypted.result);
+      parsed = JSON.parse(decrypted.result);
+      shouldReEncrypt = decrypted.shouldReEncrypt;
       if (typeof parsed?.username !== 'string' || typeof parsed?.password !== 'string')
         throw new Error();
-      if (decrypted.shouldReEncrypt) {
+    } catch {
+      throw new Error(
+        `The saved login for ${origin} could not be decrypted. Delete it in Settings > Browser and save it again.`,
+      );
+    }
+    if (shouldReEncrypt) {
+      try {
         const encrypted = await this.options.safeStorage.encryptStringAsync(
           JSON.stringify({ username: parsed.username, password: parsed.password }),
         );
@@ -132,13 +141,11 @@ class BrowserCredentialVault {
           ...rows.filter((candidate) => candidate.origin !== origin),
           { origin, enc: encrypted.toString('base64') },
         ]);
+      } catch {
+        // A failed refresh keeps the still-valid credential; the next read retries.
       }
-      return parsed;
-    } catch {
-      throw new Error(
-        `The saved login for ${origin} could not be decrypted. Delete it in Settings > Browser and save it again.`,
-      );
     }
+    return parsed;
   }
 
   queueWrite(update) {

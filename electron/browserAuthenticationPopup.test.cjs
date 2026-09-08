@@ -127,4 +127,21 @@ test('authentication popups reject unsafe URLs and prevent unsafe child navigati
     'javascript:alert(1)',
   );
   assert.equal(prevented, true);
+
+  const redirect = (isMainFrame) => {
+    let redirectPrevented = false;
+    handlers.get('will-redirect')(
+      {
+        preventDefault: () => {
+          redirectPrevented = true;
+        },
+      },
+      'file:///tmp/private',
+      false,
+      isMainFrame,
+    );
+    return redirectPrevented;
+  };
+  assert.equal(redirect(true), true);
+  assert.equal(redirect(false), false);
 });

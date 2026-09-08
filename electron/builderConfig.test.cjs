@@ -177,6 +177,26 @@ test('release entitlements support structurally valid root dictionary indentatio
       /<key>keychain-access-groups<\/key>[\s\S]*A1B2C3D4E5\.app\.droidex\.webauthn/,
     );
   }
+
+  writeFileSync(
+    join(brandDirectory, 'entitlements.mac.plist'),
+    '<?xml version="1.0"?>\r\n<plist version="1.0">\r\n<dict>\r\n</dict>\r\n</plist>\r\n',
+  );
+  const crlf = prepareMacEntitlements({ isReleaseBuild: true, projectRoot, teamId: 'A1B2C3D4E5' });
+  t.after(() => rmSync(dirname(crlf.entitlementsPath), { recursive: true, force: true }));
+  assert.match(
+    readFileSync(crlf.entitlementsPath, 'utf8'),
+    /\r\n {2}<key>keychain-access-groups<\/key>\r\n/,
+  );
+
+  writeFileSync(
+    join(brandDirectory, 'entitlements.mac.plist'),
+    '<?xml version="1.0"?>\n<plist version="1.0">\n<dict>\n</plist>\n',
+  );
+  assert.throws(
+    () => prepareMacEntitlements({ isReleaseBuild: true, projectRoot, teamId: 'A1B2C3D4E5' }),
+    /missing the root dictionary closing tag/,
+  );
 });
 
 test('release builds require crash reporting configuration', () => {

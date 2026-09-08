@@ -179,7 +179,12 @@ function normalizedCookieKey(cookie) {
 }
 
 function existingCookieKey(cookie) {
-  if (!cookie || typeof cookie.name !== 'string' || typeof cookie.path !== 'string')
+  if (
+    !cookie ||
+    cookie.partitionKey ||
+    typeof cookie.name !== 'string' ||
+    typeof cookie.path !== 'string'
+  )
     return undefined;
   const hostname =
     typeof cookie.domain === 'string' ? cookie.domain.replace(/^\./, '').toLowerCase() : undefined;

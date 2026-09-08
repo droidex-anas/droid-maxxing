@@ -5,22 +5,19 @@ const {
   validateAgentAuthenticationIntent,
 } = require('./browserAuthenticationIntent.cjs');
 
-test('agent authentication rejects cross-origin iframe controls at every autonomy level', () => {
-  for (const autonomy of ['off', 'low', 'medium', 'high']) {
-    assert.throws(
-      () =>
-        validateAgentAuthenticationIntent(
-          {
-            kind: 'cross_origin_frame',
-            origin: 'https://app.example',
-            targetOrigin: 'https://accounts.example',
-          },
-          'https://app.example/login',
-          autonomy,
-        ),
-      /Cross-origin frame authentication is blocked/,
-    );
-  }
+test('agent authentication rejects cross-origin iframe controls', () => {
+  assert.throws(
+    () =>
+      validateAgentAuthenticationIntent(
+        {
+          kind: 'cross_origin_frame',
+          origin: 'https://app.example',
+          targetOrigin: 'https://accounts.example',
+        },
+        'https://app.example/login',
+      ),
+    /Cross-origin frame authentication is blocked/,
+  );
 });
 
 test('agent authentication rejects stale or wrong-origin intent', () => {
@@ -29,7 +26,6 @@ test('agent authentication rejects stale or wrong-origin intent', () => {
       validateAgentAuthenticationIntent(
         { kind: 'signin', origin: 'https://old.example' },
         'https://current.example/login',
-        'medium',
       ),
     /origin changed/,
   );
@@ -43,7 +39,6 @@ test('OAuth popup authorization requires an authoritative exact destination', ()
       targetUrl: 'https://accounts.example/authorize?client=droidex',
     },
     'https://app.example/login',
-    'medium',
   );
   assert.equal(
     authenticationPopupTarget(intent),
@@ -55,7 +50,6 @@ test('OAuth popup authorization requires an authoritative exact destination', ()
         validateAgentAuthenticationIntent(
           { kind: 'oauth', origin: 'https://app.example' },
           'https://app.example/login',
-          'medium',
         ),
       ),
     /destination could not be verified/,
@@ -66,7 +60,6 @@ test('passkey authentication never grants a web popup', () => {
   const intent = validateAgentAuthenticationIntent(
     { kind: 'passkey', origin: 'https://app.example' },
     'https://app.example/login',
-    'high',
   );
   assert.equal(authenticationPopupTarget(intent), undefined);
 });

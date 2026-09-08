@@ -10,7 +10,9 @@ function reserveDownloadPath(directory, filename, reservedPaths) {
       // eslint-disable-next-line no-control-regex -- Download filenames must sanitize control bytes.
       .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '_')
       .replace(/[. ]+$/g, '') || 'download';
-  const safeName = truncateFilenameUtf8(sanitizedName, MAX_RESERVED_FILENAME_BYTES);
+  const safeName =
+    truncateFilenameUtf8(sanitizedName, MAX_RESERVED_FILENAME_BYTES).replace(/[. ]+$/g, '') ||
+    'download';
   const extension = path.extname(safeName);
   const stem = path.basename(safeName, extension);
   let candidate = path.join(directory, safeName);
@@ -26,7 +28,7 @@ function reserveDownloadPath(directory, filename, reservedPaths) {
 }
 
 function downloadReservationKey(filePath) {
-  return path.normalize(filePath).toLowerCase();
+  return path.normalize(filePath).normalize('NFD').toLowerCase();
 }
 
 function truncateFilenameUtf8(filename, maxBytes) {

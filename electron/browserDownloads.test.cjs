@@ -43,4 +43,20 @@ test('download filenames stay within the UTF-8 component limit with a collision 
   assert.ok(Buffer.byteLength(secondName, 'utf8') <= 255);
   assert.equal(Buffer.from(firstName, 'utf8').toString('utf8'), firstName);
   assert.match(secondName, / 2\.txt$/);
+
+  const longExtension = path.basename(
+    reserveDownloadPath(directory, `${'a'.repeat(239)}.${'b'.repeat(300)}`, reserved),
+  );
+  assert.doesNotMatch(longExtension, /[. ]$/);
+});
+
+test('download reservations collide across Unicode normalization forms', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'droidex-download-test-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const reserved = new Set();
+
+  reserveDownloadPath(directory, 'café.pdf'.normalize('NFC'), reserved);
+  const second = reserveDownloadPath(directory, 'café.pdf'.normalize('NFD'), reserved);
+
+  assert.match(path.basename(second), / 2\.pdf$/);
 });
