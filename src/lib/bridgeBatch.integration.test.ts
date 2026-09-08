@@ -247,7 +247,7 @@ test(
 
       assert.deepEqual(
         seen.map((event) => event.type),
-        ['runtime.updated'],
+        ['connection', 'runtime.updated'],
       );
 
       first.close();
@@ -483,7 +483,7 @@ test(
 
       assert.deepEqual(
         seen.map((event) => event.type),
-        ['runtime.updated', 'error', 'connection'],
+        ['connection', 'runtime.updated', 'error', 'connection'],
       );
       const unflushed = seen.find(
         (event): event is Extract<ServerEvent, { type: 'error' }> => event.type === 'error',

@@ -9,6 +9,7 @@ import type {
   ServerWireMessage,
   StreamFidelity,
 } from '../types/bridge';
+import { isAutomationSnapshot } from '../features/automations/wireValidation';
 
 export function serverWireMessage(value: unknown): ServerWireMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
@@ -237,6 +238,14 @@ function isServerEvent(value: unknown): value is ServerEvent {
       );
     case 'mcp.error':
       return hasStrings(value, ['requestId', 'message']);
+    case 'automations.snapshot':
+      return isAutomationSnapshot(value.snapshot);
+    case 'automations.result':
+      return (
+        typeof value.requestId === 'string' &&
+        ((value.ok === true && (value.runId === undefined || typeof value.runId === 'string')) ||
+          (value.ok === false && typeof value.error === 'string'))
+      );
     default: {
       const unexpected: never = type;
       void unexpected;

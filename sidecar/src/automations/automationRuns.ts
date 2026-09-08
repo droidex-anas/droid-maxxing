@@ -1,0 +1,782 @@
+import { randomUUID } from 'node:crypto';
+import type { ServerEvent } from '../protocol.js';
+import { assertModelSelection, clip, PAUSED_AFTER_FAILURES } from './automationInput.js';
+import {
+  auditRunSelection,
+  failInterruptedRuns,
+  newQueuedRun,
+  projectActiveRun,
+  projectSettledRun,
+  sessionCommandForRun,
+  type InterruptedRunCleanup,
+  type SessionCreateCommand,
+} from './automationRunRecord.js';
+import { RunTimers } from './automationRunTimers.js';
+import {
+  holdsReviewWorkspace,
+  isActiveRunStatus,
+  isSettledRunStatus,
+  trimAutomationStore,
+} from './automationStore.js';
+import { AUTOMATION_RUN_CLIENT_REF_PREFIX } from './permissionPolicy.js';
+import type {
+  Automation,
+  AutomationReasoningEffort,
+  AutomationRun,
+  AutomationRunStatus,
+  AutomationStore,
+} from './types.js';
+import type {
+  AutomationWorkspaceCreator,
+  AutomationWorkspacePreparer,
+  AutomationWorkspaceReleaser,
+} from './workspace.js';
+
+// A timed-out run whose chat has not arrived yet leaves its reference behind so
+// the late chat can be closed. The bound keeps a long uptime from growing the set.
+const MAX_ABANDONED_REFS = 32;
+const MAX_LAUNCH_ATTEMPTS = 3;
+const MAX_CONSECUTIVE_FAILURES = 3;
+const DEFAULT_LAUNCH_RETRY_MS = 400;
+// Lifecycle keeps `streaming` true for the whole turn, including tool calls.
+// This grace only debounces the turn-end update and covers a brief flicker
+// after the stream closes (compaction, a late summary patch).
+const DEFAULT_TURN_SETTLE_GRACE_MS = 30_000;
+
+type SessionSummary = Extract<ServerEvent, { type: 'session.updated' }>['session'];
+type SessionErrorEvent = Extract<ServerEvent, { type: 'error' }>;
+
+export interface AutomationRunsOptions {
+  store: () => AutomationStore;
+  now: () => number;
+  isClosed: () => boolean;
+  /** Applies a store mutation and persists it on the manager's single writer. */
+  persist: (apply: () => void) => Promise<void>;
+  /** Serializes, persists, and publishes one store operation. */
+  commit: <T>(apply: () => T | Promise<T>) => Promise<T>;
+  launchSession: (command: SessionCreateCommand) => Promise<void>;
+  closeSession: (appSessionId: string) => Promise<void>;
+  /** Resolves the run directory. Isolated worktrees are created after this path is persisted. */
+  prepareWorkspace: AutomationWorkspacePreparer;
+  createWorkspace: AutomationWorkspaceCreator;
+  releaseWorkspace: AutomationWorkspaceReleaser;
+  validateSelection: (modelId: string, reasoningEffort: AutomationReasoningEffort) => Promise<void>;
+  /** A settled run frees the schedule, so the next wake is recomputed. */
+  rearmScheduler: () => void;
+  /** Delay between launch retries. Tests shorten it. */
+  launchRetryMs?: number;
+  /** Grace after streaming stops before the run completes. Tests shorten it. */
+  turnSettleGraceMs?: number;
+}
+
+/**
+ * The runs of every automation, from queued to settled.
+ *
+ * This owns `store.runs`, `store.sessionOrigins`, and the `lastRun*` fields that
+ * project a run onto its automation, so a run's state and the summary the UI
+ * reads always move together. It runs one automation at a time: the queue drains
+ * in request order, each run launches a chat through the bridge, and the run
+ * settles from the session events that chat emits, from a timeout, or from a
+ * failure to launch at all.
+ */
+export class AutomationRuns {
+  private readonly timers: RunTimers;
+  private readonly streamingSeen = new Set<string>();
+  private readonly runFailures = new Map<string, string>();
+  private readonly abandonedClientRefs = new Set<string>();
+  private readonly launchAttempts = new Map<string, number>();
+  private readonly launchRetryMs: number;
+  private recovered: InterruptedRunCleanup = { appSessionIds: [], workspaces: [] };
+  private drainPromise: Promise<void> | null = null;
+  private eventTail: Promise<void> = Promise.resolve();
+  private readonly pendingAdopts = new Set<string>();
+  private readonly timerWork = new Set<Promise<void>>();
+
+  constructor(private readonly options: AutomationRunsOptions) {
+    this.launchRetryMs = Math.max(0, options.launchRetryMs ?? DEFAULT_LAUNCH_RETRY_MS);
+    this.timers = new RunTimers(
+      {
+        sessionCreateTimedOut: (runId) => {
+          this.trackTimerWork(
+            this.retryOrFail(
+              runId,
+              'DROIDEX did not create the automation chat before the startup timeout.',
+            ),
+            'Could not retry automation launch',
+          );
+        },
+        runLimitReached: (runId) => {
+          this.trackTimerWork(
+            this.timeOut(
+              runId,
+              'The automation run exceeded the 24-hour safety limit and was stopped in DROIDEX.',
+            ),
+            'Could not time out automation run',
+          );
+        },
+        turnSettled: (runId) => {
+          const failure = this.runFailures.get(runId);
+          this.trackTimerWork(
+            this.finish(runId, failure ? 'failed' : 'completed', failure ?? null),
+            'Could not settle automation run',
+          );
+        },
+      },
+      options.turnSettleGraceMs ?? DEFAULT_TURN_SETTLE_GRACE_MS,
+    );
+  }
+
+  /** Queues this occurrence unless this automation already has work open. */
+  queueScheduled(automation: Automation, scheduledAt: number): void {
+    if (this.hasOpenFor(automation.id)) return;
+    const queued = this.runs.some(
+      (run) =>
+        run.automationId === automation.id &&
+        run.trigger === 'schedule' &&
+        run.scheduledAt === scheduledAt,
+    );
+    if (queued) return;
+    this.runs.push(newQueuedRun(automation, scheduledAt, this.options.now(), 'schedule'));
+  }
+
+  /**
+   * Queues a run the user asked for. An automation that already has a run
+   * waiting or in progress returns that run instead of stacking another.
+   */
+  async queueManual(automationId: string): Promise<AutomationRun> {
+    return this.options.commit(async () => {
+      const automation = this.automationFor(automationId);
+      if (!automation) throw new Error('Automation not found.');
+      assertModelSelection(automation);
+      const existing = this.openRunFor(automation.id);
+      if (existing) return structuredClone(existing);
+      await this.options.validateSelection(automation.modelId, automation.reasoningEffort);
+      const requestedAt = this.options.now();
+      const run = newQueuedRun(automation, requestedAt, requestedAt, 'manual');
+      this.runs.push(run);
+      return structuredClone(run);
+    });
+  }
+
+  /** Starts the next queued run unless one is already running. */
+  startQueued(): void {
+    if (this.options.isClosed() || this.drainPromise) return;
+    // Nothing awaits the drain, so a failure here (a rejected store write) must
+    // be reported rather than escape as an unhandled rejection that would take
+    // the sidecar - and every live session with it - down.
+    this.drainPromise = this.drain()
+      .catch((error: unknown) => {
+        console.error('Could not start the next automation run', error);
+      })
+      .finally(() => {
+        this.drainPromise = null;
+        if (!this.options.isClosed() && !this.activeRun() && this.nextQueuedRun()) {
+          this.startQueued();
+        }
+      });
+  }
+
+  /** Advances the run that owns this session event, if any. */
+  async applySessionEvent(event: ServerEvent): Promise<void> {
+    // Created/updated/appended can race in from the bridge; adopt must finish
+    // before turn settlement can see the origin.
+    const dispatched = this.eventTail.then(() => this.dispatchSessionEvent(event));
+    this.eventTail = dispatched.then(
+      () => undefined,
+      () => undefined,
+    );
+    await dispatched;
+  }
+
+  private async dispatchSessionEvent(event: ServerEvent): Promise<void> {
+    switch (event.type) {
+      case 'session.created':
+        await this.adoptSession(event.clientRef, event.session);
+        return;
+      case 'session.updated':
+        this.observeTurn(event.session);
+        return;
+      case 'event.appended':
+        this.observeActivity(event.event.appSessionId);
+        return;
+      case 'approval.requested':
+        this.observeActivity(event.request.appSessionId);
+        return;
+      case 'question.requested':
+        this.observeActivity(event.question.appSessionId);
+        return;
+      case 'error':
+        await this.applyError(event);
+        return;
+      case 'session.closed':
+        await this.applySessionClosed(event.appSessionId);
+        return;
+      default:
+        return;
+    }
+  }
+
+  activeRunId(): string | null {
+    return this.activeRun()?.id ?? null;
+  }
+
+  hasActiveFor(automationId: string): boolean {
+    return this.runs.some(
+      (run) => run.automationId === automationId && isActiveRunStatus(run.status),
+    );
+  }
+
+  hasOpenFor(automationId: string): boolean {
+    return this.openRunFor(automationId) !== undefined;
+  }
+
+  hasReviewWorkspaceFor(automationId: string): boolean {
+    return this.runs.some(
+      (run) => run.automationId === automationId && holdsReviewWorkspace(this.store, run),
+    );
+  }
+
+  hasStartingClientRef(clientRef: string | undefined): boolean {
+    return this.runs.some((run) => run.clientRef === clientRef && run.status === 'starting');
+  }
+
+  rememberPendingAdopt(appSessionId: string): void {
+    this.pendingAdopts.add(appSessionId);
+  }
+
+  isAdopting(appSessionId: string): boolean {
+    return this.pendingAdopts.has(appSessionId);
+  }
+
+  private openRunFor(automationId: string): AutomationRun | undefined {
+    return this.runs.find(
+      (run) =>
+        run.automationId === automationId &&
+        (run.status === 'queued' || isActiveRunStatus(run.status)),
+    );
+  }
+
+  /** Drops the schedule-triggered runs waiting on a schedule that just changed. */
+  dropQueuedSchedules(automationId: string): void {
+    this.store.runs = this.runs.filter(
+      (run) =>
+        run.automationId !== automationId || run.status !== 'queued' || run.trigger !== 'schedule',
+    );
+  }
+
+  /** One open run per automation: extra queued copies from an older process are dropped. */
+  private dropExtraQueued(): void {
+    const open = new Set<string>();
+    for (const run of this.runs) {
+      if (isActiveRunStatus(run.status)) open.add(run.automationId);
+    }
+    const kept: AutomationRun[] = [];
+    for (const run of this.runs) {
+      if (run.status !== 'queued') {
+        kept.push(run);
+        continue;
+      }
+      if (open.has(run.automationId)) continue;
+      open.add(run.automationId);
+      kept.push(run);
+    }
+    this.store.runs = kept;
+  }
+
+  private pauseAfterConsecutiveFailures(automationId: string): void {
+    if (consecutiveFailures(this.runs, automationId) < MAX_CONSECUTIVE_FAILURES) return;
+    const automation = this.automationFor(automationId);
+    if (!automation?.enabled) return;
+    automation.enabled = false;
+    automation.nextRunAt = null;
+    automation.lastRunError = PAUSED_AFTER_FAILURES;
+    automation.updatedAt = this.options.now();
+    this.dropQueuedSchedules(automationId);
+  }
+
+  dropAllFor(automationId: string): void {
+    const droppedIds = new Set(
+      this.runs.filter((run) => run.automationId === automationId).map((run) => run.id),
+    );
+    this.store.runs = this.runs.filter((run) => run.automationId !== automationId);
+    for (const [appSessionId, origin] of Object.entries(this.store.sessionOrigins)) {
+      if (!origin) continue;
+      if (droppedIds.has(origin.runId) || origin.automationId === automationId) {
+        Reflect.deleteProperty(this.store.sessionOrigins, appSessionId);
+      }
+    }
+  }
+
+  /** Fails the runs a previous process left in flight. */
+  failInterrupted(now: number): void {
+    this.recovered = failInterruptedRuns(this.store, now);
+    this.dropExtraQueued();
+  }
+
+  /** Closes the chats and removes the worktrees `failInterrupted` reported. */
+  async releaseRecovered(): Promise<void> {
+    const recovered = this.recovered;
+    this.recovered = { appSessionIds: [], workspaces: [] };
+    for (const appSessionId of recovered.appSessionIds) {
+      await this.closeSessionQuietly(appSessionId);
+    }
+    for (const workspace of recovered.workspaces) await this.options.releaseWorkspace(workspace);
+  }
+
+  /** The drain already in flight, so shutdown can wait for it. */
+  pending(): Promise<void> | null {
+    const pending = [...this.timerWork];
+    if (this.drainPromise) pending.push(this.drainPromise);
+    return pending.length > 0 ? Promise.allSettled(pending).then(() => undefined) : null;
+  }
+
+  /** Stops watching every run. Live chats keep running; DROIDEX is exiting. */
+  stop(): void {
+    this.timers.clearAll();
+    this.streamingSeen.clear();
+    this.runFailures.clear();
+    this.abandonedClientRefs.clear();
+    this.launchAttempts.clear();
+    this.pendingAdopts.clear();
+  }
+
+  private async drain(): Promise<void> {
+    while (!this.options.isClosed()) {
+      if (this.activeRun()) return;
+      const run = this.nextQueuedRun();
+      if (!run) return;
+      await this.startRun(run);
+      if (this.activeRun()) return;
+    }
+  }
+
+  private async startRun(run: AutomationRun): Promise<void> {
+    try {
+      assertModelSelection(run.automation);
+      await this.options.validateSelection(run.automation.modelId, run.automation.reasoningEffort);
+    } catch (error) {
+      await this.finish(run.id, 'failed', errorMessage(error));
+      return;
+    }
+    const now = this.options.now();
+    try {
+      await this.options.persist(() => {
+        if (this.runById(run.id)?.status !== 'queued') return;
+        run.status = 'starting';
+        run.startedAt = now;
+        run.finishedAt = null;
+        run.appSessionId = null;
+        run.resolvedCwd = null;
+        run.error = null;
+        this.projectRun(run, 'starting', now);
+      });
+    } catch (error) {
+      await this.finish(run.id, 'failed', errorMessage(error));
+      return;
+    }
+    const currentAfterPersist = this.runById(run.id);
+    if (currentAfterPersist?.status !== 'starting') return;
+    const workspaceInput = {
+      cwd: run.automation.workspaceCwd,
+      executionMode: run.automation.executionMode,
+      title: run.automation.title,
+      runId: run.id,
+    };
+    let resolvedCwd = '';
+    try {
+      resolvedCwd = await this.options.prepareWorkspace(workspaceInput);
+      const current = this.runById(run.id);
+      if (this.options.isClosed() || current?.status !== 'starting') {
+        await this.options.releaseWorkspace({
+          resolvedCwd,
+          executionMode: run.automation.executionMode,
+        });
+        return;
+      }
+      await this.options.persist(() => {
+        const live = this.runById(run.id);
+        if (live?.status !== 'starting') return;
+        live.resolvedCwd = resolvedCwd;
+      });
+      const persisted = this.runById(run.id);
+      if (
+        this.options.isClosed() ||
+        persisted?.status !== 'starting' ||
+        persisted.resolvedCwd !== resolvedCwd
+      ) {
+        await this.options.releaseWorkspace({
+          resolvedCwd,
+          executionMode: run.automation.executionMode,
+        });
+        return;
+      }
+      await this.options.createWorkspace(workspaceInput, resolvedCwd);
+    } catch (error) {
+      const live = this.runById(run.id);
+      if (live?.resolvedCwd !== resolvedCwd) {
+        await this.options.releaseWorkspace({
+          resolvedCwd,
+          executionMode: run.automation.executionMode,
+        });
+      }
+      await this.finish(run.id, 'failed', errorMessage(error));
+      return;
+    }
+    const materialized = this.runById(run.id);
+    if (
+      this.options.isClosed() ||
+      materialized?.status !== 'starting' ||
+      materialized.resolvedCwd !== resolvedCwd
+    ) {
+      await this.options.releaseWorkspace({
+        resolvedCwd,
+        executionMode: run.automation.executionMode,
+      });
+      return;
+    }
+    await this.launchChat(run.id);
+  }
+
+  private async launchChat(runId: string): Promise<void> {
+    const run = this.runById(runId);
+    if (run?.status !== 'starting' || this.options.isClosed()) return;
+    const attempt = (this.launchAttempts.get(runId) ?? 0) + 1;
+    this.launchAttempts.set(runId, attempt);
+    if (run.clientRef) this.abandonClientRef(run.clientRef);
+    run.clientRef = `${AUTOMATION_RUN_CLIENT_REF_PREFIX}${runId}:${randomUUID()}`;
+    this.timers.armSessionCreate(runId);
+    try {
+      await this.options.launchSession(sessionCommandForRun(run));
+    } catch (error) {
+      await this.retryOrFail(runId, errorMessage(error));
+    }
+  }
+
+  private async retryOrFail(runId: string, message: string): Promise<void> {
+    const run = this.runById(runId);
+    if (!run || isSettledRunStatus(run.status)) return;
+    if (run.appSessionId || (this.launchAttempts.get(runId) ?? 0) >= MAX_LAUNCH_ATTEMPTS) {
+      await this.finish(runId, 'failed', message);
+      return;
+    }
+    this.timers.clearSessionCreate(runId);
+    if (run.clientRef) {
+      this.abandonClientRef(run.clientRef);
+      run.clientRef = null;
+    }
+    await delay(this.launchRetryMs);
+    await this.launchChat(runId);
+  }
+
+  private async adoptSession(
+    clientRef: string | undefined,
+    session: SessionSummary,
+  ): Promise<void> {
+    try {
+      const run = this.runs.find(
+        (candidate) => candidate.clientRef === clientRef && candidate.status === 'starting',
+      );
+      if (!run) {
+        // The run this chat belongs to already gave up on it, so nothing owns the
+        // chat and it must not keep running unattended.
+        if (clientRef && this.abandonedClientRefs.delete(clientRef)) {
+          await this.closeSessionQuietly(session.appSessionId);
+        }
+        return;
+      }
+      this.timers.clearSessionCreate(run.id);
+      try {
+        await this.options.persist(() => {
+          const current = this.runById(run.id);
+          if (current?.status !== 'starting') return;
+          const now = this.options.now();
+          current.status = 'running';
+          current.appSessionId = session.appSessionId;
+          current.error = null;
+          this.applySelectionAudit(current, session);
+          this.store.sessionOrigins[session.appSessionId] = {
+            automationId: current.automationId,
+            automationTitle: current.automation.title,
+            runId: current.id,
+            trigger: current.trigger,
+          };
+          this.projectRun(current, 'running', now);
+        });
+      } catch (error) {
+        await this.closeSessionQuietly(session.appSessionId);
+        if (this.runById(run.id)?.status === 'starting') this.timers.armSessionCreate(run.id);
+        console.error('Could not persist the automation session', error);
+        return;
+      }
+      const adopted = this.runById(run.id);
+      if (adopted?.status !== 'running') {
+        if (adopted?.status === 'starting') this.timers.armSessionCreate(run.id);
+        return;
+      }
+      this.timers.armRunLimit(adopted.id);
+      this.observeTurn(session);
+    } finally {
+      this.pendingAdopts.delete(session.appSessionId);
+    }
+  }
+
+  /**
+   * A lifecycle turn that stopped streaming ends the run. `streaming` stays true
+   * for the whole turn, including tool calls; the grace only covers the turn-end
+   * update. Approval and transcript activity still cancel that grace if they
+   * arrive first.
+   */
+  private observeTurn(session: SessionSummary): void {
+    const run = this.runForSession(session.appSessionId);
+    if (run?.status !== 'running') return;
+    this.applySelectionAudit(run, session);
+    if (session.streaming === true) {
+      this.streamingSeen.add(run.id);
+      this.timers.clearTurnSettle(run.id);
+      return;
+    }
+    if (session.streaming === false && this.streamingSeen.has(run.id)) {
+      this.timers.armTurnSettle(run.id);
+    }
+  }
+
+  private observeActivity(appSessionId: string): void {
+    const run = this.runForSession(appSessionId);
+    if (run?.status !== 'running') return;
+    this.streamingSeen.add(run.id);
+    this.timers.clearTurnSettle(run.id);
+  }
+
+  private async applyError(event: SessionErrorEvent): Promise<void> {
+    const starting = event.clientRef
+      ? this.runs.find((run) => run.clientRef === event.clientRef && run.status === 'starting')
+      : undefined;
+    if (starting) {
+      await this.finish(starting.id, 'failed', event.message);
+      return;
+    }
+    const running = event.appSessionId ? this.runForSession(event.appSessionId) : undefined;
+    if (!running || event.recoverable === true || running.status !== 'running') return;
+    this.runFailures.set(running.id, clip(event.message, 2_000));
+    this.timers.armTurnSettle(running.id);
+  }
+
+  private async applySessionClosed(appSessionId: string): Promise<void> {
+    const run = this.runOwningSession(appSessionId);
+    if (run && isActiveRunStatus(run.status)) {
+      const failure = this.runFailures.get(run.id);
+      if (failure) {
+        await this.finish(run.id, 'failed', failure);
+      } else if (this.timers.isTurnSettleArmed(run.id)) {
+        await this.finish(run.id, 'completed', null);
+      } else {
+        await this.finish(
+          run.id,
+          'failed',
+          this.streamingSeen.has(run.id)
+            ? 'The automation chat closed before its turn finished.'
+            : 'The automation chat closed before its first turn finished.',
+        );
+      }
+    }
+    const owned = this.runOwningSession(appSessionId);
+    try {
+      if (this.store.sessionOrigins[appSessionId]) {
+        await this.options.persist(() => {
+          Reflect.deleteProperty(this.store.sessionOrigins, appSessionId);
+        });
+      }
+    } finally {
+      if (owned) {
+        await this.options.releaseWorkspace({
+          resolvedCwd: owned.resolvedCwd,
+          executionMode: owned.automation.executionMode,
+        });
+      }
+    }
+  }
+
+  private async finish(
+    runId: string,
+    status: Extract<AutomationRunStatus, 'completed' | 'failed'>,
+    error: string | null,
+  ): Promise<void> {
+    const run = this.runById(runId);
+    if (!run || isSettledRunStatus(run.status)) return;
+
+    const clientRef = run.clientRef;
+    const appSessionId = run.appSessionId;
+    const resolvedCwd = run.resolvedCwd;
+    const executionMode = run.automation.executionMode;
+    await this.options.persist(() => {
+      const current = this.runById(runId);
+      if (!current || isSettledRunStatus(current.status)) return;
+      const now = this.options.now();
+      current.status = status;
+      current.finishedAt = now;
+      current.error = status === 'failed' ? clip(error ?? 'Automation run failed.', 2_000) : null;
+      const automation = this.automationFor(current.automationId);
+      if (automation) projectSettledRun(automation, current, now);
+      if (status === 'failed') this.pauseAfterConsecutiveFailures(current.automationId);
+      trimAutomationStore(this.store);
+    });
+
+    this.timers.clearRun(runId);
+    this.streamingSeen.delete(runId);
+    this.runFailures.delete(runId);
+    this.launchAttempts.delete(runId);
+    if (status === 'failed' && !appSessionId && clientRef) {
+      this.abandonClientRef(clientRef);
+    }
+    // A completed run leaves its chat open for review; session.closed releases the worktree.
+    if (!appSessionId) {
+      await this.options.releaseWorkspace({
+        resolvedCwd,
+        executionMode,
+      });
+    }
+    this.options.rearmScheduler();
+    this.startQueued();
+  }
+
+  /**
+   * Settles a run DROIDEX stopped waiting for and tears down its chat, so a
+   * timed-out run cannot leave a session streaming with nothing tracking it.
+   */
+  private async timeOut(runId: string, message: string): Promise<void> {
+    const run = this.runById(runId);
+    if (!run || isSettledRunStatus(run.status)) return;
+    const appSessionId = run.appSessionId;
+    const clientRef = run.clientRef;
+    await this.finish(runId, 'failed', message);
+    if (appSessionId) {
+      await this.closeSessionQuietly(appSessionId);
+      return;
+    }
+    if (clientRef) this.abandonClientRef(clientRef);
+  }
+
+  private trackTimerWork(work: Promise<void>, failureMessage: string): void {
+    const tracked = work
+      .catch((error: unknown) => {
+        console.error(failureMessage, error);
+      })
+      .finally(() => {
+        this.timerWork.delete(tracked);
+      });
+    this.timerWork.add(tracked);
+  }
+
+  /** Remembers a launch DROIDEX gave up on, so its late chat gets closed. */
+  private abandonClientRef(clientRef: string): void {
+    this.abandonedClientRefs.add(clientRef);
+    while (this.abandonedClientRefs.size > MAX_ABANDONED_REFS) {
+      const oldest = this.abandonedClientRefs.values().next().value;
+      if (typeof oldest !== 'string') break;
+      this.abandonedClientRefs.delete(oldest);
+    }
+  }
+
+  private async closeSessionQuietly(appSessionId: string): Promise<void> {
+    try {
+      await this.options.closeSession(appSessionId);
+    } catch (error) {
+      console.error('Could not close an orphaned automation chat', error);
+    }
+  }
+
+  /** A run that drifted off its selected model fails with what it actually ran. */
+  private applySelectionAudit(
+    run: AutomationRun,
+    session: { modelId?: string; reasoningEffort?: unknown },
+  ): void {
+    const mismatch = auditRunSelection(run, session);
+    if (mismatch) this.runFailures.set(run.id, mismatch);
+  }
+
+  /** Keeps the automation summary in step with the run that is on its way. */
+  private projectRun(run: AutomationRun, status: 'starting' | 'running', at: number): void {
+    const automation = this.automationFor(run.automationId);
+    if (automation) projectActiveRun(automation, run, status, at);
+  }
+
+  private runById(runId: string): AutomationRun | undefined {
+    return this.runs.find((run) => run.id === runId);
+  }
+
+  private activeRun(): AutomationRun | undefined {
+    return this.runs.find((run) => isActiveRunStatus(run.status));
+  }
+
+  private nextQueuedRun(): AutomationRun | undefined {
+    let next: AutomationRun | undefined;
+    for (const run of this.runs) {
+      if (run.status !== 'queued') continue;
+      if (!next || run.requestedAt < next.requestedAt) next = run;
+    }
+    return next;
+  }
+
+  /**
+   * The live run that owns a chat, if the chat belongs to one at all.
+   *
+   * `sessionOrigins` records that link when a run adopts its chat, so an event
+   * from an ordinary chat - the common case, and by far the most frequent event
+   * in DROIDEX - costs one lookup instead of a walk over the run history.
+   */
+  private runOwningSession(appSessionId: string): AutomationRun | undefined {
+    const origin = this.store.sessionOrigins[appSessionId];
+    if (origin) return this.runById(origin.runId);
+    return this.runs.find((run) => run.appSessionId === appSessionId);
+  }
+
+  /**
+   * The live run that owns a chat, if the chat belongs to one at all.
+   *
+   * `sessionOrigins` records that link when a run adopts its chat, so an event
+   * from an ordinary chat - the common case, and by far the most frequent event
+   * in DROIDEX - costs one lookup instead of a walk over the run history.
+   */
+  private runForSession(appSessionId: string): AutomationRun | undefined {
+    const origin = this.store.sessionOrigins[appSessionId];
+    if (!origin) return undefined;
+    const run = this.runById(origin.runId);
+    return run && isActiveRunStatus(run.status) ? run : undefined;
+  }
+
+  private automationFor(automationId: string): Automation | undefined {
+    return this.store.automations.find((candidate) => candidate.id === automationId);
+  }
+
+  private get store(): AutomationStore {
+    return this.options.store();
+  }
+
+  private get runs(): AutomationRun[] {
+    return this.store.runs;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function consecutiveFailures(runs: readonly AutomationRun[], automationId: string): number {
+  const settled = runs
+    .filter((run) => run.automationId === automationId && isSettledRunStatus(run.status))
+    .sort((left, right) => (right.finishedAt ?? 0) - (left.finishedAt ?? 0));
+  let count = 0;
+  for (const run of settled) {
+    if (run.status !== 'failed') break;
+    count += 1;
+  }
+  return count;
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref();
+  });
+}

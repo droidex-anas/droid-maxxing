@@ -1,0 +1,469 @@
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import {
+  isReasoningEffort,
+  isAutonomy,
+  missingProposalFields,
+  normalizeAutomationInput,
+} from './automationInput.js';
+import { nextAutomationRun } from './schedule.js';
+import type {
+  Automation,
+  AutomationInput,
+  AutomationProposal,
+  AutomationRun,
+  AutomationRunStatus,
+  AutomationSnapshot,
+  AutomationStore,
+} from './types.js';
+
+/**
+ * DROIDEX keeps one canonical store shape: a file written by another version is
+ * quarantined rather than migrated (see the hard-cut policy in AGENTS.md).
+ */
+export const STORE_VERSION = 1;
+
+// Retention is deliberately tight: the whole store is serialized on every state
+// change and the snapshot is broadcast to every renderer, so history costs both
+// disk writes and socket traffic.
+const MAX_RUNS = 150;
+const MAX_PROPOSALS = 50;
+const MAX_ORIGINS = 200;
+const SNAPSHOT_RUNS = 60;
+const SNAPSHOT_PROPOSALS = 25;
+
+export function emptyAutomationStore(): AutomationStore {
+  return { version: STORE_VERSION, automations: [], runs: [], proposals: [], sessionOrigins: {} };
+}
+
+/** Puts a snapshot taken before a mutation back onto the live store object. */
+export function restoreAutomationStore(store: AutomationStore, snapshot: AutomationStore): void {
+  store.automations = snapshot.automations;
+  store.runs = snapshot.runs;
+  store.proposals = snapshot.proposals;
+  store.sessionOrigins = snapshot.sessionOrigins;
+}
+
+/** True when this chat was started by an automation run, even if origins were trimmed. */
+export function storeHasRunSession(store: AutomationStore, appSessionId: string): boolean {
+  if (store.sessionOrigins[appSessionId]) return true;
+  if (store.runs.some((run) => run.appSessionId === appSessionId)) return true;
+  return store.automations.some((automation) => automation.lastAppSessionId === appSessionId);
+}
+
+export function isActiveRunStatus(status: AutomationRunStatus): boolean {
+  return status === 'starting' || status === 'running';
+}
+
+export function isSettledRunStatus(status: AutomationRunStatus): boolean {
+  return status === 'completed' || status === 'failed';
+}
+
+/** Owns the automations file: canonical shape on disk, atomic writes, recovery. */
+export class AutomationStoreFile {
+  private tail: Promise<void> = Promise.resolve();
+  private pendingPayload: string | null = null;
+  private pendingWrite: Promise<void> | null = null;
+
+  constructor(private readonly filePath: string) {}
+
+  async read(now: number): Promise<AutomationStore> {
+    let text: string;
+    try {
+      text = await readFile(this.filePath, 'utf8');
+    } catch (error) {
+      if (isMissingFile(error)) return emptyAutomationStore();
+      // Starting empty here would overwrite a store we simply could not read.
+      throw error;
+    }
+    try {
+      return parseAutomationStore(JSON.parse(text), now);
+    } catch (error) {
+      const quarantinePath = `${this.filePath}.unreadable-${String(now)}`;
+      await rename(this.filePath, quarantinePath);
+      throw new Error(
+        `The DROIDEX automations file could not be read and was moved to ${quarantinePath}. Restart DROIDEX to start a new store, or restore that file after fixing it. Cause: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Serializes the current store. Writes are queued so they cannot interleave,
+   * a queued write that has not started yet is superseded by the newer state,
+   * and a failed write is reported to its caller without poisoning the queue.
+   */
+  write(store: AutomationStore): Promise<void> {
+    this.pendingPayload = `${JSON.stringify(store)}\n`;
+    if (this.pendingWrite) return this.pendingWrite;
+    const write = this.tail.then(() => {
+      const payload = this.pendingPayload;
+      this.pendingPayload = null;
+      this.pendingWrite = null;
+      return payload === null ? undefined : this.writeAtomically(payload);
+    });
+    this.pendingWrite = write;
+    this.tail = write.catch(() => undefined);
+    return write;
+  }
+
+  /** Resolves once every queued write has settled, successfully or not. */
+  flush(): Promise<void> {
+    return this.tail;
+  }
+
+  private async writeAtomically(payload: string): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const temporaryPath = `${this.filePath}.${String(process.pid)}`;
+    await writeFile(temporaryPath, payload, 'utf8');
+    await rename(temporaryPath, this.filePath);
+  }
+}
+
+export function parseAutomationStore(value: unknown, now: number): AutomationStore {
+  const raw = recordValue(value);
+  if (!raw) throw new Error('The automations store is not an object.');
+  if (raw.version !== STORE_VERSION) {
+    throw new Error(
+      `Unsupported automations store version ${JSON.stringify(raw.version)}; DROIDEX writes version ${String(STORE_VERSION)}.`,
+    );
+  }
+  if (
+    !Array.isArray(raw.automations) ||
+    !Array.isArray(raw.runs) ||
+    !Array.isArray(raw.proposals)
+  ) {
+    throw new Error('The automations store is missing its automations, runs, or proposals list.');
+  }
+
+  const automations = raw.automations
+    .map((candidate) => parseAutomation(candidate, now))
+    .filter((candidate): candidate is Automation => candidate !== null);
+  const automationIds = new Set(automations.map((automation) => automation.id));
+  const runs = raw.runs
+    .map((candidate) => parseRun(candidate, now))
+    .filter(
+      (candidate): candidate is AutomationRun =>
+        candidate !== null && automationIds.has(candidate.automationId),
+    );
+  const proposals = raw.proposals
+    .map((candidate) => parseProposal(candidate, automationIds, now))
+    .filter((candidate): candidate is AutomationProposal => candidate !== null);
+  return {
+    version: STORE_VERSION,
+    automations,
+    runs,
+    proposals,
+    sessionOrigins: parseSessionOrigins(raw.sessionOrigins),
+  };
+}
+
+/** Drops history beyond the retention caps without touching unsettled runs. */
+export function trimAutomationStore(store: AutomationStore): void {
+  store.runs = retainRuns(store);
+  if (store.proposals.length > MAX_PROPOSALS) {
+    const drafts = store.proposals.filter((proposal) => proposal.status === 'draft');
+    const confirmed = store.proposals
+      .filter((proposal) => proposal.status === 'confirmed')
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, Math.max(0, MAX_PROPOSALS - drafts.length));
+    store.proposals = [...drafts, ...confirmed];
+  }
+  trimSessionOrigins(store);
+}
+
+export function buildAutomationSnapshot(
+  store: AutomationStore,
+  scheduler: { ready: boolean; nextWakeAt: number | null; activeRunId: string | null },
+): AutomationSnapshot {
+  let queuedRunCount = 0;
+  let activeRunCount = 0;
+  for (const run of store.runs) {
+    if (run.status === 'queued') queuedRunCount += 1;
+    else if (isActiveRunStatus(run.status)) activeRunCount += 1;
+  }
+  const runs = [...store.runs]
+    .sort((left, right) => right.requestedAt - left.requestedAt)
+    .slice(0, SNAPSHOT_RUNS);
+  const proposals = [...store.proposals]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, SNAPSHOT_PROPOSALS);
+  return {
+    automations: structuredClone(store.automations),
+    runs: structuredClone(runs),
+    proposals: structuredClone(proposals),
+    sessionOrigins: structuredClone(store.sessionOrigins),
+    queuedRunCount,
+    activeRunCount,
+    scheduler,
+  };
+}
+
+/**
+ * Queued and active runs are live work, never history, so they always survive.
+ * Each automation also keeps its most recent settled run so a busy automation
+ * cannot erase another one's last result. A settled isolated run still holding
+ * a review chat is not history yet: closing that chat is what releases the
+ * worktree.
+ */
+function retainRuns(store: AutomationStore): AutomationRun[] {
+  const runs = store.runs;
+  let excess = runs.length - MAX_RUNS;
+  if (excess <= 0) return runs;
+  const latestSettledPerAutomation = new Map<string, string>();
+  for (const run of runs) {
+    if (isSettledRunStatus(run.status)) latestSettledPerAutomation.set(run.automationId, run.id);
+  }
+  const protectedRunIds = new Set(latestSettledPerAutomation.values());
+  const retained: AutomationRun[] = [];
+  for (const run of runs) {
+    if (
+      excess > 0 &&
+      isSettledRunStatus(run.status) &&
+      !protectedRunIds.has(run.id) &&
+      !holdsReviewWorkspace(store, run)
+    ) {
+      excess -= 1;
+      continue;
+    }
+    retained.push(run);
+  }
+  return retained;
+}
+
+function trimSessionOrigins(store: AutomationStore): void {
+  const entries = Object.entries(store.sessionOrigins);
+  if (entries.length <= MAX_ORIGINS) return;
+  // Origins that still have a run are live routing keys, not history.
+  const liveRunIds = new Set(store.runs.map((run) => run.id));
+  const keptRequired: typeof entries = [];
+  const optional: typeof entries = [];
+  for (const entry of entries) {
+    const origin = entry[1];
+    if (!origin) continue;
+    if (liveRunIds.has(origin.runId)) keptRequired.push(entry);
+    else optional.push(entry);
+  }
+  const room = Math.max(0, MAX_ORIGINS - keptRequired.length);
+  store.sessionOrigins = Object.fromEntries([...optional.slice(-room), ...keptRequired]);
+}
+
+/** Isolated worktrees stay until the review chat closes. */
+export function holdsReviewWorkspace(store: AutomationStore, run: AutomationRun): boolean {
+  const appSessionId = run.appSessionId;
+  return (
+    run.automation.executionMode === 'worktree' &&
+    Boolean(run.resolvedCwd?.trim()) &&
+    typeof appSessionId === 'string' &&
+    Boolean(store.sessionOrigins[appSessionId])
+  );
+}
+
+function parseAutomation(value: unknown, now: number): Automation | null {
+  const raw = recordValue(value);
+  if (!raw || typeof raw.id !== 'string') return null;
+  const input = parseStoredAutomationInput(raw);
+  if (!input) return null;
+  try {
+    const normalized = normalizeAutomationInput(input);
+    const storedNextRunAt = finiteNumberOrNull(raw.nextRunAt);
+    return {
+      id: raw.id,
+      ...normalized,
+      nextRunAt:
+        normalized.enabled && storedNextRunAt === null
+          ? nextAutomationRun(normalized.schedule, normalized.timezone, now)
+          : storedNextRunAt,
+      lastRunAt: finiteNumberOrNull(raw.lastRunAt),
+      lastRunStatus: parseRunStatus(raw.lastRunStatus),
+      lastRunError: stringOrNull(raw.lastRunError),
+      lastRunDurationMs: finiteNumberOrNull(raw.lastRunDurationMs),
+      lastAppSessionId: stringOrNull(raw.lastAppSessionId),
+      completedAt: finiteNumberOrNull(raw.completedAt),
+      createdAt: finiteNumber(raw.createdAt, now),
+      updatedAt: finiteNumber(raw.updatedAt, now),
+    };
+  } catch (error) {
+    console.error('Dropped an invalid automation record', error);
+    return null;
+  }
+}
+
+function parseRun(value: unknown, now: number): AutomationRun | null {
+  const raw = recordValue(value);
+  if (!raw || typeof raw.id !== 'string' || typeof raw.automationId !== 'string') return null;
+  const snapshot = parseRunAutomationSnapshot(raw.automation);
+  if (!snapshot) return null;
+  return {
+    id: raw.id,
+    automationId: raw.automationId,
+    automation: snapshot,
+    scheduledAt: finiteNumber(raw.scheduledAt, now),
+    requestedAt: finiteNumber(raw.requestedAt, now),
+    trigger: raw.trigger === 'manual' ? 'manual' : 'schedule',
+    status: parseRunStatus(raw.status) ?? 'failed',
+    startedAt: finiteNumberOrNull(raw.startedAt),
+    finishedAt: finiteNumberOrNull(raw.finishedAt),
+    clientRef: stringOrNull(raw.clientRef),
+    appSessionId: stringOrNull(raw.appSessionId),
+    resolvedCwd: stringOrNull(raw.resolvedCwd),
+    error: stringOrNull(raw.error),
+    effectiveModelId: stringOrNull(raw.effectiveModelId),
+    effectiveReasoningEffort: isReasoningEffort(raw.effectiveReasoningEffort)
+      ? raw.effectiveReasoningEffort
+      : null,
+    selectionVerified: typeof raw.selectionVerified === 'boolean' ? raw.selectionVerified : null,
+  };
+}
+
+function parseProposal(
+  value: unknown,
+  automationIds: ReadonlySet<string>,
+  now: number,
+): AutomationProposal | null {
+  const raw = recordValue(value);
+  const draftRaw = raw ? recordValue(raw.draft) : null;
+  if (
+    !raw ||
+    !draftRaw ||
+    typeof raw.id !== 'string' ||
+    typeof raw.sourceAppSessionId !== 'string'
+  ) {
+    return null;
+  }
+  const input = parseStoredAutomationInput(draftRaw);
+  if (!input) return null;
+  try {
+    const draft = normalizeAutomationInput(input);
+    const storedAutomationId =
+      typeof raw.automationId === 'string' && automationIds.has(raw.automationId)
+        ? raw.automationId
+        : null;
+    const storedStatus = parseProposalStatus(raw.status);
+    // A confirmed proposal whose automation is gone is a draft again, never a
+    // dangling link to an automation the user deleted.
+    const status = storedStatus === 'confirmed' && !storedAutomationId ? 'draft' : storedStatus;
+    return {
+      id: raw.id,
+      sourceAppSessionId: raw.sourceAppSessionId,
+      draft,
+      status,
+      missingFields: status === 'confirmed' ? [] : missingProposalFields(draft),
+      automationId: storedAutomationId,
+      createdAt: finiteNumber(raw.createdAt, now),
+      updatedAt: finiteNumber(raw.updatedAt, now),
+      confirmedAt: finiteNumberOrNull(raw.confirmedAt),
+    };
+  } catch (error) {
+    console.error('Dropped an invalid automation proposal', error);
+    return null;
+  }
+}
+
+function parseStoredAutomationInput(raw: Record<string, unknown>): AutomationInput | null {
+  if (
+    typeof raw.title !== 'string' ||
+    typeof raw.prompt !== 'string' ||
+    !recordValue(raw.schedule)
+  ) {
+    return null;
+  }
+  const input: AutomationInput = {
+    title: raw.title,
+    prompt: raw.prompt,
+    workspaceCwd: stringOrNull(raw.workspaceCwd),
+    executionMode: raw.executionMode === 'worktree' ? 'worktree' : 'local',
+    enabled: raw.enabled !== false,
+    schedule: raw.schedule as AutomationInput['schedule'],
+    modelId: stringOrNull(raw.modelId),
+    reasoningEffort: isReasoningEffort(raw.reasoningEffort) ? raw.reasoningEffort : null,
+    autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : undefined,
+  };
+  if (typeof raw.timezone === 'string') input.timezone = raw.timezone;
+  return input;
+}
+
+function parseRunAutomationSnapshot(value: unknown): AutomationRun['automation'] | null {
+  const raw = recordValue(value);
+  if (
+    !raw ||
+    typeof raw.id !== 'string' ||
+    typeof raw.title !== 'string' ||
+    typeof raw.prompt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    id: raw.id,
+    title: raw.title,
+    prompt: raw.prompt,
+    workspaceCwd: stringOrNull(raw.workspaceCwd),
+    executionMode: raw.executionMode === 'worktree' ? 'worktree' : 'local',
+    timezone: typeof raw.timezone === 'string' ? raw.timezone : 'UTC',
+    modelId: stringOrNull(raw.modelId),
+    reasoningEffort: isReasoningEffort(raw.reasoningEffort) ? raw.reasoningEffort : null,
+    autonomy: isAutonomy(raw.autonomy) ? raw.autonomy : 'low',
+  };
+}
+
+function parseSessionOrigins(value: unknown): AutomationStore['sessionOrigins'] {
+  const origins = recordValue(value) ?? {};
+  const sessionOrigins: AutomationStore['sessionOrigins'] = {};
+  for (const [appSessionId, candidate] of Object.entries(origins)) {
+    const origin = recordValue(candidate);
+    if (
+      !origin ||
+      typeof origin.automationId !== 'string' ||
+      typeof origin.automationTitle !== 'string' ||
+      typeof origin.runId !== 'string'
+    ) {
+      continue;
+    }
+    sessionOrigins[appSessionId] = {
+      automationId: origin.automationId,
+      automationTitle: origin.automationTitle,
+      runId: origin.runId,
+      trigger: origin.trigger === 'manual' ? 'manual' : 'schedule',
+    };
+  }
+  return sessionOrigins;
+}
+
+function parseProposalStatus(value: unknown): AutomationProposal['status'] {
+  return value === 'confirmed' ? 'confirmed' : 'draft';
+}
+
+function parseRunStatus(value: unknown): AutomationRunStatus | null {
+  return value === 'queued' ||
+    value === 'starting' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed'
+    ? value
+    : null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function finiteNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

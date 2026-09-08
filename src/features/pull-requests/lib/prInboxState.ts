@@ -1,5 +1,6 @@
 import { resolvePrWorkspaceNumber } from './prWorkspaceCwd';
 import { addPrBacklogId, removePrBacklogId } from './prBacklog';
+import type { MainView } from '../../../hooks/persistedUiPreferences';
 
 export type PrInboxAction =
   | { type: 'OPEN_PULL_REQUESTS'; cwd?: string | null; number?: number | null }
@@ -8,7 +9,7 @@ export type PrInboxAction =
   | { type: 'RESTORE_PR_FROM_BACKLOG'; id: string };
 
 export interface PrInboxSlice {
-  mainView: 'session' | 'pull-requests';
+  mainView: MainView;
   prWorkspaceCwd: string | null;
   prWorkspaceNumber: number | null;
   prBacklogIds: string[];

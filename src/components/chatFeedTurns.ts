@@ -11,6 +11,7 @@ import {
   type BuildFeedOptions,
   type FeedItem,
 } from './chatFeed';
+import { isAutomationProposalCall } from '../features/automations/toolNames';
 
 function isUserMessage(item: FeedItem): boolean {
   return item.type === 'message' && item.event.author === 'user';
@@ -281,6 +282,9 @@ function collapseRun(run: FeedItem[], specContent?: string): FeedItem[] {
     if (it.type === 'error') {
       // A failed tool/result must stay visible after the turn completes instead
       // of being buried in a collapsed "Worked for …" group (classifier intent).
+      survivors.push(it);
+    } else if (it.type === 'tools' && it.events.some(isAutomationProposalCall)) {
+      // Proposals are review surfaces, not hidden execution detail.
       survivors.push(it);
     } else if (isCompactionMarker(it)) {
       // Provisional: the marker moves into the fold when the run has real work.

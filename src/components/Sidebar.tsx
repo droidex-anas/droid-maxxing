@@ -10,8 +10,6 @@ import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCar
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import { CirclePlus, Search, Settings, SquarePen } from 'lucide-react';
-import { GitPullRequestIcon } from './environment/GithubIcons';
-import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import { buildWorkspaceSections, resolveNewChatCwd, type WorkspaceScope } from '../lib/workspaces';
 import { SidebarCustomize } from './SidebarCustomize';
@@ -34,6 +32,7 @@ import { sessionIsLive, sessionIsUnread } from '../lib/sessions';
 import { sessionAttention } from '../lib/sessionAttention';
 import type { SessionSummary } from '../types/bridge';
 import { SidebarAppUpdateButton } from './SidebarAppUpdateButton';
+import { SidebarNavigation } from './SidebarNavigation';
 
 export default function Sidebar({
   workspaceScopes,
@@ -52,11 +51,9 @@ export default function Sidebar({
       mainView: current.mainView,
       pendingPermissions: current.pendingPermissions,
       pendingQuestions: current.pendingQuestions,
-      prWorkspaceCwd: current.prWorkspaceCwd,
       sessionLastSeen: current.sessionLastSeen,
       sessionOrder: current.sessionOrder,
       sessions: current.sessions,
-      workspaceCwds: current.workspaceCwds,
     }),
     shallowEqual,
   );
@@ -318,34 +315,7 @@ export default function Sidebar({
             <CirclePlus className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
-        <button
-          data-testid="pull-requests-nav"
-          onClick={() => {
-            const cwd = resolvePrWorkspaceCwd({
-              boundCwd: state.prWorkspaceCwd,
-              activeCwd: activeSession?.cwd,
-              workspaceKind: activeSession?.workspaceKind,
-              workspaceCwds: state.workspaceCwds,
-            });
-            dispatch({ type: 'OPEN_PULL_REQUESTS', cwd });
-          }}
-          className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-            state.mainView === 'pull-requests'
-              ? 'bg-droid-active text-droid-text'
-              : 'text-droid-text hover:bg-droid-elevated'
-          }`}
-        >
-          <span
-            className={`flex h-4 w-4 shrink-0 items-center justify-center transition-colors ${
-              state.mainView === 'pull-requests'
-                ? 'text-droid-text'
-                : 'text-droid-text-secondary group-hover:text-droid-text'
-            }`}
-          >
-            <GitPullRequestIcon size={15} />
-          </span>
-          Pull requests
-        </button>
+        <SidebarNavigation />
       </div>
 
       <SidebarCustomize
