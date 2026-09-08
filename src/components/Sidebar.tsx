@@ -347,7 +347,12 @@ export default function Sidebar({
         </button>
       </div>
 
-      <SidebarCustomize preferences={preferences} onChange={activity.update} />
+      <SidebarCustomize
+        preferences={preferences}
+        unreadCount={unreadCount}
+        onChange={activity.update}
+        onMarkAllRead={markAllSessionsRead}
+      />
       <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-3">
         {unreadOnly && unreadCount === 0 && (
           <div className="px-3 pt-2 pb-1 text-[12px] text-droid-text-muted">
