@@ -249,6 +249,10 @@ export default function ModelSelectorPopover({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.key.startsWith('Arrow') || filterOpen) return;
+      // Leave ←/→ to the search caret while there is text to move through.
+      const inSearch = e.target instanceof HTMLInputElement && e.target.value.length > 0;
+      const horizontal = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      if (inSearch && horizontal) return;
       e.preventDefault();
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         if (childTarget && !childReady) return;

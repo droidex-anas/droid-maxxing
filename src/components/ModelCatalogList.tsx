@@ -51,7 +51,10 @@ function ModelCatalogList({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rows = hasRealModels ? models : [];
-  const selectedIndex = !selectedModelId ? 0 : rows.findIndex((m) => m.id === selectedModelId) + 1;
+  // -1 when the active model is filtered out: nothing is highlighted then.
+  const selectedIndex = selectedModelId
+    ? rows.findIndex((m) => m.id === selectedModelId) + 1 || -1
+    : 0;
 
   const virtualizer = useVirtualizer({
     count: rows.length + 1,
@@ -80,16 +83,17 @@ function ModelCatalogList({
     <div ref={scrollRef} className="mt-2 max-h-[180px] overflow-y-auto -mx-1 px-1">
       <div
         role="listbox"
+        aria-label="Models"
         className="relative"
         style={{ height: `${String(virtualizer.getTotalSize())}px` }}
       >
         <div
           aria-hidden
           className={`absolute inset-x-0 top-0 h-9 rounded-lg bg-droid-surface ring-1 ring-inset ring-droid-active pointer-events-none ${
-            selectedIndex > 0 || !selectedModelId ? '' : 'opacity-0'
+            selectedIndex < 0 ? 'opacity-0' : ''
           }`}
           style={{
-            transform: `translateY(${String(selectedIndex * ROW_H)}px)`,
+            transform: `translateY(${String(Math.max(0, selectedIndex) * ROW_H)}px)`,
             transition: 'transform .22s cubic-bezier(.16,1,.3,1), opacity .15s',
           }}
         />
@@ -189,9 +193,15 @@ const ModelRow = memo(function ModelRow({
   return (
     <div
       role="option"
+      tabIndex={selected ? 0 : -1}
       aria-selected={selected}
       aria-disabled={disabled || undefined}
       onClick={() => {
+        if (!disabled) pick(id);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
         if (!disabled) pick(id);
       }}
       className={`relative flex items-center gap-2.5 h-9 px-2.5 rounded-lg select-none ${
