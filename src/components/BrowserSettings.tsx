@@ -1,5 +1,5 @@
 import { Loader2, RotateCcw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   chooseBrowserDownloadDirectory,
   clearBrowserData,
@@ -56,35 +56,29 @@ export function BrowserSettings() {
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
   const [confirmError, setConfirmError] = useState('');
 
-  const load = async () => {
+  const mounted = useRef(true);
+
+  const load = useCallback(async () => {
     setIsLoading(true);
     setError('');
     try {
-      setSnapshot(await getBrowserSettings());
+      const next = await getBrowserSettings();
+      if (mounted.current) setSnapshot(next);
     } catch {
-      setError('Could not load browser settings. Check that the desktop host is running.');
+      if (mounted.current)
+        setError('Could not load browser settings. Check that the desktop host is running.');
     } finally {
-      setIsLoading(false);
+      if (mounted.current) setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    void getBrowserSettings()
-      .then((next) => {
-        if (active) setSnapshot(next);
-      })
-      .catch(() => {
-        if (active)
-          setError('Could not load browser settings. Check that the desktop host is running.');
-      })
-      .finally(() => {
-        if (active) setIsLoading(false);
-      });
+    mounted.current = true;
+    void load();
     return () => {
-      active = false;
+      mounted.current = false;
     };
-  }, []);
+  }, [load]);
 
   const patchSettings = async (patch: BrowserSettingsPatch) => {
     if (!snapshot || isSaving) return;

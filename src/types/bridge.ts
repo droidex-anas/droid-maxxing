@@ -389,17 +389,19 @@ export interface BrowserState {
   error?: string;
 }
 
-export interface BrowserRestoreState {
-  browserSessionId: string;
-  appSessionId: string;
-  url: string;
-  title?: string;
-  viewport: BrowserViewport;
-  viewportMode: BrowserViewportMode;
-  scroll: { x: number; y: number };
-  canGoBack?: boolean;
-  canGoForward?: boolean;
-}
+export type BrowserActionSource = 'agent' | 'user';
+
+export type BrowserRestoreState = Pick<
+  BrowserState,
+  | 'browserSessionId'
+  | 'url'
+  | 'title'
+  | 'viewport'
+  | 'viewportMode'
+  | 'scroll'
+  | 'canGoBack'
+  | 'canGoForward'
+> & { appSessionId: string };
 
 export interface BrowserNativeSnapshot {
   url: string;
@@ -476,7 +478,7 @@ export interface BrowserNativeRequest {
   appSessionId: string;
   browserSessionId: string;
   action: BrowserNativeAction;
-  source?: 'agent' | 'user';
+  source?: BrowserActionSource;
   autonomy?: Autonomy;
   url?: string;
   viewport?: BrowserViewport;
@@ -730,20 +732,20 @@ export type ClientCommand =
       type: 'browser.open';
       appSessionId: string;
       url: string;
-      source?: 'agent' | 'user';
+      source?: BrowserActionSource;
       viewport?: BrowserViewport;
       viewportMode?: BrowserViewportMode;
     }
   | { type: 'browser.restore'; state: BrowserRestoreState }
   | { type: 'browser.close'; appSessionId: string }
-  | { type: 'browser.reload'; appSessionId: string; source?: 'agent' | 'user' }
+  | { type: 'browser.reload'; appSessionId: string; source?: BrowserActionSource }
   | { type: 'browser.refresh'; appSessionId: string }
   | {
       type: 'browser.resizeViewport';
       appSessionId: string;
       viewport: BrowserViewport;
       viewportMode: BrowserViewportMode;
-      source?: 'agent' | 'user';
+      source?: BrowserActionSource;
     }
   | {
       type: 'browser.click';
@@ -751,7 +753,7 @@ export type ClientCommand =
       ref?: string;
       x?: number;
       y?: number;
-      source?: 'agent' | 'user';
+      source?: BrowserActionSource;
     }
   | { type: 'browser.type'; appSessionId: string; text: string }
   | { type: 'browser.keypress'; appSessionId: string; key: string }
@@ -761,7 +763,7 @@ export type ClientCommand =
       direction: BrowserScrollDirection;
       pixels?: number;
       ref?: string;
-      source?: 'agent' | 'user';
+      source?: BrowserActionSource;
     }
   | {
       type: 'browser.screenshot';

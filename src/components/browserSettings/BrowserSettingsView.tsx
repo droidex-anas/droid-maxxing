@@ -1,18 +1,22 @@
 import { AlertTriangle, KeyRound, PanelTop } from 'lucide-react';
-import type {
-  BrowserAgentCursorStyle,
-  BrowserLoginFillApproval,
-  BrowserNavigationApproval,
-  BrowserSettingsPatch,
-  BrowserSettingsSnapshot,
-  BrowserSiteGrantKind,
-  BrowserSitePermissionMode,
+import cursorDesign from '../../../shared/browserAgentCursorDesign.json';
+import {
+  BROWSER_AGENT_CURSOR_STYLES,
+  BROWSER_LOGIN_FILL_APPROVALS,
+  BROWSER_NAVIGATION_APPROVALS,
+  BROWSER_SITE_PERMISSION_MODES,
+  parseBrowserOption,
+  type BrowserAgentCursorStyle,
+  type BrowserSettingsPatch,
+  type BrowserSettingsSnapshot,
+  type BrowserSiteGrantKind,
 } from '../../lib/browserSettings';
 import { Dropdown } from '../settingsKit';
 import { Switch } from '../Switch';
 import { BrowserSiteGrants } from './BrowserSiteGrants';
 import {
   BrowserActionButton,
+  BrowserOriginList,
   BrowserSettingRow,
   BrowserSettingsCard,
   BrowserSettingsGroup,
@@ -39,56 +43,26 @@ const CURSOR_STYLE_OPTIONS = [
 ];
 
 function AgentCursorStyleIcon({ style }: { style: BrowserAgentCursorStyle }) {
-  const fill = style === 'dark' ? '#111111' : style === 'light' ? '#ffffff' : '#303743';
-  const stroke = style === 'dark' ? '#ffffff' : style === 'light' ? '#3b3b3b' : '#dce1eb';
+  const presentation = cursorDesign.styles[style];
+  const viewBox = `0 0 ${String(cursorDesign.viewBoxSize)} ${String(cursorDesign.viewBoxSize)}`;
   return (
     <svg
       aria-hidden="true"
-      viewBox="0 0 32 32"
+      viewBox={viewBox}
       className="h-5 w-5 shrink-0"
-      style={
-        style === 'droidex'
-          ? { filter: 'drop-shadow(0 0 3px rgba(80, 139, 255, 0.75))' }
-          : undefined
-      }
+      style={presentation.iconFilter ? { filter: presentation.iconFilter } : undefined}
     >
       <path
-        d="M7.01 3.99 Q6.2 3.4 6.2 4.4 L6.2 23.4 Q6.2 26 8 27.8 L8.1 27.9 Q9.8 29.6 11.6 28.01 L15.3 24.73 Q16.8 23.4 18.8 23.3 L22.8 23.11 Q25 23 25.62 20.89 L25.7 20.6 Q26.4 18.2 24.3 16.66 Z"
-        fill={fill}
-        fillOpacity={1}
-        stroke={stroke}
-        strokeWidth="2.2"
+        d={cursorDesign.path}
+        fill={presentation.fill}
+        fillOpacity={presentation.fillOpacity}
+        stroke={presentation.stroke}
+        strokeWidth={cursorDesign.strokeWidth}
         strokeLinejoin="round"
         strokeLinecap="round"
       />
     </svg>
   );
-}
-
-function parseNavigationApproval(value: string): BrowserNavigationApproval {
-  if (
-    value === 'follow_autonomy' ||
-    value === 'always_ask' ||
-    value === 'new_sites' ||
-    value === 'never_ask'
-  )
-    return value;
-  throw new Error(`Unsupported browser navigation approval: ${value}`);
-}
-
-function parseLoginFillApproval(value: string): BrowserLoginFillApproval {
-  if (value === 'always_ask' || value === 'never') return value;
-  throw new Error(`Unsupported browser login approval: ${value}`);
-}
-
-function parseSitePermissionMode(value: string): BrowserSitePermissionMode {
-  if (value === 'block' || value === 'ask') return value;
-  throw new Error(`Unsupported browser site permission mode: ${value}`);
-}
-
-function parseAgentCursorStyle(value: string): BrowserAgentCursorStyle {
-  if (value === 'dark' || value === 'light' || value === 'droidex') return value;
-  throw new Error(`Unsupported browser agent cursor style: ${value}`);
 }
 
 function protectedStorageLabel(snapshot: BrowserSettingsSnapshot): string {
@@ -143,49 +117,6 @@ export interface BrowserSettingsViewProps {
   onDeleteCredential: (origin: string) => void;
   onRevoke: (kind: BrowserSiteGrantKind, origin: string) => void;
   onChooseDownloadDirectory: () => void;
-}
-
-function SavedLoginOrigins({
-  origins,
-  disabled,
-  onDelete,
-}: {
-  origins: string[];
-  disabled: boolean;
-  onDelete: (origin: string) => void;
-}) {
-  if (origins.length === 0) {
-    return (
-      <div className="border-t border-droid-border/50 px-4 py-3.5 text-[11.5px] text-droid-text-muted">
-        No saved logins yet.
-      </div>
-    );
-  }
-  return (
-    <ul aria-label="Saved login sites" className="border-t border-droid-border/50">
-      {origins.map((origin, index) => (
-        <li
-          key={origin}
-          className={`flex items-center justify-between gap-3 px-4 py-3 ${index > 0 ? 'border-t border-droid-border/50' : ''}`}
-        >
-          <span className="min-w-0 truncate font-mono text-[11.5px] text-droid-text-secondary">
-            {origin}
-          </span>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => {
-              onDelete(origin);
-            }}
-            aria-label={`Delete saved login for ${origin}`}
-            className="rounded-lg px-2.5 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-          >
-            Delete
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
 }
 
 export function BrowserSettingsView({
@@ -332,14 +263,26 @@ export function BrowserSettingsView({
                 width="w-40"
                 disabled={disabled}
                 onChange={(value) => {
-                  onPatch({ loginFillApproval: parseLoginFillApproval(value) });
+                  onPatch({
+                    loginFillApproval: parseBrowserOption(
+                      BROWSER_LOGIN_FILL_APPROVALS,
+                      'login approval',
+                      value,
+                    ),
+                  });
                 }}
               />
             </BrowserSettingRow>
-            <SavedLoginOrigins
+            <BrowserOriginList
               origins={snapshot.credentialOrigins}
+              emptyLabel="No saved logins yet."
+              listLabel="Saved login sites"
+              actionLabel="Delete"
+              actionNoun="saved login"
               disabled={disabled}
-              onDelete={onDeleteCredential}
+              danger
+              topBorder
+              onAction={onDeleteCredential}
             />
           </BrowserSettingsCard>
         </BrowserSettingsGroup>
@@ -357,7 +300,13 @@ export function BrowserSettingsView({
                 width="w-40"
                 disabled={disabled}
                 onChange={(value) => {
-                  onPatch({ navigationApproval: parseNavigationApproval(value) });
+                  onPatch({
+                    navigationApproval: parseBrowserOption(
+                      BROWSER_NAVIGATION_APPROVALS,
+                      'navigation approval',
+                      value,
+                    ),
+                  });
                 }}
               />
             </BrowserSettingRow>
@@ -375,7 +324,13 @@ export function BrowserSettingsView({
                     width="w-28"
                     disabled={disabled}
                     onChange={(value) => {
-                      onPatch({ agentCursorStyle: parseAgentCursorStyle(value) });
+                      onPatch({
+                        agentCursorStyle: parseBrowserOption(
+                          BROWSER_AGENT_CURSOR_STYLES,
+                          'agent cursor style',
+                          value,
+                        ),
+                      });
                     }}
                   />
                   <Switch
@@ -393,8 +348,8 @@ export function BrowserSettingsView({
                   </span>
                   <input
                     type="range"
-                    min="24"
-                    max="64"
+                    min={cursorDesign.size.min}
+                    max={cursorDesign.size.max}
                     step="2"
                     value={snapshot.agentCursorSize}
                     aria-label="Agent cursor size"
@@ -419,7 +374,13 @@ export function BrowserSettingsView({
                 width="w-40"
                 disabled={disabled}
                 onChange={(value) => {
-                  onPatch({ sitePermissionMode: parseSitePermissionMode(value) });
+                  onPatch({
+                    sitePermissionMode: parseBrowserOption(
+                      BROWSER_SITE_PERMISSION_MODES,
+                      'site permission mode',
+                      value,
+                    ),
+                  });
                 }}
               />
             </BrowserSettingRow>

@@ -2,6 +2,7 @@ import { bridge } from './bridge';
 import { isAppUpdateInstalling } from './appUpdate';
 import type {
   Autonomy,
+  BrowserActionSource,
   BrowserNativeResult,
   BrowserRestoreState,
   BrowserScrollDirection,
@@ -411,7 +412,7 @@ export const clickBrowser = (input: {
   ref?: string;
   x?: number;
   y?: number;
-  source?: 'agent' | 'user';
+  source?: BrowserActionSource;
 }) => {
   bridge.send({ type: 'browser.click', ...input });
 };
@@ -429,7 +430,7 @@ export const scrollBrowser = (input: {
   direction: BrowserScrollDirection;
   pixels?: number;
   ref?: string;
-  source?: 'agent' | 'user';
+  source?: BrowserActionSource;
 }) => {
   bridge.send({ type: 'browser.scroll', ...input });
 };

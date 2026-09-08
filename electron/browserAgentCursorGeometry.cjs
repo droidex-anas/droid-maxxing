@@ -1,8 +1,9 @@
-const CURSOR_VIEWBOX_SIZE = 32;
+const design = require('../shared/browserAgentCursorDesign.json');
+
 const CURSOR_VIEWBOX_HOTSPOT = Object.freeze({ x: 6, y: 4 });
-const BROWSER_AGENT_CURSOR_DEFAULT_SIZE = 36;
-const BROWSER_AGENT_CURSOR_MIN_SIZE = 24;
-const BROWSER_AGENT_CURSOR_MAX_SIZE = 64;
+const BROWSER_AGENT_CURSOR_DEFAULT_SIZE = design.size.default;
+const BROWSER_AGENT_CURSOR_MIN_SIZE = design.size.min;
+const BROWSER_AGENT_CURSOR_MAX_SIZE = design.size.max;
 
 function validateBrowserAgentCursorSize(value) {
   if (
@@ -19,8 +20,8 @@ function validateBrowserAgentCursorSize(value) {
 
 function scaleCursorHotspot(size) {
   return {
-    x: Math.round((CURSOR_VIEWBOX_HOTSPOT.x / CURSOR_VIEWBOX_SIZE) * size),
-    y: Math.round((CURSOR_VIEWBOX_HOTSPOT.y / CURSOR_VIEWBOX_SIZE) * size),
+    x: Math.round((CURSOR_VIEWBOX_HOTSPOT.x / design.viewBoxSize) * size),
+    y: Math.round((CURSOR_VIEWBOX_HOTSPOT.y / design.viewBoxSize) * size),
   };
 }
 

@@ -83,23 +83,36 @@ export function BrowserActionButton({
   );
 }
 
-export function ExactSiteList({
+export function BrowserOriginList({
+  origins,
   emptyLabel,
-  sites,
-  onRevoke,
+  listLabel,
+  actionLabel,
+  actionNoun,
+  onAction,
   disabled = false,
+  danger = false,
+  topBorder = false,
 }: {
+  origins: string[];
   emptyLabel: string;
-  sites: string[];
-  onRevoke: (origin: string) => void;
+  listLabel: string;
+  actionLabel: string;
+  actionNoun: string;
+  onAction: (origin: string) => void;
   disabled?: boolean;
+  danger?: boolean;
+  topBorder?: boolean;
 }) {
-  if (sites.length === 0) {
-    return <div className="px-4 py-3.5 text-[11.5px] text-droid-text-muted">{emptyLabel}</div>;
+  const edge = topBorder ? 'border-t border-droid-border/50 ' : '';
+  if (origins.length === 0) {
+    return (
+      <div className={`${edge}px-4 py-3.5 text-[11.5px] text-droid-text-muted`}>{emptyLabel}</div>
+    );
   }
   return (
-    <ul aria-label="Exact site grants" className="divide-y divide-droid-border/50">
-      {sites.map((origin) => (
+    <ul aria-label={listLabel} className={`${edge}divide-y divide-droid-border/50`}>
+      {origins.map((origin) => (
         <li key={origin} className="flex items-center justify-between gap-3 px-4 py-3">
           <span className="min-w-0 truncate font-mono text-[11.5px] text-droid-text-secondary">
             {origin}
@@ -108,12 +121,16 @@ export function ExactSiteList({
             type="button"
             disabled={disabled}
             onClick={() => {
-              onRevoke(origin);
+              onAction(origin);
             }}
-            className="rounded-lg px-2.5 py-1 text-[11px] text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:opacity-50"
-            aria-label={`Remove grant for ${origin}`}
+            aria-label={`${actionLabel} ${actionNoun} for ${origin}`}
+            className={`rounded-lg px-2.5 py-1 text-[11px] transition-colors disabled:opacity-50 ${
+              danger
+                ? 'text-red-300 hover:bg-red-500/10'
+                : 'text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text'
+            }`}
           >
-            Remove
+            {actionLabel}
           </button>
         </li>
       ))}

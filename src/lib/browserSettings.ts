@@ -1,12 +1,30 @@
-export type BrowserNavigationApproval =
-  | 'follow_autonomy'
-  | 'always_ask'
-  | 'new_sites'
-  | 'never_ask';
-export type BrowserLoginFillApproval = 'always_ask' | 'never';
-export type BrowserSitePermissionMode = 'block' | 'ask';
-export type BrowserAgentCursorStyle = 'dark' | 'light' | 'droidex';
+export const BROWSER_NAVIGATION_APPROVALS = [
+  'follow_autonomy',
+  'always_ask',
+  'new_sites',
+  'never_ask',
+] as const;
+export const BROWSER_LOGIN_FILL_APPROVALS = ['always_ask', 'never'] as const;
+export const BROWSER_SITE_PERMISSION_MODES = ['block', 'ask'] as const;
+export const BROWSER_AGENT_CURSOR_STYLES = ['dark', 'light', 'droidex'] as const;
+
+// Only referenced by BrowserSettings below; call sites narrow with parseBrowserOption
+// against the exported tuples instead of importing these aliases.
+type BrowserNavigationApproval = (typeof BROWSER_NAVIGATION_APPROVALS)[number];
+type BrowserLoginFillApproval = (typeof BROWSER_LOGIN_FILL_APPROVALS)[number];
+type BrowserSitePermissionMode = (typeof BROWSER_SITE_PERMISSION_MODES)[number];
+export type BrowserAgentCursorStyle = (typeof BROWSER_AGENT_CURSOR_STYLES)[number];
 export type BrowserSiteGrantKind = 'agent_navigation' | 'camera' | 'microphone';
+
+/** Narrows a dropdown string back onto its declared option tuple. */
+export function parseBrowserOption<T extends string>(
+  options: readonly T[],
+  label: string,
+  value: string,
+): T {
+  if ((options as readonly string[]).includes(value)) return value as T;
+  throw new Error(`Unsupported browser ${label}: ${value}`);
+}
 
 export interface BrowserSitePermissionRule {
   origin: string;
