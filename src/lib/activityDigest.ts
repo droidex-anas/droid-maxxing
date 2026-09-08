@@ -36,21 +36,19 @@ export function digestTranscript(events: readonly TranscriptEvent[]): ActivityDi
   if (events.length === 0) return null;
   let lastUser = -1;
   let lastModel = -1;
-  let activity: string | undefined;
   for (let i = events.length - 1; i >= 0 && (lastUser < 0 || lastModel < 0); i -= 1) {
     const ev = events[i];
     if (ev.role !== 'primary') continue;
     if (ev.author === 'user') lastUser = Math.max(lastUser, i);
     else if (ev.kind === 'text' && ev.text?.trim()) lastModel = Math.max(lastModel, i);
-    else if (ev.kind === 'tool_call' && lastUser < 0 && lastModel < 0)
-      activity ??= describeTool(ev);
   }
   const last = events[events.length - 1];
   return {
     at: Math.max(last.ts, last.endTs ?? 0),
     modelSpokeLast: lastModel > lastUser,
     snippet: lastSentence(lastModel >= 0 ? (events[lastModel].text ?? '') : ''),
-    activity,
+    // Only a tool call at the very tail is still running.
+    activity: last.kind === 'tool_call' ? describeTool(last) : undefined,
   };
 }
 
@@ -107,11 +105,13 @@ export function saveActivityDigests(
 }
 
 function isDigest(value: unknown): value is ActivityDigest {
+  if (!value || typeof value !== 'object') return false;
+  const { at, modelSpokeLast, snippet, activity } = value as Record<string, unknown>;
   return (
-    !!value &&
-    typeof value === 'object' &&
-    typeof (value as ActivityDigest).at === 'number' &&
-    typeof (value as ActivityDigest).modelSpokeLast === 'boolean' &&
-    typeof (value as ActivityDigest).snippet === 'string'
+    typeof at === 'number' &&
+    Number.isFinite(at) &&
+    typeof modelSpokeLast === 'boolean' &&
+    typeof snippet === 'string' &&
+    (activity === undefined || typeof activity === 'string')
   );
 }

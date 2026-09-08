@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
+
+const SAVE_DELAY_MS = 1000;
 import {
   digestTranscript,
   loadActivityDigests,
@@ -19,13 +21,15 @@ function same(x: ActivityDigest, y: ActivityDigest): boolean {
   );
 }
 
-export function useActivityDigests(): Record<string, ActivityDigest> {
-  const stored = useRef<Record<string, ActivityDigest>>(
-    typeof window === 'undefined' ? {} : loadActivityDigests(window.localStorage),
-  );
+// `enabled` gates the transcript walk so a hidden inbox costs nothing per
+// store update; the persisted copy still serves whatever it last saw.
+export function useActivityDigests(enabled: boolean): Record<string, ActivityDigest> {
+  const stored = useRef<Record<string, ActivityDigest> | null>(null);
+  stored.current ??= typeof window === 'undefined' ? {} : loadActivityDigests(window.localStorage);
   const live = useStoreSelector(
     (state) => {
       const digests: Record<string, ActivityDigest> = {};
+      if (!enabled) return digests;
       for (const [id, events] of Object.entries(state.transcripts)) {
         const digest = digestTranscript(events);
         if (digest) digests[id] = digest;
@@ -42,13 +46,20 @@ export function useActivityDigests(): Record<string, ActivityDigest> {
 
   const merged = useMemo(() => ({ ...stored.current, ...live }), [live]);
 
+  // Streaming text changes the digest on every token, so persist a beat later
+  // rather than rewriting the cache each time.
   useEffect(() => {
     stored.current = merged;
-    try {
-      saveActivityDigests(window.localStorage, merged);
-    } catch {
-      // Persistence is a convenience; the in-memory digest still drives the view.
-    }
+    const timer = setTimeout(() => {
+      try {
+        saveActivityDigests(window.localStorage, merged);
+      } catch {
+        // Persistence is a convenience; the in-memory digest still drives the view.
+      }
+    }, SAVE_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [merged]);
 
   return merged;

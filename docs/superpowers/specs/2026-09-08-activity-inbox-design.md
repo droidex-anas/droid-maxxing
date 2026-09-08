@@ -6,7 +6,8 @@ The sidebar Activity view becomes an inbox of chats that need the user, ordered 
 
 Only chats that plausibly matter now are listed. A chat is in scope when any of these hold:
 
-- it is blocked on the user (approval, question, plan waiting, failed, interrupted);
+- it is blocked on the user (approval, question, plan waiting);
+- it failed or was interrupted, and it was updated within 30 days;
 - it has a turn in flight;
 - the model spoke last and the user never replied, and it was updated within 30 days;
 - its worktree has uncommitted changes and it was updated within 14 days;
@@ -24,7 +25,7 @@ Everything else stays out of the view. A footer line says older chats live in Wo
 4. **Recent** — everything else in scope.
 5. **Settled** — collapsed.
 
-Persisted filter keys (`all`, `attention`, `working`, `ready`, `settled`) keep their meaning; `attention` maps to group 1, `ready` to groups 3 and 4.
+Filter keys are `all`, `attention`, `working`, `ship`, `ready` and `settled`; `attention` maps to group 1 and each other key to one group.
 
 ## Signals
 
@@ -40,7 +41,7 @@ Activity rows are two lines: title and time on the first line, the reason line i
 
 - `src/lib/sidebarActivity.ts` — status derivation and scope rule
 - `src/lib/activityDigest.ts`, `src/lib/activityReason.ts` — new
-- `src/hooks/useActivityDigest.ts`, `src/hooks/useActivityShipSignals.ts` — new
+- `src/hooks/useActivityDigests.ts`, `src/hooks/useActivityShipSignals.ts` — new
 - `src/hooks/useSidebarActivity.ts`, `src/components/SidebarActivity.tsx`, `src/components/SidebarSessionRow.tsx`, `src/components/Sidebar.tsx` — wiring and the two-line row
 
 Existing tests in `src/lib/sidebarActivity.test.ts` are updated for the new statuses; no new test files.

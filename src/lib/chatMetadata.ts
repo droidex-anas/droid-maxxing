@@ -389,5 +389,5 @@ export function pullRequestMatchesQuery(pr: ChatPullRequest, query: string): boo
 // wins, otherwise the most recently linked outcome.
 export function linkedPrKind(metadata: ChatMetadata | undefined): PrKind | undefined {
   const kinds = (metadata?.pullRequests ?? []).map(prKind);
-  return kinds.find((kind) => kind === 'open' || kind === 'draft') ?? kinds.at(-1);
+  return kinds.find((kind) => kind === 'open' || kind === 'draft') ?? kinds[0];
 }

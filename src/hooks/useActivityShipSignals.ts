@@ -19,16 +19,23 @@ export function useActivityShipSignals(
   useEffect(() => {
     if (!enabled || !visible || !key) return;
     let cancelled = false;
+    let inFlight = false;
     const refresh = async () => {
-      const results = await Promise.all(
-        key
-          .split('\n')
-          .map(async (cwd) => [cwd, await getGitDiffStat(cwd, 'uncommitted')] as const),
-      );
-      if (cancelled) return;
-      const next: Record<string, GitDiffStat> = {};
-      for (const [cwd, stat] of results) if (stat) next[cwd] = stat;
-      setStats(next);
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const results = await Promise.all(
+          key
+            .split('\n')
+            .map(async (cwd) => [cwd, await getGitDiffStat(cwd, 'uncommitted')] as const),
+        );
+        if (cancelled) return;
+        const next: Record<string, GitDiffStat> = {};
+        for (const [cwd, stat] of results) if (stat) next[cwd] = stat;
+        setStats(next);
+      } finally {
+        inFlight = false;
+      }
     };
     void refresh();
     const timer = setInterval(() => void refresh(), POLL_MS);

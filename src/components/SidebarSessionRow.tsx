@@ -109,6 +109,9 @@ export const SessionRow = memo(function SessionRow({
   const timeLabel = formatRelativeTime(session.updatedAt, now);
   // Outside the Activity view the pill already announces approvals/questions.
   const dot = detail || !attention ? STATUS_DOT[activityStatus] : undefined;
+  // On two-line rows the side slots are boxes the height of the title line, so
+  // the dot and the time sit on the first line rather than between the two.
+  const side = detail ? 'h-5' : '';
 
   // Return focus to the row when the inline editor closes, unless the user
   // already moved focus elsewhere (e.g. clicked another row).
@@ -197,12 +200,12 @@ export const SessionRow = memo(function SessionRow({
           e.preventDefault();
           onMenu(session.appSessionId, { x: e.clientX, y: e.clientY });
         }}
-        className={`w-full flex items-center gap-2.5 pl-3 pr-3 ${detail ? 'py-2' : 'py-1.5'} rounded-xl text-left transition-colors ${
+        className={`w-full flex ${detail ? 'items-start py-2' : 'items-center py-1.5'} gap-2.5 pl-3 pr-3 rounded-xl text-left transition-colors ${
           active ? 'bg-droid-active' : 'hover:bg-droid-elevated/40'
         }`}
       >
         <span
-          className={`w-3 flex items-center justify-center shrink-0 ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
+          className={`w-3 flex items-center justify-center shrink-0 ${side} ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
         >
           {running && !attention ? (
             <WorkingSpinner />
@@ -250,28 +253,23 @@ export const SessionRow = memo(function SessionRow({
             </span>
           )}
         </span>
-        {/* Fixed columns so PR icons and times line up down the list; the
-            attention pill spans both when a chat is blocked on the user. */}
-        <span className="ml-2 grid shrink-0 grid-cols-[16px_34px] items-center gap-x-2.5">
-          {attention && !detail ? (
-            <span className="col-span-2 flex justify-end">
-              <SessionAttentionBadge kind={attention} />
+        {attention && !detail ? (
+          <SessionAttentionBadge kind={attention} />
+        ) : (
+          /* Fixed columns so PR icons and times line up down the list. */
+          <span
+            className={`ml-2 grid shrink-0 grid-cols-[16px_34px] items-center gap-x-2.5 ${side}`}
+          >
+            <span className="flex justify-center">{pr && <PrStateIcon kind={pr} size={14} />}</span>
+            <span
+              className={`text-right text-[11.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
+                unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
+              }`}
+            >
+              {timeLabel}
             </span>
-          ) : (
-            <>
-              <span className="flex justify-center">
-                {pr && <PrStateIcon kind={pr} size={14} />}
-              </span>
-              <span
-                className={`text-right text-[11.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
-                  unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
-                }`}
-              >
-                {timeLabel}
-              </span>
-            </>
-          )}
-        </span>
+          </span>
+        )}
       </button>
       {/* On hover the timestamp becomes the "..." menu trigger (rename, pin,
           archive). It stays tabbable while hidden so keyboard users can reach
@@ -285,7 +283,7 @@ export const SessionRow = memo(function SessionRow({
           const rect = e.currentTarget.getBoundingClientRect();
           onMenu(session.appSessionId, { x: rect.right - SESSION_MENU_WIDTH, y: rect.bottom + 4 });
         }}
-        className={`${HOVER_ACTION} right-2`}
+        className={`${HOVER_ACTION} right-2 ${detail ? 'top-2 translate-y-0' : ''}`}
       >
         <MoreHorizontal className="w-4 h-4" />
       </button>

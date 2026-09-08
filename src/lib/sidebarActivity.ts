@@ -75,7 +75,7 @@ export const ACTIVITY_GROUPS: readonly {
     statuses: ['approval', 'input', 'plan', 'failed', 'interrupted', 'reply', 'review'],
   },
   { key: 'working', label: 'Working', statuses: ['working'] },
-  { key: 'ready', label: 'To ship', statuses: ['ship'] },
+  { key: 'ship', label: 'To ship', statuses: ['ship'] },
   { key: 'ready', label: 'Recent', statuses: ['ready'] },
   { key: 'settled', label: 'Settled', statuses: ['settled'] },
 ];
@@ -112,7 +112,7 @@ export interface SidebarActivityPreferences {
   view: 'activity' | 'workspaces' | 'pull-requests';
   settled: Record<string, number>;
   order: 'recent' | 'oldest' | 'title';
-  filter: 'all' | 'attention' | 'working' | 'ready' | 'settled';
+  filter: 'all' | 'attention' | 'working' | 'ship' | 'ready' | 'settled';
   limit: number;
 }
 
@@ -135,6 +135,7 @@ export function isSidebarFilter(value: unknown): value is SidebarActivityPrefere
     value === 'all' ||
     value === 'attention' ||
     value === 'working' ||
+    value === 'ship' ||
     value === 'ready' ||
     value === 'settled'
   );

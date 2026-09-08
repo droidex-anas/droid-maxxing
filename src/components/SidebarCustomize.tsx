@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
   Activity,
   ArrowDownAZ,
@@ -7,6 +7,7 @@ import {
   CircleDashed,
   Clock,
   Folder,
+  GitCommitHorizontal,
   GitPullRequest,
   History,
   ListFilter,
@@ -60,6 +61,11 @@ const STATUS: Option<SidebarActivityPreferences['filter']>[] = [
     icon: <MessageCircleWarning className={ICON} strokeWidth={1.5} />,
   },
   { value: 'working', label: 'Working', icon: <Loader className={ICON} strokeWidth={1.5} /> },
+  {
+    value: 'ship',
+    label: 'To ship',
+    icon: <GitCommitHorizontal className={ICON} strokeWidth={1.5} />,
+  },
   { value: 'ready', label: 'Recent', icon: <Clock className={ICON} strokeWidth={1.5} /> },
   { value: 'settled', label: 'Settled', icon: <Check className={ICON} strokeWidth={1.5} /> },
 ];
@@ -97,6 +103,7 @@ function FlyoutRow<T extends string | number>({
   return (
     <div
       className="relative"
+      data-submenu={id}
       onMouseEnter={() => {
         onOpen(id);
       }}
@@ -155,6 +162,34 @@ export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAll
     setSubmenu(null);
   };
   const filtered = preferences.filter !== DEFAULT_SIDEBAR_PREFERENCES.filter;
+  const customized =
+    filtered ||
+    preferences.order !== DEFAULT_SIDEBAR_PREFERENCES.order ||
+    preferences.limit !== DEFAULT_SIDEBAR_PREFERENCES.limit;
+  // Arrow keys walk the rows; Right opens a flyout and enters it, Left leaves.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(event.currentTarget.querySelectorAll('button:not([disabled])'));
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const focus = (index: number) => {
+      (buttons.at(index % buttons.length) as HTMLElement | undefined)?.focus();
+    };
+    if (event.key === 'ArrowDown') focus(current + 1);
+    else if (event.key === 'ArrowUp') focus(current - 1);
+    else if (event.key === 'Home') focus(0);
+    else if (event.key === 'End') focus(-1);
+    else if (event.key === 'ArrowLeft') setSubmenu(null);
+    else if (event.key === 'ArrowRight') {
+      const row = (document.activeElement as HTMLElement | null)?.closest('[data-submenu]');
+      const id = row?.getAttribute('data-submenu') as Submenu | null;
+      if (id) {
+        setSubmenu(id);
+        requestAnimationFrame(() => {
+          row?.querySelector<HTMLElement>('[role="menu"] button')?.focus();
+        });
+      }
+    } else return;
+    event.preventDefault();
+  };
   const set = <K extends keyof SidebarActivityPreferences>(
     key: K,
     value: SidebarActivityPreferences[K],
@@ -194,6 +229,7 @@ export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAll
       >
         <div
           className="py-1.5"
+          onKeyDown={onKeyDown}
           onMouseLeave={() => {
             setSubmenu(null);
           }}
@@ -235,11 +271,15 @@ export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAll
           <div className="mx-3.5 my-1.5 border-t border-droid-border" />
           <div className="flex items-center px-3.5 py-1.5 text-[13px] text-droid-text-muted">
             <span className="flex-1">Filters</span>
-            {filtered && (
+            {customized && (
               <button
                 className="transition-colors hover:text-droid-text"
                 onClick={() => {
-                  set('filter', DEFAULT_SIDEBAR_PREFERENCES.filter);
+                  onChange({
+                    ...DEFAULT_SIDEBAR_PREFERENCES,
+                    view: preferences.view,
+                    settled: preferences.settled,
+                  });
                 }}
               >
                 Reset

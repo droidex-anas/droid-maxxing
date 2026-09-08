@@ -65,8 +65,6 @@ export default function Sidebar({
   // (Codex-style bell toggle) belong to the sidebar, not the root store.
   const [searchOpen, setSearchOpen] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const activity = useSidebarActivity(state);
-  const { preferences, view, statusFor, reasonFor, inScope } = activity;
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
@@ -84,6 +82,8 @@ export default function Sidebar({
     };
   }, [documentVisible]);
 
+  const activity = useSidebarActivity(state, now);
+  const { preferences, view, statusFor, reasonFor, inScope } = activity;
   const activeId = state.activeAppSessionId;
   const lastSeen = state.sessionLastSeen;
   const chatMetadata = state.chatMetadata;

@@ -24,6 +24,15 @@ import type { ActivityDigest } from '../lib/activityDigest';
 import { useActivityShipSignals } from './useActivityShipSignals';
 
 const SHIP_POLL_LIMIT = 12;
+
+// A persisted digest is only trusted while the chat has not moved past it.
+function freshDigest(
+  digests: Partial<Record<string, ActivityDigest>>,
+  session: SessionSummary,
+): ActivityDigest | undefined {
+  const digest = digests[session.appSessionId];
+  return digest && digest.at >= session.updatedAt ? digest : undefined;
+}
 const SHIP_WINDOW_MS = 14 * 86_400_000;
 
 // Sidebar preferences stay local to this profile; runtime status comes from the store.
@@ -38,6 +47,7 @@ export function useSidebarActivity(
     | 'sessionOrder'
     | 'chatMetadata'
   >,
+  now: number,
 ) {
   const [preferences, setPreferences] = useState<SidebarActivityPreferences>(() => {
     if (typeof window === 'undefined') return { ...DEFAULT_SIDEBAR_PREFERENCES, settled: {} };
@@ -72,34 +82,38 @@ export function useSidebarActivity(
     }
   }
 
-  const digests = useActivityDigests();
+  const digests = useActivityDigests(preferences.view === 'activity');
 
-  // Idle worktrees worth a git call: the newest unsettled chat per folder,
-  // touched recently, capped so the poll stays cheap. Only that chat may own
-  // the "to ship" signal, so folder-mates never all light up together.
+  // Idle worktrees worth a git call: the newest chat per folder, if it is
+  // idle, unsettled and recent, capped so the poll stays cheap. Only that chat
+  // may own the "to ship" signal; a newer live or settled chat in the same
+  // folder claims it for nobody, so folder-mates never light up in its place.
   const shipOwners = useMemo(() => {
-    if (preferences.view !== 'activity') return new Map<string, string>();
-    const now = Date.now();
     const owners = new Map<string, string>();
-    const sessions: Partial<Record<string, SessionSummary>> = state.sessions;
-    for (const id of state.sessionOrder) {
-      const session = sessions[id];
-      if (!session?.cwd || owners.has(session.cwd) || sessionIsLive(session)) continue;
+    if (preferences.view !== 'activity') return owners;
+    const claimed = new Set<string>();
+    const sessions = state.sessionOrder
+      .map((id) => state.sessions[id])
+      .filter((session) => session.cwd)
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.appSessionId.localeCompare(b.appSessionId));
+    for (const session of sessions) {
+      if (claimed.has(session.cwd)) continue;
+      claimed.add(session.cwd);
+      const settledAt = preferences.settled[session.appSessionId] ?? -1;
+      if (sessionIsLive(session) || settledAt >= session.updatedAt) continue;
       if (now - session.updatedAt > SHIP_WINDOW_MS) continue;
-      if ((preferences.settled[id] ?? -1) >= session.updatedAt) continue;
-      owners.set(session.cwd, id);
+      owners.set(session.cwd, session.appSessionId);
       if (owners.size >= SHIP_POLL_LIMIT) break;
     }
     return owners;
-  }, [preferences.view, preferences.settled, state.sessionOrder, state.sessions]);
+  }, [preferences.view, preferences.settled, state.sessionOrder, state.sessions, now]);
   const shipCwds = useMemo(() => [...shipOwners.keys()], [shipOwners]);
   const diffs = useActivityShipSignals(shipCwds, preferences.view === 'activity');
 
   const statusFor = useCallback(
     (session: SessionSummary): SessionActivityStatus => {
       const id = session.appSessionId;
-      const known: Partial<Record<string, ActivityDigest>> = digests;
-      const digest = known[id];
+      const digest = freshDigest(digests, session);
       const metadata: Partial<ChatMetadataMap> = state.chatMetadata;
       const links = metadata[id]?.pullRequests ?? [];
       const owned: Partial<Record<string, GitDiffStat>> = diffs;
@@ -108,8 +122,7 @@ export function useSidebarActivity(
         attention: sessionAttention(id, state.pendingPermissions, state.pendingQuestions),
         unread: sessionIsUnread(session, state.activeAppSessionId, state.sessionLastSeen[id]),
         settledAt: preferences.settled[id],
-        awaitingReply:
-          digest !== undefined && digest.at >= session.updatedAt && digest.modelSpokeLast,
+        awaitingReply: digest?.modelSpokeLast ?? false,
         uncommitted: (diff?.files ?? 0) > 0,
         prDone:
           links.length > 0 && links.every((pr) => prKind(pr) !== 'open' && prKind(pr) !== 'draft'),
@@ -134,7 +147,7 @@ export function useSidebarActivity(
         session,
         permission: state.pendingPermissions[session.appSessionId],
         question: state.pendingQuestions[session.appSessionId],
-        digest: digests[session.appSessionId],
+        digest: freshDigest(digests, session),
         diff: diffs[session.cwd],
       }),
     [digests, diffs, state.pendingPermissions, state.pendingQuestions],

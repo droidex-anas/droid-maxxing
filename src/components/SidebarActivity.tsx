@@ -33,7 +33,7 @@ export function SidebarActivity({
     <div className="space-y-3">
       {sessions.length === 0 && (
         <p className="px-3 py-2 text-[12px] text-droid-text-muted">
-          {hiddenCount > 0 ? 'Nothing needs you right now.' : 'No tasks match this view.'}
+          {hiddenCount > 0 ? 'Nothing to show right now.' : 'No tasks match this view.'}
         </p>
       )}
       {ACTIVITY_GROUPS.map((group) => {
