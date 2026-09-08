@@ -116,6 +116,24 @@ function normalizeBareIpv6Loopback(value: string): string | null {
   return `http://[::1]${port}${path}`;
 }
 
+export function browserSurfaceLayout(
+  frame: Size,
+  viewport: BrowserViewport,
+  mode: BrowserViewportMode,
+): Size & { left: number; top: number } {
+  const padding = 18;
+  const availableWidth = Math.max(1, frame.width - padding * 2);
+  const availableHeight = Math.max(1, frame.height - padding * 2);
+  const width = mode === 'fit' ? availableWidth : Math.min(viewport.width, availableWidth);
+  const height = mode === 'fit' ? availableHeight : Math.min(viewport.height, availableHeight);
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+    left: Math.round((frame.width - width) / 2),
+    top: Math.round((frame.height - height) / 2),
+  };
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
