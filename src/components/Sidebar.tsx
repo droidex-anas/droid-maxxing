@@ -1,4 +1,4 @@
-import { canSettleSession } from '../lib/sidebarActivity';
+import { ACTIVITY_LABELS, canSettleSession } from '../lib/sidebarActivity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
@@ -20,7 +20,13 @@ import { SidebarActivity } from './SidebarActivity';
 import { useSidebarActivity } from '../hooks/useSidebarActivity';
 import { compareSidebarSessions, matchesActivityFilter } from '../lib/sidebarActivity';
 import { SidebarWorkspaceList } from './SidebarWorkspaceList';
-import { chatDisplayTitle, isChatHidden, isChatPinned, pinnedChats } from '../lib/chatMetadata';
+import {
+  chatDisplayTitle,
+  isChatHidden,
+  isChatPinned,
+  linkedPrKind,
+  pinnedChats,
+} from '../lib/chatMetadata';
 import { useSidebarRowActions } from '../hooks/useSidebarRowActions';
 import { SessionContextMenu } from './SessionContextMenu';
 import { SessionRow } from './SidebarSessionRow';
@@ -59,8 +65,6 @@ export default function Sidebar({
   // (Codex-style bell toggle) belong to the sidebar, not the root store.
   const [searchOpen, setSearchOpen] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const activity = useSidebarActivity(state);
-  const { preferences, view, statusFor } = activity;
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => bindLazySurfaceIntent('settings', settingsButtonRef.current), []);
@@ -78,6 +82,8 @@ export default function Sidebar({
     };
   }, [documentVisible]);
 
+  const activity = useSidebarActivity(state, now);
+  const { preferences, view, statusFor, reasonFor, inScope } = activity;
   const activeId = state.activeAppSessionId;
   const lastSeen = state.sessionLastSeen;
   const chatMetadata = state.chatMetadata;
@@ -134,25 +140,32 @@ export default function Sidebar({
       compareSidebarSessions(a, b, preferences.order, chatMetadata),
     [preferences.order, chatMetadata],
   );
-  const visibleSessions = useMemo(
-    () =>
-      state.sessionOrder
-        .map((id) => state.sessions[id])
-        .filter(Boolean)
-        .filter((m) => !isChatHidden(chatMetadata[m.appSessionId]) && (!unreadOnly || isUnread(m)))
-        .filter((m) => matchesActivityFilter(statusFor(m), preferences.filter))
-        .sort(compareRows),
-    [
-      state.sessionOrder,
-      state.sessions,
-      chatMetadata,
-      unreadOnly,
-      isUnread,
-      statusFor,
-      preferences.filter,
-      compareRows,
-    ],
-  );
+  // The Activity view is an inbox, so it also drops chats that aged out of
+  // scope; the count feeds a footer pointing at Workspaces.
+  const { visibleSessions, agedOutCount } = useMemo(() => {
+    const listed = state.sessionOrder
+      .map((id) => state.sessions[id])
+      .filter(Boolean)
+      .filter((m) => !isChatHidden(chatMetadata[m.appSessionId]) && (!unreadOnly || isUnread(m)))
+      .filter((m) => matchesActivityFilter(statusFor(m), preferences.filter));
+    const inScope = view === 'activity' ? listed.filter((m) => activity.inScope(m, now)) : listed;
+    return {
+      visibleSessions: inScope.sort(compareRows),
+      agedOutCount: listed.length - inScope.length,
+    };
+  }, [
+    state.sessionOrder,
+    state.sessions,
+    chatMetadata,
+    unreadOnly,
+    isUnread,
+    statusFor,
+    preferences.filter,
+    compareRows,
+    view,
+    inScope,
+    now,
+  ]);
   const { pinnedSessions, chatSessions, workspaces } = useMemo(() => {
     if (view !== 'workspaces') return { pinnedSessions: [], chatSessions: [], workspaces: [] };
     const ordinarySessions = visibleSessions.filter(
@@ -207,24 +220,35 @@ export default function Sidebar({
     handleCopyMarkdown,
   } = rowActions;
 
-  const renderRow = (m: SessionSummary) => (
-    <SessionRow
-      key={m.appSessionId}
-      session={m}
-      title={chatDisplayTitle(m, chatMetadata[m.appSessionId])}
-      active={state.activeAppSessionId === m.appSessionId}
-      unread={isUnread(m)}
-      running={sessionIsLive(m)}
-      activityStatus={statusFor(m)}
-      attention={sessionAttention(m.appSessionId, state.pendingPermissions, state.pendingQuestions)}
-      renaming={renamingId === m.appSessionId}
-      now={now}
-      onSelect={handleSelectSession}
-      onMenu={handleRowMenu}
-      onRenameCommit={handleRenameCommit}
-      onRenameCancel={handleRenameCancel}
-    />
-  );
+  const renderRow = (m: SessionSummary) => {
+    const status = statusFor(m);
+    const inbox = view === 'activity';
+    return (
+      <SessionRow
+        key={m.appSessionId}
+        session={m}
+        title={chatDisplayTitle(m, chatMetadata[m.appSessionId])}
+        active={state.activeAppSessionId === m.appSessionId}
+        unread={isUnread(m)}
+        running={sessionIsLive(m)}
+        activityStatus={status}
+        detail={inbox ? reasonFor(m, status) || ACTIVITY_LABELS[status] : undefined}
+        // The PR view already names the PR in its group header.
+        pr={view === 'pull-requests' ? undefined : linkedPrKind(chatMetadata[m.appSessionId])}
+        attention={sessionAttention(
+          m.appSessionId,
+          state.pendingPermissions,
+          state.pendingQuestions,
+        )}
+        renaming={renamingId === m.appSessionId}
+        now={now}
+        onSelect={handleSelectSession}
+        onMenu={handleRowMenu}
+        onRenameCommit={handleRenameCommit}
+        onRenameCancel={handleRenameCancel}
+      />
+    );
+  };
 
   return (
     <aside
@@ -324,7 +348,12 @@ export default function Sidebar({
         </button>
       </div>
 
-      <SidebarCustomize preferences={preferences} onChange={activity.update} />
+      <SidebarCustomize
+        preferences={preferences}
+        unreadCount={unreadCount}
+        onChange={activity.update}
+        onMarkAllRead={markAllSessionsRead}
+      />
       <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-3">
         {unreadOnly && unreadCount === 0 && (
           <div className="px-3 pt-2 pb-1 text-[12px] text-droid-text-muted">
@@ -340,6 +369,7 @@ export default function Sidebar({
             renderRow={renderRow}
             limit={preferences.limit}
             showSettled={preferences.filter === 'settled'}
+            hiddenCount={agedOutCount}
           />
         ) : view === 'pull-requests' ? (
           <SidebarPullRequests

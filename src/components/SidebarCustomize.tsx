@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState, type KeyboardEvent } from 'react';
-import { Check, ChevronDown, ListFilter } from 'lucide-react';
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Activity, Check, ChevronRight, Folder, GitPullRequest, ListFilter } from 'lucide-react';
 import { Popover } from './environment/Popover';
 import {
   DEFAULT_SIDEBAR_PREFERENCES,
@@ -8,96 +8,182 @@ import {
 
 interface Props {
   preferences: SidebarActivityPreferences;
+  unreadCount: number;
   onChange: (preferences: SidebarActivityPreferences) => void;
+  onMarkAllRead: () => void;
 }
 
-const rowClass =
-  'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:bg-droid-elevated/60 focus-visible:text-droid-text focus-visible:outline-none';
+interface Option<T> {
+  value: T;
+  label: string;
+  icon?: ReactNode;
+}
 
-function ChoiceRow<T extends string | number>({
+const ICON = 'h-4 w-4';
+const VIEWS: Option<SidebarActivityPreferences['view']>[] = [
+  { value: 'workspaces', label: 'Workspace', icon: <Folder className={ICON} strokeWidth={1.5} /> },
+  { value: 'activity', label: 'Activity', icon: <Activity className={ICON} strokeWidth={1.5} /> },
+  {
+    value: 'pull-requests',
+    label: 'Pull request',
+    icon: <GitPullRequest className={ICON} strokeWidth={1.5} />,
+  },
+];
+const ORDER: Option<SidebarActivityPreferences['order']>[] = [
+  { value: 'recent', label: 'Last active' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'title', label: 'Name' },
+];
+const LIMIT: Option<SidebarActivityPreferences['limit']>[] = [
+  { value: 5, label: '5 per group' },
+  { value: 10, label: '10 per group' },
+  { value: 0, label: 'Everything' },
+];
+const STATUS: Option<SidebarActivityPreferences['filter']>[] = [
+  { value: 'all', label: 'Any status' },
+  { value: 'attention', label: 'Needs you' },
+  { value: 'working', label: 'Working' },
+  { value: 'ship', label: 'To ship' },
+  { value: 'ready', label: 'Recent' },
+  { value: 'settled', label: 'Settled' },
+];
+
+const ROW =
+  'flex w-full items-center gap-3 px-3.5 py-2 text-left text-[13px] text-droid-text transition-colors hover:bg-droid-elevated/70 focus-visible:bg-droid-elevated/70 focus-visible:outline-none';
+
+type Submenu = 'view' | 'order' | 'limit' | 'filter';
+
+// A menu row that flies its choices out to the right, macOS style. The row
+// shows the current value; the flyout marks it with a check.
+function FlyoutRow<T extends string | number>({
+  id,
   label,
   value,
   options,
   open,
-  onToggle,
+  onOpen,
   onChange,
+  showValue = true,
+  marked = false,
 }: {
+  id: Submenu;
   label: string;
   value: T;
-  options: readonly { value: T; label: string }[];
-  open: boolean;
-  onToggle: () => void;
+  options: readonly Option<T>[];
+  open: Submenu | null;
+  onOpen: (id: Submenu) => void;
   onChange: (value: T) => void;
+  showValue?: boolean;
+  marked?: boolean;
 }) {
+  const current = options.find((option) => option.value === value);
+  const isOpen = open === id;
   return (
-    <div>
-      <button className={rowClass} aria-expanded={open} onClick={onToggle}>
+    <div
+      className="relative"
+      data-submenu={id}
+      onMouseEnter={() => {
+        onOpen(id);
+      }}
+    >
+      <button
+        className={`${ROW} ${isOpen ? 'bg-droid-elevated/70' : ''}`}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        onClick={() => {
+          onOpen(id);
+        }}
+      >
         <span className="flex-1">{label}</span>
-        <span className="text-droid-text-muted">
-          {options.find((option) => option.value === value)?.label}
-        </span>
-        <ChevronDown
-          className={`h-3 w-3 text-droid-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
-          strokeWidth={1.5}
-        />
+        {showValue && <span className="text-droid-text-muted">{current?.label}</span>}
+        {marked && <span className="h-1.5 w-1.5 rounded-full bg-droid-text-secondary" />}
+        <ChevronRight className="h-4 w-4 text-droid-text-muted" strokeWidth={1.5} />
       </button>
-      {open && (
+      {isOpen && (
         <div
-          role="group"
+          role="menu"
           aria-label={label}
-          className="mb-1 ml-2 border-l border-droid-border pl-1"
+          className="absolute -top-1.5 left-full ml-1.5 w-[220px] rounded-xl border border-droid-border bg-droid-surface py-1.5 shadow-2xl shadow-black/50"
         >
-          {options.map((option) => (
-            <button
-              key={option.value}
-              aria-pressed={value === option.value}
-              className={rowClass}
-              onClick={() => {
-                onChange(option.value);
-              }}
-            >
-              <span className="flex-1">{option.label}</span>
-              {value === option.value && (
-                <Check className="h-3.5 w-3.5 text-droid-text" strokeWidth={1.5} />
-              )}
-            </button>
-          ))}
+          {options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <button
+                key={option.value}
+                role="menuitemradio"
+                aria-checked={selected}
+                className={ROW}
+                onClick={() => {
+                  onChange(option.value);
+                }}
+              >
+                {option.icon && (
+                  <span className="flex w-4 shrink-0 justify-center text-droid-text-secondary">
+                    {option.icon}
+                  </span>
+                )}
+                <span className="flex-1">{option.label}</span>
+                {selected && <Check className="h-4 w-4" strokeWidth={2} />}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-export function SidebarCustomize({ preferences, onChange }: Props) {
+export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAllRead }: Props) {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState<'view' | 'order' | 'limit' | 'filter' | null>(null);
+  const [submenu, setSubmenu] = useState<Submenu | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => {
+  const close = () => {
     setOpen(false);
-    setExpanded(null);
-  }, []);
-  const toggle = (section: NonNullable<typeof expanded>) => {
-    setExpanded(expanded === section ? null : section);
+    setSubmenu(null);
   };
-  const viewLabels = {
-    activity: 'Activity',
-    workspaces: 'Workspace view',
-    'pull-requests': 'By pull request',
-  };
-  const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-    const buttons = Array.from(event.currentTarget.querySelectorAll('button'));
-    const current = buttons.findIndex((button) => button === document.activeElement);
-    let next = current + (event.key === 'ArrowUp' ? -1 : 1);
-    if (event.key === 'Home') next = 0;
-    if (event.key === 'End') next = buttons.length - 1;
+  const filtered = preferences.filter !== DEFAULT_SIDEBAR_PREFERENCES.filter;
+  const customized =
+    filtered ||
+    preferences.order !== DEFAULT_SIDEBAR_PREFERENCES.order ||
+    preferences.limit !== DEFAULT_SIDEBAR_PREFERENCES.limit;
+  // Arrow keys walk the rows; Right opens a flyout and enters it, Left leaves.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(event.currentTarget.querySelectorAll('button:not([disabled])'));
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const focus = (index: number) => {
+      (buttons.at(index % buttons.length) as HTMLElement | undefined)?.focus();
+    };
+    if (event.key === 'ArrowDown') focus(current + 1);
+    else if (event.key === 'ArrowUp') focus(current - 1);
+    else if (event.key === 'Home') focus(0);
+    else if (event.key === 'End') focus(-1);
+    else if (event.key === 'ArrowLeft') {
+      const row = (document.activeElement as HTMLElement | null)?.closest('[data-submenu]');
+      row?.querySelector<HTMLElement>('button')?.focus();
+      setSubmenu(null);
+    } else if (event.key === 'ArrowRight') {
+      const row = (document.activeElement as HTMLElement | null)?.closest('[data-submenu]');
+      const id = row?.getAttribute('data-submenu') as Submenu | null;
+      if (id) {
+        setSubmenu(id);
+        requestAnimationFrame(() => {
+          row?.querySelector<HTMLElement>('[role="menu"] button')?.focus();
+        });
+      }
+    } else return;
     event.preventDefault();
-    buttons[(next + buttons.length) % buttons.length]?.focus();
   };
+  const set = <K extends keyof SidebarActivityPreferences>(
+    key: K,
+    value: SidebarActivityPreferences[K],
+  ) => {
+    onChange({ ...preferences, [key]: value });
+  };
+
   return (
-    <div className="mx-3 mb-2 flex items-center justify-between">
+    <div className="mx-3 mb-1 flex items-center justify-between">
       <span className="text-[11px] font-medium text-droid-text-muted">
-        {viewLabels[preferences.view]}
+        {VIEWS.find((view) => view.value === preferences.view)?.label}
       </span>
       <button
         ref={trigger}
@@ -105,11 +191,13 @@ export function SidebarCustomize({ preferences, onChange }: Props) {
           if (open) close();
           else setOpen(true);
         }}
-        title="Customize sidebar"
-        aria-label="Customize sidebar"
-        aria-haspopup="dialog"
+        title="View options"
+        aria-label="View options"
+        aria-haspopup="menu"
         aria-expanded={open}
-        className={`rounded-md p-1.5 transition-colors hover:bg-droid-elevated focus-visible:bg-droid-elevated focus-visible:outline-none ${open ? 'bg-droid-elevated text-droid-text' : 'text-droid-text-muted hover:text-droid-text'}`}
+        className={`rounded-md p-1.5 transition-colors hover:bg-droid-elevated focus-visible:bg-droid-elevated focus-visible:outline-none ${
+          open || customized ? 'text-droid-text' : 'text-droid-text-muted hover:text-droid-text'
+        }`}
       >
         <ListFilter className="h-4 w-4" strokeWidth={1.5} />
       </button>
@@ -117,86 +205,96 @@ export function SidebarCustomize({ preferences, onChange }: Props) {
         open={open}
         onClose={close}
         anchorRef={trigger}
-        label="Customize sidebar"
-        width={264}
+        align="left"
+        label="View options"
+        width={256}
+        className="overflow-visible"
       >
-        <div className="overflow-y-auto p-1 font-sans" onKeyDown={moveFocus}>
-          <ChoiceRow
+        <div
+          className="py-1.5"
+          onKeyDown={onKeyDown}
+          onMouseLeave={() => {
+            setSubmenu(null);
+          }}
+        >
+          <FlyoutRow
+            id="view"
             label="Grouping"
             value={preferences.view}
-            open={expanded === 'view'}
-            onToggle={() => {
-              toggle('view');
-            }}
-            options={[
-              { value: 'workspaces', label: 'Workspace' },
-              { value: 'activity', label: 'Activity' },
-              { value: 'pull-requests', label: 'Pull request' },
-            ]}
+            options={VIEWS}
+            open={submenu}
+            onOpen={setSubmenu}
             onChange={(view) => {
-              onChange({ ...preferences, view });
+              set('view', view);
             }}
           />
-          <ChoiceRow
+          <FlyoutRow
+            id="order"
             label="Ordering"
             value={preferences.order}
-            open={expanded === 'order'}
-            onToggle={() => {
-              toggle('order');
-            }}
-            options={[
-              { value: 'recent', label: 'Last active' },
-              { value: 'oldest', label: 'Oldest activity' },
-              { value: 'title', label: 'Name' },
-            ]}
+            options={ORDER}
+            open={submenu}
+            onOpen={setSubmenu}
             onChange={(order) => {
-              onChange({ ...preferences, order });
+              set('order', order);
             }}
           />
-          <ChoiceRow
+          <FlyoutRow
+            id="limit"
             label="Show"
             value={preferences.limit}
-            open={expanded === 'limit'}
-            onToggle={() => {
-              toggle('limit');
-            }}
-            options={[
-              { value: 5, label: '5 per group' },
-              { value: 10, label: '10 per group' },
-              { value: 0, label: 'All tasks' },
-            ]}
+            options={LIMIT}
+            open={submenu}
+            onOpen={setSubmenu}
+            showValue={false}
             onChange={(limit) => {
-              onChange({ ...preferences, limit });
+              set('limit', limit);
             }}
           />
-          <div className="my-1 border-t border-droid-border" />
-          <ChoiceRow
+          <div className="mx-3.5 my-1.5 border-t border-droid-border" />
+          <div className="flex items-center px-3.5 py-1.5 text-[13px] text-droid-text-muted">
+            <span className="flex-1">Filters</span>
+            {customized && (
+              <button
+                className="transition-colors hover:text-droid-text"
+                onClick={() => {
+                  onChange({
+                    ...DEFAULT_SIDEBAR_PREFERENCES,
+                    view: preferences.view,
+                    settled: preferences.settled,
+                  });
+                }}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          <FlyoutRow
+            id="filter"
             label="Status"
             value={preferences.filter}
-            open={expanded === 'filter'}
-            onToggle={() => {
-              toggle('filter');
-            }}
-            options={[
-              { value: 'all', label: 'All tasks' },
-              { value: 'attention', label: 'Needs attention' },
-              { value: 'working', label: 'Working' },
-              { value: 'ready', label: 'Ready' },
-              { value: 'settled', label: 'Settled' },
-            ]}
+            options={STATUS}
+            open={submenu}
+            onOpen={setSubmenu}
+            showValue={false}
+            marked={filtered}
             onChange={(filter) => {
-              onChange({ ...preferences, filter });
+              set('filter', filter);
             }}
           />
-          <div className="my-1 border-t border-droid-border" />
+          <div className="mx-3.5 my-1.5 border-t border-droid-border" />
           <button
-            className={`${rowClass} text-droid-text-muted`}
+            className={`${ROW} disabled:text-droid-text-muted disabled:hover:bg-transparent`}
+            disabled={unreadCount === 0}
+            onMouseEnter={() => {
+              setSubmenu(null);
+            }}
             onClick={() => {
-              onChange({ ...DEFAULT_SIDEBAR_PREFERENCES, settled: preferences.settled });
-              setExpanded(null);
+              onMarkAllRead();
+              close();
             }}
           >
-            Reset view settings
+            Mark all as read
           </button>
         </div>
       </Popover>

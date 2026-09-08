@@ -16,6 +16,7 @@
 import type { SessionSummary } from '../types/bridge';
 import { toast } from './toast';
 import type { PullRequest } from '../types/vcs';
+import { prKind, type PrKind } from './github';
 
 export type ChatPullRequest = Pick<
   PullRequest,
@@ -382,4 +383,11 @@ export function pullRequestMatchesQuery(pr: ChatPullRequest, query: string): boo
     pr.url.toLowerCase().includes(term) ||
     (pr.headRefName?.toLowerCase().includes(term) ?? false)
   );
+}
+
+// The state a row badges when a chat has linked pull requests: the live one
+// wins, otherwise the most recently linked outcome.
+export function linkedPrKind(metadata: ChatMetadata | undefined): PrKind | undefined {
+  const kinds = (metadata?.pullRequests ?? []).map(prKind);
+  return kinds.find((kind) => kind === 'open' || kind === 'draft') ?? kinds[0];
 }

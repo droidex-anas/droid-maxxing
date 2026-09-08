@@ -7,8 +7,12 @@ export type SessionActivityStatus =
   | 'working'
   | 'approval'
   | 'input'
+  | 'plan'
   | 'failed'
+  | 'interrupted'
+  | 'reply'
   | 'review'
+  | 'ship'
   | 'ready'
   | 'settled';
 
@@ -16,29 +20,99 @@ export const ACTIVITY_LABELS: Record<SessionActivityStatus, string> = {
   working: 'Working',
   approval: 'Needs approval',
   input: 'Needs input',
+  plan: 'Plan waiting',
   failed: 'Failed',
+  interrupted: 'Interrupted',
+  reply: 'Awaiting your reply',
   review: 'Needs review',
-  ready: 'Ready',
+  ship: 'Uncommitted changes',
+  ready: 'Recent',
   settled: 'Settled',
 };
 
+export interface ActivitySignals {
+  attention: SessionAttentionKind | null;
+  unread: boolean;
+  settledAt?: number;
+  // The model spoke last and the user never replied.
+  awaitingReply?: boolean;
+  // This chat owns a worktree with uncommitted changes.
+  uncommitted?: boolean;
+  // Every linked pull request is merged or closed.
+  prDone?: boolean;
+}
+
+// Ordered from "blocked on the user" down to "nothing to do": the first rule
+// that matches wins, so a live turn beats a stale unread marker and a manual
+// settle beats every idle signal.
 export function sessionActivityStatus(
   session: SessionSummary,
-  options: { attention: SessionAttentionKind | null; unread: boolean; settledAt?: number },
+  signals: ActivitySignals,
 ): SessionActivityStatus {
-  if (options.attention === 'approval') return 'approval';
-  if (options.attention === 'question') return 'input';
+  if (signals.attention === 'approval') return 'approval';
+  if (signals.attention === 'question') return 'input';
   if (sessionIsLive(session)) return 'working';
-  if (options.settledAt !== undefined && session.updatedAt <= options.settledAt) return 'settled';
+  if (session.phase === 'awaiting_plan_approval' || session.phase === 'awaiting_run_start')
+    return 'plan';
+  if (signals.settledAt !== undefined && session.updatedAt <= signals.settledAt) return 'settled';
   if (session.phase === 'failed') return 'failed';
-  return options.unread ? 'review' : 'ready';
+  if (session.interruptReason) return 'interrupted';
+  if (signals.unread) return 'review';
+  if (signals.prDone) return 'settled';
+  if (signals.awaitingReply) return 'reply';
+  if (signals.uncommitted) return 'ship';
+  return 'ready';
+}
+
+export const ACTIVITY_GROUPS: readonly {
+  key: SidebarActivityPreferences['filter'];
+  label: string;
+  statuses: readonly SessionActivityStatus[];
+}[] = [
+  {
+    key: 'attention',
+    label: 'Needs you',
+    statuses: ['approval', 'input', 'plan', 'failed', 'interrupted', 'reply', 'review'],
+  },
+  { key: 'working', label: 'Working', statuses: ['working'] },
+  { key: 'ship', label: 'To ship', statuses: ['ship'] },
+  { key: 'ready', label: 'Recent', statuses: ['ready'] },
+  { key: 'settled', label: 'Settled', statuses: ['settled'] },
+];
+
+const DAY = 86_400_000;
+
+// How long an idle chat stays in the Activity view. Live and blocked chats
+// always show; everything else ages out so thousands of old sessions never
+// flood the inbox (they remain reachable from the Workspaces view).
+export function inActivityScope(
+  status: SessionActivityStatus,
+  session: Pick<SessionSummary, 'updatedAt'>,
+  now: number,
+): boolean {
+  const age = now - session.updatedAt;
+  switch (status) {
+    case 'working':
+    case 'approval':
+    case 'input':
+    case 'plan':
+      return true;
+    case 'failed':
+    case 'interrupted':
+    case 'reply':
+      return age <= 30 * DAY;
+    case 'ship':
+      return age <= 14 * DAY;
+    default:
+      return age <= 7 * DAY;
+  }
 }
 
 export interface SidebarActivityPreferences {
   view: 'activity' | 'workspaces' | 'pull-requests';
   settled: Record<string, number>;
   order: 'recent' | 'oldest' | 'title';
-  filter: 'all' | 'attention' | 'working' | 'ready' | 'settled';
+  filter: 'all' | 'attention' | 'working' | 'ship' | 'ready' | 'settled';
   limit: number;
 }
 
@@ -61,6 +135,7 @@ export function isSidebarFilter(value: unknown): value is SidebarActivityPrefere
     value === 'all' ||
     value === 'attention' ||
     value === 'working' ||
+    value === 'ship' ||
     value === 'ready' ||
     value === 'settled'
   );
@@ -139,12 +214,11 @@ export function matchesActivityFilter(
   filter: SidebarActivityPreferences['filter'],
 ): boolean {
   if (filter === 'all') return true;
-  if (filter === 'attention') return ['approval', 'input', 'failed', 'review'].includes(status);
-  return status === filter;
+  return ACTIVITY_GROUPS.some((group) => group.key === filter && group.statuses.includes(status));
 }
 
 export function canSettleSession(status: SessionActivityStatus): boolean {
-  return status !== 'working' && status !== 'approval' && status !== 'input';
+  return !['working', 'approval', 'input', 'plan'].includes(status);
 }
 
 // Keep unloaded history markers, but discard known hidden or superseded entries.
