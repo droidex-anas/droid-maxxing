@@ -335,13 +335,17 @@ test('every automation proposal in one tool group gets its own card', () => {
   const firstCall = propose('p1');
   const firstResult = proposeResult('p1');
   const secondCall = propose('p2');
-  const grepCall = ev({ kind: 'tool_call', toolName: 'Grep', toolArgs: { pattern: 'x' } });
+  const unrelatedCall = ev({
+    kind: 'tool_call',
+    toolName: 'droidmaxx-browser___automation_propose',
+    toolArgs: { prompt: 'x' },
+  });
 
   const { proposals, remaining } = splitAutomationProposals([
     firstCall,
     firstResult,
     secondCall,
-    grepCall,
+    unrelatedCall,
   ]);
   assert.deepEqual(
     proposals.map(({ call, result }) => [call.toolUseId, result?.toolUseId ?? null]),
@@ -350,7 +354,7 @@ test('every automation proposal in one tool group gets its own card', () => {
       ['p2', null],
     ],
   );
-  assert.deepEqual(remaining, [grepCall]);
+  assert.deepEqual(remaining, [unrelatedCall]);
 });
 
 test('an automation proposal stays at conversation level after the turn settles', () => {

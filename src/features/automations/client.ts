@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { bridge } from '../../lib/bridge';
-import type { ClientCommand, ServerEvent } from '../../types/bridge';
-import type { AutomationBridgeCommand, AutomationBridgeEvent } from './protocol';
+import type { ServerEvent } from '../../types/bridge';
+import type { AutomationBridgeCommand } from './protocol';
 import type { AutomationDraft, AutomationSnapshot } from './types';
 
 const EMPTY: AutomationSnapshot = {
@@ -33,7 +33,7 @@ export function useAutomationSnapshot(): AutomationSnapshot {
 
 export function requestAutomationSnapshot(): void {
   initialize();
-  sendRaw({ type: 'automations.list', requestId: newRequestId() });
+  bridge.send({ type: 'automations.list', requestId: newRequestId() });
 }
 
 export function createAutomation(input: AutomationDraft): Promise<void> {
@@ -73,21 +73,20 @@ function initialize(): void {
 }
 
 function handleEvent(event: ServerEvent): void {
-  const automationEvent = asAutomationEvent(event);
-  if (!automationEvent) return;
-  if (automationEvent.type === 'automations.snapshot') {
-    snapshot = automationEvent.snapshot;
+  if (event.type === 'automations.snapshot') {
+    snapshot = event.snapshot;
     listeners.forEach((listener) => {
       listener();
     });
     return;
   }
-  const waiter = pending.get(automationEvent.requestId);
+  if (event.type !== 'automations.result') return;
+  const waiter = pending.get(event.requestId);
   if (!waiter) return;
   clearTimeout(waiter.timeout);
-  pending.delete(automationEvent.requestId);
-  if (automationEvent.ok) waiter.resolve();
-  else waiter.reject(new Error(automationEvent.error ?? 'Automation request failed.'));
+  pending.delete(event.requestId);
+  if (event.ok) waiter.resolve();
+  else waiter.reject(new Error(event.error ?? 'Automation request failed.'));
 }
 
 // Every command routed through here mutates automations, so it must never sit in
@@ -101,23 +100,11 @@ function send(command: AutomationBridgeCommand): Promise<void> {
       reject(new Error('DROIDEX did not acknowledge the automation request.'));
     }, 10_000);
     pending.set(command.requestId, { resolve, reject, timeout });
-    if (bridge.sendIfConnected(command as unknown as ClientCommand)) return;
+    if (bridge.sendIfConnected(command)) return;
     clearTimeout(timeout);
     pending.delete(command.requestId);
     reject(new Error('DROIDEX is not connected.'));
   });
-}
-
-function sendRaw(command: AutomationBridgeCommand): void {
-  bridge.send(command as unknown as ClientCommand);
-}
-
-function asAutomationEvent(event: ServerEvent): AutomationBridgeEvent | null {
-  const candidate = event as unknown as { type?: unknown };
-  if (typeof candidate.type !== 'string' || !candidate.type.startsWith('automations.')) {
-    return null;
-  }
-  return event as unknown as AutomationBridgeEvent;
 }
 
 function subscribe(listener: () => void): () => void {

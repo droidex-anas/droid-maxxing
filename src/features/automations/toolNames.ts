@@ -39,112 +39,36 @@ export function isAutomationProposalCall(event: { kind?: string; toolName?: stri
 
 export function automationProposalIdFromText(value: string | undefined): string | null {
   if (!value) return null;
-  const parsed = parseToolResultValue(value);
-  const nested = proposalIdFromValue(parsed, 0);
-  if (nested) return nested;
-
-  // Last-resort extraction also handles JSON-encoded text nested inside an MCP
-  // content array, where quotes are escaped in the outer serialization.
-  const normalized = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
-  const match = /["']proposalId["']\s*:\s*["']([^"']+)["']/.exec(normalized);
-  return match?.[1] ?? null;
+  const result = parseToolResultObject(value);
+  return result?.ok === true && typeof result.proposalId === 'string' ? result.proposalId : null;
 }
 
+/** Decode the JSON result or MCP text content emitted by the automation tools. */
 export function parseToolResultObject(value: string): Record<string, unknown> | null {
-  const parsed = parseToolResultValue(value);
-  return findObject(parsed, 0);
+  return toolResult(value, 0);
 }
 
-function parseToolResultValue(value: string): unknown {
-  const candidates = [value.trim()];
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(value)?.[1]?.trim();
-  if (fenced) candidates.push(fenced);
-  const firstBrace = value.indexOf('{');
-  const lastBrace = value.lastIndexOf('}');
-  if (firstBrace >= 0 && lastBrace > firstBrace)
-    candidates.push(value.slice(firstBrace, lastBrace + 1));
-  const firstBracket = value.indexOf('[');
-  const lastBracket = value.lastIndexOf(']');
-  if (firstBracket >= 0 && lastBracket > firstBracket) {
-    candidates.push(value.slice(firstBracket, lastBracket + 1));
-  }
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate) as unknown;
-    } catch {
-      // Try the next bounded candidate.
-    }
-  }
-  return null;
-}
-
-function proposalIdFromValue(value: unknown, depth: number): string | null {
+function toolResult(value: unknown, depth: number): Record<string, unknown> | null {
   if (depth > 5) return null;
   if (typeof value === 'string') {
-    const parsed = parseToolResultValue(value);
-    return parsed === null ? null : proposalIdFromValue(parsed, depth + 1);
+    try {
+      return toolResult(JSON.parse(value) as unknown, depth + 1);
+    } catch {
+      return null;
+    }
   }
   if (Array.isArray(value)) {
     for (const item of value) {
-      const id = proposalIdFromValue(item, depth + 1);
-      if (id) return id;
+      const result = toolResult(item, depth + 1);
+      if (result) return result;
     }
     return null;
   }
-  const record = objectValue(value);
-  if (!record) return null;
-  if (record.ok === true && typeof record.proposalId === 'string') return record.proposalId;
-  for (const nested of Object.values(record)) {
-    const id = proposalIdFromValue(nested, depth + 1);
-    if (id) return id;
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.ok === 'boolean' || typeof record.error === 'string') return record;
+  if (record.type === 'text' && typeof record.text === 'string') {
+    return toolResult(record.text, depth + 1) ?? { error: record.text };
   }
-  return null;
-}
-
-function findObject(value: unknown, depth: number): Record<string, unknown> | null {
-  if (depth > 5) return null;
-  const direct = objectValue(value);
-  if (direct) return recordResult(direct, depth);
-  if (typeof value === 'string') {
-    const parsed = parseToolResultValue(value);
-    return parsed === null ? null : findObject(parsed, depth + 1);
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findObject(item, depth + 1);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function recordResult(
-  record: Record<string, unknown>,
-  depth: number,
-): Record<string, unknown> | null {
-  if (typeof record.error === 'string' || record.ok !== undefined) return record;
-  // An MCP text block carries the real result inside `text`; the block itself is
-  // never worth showing, so a plain message becomes the error.
-  const text = textContent(record);
-  if (text !== null) {
-    const parsed = parseToolResultValue(text);
-    const found = parsed === null ? null : findObject(parsed, depth + 1);
-    if (found) return found;
-    return text.trim() ? { error: text.trim() } : null;
-  }
-  for (const nested of Object.values(record)) {
-    const found = findObject(nested, depth + 1);
-    if (found) return found;
-  }
-  return record;
-}
-
-function textContent(record: Record<string, unknown>): string | null {
-  return record.type === 'text' && typeof record.text === 'string' ? record.text : null;
-}
-
-function objectValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return Array.isArray(record.content) ? toolResult(record.content, depth + 1) : null;
 }

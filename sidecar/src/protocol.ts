@@ -1,7 +1,7 @@
 // Bridge protocol shared between the Node sidecar and the React frontend.
 // The frontend keeps a mirror copy at src/types/bridge.ts — keep them in sync.
 
-import type { AutomationBridgeEvent } from './automations/types.js';
+import type { AutomationBridgeCommand, AutomationBridgeEvent } from './automations/types.js';
 import type { McpClientCommand, McpServerEvent } from './mcpProtocol.js';
 export type {
   McpServerInfo,
@@ -551,6 +551,7 @@ export type PermissionOutcome =
 
 // ── Frontend -> Sidecar ──────────────────────────────────────────────
 export type ClientCommand =
+  | AutomationBridgeCommand
   | McpClientCommand
   | { type: 'connect'; apiKey?: string }
   | { type: 'runtime.status' }

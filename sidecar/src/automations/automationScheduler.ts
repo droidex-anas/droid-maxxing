@@ -17,8 +17,6 @@ const SCHEDULER_RECHECK_MS = 60_000;
 interface ScheduledRunQueue {
   /** Queues this occurrence unless the same occurrence is already queued. */
   queueScheduled: (automation: Automation, scheduledAt: number) => void;
-  /** Starts the queue if nothing is running. */
-  startQueued: () => void;
 }
 
 export interface AutomationSchedulerOptions {

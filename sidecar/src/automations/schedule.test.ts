@@ -58,7 +58,7 @@ test('scheduler backs off after a due-store write fails', async (context) => {
     store: () => store,
     now: () => clock,
     isClosed: () => false,
-    runs: { queueScheduled: () => undefined, startQueued: () => undefined },
+    runs: { queueScheduled: () => undefined },
     flushDue: () => {
       flushes += 1;
       return Promise.reject(new Error('disk unavailable'));
