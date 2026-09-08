@@ -2,15 +2,8 @@ import { useSidebarPagination } from '../hooks/useSidebarPagination';
 import { useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { SessionSummary } from '../types/bridge';
-import type { SessionActivityStatus } from '../lib/sidebarActivity';
+import { ACTIVITY_GROUPS, type SessionActivityStatus } from '../lib/sidebarActivity';
 import { SidebarSessionList } from './SidebarSessionList';
-
-const GROUPS = [
-  { label: 'Needs attention', statuses: ['approval', 'input', 'failed', 'review'] },
-  { label: 'Working', statuses: ['working'] },
-  { label: 'Ready', statuses: ['ready'] },
-  { label: 'Settled', statuses: ['settled'] },
-];
 
 interface Props {
   sessions: SessionSummary[];
@@ -19,9 +12,12 @@ interface Props {
   renderRow: (session: SessionSummary) => ReactNode;
   limit: number;
   showSettled: boolean;
+  // Chats aged out of the inbox; they stay reachable from Workspaces.
+  hiddenCount: number;
 }
 
-// Activity uses the same rows and chat actions as workspace browsing.
+// An inbox: chats grouped by what they need from the user, most urgent first.
+// Rows and chat actions are shared with workspace browsing.
 export function SidebarActivity({
   sessions,
   activeAppSessionId,
@@ -29,15 +25,18 @@ export function SidebarActivity({
   renderRow,
   limit,
   showSettled,
+  hiddenCount,
 }: Props) {
   const [settledOpen, setSettledOpen] = useState(false);
   const { defaultVisibleCount, visibleCountFor, showMore, showLess } = useSidebarPagination(limit);
   return (
     <div className="space-y-3">
       {sessions.length === 0 && (
-        <p className="px-3 py-2 text-[12px] text-droid-text-muted">No tasks match this view.</p>
+        <p className="px-3 py-2 text-[12px] text-droid-text-muted">
+          {hiddenCount > 0 ? 'Nothing needs you right now.' : 'No tasks match this view.'}
+        </p>
       )}
-      {GROUPS.map((group) => {
+      {ACTIVITY_GROUPS.map((group) => {
         const rows = sessions.filter((session) => group.statuses.includes(statusFor(session)));
         if (rows.length === 0) return null;
         const isSettled = group.label === 'Settled';
@@ -87,6 +86,12 @@ export function SidebarActivity({
           </section>
         );
       })}
+      {hiddenCount > 0 && (
+        <p className="px-3 pt-1 text-[11px] text-droid-text-muted/70">
+          {String(hiddenCount)} older {hiddenCount === 1 ? 'chat lives' : 'chats live'} in
+          Workspaces.
+        </p>
+      )}
     </div>
   );
 }

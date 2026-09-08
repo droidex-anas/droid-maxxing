@@ -179,9 +179,9 @@ export function SidebarCustomize({ preferences, onChange }: Props) {
             }}
             options={[
               { value: 'all', label: 'All tasks' },
-              { value: 'attention', label: 'Needs attention' },
+              { value: 'attention', label: 'Needs you' },
               { value: 'working', label: 'Working' },
-              { value: 'ready', label: 'Ready' },
+              { value: 'ready', label: 'Recent' },
               { value: 'settled', label: 'Settled' },
             ]}
             onChange={(filter) => {

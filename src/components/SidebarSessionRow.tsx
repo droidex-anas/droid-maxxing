@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { MoreHorizontal } from 'lucide-react';
+import { Check, MoreHorizontal } from 'lucide-react';
 import { MAX_CHAT_TITLE_LENGTH } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
 import { SESSION_MENU_WIDTH } from './SessionContextMenu';
@@ -20,6 +20,21 @@ function WorkingSpinner() {
   );
 }
 
+const HOVER_ACTION =
+  'absolute top-1/2 -translate-y-1/2 flex w-5 h-5 items-center justify-center rounded-md text-droid-text-muted opacity-0 pointer-events-none transition-opacity hover:bg-droid-elevated hover:text-droid-text group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none';
+
+// Left-edge dot: red when something broke, accent for unseen output, amber for
+// anything else waiting on the user.
+const STATUS_DOT: Partial<Record<SessionActivityStatus, string>> = {
+  failed: 'bg-droid-red',
+  review: 'bg-droid-accent',
+  approval: 'bg-droid-orange',
+  input: 'bg-droid-orange',
+  plan: 'bg-droid-orange',
+  interrupted: 'bg-droid-orange',
+  reply: 'bg-droid-orange',
+};
+
 export interface SessionRowProps {
   session: SessionSummary;
   // Effective title: the app-level rename override when set, else the
@@ -30,6 +45,10 @@ export interface SessionRowProps {
   running: boolean;
   attention: SessionAttentionKind | null;
   activityStatus: SessionActivityStatus;
+  // Activity view only: a second line saying why the chat is listed. When set
+  // the row is two lines and the attention pill gives way to the time.
+  detail?: string;
+  onSettle?: (appSessionId: string) => void;
   renaming: boolean;
   now: number;
   onSelect: (appSessionId: string) => void;
@@ -48,6 +67,8 @@ export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowP
     prev.running === next.running &&
     prev.attention === next.attention &&
     prev.activityStatus === next.activityStatus &&
+    prev.detail === next.detail &&
+    prev.onSettle === next.onSettle &&
     prev.renaming === next.renaming &&
     prev.now === next.now &&
     prev.onSelect === next.onSelect &&
@@ -66,6 +87,8 @@ export const SessionRow = memo(function SessionRow({
   running,
   attention,
   activityStatus,
+  detail,
+  onSettle,
   renaming,
   now,
   onSelect,
@@ -81,6 +104,8 @@ export const SessionRow = memo(function SessionRow({
   const wasRenaming = useRef(false);
   const [marqueePx, setMarqueePx] = useState(0);
   const timeLabel = formatRelativeTime(session.updatedAt, now);
+  // Outside the Activity view the pill already announces approvals/questions.
+  const dot = detail || !attention ? STATUS_DOT[activityStatus] : undefined;
 
   // Return focus to the row when the inline editor closes, unless the user
   // already moved focus elsewhere (e.g. clicked another row).
@@ -176,55 +201,58 @@ export const SessionRow = memo(function SessionRow({
         <span
           className={`w-3 flex items-center justify-center shrink-0 ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
         >
-          {!attention && running ? <WorkingSpinner /> : null}
-          {!attention && !running && activityStatus === 'review' && (
-            <span className="h-1.5 w-1.5 rounded-full bg-droid-accent" aria-hidden="true" />
-          )}
-          {!attention && activityStatus === 'failed' && (
-            <span className="h-1.5 w-1.5 rounded-full bg-droid-red" aria-hidden="true" />
+          {running && !attention ? (
+            <WorkingSpinner />
+          ) : (
+            dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden="true" />
           )}
         </span>
-        {!attention && !running && (activityStatus === 'review' || activityStatus === 'failed') && (
-          <span className="sr-only">{ACTIVITY_LABELS[activityStatus]}:</span>
-        )}
+        {dot && <span className="sr-only">{ACTIVITY_LABELS[activityStatus]}:</span>}
         {unread && <span className="sr-only">Unread:</span>}
-        {attention && (
+        {attention && !detail && (
           <span className="sr-only">
             {attention === 'approval' ? 'Waiting for approval:' : 'Waiting for an answer:'}
           </span>
         )}
-        <span
-          className="min-w-0 flex-1 overflow-hidden"
-          style={
-            marquee
-              ? // Fade the right edge so the sliding title never collides
-                // with the hover "..." button.
-                {
-                  maskImage: `linear-gradient(to right, black calc(100% - ${String(marqueeFade)}px), transparent)`,
-                  WebkitMaskImage: `linear-gradient(to right, black calc(100% - ${String(marqueeFade)}px), transparent)`,
-                }
-              : undefined
-          }
-        >
+        <span className="min-w-0 flex-1">
           <span
-            ref={titleRef}
-            className={`block text-[13px] ${marquee ? 'title-marquee whitespace-nowrap' : 'truncate'} ${
-              active
-                ? 'text-droid-text'
-                : unread
-                  ? 'text-droid-text font-semibold'
-                  : 'text-droid-text-secondary group-hover:text-droid-text'
-            }`}
+            className="block min-w-0 overflow-hidden"
+            style={
+              marquee
+                ? // Fade the right edge so the sliding title never collides
+                  // with the hover "..." button.
+                  {
+                    maskImage: `linear-gradient(to right, black calc(100% - ${String(marqueeFade)}px), transparent)`,
+                    WebkitMaskImage: `linear-gradient(to right, black calc(100% - ${String(marqueeFade)}px), transparent)`,
+                  }
+                : undefined
+            }
           >
-            {title}
+            <span
+              ref={titleRef}
+              className={`block text-[13px] ${marquee ? 'title-marquee whitespace-nowrap' : 'truncate'} ${
+                active
+                  ? 'text-droid-text'
+                  : unread
+                    ? 'text-droid-text font-semibold'
+                    : 'text-droid-text-secondary group-hover:text-droid-text'
+              }`}
+            >
+              {title}
+            </span>
           </span>
+          {detail && (
+            <span className="block truncate text-[11.5px] leading-4 text-droid-text-muted">
+              {detail}
+            </span>
+          )}
         </span>
-        {attention ? (
+        {attention && !detail ? (
           <SessionAttentionBadge kind={attention} />
         ) : (
           timeLabel && (
             <span
-              className={`shrink-0 text-[10.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
+              className={`shrink-0 text-right text-[10.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${onSettle ? 'min-w-[44px]' : ''} ${
                 unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
               }`}
             >
@@ -236,6 +264,20 @@ export const SessionRow = memo(function SessionRow({
       {/* On hover the timestamp becomes the "..." menu trigger (rename, pin,
           archive). It stays tabbable while hidden so keyboard users can reach
           it; opacity (not display) keeps it in the tab order. */}
+      {onSettle && (
+        <button
+          type="button"
+          aria-label={`Settle ${title}`}
+          title="Mark as settled"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSettle(session.appSessionId);
+          }}
+          className={`${HOVER_ACTION} right-7`}
+        >
+          <Check className="w-3.5 h-3.5" strokeWidth={2} />
+        </button>
+      )}
       <button
         type="button"
         aria-label={`Actions for ${title}`}
@@ -245,7 +287,7 @@ export const SessionRow = memo(function SessionRow({
           const rect = e.currentTarget.getBoundingClientRect();
           onMenu(session.appSessionId, { x: rect.right - SESSION_MENU_WIDTH, y: rect.bottom + 4 });
         }}
-        className="absolute right-1.5 top-1/2 -translate-y-1/2 flex w-5 h-5 items-center justify-center rounded-md text-droid-text-muted opacity-0 pointer-events-none transition-opacity hover:bg-droid-elevated hover:text-droid-text group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none"
+        className={`${HOVER_ACTION} right-1.5`}
       >
         <MoreHorizontal className="w-4 h-4" />
       </button>
