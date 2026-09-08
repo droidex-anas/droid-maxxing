@@ -20,7 +20,13 @@ import { SidebarActivity } from './SidebarActivity';
 import { useSidebarActivity } from '../hooks/useSidebarActivity';
 import { compareSidebarSessions, matchesActivityFilter } from '../lib/sidebarActivity';
 import { SidebarWorkspaceList } from './SidebarWorkspaceList';
-import { chatDisplayTitle, isChatHidden, isChatPinned, pinnedChats } from '../lib/chatMetadata';
+import {
+  chatDisplayTitle,
+  isChatHidden,
+  isChatPinned,
+  linkedPrKind,
+  pinnedChats,
+} from '../lib/chatMetadata';
 import { useSidebarRowActions } from '../hooks/useSidebarRowActions';
 import { SessionContextMenu } from './SessionContextMenu';
 import { SessionRow } from './SidebarSessionRow';
@@ -214,15 +220,6 @@ export default function Sidebar({
     handleCopyMarkdown,
   } = rowActions;
 
-  const settleRow = useCallback(
-    (appSessionId: string) => {
-      const sessions: Partial<Record<string, SessionSummary>> = state.sessions;
-      const session = sessions[appSessionId];
-      if (session) activity.settle(session);
-    },
-    [state.sessions, activity.settle],
-  );
-
   const renderRow = (m: SessionSummary) => {
     const status = statusFor(m);
     const inbox = view === 'activity';
@@ -236,7 +233,7 @@ export default function Sidebar({
         running={sessionIsLive(m)}
         activityStatus={status}
         detail={inbox ? reasonFor(m, status) || ACTIVITY_LABELS[status] : undefined}
-        onSettle={inbox && canSettleSession(status) && status !== 'settled' ? settleRow : undefined}
+        pr={linkedPrKind(chatMetadata[m.appSessionId])}
         attention={sessionAttention(
           m.appSessionId,
           state.pendingPermissions,

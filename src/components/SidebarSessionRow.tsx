@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Check, MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal } from 'lucide-react';
 import { MAX_CHAT_TITLE_LENGTH } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
 import { SESSION_MENU_WIDTH } from './SessionContextMenu';
@@ -7,6 +7,8 @@ import type { SessionSummary } from '../types/bridge';
 import type { SessionAttentionKind } from '../lib/sessionAttention';
 import { ACTIVITY_LABELS, type SessionActivityStatus } from '../lib/sidebarActivity';
 import { SessionAttentionBadge } from './SessionAttentionBadge';
+import { PrStateIcon } from './environment/GithubIcons';
+import type { PrKind } from '../lib/github';
 
 // Simple, smooth ring spinner shown on the left of a row while its model
 // works. motion-safe keeps it static for reduced-motion users.
@@ -48,7 +50,8 @@ export interface SessionRowProps {
   // Activity view only: a second line saying why the chat is listed. When set
   // the row is two lines and the attention pill gives way to the time.
   detail?: string;
-  onSettle?: (appSessionId: string) => void;
+  // Linked pull request state, shown as a small icon before the time.
+  pr?: PrKind;
   renaming: boolean;
   now: number;
   onSelect: (appSessionId: string) => void;
@@ -68,7 +71,7 @@ export function areSessionRowPropsEqual(prev: SessionRowProps, next: SessionRowP
     prev.attention === next.attention &&
     prev.activityStatus === next.activityStatus &&
     prev.detail === next.detail &&
-    prev.onSettle === next.onSettle &&
+    prev.pr === next.pr &&
     prev.renaming === next.renaming &&
     prev.now === next.now &&
     prev.onSelect === next.onSelect &&
@@ -88,7 +91,7 @@ export const SessionRow = memo(function SessionRow({
   attention,
   activityStatus,
   detail,
-  onSettle,
+  pr,
   renaming,
   now,
   onSelect,
@@ -242,42 +245,31 @@ export const SessionRow = memo(function SessionRow({
             </span>
           </span>
           {detail && (
-            <span className="block truncate text-[11.5px] leading-4 text-droid-text-muted">
+            <span className="mt-px block truncate text-[11px] leading-4 text-droid-text-muted">
               {detail}
             </span>
           )}
         </span>
-        {attention && !detail ? (
-          <SessionAttentionBadge kind={attention} />
-        ) : (
-          timeLabel && (
-            <span
-              className={`shrink-0 text-right text-[10.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${onSettle ? 'min-w-[44px]' : ''} ${
-                unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
-              }`}
-            >
-              {timeLabel}
-            </span>
-          )
-        )}
+        <span className="flex shrink-0 items-center gap-1.5">
+          {pr && <PrStateIcon kind={pr} size={13} />}
+          {attention && !detail ? (
+            <SessionAttentionBadge kind={attention} />
+          ) : (
+            timeLabel && (
+              <span
+                className={`min-w-[22px] text-right text-[11px] tabular-nums group-hover:invisible group-focus-within:invisible ${
+                  unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
+                }`}
+              >
+                {timeLabel}
+              </span>
+            )
+          )}
+        </span>
       </button>
       {/* On hover the timestamp becomes the "..." menu trigger (rename, pin,
           archive). It stays tabbable while hidden so keyboard users can reach
           it; opacity (not display) keeps it in the tab order. */}
-      {onSettle && (
-        <button
-          type="button"
-          aria-label={`Settle ${title}`}
-          title="Mark as settled"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSettle(session.appSessionId);
-          }}
-          className={`${HOVER_ACTION} right-7`}
-        >
-          <Check className="w-3.5 h-3.5" strokeWidth={2} />
-        </button>
-      )}
       <button
         type="button"
         aria-label={`Actions for ${title}`}

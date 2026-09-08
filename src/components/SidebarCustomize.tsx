@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState, type KeyboardEvent } from 'react';
-import { Check, ChevronDown, ListFilter } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { ChevronDown, ListFilter } from 'lucide-react';
 import { Popover } from './environment/Popover';
 import {
   DEFAULT_SIDEBAR_PREFERENCES,
@@ -11,193 +11,201 @@ interface Props {
   onChange: (preferences: SidebarActivityPreferences) => void;
 }
 
-const rowClass =
-  'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:bg-droid-elevated/60 focus-visible:text-droid-text focus-visible:outline-none';
+const VIEWS: { value: SidebarActivityPreferences['view']; label: string; hint: string }[] = [
+  { value: 'workspaces', label: 'Workspaces', hint: 'Chats grouped by folder' },
+  { value: 'activity', label: 'Activity', hint: 'What needs you, first' },
+  { value: 'pull-requests', label: 'Pull requests', hint: 'Chats grouped by PR' },
+];
 
-function ChoiceRow<T extends string | number>({
+const STATUS: { value: SidebarActivityPreferences['filter']; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'attention', label: 'Needs you' },
+  { value: 'working', label: 'Working' },
+  { value: 'ready', label: 'Recent' },
+  { value: 'settled', label: 'Settled' },
+];
+
+const ORDER: { value: SidebarActivityPreferences['order']; label: string }[] = [
+  { value: 'recent', label: 'Last active' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'title', label: 'Name' },
+];
+
+const LIMIT: { value: SidebarActivityPreferences['limit']; label: string }[] = [
+  { value: 5, label: '5' },
+  { value: 10, label: '10' },
+  { value: 0, label: 'All' },
+];
+
+const ICON_BUTTON =
+  'rounded-md p-1.5 transition-colors hover:bg-droid-elevated focus-visible:bg-droid-elevated focus-visible:outline-none';
+
+// A row of pills for one preference; the whole row reads at a glance and one
+// click changes it, unlike a nested dropdown.
+function Pills<T extends string | number>({
   label,
   value,
   options,
-  open,
-  onToggle,
   onChange,
 }: {
   label: string;
   value: T;
   options: readonly { value: T; label: string }[];
-  open: boolean;
-  onToggle: () => void;
   onChange: (value: T) => void;
 }) {
   return (
-    <div>
-      <button className={rowClass} aria-expanded={open} onClick={onToggle}>
-        <span className="flex-1">{label}</span>
-        <span className="text-droid-text-muted">
-          {options.find((option) => option.value === value)?.label}
-        </span>
-        <ChevronDown
-          className={`h-3 w-3 text-droid-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
-          strokeWidth={1.5}
-        />
-      </button>
-      {open && (
-        <div
-          role="group"
-          aria-label={label}
-          className="mb-1 ml-2 border-l border-droid-border pl-1"
-        >
-          {options.map((option) => (
+    <div role="group" aria-label={label} className="px-2.5 py-1.5">
+      <div className="mb-1.5 text-[10.5px] font-medium uppercase tracking-wide text-droid-text-muted">
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
             <button
               key={option.value}
-              aria-pressed={value === option.value}
-              className={rowClass}
+              aria-pressed={selected}
               onClick={() => {
                 onChange(option.value);
               }}
+              className={`rounded-full px-2.5 py-1 text-[12px] leading-none transition-colors ${
+                selected
+                  ? 'bg-droid-text text-droid-bg'
+                  : 'bg-droid-elevated/70 text-droid-text-secondary hover:bg-droid-elevated hover:text-droid-text'
+              }`}
             >
-              <span className="flex-1">{option.label}</span>
-              {value === option.value && (
-                <Check className="h-3.5 w-3.5 text-droid-text" strokeWidth={1.5} />
-              )}
+              {option.label}
             </button>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
+// Sidebar header: the view name switches views; the funnel filters and sorts
+// within the view. Both open flat, one-click popovers.
 export function SidebarCustomize({ preferences, onChange }: Props) {
-  const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState<'view' | 'order' | 'limit' | 'filter' | null>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => {
-    setOpen(false);
-    setExpanded(null);
-  }, []);
-  const toggle = (section: NonNullable<typeof expanded>) => {
-    setExpanded(expanded === section ? null : section);
+  const [open, setOpen] = useState<'view' | 'filter' | null>(null);
+  const viewTrigger = useRef<HTMLButtonElement>(null);
+  const filterTrigger = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    setOpen(null);
   };
-  const viewLabels = {
-    activity: 'Activity',
-    workspaces: 'Workspace view',
-    'pull-requests': 'By pull request',
-  };
-  const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-    const buttons = Array.from(event.currentTarget.querySelectorAll('button'));
-    const current = buttons.findIndex((button) => button === document.activeElement);
-    let next = current + (event.key === 'ArrowUp' ? -1 : 1);
-    if (event.key === 'Home') next = 0;
-    if (event.key === 'End') next = buttons.length - 1;
-    event.preventDefault();
-    buttons[(next + buttons.length) % buttons.length]?.focus();
-  };
+  const filtered =
+    preferences.filter !== DEFAULT_SIDEBAR_PREFERENCES.filter ||
+    preferences.order !== DEFAULT_SIDEBAR_PREFERENCES.order ||
+    preferences.limit !== DEFAULT_SIDEBAR_PREFERENCES.limit;
+
   return (
-    <div className="mx-3 mb-2 flex items-center justify-between">
-      <span className="text-[11px] font-medium text-droid-text-muted">
-        {viewLabels[preferences.view]}
-      </span>
+    <div className="mx-2 mb-1 flex items-center justify-between">
       <button
-        ref={trigger}
+        ref={viewTrigger}
         onClick={() => {
-          if (open) close();
-          else setOpen(true);
+          setOpen(open === 'view' ? null : 'view');
         }}
-        title="Customize sidebar"
-        aria-label="Customize sidebar"
+        aria-haspopup="menu"
+        aria-expanded={open === 'view'}
+        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
+      >
+        {VIEWS.find((view) => view.value === preferences.view)?.label}
+        <ChevronDown className="h-3 w-3" strokeWidth={1.75} />
+      </button>
+      <button
+        ref={filterTrigger}
+        onClick={() => {
+          setOpen(open === 'filter' ? null : 'filter');
+        }}
+        title="Filter and sort"
+        aria-label="Filter and sort"
         aria-haspopup="dialog"
-        aria-expanded={open}
-        className={`rounded-md p-1.5 transition-colors hover:bg-droid-elevated focus-visible:bg-droid-elevated focus-visible:outline-none ${open ? 'bg-droid-elevated text-droid-text' : 'text-droid-text-muted hover:text-droid-text'}`}
+        aria-expanded={open === 'filter'}
+        className={`relative ${ICON_BUTTON} ${open === 'filter' || filtered ? 'text-droid-text' : 'text-droid-text-muted hover:text-droid-text'}`}
       >
         <ListFilter className="h-4 w-4" strokeWidth={1.5} />
+        {filtered && (
+          <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-droid-accent" />
+        )}
       </button>
+
       <Popover
-        open={open}
+        open={open === 'view'}
         onClose={close}
-        anchorRef={trigger}
-        label="Customize sidebar"
-        width={264}
+        anchorRef={viewTrigger}
+        align="left"
+        label="Sidebar view"
+        width={220}
       >
-        <div className="overflow-y-auto p-1 font-sans" onKeyDown={moveFocus}>
-          <ChoiceRow
-            label="Grouping"
-            value={preferences.view}
-            open={expanded === 'view'}
-            onToggle={() => {
-              toggle('view');
-            }}
-            options={[
-              { value: 'workspaces', label: 'Workspace' },
-              { value: 'activity', label: 'Activity' },
-              { value: 'pull-requests', label: 'Pull request' },
-            ]}
-            onChange={(view) => {
-              onChange({ ...preferences, view });
-            }}
-          />
-          <ChoiceRow
-            label="Ordering"
-            value={preferences.order}
-            open={expanded === 'order'}
-            onToggle={() => {
-              toggle('order');
-            }}
-            options={[
-              { value: 'recent', label: 'Last active' },
-              { value: 'oldest', label: 'Oldest activity' },
-              { value: 'title', label: 'Name' },
-            ]}
-            onChange={(order) => {
-              onChange({ ...preferences, order });
-            }}
-          />
-          <ChoiceRow
+        <div role="menu" className="p-1">
+          {VIEWS.map((view) => {
+            const selected = view.value === preferences.view;
+            return (
+              <button
+                key={view.value}
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  onChange({ ...preferences, view: view.value });
+                  close();
+                }}
+                className={`flex w-full flex-col rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60 ${
+                  selected ? 'text-droid-text' : 'text-droid-text-secondary hover:text-droid-text'
+                }`}
+              >
+                <span className="text-[12.5px] font-medium">{view.label}</span>
+                <span className="text-[11px] text-droid-text-muted">{view.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Popover>
+
+      <Popover
+        open={open === 'filter'}
+        onClose={close}
+        anchorRef={filterTrigger}
+        label="Filter and sort"
+        width={236}
+      >
+        <div className="py-1">
+          <Pills
             label="Show"
-            value={preferences.limit}
-            open={expanded === 'limit'}
-            onToggle={() => {
-              toggle('limit');
-            }}
-            options={[
-              { value: 5, label: '5 per group' },
-              { value: 10, label: '10 per group' },
-              { value: 0, label: 'All tasks' },
-            ]}
-            onChange={(limit) => {
-              onChange({ ...preferences, limit });
-            }}
-          />
-          <div className="my-1 border-t border-droid-border" />
-          <ChoiceRow
-            label="Status"
             value={preferences.filter}
-            open={expanded === 'filter'}
-            onToggle={() => {
-              toggle('filter');
-            }}
-            options={[
-              { value: 'all', label: 'All tasks' },
-              { value: 'attention', label: 'Needs you' },
-              { value: 'working', label: 'Working' },
-              { value: 'ready', label: 'Recent' },
-              { value: 'settled', label: 'Settled' },
-            ]}
+            options={STATUS}
             onChange={(filter) => {
               onChange({ ...preferences, filter });
             }}
           />
-          <div className="my-1 border-t border-droid-border" />
-          <button
-            className={`${rowClass} text-droid-text-muted`}
-            onClick={() => {
-              onChange({ ...DEFAULT_SIDEBAR_PREFERENCES, settled: preferences.settled });
-              setExpanded(null);
+          <Pills
+            label="Sort"
+            value={preferences.order}
+            options={ORDER}
+            onChange={(order) => {
+              onChange({ ...preferences, order });
             }}
-          >
-            Reset view settings
-          </button>
+          />
+          <Pills
+            label="Per group"
+            value={preferences.limit}
+            options={LIMIT}
+            onChange={(limit) => {
+              onChange({ ...preferences, limit });
+            }}
+          />
+          {filtered && (
+            <button
+              onClick={() => {
+                onChange({
+                  ...DEFAULT_SIDEBAR_PREFERENCES,
+                  view: preferences.view,
+                  settled: preferences.settled,
+                });
+              }}
+              className="mx-2.5 mb-1 mt-1 text-[11.5px] text-droid-text-muted transition-colors hover:text-droid-text"
+            >
+              Reset
+            </button>
+          )}
         </div>
       </Popover>
     </div>
