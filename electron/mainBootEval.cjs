@@ -5,6 +5,7 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const assert = require('node:assert/strict');
 
 const SENTINEL = 'MAIN_BOOT_EVAL_OK';
 
@@ -52,6 +53,9 @@ function createElectronStub(options) {
     return paths[name];
   };
   app.setPath = (name, value) => {
+    if (!path.isAbsolute(value) || !fs.existsSync(value)) {
+      throw new Error('Electron app.setPath requires an existing absolute directory');
+    }
     paths[name] = value;
   };
   app.disableHardwareAcceleration = () => {};
@@ -127,7 +131,31 @@ function installElectronStub(electron) {
 function evaluateMain() {
   const appRoot = path.resolve(__dirname, '..');
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'droidex-boot-eval-'));
-  process.env.DROIDEX_USER_DATA_DIR = userData;
+  const profileCase = process.argv[2] ?? 'existing';
+  const requestedProfile = path.join(
+    userData,
+    'fresh',
+    profileCase === 'padded' ? 'profile  ' : 'profile',
+  );
+  if (profileCase === 'file') {
+    fs.mkdirSync(path.dirname(requestedProfile), { recursive: true });
+    fs.writeFileSync(requestedProfile, 'occupied');
+  }
+  process.env.DROIDEX_USER_DATA_DIR =
+    profileCase === 'relative'
+      ? 'relative-profile'
+      : profileCase === 'blank'
+        ? '   '
+        : ['fresh', 'file', 'padded'].includes(profileCase)
+          ? requestedProfile
+          : userData;
+  const expectedProfile =
+    profileCase === 'blank'
+      ? path.join(userData, 'appData', 'DROIDEX')
+      : profileCase === 'existing'
+        ? userData
+        : requestedProfile;
+  process.on('exit', () => fs.rmSync(userData, { recursive: true, force: true }));
   delete process.env.SENTRY_DSN;
   delete process.env.ELECTRON_START_URL;
   delete process.env.SIDECAR_ENTRY;
@@ -143,6 +171,8 @@ function evaluateMain() {
   });
   installElectronStub(electron);
   require(path.join(__dirname, 'main.cjs'));
+  assert.equal(electron.app.getPath('userData'), expectedProfile);
+  assert.equal(fs.statSync(expectedProfile).isDirectory(), true);
   process.stdout.write(`${SENTINEL}\n`);
 }
 

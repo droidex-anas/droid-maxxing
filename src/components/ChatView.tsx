@@ -1,16 +1,13 @@
 import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import { openReviewAt, type OpenReviewFileHandler } from '../lib/reviewFocus';
+import type { FileChange } from '../lib/diff';
 import type { SessionRestore } from '../hooks/storeChildSession';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  MessageFeed,
-  WorkingIndicator,
-  UserBubble,
-  ChatSkeleton,
-  TranscriptSkeleton,
-} from './chat';
+import { MessageFeed } from './MessageFeed';
+import { WorkingIndicator, UserBubble, ChatSkeleton, TranscriptSkeleton } from './chat';
 import { readFile } from '../lib/desktop';
 import { interruptChild, loadChildHistory, loadSessionHistory } from '../lib/commands';
 import { chatDisplayTitle } from '../lib/chatMetadata';
@@ -23,7 +20,6 @@ import {
   shouldRequestReleasedChildHistory,
   visibleSessionTarget,
 } from '../lib/childSessions';
-import type { FileChange } from '../lib/diff';
 import { ConversationTimeline } from './ConversationTimeline';
 import { WelcomeScreen } from './WelcomeScreen';
 import { isChatWorktreePath } from '../lib/chatWorkspace';
@@ -210,6 +206,9 @@ export default function ChatView({
     [isObscured],
   );
   const state = useStoreSelector(selectChatViewState, equalChatState);
+  // Tool-activity settings are render-only feed props; select them apart from
+  // the obscured-gated chat state so a settings change always applies live.
+  const toolActivity = useStoreSelector((s) => s.toolActivity);
   const scrollRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<ConversationListHandle>(null);
   const viewportLayoutRef = useRef<ConversationViewportLayout | null>(null);
@@ -292,17 +291,15 @@ export default function ChatView({
     [childSessions, dispatch],
   );
 
-  // Open the Review pane scoped to the agent's last turn and jump to the clicked
-  // file, reused by both the per-turn changes summary and inline diff cards.
-  const openReviewFile = useCallback(
-    (path: string) => {
-      dispatch({ type: 'OPEN_REVIEW_AT', scope: 'last_turn', path });
+  const openReviewFile = useCallback<OpenReviewFileHandler>(
+    (path, change) => {
+      dispatch(openReviewAt(path, change));
     },
     [dispatch],
   );
   const openDiff = useCallback(
     (change: FileChange) => {
-      openReviewFile(change.path);
+      openReviewFile(change.path, change);
     },
     [openReviewFile],
   );
@@ -613,6 +610,8 @@ export default function ChatView({
             ? { subagentsDock: messageFeedSubagentsDock }
             : {})}
           specContent={specContent}
+          density={toolActivity.density}
+          inlineDiffs={toolActivity.inlineDiffs}
           {...(openSpecWiki !== undefined ? { onOpenSpecWiki: openSpecWiki } : {})}
           {...(!viewingChildSession && createdWorktreePath !== undefined
             ? { createdWorktreePath }

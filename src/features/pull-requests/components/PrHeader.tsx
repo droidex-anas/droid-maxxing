@@ -1,19 +1,19 @@
 import type { ReactNode } from 'react';
 
 import { CheckStatusIcon, Octicon } from '../../../components/environment/GithubIcons';
-import { checksSummary, prKind, prKindLabel } from '../../../lib/github';
+import {
+  PR_TONE_TEXT_CLASS,
+  checksBadge,
+  checksSummary,
+  prKind,
+  prKindLabel,
+  reviewDecisionBadge,
+  type PrBadge,
+} from '../../../lib/github';
 import type { PrCheck, PullRequest } from '../../../types/vcs';
 import { displayLogin } from '../lib/prIdentity';
-import {
-  REVIEWER_STATE_LABEL,
-  TONE_TEXT_CLASS,
-  checksBadge,
-  mergeStateBadge,
-  reviewDecisionBadge,
-  reviewerRows,
-} from '../lib/prMeta';
+import { REVIEWER_STATE_LABEL, mergeStateBadge, reviewerRows } from '../lib/prMeta';
 import { prAbsoluteTime, prRelativeTime } from '../lib/prTime';
-import type { PrBadge } from '../lib/prTimeline';
 import { GithubAvatar } from './GithubAvatar';
 
 const STATE_PILL = {
@@ -27,7 +27,7 @@ function Badge({ badge }: { badge: PrBadge }) {
   return (
     <span
       className={`rounded-full border border-droid-border px-2 py-0.5 text-[11.5px] font-medium ${
-        TONE_TEXT_CLASS[badge.tone]
+        PR_TONE_TEXT_CLASS[badge.tone]
       }`}
     >
       {badge.label}
@@ -84,7 +84,7 @@ function ChecksMeta({
   return (
     <span className="flex items-center gap-1.5">
       <CheckStatusIcon status={summary.status === 'none' ? 'neutral' : summary.status} size={14} />
-      <span className={TONE_TEXT_CLASS[badge.tone]}>{badge.label}</span>
+      <span className={PR_TONE_TEXT_CLASS[badge.tone]}>{badge.label}</span>
     </span>
   );
 }
@@ -182,7 +182,7 @@ export function PrHeader({
           </MetaRow>
           {mergeState ? (
             <MetaRow label="Status">
-              <span className={TONE_TEXT_CLASS[mergeState.tone]}>{mergeState.label}</span>
+              <span className={PR_TONE_TEXT_CLASS[mergeState.tone]}>{mergeState.label}</span>
             </MetaRow>
           ) : null}
         </dl>

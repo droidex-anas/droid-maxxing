@@ -250,3 +250,52 @@ test('each review-focus request bumps the request generation', () => {
   state = reducer(state, { type: 'OPEN_REVIEW_AT', scope: 'last_turn', path: 'src/app.ts' });
   assert.equal(state.reviewFocusRequestId, first + 1);
 });
+
+const capturedChange = {
+  path: 'src/app.ts',
+  verb: 'edit' as const,
+  ops: [{ type: 'add' as const, text: 'hello' }],
+  added: 1,
+  removed: 0,
+};
+
+test('OPEN_REVIEW_AT stores the captured transcript change for folderless review', () => {
+  const state = reducer(activeState('session-a'), {
+    type: 'OPEN_REVIEW_AT',
+    scope: 'last_turn',
+    path: 'src/app.ts',
+    change: capturedChange,
+  });
+  assert.equal(state.reviewFocusPath, 'src/app.ts');
+  assert.equal(state.reviewFocusChange, capturedChange);
+});
+
+test('closing Review clears a pending captured change even without a focus path', () => {
+  let state = reducer(activeState('session-a'), {
+    type: 'OPEN_REVIEW_AT',
+    scope: 'last_turn',
+    change: capturedChange,
+  });
+  assert.equal(state.reviewFocusPath, null);
+  assert.equal(state.reviewFocusChange, capturedChange);
+
+  state = {
+    ...state,
+    reviewOpenAppSessionId: null,
+    utilityPanels: {},
+  };
+  state = reducer(state, { type: 'SET_REVIEW_OPEN', open: false });
+  assert.equal(state.reviewFocusChange, null);
+});
+
+test('a session switch drops a pending captured review change', () => {
+  let state = reducer(activeState('session-a'), {
+    type: 'OPEN_REVIEW_AT',
+    scope: 'last_turn',
+    path: 'src/app.ts',
+    change: capturedChange,
+  });
+  state = reducer(state, { type: 'SET_ACTIVE_SESSION', id: 'session-b' });
+  assert.equal(state.reviewFocusPath, null);
+  assert.equal(state.reviewFocusChange, null);
+});

@@ -16,7 +16,9 @@ test('diffModeLabel shows the effective base ref for the branch mode', () => {
   // non-origin primary remote is reflected verbatim instead of forced to origin.
   assert.equal(diffModeLabel('branch', 'origin/develop'), 'Branch vs origin/develop');
   assert.equal(diffModeLabel('branch', 'upstream/main'), 'Branch vs upstream/main');
-  assert.equal(diffModeLabel('branch', null), 'Branch vs origin/main');
+  // No resolved base (a remote-less repo) means no comparison is running —
+  // the label names the mode alone instead of inventing an origin/main base.
+  assert.equal(diffModeLabel('branch', null), 'Branch');
 });
 
 test('stripRemotePrefix drops the matched remote, including slash-containing names', () => {

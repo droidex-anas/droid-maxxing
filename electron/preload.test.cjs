@@ -69,6 +69,11 @@ function loadApi(invokeResult) {
           },
         },
         ipcRenderer,
+        webUtils: {
+          getPathForFile(file) {
+            return typeof file?.path === 'string' ? file.path : '';
+          },
+        },
       };
     },
   });
@@ -285,6 +290,27 @@ test('power tier IPC carries no renderer-controlled payload', async () => {
     onBattery: false,
   });
   assert.deepEqual(calls[0], { channel: 'power-tier', payload: undefined });
+});
+
+test('saveAttachment IPC carries the pasted name and data URL', async () => {
+  const { api, calls } = loadApi('/tmp/attachments/file-1-deadbeef-notes.pdf');
+
+  assert.equal(
+    await api.saveAttachment('notes.pdf', 'data:application/pdf;base64,Zg=='),
+    '/tmp/attachments/file-1-deadbeef-notes.pdf',
+  );
+  assert.equal(calls[0].channel, 'save-attachment');
+  assert.equal(calls[0].payload.name, 'notes.pdf');
+  assert.equal(calls[0].payload.dataUrl, 'data:application/pdf;base64,Zg==');
+});
+
+test('pathForFile returns the native path and falls back to empty', () => {
+  const { api } = loadApi();
+  assert.equal(
+    api.pathForFile({ path: 'C:\\\\Users\\\\anas\\\\notes.pdf' }),
+    'C:\\\\Users\\\\anas\\\\notes.pdf',
+  );
+  assert.equal(api.pathForFile({}), '');
 });
 
 test('sidecar status IPC is exposed to the trusted renderer', async () => {

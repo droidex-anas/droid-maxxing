@@ -10,14 +10,18 @@ export interface AttachedImage {
   path: string;
   /** Data URL of the saved (fidelity-processed) image, used for chips/viewer. */
   preview: string;
+  /** Composer-intake order, shared with pasted files so mixed drops stay in order. */
+  sequence: number;
 }
 
 /**
  * Bookkeeping for in-flight additions, kept out of React state so async
- * continuations can consult it after any number of awaits. `settled` lets the
- * submit path wait for a quiescent attachment list; the generation stamp lets
- * clear() invalidate adds that are still encoding, so their late landing
- * discards the saved file instead of reviving a chip on the next prompt.
+ * continuations can consult it after any number of awaits. `knownSettled` lets
+ * the submit path wait for adds already in flight; `settled` waits until the
+ * pending set is empty, including adds that start during the wait. The
+ * generation stamp lets clear() invalidate adds that are still encoding, so
+ * their late landing discards the saved file instead of reviving a chip on the
+ * next prompt.
  */
 export function createPendingAdditions() {
   let generation = 0;
@@ -41,10 +45,39 @@ export function createPendingAdditions() {
     settled: async (): Promise<void> => {
       while (pending.size > 0) await Promise.allSettled([...pending]);
     },
+    /** Waits only for adds already tracked; a paste that starts during submit stays for the next prompt. */
+    knownSettled: async (): Promise<void> => {
+      await Promise.allSettled([...pending]);
+    },
   };
 }
 
 export type PendingAdditions = ReturnType<typeof createPendingAdditions>;
+
+/**
+ * Crops of already-staged images. Submit waits only for crops whose sequence
+ * is before cutoff, so a crop of a late paste does not stall this send.
+ */
+export function createCropMutations() {
+  const pending = new Set<{ sequence: number; promise: Promise<unknown> }>();
+  return {
+    track(sequence: number, task: Promise<unknown>) {
+      const entry = { sequence, promise: task };
+      pending.add(entry);
+      const done = () => {
+        pending.delete(entry);
+      };
+      void task.then(done, done);
+    },
+    async waitBeforeCutoff(cutoff: number): Promise<void> {
+      let inflight = [...pending].filter((crop) => crop.sequence < cutoff);
+      while (inflight.length > 0) {
+        await Promise.allSettled(inflight.map((crop) => crop.promise));
+        inflight = [...pending].filter((crop) => crop.sequence < cutoff);
+      }
+    },
+  };
+}
 
 /**
  * Writes a fresh image file, then applies the clear() race guard shared by
@@ -66,17 +99,30 @@ export async function saveImageUnlessStale(
 }
 
 /**
- * Appends an image in paste/drop order. Each add reserves a sequence number
- * before its variably slow encode, so completion order must not reorder chips
- * or the prompt's attachment list. Ids without a reserved sequence sort last.
+ * Appends an attachment in paste/drop order. Each add reserves a sequence
+ * number before its variably slow encode, so completion order must not reorder
+ * chips or the prompt's attachment list. Ids without a reserved sequence sort
+ * last. Shared by the image and file attachment stores.
  */
-export function insertBySequence(
-  images: AttachedImage[],
-  image: AttachedImage,
+export function insertBySequence<T extends { id: string }>(
+  items: T[],
+  item: T,
   sequences: ReadonlyMap<string, number>,
-): AttachedImage[] {
-  const order = (item: AttachedImage) => sequences.get(item.id) ?? Number.MAX_SAFE_INTEGER;
-  return [...images, image].sort((a, b) => order(a) - order(b));
+): T[] {
+  const order = (entry: T) => sequences.get(entry.id) ?? Number.MAX_SAFE_INTEGER;
+  return [...items, item].sort((a, b) => order(a) - order(b));
+}
+
+export function itemsBeforeCutoff<T extends { id: string }>(
+  items: readonly T[],
+  sequences: ReadonlyMap<string, number>,
+  cutoff: number,
+): T[] {
+  return items.filter((item) => (sequences.get(item.id) ?? Number.MAX_SAFE_INTEGER) < cutoff);
+}
+
+export function pathsInSequence(items: readonly { path: string; sequence: number }[]): string[] {
+  return [...items].sort((a, b) => a.sequence - b.sequence).map((item) => item.path);
 }
 
 /**
@@ -96,6 +142,10 @@ export function useImageAttachments(quality: ImagePasteQuality) {
   const nextSeqRef = useRef(0);
   // Stable per-mount instance; not React state in the render sense.
   const [additions] = useState(() => createPendingAdditions());
+  // Crops mutate an already-staged file. Submit must wait for them even when
+  // they start during an in-flight add, or the snapshot keeps the old path
+  // that applyCrop then deletes.
+  const [crops] = useState(() => createCropMutations());
 
   // useCallback: commit and clear are referenced from PromptInput effects, so
   // they must keep a stable identity across renders.
@@ -104,14 +154,15 @@ export function useImageAttachments(quality: ImagePasteQuality) {
     setImages(next);
   }, []);
 
-  const addBlob = (blob: Blob) => {
+  const addBlob = (blob: Blob, sequence?: number) => {
     if (!isDesktop()) {
       toast.error('Image attachments need the desktop app');
       return;
     }
     // Reserve the chip's position synchronously: a paste whose encode runs
     // long must not overtake one that was added later but finished earlier.
-    const seq = nextSeqRef.current++;
+    const seq = sequence ?? nextSeqRef.current;
+    if (sequence === undefined || sequence >= nextSeqRef.current) nextSeqRef.current = seq + 1;
     const stamp = additions.stamp();
     const task = (async () => {
       try {
@@ -126,7 +177,7 @@ export function useImageAttachments(quality: ImagePasteQuality) {
         // clear() ran during the encode (submit): the fresh file was deleted
         // rather than reviving a chip on the next prompt.
         if (path === null) return;
-        const image = { id: crypto.randomUUID(), path, preview: processed };
+        const image = { id: crypto.randomUUID(), path, preview: processed, sequence: seq };
         sequencesRef.current.set(image.id, seq);
         commit(insertBySequence(imagesRef.current, image, sequencesRef.current));
       } catch {
@@ -149,8 +200,8 @@ export function useImageAttachments(quality: ImagePasteQuality) {
   const applyCrop = async (id: string, rect: CropRect) => {
     const target = imagesRef.current.find((i) => i.id === id);
     if (!target) return;
-    // Tracked like an add: whenSettled() must wait for an in-flight crop, or a
-    // crop landing mid-submit could delete a path the prompt references.
+    // Tracked as a mutation of an existing chip, not a new add: whenReady
+    // waits for crops that start while an earlier encode is still in flight.
     const stamp = additions.stamp();
     const task = (async () => {
       const cropped = await cropImage(target.preview, rect, quality);
@@ -174,7 +225,7 @@ export function useImageAttachments(quality: ImagePasteQuality) {
       // After the commit: exactly one deletion of the superseded file.
       void discardImage(existing.path);
     })();
-    additions.track(task);
+    crops.track(target.sequence, task);
     await task;
   };
 
@@ -197,13 +248,27 @@ export function useImageAttachments(quality: ImagePasteQuality) {
   }, [clear]);
 
   /**
-   * Submit-path support: resolves with the live list once every in-flight add
-   * has landed or failed, so a prompt never snapshots attachments mid-encode.
+   * Submit-path support: wait only for adds already in flight at cutoff, then
+   * wait for crops of those attachments — including a crop that started during
+   * the add wait. A crop of a later paste is the next prompt's problem.
    */
-  const whenSettled = async (): Promise<AttachedImage[]> => {
-    await additions.settled();
-    return imagesRef.current;
+  const whenReady = async (cutoff: number): Promise<AttachedImage[]> => {
+    await additions.knownSettled();
+    await crops.waitBeforeCutoff(cutoff);
+    return itemsBeforeCutoff(imagesRef.current, sequencesRef.current, cutoff);
   };
 
-  return { images, addBlob, remove, applyCrop, clear, clearAndDiscard, whenSettled };
+  const clearReady = (cutoff: number) => {
+    const keep = imagesRef.current.filter(
+      (image) => (sequencesRef.current.get(image.id) ?? Number.MAX_SAFE_INTEGER) >= cutoff,
+    );
+    for (const image of imagesRef.current) {
+      if ((sequencesRef.current.get(image.id) ?? Number.MAX_SAFE_INTEGER) < cutoff) {
+        sequencesRef.current.delete(image.id);
+      }
+    }
+    commit(keep);
+  };
+
+  return { images, addBlob, remove, applyCrop, clear, clearAndDiscard, whenReady, clearReady };
 }

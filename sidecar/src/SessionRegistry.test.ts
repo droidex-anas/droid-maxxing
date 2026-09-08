@@ -717,3 +717,16 @@ test('listSummaries reads patches and hidden ids through a single history call',
 
   assert.equal(history.summaryReadCount, 1);
 });
+
+test('activity timestamps advance within the same clock tick while passive updates preserve them', () => {
+  const { registry, history, published } = createHarness({ now: () => 100 });
+  registry.register(live(summary('same-tick', { updatedAt: 100 })));
+  registry.updateSummary('same-tick', { streaming: true });
+  assert.equal(registry.getCanonicalSummary('same-tick')?.updatedAt, 101);
+  registry.updateSummary('same-tick', { streaming: false });
+  assert.equal(registry.getCanonicalSummary('same-tick')?.updatedAt, 102);
+  registry.updateSummary('same-tick', { tokensIn: 1 }, { touchActivity: false });
+  assert.equal(registry.getCanonicalSummary('same-tick')?.updatedAt, 102);
+  assert.equal(history.persisted.at(-1)?.updatedAt, 102);
+  assert.equal(published.at(-1)?.updatedAt, 102);
+});

@@ -112,6 +112,17 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   e('Setup & updates', 'Run setup again', ['onboarding', 'first run', 'setup tour', 'wizard']),
 
   // ── Configuration ────────────────────────────────────────────────────────
+  e('Configuration', 'Tool activity', [
+    'compact',
+    'balanced',
+    'detailed',
+    'density',
+    'fold',
+    'tool calls',
+    'step by step',
+    'transcript',
+  ]),
+  e('Configuration', 'Inline code diffs', ['inline diffs', 'diffs', 'code diff', 'file edits']),
   e('Configuration', 'Default autonomy', [
     'autonomy',
     'permissions',

@@ -354,3 +354,25 @@ test('forgetSession clears only the unregistered app terminal state', () => {
     ['forgotten app accepted'],
   );
 });
+
+test('idless Task admission shares the accepted transcript spawn identity', () => {
+  const harness = createHarness();
+  harness.eventFlow.applyStreamEvent('app-1', 'provider-1', 'primary', taskToolCall(''));
+  const event = harness.transcripts[0];
+  assert.ok(event);
+  assert.equal(harness.sideEffects[0]?.value.childSession?.toolUseId, event.id);
+});
+
+test('Task deltas retain their provider spawn identity across updates', () => {
+  const harness = createHarness();
+  const call = taskToolCall('stable-spawn');
+  assert.equal(call.type, 'tool_call');
+  if (call.type !== 'tool_call') return;
+  const delta: DroidStreamEvent = { ...call, type: 'tool_call_delta' };
+  harness.eventFlow.applyStreamEvent('app-1', 'provider-1', 'primary', delta);
+  harness.eventFlow.applyStreamEvent('app-1', 'provider-1', 'primary', delta);
+  assert.deepEqual(
+    harness.sideEffects.map((effect) => effect.value.childSession?.toolUseId),
+    ['stable-spawn', 'stable-spawn'],
+  );
+});

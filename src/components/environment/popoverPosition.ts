@@ -4,6 +4,9 @@ export interface PopoverPosition {
   left: number;
   width: number;
   maxHeight: number;
+  // Captured at measure time so the content box renders at exactly the
+  // zoom the positioning math used.
+  zoom: number;
 }
 
 export function calculatePopoverPosition({
@@ -11,20 +14,26 @@ export function calculatePopoverPosition({
   viewport,
   width,
   align,
+  zoom = 1,
 }: {
   anchor: Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left' | 'width'>;
   viewport: { width: number; height: number };
   width: number | 'anchor';
   align: 'left' | 'right';
+  zoom?: number;
 }): PopoverPosition {
   const margin = 8;
   const offset = 4;
   const requestedWidth = width === 'anchor' ? anchor.width : width;
-  const resolvedWidth = Math.min(requestedWidth, Math.max(0, viewport.width - margin * 2));
-  const rawLeft = align === 'right' ? anchor.right - resolvedWidth : anchor.left;
+  // The content box is zoomed, so its on-screen footprint is width*zoom;
+  // top/left/bottom stay in viewport pixels because the positioning shell
+  // is not zoomed.
+  const resolvedWidth = Math.min(requestedWidth, Math.max(0, (viewport.width - margin * 2) / zoom));
+  const visualWidth = resolvedWidth * zoom;
+  const rawLeft = align === 'right' ? anchor.right - visualWidth : anchor.left;
   const left = Math.min(
     Math.max(margin, rawLeft),
-    Math.max(margin, viewport.width - resolvedWidth - margin),
+    Math.max(margin, viewport.width - visualWidth - margin),
   );
   const spaceBelow = viewport.height - anchor.bottom - margin;
   const spaceAbove = anchor.top - margin;
@@ -37,7 +46,8 @@ export function calculatePopoverPosition({
       bottom,
       left,
       width: resolvedWidth,
-      maxHeight: Math.max(0, viewport.height - bottom - margin),
+      maxHeight: Math.max(0, (viewport.height - bottom - margin) / zoom),
+      zoom,
     };
   }
   const top = Math.max(margin, Math.min(viewport.height - margin, anchor.bottom + offset));
@@ -45,6 +55,7 @@ export function calculatePopoverPosition({
     top,
     left,
     width: resolvedWidth,
-    maxHeight: Math.max(0, viewport.height - top - margin),
+    maxHeight: Math.max(0, (viewport.height - top - margin) / zoom),
+    zoom,
   };
 }

@@ -26,6 +26,19 @@ export interface ChildSessionTarget {
   label?: string;
 }
 
+// Spawn events identify a child by toolUseId once it arrives; until then the
+// transcript event id is the only stable handle. Every activity/nav lookup
+// must use the same fallback so the row and the Working cue agree.
+export function childSessionTargetFromEvent(
+  event: Pick<TranscriptEvent, 'id' | 'toolUseId' | 'toolArgs'>,
+): ChildSessionTarget {
+  const label = childSessionInfo(event.toolArgs).label;
+  return {
+    toolUseId: event.toolUseId ?? event.id,
+    ...(label !== undefined ? { label } : {}),
+  };
+}
+
 export interface ChildSessionActivity {
   // The store's child status passes through verbatim; autonomous subagents
   // never open a runtime, so nothing here demotes running to paused.
@@ -272,7 +285,7 @@ export function resolveWaveSessions(
   childSessions: readonly ChildSessionInfo[],
 ): ChildSessionInfo[] {
   return spawns.map((spawn) => {
-    const registered = findChildSessionForTarget(childSessions, { toolUseId: spawn.toolUseId });
+    const registered = findChildSessionForTarget(childSessions, childSessionTargetFromEvent(spawn));
     // The store stamps startedAt when the child session registers, which lags
     // the actual spawn; the wave's spawn event carries the true start time.
     if (registered?.startedAt != null && registered.startedAt > spawn.ts)
@@ -345,7 +358,8 @@ export function isPendingChildPlaceholder(
 }
 
 function pendingChildSession(spawn: ChildSessionSpawnRef): ChildSessionInfo {
-  const toolUseId = spawn.toolUseId ?? spawn.id;
+  const target = childSessionTargetFromEvent(spawn);
+  const toolUseId = target.toolUseId ?? spawn.id;
   const info = childSessionInfo(spawn.toolArgs);
   return {
     parentAppSessionId: spawn.appSessionId,
@@ -355,7 +369,7 @@ function pendingChildSession(spawn: ChildSessionSpawnRef): ChildSessionInfo {
     // activity and the Task tool call ending cannot prove that the background
     // child started or finished. Only an exact child lifecycle event may do so.
     status: 'pending',
-    label: info.label ?? 'Subagent',
+    label: target.label ?? 'Subagent',
     prompt: info.description,
     modelId: '',
     spawnLink: { kind: 'tool-use', id: toolUseId },

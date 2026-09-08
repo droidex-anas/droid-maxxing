@@ -8,6 +8,7 @@ import {
   childSelectionForFeature,
   childSessionLatest,
   childSessionMeta,
+  childSessionTargetFromEvent,
   childRuntimeSubmitTarget,
   commitChildPromptAfterBaseline,
   childSessionIsLive,
@@ -20,6 +21,7 @@ import {
   shouldOpenSelectedChild,
   shouldRequestReleasedChildHistory,
   spawnedChildSessions,
+  resolveWaveSessions,
   workingFirstChildSessions,
   transcriptForVisibleSession,
   visibleSessionCanCompact,
@@ -45,6 +47,35 @@ const spawn = (toolArgs: Record<string, unknown>): TranscriptEvent =>
     toolName: 'Task',
     toolArgs,
   });
+
+test('childSessionTargetFromEvent falls back to the spawn event id', () => {
+  const spawnEvent = spawn({ subagent_type: 'explorer' });
+  assert.deepEqual(childSessionTargetFromEvent(spawnEvent), {
+    toolUseId: spawnEvent.id,
+    label: 'explorer',
+  });
+  assert.deepEqual(childSessionTargetFromEvent({ ...spawnEvent, toolUseId: 'tool-a' }), {
+    toolUseId: 'tool-a',
+    label: 'explorer',
+  });
+});
+
+test('resolveWaveSessions matches a registered child by spawn event id when toolUseId is absent', () => {
+  const spawnEvent = spawn({ subagent_type: 'explorer' });
+  const child = {
+    parentAppSessionId: spawnEvent.appSessionId,
+    childSessionId: 'child-a',
+    role: 'worker' as const,
+    status: 'running' as const,
+    modelId: 'model-default',
+    transcriptAvailable: true,
+    streamFidelity: 'state' as const,
+    spawnLink: { kind: 'tool-use' as const, id: spawnEvent.id },
+  };
+  const [resolved] = resolveWaveSessions([spawnEvent], [child]);
+  assert.equal(resolved?.childSessionId, 'child-a');
+  assert.equal(resolved?.status, 'running');
+});
 
 test('mergeChildSessionSpawn merges a label-only delta with a later description-only delta', () => {
   const merged = mergeChildSessionSpawn(

@@ -134,11 +134,18 @@ function hasSideEffects(sideEffects: NormalizedSideEffects): boolean {
 }
 
 function normalizedSideEffects(normalized: NormalizedEvent): NormalizedSideEffects {
+  let childSession = normalized.childSession;
+  // Admission and the UI must share the exact accepted spawn event identity.
+  const spawnId =
+    normalized.transcript?.kind === 'tool_call' ? normalized.transcript.id : undefined;
+  if (childSession && spawnId && !childSession.toolUseId) {
+    childSession = { ...childSession, toolUseId: spawnId };
+  }
   return {
     ...(normalized.features ? { features: normalized.features } : {}),
     ...(normalized.progress ? { progress: normalized.progress } : {}),
     ...(normalized.missionState ? { missionState: normalized.missionState } : {}),
     ...(normalized.missionChild ? { missionChild: normalized.missionChild } : {}),
-    ...(normalized.childSession ? { childSession: normalized.childSession } : {}),
+    ...(childSession ? { childSession } : {}),
   };
 }

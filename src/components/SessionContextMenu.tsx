@@ -1,7 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { Archive, Copy, FileText, Folder, Link2, Pencil, Pin, PinOff } from 'lucide-react';
+import {
+  Archive,
+  Copy,
+  FileText,
+  Folder,
+  Link2,
+  Pencil,
+  Pin,
+  PinOff,
+  CircleCheck,
+  RotateCcw,
+} from 'lucide-react';
 import { pushEscapeLayer } from './environment/usePopover';
 import { toast } from '../lib/toast';
 
@@ -40,6 +51,8 @@ export interface SessionContextMenuProps {
   x: number;
   y: number;
   pinned: boolean;
+  settled?: boolean;
+  onToggleSettled?: () => void;
   // Absent for workspace-less sessions; the Copy Working Directory row hides.
   cwd?: string;
   // The real Droid session id (vs our appSessionId). Absent until the harness
@@ -82,6 +95,8 @@ export function SessionContextMenuPanel({
   x,
   y,
   pinned,
+  settled,
+  onToggleSettled,
   cwd,
   providerSessionId,
   onRename,
@@ -150,7 +165,7 @@ export function SessionContextMenuPanel({
   // unclamped; the clamp applies on the client where a window exists.
   const viewportWidth = typeof window === 'undefined' ? undefined : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? undefined : window.innerHeight;
-  const rowCount = 4 + (cwd ? 1 : 0) + (providerSessionId ? 2 : 0);
+  const rowCount = 4 + (onToggleSettled ? 1 : 0) + (cwd ? 1 : 0) + (providerSessionId ? 2 : 0);
   const estimatedMenuHeight = MENU_CHROME_PX + rowCount * MENU_ROW_PX;
   const left =
     viewportWidth === undefined
@@ -215,6 +230,24 @@ export function SessionContextMenuPanel({
         <Pencil className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
         Rename chat
       </button>
+      {onToggleSettled && (
+        <button
+          type="button"
+          role="menuitem"
+          className={itemClass}
+          onClick={() => {
+            onToggleSettled();
+            onClose();
+          }}
+        >
+          {settled ? (
+            <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.5} />
+          ) : (
+            <CircleCheck aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.5} />
+          )}
+          {settled ? 'Reopen task' : 'Mark as settled'}
+        </button>
+      )}
       <button
         type="button"
         role="menuitem"

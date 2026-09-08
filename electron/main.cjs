@@ -54,6 +54,14 @@ const {
 } = require('./hardwareAcceleration.cjs');
 const { closeAllDesktopNotifications, showDesktopNotification } = require('./notifications.cjs');
 const APP_NAME = 'DROIDEX';
+// An explicit profile override means a second dev instance is running beside
+// the main one; its sidecar then gets an isolated history state dir so the two
+// instances never fight over the history writer lease.
+const configuredUserData = process.env.DROIDEX_USER_DATA_DIR;
+const userDataOverride = configuredUserData?.trim() ? configuredUserData : undefined;
+if (userDataOverride && !path.isAbsolute(userDataOverride)) {
+  throw new Error('DROIDEX_USER_DATA_DIR must be an absolute path.');
+}
 const buildMetadata = readBuildMetadata();
 const terminalManager = createTerminalManager({
   defaultCwd: async () => {
@@ -82,6 +90,7 @@ const sidecarSupervisor = createSidecarSupervisor({
   entryPath: sidecarEntry,
   cwd: () => (app.isPackaged ? process.resourcesPath : appRoot()),
   userData: () => app.getPath('userData'),
+  historyDir: () => (userDataOverride ? path.join(userDataOverride, 'history') : undefined),
   onUnexpectedExit: (error) => diagnostics.captureException(error, { process: 'sidecar' }),
 });
 // subscribe() replays the current status synchronously, so mainWindow must
@@ -160,10 +169,16 @@ protocol.registerSchemesAsPrivileged([
 ]);
 // Overridable so a second dev instance (e.g. a feature worktree) can run beside
 // the main one without fighting over the Chromium profile lock.
-app.setPath(
-  'userData',
-  process.env.DROIDEX_USER_DATA_DIR || path.join(app.getPath('appData'), APP_NAME),
-);
+const userDataPath = userDataOverride || path.join(app.getPath('appData'), APP_NAME);
+try {
+  fs.mkdirSync(userDataPath, { recursive: true });
+} catch (cause) {
+  throw new Error(
+    'Cannot create the DROIDEX profile directory. Check its permissions and ensure it is a directory, or set DROIDEX_USER_DATA_DIR to a writable absolute directory.',
+    { cause },
+  );
+}
+app.setPath('userData', userDataPath);
 const browserSettings = createBrowserSettingsController({
   appName: APP_NAME,
   userDataPath: app.getPath('userData'),
@@ -404,6 +419,11 @@ function registerIpc() {
   // ordinary @-mentioned paths; discard only ever unlinks inside that dir.
   const attachmentsDir = path.join(os.tmpdir(), 'droidex-attachments');
   ipcMain.handle('save-image', (_event, { dataUrl }) => attachments.save(attachmentsDir, dataUrl));
+  // Pasted non-image files (PDF, doc, video, ...) land in the same temp store
+  // and likewise travel to Droid as @-mentioned paths.
+  ipcMain.handle('save-attachment', (_event, { name, dataUrl }) =>
+    attachments.saveFile(attachmentsDir, { name, dataUrl }),
+  );
   ipcMain.handle('discard-image', (_event, { path: target }) =>
     attachments.discard(attachmentsDir, target),
   );

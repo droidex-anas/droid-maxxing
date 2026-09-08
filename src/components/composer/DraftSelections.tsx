@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import { X, type LucideIcon } from 'lucide-react';
+import { useLayoutEffect, useRef, useState, type ComponentType } from 'react';
+import { X } from 'lucide-react';
 
 const SKILL = 'var(--droid-skill)';
 
@@ -13,7 +13,9 @@ const MAX_LINE_SHARE = 0.55;
 
 export interface DraftSelection {
   key: string;
-  icon: LucideIcon;
+  // Sized through className by the row; the glyph itself may be a lucide
+  // outline or a self-coloured brand tile like the Visualize mark.
+  icon: ComponentType<{ className?: string }>;
   label: string;
   removeLabel: string;
   onRemove: () => void;

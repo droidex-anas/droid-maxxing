@@ -1,11 +1,5 @@
+import type { PrBadge } from '../../../lib/github';
 import type { PrComment, PrCommit, PullRequest } from '../../../types/vcs';
-
-export type PrTone = 'neutral' | 'success' | 'danger' | 'accent';
-
-export interface PrBadge {
-  label: string;
-  tone: PrTone;
-}
 
 // What the author did, phrased the way GitHub phrases it in the timeline.
 export function commentActionLabel(comment: PrComment): string {

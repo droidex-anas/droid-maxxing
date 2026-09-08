@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createCropMutations,
   createPendingAdditions,
   insertBySequence,
+  itemsBeforeCutoff,
+  pathsInSequence,
   saveImageUnlessStale,
   type AttachedImage,
 } from './useImageAttachments';
@@ -11,6 +14,7 @@ const img = (id: string): AttachedImage => ({
   id,
   path: `/tmp/${id}.png`,
   preview: `data:${id}`,
+  sequence: 0,
 });
 
 function deferred() {
@@ -97,10 +101,67 @@ test('settled keeps waiting when an addition starts mid-wait', async () => {
   assert.equal(settled, true);
 });
 
-test('a failed addition neither wedges nor rejects settled', async () => {
+test('knownSettled ignores additions that start after the snapshot', async () => {
   const additions = createPendingAdditions();
-  additions.track(Promise.reject(new Error('encode failed')));
-  await additions.settled();
+  const first = deferred();
+  const second = deferred();
+  additions.track(first.promise);
+  const waiting = additions.knownSettled();
+  additions.track(second.promise);
+  first.resolve();
+  await waiting;
+  second.resolve();
+});
+
+test('submit waits for a crop that starts while an addition is still encoding', async () => {
+  const additions = createPendingAdditions();
+  const crops = createCropMutations();
+  const add = deferred();
+  const crop = deferred();
+  additions.track(add.promise);
+  let ready = false;
+  const waiting = (async () => {
+    await additions.knownSettled();
+    await crops.waitBeforeCutoff(1);
+    ready = true;
+  })();
+  crops.track(0, crop.promise);
+  add.resolve();
+  await tick();
+  assert.equal(ready, false);
+  crop.resolve();
+  await waiting;
+  assert.equal(ready, true);
+});
+
+test('submit does not wait for a crop of an attachment past cutoff', async () => {
+  const crops = createCropMutations();
+  const crop = deferred();
+  crops.track(1, crop.promise);
+  await crops.waitBeforeCutoff(1);
+  crop.resolve();
+});
+
+test('itemsBeforeCutoff keeps only attachments reserved before submit', () => {
+  const sequences = new Map([
+    ['a', 0],
+    ['b', 1],
+    ['late', 2],
+  ]);
+  assert.deepEqual(
+    itemsBeforeCutoff([img('a'), img('b'), img('late')], sequences, 2).map((item) => item.id),
+    ['a', 'b'],
+  );
+});
+
+test('pathsInSequence merges mixed attachment types by intake order', () => {
+  assert.deepEqual(
+    pathsInSequence([
+      { path: '/tmp/notes.pdf', sequence: 1 },
+      { path: '/tmp/shot.png', sequence: 0 },
+    ]),
+    ['/tmp/shot.png', '/tmp/notes.pdf'],
+  );
 });
 
 test('invalidate marks earlier additions stale, not later ones', () => {

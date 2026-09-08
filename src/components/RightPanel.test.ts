@@ -7,7 +7,7 @@ import { initialState, StaticStoreProvider, type AppState } from '../hooks/useSt
 import type { ModelInfo, ReasoningEffort, SessionSummary } from '../types/bridge.js';
 import RightPanel from './RightPanel.js';
 import { EnvironmentSection } from './environment/EnvironmentSection.js';
-import type { GithubAvailability, GitEnvironment, PullRequest } from '../types/vcs.js';
+import type { GithubAvailability, GitEnvironment } from '../types/vcs.js';
 
 const session = (overrides: Partial<SessionSummary>): SessionSummary => ({
   appSessionId: 's1',
@@ -93,6 +93,25 @@ test('model row keeps the pill while the model list has not loaded', () => {
   assert.match(html, />xhigh</);
 });
 
+test('folderless chats skip the git rows and never show a loading state', () => {
+  const html = renderPanel({ cwd: '', modelId: 'm1', reasoningEffort: 'xhigh' }, [
+    model({ supportedReasoningEfforts: ['xhigh'] }),
+  ]);
+  // The model row survives under its own section header.
+  assert.match(html, /Model Alpha/);
+  assert.match(html, />Model</);
+  // No Environment section: a folderless chat has no git environment to load,
+  // so nothing may spin forever.
+  assert.doesNotMatch(html, />Environment</);
+  assert.doesNotMatch(html, /Loading environment/);
+  assert.doesNotMatch(html, /No folder/);
+  // Notes are session-scoped, not folder-scoped — the section stays.
+  assert.match(html, /Notes/);
+  // The model row is a readout, not a control: the Notes disclosure is the
+  // only button in the folderless panel.
+  assert.equal(html.match(/<button/g)?.length ?? 0, 1);
+});
+
 test('PR detection and Context setup share authenticated GitHub readiness', () => {
   const action = () => undefined;
   const env: GitEnvironment = {
@@ -140,83 +159,12 @@ test('PR detection and Context setup share authenticated GitHub readiness', () =
     installMethod: null,
   });
   assert.match(blockedHtml, /Connect GitHub/);
-  assert.doesNotMatch(blockedHtml, />Open PR</);
+  assert.doesNotMatch(blockedHtml, />Create pull request</);
 
   const readyHtml = renderEnvironment(true, {
     installed: true,
     authenticated: true,
     installMethod: null,
   });
-  assert.match(readyHtml, />Open PR</);
-});
-
-test('Context shows the Environment PR row and does not host the old PR panel', () => {
-  const action = () => undefined;
-  const env: GitEnvironment = {
-    isRepo: true,
-    isGitHub: true,
-    branch: 'hotfix/review',
-    detached: false,
-    ahead: 0,
-  };
-  const pr: PullRequest = {
-    number: 78,
-    title: 'Improve PR details',
-    state: 'OPEN',
-    url: 'https://example.test/pull/78',
-    isDraft: false,
-    headRefName: 'feature',
-    baseRefName: 'main',
-    mergeable: 'MERGEABLE',
-    reviewDecision: null,
-    additions: 10,
-    deletions: 2,
-    changedFiles: 2,
-    createdAt: '2026-08-04T10:00:00Z',
-    updatedAt: '2026-08-04T10:00:00Z',
-    author: 'author',
-    reviewRequests: [],
-    reviews: [],
-  };
-  const environmentHtml = renderToStaticMarkup(
-    createElement(
-      StaticStoreProvider,
-      { state: initialState, dispatch: action },
-      createElement(EnvironmentSection, {
-        cwd: '/workspace',
-        env,
-        branches: null,
-        worktrees: [],
-        diffStat: null,
-        diffMode: 'worktree',
-        onDiffModeChange: action,
-        refresh: action,
-        live: false,
-        githubAvailability: {
-          installed: true,
-          authenticated: true,
-          installMethod: null,
-        },
-        githubAction: 'idle',
-        githubError: null,
-        githubManualGuideOpened: false,
-        githubAuthCode: null,
-        githubAuthPopoverOpen: false,
-        githubReady: true,
-        onGithubSetupAction: action,
-        onShowGithubAuthPrompt: action,
-        onCloseGithubAuthPrompt: action,
-        onCancelGithubAuthentication: action,
-        pr,
-        onOpenPr: action,
-        onOpenReview: action,
-      }),
-    ),
-  );
-  assert.match(environmentHtml, /#78/);
-  assert.doesNotMatch(environmentHtml, /Comment on this PR…/);
-
-  const contextHtml = renderPanel({ modelId: 'm1' }, [model()]);
-  assert.match(contextHtml, /Context/);
-  assert.doesNotMatch(contextHtml, /Comment on this PR…/);
+  assert.match(readyHtml, />Create pull request</);
 });

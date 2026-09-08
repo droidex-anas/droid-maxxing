@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { MessageFeed } from './chat';
+import { MessageFeed } from './MessageFeed';
 import { buildFeed } from './chatFeed';
 import { groupTurns, trailingSubagentPoll } from './chatFeedTurns';
 import {
@@ -68,8 +68,6 @@ const textOf = (html: string) => html.replace(/<!--.*?-->/g, '');
 
 // A tool group shimmers its summary only while the step is still running.
 const LIVE_SUMMARY_CLASS = 'shimmer-text text-[13px] font-medium';
-const SETTLED_SUMMARY_CLASS =
-  'text-[13px] text-droid-text-muted group-hover:text-droid-text-secondary transition-colors';
 
 test('live runtime activity outranks the stored status', () => {
   const text = textOf(
@@ -354,8 +352,8 @@ test('a poll after a finished step reads as checking subagents, not a stuck step
     }),
   );
   assert.ok(textOf(html).includes('Checking subagents'));
-  assert.ok(html.includes(`${SETTLED_SUMMARY_CLASS}">Explored 1 search`));
-  assert.ok(!html.includes(`${LIVE_SUMMARY_CLASS}">Explored 1 search`));
+  assert.ok(html.includes('Search'));
+  assert.ok(!html.includes(`${LIVE_SUMMARY_CLASS}">Search`));
 });
 
 test('a poll after the parent stopped talking still shows the parent working', () => {
@@ -521,17 +519,6 @@ test('a row is timed from its spawn, not from when the store caught up', () => {
   assert.ok(!text.includes('5s'));
 });
 
-test('without dock data the per-spawn lines still render (Mission Control path)', () => {
-  const events = [userMsg('go'), spawn('t1', 'explorer')];
-  const text = textOf(
-    renderToStaticMarkup(
-      createElement(MessageFeed, { events, pending: false, onOpenChildSession: () => {} }),
-    ),
-  );
-  assert.ok(text.includes('Spawned'));
-  assert.ok(!text.includes('Subagents'));
-});
-
 test('streaming deltas merge into one wave event instead of duplicating the spawn', () => {
   // A spawn's subagent_type and description can arrive in separate deltas
   // sharing one toolUseId (replayed transcripts are not pre-coalesced).
@@ -672,4 +659,17 @@ test('a polled child shows a working cue and never a typewriter caret', () => {
   assert.equal(html.includes('caret-blink'), false);
   assert.equal(html.includes('data-presentation="typewriter"'), false);
   assert.equal(text.includes('Streaming'), false);
+});
+
+test('dock session status suppresses the global cue without an activity callback', () => {
+  const html = renderToStaticMarkup(
+    createElement(MessageFeed, {
+      events: [userMsg('go'), spawn('t1', 'explorer')],
+      pending: true,
+      onOpenChildSession: () => {},
+      subagentsDock: { sessions: [childSession('explorer', 't1', 'running')], models: [] },
+    }),
+  );
+  assert.ok(textOf(html).includes('Subagents'));
+  assert.equal(textOf(html).includes('Working'), false);
 });

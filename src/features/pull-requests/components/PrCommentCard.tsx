@@ -12,13 +12,8 @@ import {
 } from '../lib/prCommentFold';
 import { displayLogin } from '../lib/prIdentity';
 import { prAbsoluteTime, prRelativeTime } from '../lib/prTime';
-import {
-  commentActionLabel,
-  inlineLocation,
-  reviewBadge,
-  type PrBadge,
-  type PrTone,
-} from '../lib/prTimeline';
+import type { PrBadge, PrTone } from '../../../lib/github';
+import { commentActionLabel, inlineLocation, reviewBadge } from '../lib/prTimeline';
 import { PrBody } from './PrBody';
 import { FoldChevron, PrCollapse } from './PrCollapse';
 import { HunkPreview, ReactionChips } from './PrCommentContent';

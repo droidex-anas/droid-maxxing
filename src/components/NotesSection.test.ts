@@ -9,6 +9,8 @@ import type { SessionNote } from '../lib/sessionNotes';
 
 const noop = () => undefined;
 
+// The pad is collapsed by default in the app; tests that exercise its content
+// opt into the open state explicitly.
 const render = (
   notes: SessionNote[],
   draft = '',
@@ -28,8 +30,32 @@ const render = (
       tag,
       onTagSelect: noop,
       onTagClear: noop,
+      defaultOpen: true,
     }),
   );
+
+test('the pad starts collapsed so mounting it never reshuffles the panel', () => {
+  const html = renderToStaticMarkup(
+    createElement(NotesPanel, {
+      notes: [note('a', 'Ask about the rollout')],
+      draft: '',
+      onDraftChange: noop,
+      onSave: noop,
+      onUse: noop,
+      onRemove: noop,
+      introVisible: false,
+      onDismissIntro: noop,
+      tag: null,
+      onTagSelect: noop,
+      onTagClear: noop,
+    }),
+  );
+  assert.match(html, /aria-expanded="false"/);
+  // The header stays informative; the pad and the list mount only on open.
+  assert.match(html, /0\/1 sent/);
+  assert.doesNotMatch(html, /Write a note to use later/);
+  assert.doesNotMatch(html, /Ask about the rollout/);
+});
 
 const note = (id: string, text: string, usedAt: number | null = null): SessionNote => ({
   id,
@@ -41,13 +67,15 @@ const note = (id: string, text: string, usedAt: number | null = null): SessionNo
 test('shows the empty checklist state when no notes are parked', () => {
   const html = render([]);
   assert.match(html, /No notes yet/);
-  assert.match(html, /Scratch pad for this session/);
+  // The header is a plain panel section label; with no notes there is no
+  // checklist fraction trailing it.
+  assert.doesNotMatch(html, /sent/);
   // The notepad box carries the save hint in its placeholder, no send button.
   assert.match(html, /Write a note to use later/);
   assert.match(html, /Enter to save/);
   assert.doesNotMatch(html, /Send to composer/);
-  // The pad opens five lines tall so it reads as a place to write.
-  assert.match(html, /rows="5"/);
+  // The pad opens three lines tall so it reads as a place to write, then grows.
+  assert.match(html, /rows="3"/);
   // The pad uses the field token: raised like the composer on dark, crisp
   // card-surface on light (not elevated, which dims in light mode).
   assert.match(html, /bg-droid-field/);
@@ -60,9 +88,8 @@ test('stacks saved notes as checklist lines with empty bullets and delete', () =
   // One send-to-composer target and one delete button per note.
   assert.equal(html.match(/Send to composer/g)?.length, 2);
   assert.equal(html.match(/Delete note/g)?.length, 2);
-  // Header shows the checklist fraction and no progress arc yet.
+  // The header trails the checklist fraction.
   assert.match(html, /0\/2 sent/);
-  assert.doesNotMatch(html, /stroke-dashoffset/);
   // Both bullets are empty circles.
   assert.equal(html.match(/border-droid-text-muted\/40/g)?.length, 2);
   assert.doesNotMatch(html, /No notes yet/);
@@ -113,14 +140,12 @@ test('a selected tag chips inside the pad and swaps the placeholder', () => {
   assert.doesNotMatch(html, /something broken/);
 });
 
-test('a note sent to the composer gets a filled bullet and counts in the ring', () => {
+test('a note sent to the composer gets a filled bullet and counts in the header', () => {
   const html = render([
     note('a', 'Ask about the rollout', 123),
     note('b', 'Check migration drift'),
   ]);
   assert.match(html, /1\/2 sent/);
-  // Progress ring arc is drawn for the partial fraction.
-  assert.match(html, /stroke-dashoffset/);
   // Exactly one filled bullet, one empty one.
   assert.equal(html.match(/bg-droid-accent/g)?.length, 1);
   assert.equal(html.match(/border-droid-text-muted\/40/g)?.length, 1);

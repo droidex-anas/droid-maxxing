@@ -101,19 +101,21 @@ not advise users to disable Gatekeeper globally.
 The local index uses one canonical schema and has no migration or compatibility fallback. If startup reports an incompatible child-session index:
 
 1. Quit DROIDEX.
-2. Open the affected app profile directory: `DROIDEX_USER_DATA_DIR`, or
-   `~/Library/Application Support/DROIDEX` when no override is set. Back up
-   `session-index.sqlite`, `session-index.sqlite-wal`, and `session-index.sqlite-shm`,
-   then remove only those files from that profile. This resets DROIDEX-specific
-   session metadata and child-session state, not just the search cache.
+2. Remove only the local derived index files. The default app keeps them in
+   `~/.factory/droidex`; an instance launched with `DROIDEX_USER_DATA_DIR` keeps
+   them under `<profile>/history` (or `DROIDEX_HISTORY_DIR` when set):
+   ```bash
+   rm -f "$HOME/.factory/droidex/session-index.sqlite"
+   rm -f "$HOME/.factory/droidex/session-index.sqlite-wal"
+   rm -f "$HOME/.factory/droidex/session-index.sqlite-shm"
+   ```
 3. Restart DROIDEX. The sidecar rebuilds the index from current local Factory session history.
 
 These commands do not remove raw Factory session history. Do not delete the broader `~/.factory` directory.
 Do not remove `index.sqlite`; that filename remains reserved for older app/worktree schemas.
 
-Separate dev profiles have independent history databases. They still use the same
-Factory login and can discover the same raw Factory sessions. The former index
-under `~/.factory/droidex` is left untouched and is not automatically imported.
+Separate dev profiles have independent history databases but share the same
+Factory login and raw Factory sessions.
 
 ## Verify child navigation without Factory authentication
 

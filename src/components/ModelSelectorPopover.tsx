@@ -10,7 +10,7 @@ import {
   planChildModelUpdate,
   type ExactChildSettingsTarget,
 } from '../lib/exactChildSettings';
-import ModelCatalogList from './ModelCatalogList';
+import ModelCatalogList, { defaultModelOf, effortsFor, stepEffort } from './ModelCatalogList';
 
 export type { ExactChildSettingsTarget } from '../lib/exactChildSettings';
 
@@ -38,18 +38,6 @@ const AGENTS: { kind: AgentKind; label: string; hint: string }[] = [
   { kind: 'primary', label: 'Primary', hint: 'Runs the session' },
   { kind: 'worker', label: 'Worker', hint: 'Executes each feature' },
   { kind: 'validator', label: 'Validator', hint: 'Verifies the work' },
-];
-
-const BASE_REASONING: ReasoningEffort[] = [
-  'off',
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-  'dynamic',
 ];
 
 export default function ModelSelectorPopover({
@@ -164,13 +152,9 @@ export default function ModelSelectorPopover({
     const m = source.find((x) => x.id === effModelId);
     return m?.displayName ?? effModelId;
   })();
+  const defaultModel = useMemo(() => defaultModelOf(source), [source]);
   const selectedConfigModel = effModelId ? source.find((x) => x.id === effModelId) : undefined;
   const selectedSupportedReasoning = selectedConfigModel?.supportedReasoningEfforts;
-  const reasoningOptions = selectedConfigModel
-    ? selectedSupportedReasoning?.length
-      ? selectedSupportedReasoning
-      : [selectedConfigModel.defaultReasoningEffort ?? effReasoning]
-    : BASE_REASONING;
 
   const updateReasoning = useCallback(
     (reasoning: ReasoningEffort) => {
@@ -261,6 +245,44 @@ export default function ModelSelectorPopover({
     updateReasoning,
   ]);
 
+  // Arrow keys: ↑/↓ walk the filtered list, ←/→ step the selected model's effort.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.key.startsWith('Arrow') || filterOpen) return;
+      // Leave ←/→ to the search caret while there is text to move through.
+      const inSearch = e.target instanceof HTMLInputElement && e.target.value.length > 0;
+      const horizontal = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      if (inSearch && horizontal) return;
+      e.preventDefault();
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (childTarget && !childReady) return;
+        const ids: (string | undefined)[] = [undefined, ...models.map((m) => m.id)];
+        const idx = ids.indexOf(effModelId);
+        const next = Math.min(ids.length - 1, Math.max(0, idx + (e.key === 'ArrowDown' ? 1 : -1)));
+        if (next !== idx) updateModel(ids[next]);
+        return;
+      }
+      const efforts = effortsFor(selectedConfigModel ?? defaultModel, effReasoning);
+      const next = stepEffort(efforts, effReasoning, e.key === 'ArrowRight' ? 1 : -1);
+      if (next !== effReasoning) updateReasoning(next);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [
+    childReady,
+    childTarget,
+    defaultModel,
+    effModelId,
+    effReasoning,
+    filterOpen,
+    models,
+    selectedConfigModel,
+    updateModel,
+    updateReasoning,
+  ]);
+
   return (
     <motion.div
       ref={ref}
@@ -313,53 +335,6 @@ export default function ModelSelectorPopover({
             </div>
           </div>
         )}
-
-        {/* Reasoning selector */}
-        <div className="px-4 pt-3.5 pb-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] text-droid-text-muted uppercase tracking-wider">
-              Reasoning
-            </span>
-            <span className="text-[10px] font-medium capitalize" style={{ color: ACCENT }}>
-              {effReasoning}
-            </span>
-          </div>
-          <div className="relative flex p-0.5 rounded-lg bg-droid-bg/60 border border-droid-border">
-            {reasoningOptions.map((r) => {
-              const on = effReasoning === r;
-              return (
-                <button
-                  key={r}
-                  onClick={() => {
-                    updateReasoning(r);
-                  }}
-                  disabled={Boolean(childTarget)}
-                  title={childTarget ? 'Change the child model to adjust reasoning.' : undefined}
-                  className={`relative flex-1 py-1.5 rounded-md text-[10px] capitalize transition-colors ${
-                    on
-                      ? 'text-droid-text'
-                      : childTarget
-                        ? 'text-droid-text-muted/50 cursor-not-allowed'
-                        : 'text-droid-text-muted hover:text-droid-text-secondary'
-                  }`}
-                >
-                  {on && (
-                    <motion.span
-                      layoutId="reasoning-pill"
-                      className="absolute inset-0 rounded-md"
-                      style={{
-                        backgroundColor: accentMix(13),
-                        boxShadow: `inset 0 0 0 1px ${accentMix(33)}`,
-                      }}
-                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                    />
-                  )}
-                  <span className="relative">{r}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
 
         {/* Model search + list */}
         <div className="px-4 pt-3 pb-3">
@@ -458,11 +433,15 @@ export default function ModelSelectorPopover({
 
           <ModelCatalogList
             models={models}
+            defaultModel={defaultModel}
             hasRealModels={hasRealModels}
             selectedModelId={effModelId}
+            reasoning={effReasoning}
             query={query}
             onSelectModel={updateModel}
+            onSelectReasoning={updateReasoning}
             disabled={Boolean(childTarget && !childReady)}
+            reasoningLocked={childMode}
           />
         </div>
       </div>

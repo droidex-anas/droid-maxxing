@@ -27,6 +27,7 @@ import RightPanel from './components/RightPanel';
 import EditorOpenMenu from './components/EditorOpenMenu';
 import Toaster from './components/Toaster';
 import { useRepoStatus } from './hooks/useRepoStatus';
+import { useChatPullRequests } from './hooks/useChatPullRequests';
 import { useDocumentVisible } from './hooks/useDocumentVisible';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
@@ -82,6 +83,7 @@ function ContextListIcon({ className }: { className?: string }) {
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
+      aria-hidden="true"
       className={className}
     >
       <circle cx="5" cy="8" r="1.6" />
@@ -111,6 +113,7 @@ function childAccessForSelection(
 }
 
 export default function App() {
+  useChatPullRequests();
   const dispatch = useStoreDispatch();
   const store = useStoreApi();
   const [browserPromptOpen, setBrowserPromptOpen] = useState(false);
@@ -779,14 +782,16 @@ export default function App() {
           {canToggleContext && (
             <button
               onClick={toggleRightPanel}
-              className={`p-1.5 rounded-md transition-colors ${
+              aria-label="Toggle context panel"
+              aria-pressed={state.rightPanelOpen}
+              className={`rounded-md p-1.5 transition-colors ${
                 state.rightPanelOpen
-                  ? 'text-droid-text bg-droid-elevated'
-                  : 'text-droid-text-muted/70 hover:text-droid-text hover:bg-droid-elevated/60'
+                  ? 'bg-droid-elevated text-droid-text'
+                  : 'text-droid-text-muted/70 hover:bg-droid-elevated/60 hover:text-droid-text'
               }`}
               title="Toggle context"
             >
-              <ContextListIcon className="w-4 h-4" />
+              <ContextListIcon className="h-4 w-4" />
             </button>
           )}
           {!!activeSession && (

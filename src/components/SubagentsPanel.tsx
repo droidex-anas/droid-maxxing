@@ -1,9 +1,8 @@
-// Subagents section of the right context panel: one row per spawned child
-// session with a pixel-creature identity, a quiet status readout, and a
-// "Show N more" fold so long waves don't flood the panel. Working agents are
-// ordered first, so the fold only ever hides agents that have stopped.
-import { useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+// Subagents section of the right context panel: one stable summary line — the
+// agents' pixel-creature avatars beside a working/done rollup — that opens a
+// popover listing every agent. The section's height never depends on how many
+// agents exist, so spawning a wave never reflows the Context panel.
+import { useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import type { ChildSessionInfo } from '../hooks/storeChildSession';
 import type { ChildStatus, ModelInfo } from '../types/bridge';
@@ -11,13 +10,13 @@ import {
   childSessionMeta,
   isPendingChildPlaceholder,
   workingFirstChildSessions,
-  type NamedChildSession,
 } from '../lib/childSessions';
 import { AgentAvatar } from './AgentAvatar';
-import { SectionHeader } from './environment/primitives';
+import { Popover } from './environment/Popover';
+import { RowCaret, SectionHeader } from './environment/primitives';
 
-// Rows shown before the fold.
-const VISIBLE_LIMIT = 5;
+// Avatars shown side by side on the summary line before a "+N" overflow count.
+const STACK_LIMIT = 4;
 
 // Same status vocabulary as the in-chat subagents dock.
 const STATUS_LABEL: Record<ChildStatus, string> = {
@@ -43,7 +42,9 @@ function RowStatus({ status, queued }: { status: ChildStatus; queued?: boolean }
   );
 }
 
-function SubagentRow({
+// Named distinct from the chat dock's SubagentRow (stream rows with phase
+// pills); this is the compact row the panel's popover lists.
+export function SubagentPanelRow({
   child,
   label,
   seed,
@@ -68,7 +69,7 @@ function SubagentRow({
       data-testid="subagent-row"
       data-child-session-id={child.childSessionId}
       className={`group flex items-center rounded-lg transition-colors ${
-        selected ? 'bg-droid-elevated/70' : 'hover:bg-droid-elevated/40'
+        selected ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
       }`}
     >
       <button
@@ -79,7 +80,7 @@ function SubagentRow({
           onSelect(child);
         }}
         title={`${meta}\nChild ID: ${child.childSessionId}${child.prompt ? `\n${child.prompt}` : ''}`}
-        className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left disabled:cursor-default"
+        className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left disabled:cursor-default"
       >
         <span className="shrink-0 transition-[filter] group-hover:brightness-125">
           <AgentAvatar
@@ -109,19 +110,6 @@ function SubagentRow({
   );
 }
 
-// The rows in front of the fold: the first few, plus the agent whose transcript
-// is open, because hiding that row leaves the panel's selection unexplained.
-function unfoldedRows(
-  ordered: readonly NamedChildSession[],
-  selectedChildSessionId: string | null,
-): NamedChildSession[] {
-  const head = ordered.slice(0, VISIBLE_LIMIT);
-  const selected = ordered.findIndex(
-    ({ child }) => child.childSessionId === selectedChildSessionId,
-  );
-  return selected < VISIBLE_LIMIT ? head : [...head, ordered[selected]];
-}
-
 export function SubagentsSection({
   childSessions,
   models,
@@ -133,56 +121,93 @@ export function SubagentsSection({
   selectedChildSessionId: string | null;
   onSelect: (child: ChildSessionInfo) => void;
 }) {
-  const [showAll, setShowAll] = useState(false);
-  const reduceMotion = useReducedMotion();
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
   const ordered = workingFirstChildSessions(childSessions);
-  const visible = showAll ? ordered : unfoldedRows(ordered, selectedChildSessionId);
-  const hidden = ordered.length - visible.length;
+  const stack = ordered.slice(0, STACK_LIMIT);
+  const overflow = ordered.length - stack.length;
+
+  // The rollup on the summary line: working agents first, done count after.
+  const workingCount = ordered.filter(
+    ({ child }) => child.status === 'running' && !child.queued,
+  ).length;
+  const doneCount = ordered.filter(({ child }) => child.status === 'completed').length;
 
   return (
     <div>
       <SectionHeader label="Subagents" />
-      <div>
-        {/* Rows animate in as agents spawn and slide when one finishes and drops
-            below the still-working ones; `layout` does the reordering so nothing
-            jumps. */}
-        <AnimatePresence initial={false}>
-          {visible.map(({ child, name, key }) => (
-            <motion.div
+      <button
+        ref={anchorRef}
+        type="button"
+        data-testid="subagents-summary"
+        onClick={() => {
+          setOpen((value) => !value);
+        }}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={`group flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors ${
+          open ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
+        }`}
+      >
+        <span className="flex shrink-0 items-center gap-1">
+          {stack.map(({ child, key }) => (
+            <AgentAvatar
               key={key}
-              layout={reduceMotion ? false : 'position'}
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
-              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-              // Leaving rows only fade: a row usually leaves because it dropped
-              // behind the fold, and sliding it anywhere would suggest it moved.
-              exit={{ opacity: 0 }}
-              transition={
-                reduceMotion ? { duration: 0.12 } : { type: 'spring', stiffness: 420, damping: 34 }
-              }
-            >
-              <SubagentRow
-                child={child}
-                label={name}
-                seed={key}
-                models={models}
-                selected={child.childSessionId === selectedChildSessionId}
-                onSelect={onSelect}
-              />
-            </motion.div>
+              seed={key}
+              size={16}
+              working={child.status === 'running' && !child.queued}
+            />
           ))}
-        </AnimatePresence>
-      </div>
-      {(hidden > 0 || (showAll && ordered.length > VISIBLE_LIMIT)) && (
-        <button
-          type="button"
-          onClick={() => {
-            setShowAll((value) => !value);
-          }}
-          className="w-full px-3 py-1.5 text-left text-[12px] text-droid-text-muted transition-colors hover:text-droid-text-secondary"
-        >
-          {showAll ? 'Show less' : `Show ${String(hidden)} more`}
-        </button>
-      )}
+          {overflow > 0 && (
+            <span className="text-[10.5px] font-medium tabular-nums text-droid-text-muted">
+              +{overflow}
+            </span>
+          )}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-droid-text-secondary">
+          {workingCount > 0 && (
+            <span className="shimmer-text font-medium text-droid-text">{workingCount} working</span>
+          )}
+          {workingCount > 0 && doneCount > 0 && (
+            <span className="text-droid-text-muted/50"> · </span>
+          )}
+          {doneCount > 0 && <span>{doneCount} done</span>}
+          {workingCount + doneCount === 0 && (
+            <span>
+              {ordered.length} {ordered.length === 1 ? 'agent' : 'agents'}
+            </span>
+          )}
+        </span>
+        <RowCaret open={open} />
+      </button>
+
+      <Popover
+        open={open}
+        onClose={() => {
+          setOpen(false);
+        }}
+        anchorRef={anchorRef}
+        label="Subagents"
+        align="right"
+        width={264}
+      >
+        <div className="max-h-72 overflow-y-auto p-1.5">
+          {ordered.map(({ child, name, key }) => (
+            <SubagentPanelRow
+              key={key}
+              child={child}
+              label={name}
+              seed={key}
+              models={models}
+              selected={child.childSessionId === selectedChildSessionId}
+              onSelect={(picked) => {
+                onSelect(picked);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      </Popover>
     </div>
   );
 }

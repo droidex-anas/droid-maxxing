@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import { droidexUserDataDir } from './droidexPaths.js';
 import { dateMs, numberValue, objectValue, stringValue } from './values.js';
 import type {
   SessionRole,
@@ -38,6 +37,7 @@ import {
 } from './sessionTranscript.js';
 import { decodeProviderSessionIdList } from './historyProviderIds.js';
 import { readSessionFileHead, readSessionStart } from './sessionFileHead.js';
+import { droidexHistoryDir } from './droidexPaths.js';
 
 interface StoredMissionState {
   missionId?: string;
@@ -152,12 +152,17 @@ const SEQ_SEGMENT_STRIDE = 1 << 27;
 const HISTORY_SCHEMA_VERSION = 2;
 export const SESSION_INDEX_FILENAME = 'session-index.sqlite';
 export const SESSION_SEARCH_INDEX_FILENAME = 'session-search.sqlite';
-const HISTORY_SCHEMA_RECOVERY =
-  'DROIDEX local history index uses an incompatible schema. Quit DROIDEX, remove ' +
-  `${SESSION_INDEX_FILENAME}, ${SESSION_INDEX_FILENAME}-wal, and ` +
-  `${SESSION_INDEX_FILENAME}-shm from the app data directory ` +
-  '(DROIDEX_USER_DATA_DIR; default: ~/Library/Application Support/DROIDEX), then restart. ' +
-  'Raw Factory session history is not removed.';
+function historySchemaRecovery(): string {
+  const dir = droidexHistoryDir();
+  const displayDir = dir.startsWith(`${homedir()}/`) ? `~${dir.slice(homedir().length)}` : dir;
+  return (
+    'DROIDEX local history index uses an incompatible schema. Quit DROIDEX, remove ' +
+    `${displayDir}/${SESSION_INDEX_FILENAME}, ` +
+    `${displayDir}/${SESSION_INDEX_FILENAME}-wal, and ` +
+    `${displayDir}/${SESSION_INDEX_FILENAME}-shm, then restart. ` +
+    'Raw Factory session history is not removed.'
+  );
+}
 
 export function loadMissionControlSessions(
   options: HistoricalSummaryFilter = {},
@@ -245,7 +250,7 @@ export class HistoryIndex {
   private readonly sessionFiles = new SessionFileMirror();
 
   constructor() {
-    const dir = droidexUserDataDir();
+    const dir = droidexHistoryDir();
     mkdirSync(dir, { recursive: true });
     const db = new DatabaseSync(join(dir, SESSION_INDEX_FILENAME));
     try {
@@ -320,11 +325,11 @@ export class HistoryIndex {
     }
     if (version === 1 && hasCanonicalVersionOneHistorySchema(db)) {
       HistoryIndex.migrateVersionOneHistorySchema(db);
-      if (!hasCanonicalChildSchema(db)) throw new Error(HISTORY_SCHEMA_RECOVERY);
+      if (!hasCanonicalChildSchema(db)) throw new Error(historySchemaRecovery());
       return;
     }
     if (version !== HISTORY_SCHEMA_VERSION || !hasCanonicalChildSchema(db))
-      throw new Error(HISTORY_SCHEMA_RECOVERY);
+      throw new Error(historySchemaRecovery());
   }
 
   private static migrateVersionOneHistorySchema(db: DatabaseSync): void {
@@ -676,7 +681,7 @@ function assertCanonicalHistorySchema(db: DatabaseSync): void {
     (numberValue(row?.user_version) ?? 0) !== HISTORY_SCHEMA_VERSION ||
     !hasCanonicalChildSchema(db)
   )
-    throw new Error(HISTORY_SCHEMA_RECOVERY);
+    throw new Error(historySchemaRecovery());
 }
 
 function persistedChildSessionFromRow(row: Record<string, unknown>): PersistedChildSession {
@@ -687,11 +692,11 @@ function persistedChildSessionFromRow(row: Record<string, unknown>): PersistedCh
   const modelId = stringValue(row.model_id);
   const updatedAt = numberValue(row.updated_at);
   if (!parentAppSessionId || !childSessionId || !modelId || updatedAt === undefined)
-    throw new Error(HISTORY_SCHEMA_RECOVERY);
+    throw new Error(historySchemaRecovery());
   const spawnLink = persistedChildSpawnLink(row);
   const previousProviderSessionIds = decodeProviderSessionIdList(
     row.previous_provider_session_ids,
-    HISTORY_SCHEMA_RECOVERY,
+    historySchemaRecovery(),
   );
   return {
     parentAppSessionId,
@@ -714,14 +719,14 @@ function persistedChildSessionFromRow(row: Record<string, unknown>): PersistedCh
 function persistedChildRole(value: unknown): PersistedChildRole {
   const role = stringValue(value);
   if (role === 'worker' || role === 'validator') return role;
-  throw new Error(HISTORY_SCHEMA_RECOVERY);
+  throw new Error(historySchemaRecovery());
 }
 
 function persistedChildStatus(value: unknown): PersistedChildStatus {
   const status = stringValue(value);
   if (status === 'pending' || status === 'running' || status === 'paused' || status === 'completed')
     return status;
-  throw new Error(HISTORY_SCHEMA_RECOVERY);
+  throw new Error(historySchemaRecovery());
 }
 
 function persistedChildSpawnLink(
@@ -731,7 +736,7 @@ function persistedChildSpawnLink(
   const id = stringValue(row.spawn_link_id);
   if (kind === undefined && id === undefined) return undefined;
   if ((kind === 'tool-use' || kind === 'spawn') && id) return { kind, id };
-  throw new Error(HISTORY_SCHEMA_RECOVERY);
+  throw new Error(historySchemaRecovery());
 }
 
 function whenString<T extends object>(
@@ -758,7 +763,7 @@ function whenReasoning(
 }
 
 function readStoredSummaryPatches(): Map<string, Partial<SessionSummary>> {
-  const path = join(droidexUserDataDir(), SESSION_INDEX_FILENAME);
+  const path = join(droidexHistoryDir(), SESSION_INDEX_FILENAME);
   if (!existsSync(path)) return new Map();
   const db = new DatabaseSync(path);
   try {
@@ -799,7 +804,7 @@ function applyStoredCompactionGenerations(
 }
 
 function readStoredChildSessions(parentAppSessionId: string): PersistedChildSession[] {
-  const path = join(droidexUserDataDir(), SESSION_INDEX_FILENAME);
+  const path = join(droidexHistoryDir(), SESSION_INDEX_FILENAME);
   if (!existsSync(path)) return [];
   const db = new DatabaseSync(path);
   try {
@@ -828,7 +833,7 @@ function summaryPatchesFromRows(
       providerSessionId,
       compactedFromProviderSessionIds: decodeProviderSessionIdList(
         row.compacted_from_provider_session_ids,
-        HISTORY_SCHEMA_RECOVERY,
+        historySchemaRecovery(),
       ),
       sessionPurpose: sessionPurpose(stringValue(row.session_purpose)),
       interactionMode: sessionInteractionModeValue(stringValue(row.interaction_mode)),
@@ -865,7 +870,7 @@ function hiddenProviderSessionIdsFromRows(rows: Record<string, unknown>[]): Set<
     const appSessionId = stringValue(row.app_session_id);
     for (const providerSessionId of decodeProviderSessionIdList(
       row.compacted_from_provider_session_ids,
-      HISTORY_SCHEMA_RECOVERY,
+      historySchemaRecovery(),
     )) {
       if (providerSessionId && providerSessionId !== appSessionId) hidden.add(providerSessionId);
     }
@@ -885,6 +890,7 @@ export function applyCachedSummary(
   return {
     ...summary,
     ...defined,
+    updatedAt: Math.max(summary.updatedAt, defined.updatedAt ?? 0),
     appSessionId: defined.appSessionId ?? summary.appSessionId,
     providerSessionId: defined.providerSessionId ?? summary.providerSessionId,
     missionId: defined.missionId ?? summary.missionId,

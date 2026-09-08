@@ -34,6 +34,32 @@ For renderer-only development, use:
 npm run dev
 ```
 
+To run a second dev instance beside your main app, isolate both its profile and
+history writer (raw Factory transcripts are still discovered). Electron places
+the isolated history database in `<profile>/history`; a bare sidecar can set
+`DROIDEX_HISTORY_DIR` explicitly. The default app keeps `~/.factory/droidex`:
+
+```bash
+ELECTRON_START_URL=http://127.0.0.1:1421 BRIDGE_PORT=8766 \
+DROIDEX_USER_DATA_DIR="$HOME/Library/Application Support/DROIDEX-dev" \
+npm run electron
+```
+
+## Tool activity and review
+
+Settings → Tool activity controls how much detail appears inside tool runs:
+compact summaries, balanced expandable rows, or detailed output. Completed turns
+keep one Worked disclosure followed by the final answer at every density.
+Read output is available inside the disclosure; compaction markers stay visible.
+The streaming caret indicates arriving text, while Working stays visible until
+the turn finishes, including gaps between tokens.
+
+Click a changed file to open Review with its captured diff; its disclosure arrow
+opens an inline preview. Repeated edits show
+the latest captured change and its matching line counts, even when Git has a
+different cumulative diff. Selecting a Review scope returns to its live Git changes. Path-only previews use
+the workspace Files permissions and reject paths or symlinks outside that folder.
+
 ## GitHub pull requests
 
 For GitHub repositories, the Context panel shows pull requests, checks, and
@@ -86,6 +112,35 @@ recovery and release checks live in
 | `npm run typecheck` | Check app TypeScript |
 | `npm run sidecar:typecheck` | Check sidecar TypeScript |
 | `npm run format:check` | Check formatting |
+
+## Manage parallel work
+
+Use **Customize sidebar** (the filter-lines button above your workspaces) to switch
+between workspace grouping and **Activity / status**. Activity separates tasks
+that need attention, working tasks, ready conversations, and settled work.
+Workspace rows show the same status indicators.
+
+Choose **Mark as settled** from a chat’s action menu after reviewing a result. The conversation stays available
+under **Settled**, with a **Reopen task** action. New activity brings it back;
+running tasks and tasks awaiting your approval or answer cannot be settled.
+Settling is an organizational action, not cancellation or deletion.
+
+The customize menu also controls ordering, tasks shown per group, and status
+filters. **Last active** keeps resumed older chats near the top, including after
+restarting. Sidebar preferences and the latest 1,000 settled task markers are saved per local profile.
+Markers for hidden chats and newer activity are removed automatically.
+**Pull request** grouping and the search button beside notifications use PRs detected for the chat’s
+worktree automatically, including chats you have not opened. Discovery runs on
+startup and every minute while the app is visible, independently of the Context
+panel. GitHub CLI must be signed in. Lookups stop waiting after 10 seconds. If the underlying operation is still running,
+discovery skips that lookup until it finishes while continuing to refresh other worktrees.
+Restarting the app clears a stuck IPC call.
+Each chat retains its 10 most recently detected PRs. At the 1,000-chat metadata limit,
+opening a chat can replace an older automatic PR entry; names, pins, and hidden-chat markers take priority. Search linked PRs by number, URL, title, or
+branch. Links survive restarts and branch changes; detected PR status refreshes
+automatically. A full PR URL distinguishes repositories that use the same number.
+
+The bell filters unread conversations; selecting one clears that unread filter.
 
 ## Updates
 

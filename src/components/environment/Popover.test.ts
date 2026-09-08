@@ -31,6 +31,7 @@ test('anchor-width popovers escape a clipping card while staying inside the view
       left: 620,
       width: 160,
       maxHeight: 508,
+      zoom: 1,
     },
   );
 });
@@ -51,6 +52,7 @@ test('fixed-width popovers clamp to the viewport edge', async () => {
       left: 504,
       width: 288,
       maxHeight: 472,
+      zoom: 1,
     },
   );
 });
@@ -72,6 +74,7 @@ test('popover width shrinks when the viewport is narrower than its requested wid
       left: 8,
       width: 184,
       maxHeight: 212,
+      zoom: 1,
     },
   );
 });

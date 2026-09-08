@@ -128,12 +128,10 @@ export function nearestOverflowParent(start: HTMLElement): HTMLElement | null {
   return null;
 }
 
-export function takeFeedRowEntrance(
+export function shouldAnimateFeedRow(
   key: string,
   animateKeys: ReadonlySet<string>,
-  enteredKeys: Set<string>,
+  enteredKeys: ReadonlySet<string>,
 ): boolean {
-  if (!animateKeys.has(key) || enteredKeys.has(key)) return false;
-  enteredKeys.add(key);
-  return true;
+  return animateKeys.has(key) && !enteredKeys.has(key);
 }

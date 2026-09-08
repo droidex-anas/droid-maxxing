@@ -4,6 +4,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { SidebarSessionList, type SidebarSessionListProps } from './SidebarSessionList.js';
+import { sidebarPagination } from '../hooks/useSidebarPagination.js';
 import { SIDEBAR_VISIBLE_SESSION_LIMIT } from '../lib/workspaces.js';
 import type { SessionSummary } from '../types/bridge.js';
 
@@ -160,4 +161,33 @@ test('a folder with nothing withheld shows no reveal control', () => {
   });
 
   assert.ok(!html.includes('earlier'));
+});
+
+test('loading earlier history keeps All tasks unlimited', () => {
+  let counts: ReadonlyMap<string, number> = new Map();
+  let revealed = false;
+  clickControl(
+    {
+      sessions: eight,
+      visibleCount: Number.MAX_SAFE_INTEGER,
+      defaultVisibleCount: Number.MAX_SAFE_INTEGER,
+      earlierSessionCount: 4,
+      onShowEarlier: () => {
+        revealed = true;
+      },
+      onShowMore: () => {
+        counts = sidebarPagination(counts, { type: 'more', group: 'workspace', limit: 0 });
+      },
+    },
+    'Show 4 earlier',
+  );
+  assert.equal(revealed, true);
+  assert.equal(counts.size, 0);
+  const html = render({
+    sessions: eight,
+    visibleCount: counts.get('workspace') ?? Number.MAX_SAFE_INTEGER,
+    defaultVisibleCount: Number.MAX_SAFE_INTEGER,
+  });
+  assert.ok(html.includes('s-7'));
+  assert.ok(!html.includes('Show more'));
 });

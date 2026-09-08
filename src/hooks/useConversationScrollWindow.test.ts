@@ -11,6 +11,9 @@ import {
 } from './conversationViewportAnchor';
 import {
   applyConversationContentResize,
+  captureDisclosureAnchor,
+  disclosureAnchorDelta,
+  touchDisclosureAnchor,
   didCommitRequestedHistoryPrepend,
   deferredViewportRestoreAction,
   shouldBindConversationContentResize,
@@ -25,6 +28,36 @@ const settledPinned = {
   isAutoPagingOlderHistory: false,
   isPinned: true,
 };
+
+test('disclosure anchoring captures, holds, adjusts both directions, and releases', () => {
+  let top = 150;
+  let connected = true;
+  const button = {
+    get isConnected() {
+      return connected;
+    },
+    getBoundingClientRect: () => ({ top }),
+  } as HTMLElement;
+  const container = {
+    contains: (element: HTMLElement) => element === button,
+    getBoundingClientRect: () => ({ top: 100 }),
+  } as unknown as HTMLElement;
+  assert.equal(captureDisclosureAnchor(container, null, 0), null);
+  assert.equal(captureDisclosureAnchor(container, {} as HTMLElement, 0), null);
+  const anchor = captureDisclosureAnchor(container, button, 0);
+  assert.ok(anchor);
+  assert.deepEqual(disclosureAnchorDelta(container, anchor, 10), { mode: 'hold' });
+  top = 190;
+  assert.deepEqual(disclosureAnchorDelta(container, anchor, 10), { mode: 'adjust', delta: 40 });
+  top = 120;
+  assert.deepEqual(disclosureAnchorDelta(container, anchor, 10), { mode: 'adjust', delta: -30 });
+  touchDisclosureAnchor(anchor, 850);
+  assert.equal(anchor.expiresAt, 1250);
+  assert.equal(disclosureAnchorDelta(container, anchor, 1000).mode, 'adjust');
+  assert.equal(disclosureAnchorDelta(container, anchor, 1251).mode, 'release');
+  connected = false;
+  assert.equal(disclosureAnchorDelta(container, anchor, 1000).mode, 'release');
+});
 
 test('settled transcript release waits for older-history paging to finish', () => {
   assert.equal(shouldReleaseConversationTranscript(settledPinned), true);

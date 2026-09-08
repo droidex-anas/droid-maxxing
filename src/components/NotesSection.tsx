@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { NotesIntroCard } from './NotesIntroCard';
 import { INTRO_WIDTH, notesIntroPosition } from '../lib/notesIntro';
+import { RowCaret } from './environment/primitives';
 import {
   NOTE_TAG_CHIP,
   NOTE_TAG_HINT,
@@ -20,9 +21,9 @@ import { dismissNotesIntro, loadNotesIntroSeen, type SessionNote } from '../lib/
 const EASE = [0.16, 1, 0.3, 1] as const;
 const EMPTY_NOTES: SessionNote[] = [];
 
-// Scratch notes for the active session: write a thought down in the notepad
-// box, it stacks as a checklist line, and clicking a line hands the text to
-// the composer so it can be sent as a prompt. The bullet fills once a note has
+// Scratch notes for the active session: write a thought down in the pad, it
+// stacks as a checklist line, and clicking a line hands the text to the
+// composer so it can be sent as a prompt. The bullet fills once a note has
 // been sent. Notes persist per session across restarts.
 export default function NotesSection({ appSessionId }: { appSessionId: string }) {
   const dispatch = useStoreDispatch();
@@ -72,41 +73,10 @@ export default function NotesSection({ appSessionId }: { appSessionId: string })
   );
 }
 
-// Small ring in the header showing how many stacked notes have been sent,
-// like the progress ring on a checklist card.
-function ProgressRing({ used, total }: { used: number; total: number }) {
-  const radius = 8;
-  const circumference = 2 * Math.PI * radius;
-  const fraction = total > 0 ? used / total : 0;
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0 -rotate-90">
-      <circle
-        cx="10"
-        cy="10"
-        r={radius}
-        fill="none"
-        className="stroke-droid-border"
-        strokeWidth="2.5"
-      />
-      {fraction > 0 && (
-        <circle
-          cx="10"
-          cy="10"
-          r={radius}
-          fill="none"
-          className="stroke-droid-accent"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - fraction)}
-          style={{ transition: 'stroke-dashoffset 300ms ease' }}
-        />
-      )}
-    </svg>
-  );
-}
-
 // Presentational half, kept pure so the layout can be tested without a store.
+// Speaks the same section language as the rest of the Context panel: a muted
+// header row with a disclosure caret, content on the shared px-3 gutter — no
+// nested card chrome of its own.
 export function NotesPanel({
   notes,
   draft,
@@ -119,6 +89,7 @@ export function NotesPanel({
   tag,
   onTagSelect,
   onTagClear,
+  defaultOpen = false,
 }: {
   notes: SessionNote[];
   draft: string;
@@ -131,11 +102,18 @@ export function NotesPanel({
   tag: NoteTag | null;
   onTagSelect: (tag: NoteTag) => void;
   onTagClear: () => void;
+  defaultOpen?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(true);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const sectionRef = useRef<HTMLDivElement>(null);
+  // Collapsed by default: notes are a supporting tool, and opening the panel
+  // should never reshuffle the layout because a textarea mounted.
+  const [open, setOpen] = useState(defaultOpen);
+  const [anchorRect, setAnchorRect] = useState<{
+    top: number;
+    left: number;
+    height: number;
+  } | null>(null);
   const used = notes.filter((note) => note.usedAt !== null).length;
 
   // Pad @ autocomplete: while the whole draft is just a @token, the menu lists
@@ -161,25 +139,56 @@ export function NotesPanel({
     hadTag.current = hasTag;
   }, [tag]);
 
-  // Track the Notes card's viewport position while the intro is up so the
+  // Track the section's viewport position while the intro is up so the
   // floating card stays glued to it. The capture-phase scroll listener also
   // catches the panel's own scroll container, which does not bubble.
   useEffect(() => {
     if (!introVisible) return;
     const measure = () => {
-      setAnchorRect(cardRef.current?.getBoundingClientRect() ?? null);
+      const el = sectionRef.current;
+      if (!el) {
+        setAnchorRect(null);
+        return;
+      }
+      // The section spans the panel edge to edge while its rows sit on the
+      // px-3 gutter; anchoring to the raw rect would push the floating intro
+      // 12px too far left and detach its caret from the Notes row.
+      const rect = el.getBoundingClientRect();
+      setAnchorRect({ top: rect.top, left: rect.left + 12, height: rect.height });
     };
     measure();
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
+    // Sections above Notes can expand inline (commit/PR sheets) and the pad
+    // grows with the draft, neither of which fires resize or scroll. The
+    // section sits inside single-purpose wrappers (this component's root and
+    // the panel's per-section slot), so watch every sibling group on the way
+    // up to the scroll container to catch the layout shifts that move Notes
+    // without resizing it.
+    let observer: ResizeObserver | null = null;
+    const section = sectionRef.current;
+    if (section && typeof ResizeObserver === 'function') {
+      observer = new ResizeObserver(measure);
+      for (let el: HTMLElement | null = section; el; el = el.parentElement) {
+        observer.observe(el);
+        const parent: HTMLElement | null = el.parentElement;
+        if (!parent) break;
+        for (const sibling of parent.children) {
+          if (sibling !== el) observer.observe(sibling);
+        }
+        const overflowY = getComputedStyle(parent).overflowY;
+        if (overflowY === 'auto' || overflowY === 'scroll') break;
+      }
+    }
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
   }, [introVisible, open, notes.length]);
 
-  // "Try it now" lands the caret in the pad; if the card is collapsed the pad
-  // only mounts after it opens, so the focus waits for that render.
+  // "Try it now" lands the caret in the pad; if the section is collapsed the
+  // pad only mounts after it opens, so the focus waits for that render.
   const focusAfterOpen = useRef(false);
   const tryNotes = () => {
     onDismissIntro();
@@ -197,8 +206,8 @@ export function NotesPanel({
     }
   }, [open]);
 
-  // The pad starts five lines tall so it reads as a place to write, then grows
-  // with the text like the main composer, capped so a long note scrolls
+  // The pad starts three lines tall so it reads as a place to write, then
+  // grows with the text like the main composer, capped so a long note scrolls
   // instead of swallowing the panel. Reopen is a dep too: collapsing unmounts
   // the pad and drops its fitted height, so it must refit on the fresh mount.
   useEffect(() => {
@@ -213,31 +222,24 @@ export function NotesPanel({
 
   return (
     <div>
-      <div
-        ref={cardRef}
-        className="mx-3 mb-2 mt-1 rounded-2xl border border-droid-border bg-droid-elevated/40 shadow-[0_1px_2px_rgba(0,0,0,0.25)]"
-      >
+      <div ref={sectionRef}>
         <button
           type="button"
           onClick={() => {
             setOpen(!open);
           }}
-          className="flex w-full items-center gap-2.5 px-3.5 pb-1.5 pt-3 text-left"
+          aria-expanded={open}
+          className="group flex w-full items-center gap-2 px-3 pb-1 pt-4 text-left"
         >
-          <ProgressRing used={used} total={notes.length} />
-          <span className="min-w-0 flex-1">
-            <span className="block text-[13.5px] font-semibold text-droid-text">Notes</span>
-            <span className="block text-[11px] text-droid-text-muted">
-              {notes.length > 0
-                ? `${String(used)}/${String(notes.length)} sent`
-                : 'Scratch pad for this session'}
-            </span>
+          <span className="min-w-0 flex-1 text-[12px] font-medium text-droid-text-muted">
+            Notes
           </span>
-          <ChevronDown
-            className={`h-4 w-4 shrink-0 text-droid-text-muted transition-transform duration-200 ${
-              open ? '' : '-rotate-90'
-            }`}
-          />
+          {notes.length > 0 && (
+            <span className="shrink-0 text-[11px] leading-none tabular-nums text-droid-text-muted">
+              {used}/{notes.length} sent
+            </span>
+          )}
+          <RowCaret open={open} />
         </button>
 
         <AnimatePresence initial={false}>
@@ -249,12 +251,12 @@ export function NotesPanel({
               transition={{ duration: 0.22, ease: EASE }}
               className="overflow-hidden"
             >
-              <div className="px-2.5 pb-2.5">
-                {/* Notepad box: intentionally plain — Enter saves, no send chrome.
-                    Uses the field token: raised like the composer on dark, crisp
-                    card-surface on light. */}
-                <div>
-                  <div className="rounded-lg border border-droid-border/60 bg-droid-field px-2.5 py-1.5 transition-colors focus-within:border-droid-accent/40">
+              <div className="pb-2 pt-1">
+                {/* Notepad field: intentionally plain — Enter saves, no send
+                    chrome. Uses the field token: raised like the composer on
+                    dark, crisp card-surface on light. */}
+                <div className="mx-3">
+                  <div className="rounded-lg border border-droid-border/60 bg-droid-field px-2.5 py-2 transition-colors focus-within:border-droid-accent/40">
                     {tag && (
                       <div className="mb-1 flex">
                         <span
@@ -331,9 +333,25 @@ export function NotesPanel({
                           ? 'Add the detail — Enter to save'
                           : 'Write a note to use later — Enter to save'
                       }
-                      rows={5}
+                      rows={3}
                       className="w-full resize-none bg-transparent text-[12.5px] leading-snug text-droid-text placeholder:text-droid-text-muted/50 focus:outline-none"
                     />
+                    {/* The pad saves on Enter with no other chrome, so the moment
+                        text exists a plain save affordance and the key hints appear. */}
+                    {draft.trim() !== '' && (
+                      <div className="mt-1 flex items-center justify-end gap-2.5">
+                        <span className="text-[10px] text-droid-text-muted/60">
+                          Enter to save · Shift+Enter for a new line
+                        </span>
+                        <button
+                          type="button"
+                          onClick={onSave}
+                          className="text-[11px] font-medium text-droid-text-secondary transition-colors hover:text-droid-text"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Tag menu in flow directly below the pad: as an absolute
@@ -379,7 +397,7 @@ export function NotesPanel({
                   </AnimatePresence>
                 </div>
 
-                <div className="mt-1">
+                <div className="mt-0.5">
                   <AnimatePresence initial={false}>
                     {notes.map((note) => {
                       const tag = parseNoteTag(note.text);
@@ -398,7 +416,7 @@ export function NotesPanel({
                               onUse(note);
                             }}
                             title="Send to composer"
-                            className="flex w-full items-start gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-droid-hover/60 focus-visible:bg-droid-hover/60 focus-visible:outline-none"
+                            className="flex w-full items-start gap-2.5 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-droid-hover/60 focus-visible:bg-droid-hover/60 focus-visible:outline-none"
                           >
                             <span
                               aria-hidden
@@ -431,7 +449,7 @@ export function NotesPanel({
                               onRemove(note.id);
                             }}
                             title="Delete note"
-                            className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-droid-text-muted opacity-0 transition-opacity hover:bg-droid-active hover:text-droid-text focus-visible:opacity-100 group-hover:opacity-100"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-droid-text-muted opacity-0 transition-opacity hover:bg-droid-active hover:text-droid-text focus-visible:opacity-100 group-hover:opacity-100"
                           >
                             <X className="h-3 w-3" />
                           </button>
@@ -441,9 +459,9 @@ export function NotesPanel({
                   </AnimatePresence>
 
                   {notes.length === 0 && (
-                    <div className="px-2 py-1.5 text-[11.5px] leading-snug text-droid-text-muted">
-                      No notes yet. Click a saved note to send it as a prompt — start it with @bug,
-                      @next, @idea or @constraint to tag it.
+                    <div className="px-3 py-1.5 text-[11.5px] leading-snug text-droid-text-muted">
+                      No notes yet — write one above, Enter to save. Start it with @bug, @next,
+                      @idea or @constraint to tag it.
                     </div>
                   )}
                 </div>

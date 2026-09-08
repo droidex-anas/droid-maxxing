@@ -159,11 +159,9 @@ DROIDEX features do not use those system capabilities.
 
 The sidecar uses Electron's bundled Node 22 runtime and its built-in
 `node:sqlite`; users do not install or download SQLite. The canonical session
-index is `session-index.sqlite` inside `DROIDEX_USER_DATA_DIR` (default:
-`~/Library/Application Support/DROIDEX`). Each app profile owns its history
-writer and search database. Factory authentication and raw session history under
-`~/.factory/sessions` remain shared. A separate profile does not compete for
-another profile's history writer lease.
+index is `~/.factory/droidex/session-index.sqlite` (or `<profile>/history` for an
+instance launched with `DROIDEX_USER_DATA_DIR`). It is DROIDEX-owned derived
+state built from raw Factory session history under `~/.factory/sessions`.
 
 ## Crash and bug intake
 

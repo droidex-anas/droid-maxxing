@@ -69,7 +69,7 @@ function extensionOf(name: string): string {
   return base.slice(dot + 1).toLowerCase();
 }
 
-const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx']);
+export const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx']);
 const TABULAR_EXTENSIONS = new Set(['csv', 'tsv']);
 const CODE_THEME: PrismTheme = {
   plain: { color: 'var(--droid-text-secondary)' },
@@ -489,8 +489,12 @@ function ImagePreview({ data, fileName }: { data?: Uint8Array; fileName: string 
         src={url}
         alt={`Preview of ${fileName}`}
         className="max-h-full max-w-full rounded-sm object-contain shadow-lg"
-        onLoad={() => setStatus('ready')}
-        onError={() => setStatus('error')}
+        onLoad={() => {
+          setStatus('ready');
+        }}
+        onError={() => {
+          setStatus('error');
+        }}
       />
     </div>
   );
@@ -520,9 +524,7 @@ export function imageMimeType(fileName: string): string {
 
 async function loadPdfjsImpl() {
   const pdfjsLib = await import('pdfjs-dist');
-  const workerModule = (await import('pdfjs-dist/build/pdf.worker.min.mjs?worker&inline')) as {
-    default: new () => Worker;
-  };
+  const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?worker&inline');
   pdfjsLib.GlobalWorkerOptions.workerPort = new workerModule.default();
   return pdfjsLib;
 }
