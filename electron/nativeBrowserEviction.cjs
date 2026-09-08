@@ -110,7 +110,11 @@ function createNativeBrowserEviction({ budget, entries, closeEntry, loadUrl, rep
       restoreScroll: async (_target, scroll) => {
         const contents = safeWebContents(view);
         if (!contents || !isCurrent()) return;
-        await contents.executeJavaScript(restoreScrollScript(scroll), true);
+        try {
+          await contents.executeJavaScript(restoreScrollScript(scroll), true);
+        } catch {
+          // Scroll position is best-effort; a live restored page beats failing the action.
+        }
       },
       reportFailure: (target, url, error) => {
         reportFailure(target, url, error?.message || 'Browser restore failed.');

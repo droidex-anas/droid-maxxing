@@ -91,6 +91,18 @@ test('agent activity cannot mint trusted physical navigation provenance', () => 
   assert.equal(entry.trustedUserNavigation, null);
 });
 
+test('agent activity cannot spend a physical navigation capability minted before it', () => {
+  const { approvals, entry, navigation, view } = harness();
+  navigation.recordTrustedUserNavigation(entry, view, 'activation-1', 'https://next.test/path');
+  entry.agentActionActive = true;
+
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'navigate', 'https://next.test/path'),
+    false,
+  );
+  assert.equal(approvals.length, 1);
+});
+
 test('cross-origin transition begins one approval and consumes its successful load', async () => {
   const approval = deferred();
   const { approvals, entry, loads, navigation, view } = harness({ approval });

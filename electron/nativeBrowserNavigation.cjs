@@ -60,6 +60,7 @@ function createNativeBrowserNavigation({
   function consumeTrustedPhysicalNavigation(entry, view, destinationUrl) {
     const capability = entry.trustedUserNavigation;
     entry.trustedUserNavigation = null;
+    if (entry.agentActionActive) return false;
     return consumeTrustedUserNavigation(capability, {
       browserSessionId: entry.browserSessionId,
       destinationUrl,

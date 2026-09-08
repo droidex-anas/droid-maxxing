@@ -160,6 +160,23 @@ test('unsafe and unapproved cross-origin navigations are prevented', () => {
   assert.deepEqual(calls.transition, [{ kind: 'navigate', url: 'https://next.test/path' }]);
 });
 
+test('approved navigation commits the destination without preventing it', () => {
+  const { calls, contents, factory } = harness({ allowTransition: true });
+  const entry = factory.createEntry('browser-1');
+  factory.attachView(entry);
+  let prevented = 0;
+
+  contents.emit(
+    'will-navigate',
+    { preventDefault: () => (prevented += 1) },
+    'https://next.test/path',
+  );
+
+  assert.equal(prevented, 0);
+  assert.equal(entry.targetUrl, 'https://next.test/path');
+  assert.deepEqual(calls.transition, [{ kind: 'navigate', url: 'https://next.test/path' }]);
+});
+
 test('main-frame navigation invalidates document-bound trust and credentials', () => {
   const { calls, contents, factory } = harness();
   const entry = factory.createEntry('browser-1');

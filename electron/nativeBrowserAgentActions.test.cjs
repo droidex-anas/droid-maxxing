@@ -86,6 +86,7 @@ function harness(overrides = {}) {
     agentRequest: null,
     pendingAgentNavigation: null,
     approvedHistoryTransition: null,
+    authenticationPopupCapability: null,
   };
   let currentEntry = entry;
   const actions = createNativeBrowserAgentActions({
@@ -132,6 +133,9 @@ function harness(overrides = {}) {
         ok: true,
         snapshot: { url: 'https://site.test/page' },
       }),
+      invalidate: (candidate) => {
+        candidate.authenticationPopupCapability = null;
+      },
     },
     browserSettings: {
       authorizeAgentRequest: async (request) => {
@@ -279,6 +283,11 @@ test('navigation that wins the action race returns a fresh snapshot', async () =
   while (contents.listenerCount('did-start-navigation') === 0) await Promise.resolve();
   contents.emit('did-start-navigation', {}, 'https://site.test/next', false, true);
   contents.emit('did-finish-load');
+  execution.resolve({
+    requestId: 'request-1',
+    ok: true,
+    snapshot: { url: 'https://site.test/stale' },
+  });
 
   assert.deepEqual(await result, {
     requestId: 'request-1',
@@ -289,6 +298,71 @@ test('navigation that wins the action race returns a fresh snapshot', async () =
       canGoForward: false,
     },
   });
+});
+
+test('an interaction that resolves mid-navigation re-snapshots the new page', async () => {
+  const execution = deferred();
+  const { actions, contents } = harness({ execution });
+  const result = actions.run(request('click', { ref: 'ref-1' }));
+  while (contents.listenerCount('did-start-navigation') === 0) await Promise.resolve();
+  contents.emit('did-start-navigation', {}, 'https://site.test/next', false, true);
+  execution.resolve({
+    requestId: 'request-1',
+    ok: true,
+    snapshot: { url: 'https://site.test/stale' },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  contents.emit('did-finish-load');
+
+  assert.deepEqual(await result, {
+    requestId: 'request-1',
+    ok: true,
+    snapshot: {
+      url: 'https://site.test/page',
+      canGoBack: true,
+      canGoForward: false,
+    },
+  });
+});
+
+test('a failed agent action clears the approved authentication popup capability', async () => {
+  const execution = deferred();
+  const { actions, calls, entry } = harness({ execution });
+  entry.authenticationPopupCapability = { targetUrl: 'https://site.test/page' };
+  const result = actions.run(request('click', { ref: 'ref-1' }));
+  while (!calls.scripts.some((script) => script.includes('"nativeInputPhase":"prepare"'))) {
+    await Promise.resolve();
+  }
+  execution.reject(new Error('click failed'));
+
+  await assert.rejects(result, /click failed/);
+  assert.equal(entry.authenticationPopupCapability, null);
+});
+
+test('a navigation timeout holds the reservation until the interaction settles', async (t) => {
+  const timers = [];
+  t.mock.method(globalThis, 'setTimeout', (callback, timeoutMs) => {
+    const timer = { callback, timeoutMs, cleared: false, unref() {} };
+    timers.push(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, 'clearTimeout', (timer) => {
+    timer.cleared = true;
+  });
+  const execution = deferred();
+  const { actions, calls, entry } = harness({ execution });
+  const result = actions.run(request('click', { ref: 'ref-1' }));
+  while (!calls.scripts.some((script) => script.includes('"nativeInputPhase":"prepare"'))) {
+    await Promise.resolve();
+  }
+  timers.find(({ timeoutMs }) => timeoutMs === 7_000).callback();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(entry.agentActionActive, true);
+  execution.resolve({ requestId: 'request-1', ok: true, snapshot: {} });
+
+  await assert.rejects(result, /navigation timed out/i);
+  assert.equal(entry.agentActionActive, false);
 });
 
 test('reload timeout rejects instead of returning a stale snapshot', async (t) => {

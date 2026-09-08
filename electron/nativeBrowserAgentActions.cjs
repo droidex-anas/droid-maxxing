@@ -66,7 +66,9 @@ function createNativeBrowserAgentActions({
       actionContents = requireContents(restoredEntry);
       const actionView = restoredEntry.view;
       const actionDocumentGeneration = restoredEntry.documentGeneration;
+      let abandoned = false;
       const isCurrentActionTarget = () =>
+        !abandoned &&
         restoredEntry.view === actionView &&
         safeWebContents(actionView) === actionContents &&
         !actionContents.isDestroyed() &&
@@ -142,18 +144,18 @@ function createNativeBrowserAgentActions({
       assertCurrentActionTarget();
 
       const observedNavigation = observeNavigation(actionContents);
+      const execution = interaction
+        .executeBrowserAgentInteraction(actionContents, request, {
+          isCurrent: isCurrentActionTarget,
+          pageContext,
+          showCursor: ({ x, y, pressed }) => showAgentCursor(restoredEntry, { x, y, pressed }),
+          viewportBounds: actionView.getBounds(),
+        })
+        .then(
+          (result) => ({ type: 'result', result }),
+          (error) => ({ type: 'error', error }),
+        );
       try {
-        const execution = interaction
-          .executeBrowserAgentInteraction(actionContents, request, {
-            isCurrent: isCurrentActionTarget,
-            pageContext,
-            showCursor: ({ x, y, pressed }) => showAgentCursor(restoredEntry, { x, y, pressed }),
-            viewportBounds: actionView.getBounds(),
-          })
-          .then(
-            (result) => ({ type: 'result', result }),
-            (error) => ({ type: 'error', error }),
-          );
         const outcome = await Promise.race([
           execution,
           observedNavigation.wait().then(() => ({ type: 'navigation' })),
@@ -171,10 +173,19 @@ function createNativeBrowserAgentActions({
           await observedNavigation.wait();
           return snapshotAfterNavigation(actionContents, request);
         }
+        if (observedNavigation.started()) {
+          await observedNavigation.wait();
+          return snapshotAfterNavigation(actionContents, request);
+        }
         return withBrowserHistory(actionContents, outcome.result);
       } finally {
+        abandoned = true;
+        await execution;
         observedNavigation.dispose();
       }
+    } catch (error) {
+      credentials.invalidate(entry);
+      throw error;
     } finally {
       if (actionContents) setBrowserActionActive(entry, false);
       if (entry.agentActionActive) navigation.finishAgentAction(entry);
@@ -290,8 +301,8 @@ function createNativeBrowserAgentActions({
       rejectCompletion(error);
     }, timeoutMs);
     timeout.unref?.();
-    const onStart = (_event, _url, _isInPlace, isMainFrame) => {
-      if (isMainFrame) didStart = true;
+    const onStart = (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) didStart = true;
     };
     const onFinish = () => {
       if (didStart) finish();

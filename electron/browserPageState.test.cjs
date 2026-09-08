@@ -20,6 +20,17 @@ test('closing a loading view remembers the pending destination for restoration',
   );
 });
 
+test('closing mid-redirect keeps the redirected page instead of the original request', () => {
+  assert.equal(
+    browserTargetBeforeViewClose({
+      currentUrl: 'https://example.com/final',
+      loadingUrl: 'https://example.com/start',
+      targetUrl: 'https://example.com/final',
+    }),
+    'https://example.com/final',
+  );
+});
+
 test('trusted renderer navigation keeps the exact hash and sensitive query values', () => {
   assert.equal(
     userVisibleBrowserUrl(
@@ -154,6 +165,18 @@ test('browser actions reject missing and internal-error snapshots instead of fab
         'request-1',
       ),
     /valid page snapshot/,
+  );
+  assert.throws(
+    () =>
+      requireFreshBrowserSnapshot(
+        {
+          requestId: 'request-0',
+          ok: true,
+          snapshot: { url: 'https://example.com/page', scroll: { x: 0, y: 0 }, refs: [] },
+        },
+        'request-1',
+      ),
+    /mismatched snapshot result/,
   );
 });
 

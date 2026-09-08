@@ -74,7 +74,9 @@ function createNativeBrowserLayout({
 
   function detachNativeBrowser(browserSessionId, invalidateAttachment = true) {
     const targetBrowserSessionId =
-      browserSessionId ?? requestedAttachmentId ?? attachedBrowserSessionId;
+      browserSessionId == null
+        ? (requestedAttachmentId ?? attachedBrowserSessionId)
+        : urls.normalizeNativeBrowserSessionId(browserSessionId);
     if (invalidateAttachment && requestedAttachmentId === targetBrowserSessionId) {
       attachmentRevision += 1;
       requestedAttachmentId = null;

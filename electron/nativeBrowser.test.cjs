@@ -66,6 +66,7 @@ class FakeWebContents extends EventEmitter {
   failNavigation(url, code = -105) {
     this.url = 'chrome-error://chromewebdata/';
     this.emit('did-fail-load', {}, code, 'navigation failed', url, true);
+    this.emit('did-finish-load');
   }
 
   async executeJavaScript(script) {
@@ -147,6 +148,7 @@ function harness() {
   const mainWindow = new FakeWindow();
   const revoked = [];
   const forgotten = [];
+  const rendererEvents = [];
   class WebContentsView extends FakeView {
     constructor() {
       super();
@@ -197,13 +199,13 @@ function harness() {
     getMainWindow: () => mainWindow,
     getHostAppUrl: () => 'http://127.0.0.1:5173/',
     preloadPath: '/tmp/nativeBrowserPreload.cjs',
-    sendToRenderer() {},
+    sendToRenderer: (channel, payload) => rendererEvents.push({ channel, payload }),
   });
-  return { forgotten, hiddenWindows, mainWindow, manager, revoked, views };
+  return { forgotten, hiddenWindows, mainWindow, manager, rendererEvents, revoked, views };
 }
 
 test('user open and reload follow the live page, then recover its failed URL', async () => {
-  const { manager, views } = harness();
+  const { manager, rendererEvents, views } = harness();
   await manager.open('browser-1', 'https://example.test/start');
   const contents = views[0].webContents;
 
@@ -212,6 +214,12 @@ test('user open and reload follow the live page, then recover its failed URL', a
   assert.deepEqual(contents.reloads, ['https://example.test/live']);
 
   contents.failNavigation('https://example.test/live');
+  assert.deepEqual(
+    rendererEvents
+      .filter(({ channel }) => channel === 'native-browser-load-failed')
+      .map(({ payload }) => payload.error),
+    ['navigation failed'],
+  );
   await manager.reload('browser-1');
   assert.equal(contents.loadedUrls.at(-1), 'https://example.test/live');
   assert.equal(contents.getURL(), 'https://example.test/live');

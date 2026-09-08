@@ -32,7 +32,8 @@ function chooseBrowserRestore({ currentUrl, targetUrl, homePage }) {
 }
 
 function browserTargetBeforeViewClose({ currentUrl, loadingUrl, targetUrl }) {
-  for (const url of [loadingUrl, currentUrl, targetUrl]) {
+  const pendingUrl = browserPageUrlsMatch(loadingUrl, targetUrl) ? loadingUrl : null;
+  for (const url of [pendingUrl, currentUrl, targetUrl]) {
     if (isSafeHttpUrl(url)) return url;
   }
   return null;

@@ -231,10 +231,7 @@ function createNativeBrowserViewFactory({
     const contents = safeWebContents(view);
     if (entry.view !== view || !contents) return;
     const url = contents.getURL();
-    if (urls.isChromeErrorUrl(url)) {
-      emitLoadFailed(entry, entry.targetUrl || url, 'Browser page failed to load.');
-      return;
-    }
+    if (urls.isChromeErrorUrl(url)) return;
     if (entry.state.designMode && entry.attached && entry.visible) applyDesignState(entry);
   }
 
