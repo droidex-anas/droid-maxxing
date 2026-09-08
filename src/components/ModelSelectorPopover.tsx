@@ -10,7 +10,7 @@ import {
   planChildModelUpdate,
   type ExactChildSettingsTarget,
 } from '../lib/exactChildSettings';
-import ModelCatalogList, { effortsFor, stepEffort } from './ModelCatalogList';
+import ModelCatalogList, { defaultModelOf, effortsFor, stepEffort } from './ModelCatalogList';
 
 export type { ExactChildSettingsTarget } from '../lib/exactChildSettings';
 
@@ -152,6 +152,7 @@ export default function ModelSelectorPopover({
     const m = source.find((x) => x.id === effModelId);
     return m?.displayName ?? effModelId;
   })();
+  const defaultModel = useMemo(() => defaultModelOf(source), [source]);
   const selectedConfigModel = effModelId ? source.find((x) => x.id === effModelId) : undefined;
   const selectedSupportedReasoning = selectedConfigModel?.supportedReasoningEfforts;
 
@@ -257,7 +258,7 @@ export default function ModelSelectorPopover({
         if (next !== idx) updateModel(ids[next]);
         return;
       }
-      const efforts = effortsFor(selectedConfigModel, effReasoning);
+      const efforts = effortsFor(selectedConfigModel ?? defaultModel, effReasoning);
       const next = stepEffort(efforts, effReasoning, e.key === 'ArrowRight' ? 1 : -1);
       if (next !== effReasoning) updateReasoning(next);
     };
@@ -268,6 +269,7 @@ export default function ModelSelectorPopover({
   }, [
     childReady,
     childTarget,
+    defaultModel,
     effModelId,
     effReasoning,
     filterOpen,
@@ -427,6 +429,7 @@ export default function ModelSelectorPopover({
 
           <ModelCatalogList
             models={models}
+            defaultModel={defaultModel}
             hasRealModels={hasRealModels}
             selectedModelId={effModelId}
             reasoning={effReasoning}

@@ -1,27 +1,21 @@
-import { memo } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ModelInfo, ReasoningEffort } from '../types/bridge';
 import { ModelIcon, providerOf } from './ModelIcon';
 
 const ROW_H = 36;
+const VISIBLE_H = 180;
 
-export const BASE_REASONING: ReasoningEffort[] = [
-  'off',
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-  'dynamic',
-];
+/** The catalog entry Droid CLI falls back to when no model is chosen. */
+export function defaultModelOf(models: ModelInfo[]) {
+  return models.find((m) => m.isDefault && !m.isCustom);
+}
 
 /** Effort choices a row exposes: the model's supported set, or its single fixed default. */
 export function effortsFor(model: ModelInfo | undefined, fallback: ReasoningEffort) {
-  if (!model) return BASE_REASONING;
-  const supported = model.supportedReasoningEfforts;
+  const supported = model?.supportedReasoningEfforts;
   if (supported?.length) return supported;
-  return [model.defaultReasoningEffort ?? fallback];
+  return [model?.defaultReasoningEffort ?? fallback];
 }
 
 export function stepEffort(efforts: ReasoningEffort[], current: ReasoningEffort, delta: number) {
@@ -30,8 +24,11 @@ export function stepEffort(efforts: ReasoningEffort[], current: ReasoningEffort,
   return efforts[Math.min(efforts.length - 1, Math.max(0, base + delta))];
 }
 
+type Pick = (modelId: string | undefined, effort?: ReasoningEffort) => void;
+
 function ModelCatalogList({
   models,
+  defaultModel,
   hasRealModels,
   selectedModelId,
   reasoning,
@@ -42,6 +39,7 @@ function ModelCatalogList({
   reasoningLocked,
 }: {
   models: ModelInfo[];
+  defaultModel: ModelInfo | undefined;
   hasRealModels: boolean;
   selectedModelId: string | undefined;
   reasoning: ReasoningEffort;
@@ -51,58 +49,102 @@ function ModelCatalogList({
   disabled: boolean;
   reasoningLocked: boolean;
 }) {
-  const highlightIndex = !selectedModelId
-    ? 0
-    : hasRealModels
-      ? models.findIndex((m) => m.id === selectedModelId) + 1
-      : 0;
-  const pick = (modelId: string | undefined, effort?: ReasoningEffort) => {
-    if (modelId !== selectedModelId) onSelectModel(modelId);
-    if (effort) onSelectReasoning(effort);
-  };
-  const rowProps = { selectedModelId, reasoning, pick, disabled, reasoningLocked };
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rows = hasRealModels ? models : [];
+  const selectedIndex = !selectedModelId ? 0 : rows.findIndex((m) => m.id === selectedModelId) + 1;
+
+  const virtualizer = useVirtualizer({
+    count: rows.length + 1,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_H,
+    overscan: 4,
+    initialRect: { width: 0, height: VISIBLE_H },
+    initialOffset: Math.max(0, selectedIndex * ROW_H - VISIBLE_H / 2 + ROW_H / 2),
+  });
+
+  useEffect(() => {
+    if (selectedIndex > 0) virtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
+  }, [selectedIndex, virtualizer]);
+
+  const latest = useRef({ selectedModelId, onSelectModel, onSelectReasoning });
+  latest.current = { selectedModelId, onSelectModel, onSelectReasoning };
+  const pick = useCallback<Pick>((modelId, effort) => {
+    const cur = latest.current;
+    if (modelId !== cur.selectedModelId) cur.onSelectModel(modelId);
+    if (effort) cur.onSelectReasoning(effort);
+  }, []);
+
+  const rowProps = { pick, disabled, reasoningLocked };
 
   return (
-    <div className="mt-2 max-h-[180px] overflow-y-auto -mx-1 px-1">
-      <div className="relative" role="listbox">
+    <div ref={scrollRef} className="mt-2 max-h-[180px] overflow-y-auto -mx-1 px-1">
+      <div
+        role="listbox"
+        className="relative"
+        style={{ height: `${String(virtualizer.getTotalSize())}px` }}
+      >
         <div
           aria-hidden
           className={`absolute inset-x-0 top-0 h-9 rounded-lg bg-droid-surface ring-1 ring-inset ring-droid-active pointer-events-none ${
-            highlightIndex > 0 || !selectedModelId ? '' : 'opacity-0'
+            selectedIndex > 0 || !selectedModelId ? '' : 'opacity-0'
           }`}
           style={{
-            transform: `translateY(${String(highlightIndex * ROW_H)}px)`,
+            transform: `translateY(${String(selectedIndex * ROW_H)}px)`,
             transition: 'transform .22s cubic-bezier(.16,1,.3,1), opacity .15s',
           }}
         />
-        <ModelRow label="Default" {...rowProps} />
-        {hasRealModels ? (
-          <>
-            {models.map((model) => (
-              <ModelRow key={model.id} label={model.displayName} model={model} {...rowProps} />
-            ))}
-            {models.length === 0 && (
-              <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
-                No matches for “{query}”
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
-            Loading models…
-          </div>
-        )}
+        {virtualizer.getVirtualItems().map((item) => {
+          const model = item.index === 0 ? undefined : rows[item.index - 1];
+          const selected = item.index === selectedIndex;
+          return (
+            <div
+              key={model?.id ?? 'default'}
+              className="absolute inset-x-0 top-0"
+              style={{ transform: `translateY(${String(item.start)}px)` }}
+            >
+              {item.index === 0 ? (
+                <ModelRow
+                  label={defaultModel ? `Default · ${defaultModel.displayName}` : 'Default'}
+                  model={defaultModel}
+                  isDefaultRow
+                  selected={selected}
+                  reasoning={selected ? reasoning : undefined}
+                  {...rowProps}
+                />
+              ) : (
+                <ModelRow
+                  label={model?.displayName ?? ''}
+                  model={model}
+                  selected={selected}
+                  reasoning={selected ? reasoning : undefined}
+                  {...rowProps}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
+      {!hasRealModels && (
+        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+          Loading models…
+        </div>
+      )}
+      {hasRealModels && models.length === 0 && (
+        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+          No matches for “{query}”
+        </div>
+      )}
     </div>
   );
 }
 
 export default memo(ModelCatalogList);
 
-function ModelRow({
+const ModelRow = memo(function ModelRow({
   label,
   model,
-  selectedModelId,
+  isDefaultRow = false,
+  selected,
   reasoning,
   pick,
   disabled,
@@ -110,18 +152,18 @@ function ModelRow({
 }: {
   label: string;
   model?: ModelInfo;
-  selectedModelId: string | undefined;
-  reasoning: ReasoningEffort;
-  pick: (modelId: string | undefined, effort?: ReasoningEffort) => void;
+  isDefaultRow?: boolean;
+  selected: boolean;
+  /** Only set on the selected row; other rows show their model's default. */
+  reasoning?: ReasoningEffort;
+  pick: Pick;
   disabled: boolean;
   reasoningLocked: boolean;
 }) {
-  const id = model?.id;
-  const selected = id === selectedModelId;
-  const efforts = effortsFor(model, reasoning);
-  const shown = selected
-    ? reasoning
-    : (model?.defaultReasoningEffort ?? efforts[efforts.length - 1]);
+  const id = isDefaultRow ? undefined : model?.id;
+  const fallback = model?.defaultReasoningEffort ?? reasoning ?? 'medium';
+  const efforts = effortsFor(model, fallback);
+  const shown = reasoning ?? model?.defaultReasoningEffort ?? efforts[efforts.length - 1];
   const current = efforts.indexOf(shown);
   const canStep = efforts.length > 1 && !reasoningLocked;
   const lockTitle = reasoningLocked ? 'Change the child model to adjust reasoning.' : undefined;
@@ -215,4 +257,4 @@ function ModelRow({
       </span>
     </div>
   );
-}
+});
