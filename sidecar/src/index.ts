@@ -87,7 +87,9 @@ async function shutdown(): Promise<void> {
       shutdownAutomations: async () => {
         await automationManager?.shutdown();
       },
-      disableMetrics: () => { hotPathMetrics.disable(); },
+      disableMetrics: () => {
+        hotPathMetrics.disable();
+      },
       closeBridge: () => server.close(),
     });
   } catch (error) {
