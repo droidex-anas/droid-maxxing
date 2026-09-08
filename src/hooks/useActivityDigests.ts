@@ -12,6 +12,15 @@ import { useStoreSelector } from './useStore';
 // Digests for every chat this profile has seen: live ones from transcripts in
 // the store, backed by a persisted copy for chats not opened since launch. A
 // persisted digest is trusted only while the session has not moved past it.
+function persist(digests: Record<string, ActivityDigest> | null): void {
+  if (!digests) return;
+  try {
+    saveActivityDigests(window.localStorage, digests);
+  } catch {
+    // Persistence is a convenience; the in-memory digest still drives the view.
+  }
+}
+
 function same(x: ActivityDigest, y: ActivityDigest): boolean {
   return (
     x.at === y.at &&
@@ -50,22 +59,25 @@ export function useActivityDigests(enabled: boolean): Record<string, ActivityDig
   // rather than rewriting the cache each time.
   useEffect(() => {
     stored.current = merged;
-    const save = () => {
-      try {
-        saveActivityDigests(window.localStorage, merged);
-      } catch {
-        // Persistence is a convenience; the in-memory digest still drives the view.
-      }
-    };
-    const timer = setTimeout(save, SAVE_DELAY_MS);
-    window.addEventListener('pagehide', save);
+    const timer = setTimeout(() => {
+      persist(stored.current);
+    }, SAVE_DELAY_MS);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('pagehide', save);
-      // Unmounting (sidebar collapse) must not drop the last change.
-      save();
     };
   }, [merged]);
+
+  // A collapse or quit inside the save delay must not drop the last change.
+  useEffect(() => {
+    const flush = () => {
+      persist(stored.current);
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, []);
 
   return merged;
 }
