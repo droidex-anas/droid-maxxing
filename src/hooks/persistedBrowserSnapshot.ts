@@ -105,7 +105,7 @@ export function sanitizePersistedBrowserUrl(value: string): string {
     const url = new URL(value);
     removeSensitiveBrowserParams(url.searchParams);
     const fragment = url.hash.slice(1);
-    if (fragment.startsWith('/') && fragment.includes('?')) {
+    if (fragment.includes('?')) {
       const queryIndex = fragment.indexOf('?');
       const route = fragment.slice(0, queryIndex);
       const fragmentParams = new URLSearchParams(fragment.slice(queryIndex + 1));
@@ -114,7 +114,7 @@ export function sanitizePersistedBrowserUrl(value: string): string {
       );
       removeSensitiveBrowserParams(
         fragmentParams,
-        hasSecret || /\/(?:auth|callback|login|oauth|signin)(?:\/|$)/i.test(route),
+        hasSecret || /(?:^|\/)(?:auth|callback|login|oauth|signin)(?:\/|$)/i.test(route),
       );
       const remaining = fragmentParams.toString();
       url.hash = `#${route}${remaining ? `?${remaining}` : ''}`;

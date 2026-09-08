@@ -365,7 +365,7 @@ export function BrowserSettingsView({
             <BrowserSettingRow
               border
               label="Camera and microphone"
-              description="Allow each site here and approve macOS access separately. If macOS blocks access, enable DROIDEX in System Settings > Privacy & Security > Camera or Microphone, then restart. HID and USB remain blocked."
+              description="Ask me prompts in DROIDEX and remembers each site's choice in the lists below; Block refuses silently. macOS access is separate - if it blocks, enable DROIDEX in System Settings > Privacy & Security > Camera or Microphone, then restart. HID and USB remain blocked."
             >
               <Dropdown
                 value={snapshot.sitePermissionMode}

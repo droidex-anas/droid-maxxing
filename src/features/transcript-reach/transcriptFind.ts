@@ -24,10 +24,6 @@ export interface TranscriptFindMatch {
   snippet: string;
 }
 
-function searchableTextForFeedItem(item: FeedItem): string {
-  return copyTextForFeedItem(item);
-}
-
 export function projectTranscriptSearchIndex(
   previous: TranscriptSearchIndex | null,
   identity: string,
@@ -108,7 +104,7 @@ export function transcriptFindScopeNotice(input: {
 }
 
 function searchRowForItem(item: FeedItem): TranscriptSearchRow {
-  const displayText = searchableTextForFeedItem(item);
+  const displayText = copyTextForFeedItem(item);
   return {
     rowId: feedRowId(item),
     itemKey: item.key,

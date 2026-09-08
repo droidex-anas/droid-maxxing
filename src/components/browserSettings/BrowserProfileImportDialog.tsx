@@ -197,6 +197,8 @@ export function BrowserProfileImportDialog({
     pendingPlanId.current = null;
     try {
       await discardBrowserCookieProfileImport(planId);
+    } catch {
+      // Main drops the prepared plan and its TTL timer before this call can fail.
     } finally {
       if (isMounted.current) {
         setBusy(false);

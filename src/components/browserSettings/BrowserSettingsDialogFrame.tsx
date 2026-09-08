@@ -39,13 +39,19 @@ export function BrowserSettingsDialogFrame({
     const lifecycle = createDialogFocusLifecycle(
       document.activeElement instanceof HTMLElement ? document.activeElement : null,
     );
-    lifecycle.focusInitial(
-      dialogRef.current?.querySelector<HTMLElement>('[data-autofocus]') ?? null,
-    );
     return () => {
       lifecycle.restore();
     };
   }, []);
+
+  // The autofocus target can unmount between steps (Cancel gives way to Import,
+  // then Done), which drops focus to the body and silences the Tab trap. Refocus
+  // after any render where focus left the dialog, never stealing it back.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || dialog.contains(document.activeElement)) return;
+    dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
+  });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

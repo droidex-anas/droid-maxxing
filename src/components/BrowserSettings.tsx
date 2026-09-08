@@ -102,7 +102,14 @@ export function BrowserSettings() {
       const next = await chooseBrowserDownloadDirectory();
       if (next) setSnapshot(next);
     } catch {
-      setError('Could not change the browser download location.');
+      setError(
+        'Could not confirm the browser download location. Review the current settings or retry loading them.',
+      );
+      try {
+        setSnapshot(await getBrowserSettings());
+      } catch {
+        setSnapshot(null);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -112,6 +119,7 @@ export function BrowserSettings() {
     if (!confirmTarget) return;
     setIsSaving(true);
     setConfirmError('');
+    setError('');
     try {
       if (confirmTarget.kind === 'clear_data') {
         setSnapshot(await clearBrowserData());

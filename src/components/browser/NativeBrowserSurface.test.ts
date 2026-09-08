@@ -18,12 +18,12 @@ test('effect restarts share one pending native attach per target', async () => {
   const switched = attach('browser-2', bounds);
   const returned = attach('browser-1', bounds);
   assert.equal(first, resized);
-  assert.equal(first, returned);
-  assert.deepEqual(calls, ['browser-1', 'browser-2']);
+  assert.notEqual(first, returned);
+  assert.deepEqual(calls, ['browser-1', 'browser-2', 'browser-1']);
   finish();
   await Promise.all([first, resized, switched, returned]);
   await attach('browser-1', bounds);
-  assert.deepEqual(calls, ['browser-1', 'browser-2', 'browser-1']);
+  assert.deepEqual(calls, ['browser-1', 'browser-2', 'browser-1', 'browser-1']);
 });
 
 test('native surface attachment retries twice before surfacing the failure', async () => {

@@ -105,7 +105,9 @@ function looksLikeWebsiteAddress(value: string): boolean {
   if (/^https?:\/\//i.test(value) || value.startsWith('//')) return true;
   if (/^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?(?:[/?#]|$)/i.test(value)) return true;
   if (/\s|@/.test(value)) return false;
-  return /^(?:[a-z\d-]+\.)+[a-z\d-]+(?::\d+)?(?:[/?#]|$)/i.test(value);
+  if (/^\[[\da-f:]+\](?::\d+)?(?:[/?#]|$)/i.test(value)) return true;
+  // Unicode-aware labels so bare IDN hosts open instead of falling through to search.
+  return /^(?:[^\s@/?#:.]+\.)+[^\s@/?#:.]+(?::\d+)?(?:[/?#]|$)/u.test(value);
 }
 
 function normalizeBareIpv6Loopback(value: string): string | null {

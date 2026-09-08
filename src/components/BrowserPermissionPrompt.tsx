@@ -1,5 +1,5 @@
 import { AlertTriangle, KeyRound } from 'lucide-react';
-import { useEffect, useReducer } from 'react';
+import { useEffect, useLayoutEffect, useReducer } from 'react';
 import { isDesktop } from '../lib/desktop';
 import {
   onBrowserPermissionPrompt,
@@ -34,7 +34,9 @@ export function BrowserPermissionPromptHost({
       stopDismiss();
     };
   }, []);
-  useEffect(() => {
+  // Layout effect so the native browser view is hidden in the same commit the
+  // modal mounts, before paint.
+  useLayoutEffect(() => {
     onOpenChange?.(Boolean(prompt));
     return () => {
       onOpenChange?.(false);

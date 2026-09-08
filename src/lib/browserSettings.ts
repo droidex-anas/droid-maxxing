@@ -192,52 +192,52 @@ export async function getBrowserSettings(): Promise<BrowserSettingsSnapshot> {
   return requireBrowserApi().browserSettingsGet();
 }
 
-export function updateBrowserSettings(
+export async function updateBrowserSettings(
   patch: BrowserSettingsPatch,
 ): Promise<BrowserSettingsSnapshot> {
   return requireBrowserApi().browserSettingsUpdate(patch);
 }
 
-export function importBrowserCookies(): Promise<BrowserCookieImportResult> {
+export async function importBrowserCookies(): Promise<BrowserCookieImportResult> {
   return requireBrowserApi().browserCookiesImport();
 }
 
-export function discoverBrowserCookieProfiles(): Promise<BrowserCookieProfileDiscovery> {
+export async function discoverBrowserCookieProfiles(): Promise<BrowserCookieProfileDiscovery> {
   return requireBrowserApi().browserCookieProfilesDiscover();
 }
 
-export function prepareBrowserCookieProfileImport(
+export async function prepareBrowserCookieProfileImport(
   profileId: string,
 ): Promise<BrowserCookieProfileImportPrepareResult> {
   return requireBrowserApi().browserCookieProfileImportPrepare(profileId);
 }
 
-export function commitBrowserCookieProfileImport(
+export async function commitBrowserCookieProfileImport(
   planId: string,
 ): Promise<BrowserCookieProfileImportResult> {
   return requireBrowserApi().browserCookieProfileImportCommit(planId);
 }
 
-export function discardBrowserCookieProfileImport(planId: string): Promise<boolean> {
+export async function discardBrowserCookieProfileImport(planId: string): Promise<boolean> {
   return requireBrowserApi().browserCookieProfileImportDiscard(planId);
 }
 
-export function clearBrowserData(): Promise<BrowserSettingsSnapshot> {
+export async function clearBrowserData(): Promise<BrowserSettingsSnapshot> {
   return requireBrowserApi().browserDataClear();
 }
 
-export function deleteBrowserCredential(origin: string): Promise<BrowserSettingsSnapshot> {
+export async function deleteBrowserCredential(origin: string): Promise<BrowserSettingsSnapshot> {
   return requireBrowserApi().browserCredentialDelete(origin);
 }
 
-export function revokeBrowserSiteGrant(
+export async function revokeBrowserSiteGrant(
   kind: BrowserSiteGrantKind,
   origin: string,
 ): Promise<BrowserSettingsSnapshot> {
   return requireBrowserApi().browserSiteGrantRevoke(kind, origin);
 }
 
-export function chooseBrowserDownloadDirectory(): Promise<BrowserSettingsSnapshot | null> {
+export async function chooseBrowserDownloadDirectory(): Promise<BrowserSettingsSnapshot | null> {
   return requireBrowserApi().browserDownloadDirectoryChoose();
 }
 

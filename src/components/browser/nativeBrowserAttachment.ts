@@ -5,14 +5,15 @@ const NATIVE_ATTACH_RETRY_DELAYS_MS = [100, 300] as const;
 export function createNativeBrowserAttacher(
   attach: typeof attachNativeBrowser,
 ): typeof attachNativeBrowser {
-  const pending = new Map<string, Promise<void>>();
+  // Main bumps an attachment revision per attach, so a request superseded by a
+  // different target resolves as a no-op. Only the latest target may be shared.
+  let current: { id: string; request: Promise<void> } | null = null;
   return (browserSessionId, bounds, url) => {
-    const existing = pending.get(browserSessionId);
-    if (existing) return existing;
+    if (current?.id === browserSessionId) return current.request;
     const request = attach(browserSessionId, bounds, url).finally(() => {
-      if (pending.get(browserSessionId) === request) pending.delete(browserSessionId);
+      if (current?.request === request) current = null;
     });
-    pending.set(browserSessionId, request);
+    current = { id: browserSessionId, request };
     return request;
   };
 }

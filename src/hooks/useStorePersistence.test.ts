@@ -189,6 +189,12 @@ test('browser URL persistence removes OAuth secrets without corrupting routes', 
     ),
     'https://app.example.test/callback#tab=activity',
   );
+  assert.equal(
+    sanitizePersistedBrowserUrl(
+      'https://app.example.test/#callback?access_token=bearer&tab=activity',
+    ),
+    'https://app.example.test/#callback?tab=activity',
+  );
   assert.equal(sanitizePersistedBrowserUrl('not a browser URL'), '');
 });
 

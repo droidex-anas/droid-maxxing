@@ -88,6 +88,8 @@ test('normalizeBrowserOmniboxInput searches ordinary text and opens website addr
   assert.equal(normalizeBrowserOmniboxInput('openai'), 'https://www.google.com/search?q=openai');
   assert.equal(normalizeBrowserOmniboxInput('example.com/docs'), 'https://example.com/docs');
   assert.equal(normalizeBrowserOmniboxInput('localhost:3000'), 'http://localhost:3000');
+  assert.equal(normalizeBrowserOmniboxInput('münchen.de'), 'https://münchen.de');
+  assert.equal(normalizeBrowserOmniboxInput('[2001:db8::1]:8080'), 'https://[2001:db8::1]:8080');
   assert.throws(
     () => normalizeBrowserOmniboxInput('javascript:alert(1)'),
     /http:\/\/ and https:\/\//,

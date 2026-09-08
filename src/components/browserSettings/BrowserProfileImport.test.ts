@@ -232,6 +232,10 @@ test('profile import wrappers use the main-owned plan bridge without cookie data
   }
 });
 
+test('profile discovery rejects instead of throwing when browser controls are missing', async () => {
+  await assert.rejects(discoverBrowserCookieProfiles(), /only available in the desktop app/);
+});
+
 test('profile preparation failures show specific sanitized recovery without false Keychain blame', () => {
   assert.match(browserProfileImportFailureMessage('keychain_denied'), /macOS Keychain/);
   assert.match(browserProfileImportFailureMessage('profile_missing'), /no longer available/);
