@@ -4,7 +4,11 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { commitBrowserCookieImport } = require('./browserCookieImport.cjs');
-const { createBrowserCookieImports } = require('./browserCookieImports.cjs');
+const {
+  COOKIE_IMPORT_FAILURE_TAG,
+  createBrowserCookieImports,
+  serializeCookieImportFailure,
+} = require('./browserCookieImports.cjs');
 
 const preview = Object.freeze({
   source: 'chrome',
@@ -357,6 +361,18 @@ test('a receipt persistence failure reports the completed import and still flush
   assert.match(error?.message, /receipt could not be saved/);
   assert.doesNotMatch(error?.message, /private settings path/);
   assert.deepEqual(lifecycle, ['receipt', 'flush']);
+
+  // The renderer only sees the rejection message, so the code and flags travel
+  // in the serialized envelope instead of a matched sentence.
+  const serialized = serializeCookieImportFailure(error);
+  assert.ok(serialized.message.startsWith(COOKIE_IMPORT_FAILURE_TAG));
+  assert.deepEqual(JSON.parse(serialized.message.slice(COOKIE_IMPORT_FAILURE_TAG.length)), {
+    code: 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED',
+    message: error.message,
+    receiptPersistenceFailed: true,
+    snapshotFailed: false,
+    storageFlushFailed: false,
+  });
 });
 
 test('a snapshot failure reports the completed import after receipt and storage flush', async () => {

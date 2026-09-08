@@ -4,7 +4,10 @@ const { createBrowserCredentialVault } = require('./browserCredentialVault.cjs')
 const { downloadReservationKey, reserveDownloadPath } = require('./browserDownloads.cjs');
 const { createBrowserPermissionController } = require('./browserPermissions.cjs');
 const { browserPromptFromDialogOptions } = require('./browserPrompt.cjs');
-const { createBrowserCookieImports } = require('./browserCookieImports.cjs');
+const {
+  createBrowserCookieImports,
+  serializeCookieImportFailure,
+} = require('./browserCookieImports.cjs');
 const {
   addExactOrigin,
   createCookieImportReceipt,
@@ -264,7 +267,7 @@ class BrowserSettingsController {
   }
 
   async importCookies() {
-    return this.cookieImports.importFile();
+    return withSerializedImportFailure(() => this.cookieImports.importFile());
   }
 
   recordCookieImport(receipt) {
@@ -287,7 +290,7 @@ class BrowserSettingsController {
   }
 
   commitCookieProfileImport(planId) {
-    return this.cookieImports.commitProfile(planId);
+    return withSerializedImportFailure(() => this.cookieImports.commitProfile(planId));
   }
 
   discardCookieProfileImport(planId) {
@@ -444,6 +447,14 @@ class BrowserSettingsController {
     return owner
       ? this.options.dialog.showOpenDialog(owner, options)
       : this.options.dialog.showOpenDialog(options);
+  }
+}
+
+async function withSerializedImportFailure(run) {
+  try {
+    return await run();
+  } catch (error) {
+    throw serializeCookieImportFailure(error);
   }
 }
 

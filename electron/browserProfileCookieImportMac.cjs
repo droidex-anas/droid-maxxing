@@ -3,13 +3,13 @@ const { execFile } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+const { COOKIE_LIMIT_BYTES, isValidHostname } = require('./browserCookieImport.cjs');
 
 const CHROME_COOKIE_SCHEMA_VERSION = 24;
 const CHROME_TO_UNIX_EPOCH_MICROSECONDS = 11_644_473_600_000_000n;
 const MICROSECONDS_PER_SECOND = 1_000_000n;
 const CHROME_PROFILE_LIMIT = 50;
 const COOKIE_LIMIT = 5_000;
-const COOKIE_LIMIT_BYTES = 4_096;
 const ENCRYPTED_COOKIE_LIMIT_BYTES = 4_147;
 const LOCAL_STATE_LIMIT_BYTES = 5 * 1024 * 1024;
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
@@ -291,7 +291,11 @@ function normalizeChromeRow(row, key, nowMs) {
   }
 
   const value = decryptChromeCookieValue(row, key);
-  if (!value || value.length > 4_096 || value.length + Buffer.byteLength(name) > 4_096) {
+  if (
+    !value ||
+    value.length > COOKIE_LIMIT_BYTES ||
+    value.length + Buffer.byteLength(name) > COOKIE_LIMIT_BYTES
+  ) {
     value?.fill(0);
     return undefined;
   }
@@ -422,15 +426,7 @@ function normalizeProfileLabel(label, fallback) {
 function normalizeChromeHostname(hostKey) {
   if (typeof hostKey !== 'string') return undefined;
   const hostname = hostKey.replace(/^\./, '').toLowerCase();
-  // eslint-disable-next-line no-control-regex -- Imported hostnames must reject control bytes.
-  if (!hostname || hostname.length > 253 || /[\s\u0000-\u001f\u007f/@\\]/.test(hostname)) {
-    return undefined;
-  }
-  try {
-    return new URL(`https://${hostname}/`).hostname === hostname ? hostname : undefined;
-  } catch {
-    return undefined;
-  }
+  return isValidHostname(hostname) ? hostname : undefined;
 }
 
 function normalizeCookieName(value) {

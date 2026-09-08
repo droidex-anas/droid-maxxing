@@ -5,8 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { BrowserCookieImportCommitError } = require('./browserCookieImport.cjs');
 const {
-  BrowserProfileCookieImportCommitError,
   BrowserProfileCookieImportError,
   commitChromeProfileCookieImport,
   createChromeProfileCookieImportPlan,
@@ -520,7 +520,8 @@ test('partial commits are secret-free, continue safely, and consume the plan', a
     error = caught;
   }
 
-  assert.ok(error instanceof BrowserProfileCookieImportCommitError);
+  assert.ok(error instanceof BrowserCookieImportCommitError);
+  assert.equal(error.name, 'BrowserProfileCookieImportCommitError');
   assert.equal(error.code, 'BROWSER_PROFILE_COOKIE_IMPORT_PARTIAL');
   assert.equal(error.result.importedCount, 2);
   assert.equal(error.result.failedCount, 1);

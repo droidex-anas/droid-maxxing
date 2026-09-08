@@ -1,5 +1,9 @@
 const os = require('node:os');
-const { commitCookieBatch } = require('./browserCookieImport.cjs');
+const {
+  BrowserCookieImportCommitError,
+  PROFILE_COOKIE_IMPORT_COMMIT,
+  commitCookieBatch,
+} = require('./browserCookieImport.cjs');
 const {
   clearNormalizedCookies,
   discoverChromeProfiles,
@@ -21,22 +25,6 @@ class BrowserProfileCookieImportError extends Error {
     super(message);
     this.name = 'BrowserProfileCookieImportError';
     this.code = code;
-  }
-}
-
-class BrowserProfileCookieImportCommitError extends Error {
-  constructor(result) {
-    super(
-      result.importedCount > 0
-        ? `Cookie import completed partially: ${result.importedCount} stored and ${result.failedCount} failed.`
-        : `Cookie import failed for ${result.failedCount} cookies.`,
-    );
-    this.name = 'BrowserProfileCookieImportCommitError';
-    this.code =
-      result.importedCount > 0
-        ? 'BROWSER_PROFILE_COOKIE_IMPORT_PARTIAL'
-        : 'BROWSER_PROFILE_COOKIE_IMPORT_FAILED';
-    this.result = result;
   }
 }
 
@@ -157,7 +145,9 @@ async function commitChromeProfileCookieImport(plan, { cookieStore }) {
     domainCount: committed.domainCount,
     affectedDomains: committed.affectedDomains,
   });
-  if (committed.failedCount > 0) throw new BrowserProfileCookieImportCommitError(result);
+  if (committed.failedCount > 0) {
+    throw new BrowserCookieImportCommitError(result, PROFILE_COOKIE_IMPORT_COMMIT);
+  }
   return result;
 }
 
@@ -232,7 +222,6 @@ function assertCookieStore(cookieStore) {
 }
 
 module.exports = {
-  BrowserProfileCookieImportCommitError,
   BrowserProfileCookieImportError,
   commitChromeProfileCookieImport,
   createChromeProfileCookieImportPlan,

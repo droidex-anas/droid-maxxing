@@ -7,6 +7,9 @@ const {
 const defaultProfileImport = require('./browserProfileCookieImport.cjs');
 
 const PROFILE_PLAN_TTL_MS = 120_000;
+// `ipcMain.handle` forwards only an error's message to the renderer, so failure
+// codes and flags travel to it as a JSON envelope tagged for decoding.
+const COOKIE_IMPORT_FAILURE_TAG = 'browser-cookie-import-failure:';
 
 class BrowserCookieImportFinalizeError extends Error {
   constructor(
@@ -37,6 +40,20 @@ class BrowserCookieImportFinalizeError extends Error {
     this.snapshotFailed = snapshotFailed;
     this.storageFlushFailed = storageFlushFailed;
   }
+}
+
+function serializeCookieImportFailure(error) {
+  if (typeof error?.code !== 'string' || !error.code.startsWith('BROWSER_')) return error;
+  return new Error(
+    COOKIE_IMPORT_FAILURE_TAG +
+      JSON.stringify({
+        code: error.code,
+        message: error.message,
+        receiptPersistenceFailed: error.receiptPersistenceFailed === true,
+        snapshotFailed: error.snapshotFailed === true,
+        storageFlushFailed: error.storageFlushFailed === true,
+      }),
+  );
 }
 
 function createBrowserCookieImports(options) {
@@ -280,4 +297,8 @@ function validateOpaqueId(value, label) {
   return value;
 }
 
-module.exports = { createBrowserCookieImports };
+module.exports = {
+  COOKIE_IMPORT_FAILURE_TAG,
+  createBrowserCookieImports,
+  serializeCookieImportFailure,
+};

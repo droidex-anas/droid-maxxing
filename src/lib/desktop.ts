@@ -410,6 +410,39 @@ export function onDesktopMemoryPressure(handler: (payload: { at: number }) => vo
   return api.onMemoryPressure(handler);
 }
 
+export interface BrowserCookieImportFailure {
+  code: string;
+  message: string;
+  receiptPersistenceFailed: boolean;
+  snapshotFailed: boolean;
+  storageFlushFailed: boolean;
+}
+
+// Main tags cookie-import rejections with this envelope because Electron drops
+// error properties across `invoke`; the message is all that survives.
+const COOKIE_IMPORT_FAILURE_TAG = 'browser-cookie-import-failure:';
+
+export function browserCookieImportFailure(error: unknown): BrowserCookieImportFailure | null {
+  if (!(error instanceof Error)) return null;
+  const tagAt = error.message.indexOf(COOKIE_IMPORT_FAILURE_TAG);
+  if (tagAt < 0) return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(error.message.slice(tagAt + COOKIE_IMPORT_FAILURE_TAG.length));
+  } catch {
+    return null;
+  }
+  const failure = payload as Partial<BrowserCookieImportFailure> | null;
+  if (!failure || typeof failure.code !== 'string') return null;
+  return {
+    code: failure.code,
+    message: typeof failure.message === 'string' ? failure.message : '',
+    receiptPersistenceFailed: failure.receiptPersistenceFailed === true,
+    snapshotFailed: failure.snapshotFailed === true,
+    storageFlushFailed: failure.storageFlushFailed === true,
+  };
+}
+
 function requireDesktopApi(message: string): DroidControlApi {
   const api = desktopApi();
   if (!api) throw new Error(message);

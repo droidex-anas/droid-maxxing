@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const { parseSafeHttpUrl } = require('./nativeBrowserUrls.cjs');
 
 const COOKIE_EXPORT_LIMIT_BYTES = 10 * 1024 * 1024;
 const COOKIE_EXPORT_LIMIT_ROWS = 5_000;
@@ -6,16 +7,29 @@ const COOKIE_LIMIT_BYTES = 4_096;
 const COOKIE_WRITE_CONCURRENCY = 8;
 const PLAN_SECRETS = new WeakMap();
 
+// File and profile imports report the same failure shape under their own error
+// name, code prefix, and partial wording.
+const FILE_COOKIE_IMPORT_COMMIT = Object.freeze({
+  name: 'BrowserCookieImportCommitError',
+  codePrefix: 'BROWSER_COOKIE_IMPORT',
+  partialPhrase: 'stopped with',
+});
+const PROFILE_COOKIE_IMPORT_COMMIT = Object.freeze({
+  name: 'BrowserProfileCookieImportCommitError',
+  codePrefix: 'BROWSER_PROFILE_COOKIE_IMPORT',
+  partialPhrase: 'completed partially:',
+});
+
 class BrowserCookieImportCommitError extends Error {
-  constructor(result) {
-    const message =
-      result.importedCount > 0
-        ? `Cookie import stopped with ${result.importedCount} stored and ${result.failedCount} failed.`
-        : `Cookie import failed for ${result.failedCount} cookies.`;
-    super(message);
-    this.name = 'BrowserCookieImportCommitError';
-    this.code =
-      result.importedCount > 0 ? 'BROWSER_COOKIE_IMPORT_PARTIAL' : 'BROWSER_COOKIE_IMPORT_FAILED';
+  constructor(result, variant = FILE_COOKIE_IMPORT_COMMIT) {
+    const partial = result.importedCount > 0;
+    super(
+      partial
+        ? `Cookie import ${variant.partialPhrase} ${result.importedCount} stored and ${result.failedCount} failed.`
+        : `Cookie import failed for ${result.failedCount} cookies.`,
+    );
+    this.name = variant.name;
+    this.code = `${variant.codePrefix}_${partial ? 'PARTIAL' : 'FAILED'}`;
     this.result = result;
   }
 }
@@ -295,24 +309,13 @@ function normalizeCookie(row, nowMs) {
 function normalizeCookieTarget(row) {
   const secure = row.secure === true;
   if (typeof row.url === 'string' && row.url.trim()) {
-    try {
-      const parsed = new URL(row.url);
-      if (
-        (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
-        parsed.username ||
-        parsed.password ||
-        !isValidHostname(parsed.hostname)
-      ) {
-        return undefined;
-      }
-      return {
-        url: `${secure ? 'https' : 'http'}://${parsed.host}/`,
-        domain: parsed.hostname,
-        secure,
-      };
-    } catch {
-      return undefined;
-    }
+    const parsed = parseSafeHttpUrl(row.url);
+    if (!parsed || !isValidHostname(parsed.hostname)) return undefined;
+    return {
+      url: `${secure ? 'https' : 'http'}://${parsed.host}/`,
+      domain: parsed.hostname,
+      secure,
+    };
   }
   if (typeof row.domain !== 'string') return undefined;
   const domain = row.domain.trim().toLowerCase();
@@ -334,11 +337,7 @@ function isValidHostname(hostname) {
   ) {
     return false;
   }
-  try {
-    return new URL(`https://${hostname}/`).hostname === hostname;
-  } catch {
-    return false;
-  }
+  return parseSafeHttpUrl(`https://${hostname}/`)?.hostname === hostname;
 }
 
 function normalizeCookiePath(value) {
@@ -437,8 +436,11 @@ function assertCookieStore(cookieStore) {
 module.exports = {
   BrowserCookieImportCommitError,
   COOKIE_EXPORT_LIMIT_BYTES,
+  COOKIE_LIMIT_BYTES,
+  PROFILE_COOKIE_IMPORT_COMMIT,
   commitCookieBatch,
   commitBrowserCookieImport,
   createBrowserCookieImportPlan,
   discardBrowserCookieImportPlan,
+  isValidHostname,
 };

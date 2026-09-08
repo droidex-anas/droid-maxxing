@@ -244,24 +244,44 @@ test('profile preparation failures show specific sanitized recovery without fals
 
 test('post-commit import failures report completed cookies without exposing host errors', () => {
   const fallback = 'Some cookies may already be imported.';
-  const completedImport = new Error(
-    "Error invoking remote method 'browser-cookie-profile-import-commit': Error: Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.",
-  );
-  const failedSnapshot = new Error(
-    "Error invoking remote method 'browser-cookie-profile-import-commit': Error: Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.",
-  );
+  const rejection = (failure: Record<string, unknown>) =>
+    new Error(
+      "Error invoking remote method 'browser-cookie-profile-import-commit': Error: " +
+        `browser-cookie-import-failure:${JSON.stringify(failure)}`,
+    );
 
   assert.equal(
-    browserCookieImportCommitFailureMessage(completedImport, fallback),
+    browserCookieImportCommitFailureMessage(
+      rejection({
+        code: 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED',
+        message: 'Cookies were imported, but the import receipt could not be saved.',
+        receiptPersistenceFailed: true,
+      }),
+      fallback,
+    ),
     'Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.',
   );
   assert.equal(
-    browserCookieImportCommitFailureMessage(failedSnapshot, fallback),
+    browserCookieImportCommitFailureMessage(
+      rejection({ code: 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED', snapshotFailed: true }),
+      fallback,
+    ),
     'Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.',
+  );
+  // Other import codes, and any untagged rejection, stay on the generic fallback:
+  // the dialog reads the failure code, never the main-process sentence.
+  assert.equal(
+    browserCookieImportCommitFailureMessage(
+      rejection({ code: 'BROWSER_PROFILE_COOKIE_IMPORT_PARTIAL' }),
+      fallback,
+    ),
+    fallback,
   );
   assert.equal(
     browserCookieImportCommitFailureMessage(
-      new Error('Cookies were imported, but private settings path'),
+      new Error(
+        'Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.',
+      ),
       fallback,
     ),
     fallback,

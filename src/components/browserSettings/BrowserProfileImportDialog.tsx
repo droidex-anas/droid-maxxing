@@ -14,6 +14,7 @@ import {
   type BrowserCookieProfileImportPreview,
   type BrowserSettingsSnapshot,
 } from '../../lib/browserSettings';
+import { browserCookieImportFailure } from '../../lib/desktop';
 import { BrowserSettingsDialogFrame } from './BrowserSettingsDialogFrame';
 import {
   BrowserProfileImportPreview,
@@ -48,13 +49,6 @@ const PROFILE_IMPORT_FAILURE_MESSAGES: Record<BrowserCookieProfileImportFailureR
     'This Chrome profile has more than 5,000 cookies. Remove stale site data in Chrome or use a smaller Chrome export.',
 };
 
-const COOKIE_IMPORT_COMMIT_FAILURE_MESSAGES = [
-  'Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.',
-  'Cookies were imported, but the import receipt could not be saved and browser storage could not be finalized. Restart DROIDEX, then verify the imported sites before retrying.',
-  'Cookies were imported, but browser storage could not be finalized. Restart DROIDEX before relying on the imported session.',
-  'Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.',
-];
-
 export function browserProfileImportFailureMessage(
   reason: BrowserCookieProfileImportFailureReason,
 ): string {
@@ -62,11 +56,21 @@ export function browserProfileImportFailureMessage(
 }
 
 export function browserCookieImportCommitFailureMessage(error: unknown, fallback: string): string {
-  if (!(error instanceof Error)) return fallback;
-  return (
-    COOKIE_IMPORT_COMMIT_FAILURE_MESSAGES.find((message) => error.message.includes(message)) ??
-    fallback
-  );
+  const failure = browserCookieImportFailure(error);
+  if (failure?.code !== 'BROWSER_COOKIE_IMPORT_FINALIZE_FAILED') return fallback;
+  if (failure.receiptPersistenceFailed && failure.storageFlushFailed) {
+    return 'Cookies were imported, but the import receipt could not be saved and browser storage could not be finalized. Restart DROIDEX, then verify the imported sites before retrying.';
+  }
+  if (failure.receiptPersistenceFailed) {
+    return 'Cookies were imported, but the import receipt could not be saved. Verify the imported sites before retrying; Settings may still show the previous import.';
+  }
+  if (failure.storageFlushFailed) {
+    return 'Cookies were imported, but browser storage could not be finalized. Restart DROIDEX before relying on the imported session.';
+  }
+  if (failure.snapshotFailed) {
+    return 'Cookies were imported and recorded, but Settings could not be refreshed. Reopen Settings to verify the completed import.';
+  }
+  return fallback;
 }
 
 function defaultProfileId(discovery: BrowserCookieProfileDiscovery): string {
@@ -91,6 +95,14 @@ export function BrowserProfileImportDialog({
   const [error, setError] = useState('');
   const pendingPlanId = useRef<string | null>(null);
   const isMounted = useRef(true);
+
+  const resyncSnapshot = async () => {
+    try {
+      onSnapshot(await getBrowserSettings());
+    } catch {
+      // The surrounding Browser page keeps its last authoritative snapshot.
+    }
+  };
 
   useEffect(() => {
     isMounted.current = true;
@@ -211,11 +223,7 @@ export function BrowserProfileImportDialog({
       const planId = pendingPlanId.current;
       pendingPlanId.current = null;
       if (planId) void discardBrowserCookieProfileImport(planId);
-      try {
-        onSnapshot(await getBrowserSettings());
-      } catch {
-        // The surrounding Browser page keeps its last authoritative snapshot.
-      }
+      await resyncSnapshot();
       setFlow({ kind: 'select', discovery: flow.discovery });
       setError(
         browserCookieImportCommitFailureMessage(
@@ -243,11 +251,7 @@ export function BrowserProfileImportDialog({
         failedCount: result.failedCount,
       });
     } catch (error) {
-      try {
-        onSnapshot(await getBrowserSettings());
-      } catch {
-        // The surrounding Browser page keeps its last authoritative snapshot.
-      }
+      await resyncSnapshot();
       setError(
         browserCookieImportCommitFailureMessage(
           error,
