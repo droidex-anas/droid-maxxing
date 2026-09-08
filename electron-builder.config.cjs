@@ -78,7 +78,19 @@ module.exports = {
     output: 'release',
     buildResources: 'assets/brand',
   },
-  files: ['package.json', 'dist/**', 'electron/**', '!**/*.test.cjs', '!**/*.test.ts', '!**/*.map'],
+  files: [
+    'package.json',
+    'dist/**',
+    'electron/**',
+    // Layer-neutral assets shared by the Electron main process and the renderer.
+    'shared/**',
+    // The browser preload ships as the bundle built from these ESM sources; the
+    // sources themselves are never loaded at runtime.
+    '!electron/nativeBrowserPreload/**',
+    '!**/*.test.cjs',
+    '!**/*.test.ts',
+    '!**/*.map',
+  ],
   asarUnpack: ['node_modules/node-pty/**', 'node_modules/@droidex/sparkle-updater/**'],
   extraFiles: [
     {

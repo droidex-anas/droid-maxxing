@@ -1,47 +1,4 @@
-const SENSITIVE_KEY_PARTS = [
-  'token',
-  'key',
-  'secret',
-  'password',
-  'passcode',
-  'auth',
-  'authorization',
-  'signature',
-  'credential',
-  'code',
-  'cookie',
-  'session',
-  'csrf',
-  'otp',
-  'state',
-  'nonce',
-  'relaystate',
-  'assertion',
-  'ticket',
-  'samlresponse',
-];
-
-function isSensitiveBrowserKey(value) {
-  const key = String(value || '').toLowerCase();
-  return SENSITIVE_KEY_PARTS.some((part) => key.includes(part));
-}
-
-function redactBrowserDiagnosticUrl(value, baseUrl) {
-  try {
-    const url = baseUrl ? new URL(String(value), baseUrl) : new URL(String(value));
-    for (const key of [...url.searchParams.keys()]) {
-      if (isSensitiveBrowserKey(key)) {
-        url.searchParams.set(key, '[redacted]');
-      }
-    }
-    url.username = '';
-    url.password = '';
-    url.hash = '';
-    return url.href;
-  } catch {
-    return '[invalid URL]';
-  }
-}
+const { isSensitiveBrowserKey, redactBrowserDiagnosticUrl } = require('./browserRedaction.cjs');
 
 function redactBrowserDiagnosticText(value) {
   const bounded = String(value || '').slice(0, 4000);

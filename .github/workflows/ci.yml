@@ -186,6 +186,9 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      # nativeBrowserPreload.cjs is generated, so a clean checkout has to build it
+      # before the syntax gate can cover the sandboxed browser preload.
+      - run: npm run preload:build
       - run: npm run electron:check
 
   production-build:

@@ -4,24 +4,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, 'nativeBrowserPreload.cjs'), 'utf8');
+// The shipped preload is an esbuild bundle of electron/nativeBrowserPreload/;
+// these tests exercise the source modules the functions actually live in.
+const read = (module) =>
+  fs.readFileSync(path.join(__dirname, 'nativeBrowserPreload', module), 'utf8');
+const agentActions = read('agentActions.js');
+const agentSnapshot = read('agentSnapshot.js');
+const authIntent = read('authIntent.js');
+const trustedNavigation = read('trustedNavigation.js');
 
 test('trusted physical intent cannot expire before native navigation observes it', () => {
-  const start = source.indexOf('function reportTrustedUserNavigation(event)');
-  const end = source.indexOf('\nfunction trustedUserNavigationDestination', start);
+  const start = trustedNavigation.indexOf('function reportTrustedUserNavigation(event)');
+  const end = trustedNavigation.indexOf('\nfunction trustedUserNavigationDestination', start);
   assert.ok(start >= 0 && end > start, 'trusted user navigation reporter must exist');
   const sent = [];
   let agentInputSuppressed = true;
   const report = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function reportTrustedUserNavigation', 'function')})`,
+    `(${trustedNavigation.slice(start, end).replace('function reportTrustedUserNavigation', 'function')})`,
     {
-      capturePending: false,
       consumeTrustedPhysicalFormActivation: () => true,
       crypto: { randomUUID: () => 'activation-1' },
-      designMode: false,
       ipcRenderer: { send: (...args) => sent.push(args) },
       isAgentInputSuppressed: () => agentInputSuppressed,
-      setTimeout: (callback) => callback(),
+      state: { designMode: false, capturePending: false },
       trustedUserNavigationDestination: () => 'https://accounts.example/sign-in',
     },
   );
@@ -46,19 +51,17 @@ test('trusted physical intent cannot expire before native navigation observes it
 });
 
 test('a programmatic form submit cannot report user navigation without trusted physical input', () => {
-  const start = source.indexOf('function reportTrustedUserNavigation(event)');
-  const end = source.indexOf('\nfunction trustedUserNavigationDestination', start);
+  const start = trustedNavigation.indexOf('function reportTrustedUserNavigation(event)');
+  const end = trustedNavigation.indexOf('\nfunction trustedUserNavigationDestination', start);
   const sent = [];
   const report = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function reportTrustedUserNavigation', 'function')})`,
+    `(${trustedNavigation.slice(start, end).replace('function reportTrustedUserNavigation', 'function')})`,
     {
-      capturePending: false,
       consumeTrustedPhysicalFormActivation: () => false,
       crypto: { randomUUID: () => 'activation-2' },
-      designMode: false,
       ipcRenderer: { send: (...args) => sent.push(args) },
       isAgentInputSuppressed: () => false,
-      setTimeout: () => {},
+      state: { designMode: false, capturePending: false },
       trustedUserNavigationDestination: () => 'https://accounts.example/sign-in',
     },
   );
@@ -68,14 +71,14 @@ test('a programmatic form submit cannot report user navigation without trusted p
 });
 
 test('suppressed agent input cannot leave a trusted form activation behind', () => {
-  const start = source.indexOf('function rememberTrustedPhysicalFormActivation(event)');
-  const end = source.indexOf('\nfunction reportTrustedUserNavigation', start);
+  const start = trustedNavigation.indexOf('function rememberTrustedPhysicalFormActivation(event)');
+  const end = trustedNavigation.indexOf('\nfunction reportTrustedUserNavigation', start);
   assert.ok(start >= 0 && end > start, 'trusted form activation helpers must exist');
   let agentInputSuppressed = true;
   const activation = vm.runInNewContext(
     `(() => {
       let trustedPhysicalFormActivation = null;
-      ${source.slice(start, end)}
+      ${trustedNavigation.slice(start, end)}
       return { rememberTrustedPhysicalFormActivation, consumeTrustedPhysicalFormActivation };
     })()`,
     { isAgentInputSuppressed: () => agentInputSuppressed },
@@ -92,8 +95,10 @@ test('suppressed agent input cannot leave a trusted form activation behind', () 
 });
 
 test('trusted navigation destination accepts only real link and form defaults', () => {
-  const start = source.indexOf('function trustedUserNavigationDestination(event)');
-  const end = source.indexOf('\nfunction onClick', start);
+  const start = trustedNavigation.indexOf('function trustedUserNavigationDestination(event)');
+  // Stop at this function's own closing brace (a `}` in column 0) instead of at
+  // end-of-file, so appending another function to the module stays valid here.
+  const end = trustedNavigation.indexOf('\n}\n', start) + 2;
   assert.ok(start >= 0 && end > start, 'trusted navigation destination resolver must exist');
   class FormData {
     constructor(form) {
@@ -104,7 +109,7 @@ test('trusted navigation destination accepts only real link and form defaults', 
     }
   }
   const resolve = vm.runInNewContext(
-    `(${source
+    `(${trustedNavigation
       .slice(start, end)
       .replace('function trustedUserNavigationDestination', 'function')})`,
     {
@@ -156,30 +161,12 @@ test('trusted navigation destination accepts only real link and form defaults', 
   );
 });
 
-test('diagnostic URLs redact secrets and fail closed for malformed input', () => {
-  const start = source.indexOf('const SENSITIVE_URL_KEY_PARTS');
-  const end = source.indexOf('\nlet designMode', start);
-  const redact = vm.runInNewContext(
-    `(() => {\n${source.slice(start, end)}\nreturn redactBrowserDiagnosticUrl;\n})()`,
-    { URL },
-  );
-
-  assert.equal(
-    redact('https://example.test/callback?state=private&safe=yes'),
-    'https://example.test/callback?state=%5Bredacted%5D&safe=yes',
-  );
-  assert.equal(
-    redact('https://[malformed]?token=super-secret', 'https://example.test/'),
-    '[invalid URL]',
-  );
-});
-
 test('final page execution rejects a replaced document, snapshot, or in-page URL', () => {
-  const start = source.indexOf('function requireCurrentAgentActionContext(expected)');
-  const end = source.indexOf('\nfunction requireSafeAgentTextAction', start);
+  const start = agentSnapshot.indexOf('function requireCurrentAgentActionContext(expected)');
+  const end = agentSnapshot.indexOf('\nfunction requireSafeAgentTextAction', start);
   const current = { documentId: 'document-1', snapshotId: 'document-1:8', urlHash: 'url-1' };
   const requireContext = vm.runInNewContext(
-    `(${source
+    `(${agentSnapshot
       .slice(start, end)
       .replace('function requireCurrentAgentActionContext', 'function')})`,
     { browserAgentActionContext: () => current },
@@ -199,12 +186,12 @@ test('final page execution rejects a replaced document, snapshot, or in-page URL
 });
 
 test('snapshot recovery mints a new lease when in-page navigation cleared the old one', async () => {
-  const start = source.indexOf('async function runAgentAction(request)');
-  const end = source.indexOf('\nfunction validateClickTargetAt', start);
+  const start = agentActions.indexOf('async function runAgentAction(request)');
+  const end = agentActions.indexOf('\nfunction validateClickTargetAt', start);
   let agentSnapshotId = '';
   let contextChecks = 0;
   const runAction = vm.runInNewContext(
-    `(${source.slice(start, end).replace('async function runAgentAction', 'async function')})`,
+    `(${agentActions.slice(start, end).replace('async function runAgentAction', 'async function')})`,
     {
       finishScrollAttempt: () => undefined,
       pageSnapshot: () => {
@@ -229,14 +216,14 @@ test('snapshot recovery mints a new lease when in-page navigation cleared the ol
 });
 
 test('agent input suppression stays fail-closed until its exact request ends', () => {
-  const start = source.indexOf('function beginAgentInputSuppression(requestId)');
-  const end = source.indexOf('\nasync function runAgentAction(request)', start);
+  const start = agentActions.indexOf('function beginAgentInputSuppression(requestId)');
+  const end = agentActions.indexOf('\nasync function runAgentAction(request)', start);
   assert.ok(start >= 0 && end > start, 'agent input suppression helpers must exist');
   let now = 1_000;
   const suppression = vm.runInNewContext(
     `(() => {
       let agentInputSuppression = null;
-      ${source.slice(start, end)}
+      ${agentActions.slice(start, end)}
       return { beginAgentInputSuppression, endAgentInputSuppression, isAgentInputSuppressed };
     })()`,
     { Date: { now: () => now } },
@@ -255,12 +242,12 @@ test('agent input suppression stays fail-closed until its exact request ends', (
 });
 
 test('native click preparation and completion own one suppression lease', async () => {
-  const start = source.indexOf('async function runAgentAction(request)');
-  const end = source.indexOf('\nfunction validateClickTargetAt', start);
+  const start = agentActions.indexOf('async function runAgentAction(request)');
+  const end = agentActions.indexOf('\nfunction validateClickTargetAt', start);
   assert.ok(start >= 0 && end > start, 'native click action must use target validation');
   const calls = [];
   const runAction = vm.runInNewContext(
-    `(${source.slice(start, end).replace('async function runAgentAction', 'async function')})`,
+    `(${agentActions.slice(start, end).replace('async function runAgentAction', 'async function')})`,
     {
       beginAgentInputSuppression: (requestId) => calls.push(['begin', requestId]),
       endAgentInputSuppression: (requestId) => calls.push(['end', requestId]),
@@ -306,8 +293,8 @@ test('native click preparation and completion own one suppression lease', async 
 });
 
 test('hover validates the current target without dispatching a synthetic mouse event', async () => {
-  const start = source.indexOf('function validateHoverTargetAt(x, y, expectedTarget)');
-  const end = source.indexOf('\nfunction typeIntoFocused', start);
+  const start = agentActions.indexOf('function validateHoverTargetAt(x, y, expectedTarget)');
+  const end = agentActions.indexOf('\nfunction typeIntoFocused', start);
   const target = {
     dispatchCount: 0,
     dispatchEvent() {
@@ -315,7 +302,7 @@ test('hover validates the current target without dispatching a synthetic mouse e
     },
   };
   const hover = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function validateHoverTargetAt', 'function')})`,
+    `(${agentActions.slice(start, end).replace('function validateHoverTargetAt', 'function')})`,
     {
       MouseEvent: class {},
       document: { elementFromPoint: () => target },
@@ -329,8 +316,8 @@ test('hover validates the current target without dispatching a synthetic mouse e
 });
 
 test('hover action validates its exact context and target without minting a premature snapshot', async () => {
-  const start = source.indexOf('async function runAgentAction(request)');
-  const end = source.indexOf('\nfunction validateClickTargetAt', start);
+  const start = agentActions.indexOf('async function runAgentAction(request)');
+  const end = agentActions.indexOf('\nfunction validateClickTargetAt', start);
   const target = {};
   const context = {
     documentId: 'document-1',
@@ -341,7 +328,7 @@ test('hover action validates its exact context and target without minting a prem
   let targetChecks = 0;
   let snapshotCount = 0;
   const runAction = vm.runInNewContext(
-    `(${source.slice(start, end).replace('async function runAgentAction', 'async function')})`,
+    `(${agentActions.slice(start, end).replace('async function runAgentAction', 'async function')})`,
     {
       validateHoverTargetAt: (x, y, expectedTarget) => {
         assert.equal(x, 40);
@@ -406,12 +393,12 @@ for (const action of ['click', 'hover']) {
         inputCount += 1;
       },
     });
-    const start = source.indexOf('async function runAgentAction(request)');
-    const end = source.indexOf('\nfunction typeIntoFocused', start);
-    const leaseStart = source.indexOf('function currentAgentSnapshotTarget(ref, selector)');
-    const leaseEnd = source.indexOf('\nfunction invalidateAgentSnapshot', leaseStart);
+    const start = agentActions.indexOf('async function runAgentAction(request)');
+    const end = agentActions.indexOf('\nfunction typeIntoFocused', start);
+    const leaseStart = agentSnapshot.indexOf('function currentAgentSnapshotTarget(ref, selector)');
+    const leaseEnd = agentSnapshot.indexOf('\nfunction invalidateAgentSnapshot', leaseStart);
     const runAction = vm.runInNewContext(
-      `${source.slice(start, end)}\n${source.slice(leaseStart, leaseEnd)}\nrunAgentAction`,
+      `${agentActions.slice(start, end)}\n${agentSnapshot.slice(leaseStart, leaseEnd)}\nrunAgentAction`,
       {
         beginAgentInputSuppression: () => {},
         document,
@@ -447,11 +434,11 @@ for (const action of ['click', 'hover']) {
 }
 
 test('the isolated final action rechecks sensitive focus immediately before typing', () => {
-  const start = source.indexOf('function requireSafeAgentTextAction(request)');
-  const end = source.indexOf('\nfunction currentAgentSnapshotTarget', start);
+  const start = agentSnapshot.indexOf('function requireSafeAgentTextAction(request)');
+  const end = agentSnapshot.indexOf('\nfunction currentAgentSnapshotTarget', start);
   let sensitive = null;
   const requireSafeText = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function requireSafeAgentTextAction', 'function')})`,
+    `(${agentSnapshot.slice(start, end).replace('function requireSafeAgentTextAction', 'function')})`,
     { sensitiveFocusedField: () => sensitive },
   );
 
@@ -461,16 +448,16 @@ test('the isolated final action rechecks sensitive focus immediately before typi
   assert.throws(() => requireSafeText({ action: 'keypress', key: 'a' }), /password field/);
   assert.doesNotThrow(() => requireSafeText({ action: 'keypress', key: 'Enter' }));
 
-  const actionStart = source.indexOf('async function runAgentAction(request)');
-  const actionEnd = source.indexOf('\nfunction validateClickTargetAt', actionStart);
-  const action = source.slice(actionStart, actionEnd);
+  const actionStart = agentActions.indexOf('async function runAgentAction(request)');
+  const actionEnd = agentActions.indexOf('\nfunction validateClickTargetAt', actionStart);
+  const action = agentActions.slice(actionStart, actionEnd);
   assert.match(action, /requireSafeAgentTextAction\(request\);\s*typeIntoFocused/);
   assert.match(action, /requireSafeAgentTextAction\(request\);\s*pressKey/);
 });
 
 test('replacing an element with the same selector expires the old browser ref', () => {
-  const start = source.indexOf('function currentAgentSnapshotTarget(ref, selector)');
-  const end = source.indexOf('\nfunction requireCurrentAgentSnapshotTarget', start);
+  const start = agentSnapshot.indexOf('function currentAgentSnapshotTarget(ref, selector)');
+  const end = agentSnapshot.indexOf('\nfunction requireCurrentAgentSnapshotTarget', start);
   const document = {};
   class Element {}
   const snapshottedElement = Object.assign(new Element(), {
@@ -486,7 +473,7 @@ test('replacing an element with the same selector expires the old browser ref', 
     ['@b-current', { element: snapshottedElement, selector: '#continue' }],
   ]);
   const currentTarget = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function currentAgentSnapshotTarget', 'function')})`,
+    `(${agentSnapshot.slice(start, end).replace('function currentAgentSnapshotTarget', 'function')})`,
     { agentSnapshotId: 'document:1', agentSnapshotTargets, document, Element },
   );
 
@@ -499,15 +486,14 @@ test('replacing an element with the same selector expires the old browser ref', 
 });
 
 test('agent pointer resolution uses live refs without requiring a selector, then snapshot x/y', () => {
-  const start = source.indexOf('function resolveAgentPointer(request)');
-  const end = source.indexOf('\nfunction inspectAuthenticationIntent', start);
+  const start = agentActions.indexOf('function resolveAgentPointer(request)');
   const scrolled = [];
   const liveTarget = {
     scrollIntoView: (options) => scrolled.push(options),
     getBoundingClientRect: () => ({ left: 8, top: 20, width: 40, height: 24 }),
   };
   const resolve = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function resolveAgentPointer', 'function')})`,
+    `(${agentActions.slice(start).replace('function resolveAgentPointer', 'function')})`,
     {
       currentAgentSnapshotTarget: (ref, selector) =>
         ref === '@b-results' && (selector === undefined || selector === '#results')
@@ -524,8 +510,8 @@ test('agent pointer resolution uses live refs without requiring a selector, then
 });
 
 test('ref-targeted scroll without a selector uses the live snapshot element', () => {
-  const start = source.indexOf('function scrollTargetFor(request, horizontal)');
-  const end = source.indexOf('\nfunction safeSnapshot()', start);
+  const start = agentActions.indexOf('function scrollTargetFor(request, horizontal)');
+  const end = agentActions.indexOf('\nfunction sendAgent', start);
   class Element {}
   const nested = Object.assign(Object.create(Element.prototype), {
     parentElement: null,
@@ -535,7 +521,7 @@ test('ref-targeted scroll without a selector uses the live snapshot element', ()
     clientHeight: 120,
   });
   const scrollTargetFor = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function scrollTargetFor', 'function')})`,
+    `(${agentActions.slice(start, end).replace('function scrollTargetFor', 'function')})`,
     {
       Element,
       currentAgentSnapshotTarget: (ref) => (ref === '@b-results' ? nested : null),
@@ -557,9 +543,8 @@ test('ref-targeted scroll without a selector uses the live snapshot element', ()
 });
 
 test('OAuth authentication intent includes the exact authoritative anchor destination', () => {
-  const start = source.indexOf('function inspectAuthenticationIntent(request)');
-  const helperStart = source.indexOf('\nfunction authoritativeAuthenticationTarget', start);
-  const end = source.indexOf('\nfunction sensitiveFocusedField', helperStart);
+  const start = authIntent.indexOf('function inspectAuthenticationIntent(request)');
+  const helperStart = authIntent.indexOf('\nfunction authoritativeAuthenticationTarget', start);
   class Element {}
   class HTMLIFrameElement extends Element {}
   class HTMLAnchorElement extends Element {}
@@ -584,13 +569,13 @@ test('OAuth authentication intent includes the exact authoritative anchor destin
   realm.currentAgentSnapshotTarget = () => anchor;
   realm.document = { querySelector: () => anchor };
   realm.authoritativeAuthenticationTarget = vm.runInNewContext(
-    `(${source
-      .slice(helperStart + 1, end)
+    `(${authIntent
+      .slice(helperStart + 1)
       .replace('function authoritativeAuthenticationTarget', 'function')})`,
     realm,
   );
   const inspect = vm.runInNewContext(
-    `(${source
+    `(${authIntent
       .slice(start, helperStart)
       .replace('function inspectAuthenticationIntent', 'function')})`,
     realm,
@@ -608,8 +593,8 @@ test('OAuth authentication intent includes the exact authoritative anchor destin
 });
 
 test('focusing a credential field is not treated as submitting a sign-in form', () => {
-  const start = source.indexOf('function inspectAuthenticationIntent(request)');
-  const end = source.indexOf('\nfunction authoritativeAuthenticationTarget', start);
+  const start = authIntent.indexOf('function inspectAuthenticationIntent(request)');
+  const end = authIntent.indexOf('\nfunction authoritativeAuthenticationTarget', start);
   class Element {
     constructor(tagName, type = '') {
       this.tagName = tagName;
@@ -653,7 +638,7 @@ test('focusing a credential field is not treated as submitting a sign-in form', 
   username.value = '';
   username.textContent = '';
   const inspect = vm.runInNewContext(
-    `(${source.slice(start, end).replace('function inspectAuthenticationIntent', 'function')})`,
+    `(${authIntent.slice(start, end).replace('function inspectAuthenticationIntent', 'function')})`,
     {
       Element,
       HTMLAnchorElement,
@@ -674,15 +659,15 @@ test('focusing a credential field is not treated as submitting a sign-in form', 
 });
 
 test('browser snapshots stop scanning after a bounded number of DOM nodes', () => {
-  const ceilingMatch = source.match(/const MAX_SNAPSHOT_VISITED_NODES = ([\d_]+);/);
+  const ceilingMatch = agentSnapshot.match(/const MAX_SNAPSHOT_VISITED_NODES = ([\d_]+);/);
   assert.ok(ceilingMatch, 'snapshot node ceiling must be explicit');
   const ceiling = Number(ceilingMatch[1].replaceAll('_', ''));
   assert.equal(ceiling, 2_000);
 
-  const collectStart = source.indexOf('function collectRefs()');
-  const collectEnd = source.indexOf('\nfunction intersectsViewport(', collectStart);
+  const collectStart = agentSnapshot.indexOf('function collectRefs()');
+  const collectEnd = agentSnapshot.indexOf('\nfunction intersectsViewport(', collectStart);
   assert.ok(collectStart >= 0 && collectEnd > collectStart);
-  const collectSource = source.slice(collectStart, collectEnd);
+  const collectSource = agentSnapshot.slice(collectStart, collectEnd);
   const nodes = Array.from({ length: ceiling * 2 }, () => ({}));
   let nextIndex = 1;
   let visited = 0;
@@ -714,4 +699,78 @@ test('browser snapshots stop scanning after a bounded number of DOM nodes', () =
 
   assert.deepEqual(collectRefs(), []);
   assert.equal(visited, ceiling);
+});
+
+test('shipped preload bundle exposes exactly the documented main-world surface', () => {
+  const bundlePath = path.join(__dirname, 'nativeBrowserPreload.cjs');
+  if (!fs.existsSync(bundlePath)) {
+    require('node:child_process').execFileSync(
+      process.execPath,
+      [path.join(__dirname, '..', 'tools', 'build-native-browser-preload.mjs')],
+      { stdio: 'inherit' },
+    );
+  }
+  const bundle = fs.readFileSync(bundlePath, 'utf8');
+
+  // Sandboxed preloads can only require('electron'); a relative require would
+  // resolve against the packaged asar at runtime and throw.
+  const required = [...bundle.matchAll(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(required)].sort(), ['electron']);
+
+  // Every DOM object the bundle touches while loading answers to anything, so
+  // the module's top-level effects run without a real renderer.
+  const stub = () =>
+    new Proxy(function () {}, {
+      get: (_target, key) => (key === Symbol.toPrimitive || key === 'toString' ? () => '' : stub()),
+      set: () => true,
+      apply: () => stub(),
+      construct: () => stub(),
+    });
+  const exposed = [];
+  const subscribed = [];
+  const sandbox = {
+    module: { exports: {} },
+    exports: {},
+    require: (id) => {
+      assert.equal(id, 'electron');
+      return {
+        contextBridge: { exposeInMainWorld: (name) => exposed.push(name) },
+        ipcRenderer: { on: (channel) => subscribed.push(channel), send: () => {} },
+      };
+    },
+    document: stub(),
+    window: stub(),
+    requestAnimationFrame: stub(),
+    clearTimeout: stub(),
+    crypto: stub(),
+    location: stub(),
+  };
+  vm.runInNewContext(bundle, sandbox, { filename: 'nativeBrowserPreload.cjs' });
+
+  assert.deepEqual(exposed.sort(), [
+    '__DROIDMAXX_AGENT_ACTION',
+    '__DROIDMAXX_AGENT_CONTEXT',
+    '__DROIDMAXX_APPLY_DESIGN_STATE',
+    '__DROIDMAXX_AUTH_INTENT',
+    '__DROIDMAXX_FILL_CREDENTIALS',
+    '__DROIDMAXX_MASK_SENSITIVE_FIELDS',
+    '__DROIDMAXX_RESOLVE_POINTER',
+    '__DROIDMAXX_SENSITIVE_FIELD',
+  ]);
+  assert.deepEqual(subscribed.sort(), [
+    'native-browser-agent-snapshot-invalidated',
+    'native-browser-design-prompt-sent',
+  ]);
+
+  const channels = [
+    ...bundle.matchAll(/\bipcRenderer\.(?:send|invoke|on|once|sendSync)\(\s*['"]([^'"]+)['"]/g),
+  ].map((m) => m[1]);
+  assert.deepEqual([...new Set(channels)].sort(), [
+    'native-browser-agent-snapshot-invalidated',
+    'native-browser-credential-capture',
+    'native-browser-design-prompt',
+    'native-browser-design-prompt-sent',
+    'native-browser-selection',
+    'native-browser-user-navigation',
+  ]);
 });
