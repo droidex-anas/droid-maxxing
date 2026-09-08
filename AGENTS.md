@@ -275,6 +275,37 @@ For the full desktop app:
 npm run electron
 ```
 
+## Cursor Cloud specific instructions
+
+Cloud Agents boot from current `origin/main`, not the local
+`integration/multi-provider-v1` worktree. Use Node.js 22 from the image; do not
+require `rtk` or `mise`.
+
+Install:
+
+```bash
+npm ci
+npm ci --prefix sidecar
+```
+
+Multi-provider v1 design and delivery plans (source:
+`origin/integration/multi-provider-v1` at `ede366ce`):
+
+- spec: `docs/superpowers/specs/2026-08-12-multi-provider-runtime-design.md`
+- umbrella: `docs/superpowers/plans/2026-08-12-multi-provider-runtime-v1.md`
+- foundation: `docs/superpowers/plans/2026-08-12-multi-provider-foundation.md`
+- Droid core: `docs/superpowers/plans/2026-08-12-provider-core-droid.md`
+- Codex/Claude adapters: `docs/superpowers/plans/2026-08-12-codex-claude-adapters.md`
+- settings: `docs/superpowers/plans/2026-08-12-provider-settings-convergence.md`
+
+Execute those plans in the umbrella order. Reconcile them against current
+`origin/main` before coding: ordered bridge protocol 3, history workers, session
+and child retirement, and transcript chunks landed after `6890d1f1`.
+
+T3 Code is an external provenance source, not a repository in this environment.
+Do not clone it unless repository access is added. Authenticated Droid, Codex,
+and Claude smokes stay pending unless the owner supplies CLIs and keys.
+
 ## Required validation
 
 Run checks that match the files changed. For broad changes:
