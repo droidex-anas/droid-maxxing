@@ -1,263 +1,288 @@
 # Agent Instructions
 
-This repository contains the DROIDEX Electron app, React renderer, Electron host,
-and Node sidecar that integrates with the Factory Droid SDK.
+DROIDEX is an Electron app: a React renderer in `src/`, an Electron host in
+`electron/`, and a Node sidecar in `sidecar/src/` that drives the Factory Droid
+SDK. Treat every change as production work that another strong engineer must
+be able to read, review, debug, and change without reconstructing your
+reasoning.
 
-Treat every change as production work that another strong engineer must be able
-to understand, review, debug, extend, and confidently ship.
+## Engineering priorities
 
-## The standard
+Deliver the requested behavior with the smallest coherent solution: one clear
+owner per concern, direct control flow, precise names, and no more concepts
+than the problem needs. Smallest means fewest ideas, not fewest lines. Do not
+preserve a broken design to keep a diff short, and do not compress readable
+code to hit a limit.
 
-Choose the smallest complete solution that solves the current problem well.
+Good code here is boring in the best way. A reader should be able to predict
+what a function does from its name and signature, then confirm it in a glance.
+If a reader has to mentally execute the code to know what it does, simplify it.
 
-Beautiful code is boring in the best way: clear names, obvious control flow,
-few concepts, predictable state, and no surprises.
+These are engineering defaults, not ceremony. Explicit user constraints and the
+repository boundaries below always apply; beyond that, use judgment and explain
+material tradeoffs in a sentence or two.
 
-- Prefer simple, explicit code over clever code.
-- Keep behavior close to the state and invariants it changes.
-- Give every piece of mutable state one authoritative owner.
-- Preserve working behavior unless the task explicitly changes it.
-- Reuse existing code when it represents the same concept.
-- Make failures visible and diagnostics actionable.
-- Keep the touched area clean without expanding the task.
+## Understand before editing
 
-Do not overengineer. Do not add layers, factories, registries, interfaces,
-configuration, extension points, or dependencies for hypothetical future needs.
+- Read the relevant implementation, its callers, the types it depends on, and
+  the existing tests. Read `docs/architecture.md` when a change crosses the
+  renderer, Electron, or sidecar boundary.
+- Trace a bug to its owner and its actual cause. Do not patch a symptom with
+  another flag, fallback, or special case.
+- Search with `rg` for an existing helper, hook, selector, command, event, or
+  type before adding one. Follow the established pattern where it fits; do not
+  copy a known mistake because it is nearby.
+- Use the repository's real scripts. Check `package.json`, `sidecar/package.json`,
+  and `.github/workflows/` rather than inventing commands or adding a toolchain.
+- Once the behavior and approach are clear, implement. Plan briefly for
+  substantial or risky work; do not turn routine edits into architecture
+  proposals or repeated approval requests.
 
-## Before changing code
+## Implementation and reuse
 
-1. Read the relevant implementation, tests, types, and architecture docs.
-2. Search with `rg` for existing helpers, hooks, commands, events, selectors,
-   and names before adding anything.
-3. Identify who owns the state and behavior being changed.
-4. Check the branch and worktree. Preserve unrelated user changes.
-5. For broad or risky work, use a dedicated worktree from a freshly fetched
-   `origin/main`.
-6. Define the intended behavior and how it will be verified.
+- Keep related behavior together. Give mutable state one authoritative owner
+  and derive other values from it instead of synchronizing copies.
+- Prefer straightforward functions with explicit inputs and readable branches.
+  Avoid dense one-liners, nested ternaries, misleading defaults, and indirect
+  control flow.
+- Extract a function or module when it names a meaningful operation, hides real
+  complexity, owns an invariant or lifecycle, or removes duplication of the
+  same rule. A good extraction can have a single caller.
+- Do not extract merely to move lines elsewhere. No forwarding-only layers,
+  context bags, catch-all `utils` files, or interfaces that add no boundary.
+- Reuse existing code only when its meaning, ownership, and failure behavior
+  match. Do not force unrelated workflows through one configurable helper
+  because their syntax looks similar.
+- Keep code feature-local until sharing is justified. Tolerate small incidental
+  duplication rather than adding flags to a shared helper that then lies about
+  what it does.
+- Add dependencies, caches, registries, factories, and extension points only
+  for a concrete, current need.
+- No wrappers on wrappers. A function that only calls another function with
+  the same arguments, a hook that only returns another hook, a component that
+  only renders another component with the same props, or a type that only
+  aliases another type is noise. Call the real thing.
+- Make the fast path the plain path. Avoid work in render, avoid rebuilding
+  derived values every call when a selector or memo is the natural owner, and
+  do not copy large structures to change one field. Do not add memoization or
+  indirection without a measured reason.
+- Prefer early returns to nested conditions, flat data to deep option objects,
+  and a small discriminated union to a bag of booleans.
+- Delete what you supersede. Leave no dead exports, unused props, commented-out
+  code, or stale comments behind your change.
 
-Never reset, clean, stash, rebase, overwrite, or broadly reformat a dirty
-checkout without explicit permission.
+## Leave it cleaner
 
-Do not infer permission for unrelated refactors, dependency upgrades, pushes,
-PRs, merges, releases, migrations, or authenticated external calls.
+When you work in existing code, clean the part you touch. The goal is that the
+next reader cannot tell which lines were old and which were new, because both
+now read the same way.
 
-## Modules and ownership
-
-A module should own one cohesive product or runtime concept.
-
-- Keep its state, lifecycle, validation, persistence, cleanup, and error handling
-  together.
-- Expose semantic operations, not internal maps or mutable objects.
-- Keep dependency direction explicit.
-- Prefer direct calls over internal event buses or generic context bags.
-- Keep composition roots focused on construction and routing.
-- Delete superseded paths instead of keeping two canonical implementations.
-
-Before extracting code, apply the deletion test:
-
-- If deleting the new module only removes forwarding calls, it is a useless
-  wrapper.
-- If deleting it would spread meaningful state, sequencing, or validation back
-  across several callers, it owns a real responsibility.
-
-Avoid:
-
-- god files mixing unrelated workflows;
-- mirrored state or multiple owners;
-- vague dumping grounds such as `Utils`, `Helpers`, or generic `Manager`;
-- one-line forwarding wrappers;
-- interface/default-class pairs with one implementation;
-- speculative abstractions;
-- hidden global state; and
-- abstractions created only to reduce a line count.
+- Fix what your change exposes: a misleading name, a duplicated rule, a stale
+  comment, a redundant branch, an unused parameter, a wrapper that no longer
+  earns its place. Do it in the same diff when it is local and small.
+- Do not stop at your own lines. If your change makes a helper's remaining
+  callers obvious to fold in, fold them in; if it leaves a helper with one
+  trivial caller, inline it.
+- Stay inside the task's blast radius. Cleanup that reaches unrelated modules,
+  reformats files, or renames widely used concepts is a separate change. Note
+  it for later instead of doing it now.
+- Slop patterns to remove on sight when local: `x ?? x`, defensive checks for
+  states the types already exclude, `try/catch` that only rethrows or logs,
+  boolean parameters that select between two unrelated behaviors, `Props`
+  spread through three layers, `TODO` without an owner, and `// eslint-disable`
+  without a reason.
 
 ## File size
 
-Line count is a warning, not a design goal.
+Line count is a signal to inspect responsibilities, not a design goal.
 
-- Leaf UI files should usually stay around 50-250 readable lines.
-- Feature modules, hooks, reducers, and screens should usually stay around
-  150-400 lines.
-- Stop for architecture review before adding a new production file above 500
-  lines.
-- Any change that creates a production file above 500 lines, takes a file across
-  500 lines, or materially grows a file already above 500 lines must stop for
-  approval and justify the exception every time.
-- The justification must state the file's single cohesive responsibility,
-  current and expected line count, why a clean split would make ownership or
-  readability worse, which alternatives were rejected, and the reviewed
-  ceiling.
-- A cohesive state machine may exceed 500 lines only through that explicit
-  exception process.
-- Never compress readable code or create tiny files merely to satisfy a limit.
-- Existing oversized files are debt. Avoid materially growing them. Extract a
-  cohesive responsibility only when it belongs to the current task.
+- Leaf UI files usually sit around 50-250 lines; feature modules, hooks,
+  reducers, and screens around 150-400.
+- Do not create a production file above 500 lines, take a file across 500, or
+  materially grow one already above it without stopping for review. Justify the
+  exception: the file's single responsibility, why a split would hurt ownership
+  or readability, and the reviewed ceiling.
+- Existing oversized files are debt. Extract a cohesive responsibility only when
+  it belongs to the current task.
 
 Prefer a few focused modules over either a monolith or a maze of tiny files.
 
 ## Naming
 
-Names should explain the product concept without requiring the reader to inspect
-the implementation.
+A name should communicate the concept at the scope where it is read.
 
-- Use nouns for concepts and verbs for operations.
-- Name booleans as predicates such as `isReady`, `hasHistory`, or
-  `canInterrupt`.
-- Include units when ambiguous: `timeoutMs`, `tokenLimit`, `startedAt`.
-- Avoid abbreviations except established domain terms.
-- Do not use one word for multiple identities or lifecycle states.
-- Commands and events describe domain intent and facts, not implementation
-  details.
+- Use the domain vocabulary consistently: nouns for values, verbs for
+  operations, predicates for booleans (`isReady`, `canInterrupt`).
+- Be specific without repeating context the module or type already supplies.
+  `sessions.get(appSessionId)`, not `sessions.getSessionFromSessions(...)`.
+- Include units where ambiguity matters (`timeoutMs`, `budgetBytes`).
+  Distinguish identities from lifecycle states even when a shorter name is
+  convenient.
+- No unexplained abbreviations, no vague `data` / `info` / `manager` where the
+  domain matters, and no decorative qualifiers like `new`, `enhanced`, or `v2`
+  without a real versioned contract.
+- Follow local conventions. Do not rename unrelated code for consistency.
 
-Canonical session vocabulary:
+## Comments and documentation
+
+- Comments are sparse, short, and explain why, not what. One or two lines.
+- Document non-obvious invariants, edge cases, compatibility constraints, and
+  deliberate tradeoffs. Do not narrate the implementation, add section banners,
+  or restate names and types in prose.
+- Prefer a clearer name or simpler code over an explanatory comment. Small
+  private helpers need no docblock.
+- Document public contracts and genuinely intricate behavior when callers need
+  it. Avoid essay-style TSDoc.
+- Update comments and docs that your change affects. Do not create documents
+  that merely summarize your work.
+
+## Types, boundaries, and failures
+
+- Represent valid states directly: precise types, discriminated unions, and
+  exhaustive handling where it helps. Avoid optional-field combinations that
+  permit contradictory states.
+- Validate untrusted data at real boundaries: IPC, the bridge protocol,
+  provider responses, persisted state, and user input. Past that boundary, trust
+  the established contract instead of revalidating everywhere.
+- Do not silence a missing invariant with `any`, a non-null assertion, a broad
+  cast, or a fabricated default. Keep necessary assertions narrow and local.
+- Handle failures that can actually happen. Catch where recovery or useful
+  context belongs, use `finally` for owned cleanup, and otherwise let the
+  responsible handler receive the error. Never swallow errors silently or log
+  the same failure at every layer.
+- Distinguish expected cancellation from failure. Make diagnostics actionable
+  without exposing credentials or payloads.
+
+## React and UI
+
+- Keep the renderer provider-neutral. Translate SDK-specific types and behavior
+  at the bridge boundary, not in presentation components. Preserve meaningful
+  provider differences instead of pretending providers are identical.
+- Keep feature state near its owner. Use the root store only for genuinely
+  shared state, and pass focused values and callbacks rather than whole state
+  objects.
+- Derive presentation values during render or through selectors. Use effects
+  for external synchronization only, with complete cleanup.
+- Reuse existing components, theme tokens (`--droid-*`), and interaction
+  patterns. Do not introduce a parallel palette or design system.
+- Controls must be working, discoverable, and keyboard-accessible, with loading,
+  empty, and error states. Polish does not replace function.
+- Large lists mount only what is visible. Measure render cost with the real
+  catalog or transcript before shipping a list-shaped change.
+
+## DROIDEX identity and runtime contracts
+
+Preserve these distinctions when touching sessions, providers, or async work:
 
 - `appSessionId`: stable top-level DROIDEX session identity.
 - `parentAppSessionId`: owning top-level identity for a child.
 - `childSessionId`: stable logical child identity within its parent.
-- `providerSessionId`: replaceable backend/runtime identity.
-- `session`: universal runtime and UI concept.
-- `mission`: actual AGI Mission Control behavior only.
-- `auto`, `spec`, `agi`: interaction modes.
-- `off`, `low`, `medium`, `high`: independent autonomy levels.
+- `providerSessionId`: replaceable backend identity, never the UI identity.
+- `session`: universal runtime and UI concept; `mission`: AGI Mission Control
+  behavior only.
+- `auto`, `spec`, `agi`: interaction modes. `off`, `low`, `medium`, `high`:
+  independent autonomy levels.
 
-Workers and validators are child sessions. They remain parent-owned and do not
-become top-level navigation sessions.
+Workers and validators are parent-owned child sessions, not top-level
+navigation sessions. Change cross-process protocol definitions and all of their
+consumers in the same commit.
 
-## Reuse
+For work that can race session closure, replacement, or shutdown: capture the
+stable identity and generation before starting, revalidate after every await
+before applying results, invalidate stale work before awaiting external cleanup,
+and make settlement and cleanup idempotent. Release owned timers,
+subscriptions, queues, waiters, and provisional resources. Stale results must
+never mutate a replacement session.
 
-Search first, but do not force different concepts through one abstraction.
+## Compatibility policy
 
-- Reuse code only when behavior, invariants, and failure semantics match.
-- Extend a module only when the new behavior belongs to its responsibility.
-- Keep code feature-local until a second real consumer proves it is shared.
-- A little duplication is better than the wrong abstraction.
-- Centralize stable domain rules and test them once through the shared entry
-  point.
+Maintain one canonical current implementation. Historical compatibility is
+opt-in, never assumed.
 
-Moving code into a shared folder is not reuse unless it reduces what callers
-need to know.
+Do not add legacy readers, migration paths, aliases, dual commands, fallback
+fields, or shims unless the user explicitly asks to support the old contract.
+Remove superseded paths within the scope of the replacement. Any approved
+temporary compatibility path needs a stated supported case and a removal
+condition.
 
-## Frontend
+Adapters for currently supported providers and recovery from real current
+failures are not compatibility debt. This policy never authorizes discarding
+user data or breaking a supported integration; establish that something is
+obsolete before removing it, and surface a destructive transition instead of
+assuming permission.
 
-The renderer is a provider-neutral DROIDEX UI. Backend-specific behavior reaches
-it through the bridge and DROIDEX domain contracts.
+## Verification and tests
 
-- Screens compose focused feature modules.
-- Keep feature state, selectors, persistence, commands, and visual sections near
-  the owning feature.
-- Keep Factory, Droid, Codex, and future SDK types out of presentation code.
-- Do not hide real provider differences behind a misleading universal
-  abstraction. Translate them at the provider seam.
-- Prefer pure selectors and reducers for state transitions.
-- Put effects in narrowly named hooks with complete cleanup.
-- Do not put feature-local state in the root store without a real cross-feature
-  need.
-- Pass small meaningful values and operations, not giant state objects.
-- Build visual primitives locally first. Promote them after real reuse appears.
-- Keep controls discoverable, keyboard-usable, and accessible.
-- Never ship fake controls or UI that looks functional without real behavior.
+Verify the change. Tests are one way to do that, not a requirement for every
+edit. Spend your attention on reading and understanding the code first; choose
+checks by the uncertainty and failure risk they actually resolve, never by test
+count, coverage targets, or a wish to look thorough.
 
-For substantial new areas such as Studio, prefer a feature-first shape:
+- Start from existing coverage and focused checks. No new tests is a valid and
+  common outcome. Renames, mechanical refactors, styling, and documentation
+  changes usually need none.
+- For UI changes, look at the rendered behavior in the running app when you
+  can. A passing build is not visual verification.
+- Add or update a durable test only when it protects meaningful behavior,
+  closes a real gap, or would catch a plausible regression. A nontrivial bug
+  gets one focused regression test at the narrowest level that reproduces it,
+  not a test for every helper it touched.
+- Prioritize deterministic coverage for data integrity, session targeting,
+  ordering, cancellation, cleanup, security boundaries, and cross-process
+  contracts. Exercise behavior through production entry points.
+- Keep tests readable and small. No assertions that mirror implementation
+  details, mock-only behavior, giant snapshots, redundant case matrices, or
+  source-text checks unless the text is the contract. Use controlled promises,
+  clocks, and faithful fakes for races, never sleeps.
+- Extend an existing suite when the behavior belongs there. Do not add a test
+  framework, expose private helpers, or add production indirection to make
+  something testable.
+- Write as many throwaway tests, probes, and reproduction scripts as you need
+  while working; they are tools, not deliverables. Before committing, keep only
+  the tests whose ongoing protection is worth their maintenance and delete the
+  rest. Never commit scaffolding to look thorough, and never drop a valuable
+  test to look small.
+- Do not weaken assertions or delete failing tests to get a green run. Honor CI
+  gates, including the coverage thresholds in `npm run test:coverage`.
 
-```text
-src/features/<feature>/
-  <Feature>View.tsx
-  components/
-  hooks/
-  state/
-  lib/
-  tests/
-```
+Tests are maintained code too. Keep the ones whose protection justifies their
+cost.
 
-Do not create empty folders or one file per function to imitate this layout.
+## Scope, Git, and delivery
 
-## TypeScript, contracts, and concurrency
+- Inspect the branch and worktree before editing. Preserve unrelated user
+  changes and the intended base. Use a separate worktree when isolation helps,
+  not as a ritual, and do not switch to `origin/main` on your own.
+- Never reset, clean, stash, rebase, overwrite, or broadly reformat a dirty
+  checkout without permission. Do not infer authorization for pushes, PRs,
+  merges, releases, destructive migrations, or authenticated external actions.
+- Include local refactoring when the requested change needs it to be correct
+  and maintainable. Keep unrelated redesigns, dependency upgrades, and
+  formatting out of the diff.
+- Keep commits focused, buildable, and honestly named. Plain commit messages,
+  no generated trailers.
+- Keep the diff reviewable. Every hunk should trace to the task or to cleanup
+  the task exposed. No unrelated reformatting, import reordering, whitespace
+  churn, or renames that widen the review without changing behavior. If a
+  formatter touches lines you did not mean to change, revert them.
+- Separate mechanical moves from behavior changes when both are large. A
+  reviewer should never have to find a logic change inside a 400-line rename.
+- Read your own diff before pushing as if reviewing a stranger's PR. If a hunk
+  needs a comment to justify itself, either simplify it or explain it in the
+  commit message, not in a code comment.
+- Remove superseded code and your own temporary artifacts. Do not commit
+  internal prompts, plans, reviewer transcripts, generated reports, or scratch
+  files unless they are an explicit deliverable.
+- Review the final diff for correctness, avoidable complexity, naming drift,
+  duplicated rules, missing cleanup, and accidental scope. Passing tests are
+  evidence, not understanding.
+- Finish with a concise account of the result, the checks actually run and
+  their outcomes, and remaining risks or manual verification. Never claim a
+  check passed unless it was exercised.
 
-- Prefer precise types, discriminated unions, exhaustive switches, and runtime
-  validation at untrusted inputs.
-- Avoid `any`, non-null assertions, and casts that bypass missing invariants.
-  Narrow assertions at validated external seams must stay local and documented.
-- Model mutually exclusive states explicitly instead of combining optional
-  fields.
-- Keep protocol mirrors synchronized in the same change.
-- Never expose backend identity as UI identity.
-- Fail fast when canonical state is invalid.
-- Do not silently swallow errors.
-
-For asynchronous state:
-
-- Capture stable identity and generation before provider work.
-- Revalidate after awaits that can race close, replacement, or shutdown.
-- Make settlement and cleanup idempotent.
-- Invalidate stale work before awaiting external cleanup.
-- Clean timers, subscriptions, pollers, watchdogs, queues, provisional
-  resources, and request waiters.
-
-Race fixes require deterministic regression tests, not sleeps.
-
-## Hard-cut product policy
-
-DROIDEX currently has no external installed user base. Maintain one canonical
-current implementation.
-
-- Backward compatibility is opt-in, never the default.
-- Do not add compatibility shims, migrations, aliases, dual commands, fallback
-  fields, legacy readers, or silent recovery for obsolete states unless the
-  user explicitly requests support for a specific historical state.
-- Do not preserve an old path merely because it already exists or because
-  compatibility feels safer.
-- Prefer fail-fast diagnostics and explicit recovery instructions.
-- Delete replaced compatibility code.
-
-Any explicitly approved temporary compatibility path must document why it
-exists, its exact deletion criteria, and the issue or ADR that owns removal.
-
-## Tests
-
-Test behavior through the same entry points used by production.
-
-- Every behavior change gets focused tests.
-- Every bug fix gets a regression test for the original failure.
-- Prefer deterministic production-faithful fakes over private reach-ins.
-- Test failure, cancellation, stale results, close, and cleanup when relevant.
-- Reducer tests prove transitions and isolation.
-- UI tests prove visible behavior and command targeting, not only snapshots.
-- Use integration or Electron smoke tests for cross-process behavior.
-- Report authenticated or manual smoke tests as pending when they were not run.
-
-Do not weaken assertions, delete useful coverage, or add sleeps to make tests
-pass.
-
-## Workflow and review
-
-1. Establish the exact base and current behavior.
-2. Write and approve a design before risky architectural changes.
-3. Implement the smallest coherent vertical slice.
-4. Keep commits focused, buildable, and honestly named.
-5. Run focused checks while developing.
-6. Review the diff for duplication, dead code, naming drift, accidental
-   compatibility, unrelated formatting, and missing cleanup.
-7. Run validation proportional to the risk.
-8. Report what changed, what passed, what remains manual, and known debt.
-
-Keep behavior changes separate from structural refactors unless they are
-inseparable and explicitly approved. Do not perform drive-by cleanup.
-
-Do not commit internal prompts, private implementation plans, reviewer
-transcripts, or agent-process artifacts. Public docs explain the current
-product, architecture, operation, and recovery.
-
-## Definition of done
-
-A change is done only when:
-
-- behavior works end to end;
-- the implementation is simple and maintainable;
-- important contracts and failures are tested;
-- relevant validation passes;
-- documentation matches the current system;
-- users can discover and understand the behavior; and
-- the result can be confidently demonstrated and shipped.
+The work is complete when the requested behavior is implemented coherently,
+relevant verification supports it, and the change reads well without a long
+defense of its design.
 
 ## Fast start
 
@@ -275,9 +300,12 @@ For the full desktop app:
 npm run electron
 ```
 
+To run a second instance beside your main one, set `ELECTRON_START_URL` to a
+different port and `DROIDEX_USER_DATA_DIR` to a separate profile directory.
+
 ## Required validation
 
-Run checks that match the files changed. For broad changes:
+Run the checks that match the files you changed. For broad changes:
 
 ```bash
 npm run format:check
@@ -290,23 +318,22 @@ npm run docs:check
 npm run build
 ```
 
-`npm run lint` is currently non-blocking because of existing backlog. New and
-changed files remain responsible for their diagnostics.
+`npm run lint` is non-blocking because of existing backlog; new and changed
+files still own their diagnostics. The pre-commit hook runs lint-staged, file
+size, tech-debt, and typecheck gates.
 
 Performance changes are validated with the deterministic replay harness
-(`npm run perf:replay -- --scenario <smoke|idle|streaming|multi-agent|agents-4|agents-16|agents-27|long-history|long-tail|session-switch|soak>`)
-instead of intuition; artifacts land in `reports/perf/`. Compare `origin/main`
-against this branch with `npm run perf:compare` / `npm run perf:report`. Fail
-deterministic invariants with `npm run perf:gates` (also `npm run quality:perf-gates`).
-Convenience aliases: `npm run perf:multi-agent`, `npm run perf:long-session`,
-`npm run perf:soak`. Bundle budgets remain `npm run quality:bundle-budgets`.
+(`npm run perf:replay -- --scenario <smoke|idle|streaming|multi-agent|agents-4|agents-16|agents-27|long-history|long-tail|session-switch|soak>`),
+not intuition; artifacts land in `reports/perf/`. Compare against `origin/main`
+with `npm run perf:compare` and `npm run perf:report`, and enforce invariants
+with `npm run perf:gates`. Bundle budgets are `npm run quality:bundle-budgets`.
 
 ## Project map
 
-- `src/`: React UI, state, hooks, and frontend tests
+- `src/`: React UI, store, hooks, and frontend tests
 - `electron/`: Electron main process, preload scripts, and launcher
 - `sidecar/src/`: bridge, Factory runtime, browser runtime, and sidecar tests
-- `docs/`: public architecture, generated reference, and runbooks
+- `docs/`: architecture, generated reference, and runbooks
 - `tools/`: maintenance and validation scripts
 
 ## Environment variables
@@ -316,18 +343,20 @@ Start from `.env.example` for local overrides.
 - `ELECTRON_START_URL`: Electron development URL
 - `BRIDGE_PORT`: local sidecar WebSocket port
 - `BRIDGE_TOKEN`: packaged Electron bridge token
-- `DROIDEX_USER_DATA_DIR`: optional Electron profile directory override so a
-  second dev instance can run beside the main one; its sidecar then also gets
-  an isolated history state dir (`<profile>/history`) instead of competing for
-  the shared history writer lease
+- `DROIDEX_USER_DATA_DIR`: Electron profile directory override so a second dev
+  instance can run beside the main one; its sidecar gets an isolated history
+  state dir (`<profile>/history`) instead of competing for the shared writer
+  lease
 - `DROIDEX_HISTORY_DIR`: explicit history state directory for a bare sidecar
-  running beside the main app (Electron derives it from the profile override)
+  running beside the main app
 - `DROID_PATH`: explicit Droid CLI path
 - `FACTORY_API_KEY`: optional Factory key for Droid child processes
 
 ## Secrets
 
-Never commit or print secrets, tokens, personal data, or authenticated payloads.
+Never commit, print, or paste secrets, tokens, personal data, or authenticated
+payloads. That includes echoing `~/.factory/settings.json`, which contains
+provider API keys.
 
 ## Documentation upkeep
 
@@ -337,6 +366,3 @@ When scripts, environment variables, or onboarding commands change:
 npm run docs:generate
 npm run docs:check
 ```
-
-`npm run docs:check` confirms generated docs are current and command references
-in `AGENTS.md` map to real package scripts.

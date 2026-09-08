@@ -1681,12 +1681,7 @@ export default function PromptInput({
                     <span className="truncate">{selectedModelLabel}</span>
                     {primaryReasoning && (
                       <span
-                        className="shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-medium capitalize leading-none"
-                        style={{
-                          color: 'var(--droid-accent)',
-                          backgroundColor:
-                            'color-mix(in srgb, var(--droid-accent) 13%, transparent)',
-                        }}
+                        className="shrink-0 text-droid-text-muted capitalize"
                         title={`Reasoning: ${primaryReasoning}`}
                       >
                         {primaryReasoning}
