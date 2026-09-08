@@ -9,6 +9,19 @@ import type { AutomationInput } from './types.js';
 
 type SessionCreate = Extract<ClientCommand, { type: 'session.create' }>;
 
+type ManagerOptions = ConstructorParameters<typeof AutomationManager>[0];
+
+function createManager(dataDir: string, options: Partial<ManagerOptions> = {}): AutomationManager {
+  return new AutomationManager({
+    dataDir,
+    turnSettleGraceMs: 80,
+    emit: () => undefined,
+    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+    launchSession: async () => undefined,
+    ...options,
+  });
+}
+
 function task(overrides: Partial<AutomationInput> = {}): AutomationInput {
   return {
     title: 'Task',
@@ -22,55 +35,10 @@ function task(overrides: Partial<AutomationInput> = {}): AutomationInput {
   };
 }
 
-test('a run launches a chat and completes only after the turn settles', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
-  const launches: SessionCreate[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
-    launchSession: async (command) => {
-      launches.push(command);
-    },
-  });
-
-  try {
-    const automation = await manager.create(task());
-    await manager.runNow(automation.id);
-    await waitFor(() => launches.length === 1);
-    const launch = launches[0];
-    if (!launch) throw new Error('Expected an automation session launch.');
-    assert.equal(launch.autonomy, 'low');
-    await manager.observeSessionEvent({
-      type: 'session.created',
-      clientRef: launch.clientRef,
-      session: { appSessionId: 'session-a' },
-    } as ServerEvent);
-    await manager.observeSessionEvent({
-      type: 'session.updated',
-      session: { appSessionId: 'session-a', streaming: true },
-    } as ServerEvent);
-    await manager.observeSessionEvent({
-      type: 'session.updated',
-      session: { appSessionId: 'session-a', streaming: false },
-    } as ServerEvent);
-    await waitFor(async () => (await manager.snapshot()).runs[0]?.status === 'completed');
-    assert.equal((await manager.snapshot()).runs[0]?.status, 'completed');
-  } finally {
-    await manager.shutdown();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
 test('a run that resumes during settle grace stays open until the next turn ends', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+  const manager = createManager(directory, {
     launchSession: async (command) => {
       launches.push(command);
     },
@@ -124,11 +92,7 @@ test('a run that resumes during settle grace stays open until the next turn ends
 test('a run still settles when turn events arrive during session adopt', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+  const manager = createManager(directory, {
     launchSession: async (command) => {
       launches.push(command);
     },
@@ -140,6 +104,7 @@ test('a run still settles when turn events arrive during session adopt', async (
     await waitFor(() => launches.length === 1);
     const launch = launches[0];
     if (!launch) throw new Error('Expected an automation session launch.');
+    assert.equal(launch.autonomy, 'low');
     const created = manager.observeSessionEvent({
       type: 'session.created',
       clientRef: launch.clientRef,
@@ -173,11 +138,7 @@ test('a run still settles when turn events arrive during session adopt', async (
 test('closing a chat while it is still streaming fails the run', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+  const manager = createManager(directory, {
     launchSession: async (command) => {
       launches.push(command);
     },
@@ -218,11 +179,7 @@ test('one automation cannot stack a second open run', async () => {
   const launches: SessionCreate[] = [];
   let clock = Date.UTC(2026, 0, 1, 8, 0, 0);
   const dueAt = clock + 60_000;
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+  const manager = createManager(directory, {
     launchSession: async (command) => {
       launches.push(command);
     },
@@ -261,13 +218,7 @@ test('one automation cannot stack a second open run', async () => {
 
 test('an enabled one-time schedule cannot be backdated', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
-    launchSession: async () => undefined,
-  });
+  const manager = createManager(directory, {});
 
   try {
     await assert.rejects(
@@ -284,14 +235,10 @@ test('an enabled one-time schedule cannot be backdated', async () => {
 test('ordinary chat transcript appends do not persist an automation snapshot', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const published: string[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
+  const manager = createManager(directory, {
     emit: (event) => {
       published.push(event.type);
     },
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
-    launchSession: async () => undefined,
   });
 
   try {
@@ -320,10 +267,7 @@ test('a failed adoption write closes the unowned automation chat', async (contex
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];
   const closed: string[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+  const manager = createManager(directory, {
     launchSession: async (command) => {
       launches.push(command);
     },
@@ -360,10 +304,7 @@ test('a completed run keeps its worktree until the review chat closes', async ()
   const worktree = join(directory, 'worktree');
   const launches: SessionCreate[] = [];
   const released: string[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
+  const manager = createManager(directory, {
     prepareWorkspace: async () => worktree,
     launchSession: async (command) => {
       launches.push(command);
@@ -418,10 +359,8 @@ test('review-chat close releases its worktree when the origin write fails', asyn
   const worktree = join(directory, 'worktree');
   const launches: SessionCreate[] = [];
   const released: string[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
+  const manager = createManager(directory, {
     turnSettleGraceMs: 20,
-    emit: () => undefined,
     prepareWorkspace: async () => worktree,
     launchSession: async (command) => {
       launches.push(command);
@@ -479,10 +418,7 @@ test('an isolated worktree is not created until its path is persisted', async ()
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const worktree = join(directory, 'worktree');
   const events: string[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
+  const manager = createManager(directory, {
     prepareWorkspace: async () => {
       events.push('resolve');
       return worktree;
@@ -525,9 +461,7 @@ test('shutdown releases a worktree materialized before launch', async () => {
   const materializingStarted = new Promise<void>((resolve) => {
     noteMaterializing = resolve;
   });
-  const manager = new AutomationManager({
-    dataDir: directory,
-    emit: () => undefined,
+  const manager = createManager(directory, {
     prepareWorkspace: async () => worktree,
     createWorkspace: async () => {
       noteMaterializing();
@@ -564,10 +498,7 @@ test('a restarted sidecar can release a worktree created before launch', async (
   const worktree = join(directory, 'worktree');
   const released: string[] = [];
   const launches: SessionCreate[] = [];
-  const first = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
+  const first = createManager(directory, {
     prepareWorkspace: async () => worktree,
     launchSession: async (command) => {
       launches.push(command);
@@ -586,12 +517,8 @@ test('a restarted sidecar can release a worktree created before launch', async (
       await first.shutdown();
     }
     assert.equal(released.length, 0);
-    const second = new AutomationManager({
-      dataDir: directory,
-      turnSettleGraceMs: 80,
-      emit: () => undefined,
+    const second = createManager(directory, {
       prepareWorkspace: async () => '',
-      launchSession: async () => undefined,
       releaseWorkspace: async ({ resolvedCwd }) => {
         if (resolvedCwd) released.push(resolvedCwd);
       },
@@ -612,10 +539,7 @@ test('a restarted sidecar releases a worktree after its review origin was droppe
   const worktree = join(directory, 'worktree');
   const released: string[] = [];
   const launches: SessionCreate[] = [];
-  const first = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
+  const first = createManager(directory, {
     prepareWorkspace: async () => worktree,
     launchSession: async (command) => {
       launches.push(command);
@@ -658,12 +582,8 @@ test('a restarted sidecar releases a worktree after its review origin was droppe
     };
     delete store.sessionOrigins['session-review'];
     await writeFile(storePath, JSON.stringify(store), 'utf8');
-    const second = new AutomationManager({
-      dataDir: directory,
-      turnSettleGraceMs: 80,
-      emit: () => undefined,
+    const second = createManager(directory, {
       prepareWorkspace: async () => '',
-      launchSession: async () => undefined,
       releaseWorkspace: async ({ resolvedCwd }) => {
         if (resolvedCwd) released.push(resolvedCwd);
       },
@@ -686,12 +606,7 @@ test(
     const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
     let clock = Date.UTC(2026, 0, 1, 8, 0, 0);
     const dueAt = clock + 60_000;
-    const manager = new AutomationManager({
-      dataDir: directory,
-      turnSettleGraceMs: 80,
-      emit: () => undefined,
-      prepareWorkspace: async ({ cwd }) => cwd ?? '',
-      launchSession: async () => undefined,
+    const manager = createManager(directory, {
       now: () => clock,
     });
 
@@ -719,13 +634,7 @@ test(
 
 test('overlapping creates both persist', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
-    launchSession: async () => undefined,
-  });
+  const manager = createManager(directory, {});
 
   try {
     const [left, right] = await Promise.all([
@@ -746,11 +655,7 @@ test('overlapping creates both persist', async () => {
 test('an unattended run cannot create another automation', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
+  const manager = createManager(directory, {
     launchSession: async (command) => {
       launches.push(command);
     },
@@ -786,12 +691,7 @@ test('an unattended run cannot create another automation', async () => {
 
 test('direct creation requires High autonomy', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
-    emit: () => undefined,
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
-    launchSession: async () => undefined,
+  const manager = createManager(directory, {
     resolveSessionContext: async () => ({
       cwd: '/repo',
       modelId: 'chat-model',
@@ -814,14 +714,10 @@ test('direct creation requires High autonomy', async () => {
 test('unknown automations commands fail instead of succeeding empty', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const results: Array<{ ok: boolean; error?: string }> = [];
-  const manager = new AutomationManager({
-    dataDir: directory,
-    turnSettleGraceMs: 80,
+  const manager = createManager(directory, {
     emit: (event) => {
       if (event.type === 'automations.result') results.push(event);
     },
-    prepareWorkspace: async ({ cwd }) => cwd ?? '',
-    launchSession: async () => undefined,
   });
 
   try {

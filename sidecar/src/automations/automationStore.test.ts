@@ -12,6 +12,23 @@ import {
   storeHasRunSession,
   trimAutomationStore,
 } from './automationStore.js';
+import type { AutomationInput } from './types.js';
+
+function automation(now: number, overrides: Partial<AutomationInput> = {}) {
+  return createAutomationRecord(
+    normalizeAutomationInput({
+      title: 'Task',
+      prompt: 'Do the task.',
+      enabled: false,
+      schedule: { kind: 'daily', time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+      ...overrides,
+    }),
+    now,
+  );
+}
 
 test('a store written by another version is refused instead of guessed at', () => {
   assert.throws(
@@ -66,32 +83,12 @@ test('invalid stored records are dropped and logged', () => {
 
 test('trim keeps a review worktree until its chat origin is dropped', () => {
   const now = Date.now();
-  const busy = createAutomationRecord(
-    normalizeAutomationInput({
-      title: 'Busy',
-      prompt: 'Do the task.',
-      enabled: false,
-      schedule: { kind: 'daily', time: '23:59' },
-      timezone: 'UTC',
-      modelId: 'model-a',
-      reasoningEffort: 'high',
-    }),
-    now,
-  );
-  const isolated = createAutomationRecord(
-    normalizeAutomationInput({
-      title: 'Isolated',
-      prompt: 'Do the task.',
-      workspaceCwd: '/repo',
-      executionMode: 'worktree',
-      enabled: false,
-      schedule: { kind: 'daily', time: '23:59' },
-      timezone: 'UTC',
-      modelId: 'model-a',
-      reasoningEffort: 'high',
-    }),
-    now,
-  );
+  const busy = automation(now, { title: 'Busy' });
+  const isolated = automation(now, {
+    title: 'Isolated',
+    workspaceCwd: '/repo',
+    executionMode: 'worktree',
+  });
   const store = emptyAutomationStore();
   const runs = [];
   for (let index = 0; index < 160; index += 1) {
@@ -133,33 +130,22 @@ test('trim keeps a review worktree until its chat origin is dropped', () => {
 
 test('trim keeps the origin of an in-flight run', () => {
   const now = Date.now();
-  const automation = createAutomationRecord(
-    normalizeAutomationInput({
-      title: 'Task',
-      prompt: 'Do the task.',
-      enabled: false,
-      schedule: { kind: 'daily', time: '23:59' },
-      timezone: 'UTC',
-      modelId: 'model-a',
-      reasoningEffort: 'high',
-    }),
-    now,
-  );
+  const definition = automation(now);
   const store = emptyAutomationStore();
-  const run = newQueuedRun(automation, now, now, 'manual');
+  const run = newQueuedRun(definition, now, now, 'manual');
   run.status = 'running';
   run.appSessionId = 'session-live';
   store.runs = [run];
   store.sessionOrigins['session-live'] = {
-    automationId: automation.id,
-    automationTitle: automation.title,
+    automationId: definition.id,
+    automationTitle: definition.title,
     runId: run.id,
     trigger: 'manual',
   };
   for (let index = 0; index < 210; index += 1) {
     store.sessionOrigins[`old-${String(index)}`] = {
-      automationId: automation.id,
-      automationTitle: automation.title,
+      automationId: definition.id,
+      automationTitle: definition.title,
       runId: `old-run-${String(index)}`,
       trigger: 'manual',
     };
@@ -173,33 +159,22 @@ test('trim keeps the origin of an in-flight run', () => {
 test('a run session is still recognized after its origin record is dropped', () => {
   const now = Date.now();
   const store = emptyAutomationStore();
-  const automation = createAutomationRecord(
-    normalizeAutomationInput({
-      title: 'Task',
-      prompt: 'Do the task.',
-      enabled: false,
-      schedule: { kind: 'daily', time: '23:59' },
-      timezone: 'UTC',
-      modelId: 'model-a',
-      reasoningEffort: 'high',
-    }),
-    now,
-  );
+  const definition = automation(now);
   store.sessionOrigins['from-origin'] = {
-    automationId: automation.id,
-    automationTitle: automation.title,
+    automationId: definition.id,
+    automationTitle: definition.title,
     runId: 'run-1',
     trigger: 'manual',
   };
   assert.equal(storeHasRunSession(store, 'from-origin'), true);
   store.sessionOrigins = {};
-  const run = newQueuedRun(automation, now, now, 'manual');
+  const run = newQueuedRun(definition, now, now, 'manual');
   run.appSessionId = 'from-run';
   store.runs = [run];
   assert.equal(storeHasRunSession(store, 'from-run'), true);
   store.runs = [];
-  automation.lastAppSessionId = 'from-last';
-  store.automations = [automation];
+  definition.lastAppSessionId = 'from-last';
+  store.automations = [definition];
   assert.equal(storeHasRunSession(store, 'from-last'), true);
   assert.equal(storeHasRunSession(store, 'ordinary-chat'), false);
 });
