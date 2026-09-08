@@ -233,7 +233,8 @@ export default function Sidebar({
         running={sessionIsLive(m)}
         activityStatus={status}
         detail={inbox ? reasonFor(m, status) || ACTIVITY_LABELS[status] : undefined}
-        pr={linkedPrKind(chatMetadata[m.appSessionId])}
+        // The PR view already names the PR in its group header.
+        pr={view === 'pull-requests' ? undefined : linkedPrKind(chatMetadata[m.appSessionId])}
         attention={sessionAttention(
           m.appSessionId,
           state.pendingPermissions,
