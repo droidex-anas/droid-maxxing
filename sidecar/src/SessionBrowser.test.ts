@@ -28,6 +28,13 @@ test('restore reports a missing chat identity through browser error events', asy
     events.map((event) => event.type),
     ['browser.error', 'error'],
   );
+
+  events.length = 0;
+  await browser.handle({ type: 'browser.restore' } as never);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['browser.error', 'error'],
+  );
 });
 
 test('shutdown rejects pending native browser work and blocks future requests', async () => {

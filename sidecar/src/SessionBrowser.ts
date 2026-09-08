@@ -139,10 +139,12 @@ export class SessionBrowser {
   }
 
   async restore(cmd: Extract<ClientCommand, { type: 'browser.restore' }>): Promise<void> {
-    await this.handleBrowser(cmd.state.appSessionId, () =>
+    // Wire commands are unvalidated, so a missing state must fail on the browser channel.
+    const appSessionId = (cmd.state as { appSessionId?: string } | undefined)?.appSessionId;
+    await this.handleBrowser(appSessionId, () =>
       this.d.browsers.restore({
         ...cmd.state,
-        appSessionId: this.requireBrowserAppSessionId(cmd.state.appSessionId),
+        appSessionId: this.requireBrowserAppSessionId(appSessionId),
       }),
     );
   }

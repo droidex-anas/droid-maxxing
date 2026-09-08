@@ -104,8 +104,8 @@ export class BrowserSessionManager {
     viewport?: BrowserViewport;
     viewportMode?: BrowserViewportMode;
   }): Promise<BrowserState> {
-    const session = this.sessionFor(input.appSessionId, input.viewport, input.viewportMode);
     const url = normalizeBrowserUrl(input.url);
+    const session = this.sessionFor(input.appSessionId, input.viewport, input.viewportMode);
     const previousViewport = session.state.viewport;
     const nextViewport = input.viewport ?? previousViewport;
     if (input.viewport) await session.runtime.setViewport(input.viewport, input.source);

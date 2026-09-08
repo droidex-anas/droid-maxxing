@@ -830,6 +830,13 @@ test('open normalizes bare domains before the native runtime sees them', async (
   assert.equal(state.url, 'https://skeina.tech');
 });
 
+test('a rejected open registers no session', async () => {
+  const manager = createManager();
+
+  await assert.rejects(manager.open({ appSessionId: 'm1', url: '' }));
+  await assert.rejects(manager.refresh('m1'), /not open yet/);
+});
+
 test('reload updates the managed browser state from the runtime snapshot', async () => {
   let runtime!: FakeRuntime;
   const manager = createManager({
