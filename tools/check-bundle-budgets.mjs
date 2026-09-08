@@ -5,8 +5,10 @@ import { join } from 'node:path';
 // Raised from 1_280_000 for the context-panel redesign (#216): the shared
 // popover system and section rework added ~2.3KB to the entry chunk, which
 // had only ~300B of headroom left on main.
+// Raised from 1_285_000 for the activity inbox (#217): status derivation,
+// the transcript digest, and the flyout view menu added ~6KB to the entry.
 const BUDGETS = {
-  initialRendererJsBytes: 1_285_000,
+  initialRendererJsBytes: 1_295_000,
   initialCssBytes: 95_000,
   largestLazyChunkBytes: 680_000,
   duplicatePackageMaxBytes: 120_000,

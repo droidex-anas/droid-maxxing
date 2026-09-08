@@ -48,7 +48,7 @@ export function digestTranscript(events: readonly TranscriptEvent[]): ActivityDi
     modelSpokeLast: lastModel > lastUser,
     snippet: lastSentence(lastModel >= 0 ? (events[lastModel].text ?? '') : ''),
     // Only a tool call at the very tail is still running.
-    activity: last.kind === 'tool_call' ? describeTool(last) : undefined,
+    activity: last.kind === 'tool_call' && last.role === 'primary' ? describeTool(last) : undefined,
   };
 }
 

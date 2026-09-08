@@ -92,9 +92,10 @@ export function useSidebarActivity(
     const owners = new Map<string, string>();
     if (preferences.view !== 'activity') return owners;
     const claimed = new Set<string>();
+    const known: Partial<Record<string, SessionSummary>> = state.sessions;
     const sessions = state.sessionOrder
-      .map((id) => state.sessions[id])
-      .filter((session) => session.cwd)
+      .map((id) => known[id])
+      .filter((session): session is SessionSummary => Boolean(session?.cwd))
       .sort((a, b) => b.updatedAt - a.updatedAt || a.appSessionId.localeCompare(b.appSessionId));
     for (const session of sessions) {
       if (claimed.has(session.cwd)) continue;

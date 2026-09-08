@@ -50,15 +50,20 @@ export function useActivityDigests(enabled: boolean): Record<string, ActivityDig
   // rather than rewriting the cache each time.
   useEffect(() => {
     stored.current = merged;
-    const timer = setTimeout(() => {
+    const save = () => {
       try {
         saveActivityDigests(window.localStorage, merged);
       } catch {
         // Persistence is a convenience; the in-memory digest still drives the view.
       }
-    }, SAVE_DELAY_MS);
+    };
+    const timer = setTimeout(save, SAVE_DELAY_MS);
+    window.addEventListener('pagehide', save);
     return () => {
       clearTimeout(timer);
+      window.removeEventListener('pagehide', save);
+      // Unmounting (sidebar collapse) must not drop the last change.
+      save();
     };
   }, [merged]);
 

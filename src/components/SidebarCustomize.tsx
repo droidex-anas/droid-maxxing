@@ -1,19 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import {
-  Activity,
-  ArrowDownAZ,
-  Check,
-  ChevronRight,
-  CircleDashed,
-  Clock,
-  Folder,
-  GitCommitHorizontal,
-  GitPullRequest,
-  History,
-  ListFilter,
-  Loader,
-  MessageCircleWarning,
-} from 'lucide-react';
+import { Activity, Check, ChevronRight, Folder, GitPullRequest, ListFilter } from 'lucide-react';
 import { Popover } from './environment/Popover';
 import {
   DEFAULT_SIDEBAR_PREFERENCES,
@@ -44,9 +30,9 @@ const VIEWS: Option<SidebarActivityPreferences['view']>[] = [
   },
 ];
 const ORDER: Option<SidebarActivityPreferences['order']>[] = [
-  { value: 'recent', label: 'Last active', icon: <Clock className={ICON} strokeWidth={1.5} /> },
-  { value: 'oldest', label: 'Oldest first', icon: <History className={ICON} strokeWidth={1.5} /> },
-  { value: 'title', label: 'Name', icon: <ArrowDownAZ className={ICON} strokeWidth={1.5} /> },
+  { value: 'recent', label: 'Last active' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'title', label: 'Name' },
 ];
 const LIMIT: Option<SidebarActivityPreferences['limit']>[] = [
   { value: 5, label: '5 per group' },
@@ -54,20 +40,12 @@ const LIMIT: Option<SidebarActivityPreferences['limit']>[] = [
   { value: 0, label: 'Everything' },
 ];
 const STATUS: Option<SidebarActivityPreferences['filter']>[] = [
-  { value: 'all', label: 'Any status', icon: <CircleDashed className={ICON} strokeWidth={1.5} /> },
-  {
-    value: 'attention',
-    label: 'Needs you',
-    icon: <MessageCircleWarning className={ICON} strokeWidth={1.5} />,
-  },
-  { value: 'working', label: 'Working', icon: <Loader className={ICON} strokeWidth={1.5} /> },
-  {
-    value: 'ship',
-    label: 'To ship',
-    icon: <GitCommitHorizontal className={ICON} strokeWidth={1.5} />,
-  },
-  { value: 'ready', label: 'Recent', icon: <Clock className={ICON} strokeWidth={1.5} /> },
-  { value: 'settled', label: 'Settled', icon: <Check className={ICON} strokeWidth={1.5} /> },
+  { value: 'all', label: 'Any status' },
+  { value: 'attention', label: 'Needs you' },
+  { value: 'working', label: 'Working' },
+  { value: 'ship', label: 'To ship' },
+  { value: 'ready', label: 'Recent' },
+  { value: 'settled', label: 'Settled' },
 ];
 
 const ROW =
@@ -139,9 +117,11 @@ function FlyoutRow<T extends string | number>({
                   onChange(option.value);
                 }}
               >
-                <span className="flex w-4 shrink-0 justify-center text-droid-text-secondary">
-                  {option.icon}
-                </span>
+                {option.icon && (
+                  <span className="flex w-4 shrink-0 justify-center text-droid-text-secondary">
+                    {option.icon}
+                  </span>
+                )}
                 <span className="flex-1">{option.label}</span>
                 {selected && <Check className="h-4 w-4" strokeWidth={2} />}
               </button>
@@ -177,8 +157,11 @@ export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAll
     else if (event.key === 'ArrowUp') focus(current - 1);
     else if (event.key === 'Home') focus(0);
     else if (event.key === 'End') focus(-1);
-    else if (event.key === 'ArrowLeft') setSubmenu(null);
-    else if (event.key === 'ArrowRight') {
+    else if (event.key === 'ArrowLeft') {
+      const row = (document.activeElement as HTMLElement | null)?.closest('[data-submenu]');
+      row?.querySelector<HTMLElement>('button')?.focus();
+      setSubmenu(null);
+    } else if (event.key === 'ArrowRight') {
       const row = (document.activeElement as HTMLElement | null)?.closest('[data-submenu]');
       const id = row?.getAttribute('data-submenu') as Submenu | null;
       if (id) {
@@ -213,7 +196,7 @@ export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAll
         aria-haspopup="menu"
         aria-expanded={open}
         className={`rounded-md p-1.5 transition-colors hover:bg-droid-elevated focus-visible:bg-droid-elevated focus-visible:outline-none ${
-          open || filtered ? 'text-droid-text' : 'text-droid-text-muted hover:text-droid-text'
+          open || customized ? 'text-droid-text' : 'text-droid-text-muted hover:text-droid-text'
         }`}
       >
         <ListFilter className="h-4 w-4" strokeWidth={1.5} />
