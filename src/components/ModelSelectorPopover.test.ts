@@ -35,27 +35,28 @@ function renderTarget(readiness: ExactChildSettingsTarget['readiness']): string 
   );
 }
 
-test('exact child editor labels readiness and keeps standalone reasoning disabled', () => {
+test('exact child editor labels readiness and keeps per-row reasoning locked', () => {
   const opening = renderTarget('opening');
   assert.match(opening, /Sub-agent 2/);
   assert.match(opening, /Opening child…/);
   assert.match(opening, /Change the child model to adjust reasoning/);
+  assert.doesNotMatch(opening, /Reasoning<\/span>/);
+  assert.match(opening, /aria-disabled="true"/);
 
   const ready = renderTarget('ready');
   assert.match(ready, /Sub-agent 2/);
   assert.match(ready, /Validator model/);
   assert.match(ready, /Change the child model to adjust reasoning/);
+  assert.doesNotMatch(ready, /aria-disabled="true"/);
+  // Effort blocks stay disabled in child mode regardless of readiness.
   assert.equal(
     (opening.match(/disabled=""/g) ?? []).length,
-    (ready.match(/disabled=""/g) ?? []).length + 1,
+    (ready.match(/disabled=""/g) ?? []).length,
   );
 
   const unavailable = renderTarget('failed');
   assert.match(unavailable, /Child unavailable/);
-  assert.equal(
-    (unavailable.match(/disabled=""/g) ?? []).length,
-    (opening.match(/disabled=""/g) ?? []).length,
-  );
+  assert.match(unavailable, /aria-disabled="true"/);
 });
 
 test('a dangling active session id keeps using the visible global defaults', () => {
@@ -88,7 +89,9 @@ test('a dangling active session id keeps using the visible global defaults', () 
   );
 
   assert.match(html, /Search models · Global Model/);
-  assert.match(html, /Reasoning<\/span><span[^>]*>low<\/span>/);
-  assert.equal((html.match(/aria-pressed="true"/g) ?? []).length, 1);
-  assert.equal((html.match(/aria-pressed="false"/g) ?? []).length, 1);
+  // The selected row shows the session's effort; the meter has one block per supported effort.
+  assert.match(html, /aria-selected="true"[\s\S]*?capitalize[^>]*>low<\/span>/);
+  assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
+  assert.equal((html.match(/aria-selected="false"/g) ?? []).length, 1);
+  assert.equal((html.match(/aria-label="Global Model: (low|high)"/g) ?? []).length, 2);
 });
