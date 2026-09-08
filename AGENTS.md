@@ -58,8 +58,39 @@ material tradeoffs in a sentence or two.
   what it does.
 - Add dependencies, caches, registries, factories, and extension points only
   for a concrete, current need.
+- No wrappers on wrappers. A function that only calls another function with
+  the same arguments, a hook that only returns another hook, a component that
+  only renders another component with the same props, or a type that only
+  aliases another type is noise. Call the real thing.
+- Make the fast path the plain path. Avoid work in render, avoid rebuilding
+  derived values every call when a selector or memo is the natural owner, and
+  do not copy large structures to change one field. Do not add memoization or
+  indirection without a measured reason.
+- Prefer early returns to nested conditions, flat data to deep option objects,
+  and a small discriminated union to a bag of booleans.
 - Delete what you supersede. Leave no dead exports, unused props, commented-out
   code, or stale comments behind your change.
+
+## Leave it cleaner
+
+When you work in existing code, clean the part you touch. The goal is that the
+next reader cannot tell which lines were old and which were new, because both
+now read the same way.
+
+- Fix what your change exposes: a misleading name, a duplicated rule, a stale
+  comment, a redundant branch, an unused parameter, a wrapper that no longer
+  earns its place. Do it in the same diff when it is local and small.
+- Do not stop at your own lines. If your change makes a helper's remaining
+  callers obvious to fold in, fold them in; if it leaves a helper with one
+  trivial caller, inline it.
+- Stay inside the task's blast radius. Cleanup that reaches unrelated modules,
+  reformats files, or renames widely used concepts is a separate change. Note
+  it for later instead of doing it now.
+- Slop patterns to remove on sight when local: `x ?? x`, defensive checks for
+  states the types already exclude, `try/catch` that only rethrows or logs,
+  boolean parameters that select between two unrelated behaviors, `Props`
+  spread through three layers, `TODO` without an owner, and `// eslint-disable`
+  without a reason.
 
 ## File size
 
@@ -206,9 +237,11 @@ count, coverage targets, or a wish to look thorough.
 - Extend an existing suite when the behavior belongs there. Do not add a test
   framework, expose private helpers, or add production indirection to make
   something testable.
-- Exploratory probes and reproduction scripts stay local and are removed after
-  use. Never commit throwaway scaffolding to look thorough, and never omit a
-  valuable test to look small.
+- Write as many throwaway tests, probes, and reproduction scripts as you need
+  while working; they are tools, not deliverables. Before committing, keep only
+  the tests whose ongoing protection is worth their maintenance and delete the
+  rest. Never commit scaffolding to look thorough, and never drop a valuable
+  test to look small.
 - Do not weaken assertions or delete failing tests to get a green run. Honor CI
   gates, including the coverage thresholds in `npm run test:coverage`.
 
@@ -228,6 +261,15 @@ cost.
   formatting out of the diff.
 - Keep commits focused, buildable, and honestly named. Plain commit messages,
   no generated trailers.
+- Keep the diff reviewable. Every hunk should trace to the task or to cleanup
+  the task exposed. No unrelated reformatting, import reordering, whitespace
+  churn, or renames that widen the review without changing behavior. If a
+  formatter touches lines you did not mean to change, revert them.
+- Separate mechanical moves from behavior changes when both are large. A
+  reviewer should never have to find a logic change inside a 400-line rename.
+- Read your own diff before pushing as if reviewing a stranger's PR. If a hunk
+  needs a comment to justify itself, either simplify it or explain it in the
+  commit message, not in a code comment.
 - Remove superseded code and your own temporary artifacts. Do not commit
   internal prompts, plans, reviewer transcripts, generated reports, or scratch
   files unless they are an explicit deliverable.
