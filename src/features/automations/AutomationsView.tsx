@@ -19,6 +19,7 @@ import {
   useAutomationSnapshot,
 } from './client';
 import {
+  automationWorkspaceIssue,
   automationToDraft,
   defaultAutomationDraft,
   latestRunsByAutomation,
@@ -60,10 +61,7 @@ export function AutomationsView({
   const [editor, setEditor] = useState<AutomationEditorState | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const [followManualRun, setFollowManualRun] = useState<{
-    automationId: string;
-    requestedAfter: number;
-  } | null>(null);
+  const [followManualRunId, setFollowManualRunId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const reduceMotion = useReducedMotion();
 
@@ -125,27 +123,19 @@ export function AutomationsView({
   }, [editorRequest, modelDefaults, onEditorRequestHandled, snapshot.automations]);
 
   useEffect(() => {
-    if (!followManualRun) return;
-    const run = snapshot.runs
-      .filter(
-        (candidate) =>
-          candidate.automationId === followManualRun.automationId &&
-          candidate.trigger === 'manual' &&
-          candidate.requestedAt >= followManualRun.requestedAfter,
-      )
-      .sort((left, right) => right.requestedAt - left.requestedAt)
-      .at(0);
+    if (!followManualRunId) return;
+    const run = snapshot.runs.find((candidate) => candidate.id === followManualRunId);
     if (!run) return;
     if (run.appSessionId) {
-      setFollowManualRun(null);
+      setFollowManualRunId(null);
       onOpenSession(run.appSessionId);
       return;
     }
     if (run.status === 'failed') {
-      setFollowManualRun(null);
+      setFollowManualRunId(null);
       toast.error(run.error ?? 'The automation could not start.');
     }
-  }, [followManualRun, onOpenSession, snapshot.runs]);
+  }, [followManualRunId, onOpenSession, snapshot.runs]);
 
   const visible = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -190,7 +180,9 @@ export function AutomationsView({
     if (!editor || saving) return;
     // Time-dependent rules (a one-time run that has since passed) can go stale
     // while the drawer stays open, so the draft is checked again before writing.
-    const issue = validateAutomationDraft(editor.draft, models);
+    const issue =
+      validateAutomationDraft(editor.draft, models) ??
+      automationWorkspaceIssue(editor.draft, workspaceScopes, workspaceScopesReady);
     if (issue) {
       toast.error(issue);
       return;
@@ -341,12 +333,13 @@ export function AutomationsView({
                   void setAutomationEnabled(automation.id, !automation.enabled).catch(showError)
                 }
                 onRun={() => {
-                  const requestedAfter = Date.now() - 250;
-                  setFollowManualRun({ automationId: automation.id, requestedAfter });
                   void runAutomationNow(automation.id)
-                    .then(() => toast.success('Starting automation…'))
+                    .then((runId) => {
+                      setFollowManualRunId(runId);
+                      toast.success('Starting automation…');
+                    })
                     .catch((error: unknown) => {
-                      setFollowManualRun(null);
+                      setFollowManualRunId(null);
                       showError(error);
                     });
                 }}

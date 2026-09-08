@@ -555,6 +555,7 @@ type Action =
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_MISSION_CONTROL' }
   | { type: 'OPEN_AUTOMATIONS'; automationId?: string }
+  | { type: 'CLOSE_AUTOMATIONS' }
   | { type: 'AUTOMATION_EDITOR_REQUEST_HANDLED'; requestId: number }
   | PrInboxAction
   | {
@@ -1707,6 +1708,11 @@ function baseReducer(state: AppState, action: Action): AppState {
           : null,
         rightPanelOpen: false,
       };
+
+    case 'CLOSE_AUTOMATIONS':
+      return state.mainView !== 'automations' && !state.automationEditorRequest
+        ? state
+        : { ...state, mainView: 'session', automationEditorRequest: null };
 
     case 'AUTOMATION_EDITOR_REQUEST_HANDLED':
       return state.automationEditorRequest?.requestId === action.requestId

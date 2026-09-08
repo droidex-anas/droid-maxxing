@@ -652,6 +652,152 @@ test('overlapping creates both persist', async () => {
   }
 });
 
+test('overlapping updates merge against the latest stored definition', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  let validationCount = 0;
+  let releaseFirstUpdate: () => void = () => undefined;
+  const firstUpdateBlocked = new Promise<void>((resolve) => {
+    releaseFirstUpdate = resolve;
+  });
+  let firstUpdateStarted: () => void = () => undefined;
+  const firstUpdateIsValidating = new Promise<void>((resolve) => {
+    firstUpdateStarted = resolve;
+  });
+  const manager = createManager(directory, {
+    validateSelection: async () => {
+      validationCount += 1;
+      if (validationCount !== 2) return;
+      firstUpdateStarted();
+      await firstUpdateBlocked;
+    },
+  });
+
+  try {
+    const created = await manager.create(task());
+    const titleUpdate = manager.update(created.id, { title: 'Renamed' });
+    await firstUpdateIsValidating;
+    const promptUpdate = manager.update(created.id, { prompt: 'Updated instructions.' });
+    releaseFirstUpdate();
+    await Promise.all([titleUpdate, promptUpdate]);
+
+    const updated = (await manager.snapshot()).automations[0];
+    assert.equal(updated?.title, 'Renamed');
+    assert.equal(updated?.prompt, 'Updated instructions.');
+  } finally {
+    releaseFirstUpdate();
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('manual queue validation is serialized with deletion', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  let validationCount = 0;
+  let releaseRunValidation: () => void = () => undefined;
+  const runValidationBlocked = new Promise<void>((resolve) => {
+    releaseRunValidation = resolve;
+  });
+  let runValidationStarted: () => void = () => undefined;
+  const runIsValidating = new Promise<void>((resolve) => {
+    runValidationStarted = resolve;
+  });
+  const manager = createManager(directory, {
+    validateSelection: async () => {
+      validationCount += 1;
+      if (validationCount !== 2) return;
+      runValidationStarted();
+      await runValidationBlocked;
+    },
+  });
+
+  try {
+    const created = await manager.create(task());
+    const run = manager.runNow(created.id);
+    await runIsValidating;
+    let removed = false;
+    const removal = manager.remove(created.id).then(() => {
+      removed = true;
+    });
+    await Promise.resolve();
+    assert.equal(removed, false);
+    releaseRunValidation();
+    await Promise.all([run, removal]);
+    const snapshot = await manager.snapshot();
+    assert.deepEqual(snapshot.automations, []);
+    assert.deepEqual(snapshot.runs, []);
+  } finally {
+    releaseRunValidation();
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('workspace paths keep meaningful leading and trailing spaces', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const manager = createManager(directory, {});
+
+  try {
+    const created = await manager.create(
+      task({
+        enabled: false,
+        workspaceCwd: ' /repo with spaces ',
+        executionMode: 'worktree',
+      }),
+    );
+    assert.equal(created.workspaceCwd, ' /repo with spaces ');
+    assert.equal(created.executionMode, 'worktree');
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('shutdown waits for recovered workspace cleanup already in progress', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const worktree = join(directory, 'worktree');
+  const launches: SessionCreate[] = [];
+  const first = createManager(directory, {
+    prepareWorkspace: async () => worktree,
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+  });
+
+  try {
+    const automation = await first.create(task());
+    await first.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    await first.shutdown();
+
+    let releaseStarted: () => void = () => undefined;
+    const cleanupStarted = new Promise<void>((resolve) => {
+      releaseStarted = resolve;
+    });
+    let finishRelease: () => void = () => undefined;
+    const releaseBlocked = new Promise<void>((resolve) => {
+      finishRelease = resolve;
+    });
+    const second = createManager(directory, {
+      releaseWorkspace: async () => {
+        releaseStarted();
+        await releaseBlocked;
+      },
+    });
+    let shutdownFinished = false;
+    const shutdown = second.shutdown().then(() => {
+      shutdownFinished = true;
+    });
+    await cleanupStarted;
+    await Promise.resolve();
+    assert.equal(shutdownFinished, false);
+    finishRelease();
+    await shutdown;
+  } finally {
+    await first.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('an unattended run cannot create another automation', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const launches: SessionCreate[] = [];
@@ -711,6 +857,105 @@ test('direct creation requires High autonomy', async () => {
   }
 });
 
+test('concurrent proposal confirmations create one automation from the first input', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  let validationStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    validationStarted = resolve;
+  });
+  let finishValidation: () => void = () => undefined;
+  const blocked = new Promise<void>((resolve) => {
+    finishValidation = resolve;
+  });
+  const manager = createManager(directory, {
+    validateSelection: async () => {
+      validationStarted();
+      await blocked;
+    },
+  });
+
+  try {
+    const proposal = await manager.propose(task({ enabled: false }), 'chat');
+    const first = manager.confirmProposal(proposal.id, task({ title: 'First', enabled: false }));
+    await started;
+    const second = manager.confirmProposal(proposal.id, task({ title: 'Second', enabled: false }));
+    finishValidation();
+
+    const [firstAutomation, secondAutomation] = await Promise.all([first, second]);
+    assert.equal(firstAutomation.id, secondAutomation.id);
+    assert.equal(firstAutomation.title, 'First');
+
+    const repeated = await manager.confirmProposal(
+      proposal.id,
+      task({ title: 'Ignored', enabled: false }),
+    );
+    const snapshot = await manager.snapshot();
+    assert.equal(repeated.id, firstAutomation.id);
+    assert.deepEqual(
+      snapshot.automations.map((automation) => automation.title),
+      ['First'],
+    );
+    assert.equal(snapshot.proposals[0]?.automationId, firstAutomation.id);
+  } finally {
+    finishValidation();
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('shutdown waits for work started by a run-limit timer', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const launches: SessionCreate[] = [];
+  let closeStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    closeStarted = resolve;
+  });
+  let finishClose: () => void = () => undefined;
+  const blocked = new Promise<void>((resolve) => {
+    finishClose = resolve;
+  });
+  const manager = createManager(directory, {
+    closeSession: async () => {
+      closeStarted();
+      await blocked;
+    },
+    launchSession: async (command) => {
+      launches.push(command);
+    },
+  });
+
+  try {
+    const automation = await manager.create(task({ enabled: false }));
+    await manager.runNow(automation.id);
+    await waitFor(() => launches.length === 1);
+    const launch = launches[0];
+    if (!launch) throw new Error('Expected an automation session launch.');
+    context.mock.timers.enable({ apis: ['setTimeout'] });
+    await manager.observeSessionEvent({
+      type: 'session.created',
+      clientRef: launch.clientRef,
+      session: { appSessionId: 'session-timeout', streaming: true },
+    } as ServerEvent);
+
+    context.mock.timers.tick(24 * 60 * 60 * 1_000);
+    await started;
+    let shutdownFinished = false;
+    const shutdown = manager.shutdown().then(() => {
+      shutdownFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(shutdownFinished, false);
+    finishClose();
+    await shutdown;
+    assert.equal((await manager.snapshot()).runs[0]?.status, 'failed');
+  } finally {
+    finishClose();
+    await manager.shutdown();
+    context.mock.timers.reset();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('unknown automations commands fail instead of succeeding empty', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
   const results: Array<{ ok: boolean; error?: string }> = [];
@@ -729,6 +974,36 @@ test('unknown automations commands fail instead of succeeding empty', async () =
     assert.equal(handled, true);
     assert.equal(results[0]?.ok, false);
     assert.match(results[0]?.error ?? '', /Unknown automations command/);
+  } finally {
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('run-now bridge results identify the exact queued run', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'droidex-automations-'));
+  const results: Array<{ ok: boolean; runId?: string }> = [];
+  const manager = createManager(directory, {
+    emit: (event) => {
+      if (event.type === 'automations.result') results.push(event);
+    },
+  });
+
+  try {
+    const automation = await manager.create(task());
+    await manager.handleBridgeCommand({
+      type: 'automations.runNow',
+      requestId: 'req-run-now',
+      id: automation.id,
+    });
+
+    const queued = (await manager.snapshot()).runs.find(
+      (run) => run.automationId === automation.id && run.trigger === 'manual',
+    );
+    assert.ok(queued);
+    assert.deepEqual(results, [
+      { type: 'automations.result', requestId: 'req-run-now', ok: true, runId: queued.id },
+    ]);
   } finally {
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });

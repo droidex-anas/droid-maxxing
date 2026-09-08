@@ -6,6 +6,7 @@ import { AutomationModelPicker } from './AutomationModelPicker';
 import { SelectMenu } from './SelectMenu';
 import {
   AUTOMATION_AUTONOMY_OPTIONS,
+  automationWorkspaceIssue,
   convertOnceRunAt,
   epochFromZonedInput,
   supportedTimeZones,
@@ -25,8 +26,7 @@ import type { AutomationDraft, AutomationEditorState, AutomationSchedule } from 
 interface AutomationEditorProps {
   editor: AutomationEditorState;
   workspaceScopes: readonly WorkspaceScope[];
-  // Workspace discovery is asynchronous; until it settles an unknown workspace
-  // path in the draft is not yet evidence that the workspace disappeared.
+  // Saving waits for discovery so a path cannot disappear between load and edit.
   workspaceScopesReady: boolean;
   models: ModelInfo[];
   onChange: (draft: AutomationDraft) => void;
@@ -50,7 +50,7 @@ export function AutomationEditor({
   const validation = useMemo(
     () =>
       validateAutomationDraft(draft, models) ??
-      missingWorkspaceIssue(draft, workspaceScopes, workspaceScopesReady),
+      automationWorkspaceIssue(draft, workspaceScopes, workspaceScopesReady),
     [draft, models, workspaceScopes, workspaceScopesReady],
   );
   const timeZones = useMemo(
@@ -77,12 +77,14 @@ export function AutomationEditor({
       update('timezone', timezone);
       return;
     }
+    const runAt = convertOnceRunAt(draft.schedule.runAt, draft.timezone, timezone);
+    if (runAt === null) return;
     onChange({
       ...draft,
       timezone,
       schedule: {
         kind: 'once',
-        runAt: convertOnceRunAt(draft.schedule.runAt, draft.timezone, timezone),
+        runAt,
       },
     });
   };
@@ -298,9 +300,11 @@ export function ScheduleControls({
               value={parts}
               minimum={minimumDate}
               onChange={(date) => {
+                const runAt = epochFromZonedInput({ ...parts, ...date }, timezone);
+                if (runAt === null) return;
                 onChange({
                   kind: 'once',
-                  runAt: epochFromZonedInput({ ...parts, ...date }, timezone),
+                  runAt,
                 });
               }}
             />
@@ -310,16 +314,18 @@ export function ScheduleControls({
               value={`${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`}
               onChange={(time) => {
                 const [hourText = '', minuteText = ''] = time.split(':');
+                const runAt = epochFromZonedInput(
+                  {
+                    ...parts,
+                    hour: clampNumber(hourText, 0, 23, parts.hour),
+                    minute: clampNumber(minuteText, 0, 59, parts.minute),
+                  },
+                  timezone,
+                );
+                if (runAt === null) return;
                 onChange({
                   kind: 'once',
-                  runAt: epochFromZonedInput(
-                    {
-                      ...parts,
-                      hour: clampNumber(hourText, 0, 23, parts.hour),
-                      minute: clampNumber(minuteText, 0, 59, parts.minute),
-                    },
-                    timezone,
-                  ),
+                  runAt,
                 });
               }}
             />
@@ -396,21 +402,6 @@ export function ScheduleControls({
         </EditorRow>
       );
   }
-}
-
-// A saved workspace can disappear from discovery. The picker then shows nothing
-// selected while the draft still carries the old path, so saving is blocked
-// until the user picks an available workspace or clears it. Nothing is claimed
-// missing before discovery reports its result.
-function missingWorkspaceIssue(
-  draft: AutomationDraft,
-  workspaceScopes: readonly WorkspaceScope[],
-  workspaceScopesReady: boolean,
-): string | null {
-  const cwd = draft.workspaceCwd;
-  if (cwd === null || !workspaceScopesReady) return null;
-  if (workspaceScopes.some((scope) => scope.cwd === cwd)) return null;
-  return `${workspaceLabel(cwd)} is no longer available. Choose a workspace or select No workspace.`;
 }
 
 export function scheduleForKind(kind: string, current: AutomationSchedule): AutomationSchedule {

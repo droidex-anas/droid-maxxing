@@ -185,6 +185,18 @@ test('validates complete automation snapshot records', () => {
     },
     {
       ...snapshot,
+      automations: [{ ...automation, timezone: 'Not/A_Timezone' }],
+    },
+    {
+      ...snapshot,
+      automations: [{ ...automation, schedule: { kind: 'daily', time: '9:00' } }],
+    },
+    {
+      ...snapshot,
+      automations: [{ ...automation, schedule: { kind: 'cron', expression: '61 * * * *' } }],
+    },
+    {
+      ...snapshot,
       sessionOrigins: { 'session-1': { automationId: automation.id, runId: run.id } },
     },
     { ...snapshot, scheduler: { ...snapshot.scheduler, nextWakeAt: Number.NaN } },
@@ -195,6 +207,50 @@ test('validates complete automation snapshot records', () => {
       null,
     );
   }
+});
+
+test('validates automation command results by outcome', () => {
+  assert.ok(
+    serverWireMessage(
+      batch({
+        type: 'automations.result',
+        requestId: 'request-1',
+        ok: true,
+        runId: 'run-1',
+      }),
+    ),
+  );
+  assert.ok(
+    serverWireMessage(
+      batch({
+        type: 'automations.result',
+        requestId: 'request-2',
+        ok: false,
+        error: 'Automation not found.',
+      }),
+    ),
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'automations.result',
+        requestId: 'request-3',
+        ok: false,
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'automations.result',
+        requestId: 'request-4',
+        ok: true,
+        runId: 4,
+      }),
+    ),
+    null,
+  );
 });
 
 test('rejects object payloads that are actually arrays', () => {

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AUTOMATION_MCP_SERVER_NAME,
+  automationPermissionTarget,
   shouldAttachAutomationMcp,
+  shouldAutoApproveAutomationPermission,
   shouldAutoApproveAutomationTool,
 } from './permissionPolicy.js';
 
@@ -45,4 +47,21 @@ test('automation MCP is not attached to run chats on create or resume', () => {
   assert.equal(shouldAttachAutomationMcp('resume:session-run', true), false);
   assert.equal(shouldAttachAutomationMcp('resume:session-run', false), true);
   assert.equal(shouldAttachAutomationMcp(undefined, false), true);
+});
+
+test('conflicting explicit and namespaced MCP server names are rejected', () => {
+  const params = {
+    toolUses: [
+      {
+        details: {
+          type: 'mcp_tool',
+          serverName: 'droidex-automations',
+          toolName: 'untrusted___automation_create',
+        },
+      },
+    ],
+  } as never;
+
+  assert.equal(automationPermissionTarget(params), null);
+  assert.equal(shouldAutoApproveAutomationPermission(params, 'high'), false);
 });

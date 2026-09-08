@@ -1,5 +1,6 @@
 import type { ModelInfo, ReasoningEffort } from '../../types/bridge';
 import { AUTONOMY_DESCRIPTIONS, AUTONOMY_LABELS, AUTONOMY_LEVELS } from '../../lib/autonomy';
+import type { WorkspaceScope } from '../../lib/workspaces';
 import { reasoningForModel, validateAutomationModelSelection } from './modelSelection';
 import type { Automation, AutomationDraft, AutomationRun, AutomationSchedule } from './types';
 
@@ -111,6 +112,18 @@ export function validateAutomationDraft(
     }
   }
   return null;
+}
+
+export function automationWorkspaceIssue(
+  draft: AutomationDraft,
+  workspaceScopes: readonly WorkspaceScope[],
+  workspaceScopesReady: boolean,
+): string | null {
+  const cwd = draft.workspaceCwd;
+  if (cwd === null) return null;
+  if (!workspaceScopesReady) return 'Checking whether the selected workspace is available.';
+  if (workspaceScopes.some((scope) => scope.cwd === cwd)) return null;
+  return `${workspaceLabel(cwd)} is no longer available. Choose a workspace or select No workspace.`;
 }
 
 const CRON_FIELDS = [
@@ -249,7 +262,7 @@ export function deviceTimeZone(): string {
 export function supportedTimeZones(): string[] {
   const zones = Intl.supportedValuesOf('timeZone');
   const current = deviceTimeZone();
-  return zones.includes(current) ? zones : [current, ...zones];
+  return [...new Set(['UTC', current, ...zones])];
 }
 
 export function zonedInputParts(epochMs: number, timezone: string) {
@@ -280,17 +293,16 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 /**
  * Instant for a wall-clock time in `timezone`, verified by formatting the result
  * back. Around a DST change two offsets are in play, so both are tried: an
- * ambiguous time (fall back) resolves to its first occurrence, and a time inside
- * a spring-forward gap — which never happens on that clock — resolves to the
- * first instant after the gap instead of silently landing an hour early.
+ * ambiguous time (fall back) resolves to its first occurrence. A time inside a
+ * spring-forward gap does not exist on that clock, so it is rejected.
  */
-export function epochFromZonedInput(input: ZonedInput, timezone: string): number {
+export function epochFromZonedInput(input: ZonedInput, timezone: string): number | null {
   const wallUtc = utcFromZonedInput(input);
   const earlier = wallUtc - zoneOffsetMs(wallUtc - DAY_MS, timezone);
   const later = wallUtc - zoneOffsetMs(wallUtc + DAY_MS, timezone);
   if (utcFromZonedInput(zonedInputParts(earlier, timezone)) === wallUtc) return earlier;
   if (utcFromZonedInput(zonedInputParts(later, timezone)) === wallUtc) return later;
-  return Math.max(earlier, later);
+  return null;
 }
 
 function utcFromZonedInput(input: ZonedInput): number {
@@ -303,7 +315,11 @@ function zoneOffsetMs(epochMs: number, timezone: string): number {
   return utcFromZonedInput(zonedInputParts(epochMs, timezone)) - epochMs;
 }
 
-export function convertOnceRunAt(runAt: number, fromTimezone: string, toTimezone: string): number {
+export function convertOnceRunAt(
+  runAt: number,
+  fromTimezone: string,
+  toTimezone: string,
+): number | null {
   return epochFromZonedInput(zonedInputParts(runAt, fromTimezone), toTimezone);
 }
 
@@ -396,7 +412,7 @@ function nextHourTime(): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-function validTime(value: string): boolean {
+export function validTime(value: string): boolean {
   const match = /^(\d{2}):(\d{2})$/.exec(value);
   return !!match && Number(match[1]) <= 23 && Number(match[2]) <= 59;
 }

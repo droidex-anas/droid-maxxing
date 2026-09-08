@@ -84,7 +84,9 @@ export function AutomationModelPicker({
 
   const reasoningOptions = reasoningOptionsForModel(selectedModel, selectedReasoning);
   const label =
-    selectedModel?.displayName ?? (models.length === 0 ? 'Loading models…' : 'Choose model');
+    selectedModel?.displayName ??
+    modelId ??
+    (models.length === 0 ? 'Loading models…' : 'Choose model');
 
   const selectModel = (nextModelId?: string) => {
     if (!nextModelId) return;
@@ -120,7 +122,7 @@ export function AutomationModelPicker({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[12.5px] font-medium text-droid-text">{label}</span>
           <span className="block text-[10.5px] capitalize text-droid-text-muted">
-            {selectedModel ? `${selectedReasoning} reasoning` : 'Select from your model catalog'}
+            {modelId ? `${selectedReasoning} reasoning` : 'Select from your model catalog'}
           </span>
         </span>
         <ChevronDown
@@ -241,11 +243,18 @@ export function AutomationModelPicker({
 
               <ModelCatalogList
                 models={filteredModels}
+                defaultModel={undefined}
                 hasRealModels={models.length > 0}
                 selectedModelId={modelId ?? undefined}
+                reasoning={selectedReasoning}
                 query={query}
                 onSelectModel={selectModel}
+                onSelectReasoning={(reasoning) => {
+                  if (!selectedModel) return;
+                  onChange({ modelId: selectedModel.id, reasoningEffort: reasoning });
+                }}
                 disabled={false}
+                reasoningLocked={false}
                 showDefault={false}
               />
             </div>
@@ -255,12 +264,14 @@ export function AutomationModelPicker({
             <span className="min-w-0 truncate text-[10.5px] text-droid-text-muted">
               {selectedModel
                 ? `${selectedModel.displayName} · ${selectedReasoning} reasoning`
-                : 'Choose a model to continue'}
+                : modelId
+                  ? `${modelId} · ${selectedReasoning} reasoning`
+                  : 'Choose a model to continue'}
             </span>
             <button
               type="button"
               onClick={close}
-              disabled={!selectedModel}
+              disabled={!modelId}
               className="rounded-lg bg-droid-text px-3 py-1.5 text-[11px] font-medium text-droid-bg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
             >
               Done

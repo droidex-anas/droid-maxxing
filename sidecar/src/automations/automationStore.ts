@@ -127,8 +127,12 @@ export function parseAutomationStore(value: unknown, now: number): AutomationSto
       `Unsupported automations store version ${JSON.stringify(raw.version)}; DROIDEX writes version ${String(STORE_VERSION)}.`,
     );
   }
-  if (!Array.isArray(raw.automations) || !Array.isArray(raw.runs)) {
-    throw new Error('The automations store is missing its automations or runs list.');
+  if (
+    !Array.isArray(raw.automations) ||
+    !Array.isArray(raw.runs) ||
+    !Array.isArray(raw.proposals)
+  ) {
+    throw new Error('The automations store is missing its automations, runs, or proposals list.');
   }
 
   const automations = raw.automations
@@ -141,11 +145,9 @@ export function parseAutomationStore(value: unknown, now: number): AutomationSto
       (candidate): candidate is AutomationRun =>
         candidate !== null && automationIds.has(candidate.automationId),
     );
-  const proposals = Array.isArray(raw.proposals)
-    ? raw.proposals
-        .map((candidate) => parseProposal(candidate, automationIds, now))
-        .filter((candidate): candidate is AutomationProposal => candidate !== null)
-    : [];
+  const proposals = raw.proposals
+    .map((candidate) => parseProposal(candidate, automationIds, now))
+    .filter((candidate): candidate is AutomationProposal => candidate !== null);
   return {
     version: STORE_VERSION,
     automations,
@@ -159,9 +161,12 @@ export function parseAutomationStore(value: unknown, now: number): AutomationSto
 export function trimAutomationStore(store: AutomationStore): void {
   store.runs = retainRuns(store);
   if (store.proposals.length > MAX_PROPOSALS) {
-    store.proposals = [...store.proposals]
+    const drafts = store.proposals.filter((proposal) => proposal.status === 'draft');
+    const confirmed = store.proposals
+      .filter((proposal) => proposal.status === 'confirmed')
       .sort((left, right) => right.updatedAt - left.updatedAt)
-      .slice(0, MAX_PROPOSALS);
+      .slice(0, Math.max(0, MAX_PROPOSALS - drafts.length));
+    store.proposals = [...drafts, ...confirmed];
   }
   trimSessionOrigins(store);
 }

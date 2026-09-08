@@ -30,8 +30,8 @@ export interface AutomationProposalsOptions {
   /** Read through a getter: the manager replaces the store once, on load. */
   store: () => AutomationStore;
   now: () => number;
-  /** Applies a store mutation and undoes it when the write fails. */
-  commit: (apply: () => void, undo: () => void) => Promise<void>;
+  /** Serializes, persists, and publishes one store operation. */
+  commit: <T>(apply: () => T | Promise<T>) => Promise<T>;
   /** Settings a proposal inherits from the chat that asked for it. */
   sessionContext: (appSessionId: string) => Promise<AutomationSessionContext | null>;
   /** Rejects a model and reasoning pair DROIDEX cannot run. */
@@ -77,16 +77,9 @@ export class AutomationProposals {
       updatedAt: now,
       confirmedAt: null,
     };
-    await this.options.commit(
-      () => {
-        this.store.proposals.unshift(proposal);
-      },
-      () => {
-        this.store.proposals = this.store.proposals.filter(
-          (candidate) => candidate.id !== proposal.id,
-        );
-      },
-    );
+    await this.options.commit(() => {
+      this.store.proposals.unshift(proposal);
+    });
     return structuredClone(proposal);
   }
 
@@ -105,13 +98,6 @@ export class AutomationProposals {
     return operation;
   }
 
-  /** Clones the proposals of an automation so a failed delete can restore them. */
-  capturedForAutomation(automationId: string): AutomationProposal[] {
-    return this.store.proposals
-      .filter((proposal) => proposal.automationId === automationId)
-      .map((proposal) => structuredClone(proposal));
-  }
-
   /**
    * Returns the proposals of a deleted automation to drafts, the same repair the
    * store applies on load, so a card never links to a missing automation.
@@ -127,40 +113,26 @@ export class AutomationProposals {
     }
   }
 
-  restore(captured: readonly AutomationProposal[]): void {
-    for (const snapshot of captured) {
-      const proposal = this.store.proposals.find((candidate) => candidate.id === snapshot.id);
-      if (proposal) Object.assign(proposal, snapshot);
-    }
-  }
-
   private async confirmOnce(id: string, input?: AutomationInput): Promise<Automation> {
-    const proposal = this.require(id);
-    if (proposal.status === 'confirmed' && proposal.automationId) {
-      return structuredClone(this.requireAutomation(proposal.automationId));
-    }
-    const draft = normalizeAutomationInput(input ?? proposal.draft);
-    assertModelSelection(draft);
-    await this.options.validateSelection(draft.modelId, draft.reasoningEffort);
-    const now = this.options.now();
-    const automation = createAutomationRecord(draft, now);
-    const restored = structuredClone(proposal);
-    await this.options.commit(
-      () => {
-        this.options.automations.add(automation);
-        proposal.draft = draft;
-        proposal.status = 'confirmed';
-        proposal.missingFields = [];
-        proposal.automationId = automation.id;
-        proposal.confirmedAt = now;
-        proposal.updatedAt = now;
-      },
-      () => {
-        this.options.automations.discard(automation.id);
-        Object.assign(proposal, restored);
-      },
-    );
-    return structuredClone(automation);
+    return this.options.commit(async () => {
+      const proposal = this.require(id);
+      if (proposal.status === 'confirmed' && proposal.automationId) {
+        return structuredClone(this.requireAutomation(proposal.automationId));
+      }
+      const draft = normalizeAutomationInput(input ?? proposal.draft);
+      assertModelSelection(draft);
+      await this.options.validateSelection(draft.modelId, draft.reasoningEffort);
+      const now = this.options.now();
+      const automation = createAutomationRecord(draft, now);
+      this.options.automations.add(automation);
+      proposal.draft = draft;
+      proposal.status = 'confirmed';
+      proposal.missingFields = [];
+      proposal.automationId = automation.id;
+      proposal.confirmedAt = now;
+      proposal.updatedAt = now;
+      return structuredClone(automation);
+    });
   }
 
   private require(id: string): AutomationProposal {

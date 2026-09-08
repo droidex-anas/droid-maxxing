@@ -253,6 +253,10 @@ export class Bridge {
 function eventsFromSnapshot(message: BridgeSnapshotMessage): ServerEvent[] {
   const events: ServerEvent[] = [
     {
+      type: 'connection',
+      status: 'connected',
+    },
+    {
       type: 'runtime.updated',
       status: message.snapshot.runtime,
     },

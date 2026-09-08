@@ -54,10 +54,7 @@ export function AutomationProposalCard({
   const proposalId = automationProposalIdFromText(result?.text);
   const fallback = useMemo(() => draftPreviewFromToolArgs(call.toolArgs), [call.toolArgs]);
   const proposal = useMemo(
-    () =>
-      (proposalId
-        ? snapshot.proposals.find((candidate) => candidate.id === proposalId)
-        : undefined) ?? findProposalForCall(snapshot.proposals, call, fallback),
+    () => findProposalForCall(snapshot.proposals, call, fallback, proposalId),
     [call, fallback, proposalId, snapshot.proposals],
   );
   const draft = proposal?.draft ?? fallback;
@@ -118,11 +115,13 @@ export function AutomationProposalCard({
       updateDraft({ timezone });
       return;
     }
+    const runAt = convertOnceRunAt(workingDraft.schedule.runAt, workingDraft.timezone, timezone);
+    if (runAt === null) return;
     updateDraft({
       timezone,
       schedule: {
         kind: 'once',
-        runAt: convertOnceRunAt(workingDraft.schedule.runAt, workingDraft.timezone, timezone),
+        runAt,
       },
     });
   };

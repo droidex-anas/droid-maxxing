@@ -1,6 +1,6 @@
 {
-  "scan_id": "scan-2026-09-07-pr-128-automations",
-  "scan_date": "2026-09-07T07:51:07Z",
+  "scan_id": "scan-2026-09-08-pr-128-automations",
+  "scan_date": "2026-09-08T15:49:21Z",
   "scan_type": "pr",
   "commit_range": "origin/main...feat/automations (including working tree at scan time)",
   "pr_number": 128,
@@ -35,7 +35,7 @@
     {
       "id": "automation-worktree-destructive-cleanup",
       "disposition": "mitigated",
-      "reason": "Cleanup derives the repository from Git worktree metadata, refuses the main checkout, refuses dirty worktrees, and uses git worktree remove without force. Cleanup failures are reported rather than falling back to recursive deletion."
+      "reason": "Cleanup resolves the registered worktrees from Git metadata, accepts only a canonical linked worktree in DROIDEX's .worktrees/<run>/<repository> layout beneath another registered checkout, refuses main and unrelated linked worktrees, refuses dirty worktrees, and uses git worktree remove without force. Cleanup failures are reported rather than falling back to recursive deletion."
     },
     {
       "id": "automation-store-tampering",
@@ -64,7 +64,7 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 74
+    "files_analyzed": 88
   },
   "thresholds": {
     "block_merge": ["CRITICAL"],
@@ -73,6 +73,7 @@
   },
   "notes": [
     "Pre-existing codebase risks documented in .factory/threat-model.md were not counted unless PR #128 introduced or materially worsened them.",
-    "The four final cleanup edits are test portability and complexity refactors and do not add new trust boundaries or privileged sinks."
+    "The scan covered the complete origin/main comparison plus eight untracked files in the working tree.",
+    "A persisted-path cleanup candidate found during this scan was fixed before the report was finalized; no open vulnerability remains."
   ]
 }

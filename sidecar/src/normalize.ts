@@ -549,8 +549,6 @@ export function confirmationType(params: RequestPermissionRequestParams): string
   return typeof type === 'string' ? type : 'other';
 }
 
-const MAX_DIGESTED_ARGUMENT_CHARS = 8_192;
-
 // Hashing keeps the signature bounded and keeps argument values (which may hold
 // secrets) out of the stored grant key. An empty result means the arguments
 // could not be serialized, so the request stays ineligible for always-allow.
@@ -561,11 +559,7 @@ function toolArgumentDigest(input: Record<string, unknown>): string {
   } catch {
     return '';
   }
-  const bounded =
-    serialized.length > MAX_DIGESTED_ARGUMENT_CHARS
-      ? `${serialized.slice(0, MAX_DIGESTED_ARGUMENT_CHARS)}#${String(serialized.length)}`
-      : serialized;
-  return createHash('sha256').update(bounded).digest('hex').slice(0, 32);
+  return createHash('sha256').update(serialized).digest('hex').slice(0, 32);
 }
 
 function stableJson(value: unknown): string {

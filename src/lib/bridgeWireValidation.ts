@@ -241,7 +241,11 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'automations.snapshot':
       return isAutomationSnapshot(value.snapshot);
     case 'automations.result':
-      return typeof value.requestId === 'string' && typeof value.ok === 'boolean';
+      return (
+        typeof value.requestId === 'string' &&
+        ((value.ok === true && (value.runId === undefined || typeof value.runId === 'string')) ||
+          (value.ok === false && typeof value.error === 'string'))
+      );
     default: {
       const unexpected: never = type;
       void unexpected;

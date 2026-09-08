@@ -1,4 +1,4 @@
-import { isAutonomy, isReasoningEffort, trimmedOrNull } from './automationInput.js';
+import { isAutonomy, isReasoningEffort, nonBlankOrNull, trimmedOrNull } from './automationInput.js';
 import type { AutomationAutonomy, AutomationReasoningEffort } from './types.js';
 
 export interface AutomationSessionContext {
@@ -10,8 +10,8 @@ export interface AutomationSessionContext {
 
 interface ObservedSession {
   appSessionId: string;
-  cwd?: string;
-  modelId?: string;
+  cwd?: string | null;
+  modelId?: string | null;
   reasoningEffort?: unknown;
   autonomy?: unknown;
 }
@@ -30,12 +30,14 @@ export class SessionContextCache {
   observe(session: ObservedSession): void {
     const previous = this.contexts.get(session.appSessionId);
     const next: AutomationSessionContext = {
-      cwd: trimmedOrNull(session.cwd) ?? previous?.cwd ?? null,
-      modelId: trimmedOrNull(session.modelId) ?? previous?.modelId ?? null,
+      cwd: 'cwd' in session ? nonBlankOrNull(session.cwd) : (previous?.cwd ?? null),
+      modelId: 'modelId' in session ? trimmedOrNull(session.modelId) : (previous?.modelId ?? null),
       reasoningEffort:
-        (isReasoningEffort(session.reasoningEffort) ? session.reasoningEffort : null) ??
-        previous?.reasoningEffort ??
-        null,
+        'reasoningEffort' in session
+          ? isReasoningEffort(session.reasoningEffort)
+            ? session.reasoningEffort
+            : null
+          : (previous?.reasoningEffort ?? null),
       autonomy: isAutonomy(session.autonomy) ? session.autonomy : (previous?.autonomy ?? 'low'),
     };
     this.contexts.delete(session.appSessionId);
@@ -65,10 +67,11 @@ export function mergeSessionContext(
   resolved: AutomationSessionContext | null,
 ): AutomationSessionContext | null {
   if (!observed && !resolved) return null;
+  if (resolved) return resolved;
   return {
-    cwd: resolved?.cwd ?? observed?.cwd ?? null,
-    modelId: resolved?.modelId ?? observed?.modelId ?? null,
-    reasoningEffort: resolved?.reasoningEffort ?? observed?.reasoningEffort ?? null,
-    autonomy: resolved?.autonomy ?? observed?.autonomy ?? 'low',
+    cwd: observed?.cwd ?? null,
+    modelId: observed?.modelId ?? null,
+    reasoningEffort: observed?.reasoningEffort ?? null,
+    autonomy: observed?.autonomy ?? 'low',
   };
 }

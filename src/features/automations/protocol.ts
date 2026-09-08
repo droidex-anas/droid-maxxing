@@ -2,7 +2,8 @@ import type { AutomationDraft, AutomationSnapshot } from './types';
 
 export type AutomationBridgeEvent =
   | { type: 'automations.snapshot'; snapshot: AutomationSnapshot }
-  | { type: 'automations.result'; requestId: string; ok: boolean; error?: string };
+  | { type: 'automations.result'; requestId: string; ok: true; runId?: string }
+  | { type: 'automations.result'; requestId: string; ok: false; error: string };
 
 export type AutomationBridgeCommand =
   | { type: 'automations.list'; requestId: string }

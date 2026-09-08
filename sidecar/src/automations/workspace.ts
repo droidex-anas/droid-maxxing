@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { appendFile, lstat, mkdir, readFile, rmdir, stat } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, readFile, realpath, rmdir, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { AutomationExecutionMode } from './types.js';
@@ -43,8 +43,8 @@ export type AutomationWorkspaceReleaser = (
 export async function resolveAutomationWorkspace(
   input: PrepareAutomationWorkspaceInput,
 ): Promise<string> {
-  const selected = input.cwd?.trim() ?? '';
-  if (!selected) return '';
+  const selected = input.cwd ?? '';
+  if (!selected.trim()) return '';
   await requireDirectory(selected);
   if (input.executionMode === 'local') return selected;
 
@@ -71,10 +71,10 @@ export async function createAutomationWorkspace(
   input: PrepareAutomationWorkspaceInput,
   resolvedCwd: string,
 ): Promise<void> {
-  const target = resolvedCwd.trim();
-  if (!target || input.executionMode !== 'worktree') return;
-  const selected = input.cwd?.trim() ?? '';
-  if (!selected) return;
+  const target = resolvedCwd;
+  if (!target.trim() || input.executionMode !== 'worktree') return;
+  const selected = input.cwd ?? '';
+  if (!selected.trim()) return;
   const root = await git(selected, ['rev-parse', '--show-toplevel']).catch(() => '');
   if (!root) {
     throw new Error('An isolated worktree can only be created for a Git repository.');
@@ -98,20 +98,23 @@ export async function createAutomationWorkspace(
 export async function releaseAutomationWorkspace(
   run: ReleasableAutomationWorkspace,
 ): Promise<void> {
-  const target = run.resolvedCwd?.trim() ?? '';
-  if (run.executionMode !== 'worktree' || !target || !existsSync(target)) return;
+  const target = run.resolvedCwd ?? '';
+  if (run.executionMode !== 'worktree' || !target.trim() || !existsSync(target)) return;
   try {
-    const commonDir = await git(target, [
-      'rev-parse',
-      '--path-format=absolute',
-      '--git-common-dir',
-    ]);
-    const root = basename(commonDir) === '.git' ? dirname(commonDir) : '';
-    if (!root || resolve(target) === resolve(root)) return;
+    const worktrees = parseWorktreePaths(await git(target, ['worktree', 'list', '--porcelain']));
+    const main = worktrees[0];
+    const canonicalTarget = await registeredWorktreePath(worktrees, target);
+    if (
+      !main ||
+      !canonicalTarget ||
+      !(await isAutomationWorktreePath(worktrees, canonicalTarget))
+    ) {
+      return;
+    }
     if (await git(target, ['status', '--porcelain'])) return;
-    await git(root, ['worktree', 'remove', target]);
-    await git(root, ['worktree', 'prune']);
-    await rmdir(dirname(target)).catch(() => undefined);
+    await git(main, ['worktree', 'remove', canonicalTarget]);
+    await git(main, ['worktree', 'prune']);
+    await rmdir(dirname(canonicalTarget)).catch(() => undefined);
   } catch (error) {
     console.error('Could not remove the automation worktree', errorMessage(error));
   }
@@ -156,6 +159,45 @@ async function requireRealDirectoryPath(root: string, target: string): Promise<v
       );
     }
   }
+}
+
+function parseWorktreePaths(output: string): string[] {
+  return output
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length));
+}
+
+async function registeredWorktreePath(
+  worktrees: readonly string[],
+  target: string,
+): Promise<string | null> {
+  const targetPath = await realpath(target);
+  for (const worktree of worktrees) {
+    if ((await realpath(worktree).catch(() => '')) === targetPath) return worktree;
+  }
+  return null;
+}
+
+async function isAutomationWorktreePath(
+  worktrees: readonly string[],
+  target: string,
+): Promise<boolean> {
+  const targetPath = await realpath(target);
+  for (const worktree of worktrees) {
+    const ownerPath = await realpath(worktree).catch(() => '');
+    if (!ownerPath || ownerPath === targetPath) continue;
+    const parts = relative(ownerPath, targetPath).split(sep);
+    if (
+      parts.length === 3 &&
+      parts[0] === '.worktrees' &&
+      Boolean(parts[1]) &&
+      parts[2] === basename(ownerPath)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function ensureWorktreeDirectoryIgnored(root: string): Promise<void> {

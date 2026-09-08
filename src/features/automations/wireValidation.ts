@@ -1,5 +1,6 @@
 import { normalizeAutonomy } from '../../lib/autonomy';
 import { isReasoningEffort } from '../../lib/reasoningEffort';
+import { cronExpressionIssue, isTimeZone, validTime } from './schedule';
 import type {
   Automation,
   AutomationDraft,
@@ -57,6 +58,7 @@ function isAutomationDraft(value: unknown): value is AutomationDraft {
     typeof value.enabled === 'boolean' &&
     isAutomationSchedule(value.schedule) &&
     typeof value.timezone === 'string' &&
+    isTimeZone(value.timezone) &&
     nullableString(value.modelId) &&
     nullableReasoningEffort(value.reasoningEffort) &&
     normalizeAutonomy(value.autonomy) !== undefined
@@ -72,15 +74,16 @@ function isAutomationSchedule(value: unknown): value is AutomationSchedule {
       return nonNegativeSafeInteger(value.minute) && value.minute <= 59;
     case 'daily':
     case 'weekdays':
-      return typeof value.time === 'string';
+      return typeof value.time === 'string' && validTime(value.time);
     case 'weekly':
       return (
         nonNegativeSafeInteger(value.weekday) &&
         value.weekday <= 6 &&
-        typeof value.time === 'string'
+        typeof value.time === 'string' &&
+        validTime(value.time)
       );
     case 'cron':
-      return typeof value.expression === 'string';
+      return typeof value.expression === 'string' && cronExpressionIssue(value.expression) === null;
     default:
       return false;
   }
@@ -117,6 +120,7 @@ function isRunSnapshot(value: unknown): boolean {
     nullableString(value.workspaceCwd) &&
     (value.executionMode === 'local' || value.executionMode === 'worktree') &&
     typeof value.timezone === 'string' &&
+    isTimeZone(value.timezone) &&
     nullableString(value.modelId) &&
     nullableReasoningEffort(value.reasoningEffort) &&
     normalizeAutonomy(value.autonomy) !== undefined

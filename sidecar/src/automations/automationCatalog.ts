@@ -12,7 +12,6 @@ import type {
   AutomationInput,
   AutomationPatch,
   AutomationReasoningEffort,
-  AutomationRun,
   AutomationStore,
 } from './types.js';
 
@@ -22,8 +21,6 @@ import type {
  * belong to a schedule.
  */
 interface AutomationRunCascade {
-  capture: () => AutomationRun[];
-  restore: (runs: AutomationRun[]) => void;
   dropQueuedSchedules: (automationId: string) => void;
   dropAllFor: (automationId: string) => void;
 }
@@ -32,8 +29,8 @@ export interface AutomationCatalogOptions {
   /** Read through a getter: the manager replaces the store once, on load. */
   store: () => AutomationStore;
   now: () => number;
-  /** Applies a store mutation and undoes it when the write fails. */
-  commit: (apply: () => void, undo: () => void) => Promise<void>;
+  /** Serializes, persists, and publishes one store operation. */
+  commit: <T>(apply: () => T | Promise<T>) => Promise<T>;
   /** Rejects a model and reasoning pair DROIDEX cannot run. */
   validateSelection: (modelId: string, reasoningEffort: AutomationReasoningEffort) => Promise<void>;
   /** Settings an automation inherits from the chat that asked for it. */
@@ -73,29 +70,8 @@ export class AutomationCatalog {
     this.options.runs.dropAllFor(id);
   }
 
-  /** The definitions as they stand, for a caller that has to undo a delete. */
-  capture(): Automation[] {
-    return this.records.slice();
-  }
-
-  restore(automations: Automation[]): void {
-    this.options.store().automations = automations;
-  }
-
   async create(input: AutomationInput): Promise<Automation> {
-    const normalized = normalizeAutomationInput(input);
-    assertModelSelection(normalized);
-    await this.options.validateSelection(normalized.modelId, normalized.reasoningEffort);
-    const automation = createAutomationRecord(normalized, this.options.now());
-    await this.options.commit(
-      () => {
-        this.add(automation);
-      },
-      () => {
-        this.discard(automation.id);
-      },
-    );
-    return structuredClone(automation);
+    return this.options.commit(() => this.createRecord(input));
   }
 
   /**
@@ -104,73 +80,80 @@ export class AutomationCatalog {
    * review; an unattended run cannot spawn another automation.
    */
   async createFromSession(input: AutomationInput, sourceAppSessionId: string): Promise<Automation> {
-    if (storeHasRunSession(this.options.store(), sourceAppSessionId)) {
-      throw new Error('Unattended automation runs cannot create DROIDEX automations.');
-    }
-    const context = await this.options.sessionContext(sourceAppSessionId);
-    if (context?.autonomy !== 'high') {
-      throw new Error(
-        'Direct automation creation requires High autonomy. Use automation_propose so the user can review and confirm the DROIDEX card.',
-      );
-    }
-    return this.create({
-      ...input,
-      workspaceCwd: input.workspaceCwd === undefined ? context.cwd : input.workspaceCwd,
-      executionMode: input.executionMode ?? 'local',
-      timezone: input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-      modelId: input.modelId === undefined ? context.modelId : input.modelId,
-      reasoningEffort:
-        input.reasoningEffort === undefined ? context.reasoningEffort : input.reasoningEffort,
-      autonomy: input.autonomy ?? context.autonomy,
+    return this.options.commit(async () => {
+      if (storeHasRunSession(this.options.store(), sourceAppSessionId)) {
+        throw new Error('Unattended automation runs cannot create DROIDEX automations.');
+      }
+      const context = await this.options.sessionContext(sourceAppSessionId);
+      if (
+        storeHasRunSession(this.options.store(), sourceAppSessionId) ||
+        context?.autonomy !== 'high'
+      ) {
+        throw new Error(
+          context?.autonomy === 'high'
+            ? 'Unattended automation runs cannot create DROIDEX automations.'
+            : 'Direct automation creation requires High autonomy. Use automation_propose so the user can review and confirm the DROIDEX card.',
+        );
+      }
+      return this.createRecord({
+        ...input,
+        workspaceCwd: input.workspaceCwd === undefined ? context.cwd : input.workspaceCwd,
+        executionMode: input.executionMode ?? 'local',
+        timezone: input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+        modelId: input.modelId === undefined ? context.modelId : input.modelId,
+        reasoningEffort:
+          input.reasoningEffort === undefined ? context.reasoningEffort : input.reasoningEffort,
+        autonomy: input.autonomy ?? context.autonomy,
+      });
     });
   }
 
   async update(id: string, patch: AutomationPatch): Promise<Automation> {
-    const current = this.require(id);
-    const normalized = normalizeAutomationInput({
-      title: patch.title ?? current.title,
-      prompt: patch.prompt ?? current.prompt,
-      workspaceCwd: patch.workspaceCwd === undefined ? current.workspaceCwd : patch.workspaceCwd,
-      executionMode: patch.executionMode ?? current.executionMode,
-      enabled: patch.enabled ?? current.enabled,
-      schedule: patch.schedule ?? current.schedule,
-      timezone: patch.timezone ?? current.timezone,
-      modelId: patch.modelId === undefined ? current.modelId : patch.modelId,
-      reasoningEffort:
-        patch.reasoningEffort === undefined ? current.reasoningEffort : patch.reasoningEffort,
-      autonomy: patch.autonomy ?? current.autonomy,
+    return this.options.commit(async () => {
+      const current = this.require(id);
+      const normalized = normalizeAutomationInput({
+        title: patch.title ?? current.title,
+        prompt: patch.prompt ?? current.prompt,
+        workspaceCwd: patch.workspaceCwd === undefined ? current.workspaceCwd : patch.workspaceCwd,
+        executionMode: patch.executionMode ?? current.executionMode,
+        enabled: patch.enabled ?? current.enabled,
+        schedule: patch.schedule ?? current.schedule,
+        timezone: patch.timezone ?? current.timezone,
+        modelId: patch.modelId === undefined ? current.modelId : patch.modelId,
+        reasoningEffort:
+          patch.reasoningEffort === undefined ? current.reasoningEffort : patch.reasoningEffort,
+        autonomy: patch.autonomy ?? current.autonomy,
+      });
+      if (normalized.enabled) {
+        assertModelSelection(normalized);
+        await this.options.validateSelection(normalized.modelId, normalized.reasoningEffort);
+      }
+      const now = this.options.now();
+      const scheduleChanged = patch.schedule !== undefined || patch.timezone !== undefined;
+      const enabledChanged = patch.enabled !== undefined;
+      if (scheduleChanged || enabledChanged) {
+        assertEnabledScheduleHasNextRun(normalized, now);
+      }
+      const next: Automation = {
+        ...current,
+        ...normalized,
+        nextRunAt: nextRunAfterUpdate(current, normalized, scheduleChanged || enabledChanged, now),
+        completedAt: normalized.enabled ? null : current.completedAt,
+        updatedAt: now,
+      };
+      if (scheduleChanged || !normalized.enabled) this.options.runs.dropQueuedSchedules(id);
+      this.replace(id, next);
+      return structuredClone(next);
     });
-    if (normalized.enabled) {
-      assertModelSelection(normalized);
-      await this.options.validateSelection(normalized.modelId, normalized.reasoningEffort);
-    }
-    const now = this.options.now();
-    const scheduleChanged = patch.schedule !== undefined || patch.timezone !== undefined;
-    const enabledChanged = patch.enabled !== undefined;
-    if (scheduleChanged || enabledChanged) {
-      assertEnabledScheduleHasNextRun(normalized, now);
-    }
-    const next: Automation = {
-      ...current,
-      ...normalized,
-      nextRunAt: nextRunAfterUpdate(current, normalized, scheduleChanged || enabledChanged, now),
-      completedAt: normalized.enabled ? null : current.completedAt,
-      updatedAt: now,
-    };
-    const previousRuns = this.options.runs.capture();
-    await this.options.commit(
-      () => {
-        // A run queued for the old schedule is no longer what the user asked
-        // for, and a disabled automation must not run at all.
-        if (scheduleChanged || !normalized.enabled) this.options.runs.dropQueuedSchedules(id);
-        this.replace(id, next);
-      },
-      () => {
-        this.options.runs.restore(previousRuns);
-        this.replace(id, current);
-      },
-    );
-    return structuredClone(next);
+  }
+
+  private async createRecord(input: AutomationInput): Promise<Automation> {
+    const normalized = normalizeAutomationInput(input);
+    assertModelSelection(normalized);
+    await this.options.validateSelection(normalized.modelId, normalized.reasoningEffort);
+    const automation = createAutomationRecord(normalized, this.options.now());
+    this.add(automation);
+    return structuredClone(automation);
   }
 
   private replace(id: string, record: Automation): void {

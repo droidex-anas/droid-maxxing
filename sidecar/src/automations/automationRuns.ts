@@ -52,8 +52,8 @@ export interface AutomationRunsOptions {
   isClosed: () => boolean;
   /** Applies a store mutation and persists it on the manager's single writer. */
   persist: (apply: () => void) => Promise<void>;
-  /** Applies a store mutation and undoes it when the write fails. */
-  commit: (apply: () => void, undo: () => void) => Promise<void>;
+  /** Serializes, persists, and publishes one store operation. */
+  commit: <T>(apply: () => T | Promise<T>) => Promise<T>;
   launchSession: (command: SessionCreateCommand) => Promise<void>;
   closeSession: (appSessionId: string) => Promise<void>;
   /** Resolves the run directory. Isolated worktrees are created after this path is persisted. */
@@ -90,31 +90,35 @@ export class AutomationRuns {
   private drainPromise: Promise<void> | null = null;
   private eventTail: Promise<void> = Promise.resolve();
   private readonly pendingAdopts = new Set<string>();
+  private readonly timerWork = new Set<Promise<void>>();
 
   constructor(private readonly options: AutomationRunsOptions) {
     this.launchRetryMs = Math.max(0, options.launchRetryMs ?? DEFAULT_LAUNCH_RETRY_MS);
     this.timers = new RunTimers(
       {
         sessionCreateTimedOut: (runId) => {
-          void this.retryOrFail(
-            runId,
-            'DROIDEX did not create the automation chat before the startup timeout.',
-          ).catch((error: unknown) => {
-            console.error('Could not retry automation launch', error);
-          });
+          this.trackTimerWork(
+            this.retryOrFail(
+              runId,
+              'DROIDEX did not create the automation chat before the startup timeout.',
+            ),
+            'Could not retry automation launch',
+          );
         },
         runLimitReached: (runId) => {
-          this.timeOut(
-            runId,
-            'The automation run exceeded the 24-hour safety limit and was stopped in DROIDEX.',
+          this.trackTimerWork(
+            this.timeOut(
+              runId,
+              'The automation run exceeded the 24-hour safety limit and was stopped in DROIDEX.',
+            ),
+            'Could not time out automation run',
           );
         },
         turnSettled: (runId) => {
           const failure = this.runFailures.get(runId);
-          void this.finish(runId, failure ? 'failed' : 'completed', failure ?? null).catch(
-            (error: unknown) => {
-              console.error('Could not settle automation run', error);
-            },
+          this.trackTimerWork(
+            this.finish(runId, failure ? 'failed' : 'completed', failure ?? null),
+            'Could not settle automation run',
           );
         },
       },
@@ -139,27 +143,19 @@ export class AutomationRuns {
    * Queues a run the user asked for. An automation that already has a run
    * waiting or in progress returns that run instead of stacking another.
    */
-  async queueManual(automation: Automation): Promise<AutomationRun> {
-    assertModelSelection(automation);
-    const existing = this.openRunFor(automation.id);
-    if (existing) return structuredClone(existing);
-    await this.options.validateSelection(automation.modelId, automation.reasoningEffort);
-    const pending = this.openRunFor(automation.id);
-    if (pending) return structuredClone(pending);
-    const requestedAt = this.options.now();
-    const run = newQueuedRun(automation, requestedAt, requestedAt, 'manual');
-    await this.options.commit(
-      () => {
-        if (this.hasOpenFor(automation.id)) return;
-        this.runs.push(run);
-      },
-      () => {
-        this.store.runs = this.runs.filter((candidate) => candidate.id !== run.id);
-      },
-    );
-    const open = this.openRunFor(automation.id);
-    if (!open) throw new Error('Could not queue the automation run.');
-    return structuredClone(open);
+  async queueManual(automationId: string): Promise<AutomationRun> {
+    return this.options.commit(async () => {
+      const automation = this.automationFor(automationId);
+      if (!automation) throw new Error('Automation not found.');
+      assertModelSelection(automation);
+      const existing = this.openRunFor(automation.id);
+      if (existing) return structuredClone(existing);
+      await this.options.validateSelection(automation.modelId, automation.reasoningEffort);
+      const requestedAt = this.options.now();
+      const run = newQueuedRun(automation, requestedAt, requestedAt, 'manual');
+      this.runs.push(run);
+      return structuredClone(run);
+    });
   }
 
   /** Starts the next queued run unless one is already running. */
@@ -260,15 +256,6 @@ export class AutomationRuns {
     );
   }
 
-  /** The run list as it stands, for a caller that has to undo its own mutation. */
-  capture(): AutomationRun[] {
-    return this.runs.slice();
-  }
-
-  restore(runs: AutomationRun[]): void {
-    this.store.runs = runs;
-  }
-
   /** Drops the schedule-triggered runs waiting on a schedule that just changed. */
   dropQueuedSchedules(automationId: string): void {
     this.store.runs = this.runs.filter(
@@ -338,7 +325,9 @@ export class AutomationRuns {
 
   /** The drain already in flight, so shutdown can wait for it. */
   pending(): Promise<void> | null {
-    return this.drainPromise;
+    const pending = [...this.timerWork];
+    if (this.drainPromise) pending.push(this.drainPromise);
+    return pending.length > 0 ? Promise.allSettled(pending).then(() => undefined) : null;
   }
 
   /** Stops watching every run. Live chats keep running; DROIDEX is exiting. */
@@ -654,22 +643,28 @@ export class AutomationRuns {
    * Settles a run DROIDEX stopped waiting for and tears down its chat, so a
    * timed-out run cannot leave a session streaming with nothing tracking it.
    */
-  private timeOut(runId: string, message: string): void {
+  private async timeOut(runId: string, message: string): Promise<void> {
     const run = this.runById(runId);
     if (!run || isSettledRunStatus(run.status)) return;
     const appSessionId = run.appSessionId;
     const clientRef = run.clientRef;
-    void this.finish(runId, 'failed', message)
-      .then(async () => {
-        if (appSessionId) {
-          await this.closeSessionQuietly(appSessionId);
-          return;
-        }
-        if (clientRef) this.abandonClientRef(clientRef);
-      })
+    await this.finish(runId, 'failed', message);
+    if (appSessionId) {
+      await this.closeSessionQuietly(appSessionId);
+      return;
+    }
+    if (clientRef) this.abandonClientRef(clientRef);
+  }
+
+  private trackTimerWork(work: Promise<void>, failureMessage: string): void {
+    const tracked = work
       .catch((error: unknown) => {
-        console.error('Could not time out automation run', error);
+        console.error(failureMessage, error);
+      })
+      .finally(() => {
+        this.timerWork.delete(tracked);
       });
+    this.timerWork.add(tracked);
   }
 
   /** Remembers a launch DROIDEX gave up on, so its late chat gets closed. */

@@ -117,6 +117,7 @@ export class AutomationManager {
   private readonly catalog: AutomationCatalog;
   private readonly proposals: AutomationProposals;
   private readonly ready: Promise<void>;
+  private readonly startup: Promise<void>;
   private readonly inFlight = new Set<Promise<void>>();
   private mutationTail: Promise<void> = Promise.resolve();
   private closed = false;
@@ -130,7 +131,7 @@ export class AutomationManager {
     const shared = {
       store: () => this.store,
       now: () => this.now(),
-      commit: (apply: () => void, undo: () => void) => this.commit(apply, undo),
+      commit: <T>(apply: () => T | Promise<T>) => this.commit(apply),
       validateSelection,
     };
     this.runs = new AutomationRuns({
@@ -170,14 +171,13 @@ export class AutomationManager {
       automations: this.catalog,
     });
     this.ready = this.initialize();
-    void this.ready
-      .then(async () => {
-        await this.runs.releaseRecovered();
-        this.runs.startQueued();
-      })
-      .catch((error: unknown) => {
-        console.error('Could not initialize DROIDEX automations', error);
-      });
+    this.startup = this.ready.then(async () => {
+      await this.runs.releaseRecovered();
+      this.runs.startQueued();
+    });
+    void this.startup.catch((error: unknown) => {
+      console.error('Could not initialize DROIDEX automations', error);
+    });
   }
 
   async snapshot(): Promise<AutomationSnapshot> {
@@ -224,32 +224,22 @@ export class AutomationManager {
    */
   async remove(id: string): Promise<void> {
     await this.ready;
-    this.catalog.require(id);
-    const previousAutomations = this.catalog.capture();
-    const previousRuns = this.runs.capture();
-    const previousProposals = this.proposals.capturedForAutomation(id);
-    await this.commit(
-      () => {
-        if (this.runs.hasActiveFor(id)) {
-          throw new Error('Wait for the active automation run to finish before deleting it.');
-        }
-        if (this.runs.hasReviewWorkspaceFor(id)) {
-          throw new Error('Close the automation review chat before deleting it.');
-        }
-        this.catalog.discard(id);
-        this.proposals.unlinkAutomation(id, this.now());
-      },
-      () => {
-        this.catalog.restore(previousAutomations);
-        this.runs.restore(previousRuns);
-        this.proposals.restore(previousProposals);
-      },
-    );
+    await this.commit(() => {
+      this.catalog.require(id);
+      if (this.runs.hasActiveFor(id)) {
+        throw new Error('Wait for the active automation run to finish before deleting it.');
+      }
+      if (this.runs.hasReviewWorkspaceFor(id)) {
+        throw new Error('Close the automation review chat before deleting it.');
+      }
+      this.catalog.discard(id);
+      this.proposals.unlinkAutomation(id, this.now());
+    });
   }
 
   async runNow(id: string): Promise<AutomationRun> {
     await this.ready;
-    return this.runs.queueManual(this.catalog.require(id));
+    return this.runs.queueManual(id);
   }
 
   async propose(input: AutomationInput, sourceAppSessionId: string): Promise<AutomationProposal> {
@@ -289,8 +279,13 @@ export class AutomationManager {
     if (!isAutomationCommand(value)) return false;
     const command = value;
     try {
-      await this.runCommand(command);
-      this.emit({ type: 'automations.result', requestId: command.requestId, ok: true });
+      const runId = await this.runCommand(command);
+      this.emit({
+        type: 'automations.result',
+        requestId: command.requestId,
+        ok: true,
+        ...(runId ? { runId } : {}),
+      });
     } catch (error) {
       this.emit({
         type: 'automations.result',
@@ -310,7 +305,7 @@ export class AutomationManager {
    */
   async shutdown(): Promise<void> {
     this.closed = true;
-    await this.ready.catch(() => undefined);
+    await this.startup.catch(() => undefined);
     this.scheduler.stop();
     this.runs.stop();
     this.sessionContexts.clear();
@@ -318,7 +313,7 @@ export class AutomationManager {
     await this.storeFile.flush();
   }
 
-  private async runCommand(command: AutomationBridgeCommand): Promise<void> {
+  private async runCommand(command: AutomationBridgeCommand): Promise<string | undefined> {
     switch (command.type) {
       case 'automations.list':
         await this.publishSnapshot();
@@ -336,8 +331,7 @@ export class AutomationManager {
         await this.setEnabled(command.id, command.enabled);
         return;
       case 'automations.runNow':
-        await this.runNow(command.id);
-        return;
+        return (await this.runNow(command.id)).id;
       case 'automations.confirmProposal':
         await this.confirmProposal(command.id, command.input);
         return;
@@ -420,26 +414,27 @@ export class AutomationManager {
    * `processDue` can advance other automations and queue their runs in the same
    * turn, so the caller's undo is not enough on its own.
    */
-  private async commit(apply: () => void, undo: () => void): Promise<void> {
+  private async commit<T>(apply: () => T | Promise<T>): Promise<T> {
     try {
-      await this.runExclusive(async () => {
+      const result = await this.runExclusive(async () => {
         const previous = structuredClone(this.store);
         try {
-          apply();
+          const applied = await apply();
           this.scheduler.processDue();
           trimAutomationStore(this.store);
           await this.persistAndPublish();
+          return applied;
         } catch (error) {
-          undo();
           restoreAutomationStore(this.store, previous);
           this.emit({ type: 'automations.snapshot', snapshot: this.snapshotNow() });
           throw error;
         }
       });
+      this.runs.startQueued();
+      return result;
     } finally {
       if (!this.closed) this.scheduler.arm();
     }
-    this.runs.startQueued();
   }
 
   private persistMutation(apply: () => void): Promise<void> {

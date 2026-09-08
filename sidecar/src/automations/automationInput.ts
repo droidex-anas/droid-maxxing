@@ -40,7 +40,7 @@ export function normalizeAutomationInput(input: AutomationInput): NormalizedAuto
   validateSchedule(input.schedule);
   const timezone = (input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone).trim();
   assertTimeZone(timezone);
-  const workspaceCwd = trimmedOrNull(input.workspaceCwd);
+  const workspaceCwd = nonBlankOrNull(input.workspaceCwd);
   const reasoningEffort = input.reasoningEffort ?? null;
   if (!isReasoningEffort(reasoningEffort)) {
     throw new Error('Choose a reasoning level supported by DROIDEX.');
@@ -148,6 +148,11 @@ export function trimmedOrNull(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
+}
+
+export function nonBlankOrNull(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value.trim() === '') return null;
+  return value;
 }
 
 export function clip(value: string, maximum: number): string {

@@ -103,6 +103,13 @@ export function automationPermissionTarget(
   const rawToolName = stringValue(details.toolName);
   const explicitServerName = stringValue(details.serverName);
   const split = splitNamespacedTool(rawToolName);
+  if (
+    explicitServerName &&
+    split.serverName &&
+    normalizeMcpServerName(explicitServerName) !== normalizeMcpServerName(split.serverName)
+  ) {
+    return null;
+  }
   const serverName = explicitServerName || split.serverName;
   const toolName = split.toolName;
   return toolName ? { serverName, toolName } : null;

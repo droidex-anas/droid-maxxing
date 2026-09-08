@@ -77,6 +77,8 @@ export function nextAutomationRun(
     }
     case 'cron':
       return nextCronRun(parseCron(schedule.expression), timezone, fromMs);
+    default:
+      throw new Error('Unknown automation schedule kind.');
   }
 }
 
@@ -116,6 +118,8 @@ export function validateSchedule(schedule: AutomationSchedule): void {
     case 'cron':
       parseCron(schedule.expression);
       return;
+    default:
+      throw new Error('Unknown automation schedule kind.');
   }
 }
 

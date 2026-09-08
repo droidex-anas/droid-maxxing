@@ -141,6 +141,14 @@ export default function App() {
     };
   }, shallowEqual);
   const embedded = isEmbedded();
+  useEffect(() => {
+    if (!embedded) return;
+    if (state.mainView === 'automations') {
+      dispatch({ type: 'CLOSE_AUTOMATIONS' });
+    } else if (state.mainView === 'pull-requests') {
+      dispatch({ type: 'CLOSE_PULL_REQUESTS' });
+    }
+  }, [dispatch, embedded, state.mainView]);
   const onboard = useOnboarding();
   useDiagnosticsContext();
   useHistoryIndexingIdle();

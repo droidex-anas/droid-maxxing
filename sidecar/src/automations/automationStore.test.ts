@@ -37,6 +37,46 @@ test('a store written by another version is refused instead of guessed at', () =
   );
 });
 
+test('a store missing proposals is refused instead of silently discarding them', () => {
+  assert.throws(
+    () => parseAutomationStore({ version: 1, automations: [], runs: [] }, Date.now()),
+    /missing its automations, runs, or proposals list/,
+  );
+});
+
+test('a stored automation with an unknown schedule kind is dropped', () => {
+  const messages: string[] = [];
+  const original = console.error;
+  console.error = (message?: unknown) => {
+    messages.push(String(message));
+  };
+  try {
+    const store = parseAutomationStore(
+      {
+        version: 1,
+        automations: [
+          {
+            id: 'automation-1',
+            title: 'Task',
+            prompt: 'Do the task.',
+            schedule: { kind: 'monthly', time: '23:59' },
+            timezone: 'UTC',
+            modelId: 'model-a',
+            reasoningEffort: 'high',
+          },
+        ],
+        runs: [],
+        proposals: [],
+      },
+      Date.now(),
+    );
+    assert.deepEqual(store.automations, []);
+    assert.deepEqual(messages, ['Dropped an invalid automation record']);
+  } finally {
+    console.error = original;
+  }
+});
+
 test('invalid stored records are dropped and logged', () => {
   const messages: string[] = [];
   const original = console.error;
@@ -154,6 +194,44 @@ test('trim keeps the origin of an in-flight run', () => {
   trimAutomationStore(store);
 
   assert.ok(store.sessionOrigins['session-live']);
+});
+
+test('trim keeps every unconfirmed proposal while capping confirmed history', () => {
+  const now = Date.now();
+  const definition = automation(now);
+  const store = emptyAutomationStore();
+  store.automations = [definition];
+  store.proposals = Array.from({ length: 60 }, (_, index) => ({
+    id: `proposal-${String(index)}`,
+    sourceAppSessionId: `session-${String(index)}`,
+    draft: {
+      title: `Task ${String(index)}`,
+      prompt: 'Do the task.',
+      workspaceCwd: null,
+      executionMode: 'local' as const,
+      enabled: false,
+      schedule: { kind: 'daily' as const, time: '23:59' },
+      timezone: 'UTC',
+      modelId: 'model-a',
+      reasoningEffort: 'high' as const,
+      autonomy: 'low' as const,
+    },
+    status: index < 30 ? ('draft' as const) : ('confirmed' as const),
+    missingFields: [],
+    automationId: index < 30 ? null : definition.id,
+    createdAt: now + index,
+    updatedAt: now + index,
+    confirmedAt: index < 30 ? null : now + index,
+  }));
+
+  trimAutomationStore(store);
+
+  assert.equal(store.proposals.length, 50);
+  assert.equal(store.proposals.filter((proposal) => proposal.status === 'draft').length, 30);
+  assert.equal(
+    store.proposals.some((proposal) => proposal.id === 'proposal-30'),
+    false,
+  );
 });
 
 test('a run session is still recognized after its origin record is dropped', () => {

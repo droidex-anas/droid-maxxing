@@ -5,6 +5,7 @@ import {
 import { SessionManager } from './SessionManager.js';
 import { startBridgeServer } from './bridgeServer.js';
 import { droidexUserDataDir } from './droidexPaths.js';
+import { shutdownSidecar } from './shutdown.js';
 import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 
 const REQUESTED_PORT = bridgePort(process.env.BRIDGE_PORT ?? '0');
@@ -81,10 +82,14 @@ async function shutdown(): Promise<void> {
     // Sessions close first so the automation store records their final run state
     // before it flushes. Bridge close is bounded and flushes its ordered queue
     // after shutdown.
-    await manager.shutdown();
-    await automationManager?.shutdown();
-    hotPathMetrics.disable();
-    await server.close();
+    await shutdownSidecar({
+      shutdownSessions: () => manager.shutdown(),
+      shutdownAutomations: async () => {
+        await automationManager?.shutdown();
+      },
+      disableMetrics: () => { hotPathMetrics.disable(); },
+      closeBridge: () => server.close(),
+    });
   } catch (error) {
     console.error(error);
     process.exitCode = 1;

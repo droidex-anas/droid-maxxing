@@ -1,7 +1,7 @@
 import type { TranscriptEvent } from '../../types/bridge';
 import { normalizeAutonomy } from '../../lib/autonomy';
 import { isReasoningEffort } from '../../lib/reasoningEffort';
-import { cronExpressionIssue, deviceTimeZone, isTimeZone } from './schedule';
+import { cronExpressionIssue, deviceTimeZone, isTimeZone, validTime } from './schedule';
 import { parseToolResultObject } from './toolNames';
 import type { AutomationDraft, AutomationProposal, AutomationSchedule } from './types';
 
@@ -61,7 +61,9 @@ export function findProposalForCall(
   proposals: readonly AutomationProposal[],
   call: TranscriptEvent,
   fallback: AutomationDraft | null,
+  proposalId: string | null = null,
 ): AutomationProposal | undefined {
+  if (proposalId) return proposals.find((proposal) => proposal.id === proposalId);
   const recent = proposals.filter(
     (proposal) =>
       proposal.sourceAppSessionId === call.appSessionId &&
@@ -121,15 +123,21 @@ function previewSchedule(value: unknown): AutomationSchedule | null {
     case 'hourly':
       return isWholeNumberWithin(raw.minute, 0, 59) ? { kind: 'hourly', minute: raw.minute } : null;
     case 'daily':
-      return isWallClockTime(raw.time) ? { kind: 'daily', time: raw.time } : null;
+      return typeof raw.time === 'string' && validTime(raw.time)
+        ? { kind: 'daily', time: raw.time }
+        : null;
     case 'weekdays':
-      return isWallClockTime(raw.time) ? { kind: 'weekdays', time: raw.time } : null;
+      return typeof raw.time === 'string' && validTime(raw.time)
+        ? { kind: 'weekdays', time: raw.time }
+        : null;
     case 'weekly':
-      return isWallClockTime(raw.time) && isWholeNumberWithin(raw.weekday, 0, 6)
+      return typeof raw.time === 'string' &&
+        validTime(raw.time) &&
+        isWholeNumberWithin(raw.weekday, 0, 6)
         ? { kind: 'weekly', weekday: raw.weekday, time: raw.time }
         : null;
     case 'cron':
-      return typeof raw.expression === 'string' && !cronExpressionIssue(raw.expression)
+      return typeof raw.expression === 'string' && cronExpressionIssue(raw.expression) === null
         ? { kind: 'cron', expression: raw.expression }
         : null;
     default:
@@ -145,12 +153,6 @@ function isWholeNumberWithin(value: unknown, minimum: number, maximum: number): 
   return (
     typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
   );
-}
-
-function isWallClockTime(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
-  return !!match && Number(match[1]) <= 23 && Number(match[2]) <= 59;
 }
 
 function derivePreviewTitle(prompt: string): string {

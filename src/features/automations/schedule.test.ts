@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ModelInfo } from '../../types/bridge';
-import { defaultAutomationDraft, validateAutomationDraft } from './schedule';
+import {
+  defaultAutomationDraft,
+  epochFromZonedInput,
+  supportedTimeZones,
+  validateAutomationDraft,
+} from './schedule';
 
 const MODELS: ModelInfo[] = [
   {
@@ -24,4 +29,19 @@ test('draft validation rejects a past one-time schedule and keeps a catalog-miss
   draft.schedule = { kind: 'daily', time: '09:00' };
   draft.modelId = 'custom:byok';
   assert.equal(validateAutomationDraft(draft, MODELS), null);
+});
+
+test('zoned input rejects a nonexistent DST-gap time and preserves the first fallback occurrence', () => {
+  assert.equal(
+    epochFromZonedInput({ year: 2025, month: 3, day: 9, hour: 2, minute: 30 }, 'America/New_York'),
+    null,
+  );
+  assert.equal(
+    epochFromZonedInput({ year: 2025, month: 11, day: 2, hour: 1, minute: 30 }, 'America/New_York'),
+    Date.UTC(2025, 10, 2, 5, 30),
+  );
+});
+
+test('timezone options always include UTC', () => {
+  assert.ok(supportedTimeZones().includes('UTC'));
 });
