@@ -2,6 +2,7 @@
 
 import { cleanText } from './dom.js';
 import { currentAgentSnapshotTarget } from './agentSnapshot.js';
+import { isSensitiveField } from './elementInspection.js';
 
 export { inspectAuthenticationIntent };
 
@@ -26,7 +27,9 @@ function inspectAuthenticationIntent(request) {
         return { kind: 'cross_origin_frame', origin: location.origin };
       }
     }
-    const control = target.closest('button,a,input[type="submit"],input[type="button"]') || target;
+    const control =
+      target.closest('button,a,input[type="submit"],input[type="button"],input[type="image"]') ||
+      target;
     const form = control.form || control.closest?.('form') || target.closest?.('form');
     const label = cleanText(
       control.getAttribute?.('aria-label') ||
@@ -38,7 +41,6 @@ function inspectAuthenticationIntent(request) {
       100,
     );
     const context = cleanText(`${label} ${form?.textContent || ''}`, 500).toLowerCase();
-    const hasPassword = Boolean(form?.querySelector('input[type="password"]'));
     let kind;
     if (/passkey|security key|touch id|webauthn/.test(context)) kind = 'passkey';
     else if (
@@ -49,8 +51,11 @@ function inspectAuthenticationIntent(request) {
       kind = 'oauth';
     else if (/sign up|register|create (?:an )?account|join now/.test(context)) kind = 'signup';
     else if (
-      hasPassword &&
-      (isEnter || control.matches?.('button,input[type="submit"],input[type="button"]'))
+      (isEnter ||
+        control.matches?.(
+          'button,input[type="submit"],input[type="button"],input[type="image"]',
+        )) &&
+      Array.from(form?.querySelectorAll('input') || []).some(isSensitiveField)
     ) {
       kind = 'signin';
     }

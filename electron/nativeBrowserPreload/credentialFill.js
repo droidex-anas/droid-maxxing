@@ -103,10 +103,11 @@ function maskSensitiveFields(active) {
     return true;
   }
   if (maskedSensitiveFields.length > 0) return true;
-  for (const field of document.querySelectorAll('input')) {
+  for (const field of document.querySelectorAll('input, textarea')) {
     if (!isSensitiveField(field)) continue;
     maskedSensitiveFields.push({ field, style: field.getAttribute('style') });
     field.style.setProperty('color', 'transparent', 'important');
+    field.style.setProperty('-webkit-text-fill-color', 'transparent', 'important');
     field.style.setProperty('text-shadow', 'none', 'important');
     field.style.setProperty('caret-color', 'transparent', 'important');
     field.style.setProperty('background-image', 'none', 'important');

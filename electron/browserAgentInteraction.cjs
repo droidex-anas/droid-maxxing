@@ -49,11 +49,57 @@ async function executeBrowserAgentInteraction(contents, request, options) {
     return dispatchNativeClick(contents, request, options, { x, y });
   }
 
+  if (request.action === 'keypress') {
+    assertCurrentBrowserAction(options);
+    const validation = await runWithWebContentsDebugger(contents, async (debuggerApi) => {
+      assertCurrentBrowserAction(options);
+      const result = await executePageAction(contents, request, options);
+      assertCurrentBrowserAction(options);
+      if (result?.ok !== true) return result;
+      await dispatchNativeKey(debuggerApi, String(request.key || ''));
+      return result;
+    });
+    assertCurrentBrowserAction(options);
+    if (validation?.ok !== true) return validation;
+    return executePageAction(contents, { ...request, action: 'snapshot' }, options);
+  }
+
   assertCurrentBrowserAction(options);
   return contents.executeJavaScript(
     `window.__DROIDMAXX_AGENT_ACTION?.(${JSON.stringify(pageActionRequest(request, options))});`,
     true,
   );
+}
+
+const KEY_CODES = {
+  Enter: 13,
+  Tab: 9,
+  Escape: 27,
+  Backspace: 8,
+  Delete: 46,
+  ArrowLeft: 37,
+  ArrowUp: 38,
+  ArrowRight: 39,
+  ArrowDown: 40,
+};
+
+// Keys are dispatched through Chromium so the page receives trusted events;
+// printable keys (and Enter) also need the char event that drives text entry
+// and implicit form submission.
+async function dispatchNativeKey(debuggerApi, key) {
+  const text = key.length === 1 ? key : key === 'Enter' ? '\r' : '';
+  const code = KEY_CODES[key] ?? (text ? text.toUpperCase().charCodeAt(0) : 0);
+  const base = { key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code };
+  await debuggerApi.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
+  if (text) {
+    await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
+      ...base,
+      type: 'char',
+      text,
+      unmodifiedText: text,
+    });
+  }
+  await debuggerApi.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
 }
 
 function dispatchNativeClick(contents, request, options, point) {

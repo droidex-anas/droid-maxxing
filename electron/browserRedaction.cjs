@@ -9,7 +9,7 @@ const SENSITIVE_KEY_PARTS = [
   'passcode',
   'auth',
   'authorization',
-  'signature',
+  'sig',
   'credential',
   'code',
   'cookie',
@@ -29,12 +29,20 @@ function isSensitiveBrowserKey(value) {
   return SENSITIVE_KEY_PARTS.some((part) => key.includes(part));
 }
 
-function redactBrowserDiagnosticUrl(value, baseUrl) {
+// Redirect-style parameters carry whole URLs, so their own query strings are
+// redacted too; depth is bounded so a nested chain cannot recurse without end.
+function redactBrowserDiagnosticUrl(value, baseUrl, depth = 0) {
   try {
     const url = baseUrl ? new URL(String(value), baseUrl) : new URL(String(value));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '[non-http URL]';
     for (const key of [...url.searchParams.keys()]) {
       if (isSensitiveBrowserKey(key)) {
         url.searchParams.set(key, '[redacted]');
+        continue;
+      }
+      const nested = url.searchParams.get(key);
+      if (depth < 2 && /^https?:\/\//i.test(nested)) {
+        url.searchParams.set(key, redactBrowserDiagnosticUrl(nested, undefined, depth + 1));
       }
     }
     url.username = '';

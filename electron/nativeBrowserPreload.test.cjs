@@ -507,6 +507,7 @@ test('agent pointer resolution uses live refs without requiring a selector, then
   assert.deepEqual(scrolled, [{ block: 'center', inline: 'center', behavior: 'auto' }]);
   assert.deepEqual(resolve({ x: 12.3, y: 45.8 }), { x: 12, y: 46 });
   assert.equal(resolve({ selector: '#missing', x: 12.3, y: 45.8 }), null);
+  assert.equal(resolve({ ref: '@b-missing', x: 12.3, y: 45.8 }), null);
 });
 
 test('ref-targeted scroll without a selector uses the live snapshot element', () => {
@@ -628,10 +629,13 @@ test('focusing a credential field is not treated as submitting a sign-in form', 
   }
   class HTMLIFrameElement extends Element {}
   class HTMLAnchorElement extends Element {}
+  const password = new Element('INPUT', 'password');
+  const otp = new Element('INPUT', 'text');
+  otp.autocomplete = 'one-time-code';
   const form = {
     textContent: 'Email Password',
     getAttribute: () => '',
-    querySelector: (selector) => (selector === 'input[type="password"]' ? {} : null),
+    querySelectorAll: () => [password],
   };
   const username = new Element('INPUT', 'text');
   username.form = form;
@@ -649,13 +653,19 @@ test('focusing a credential field is not treated as submitting a sign-in form', 
           .trim()
           .slice(0, limit),
       currentAgentSnapshotTarget: () => username,
-      document: { elementFromPoint: () => username },
+      document: { activeElement: otp, elementFromPoint: () => username },
+      isSensitiveField: (field) =>
+        field.type === 'password' || field.autocomplete === 'one-time-code',
       location: { href: 'https://app.example/login', origin: 'https://app.example' },
       URL,
     },
   );
 
   assert.equal(inspect({ action: 'click', ref: '@b-email', selector: '#email' }), null);
+
+  // A one-time-code form has no password input, but submitting it is still a sign-in.
+  otp.form = { ...form, querySelectorAll: () => [otp] };
+  assert.equal(inspect({ action: 'keypress', key: 'Enter' })?.kind, 'signin');
 });
 
 test('browser snapshots stop scanning after a bounded number of DOM nodes', () => {

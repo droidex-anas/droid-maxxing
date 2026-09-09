@@ -1,4 +1,4 @@
-/* global document, window, Element, Event, InputEvent, KeyboardEvent, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, getComputedStyle */
+/* global document, window, Element, Event, InputEvent, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, getComputedStyle */
 
 import { cleanText, settle } from './dom.js';
 import {
@@ -19,6 +19,8 @@ export {
   runAgentAction,
   resolveAgentPointer,
 };
+
+const RANGE_TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'password']);
 
 let agentInputSuppression = null;
 
@@ -123,7 +125,14 @@ function typeIntoFocused(text) {
   if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
     const start = active.selectionStart == null ? active.value.length : active.selectionStart;
     const end = active.selectionEnd == null ? active.value.length : active.selectionEnd;
-    active.setRangeText(value, start, end, 'end');
+    // setRangeText throws on inputs whose type has no selection API (number,
+    // email, date, ...), so splice those values directly instead.
+    if (active instanceof HTMLInputElement && !RANGE_TEXT_INPUT_TYPES.has(inputType(active))) {
+      const old = active.value;
+      active.value = old.slice(0, start) + value + old.slice(end);
+    } else {
+      active.setRangeText(value, start, end, 'end');
+    }
     active.dispatchEvent(
       new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }),
     );
@@ -138,6 +147,10 @@ function typeIntoFocused(text) {
     return;
   }
   throw new Error('Focused element is not text-editable.');
+}
+
+function inputType(el) {
+  return (el.getAttribute('type') || 'text').toLowerCase();
 }
 
 function selectOption(selector, value, ref) {
@@ -159,15 +172,10 @@ function selectOption(selector, value, ref) {
   target.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+// The key itself is dispatched natively by the main process; this only
+// validates the request so the untrusted page never sees a synthetic event.
 function pressKey(key) {
-  const active = document.activeElement || document.body;
-  const value = String(key);
-  active.dispatchEvent(
-    new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }),
-  );
-  if (value === 'Enter' && active instanceof HTMLInputElement && active.form)
-    active.form.requestSubmit();
-  active.dispatchEvent(new KeyboardEvent('keyup', { key: value, bubbles: true, cancelable: true }));
+  if (!String(key)) throw new Error('Browser keypress requires a key.');
 }
 
 function scrollPage(request) {
@@ -221,7 +229,7 @@ function resolveAgentPointer(request) {
         x: Math.round(box.left + box.width / 2),
         y: Math.round(box.top + box.height / 2),
       };
-    } else if (request?.selector) {
+    } else if (request?.ref || request?.selector) {
       return null;
     } else {
       point = { x: Math.round(Number(request?.x)), y: Math.round(Number(request?.y)) };

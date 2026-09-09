@@ -773,11 +773,15 @@ function registerIpc() {
   ipcMain.on('native-browser-design-prompt', async (event, payload) => {
     try {
       const prompt = await nativeBrowserManager.prepareDesignPrompt(event, payload);
-      if (!prompt) return;
-      mainWindow?.webContents.send('native-browser-design-prompt', prompt);
-      event.sender.send('native-browser-design-prompt-sent', { captureId: payload.captureId });
+      if (prompt) mainWindow?.webContents.send('native-browser-design-prompt', prompt);
     } catch (error) {
       console.error(`failed to prepare browser design selection: ${error.message}`);
+    } finally {
+      // Ack every outcome so the page clears its pending capture without
+      // waiting for the preload's watchdog timer.
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('native-browser-design-prompt-sent', { captureId: payload?.captureId });
+      }
     }
   });
   ipcMain.on('native-browser-user-navigation', (event, payload) => {

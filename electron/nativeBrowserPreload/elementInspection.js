@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, HTMLInputElement, Node */
+/* global document, getComputedStyle, HTMLElement, HTMLInputElement, HTMLTextAreaElement, Node */
 
 import { sanitizeUrl, isSensitiveBrowserKey } from './diagnostics.js';
 import { cssEscape, redactedTextTags } from './dom.js';
@@ -138,21 +138,25 @@ function isMetaRefreshContent(name, el) {
 // Password and one-time-code fields must never reach the agent transcript, so
 // their live values are redacted from every snapshot/detail payload.
 function isSensitiveField(el) {
-  if (!el || el.tagName !== 'INPUT') return false;
+  if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return false;
   if (savedCredentialFields.has(el)) return true;
   const type = (el.getAttribute('type') || '').toLowerCase();
   if (type === 'password') return true;
   const auto = (el.getAttribute('autocomplete') || '').toLowerCase();
   return (
     auto.includes('password') ||
-    auto === 'one-time-code' ||
+    auto.split(/\s+/).includes('one-time-code') ||
     /otp|verification|passcode/i.test(el.name || el.id)
   );
 }
 
 function sensitiveFocusedField() {
   const field = document.activeElement;
-  if (!(field instanceof HTMLInputElement)) return null;
+  const editable =
+    field instanceof HTMLInputElement ||
+    field instanceof HTMLTextAreaElement ||
+    (field instanceof HTMLElement && field.isContentEditable);
+  if (!editable) return null;
   const type = (field.getAttribute('type') || '').toLowerCase();
   const autocomplete = (field.getAttribute('autocomplete') || '').toLowerCase();
   if (type === 'password' || autocomplete.includes('password')) return { kind: 'password' };

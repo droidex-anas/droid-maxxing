@@ -1,4 +1,4 @@
-/* global document, window, CSS, Node, requestAnimationFrame */
+/* global document, window, CSS, Node, getComputedStyle, requestAnimationFrame */
 
 export {
   INTERNAL_ATTR,
@@ -50,7 +50,9 @@ function firstVisible(nodes) {
 function isVisible(el) {
   if (!el) return false;
   const rect = el.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  const style = getComputedStyle(el);
+  return style.visibility !== 'hidden' && style.visibility !== 'collapse' && style.opacity !== '0';
 }
 
 function settle() {

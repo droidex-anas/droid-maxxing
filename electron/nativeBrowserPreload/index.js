@@ -62,17 +62,19 @@ function applyState(next) {
 }
 
 function onWheel(event) {
-  if (!state.designMode || !state.capturePending) return;
+  if (!state.designMode || (!state.capturePending && !promptVisible())) return;
   swallow(event);
 }
 
 function onKey(event) {
   if (!state.designMode) return;
-  // Freeze keyboard scrolling (space, arrows, page keys) during capture so the
-  // viewport cannot shift out from under the region being captured.
-  if (state.capturePending) {
+  // Freeze keyboard scrolling (space, arrows, page keys) while a capture is
+  // pending or the composer is open, so the viewport cannot shift out from
+  // under the selection. The composer stops both events on itself, so typing
+  // and Escape inside it still work.
+  if (state.capturePending || promptVisible()) {
     if (event.type === 'keydown') swallow(event);
-    return;
+    if (state.capturePending) return;
   }
   state.altHeld = Boolean(event.altKey);
   if (event.type === 'keydown' && event.key === 'Escape') {

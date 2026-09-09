@@ -1,4 +1,4 @@
-/* global crypto, document, window, location, Element, NodeFilter, HTMLIFrameElement */
+/* global crypto, document, window, location, Element, NodeFilter, HTMLIFrameElement, getComputedStyle */
 
 import { agentVisibleUrl, sanitizeUrl } from './diagnostics.js';
 import {
@@ -161,6 +161,8 @@ function isCandidate(el) {
   if (el.getAttribute(INTERNAL_ATTR)) return false;
   const rect = el.getBoundingClientRect();
   if (rect.width < 4 || rect.height < 4) return false;
+  const style = getComputedStyle(el);
+  if (style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
   const area = rect.width * rect.height;
   const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
   if (area > viewportArea * 0.72) return false;

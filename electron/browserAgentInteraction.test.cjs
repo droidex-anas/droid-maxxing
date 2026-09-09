@@ -498,6 +498,30 @@ test('navigation invalidates typing and keypresses before page code can receive 
   assert.deepEqual(scripts, []);
 });
 
+test('keypress reaches the page as a trusted Chromium key event', async () => {
+  const { commands, contents, scripts } = hoverContents();
+
+  const result = await executeBrowserAgentInteraction(
+    contents,
+    { requestId: 'request-tab', action: 'keypress', key: 'Tab' },
+    {
+      isCurrent: () => true,
+      pageContext: PAGE_CONTEXT,
+      viewportBounds: { width: 300, height: 200 },
+    },
+  );
+
+  assert.deepEqual(
+    commands.map(({ name, params }) => [name, params.type, params.windowsVirtualKeyCode]),
+    [
+      ['Input.dispatchKeyEvent', 'rawKeyDown', 9],
+      ['Input.dispatchKeyEvent', 'keyUp', 9],
+    ],
+  );
+  assert.equal(result.snapshot.url, 'https://example.test/');
+  assert.equal(scripts.filter((script) => script.includes('"action":"snapshot"')).length, 1);
+});
+
 test('native input is blocked when the exact point is outside the live viewport', async () => {
   const inputEvents = [];
   const contents = {
