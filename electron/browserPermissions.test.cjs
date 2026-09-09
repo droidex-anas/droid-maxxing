@@ -307,8 +307,15 @@ test('a WebContents cannot queue overlapping media prompts', async () => {
 test('site decisions revoke temporary grants and invalidate pending prompts', async () => {
   const contents = browserContents();
   const prompt = deferred();
+  const siteDecisions = new Map();
   let promptCount = 0;
+  let gate;
   const { controller } = controllerFor(contents, {
+    siteDecisions,
+    persistSiteDecision: async ({ origin, mediaTypes, decision }) => {
+      await gate?.promise;
+      for (const mediaType of mediaTypes) siteDecisions.set(`${origin}\0${mediaType}`, decision);
+    },
     requestPermission: (request) => {
       promptCount += 1;
       if (promptCount === 1) {
@@ -330,9 +337,12 @@ test('site decisions revoke temporary grants and invalidate pending prompts', as
     securityOrigin: 'https://camera.example',
     mediaTypes: ['video'],
   });
-  await controller.setSiteDecision('https://camera.example', ['video'], 'deny');
+  gate = deferred();
+  const revoked = controller.setSiteDecision('https://camera.example', ['video'], 'deny');
   prompt.resolve({ promptId: 'prompt-2', decision: 'allow_once' });
   assert.equal(await pending, false);
+  gate.resolve();
+  await revoked;
   assert.equal(canAccess(controller, contents, 'https://camera.example', 'video'), false);
 });
 

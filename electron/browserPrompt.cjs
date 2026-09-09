@@ -174,7 +174,7 @@ function validatePrompt(input) {
   if (buttons.length < 2 || buttons.length > 4 || buttons.some((button) => !button)) {
     throw new Error('Browser prompt requires two to four labeled actions.');
   }
-  const cancelId = Number(input.cancelId);
+  const cancelId = input.cancelId;
   if (!Number.isInteger(cancelId) || cancelId < 0 || cancelId >= buttons.length) {
     throw new Error('Browser prompt requires a valid cancel action.');
   }

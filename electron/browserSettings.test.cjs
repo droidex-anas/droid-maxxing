@@ -92,6 +92,7 @@ function deferred() {
 function downloadItem(filename) {
   let done;
   let savePath;
+  let dialogOptions;
   return {
     getFilename: () => filename,
     once: (event, listener) => {
@@ -101,8 +102,12 @@ function downloadItem(filename) {
     setSavePath: (value) => {
       savePath = value;
     },
+    setSaveDialogOptions: (value) => {
+      dialogOptions = value;
+    },
     finish: () => done(),
     savePath: () => savePath,
+    dialogOptions: () => dialogOptions,
   };
 }
 
@@ -401,6 +406,20 @@ test('completed downloads release their case-insensitive path reservation', asyn
     controller.prepareDownload(next);
 
     assert.equal(path.basename(next.savePath()), 'REPORT.pdf');
+  });
+});
+
+test('the save dialog opens in the chosen download folder when asking is on', async () => {
+  await withController(async ({ controller, openDialogResponses, userDataPath }) => {
+    const chosen = path.join(userDataPath, 'Chosen');
+    openDialogResponses.push({ canceled: false, filePaths: [chosen] });
+    await controller.chooseDownloadDirectory();
+
+    const item = downloadItem('Report.pdf');
+    controller.prepareDownload(item);
+
+    assert.equal(item.savePath(), undefined);
+    assert.equal(item.dialogOptions().defaultPath, path.join(chosen, 'Report.pdf'));
   });
 });
 

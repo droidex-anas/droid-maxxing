@@ -8,7 +8,7 @@ function createFixture(overrides = {}) {
   const timers = [];
   let sequence = 0;
   const controller = createBrowserPromptController({
-    isAvailable: () => true,
+    isAvailable: overrides.isAvailable ?? (() => true),
     randomUUID: () => `prompt-${++sequence}`,
     send: (prompt) => sent.push(prompt),
     dismiss: overrides.dismiss ?? ((requestId) => dismissed.push(requestId)),
@@ -164,4 +164,14 @@ test('credential prompts move ahead of queued permissions without preempting the
   assert.equal(sent[2].title, 'Second permission');
   controller.resolve('prompt-3', 2);
   assert.deepEqual(await permission, { response: 2 });
+});
+
+test('prompts fail closed while the renderer is unavailable', async () => {
+  const { controller, sent } = createFixture({ isAvailable: () => false });
+  const first = controller.request(prompt);
+  const second = controller.request(prompt);
+
+  assert.deepEqual(await first, { response: 2 });
+  assert.deepEqual(await second, { response: 2 });
+  assert.equal(sent.length, 0);
 });

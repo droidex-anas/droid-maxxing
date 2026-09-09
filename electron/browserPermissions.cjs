@@ -146,7 +146,7 @@ function createBrowserPermissionController(options) {
   }
 
   async function setSiteDecision(value, mediaTypes, decision) {
-    const origin = requestingHttpOrigin(value);
+    const origin = parseSafeHttpUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH })?.origin;
     const normalizedTypes = normalizeRequestedMediaTypes(mediaTypes);
     if (!origin) throw new Error('Browser site permission requires an exact HTTP origin.');
     if (normalizedTypes.length === 0) {
@@ -155,8 +155,8 @@ function createBrowserPermissionController(options) {
     if (!SITE_DECISIONS.has(decision)) {
       throw new Error('Browser site permission must be allow, ask, or deny.');
     }
-    await persistDecision(origin, normalizedTypes, decision);
     invalidateOrigin(origin, normalizedTypes);
+    await persistDecision(origin, normalizedTypes, decision);
   }
 
   function revokeForNavigation(contents) {
@@ -265,7 +265,7 @@ function removeGrantKeys(grants, origin, mediaTypes) {
 }
 
 function requestingHttpOrigin(value) {
-  return parseSafeHttpUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH })?.origin;
+  return parseSafeHttpUrl(value)?.origin;
 }
 
 function once(callback) {

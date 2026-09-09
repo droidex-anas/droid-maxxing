@@ -98,7 +98,7 @@ class BrowserCredentialVault {
   async upsert(origin, username, password) {
     await this.queueStorageOperation(async () => {
       const encrypted = await this.options.safeStorage.encryptStringAsync(
-        JSON.stringify({ username, password }),
+        JSON.stringify({ origin, username, password }),
       );
       const rows = await readRows(this.filePath);
       await writeRows(this.filePath, [
@@ -125,7 +125,11 @@ class BrowserCredentialVault {
       );
       parsed = JSON.parse(decrypted.result);
       shouldReEncrypt = decrypted.shouldReEncrypt;
-      if (typeof parsed?.username !== 'string' || typeof parsed?.password !== 'string')
+      if (
+        parsed?.origin !== origin ||
+        typeof parsed.username !== 'string' ||
+        typeof parsed.password !== 'string'
+      )
         throw new Error();
     } catch {
       throw new Error(
@@ -135,7 +139,7 @@ class BrowserCredentialVault {
     if (shouldReEncrypt) {
       try {
         const encrypted = await this.options.safeStorage.encryptStringAsync(
-          JSON.stringify({ username: parsed.username, password: parsed.password }),
+          JSON.stringify({ origin, username: parsed.username, password: parsed.password }),
         );
         await writeRows(this.filePath, [
           ...rows.filter((candidate) => candidate.origin !== origin),
@@ -145,7 +149,7 @@ class BrowserCredentialVault {
         // A failed refresh keeps the still-valid credential; the next read retries.
       }
     }
-    return parsed;
+    return { username: parsed.username, password: parsed.password };
   }
 
   queueWrite(update) {

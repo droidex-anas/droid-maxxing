@@ -330,7 +330,17 @@ class BrowserSettingsController {
 
   prepareDownload(item) {
     const settings = this.requireSettings();
-    if (settings.askDownloadLocation) return;
+    if (settings.askDownloadLocation) {
+      try {
+        fs.mkdirSync(settings.downloadDirectory, { recursive: true });
+        item.setSaveDialogOptions({
+          defaultPath: path.join(settings.downloadDirectory, item.getFilename()),
+        });
+      } catch {
+        // An unusable folder just leaves Electron's own default in the save dialog.
+      }
+      return;
+    }
     fs.mkdirSync(settings.downloadDirectory, { recursive: true });
     const savePath = reserveDownloadPath(
       settings.downloadDirectory,

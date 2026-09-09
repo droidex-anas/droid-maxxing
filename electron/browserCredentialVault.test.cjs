@@ -181,7 +181,8 @@ test('credential decryption is serialized against saved-login deletion', async (
       const deletion = vault.delete('https://example.com');
       let credential;
       try {
-        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
         assert.equal(deletionReadStarted, false);
       } finally {
         fs.readFile = originalReadFile;
@@ -270,5 +271,30 @@ test('saved login storage fails closed when async operating-system encryption is
         isAsyncEncryptionAvailable: async () => false,
       },
     },
+  );
+});
+
+test('a saved login relabelled to another origin fails closed', async () => {
+  await withVault(
+    async ({ vault, userDataPath }) => {
+      assert.equal(
+        await vault.capture({
+          url: 'https://example.com/login',
+          username: 'user@example.com',
+          password: 'secret',
+        }),
+        true,
+      );
+      const filePath = path.join(userDataPath, 'browser-credentials.enc');
+      const rows = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      rows[0].origin = 'https://evil.com';
+      await fs.writeFile(filePath, JSON.stringify(rows));
+
+      await assert.rejects(
+        vault.credentialForAgent('https://evil.com/login'),
+        /could not be decrypted/,
+      );
+    },
+    { responses: [0, 0] },
   );
 });
