@@ -128,6 +128,9 @@ function createNativeBrowserAgentActions({
         const observedNavigation = observeNavigation(actionContents);
         try {
           await Promise.all([reloadBrowser(request.browserSessionId), observedNavigation.wait()]);
+          if (restoredEntry.canceledRequestId === request.requestId) {
+            throw new Error(CANCELED_ACTION_MESSAGE);
+          }
           await navigation.consumePendingApproval(restoredEntry);
           return snapshotAfterNavigation(actionContents, request);
         } finally {
@@ -244,7 +247,7 @@ function createNativeBrowserAgentActions({
       await navigation.authorizeHistoryTransition(entry, entry.view, target.url, request.autonomy);
     }
     assertCurrentActionTarget();
-    const observedNavigation = observeNavigation(contents);
+    const observedNavigation = observeNavigation(contents, { sameDocument: true });
     try {
       history.goToOffset(offset);
       await observedNavigation.wait();
@@ -293,7 +296,7 @@ function createNativeBrowserAgentActions({
     return cursor.show({ browserSessionId: entry.browserSessionId, ...point });
   }
 
-  function observeNavigation(contents, timeoutMs = 7_000) {
+  function observeNavigation(contents, { sameDocument = false, timeoutMs = 7_000 } = {}) {
     let didStart = false;
     let settled = false;
     let resolveCompletion;
@@ -325,10 +328,15 @@ function createNativeBrowserAgentActions({
       if (isMainFrame && errorCode !== -3) finish();
     };
     const onDestroyed = () => finish();
+    // History moves can land on a same-document entry that never loads again.
+    const onInPage = (_event, _url, isMainFrame) => {
+      if (isMainFrame) finish();
+    };
     contents.on('did-start-navigation', onStart);
     contents.on('did-finish-load', onFinish);
     contents.on('did-fail-load', onFail);
     contents.on('destroyed', onDestroyed);
+    if (sameDocument) contents.on('did-navigate-in-page', onInPage);
     return {
       started: () => didStart,
       wait: () => completion,
@@ -338,6 +346,7 @@ function createNativeBrowserAgentActions({
         contents.removeListener('did-finish-load', onFinish);
         contents.removeListener('did-fail-load', onFail);
         contents.removeListener('destroyed', onDestroyed);
+        if (sameDocument) contents.removeListener('did-navigate-in-page', onInPage);
       },
     };
   }

@@ -244,6 +244,7 @@ test('JSON URL cookies keep a covering explicit domain and reject an unrelated o
     JSON.stringify([
       { url: 'https://app.example.com/', domain: '.example.com', name: 'a', value: '1' },
       { url: 'https://app.example.com/', domain: 'other.test', name: 'b', value: '2' },
+      { url: 'https://app.example.com/', domain: '.exa mple.com', name: 'c', value: '3' },
     ]),
   );
   const writes = [];

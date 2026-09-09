@@ -108,6 +108,17 @@ test('saved-login fill sends nothing after the document changes during approval'
   assert.deepEqual(calls.scripts, []);
 });
 
+test('saved-login fill sends nothing after the caller abandons the request', async () => {
+  const credential = deferred();
+  const { calls, contents, credentials, entry } = harness({ credential });
+  const fill = credentials.fillForAgent(entry, contents, { requestId: 'request-1' });
+  entry.canceledRequestId = 'request-1';
+  credential.resolve({ username: 'person', password: 'secret' });
+
+  assert.equal((await fill).ok, false);
+  assert.deepEqual(calls.scripts, []);
+});
+
 test('saved-login fill clears diagnostics without returning secrets', async () => {
   const { calls, contents, credentials, entry } = harness();
 

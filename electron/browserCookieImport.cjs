@@ -316,9 +316,8 @@ function normalizeCookieTarget(row) {
     if (typeof row.domain === 'string') {
       domain = row.domain.trim().toLowerCase();
       const hostname = domain.startsWith('.') ? domain.slice(1) : domain;
-      if (parsed.hostname !== hostname && !parsed.hostname.endsWith(`.${hostname}`)) {
-        return undefined;
-      }
+      const covers = parsed.hostname === hostname || parsed.hostname.endsWith(`.${hostname}`);
+      if (!isValidHostname(hostname) || !covers) return undefined;
     }
     return { url: `${secure ? 'https' : 'http'}://${parsed.host}/`, domain, secure };
   }

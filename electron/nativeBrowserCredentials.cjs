@@ -40,6 +40,14 @@ function createNativeBrowserCredentials({
         error: error?.message || 'Saved-login use was not authorized.',
       };
     }
+    if (entry.canceledRequestId === request.requestId) {
+      return {
+        requestId: request.requestId,
+        ok: false,
+        error:
+          'The saved-login request was abandoned before approval completed. Nothing was filled.',
+      };
+    }
     if (!isCurrentDocument(entry, expectedView, contents, expectedGeneration, expectedOrigin)) {
       return {
         requestId: request.requestId,

@@ -573,6 +573,29 @@ test('history approval does not consume or detach the navigation timeout', async
   assert.equal(entry.agentActionActive, false);
 });
 
+test('history navigation completes on a same-document entry', async () => {
+  let historyNavigations = 0;
+  const { actions, contents } = harness({
+    contents: {
+      navigationHistory: {
+        canGoBack: () => true,
+        canGoForward: () => false,
+        canGoToOffset: () => true,
+        getActiveIndex: () => 1,
+        getEntryAtIndex: () => ({ url: 'https://site.test/page#section' }),
+        goToOffset: () => {
+          historyNavigations += 1;
+        },
+      },
+    },
+  });
+  const result = actions.run(request('goBack'));
+  while (historyNavigations === 0) await Promise.resolve();
+  contents.emit('did-navigate-in-page', {}, 'https://site.test/page#section', true);
+
+  assert.equal((await result).ok, true);
+});
+
 test('open rejects a replacement view instead of snapshotting the wrong page', async () => {
   const open = deferred();
   const { actions, entry } = harness({ open });
