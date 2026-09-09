@@ -341,14 +341,18 @@ class BrowserSettingsController {
       }
       return;
     }
-    fs.mkdirSync(settings.downloadDirectory, { recursive: true });
-    const savePath = reserveDownloadPath(
-      settings.downloadDirectory,
-      item.getFilename(),
-      this.reservedDownloadPaths,
-    );
-    item.once('done', () => this.reservedDownloadPaths.delete(downloadReservationKey(savePath)));
-    item.setSavePath(savePath);
+    try {
+      fs.mkdirSync(settings.downloadDirectory, { recursive: true });
+      const savePath = reserveDownloadPath(
+        settings.downloadDirectory,
+        item.getFilename(),
+        this.reservedDownloadPaths,
+      );
+      item.once('done', () => this.reservedDownloadPaths.delete(downloadReservationKey(savePath)));
+      item.setSavePath(savePath);
+    } catch {
+      // An unusable folder falls back to Electron's own save dialog.
+    }
   }
 
   canAccessPermission(contents, permission, requestingOrigin, details) {

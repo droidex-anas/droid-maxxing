@@ -189,7 +189,7 @@ function createNativeBrowserManager(options) {
   function closeNativeBrowser(browserSessionId) {
     const entry = nativeBrowsers.get(urls.normalizeNativeBrowserSessionId(browserSessionId));
     if (entry) {
-      layout.detach(browserSessionId);
+      layout.detach(browserSessionId, true, false);
       closeNativeBrowserEntry(entry, true);
     }
   }

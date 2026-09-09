@@ -51,20 +51,6 @@ test('memory and idle budgets never evict a browser with active work', () => {
   const budget = createNativeBrowserBudget({ maxLive: 1, idleMs: 1, now: () => 100 });
   const active = entry('active', { active: true });
   assert.deepEqual(budget.idsToEvict([entry('visible', { attached: true }), active]), []);
-  assert.equal(budget.shouldIdleEvict(active), false);
-});
-
-test('idle eviction is disabled when idleMs is 0 and enabled after the timeout', () => {
-  let now = 0;
-  const budget = createNativeBrowserBudget({ idleMs: 0, now: () => now });
-  assert.equal(budget.shouldIdleEvict(entry('warm', { lastUsedAt: 0 })), false);
-
-  const timed = createNativeBrowserBudget({ idleMs: 5_000, now: () => now });
-  now = 4_999;
-  assert.equal(timed.shouldIdleEvict(entry('warm', { lastUsedAt: 0 })), false);
-  now = 5_000;
-  assert.equal(timed.shouldIdleEvict(entry('warm', { lastUsedAt: 0 })), true);
-  assert.equal(timed.shouldIdleEvict(entry('attached', { attached: true, lastUsedAt: 0 })), false);
 });
 
 test('counts report live, warm, attached, and serialized sessions', () => {

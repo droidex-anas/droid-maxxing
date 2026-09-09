@@ -60,7 +60,7 @@ export function BrowserPermissionPromptHost({
   );
 }
 
-export function BrowserPermissionPromptView({
+function BrowserPermissionPromptView({
   prompt,
   busy,
   error = null,

@@ -7,8 +7,6 @@ const {
 } = require('./browserAgentCursorDocument.cjs');
 const {
   BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
-  BROWSER_AGENT_CURSOR_MAX_SIZE,
-  BROWSER_AGENT_CURSOR_MIN_SIZE,
   browserBoundsEqual,
   normalizeBrowserBounds,
   normalizePoint,
@@ -21,9 +19,6 @@ const { isUsableHost } = require('./nativeBrowserHost.cjs');
 const CURSOR_FRAME_MS = 16;
 const CURSOR_MIN_MOVE_MS = 160;
 const CURSOR_MAX_MOVE_MS = 420;
-const BROWSER_AGENT_CURSOR_HOTSPOT = Object.freeze(
-  scaleCursorHotspot(BROWSER_AGENT_CURSOR_DEFAULT_SIZE),
-);
 function createBrowserAgentCursorController(options) {
   if (typeof options?.BrowserWindow !== 'function') {
     throw new Error('Browser agent cursor requires Electron BrowserWindow.');
@@ -488,9 +483,6 @@ function normalizeBrowserSessionId(value) {
 module.exports = {
   BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
   BROWSER_AGENT_CURSOR_DEFAULT_STYLE,
-  BROWSER_AGENT_CURSOR_HOTSPOT,
-  BROWSER_AGENT_CURSOR_MAX_SIZE,
-  BROWSER_AGENT_CURSOR_MIN_SIZE,
   BROWSER_AGENT_CURSOR_STYLES,
   createBrowserAgentCursorController,
   validateBrowserAgentCursorSize,

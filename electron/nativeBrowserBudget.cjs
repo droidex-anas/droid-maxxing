@@ -53,13 +53,6 @@ function createNativeBrowserBudget(options = {}) {
       .map((entry) => entry.browserSessionId);
   }
 
-  function shouldIdleEvict(entry) {
-    if (!entry || entry.attached || entry.active || !entry.hasView) return false;
-    if (idleMs <= 0) return false;
-    const age = now() - (entry.lastUsedAt ?? 0);
-    return age >= idleMs;
-  }
-
   function counts(entries) {
     let live = 0;
     let attached = 0;
@@ -100,7 +93,6 @@ function createNativeBrowserBudget(options = {}) {
     idleMs,
     snapshotFrom,
     idsToEvict,
-    shouldIdleEvict,
     warmHiddenId,
     counts,
     isEvictionClose,

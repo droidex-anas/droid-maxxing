@@ -280,3 +280,15 @@ test('closeAll closes every view and revokes its permissions and cursor ownershi
     true,
   );
 });
+
+test('closing background sessions never re-parks them on a fresh hidden host', async () => {
+  const { hiddenWindows, manager } = harness();
+  await manager.open('browser-1', 'https://one.example/');
+  await manager.open('browser-2', 'https://two.example/');
+
+  manager.close('browser-1');
+  manager.close('browser-2');
+
+  assert.equal(hiddenWindows.length, 1);
+  assert.equal(hiddenWindows[0].destroyed, true);
+});

@@ -73,7 +73,7 @@ function createNativeBrowserLayout({
     }
   }
 
-  function detachNativeBrowser(browserSessionId, invalidateAttachment = true) {
+  function detachNativeBrowser(browserSessionId, invalidateAttachment = true, rehost = true) {
     const targetBrowserSessionId =
       browserSessionId == null
         ? (requestedAttachmentId ?? attachedBrowserSessionId)
@@ -91,6 +91,7 @@ function createNativeBrowserLayout({
     cursor.detach(entry.browserSessionId);
     setBrowserActionActive(entry, Boolean(entry.agentActionActive));
     viewHost.removeView(entry, entry.view);
+    if (!rehost) return;
     viewHost.setHiddenBounds(entry, entry.viewport);
     viewHost.addHiddenView(entry);
     eviction.schedule(entry);

@@ -409,6 +409,22 @@ test('completed downloads release their case-insensitive path reservation', asyn
   });
 });
 
+test('an unusable download folder falls back to the save dialog instead of throwing', async () => {
+  await withController(async ({ controller, openDialogResponses, responses, userDataPath }) => {
+    const blocker = path.join(userDataPath, 'blocker');
+    await fs.writeFile(blocker, '');
+    openDialogResponses.push({ canceled: false, filePaths: [path.join(blocker, 'nested')] });
+    await controller.chooseDownloadDirectory();
+    responses.push(0);
+    await controller.update({ askDownloadLocation: false });
+
+    const item = downloadItem('Report.pdf');
+    controller.prepareDownload(item);
+
+    assert.equal(item.savePath(), undefined);
+  });
+});
+
 test('the save dialog opens in the chosen download folder when asking is on', async () => {
   await withController(async ({ controller, openDialogResponses, userDataPath }) => {
     const chosen = path.join(userDataPath, 'Chosen');

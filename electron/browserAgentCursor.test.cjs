@@ -3,11 +3,11 @@ const { EventEmitter } = require('node:events');
 const test = require('node:test');
 const {
   BROWSER_AGENT_CURSOR_DEFAULT_SIZE,
-  BROWSER_AGENT_CURSOR_HOTSPOT,
   BROWSER_AGENT_CURSOR_STYLES,
   createBrowserAgentCursorController,
 } = require('./browserAgentCursor.cjs');
 const { createBrowserAgentCursorDataUrl } = require('./browserAgentCursorDocument.cjs');
+const { scaleCursorHotspot } = require('./browserAgentCursorGeometry.cjs');
 
 function deferred() {
   let resolve;
@@ -137,7 +137,7 @@ test('cursor overlay is sandboxed, click-through, static, and blocks navigation'
 test('cursor documents are distinct and script-free', () => {
   assert.deepEqual(BROWSER_AGENT_CURSOR_STYLES, ['dark', 'light', 'droidex']);
   assert.equal(BROWSER_AGENT_CURSOR_DEFAULT_SIZE, 36);
-  assert.deepEqual(BROWSER_AGENT_CURSOR_HOTSPOT, { x: 7, y: 5 });
+  assert.deepEqual(scaleCursorHotspot(BROWSER_AGENT_CURSOR_DEFAULT_SIZE), { x: 7, y: 5 });
 
   const documents = BROWSER_AGENT_CURSOR_STYLES.map((style) =>
     decodeURIComponent(createBrowserAgentCursorDataUrl(style)),
