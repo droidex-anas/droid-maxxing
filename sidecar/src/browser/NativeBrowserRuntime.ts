@@ -116,7 +116,11 @@ export class NativeBrowserRuntime implements BrowserRuntime {
   }
 
   async fillCredentials(): Promise<BrowserSnapshot> {
-    return this.snapshotFrom(await this.send({ action: 'fillCredentials' }));
+    const result = await this.send({ action: 'fillCredentials' });
+    if (!result.ok) throw new Error(result.error ?? 'Native browser action failed.');
+    // The credential is already on the page once ok is set; a failed follow-up
+    // probe must not report the fill as failed and invite a second fill.
+    return result.snapshot ? this.snapshotFrom(result) : this.snapshot();
   }
 
   async close(): Promise<void> {

@@ -199,6 +199,34 @@ test('reload without a snapshot fails without reusing stale page metadata', asyn
   await assert.rejects(runtime.fillCredentials(), /action completed without a fresh page snapshot/);
 });
 
+test('a successful fill whose probe fails returns a fresh snapshot instead of failing', async () => {
+  const actions: string[] = [];
+  const runtime = new NativeBrowserRuntime({
+    appSessionId: 'app-session-one',
+    browserSessionId: 'browser-one',
+    viewport: { width: 900, height: 700, deviceScaleFactor: 2 },
+    request: async (request) => {
+      actions.push(request.action);
+      return {
+        requestId: request.requestId,
+        appSessionId: request.appSessionId,
+        browserSessionId: request.browserSessionId,
+        ok: true,
+        snapshot:
+          request.action === 'fillCredentials'
+            ? undefined
+            : { url: 'https://example.com/login', scroll: { x: 0, y: 0 }, refs: [] },
+      };
+    },
+  });
+
+  await runtime.open('https://example.com/login');
+  const snapshot = await runtime.fillCredentials();
+
+  assert.equal(snapshot.url, 'https://example.com/login');
+  assert.deepEqual(actions, ['open', 'fillCredentials', 'snapshot']);
+});
+
 test('history navigation never reuses a stale page snapshot', async () => {
   const runtime = new NativeBrowserRuntime({
     appSessionId: 'app-session-one',
