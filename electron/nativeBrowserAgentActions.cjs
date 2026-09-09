@@ -269,7 +269,9 @@ function createNativeBrowserAgentActions({
   }
 
   function showAgentCursor(entry, point) {
-    if (!entry.attached || !entry.visible) {
+    // The overlay exists only while the renderer reports an active run; an
+    // action outside one still records its point so the input stays trusted.
+    if (!entry.attached || !entry.visible || !entry.agentCursorActive) {
       return cursor.park({
         browserSessionId: entry.browserSessionId,
         bounds: entry.view.getBounds(),

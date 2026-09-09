@@ -102,6 +102,8 @@ function createBrowserCookieImports(options) {
         () => discardProfile(planId),
         options.planTtlMs ?? PROFILE_PLAN_TTL_MS,
       );
+      // A faster overlapping preparation may have filled the slot meanwhile.
+      discardPreparedProfile();
       preparedProfile = { planId, plan, timer };
       return { status: 'ready', planId, preview: plan.preview };
     } catch (error) {

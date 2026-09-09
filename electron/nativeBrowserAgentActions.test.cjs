@@ -147,7 +147,7 @@ function harness(overrides = {}) {
         if (overrides.originApproval) await overrides.originApproval.promise;
       },
     },
-    cursor: {
+    cursor: overrides.cursor ?? {
       park: () => true,
       show: async () => true,
     },
@@ -384,6 +384,23 @@ test('reload timeout rejects instead of returning a stale snapshot', async (t) =
   navigationTimer.callback();
 
   await assert.rejects(reload, /navigation timed out/i);
+});
+
+test('a visible pane without an active run parks the cursor instead of blocking input', async () => {
+  const cursorCalls = [];
+  const { actions, entry } = harness({
+    cursor: {
+      park: () => (cursorCalls.push('park'), true),
+      show: async () => (cursorCalls.push('show'), false),
+    },
+  });
+  entry.attached = true;
+  entry.agentCursorActive = false;
+
+  const result = await actions.run(request('hover', { x: 10, y: 12 }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(cursorCalls, ['park']);
 });
 
 test('resize delegates semantic viewport handling without attaching', async () => {

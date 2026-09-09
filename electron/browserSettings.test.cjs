@@ -539,5 +539,17 @@ test('saved-login filling and authentication actions fail closed', async () => {
       /denied for https:\/\/accounts\.example/,
     );
     assert.equal(prompts.at(-1).buttons.length, 2);
+
+    await assert.rejects(
+      controller.authorizeAuthenticationAction({
+        kind: 'oauth',
+        origin: 'https://app.example',
+        targetUrl: 'https://idp.example/authorize?client=1',
+      }),
+    );
+    assert.match(
+      prompts.at(-1).message,
+      /on https:\/\/app\.example, opening https:\/\/idp\.example\?/,
+    );
   });
 });

@@ -156,6 +156,49 @@ test('profile plans commit or discard exactly once through their opaque id', asy
   assert.deepEqual(discarded.calls, ['prepare:Default', 'discard']);
 });
 
+test('a slower overlapping preparation discards the plan it overwrites', async () => {
+  const plans = [{ preview }, { preview }];
+  const pending = [];
+  const discarded = [];
+  const planIds = ['plan-1', 'plan-2'];
+  const controller = createBrowserCookieImports({
+    platform: 'darwin',
+    getCookieStore: () => ({ get: async () => [], set: async () => undefined }),
+    showPrompt: async () => ({ response: 0 }),
+    snapshot: async () => ({ cookieCount: 0 }),
+    recordReceipt: async () => undefined,
+    nextPlanId: () => planIds.shift(),
+    setTimeout: () => ({}),
+    clearTimeout: () => undefined,
+    profileImport: {
+      discoverBrowserCookieProfiles: async () => ({}),
+      createChromeProfileCookieImportPlan: () =>
+        new Promise((resolve) => pending.push(() => resolve(plans[pending.length - 1]))),
+      commitChromeProfileCookieImport: async () => ({
+        ...preview,
+        importedCount: 2,
+        failedCount: 0,
+      }),
+      discardChromeProfileCookieImportPlan: (plan) => {
+        discarded.push(plans.indexOf(plan));
+        return true;
+      },
+    },
+  });
+
+  const slow = controller.prepareProfile('Default');
+  const fast = controller.prepareProfile('Default');
+  await Promise.resolve();
+  pending[1]();
+  assert.equal((await fast).planId, 'plan-1');
+  pending[0]();
+  assert.equal((await slow).planId, 'plan-2');
+
+  assert.deepEqual(discarded, [1]);
+  await assert.rejects(controller.commitProfile('plan-1'), /invalid or expired/);
+  assert.equal((await controller.commitProfile('plan-2')).importedCount, 2);
+});
+
 test('profile plans expire and discard decrypted cookie data', async () => {
   const { calls, controller, timers } = fixture(0);
   await controller.prepareProfile('Default');

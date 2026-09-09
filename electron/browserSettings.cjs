@@ -217,13 +217,17 @@ class BrowserSettingsController {
     };
     const action = labels[intent?.kind];
     if (!action) throw new Error('Unknown browser authentication action.');
+    // An OAuth popup may open a different host than the page; the consent must name it.
+    const popupOrigin =
+      intent.kind === 'oauth' && intent.targetUrl ? exactHttpOrigin(intent.targetUrl) : origin;
+    const destination = popupOrigin === origin ? origin : `${origin}, opening ${popupOrigin}`;
     const response = await this.showMessageBox({
       type: 'question',
       buttons: ['Approve once', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
       title: 'Approve DROIDEX authentication action?',
-      message: `Allow DROIDEX to ${action} on ${origin}?`,
+      message: `Allow DROIDEX to ${action} on ${destination}?`,
       detail:
         'This approval is single-use. Passwords remain protected, and any supported OS passkey or provider consent sheet stays under your control.',
     });
