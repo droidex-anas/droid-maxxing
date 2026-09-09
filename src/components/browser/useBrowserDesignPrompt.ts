@@ -117,9 +117,7 @@ export function useBrowserDesignPrompt({
       if (sessionLive) {
         queueDesignPrompt(text, [reference], [referenceId]);
       } else {
-        window.setTimeout(() => {
-          sendDesignPrompt(browserKey, text, [referenceId]);
-        }, 0);
+        sendDesignPrompt(browserKey, text, [referenceId]);
         emitDesignTranscript(text, [reference]);
       }
       setReferences([]);

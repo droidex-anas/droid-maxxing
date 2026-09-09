@@ -20,7 +20,6 @@ import type {
   BrowserViewport,
   DesignAnchor,
   DesignAnchorDetail,
-  ScrollDirection,
 } from './types.js';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'droid-browser-test-'));
@@ -38,14 +37,7 @@ class FakeRuntime implements BrowserRuntime {
   hovers: { x: number; y: number; selector?: string }[] = [];
   refs: BrowserElementRef[] = [buttonRef()];
   selections: { selector: string; value: string }[] = [];
-  scrolls: {
-    direction: ScrollDirection;
-    pixels?: number;
-    x?: number;
-    y?: number;
-    selector?: string;
-    ref?: string;
-  }[] = [];
+  scrolls: BrowserScrollAction[] = [];
   screenshots: BrowserScreenshotOptions[] = [];
   captures: (BrowserBox | undefined)[] = [];
   viewport: BrowserViewport;
@@ -266,6 +258,28 @@ test('restore keeps an existing session authoritative and never reopens its stal
   assert.equal(runtime.snapshotRequests, 0);
 });
 
+test('restore refuses a browser session that already belongs to another chat', async () => {
+  const manager = createManager();
+  const live = await manager.open({
+    appSessionId: 'app-owner',
+    url: 'https://example.com/owned',
+  });
+
+  assert.throws(
+    () =>
+      manager.restore({
+        browserSessionId: live.browserSessionId,
+        appSessionId: 'app-intruder',
+        url: 'https://example.com/owned',
+        viewport: { width: 1280, height: 720, deviceScaleFactor: 2 },
+        viewportMode: 'custom',
+        scroll: { x: 0, y: 0 },
+      }),
+    /already belongs to another Droid chat/,
+  );
+  assert.equal(manager.hasSession('app-intruder'), false);
+});
+
 test('opening a new page clears stale history when its snapshot omits navigation state', async () => {
   let runtime!: FakeRuntime;
   const manager = createManager({
@@ -403,6 +417,7 @@ test('failed open preserves the committed URL and viewport without emitting opti
   assert.equal(manager.state('m1')?.url, committed?.url);
   assert.deepEqual(manager.state('m1')?.viewport, committed?.viewport);
   assert.equal(manager.state('m1')?.viewportMode, committed?.viewportMode);
+  assert.deepEqual(runtime.viewport, committed?.viewport);
 });
 
 test('failed agent click does not emit speculative browser state', async () => {
@@ -451,7 +466,7 @@ test('untargeted scroll defers its point to the live native viewport', async () 
   await manager.open({ appSessionId: 'm1', url: 'http://127.0.0.1:1420/' });
 
   await manager.scroll('m1', 'down', 500);
-  await manager.scroll('m1', 'up', 200, 'agent', '@e1');
+  await manager.scroll('m1', 'up', 200, '@e1');
 
   assert.deepEqual(runtime.scrolls, [
     {

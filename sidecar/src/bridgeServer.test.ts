@@ -357,7 +357,7 @@ test('async admission closes a client whose queued commands exceed the bound', a
       }
       assert.equal(await closed, 1009);
       gate.release();
-      await Promise.resolve();
+      await new Promise((resolve) => setImmediate(resolve));
       assert.deepEqual(commands, []);
     },
     async (command) => {

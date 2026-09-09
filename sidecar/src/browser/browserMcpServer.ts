@@ -5,6 +5,10 @@ import { browserMcpToolDefs as defs } from './browserMcpToolDefs.js';
 import type { BrowserState, DesignReference } from './types.js';
 import { jsonResult, safeTool, type ToolHandlerResult } from '../mcpToolUtils.js';
 
+// A design_context reply carries at most this many screenshots; the agent
+// fetches any older reference by @id with design_reference.
+const MAX_CONTEXT_IMAGES = 4;
+
 export function createBrowserMcpServer(
   manager: BrowserSessionManager,
   appSessionIdForTool: () => string | undefined,
@@ -167,7 +171,6 @@ export function createBrowserMcpServer(
             appSessionId(),
             input.direction,
             input.pixels,
-            undefined,
             input.ref,
           );
           return jsonResult(stateForTool(state));
@@ -227,20 +230,16 @@ export function createBrowserMcpServer(
           await manager.refresh(id);
           const context = manager.designContext(id);
           const refs = context.references;
-          const images = refs.flatMap((ref) =>
-            ref.screenshot
-              ? [
-                  {
-                    type: 'image' as const,
-                    data: ref.screenshot.base64,
-                    mimeType: 'image/png' as const,
-                  },
-                ]
-              : [],
-          );
+          const withScreenshots = refs.flatMap((ref) => (ref.screenshot ? [ref.screenshot] : []));
+          const images = withScreenshots.slice(-MAX_CONTEXT_IMAGES).map((screenshot) => ({
+            type: 'image' as const,
+            data: screenshot.base64,
+            mimeType: 'image/png' as const,
+          }));
           const result = jsonResult({
             ok: true,
             instruction: input.instruction,
+            omittedScreenshots: withScreenshots.length - images.length,
             ...stateForTool(context.state, refs),
           });
           if (images.length > 0) {

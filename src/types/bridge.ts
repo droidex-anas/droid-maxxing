@@ -417,6 +417,11 @@ export interface BrowserNativeSnapshot {
   scrollResult?: BrowserScrollResult;
 }
 
+/**
+ * The outcome of one scroll. `x`/`y` are the resulting absolute scroll offsets
+ * of the scrolled target, while `requested.x`/`requested.y` are the signed
+ * deltas that were asked for.
+ */
 export interface BrowserScrollResult {
   x: number;
   y: number;
@@ -768,7 +773,6 @@ export type ClientCommand =
       direction: BrowserScrollDirection;
       pixels?: number;
       ref?: string;
-      source?: BrowserActionSource;
     }
   | {
       type: 'browser.screenshot';

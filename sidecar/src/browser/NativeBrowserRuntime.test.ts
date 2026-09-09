@@ -86,7 +86,7 @@ test('open fails when navigation returns no fresh DOM snapshot', async () => {
 
   await assert.rejects(
     runtime.open('https://example.com/'),
-    /action completed without a fresh page snapshot/,
+    /navigation completed without a fresh page snapshot/,
   );
 });
 
@@ -111,7 +111,7 @@ test('open rejects an early about:blank snapshot instead of fabricating success'
 
   await assert.rejects(
     runtime.open('https://example.com/account'),
-    /action completed without a fresh page snapshot/,
+    /navigation returned an invalid page snapshot/,
   );
 });
 
@@ -168,7 +168,7 @@ test('a second open cannot reuse metadata from the previous page', async () => {
   await runtime.open('https://example.com/first');
   await assert.rejects(
     runtime.open('https://example.com/second'),
-    /action completed without a fresh page snapshot/,
+    /navigation completed without a fresh page snapshot/,
   );
 });
 

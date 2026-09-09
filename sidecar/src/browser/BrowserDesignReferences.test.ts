@@ -130,7 +130,7 @@ test('session disposal during an anchor capture rejects and removes the late cro
 test('standalone screenshots keep only the newest 32 pending image files', async () => {
   await withReferences(
     async () => '',
-    async (references) => {
+    async (references, browserDataDir) => {
       let oldestPath = '';
       let newestPath = '';
       for (let index = 0; index < 33; index += 1) {
@@ -144,6 +144,10 @@ test('standalone screenshots keep only the newest 32 pending image files', async
 
       await assert.rejects(readFile(oldestPath), /ENOENT/);
       assert.equal((await readFile(newestPath, 'utf8')).length > 0, true);
+      assert.equal(
+        (await readdir(join(browserDataDir, 'design-references', 'app-one'))).length,
+        32,
+      );
     },
   );
 });

@@ -27,6 +27,35 @@ test('browser actions execute in request order within one managed session', asyn
   assert.equal(manager.state('chat-1')?.url, 'https://example.test/keypressed');
 });
 
+test("a resize queued behind a click commits the click's page with the new viewport", async () => {
+  const runtime = new ControlledRuntime();
+  const manager = new BrowserSessionManager({ runtimeFactory: () => runtime });
+  await manager.open({ appSessionId: 'chat-1', url: 'https://example.test' });
+
+  const clickResult = deferred<BrowserSnapshot>();
+  runtime.nextClickResult = clickResult;
+  const clicked = manager.click({ appSessionId: 'chat-1', x: 1, y: 1 });
+  await runtime.clickStarted.promise;
+  const resized = manager.resizeViewport({
+    appSessionId: 'chat-1',
+    viewport: { width: 390, height: 844, deviceScaleFactor: 2 },
+    viewportMode: 'mobile',
+  });
+  clickResult.resolve(snapshot('https://example.test/clicked'));
+
+  // The resize lands behind the click and supersedes its return value; the
+  // committed state must still describe the page the click navigated to.
+  await assert.rejects(clicked, /superseded/);
+  await resized;
+
+  assert.equal(manager.state('chat-1')?.url, 'https://example.test/clicked');
+  assert.deepEqual(manager.state('chat-1')?.viewport, {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+  });
+});
+
 test('close invalidates active and queued actions before a replacement is created', async () => {
   const runtimes: ControlledRuntime[] = [];
   const updates: string[] = [];
@@ -142,7 +171,9 @@ test('closing a session rejects an update still awaiting design cleanup', async 
 class ControlledRuntime implements BrowserRuntime {
   readonly actions: string[] = [];
   readonly typeStarted = deferred<void>();
+  readonly clickStarted = deferred<void>();
   nextTypeResult?: Deferred<BrowserSnapshot>;
+  nextClickResult?: Deferred<BrowserSnapshot>;
 
   async open(url: string): Promise<BrowserSnapshot> {
     this.actions.push('open');
@@ -176,7 +207,8 @@ class ControlledRuntime implements BrowserRuntime {
   }
 
   async click(): Promise<BrowserSnapshot> {
-    return snapshot('https://example.test/clicked');
+    this.clickStarted.resolve();
+    return this.nextClickResult?.promise ?? snapshot('https://example.test/clicked');
   }
 
   async hover(): Promise<BrowserSnapshot> {

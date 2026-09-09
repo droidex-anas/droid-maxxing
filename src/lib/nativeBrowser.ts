@@ -53,6 +53,7 @@ const NATIVE_BROWSER_INTERACTIVE_TIMEOUT_MS = 180_000;
 type DesktopApi = NonNullable<Window['droidControl']>;
 const INTERACTIVE_BROWSER_ACTIONS = new Set<NativeBrowserAgentAction['action']>([
   'open',
+  'reload',
   'goBack',
   'goForward',
   'click',

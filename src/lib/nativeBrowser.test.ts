@@ -165,11 +165,17 @@ test('Enter and saved-login actions retain the approval timeout', async () => {
         browserSessionId: 'browser-1',
         action: 'fillCredentials',
       }),
+      runNativeBrowserAgentAction({
+        requestId: 'reload',
+        appSessionId: 'app-1',
+        browserSessionId: 'browser-1',
+        action: 'reload',
+      }),
     ];
 
     assert.deepEqual(
       fake.timers.map(({ delay }) => delay),
-      [180_000, 180_000],
+      [180_000, 180_000, 180_000],
     );
     fake.timers.forEach(({ callback }) => callback());
     await Promise.all(pending.map((promise) => assert.rejects(promise, /timed out/)));

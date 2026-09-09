@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import type { BrowserRuntime } from './BrowserSessionManager.js';
 import { browserDesignReferenceDir } from './browserPaths.js';
 import { formatDesignPrompt, writeDesignPromptPack } from './designPromptPacks.js';
@@ -179,8 +179,9 @@ export class BrowserDesignReferences {
       this.options.browserDataDir,
     );
     await mkdir(directory, { recursive: true });
-    const extension = extname(name);
-    const stem = extension ? name.slice(0, -extension.length) : name;
+    const safeName = basename(name);
+    const extension = extname(safeName);
+    const stem = extension ? safeName.slice(0, -extension.length) : safeName;
     const path = join(directory, `${stem}-${randomUUID()}${extension}`);
     await writeFile(path, Buffer.from(base64, 'base64'));
     this.ownedImagePaths.add(path);

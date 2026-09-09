@@ -107,7 +107,7 @@ export class SerializedBrowserRuntime implements BrowserRuntime {
   close(): Promise<void> {
     this.actions.invalidate();
     // Close bypasses the action tail intentionally: waiting for a hung native
-    // action would leave its WebContents alive. The wrapper generation rejects
+    // action would leave its WebContents alive. The queue's closed error rejects
     // every late result, and each replacement gets a new browserSessionId, so
     // the old runtime can neither publish state nor target the replacement.
     this.closePromise ??= Promise.resolve().then(() => this.runtime.close());
@@ -121,17 +121,15 @@ interface PendingAction {
 
 class BrowserActionQueue {
   private tail: Promise<void> = Promise.resolve();
-  private generation = 0;
   private closedError?: Error;
   private readonly pending = new Set<PendingAction>();
 
   run<T>(action: () => Promise<T>): Promise<T> {
     if (this.closedError) return Promise.reject(this.closedError);
-    const expectedGeneration = this.generation;
     const queued = this.tail.then(async () => {
-      this.assertCurrent(expectedGeneration);
+      this.assertOpen();
       const value = await action();
-      this.assertCurrent(expectedGeneration);
+      this.assertOpen();
       return value;
     });
     this.tail = queued.then(
@@ -157,15 +155,12 @@ class BrowserActionQueue {
 
   invalidate(): void {
     if (this.closedError) return;
-    this.generation += 1;
     this.closedError = new Error(CLOSED_MESSAGE);
     for (const action of this.pending) action.reject(this.closedError);
     this.pending.clear();
   }
 
-  private assertCurrent(expectedGeneration: number): void {
-    if (this.closedError || expectedGeneration !== this.generation) {
-      throw this.closedError ?? new Error(CLOSED_MESSAGE);
-    }
+  private assertOpen(): void {
+    if (this.closedError) throw this.closedError;
   }
 }

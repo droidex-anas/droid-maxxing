@@ -160,3 +160,36 @@ export interface DesignPromptPack {
   instruction: string;
   references: DesignReference[];
 }
+
+export type BrowserInputSource = 'agent' | 'user';
+
+export interface BrowserRuntime {
+  open(url: string, source?: BrowserInputSource): Promise<BrowserSnapshot>;
+  reload(source?: BrowserInputSource): Promise<BrowserSnapshot>;
+  goBack(): Promise<BrowserSnapshot>;
+  goForward(): Promise<BrowserSnapshot>;
+  setViewport(viewport: BrowserViewport, source?: BrowserInputSource): Promise<void>;
+  screenshot(options?: BrowserScreenshotOptions): Promise<string>;
+  capture(box?: BrowserBox, options?: BrowserScreenshotOptions): Promise<string>;
+  snapshot(): Promise<BrowserSnapshot>;
+  click(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot>;
+  hover(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot>;
+  selectOption(selector: string, value: string, ref?: string): Promise<BrowserSnapshot>;
+  type(text: string): Promise<BrowserSnapshot>;
+  keypress(key: string): Promise<BrowserSnapshot>;
+  scroll(input: BrowserScrollAction): Promise<BrowserSnapshot>;
+  inspect(selector: string, ref?: string): Promise<BrowserElementInspection>;
+  network(clear?: boolean): Promise<BrowserNetworkEvent[]>;
+  console(clear?: boolean): Promise<BrowserConsoleEvent[]>;
+  fillCredentials?(): Promise<BrowserSnapshot>;
+  close(): Promise<void>;
+}
+
+export interface BrowserScrollAction {
+  direction: ScrollDirection;
+  pixels?: number;
+  x?: number;
+  y?: number;
+  selector?: string;
+  ref?: string;
+}

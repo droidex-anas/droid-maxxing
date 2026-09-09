@@ -592,6 +592,7 @@ export function permissionSignature(params: RequestPermissionRequestParams): str
       const namespacedServer = separatorIndex >= 0 ? rawToolName.slice(0, separatorIndex) : '';
       const toolName = separatorIndex >= 0 ? rawToolName.slice(separatorIndex + 3) : rawToolName;
       const serverName = (typeof c.serverName === 'string' ? c.serverName : '') || namespacedServer;
+      if (!serverName || !toolName) return '';
       const key = `mcp::${serverName}::${toolName}`;
       if (!isAutomationMutationPermission(params)) return key;
       const args = toolArgumentDigest(primaryToolInput(params));

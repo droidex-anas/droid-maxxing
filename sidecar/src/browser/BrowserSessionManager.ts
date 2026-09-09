@@ -6,11 +6,12 @@ import type { writeDesignPromptPack } from './designPromptPacks.js';
 import { waitForBrowserCondition } from './browserWait.js';
 import { SerializedBrowserRuntime } from './SerializedBrowserRuntime.js';
 import type {
-  BrowserBox,
   BrowserConsoleEvent,
   BrowserElementInspection,
   BrowserElementRef,
+  BrowserInputSource,
   BrowserNetworkEvent,
+  BrowserRuntime,
   BrowserScreenshotOptions,
   BrowserSnapshot,
   BrowserState,
@@ -41,46 +42,15 @@ export interface BrowserSessionManagerOptions {
   waitDelay?: (milliseconds: number) => Promise<void>;
 }
 
-export interface BrowserRuntime {
-  open(url: string, source?: BrowserInputSource): Promise<BrowserSnapshot>;
-  reload(source?: BrowserInputSource): Promise<BrowserSnapshot>;
-  goBack(): Promise<BrowserSnapshot>;
-  goForward(): Promise<BrowserSnapshot>;
-  setViewport(viewport: BrowserViewport, source?: BrowserInputSource): Promise<void>;
-  screenshot(options?: BrowserScreenshotOptions): Promise<string>;
-  capture(box?: BrowserBox, options?: BrowserScreenshotOptions): Promise<string>;
-  snapshot(): Promise<BrowserSnapshot>;
-  click(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot>;
-  hover(x: number, y: number, selector?: string, ref?: string): Promise<BrowserSnapshot>;
-  selectOption(selector: string, value: string, ref?: string): Promise<BrowserSnapshot>;
-  type(text: string): Promise<BrowserSnapshot>;
-  keypress(key: string): Promise<BrowserSnapshot>;
-  scroll(input: BrowserScrollAction): Promise<BrowserSnapshot>;
-  inspect(selector: string, ref?: string): Promise<BrowserElementInspection>;
-  network(clear?: boolean): Promise<BrowserNetworkEvent[]>;
-  console(clear?: boolean): Promise<BrowserConsoleEvent[]>;
-  fillCredentials?(): Promise<BrowserSnapshot>;
-  close(): Promise<void>;
-}
-
-export interface BrowserScrollAction {
-  direction: ScrollDirection;
-  pixels?: number;
-  x?: number;
-  y?: number;
-  selector?: string;
-  ref?: string;
-}
+export type { BrowserInputSource, BrowserRuntime, BrowserScrollAction } from './types.js';
 
 interface ManagedBrowserSession {
   id: string;
   appSessionId: string;
-  runtime: BrowserRuntime;
+  runtime: SerializedBrowserRuntime;
   state: BrowserState;
   designReferences: BrowserDesignReferences;
 }
-
-export type BrowserInputSource = 'agent' | 'user';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = {
   width: 1200,
@@ -188,15 +158,14 @@ export class BrowserSessionManager {
     source?: BrowserInputSource;
   }): Promise<BrowserState> {
     const session = this.requireSession(input.appSessionId);
-    const nextState = {
+    await session.runtime.setViewport(input.viewport, input.source);
+    session.state = {
       ...session.state,
       viewport: input.viewport,
       viewportMode: input.viewportMode,
       refs: [],
       scrollResult: undefined,
     };
-    await session.runtime.setViewport(input.viewport, input.source);
-    session.state = nextState;
     this.emitUpdated(session.state);
     return session.state;
   }
@@ -263,7 +232,6 @@ export class BrowserSessionManager {
     appSessionId: string,
     direction: ScrollDirection,
     pixels?: number,
-    _source?: BrowserInputSource,
     ref?: string,
   ): Promise<BrowserState> {
     const session = this.requireSession(appSessionId);
@@ -302,9 +270,6 @@ export class BrowserSessionManager {
 
   async fillCredentials(appSessionId: string): Promise<BrowserState> {
     const session = this.requireSession(appSessionId);
-    if (!session.runtime.fillCredentials) {
-      throw new Error('Credential autofill is only available in the live DROIDEX browser.');
-    }
     const snapshot = await session.runtime.fillCredentials();
     return this.updateFromSnapshot(session, snapshot);
   }
@@ -312,16 +277,21 @@ export class BrowserSessionManager {
   async screenshot(appSessionId: string, options: BrowserScreenshotOptions = {}): Promise<string> {
     const session = this.requireSession(appSessionId);
     const base64 = await session.runtime.screenshot(options);
+    const url = session.state.url;
     const screenshotPath = await session.designReferences.saveImage(
       `screenshot-${Date.now().toString(36)}.png`,
       base64,
     );
-    session.state = {
-      ...session.state,
-      screenshotPath,
-      screenshotUrl: this.options.assetUrlFor?.(screenshotPath),
-    };
-    this.emitUpdated(session.state);
+    // A navigation that landed while the image was being written owns the
+    // state; attaching this stale capture to the new page would mislabel it.
+    if (session.state.url === url) {
+      session.state = {
+        ...session.state,
+        screenshotPath,
+        screenshotUrl: this.options.assetUrlFor?.(screenshotPath),
+      };
+      this.emitUpdated(session.state);
+    }
     return screenshotPath;
   }
 
@@ -386,7 +356,13 @@ export class BrowserSessionManager {
     this.sessions.clear();
     const disposals = sessions.map((session) => session.designReferences.dispose());
     const results = await Promise.allSettled(disposals);
-    await Promise.all(sessions.map((session) => session.runtime.close().catch(() => undefined)));
+    await Promise.all(
+      sessions.map((session) =>
+        session.runtime.close().catch((error: unknown) => {
+          console.error(`Failed to close browser runtime ${session.id}.`, error);
+        }),
+      ),
+    );
     for (const result of results) if (result.status === 'rejected') throw result.reason;
   }
 

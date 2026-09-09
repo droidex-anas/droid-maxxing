@@ -174,17 +174,24 @@ export function startBridgeServer(options: {
     ws.on('close', removeConnection);
     ws.on('error', removeConnection);
 
-    void resumeClient(ws, url).then((canAdmit) => {
-      if (!canAdmit || closed || connectionClosed || ws.readyState !== ws.OPEN) {
-        discardPendingCommands();
-        return;
-      }
-      clients.add(ws);
-      admitted = true;
-      const commands = pendingCommands.splice(0);
-      pendingCommandBytes = 0;
-      for (const command of commands) void handleMessage(ws, command);
-    });
+    void resumeClient(ws, url)
+      .then((canAdmit) => {
+        if (!canAdmit || closed || connectionClosed || ws.readyState !== ws.OPEN) {
+          discardPendingCommands();
+          return;
+        }
+        clients.add(ws);
+        admitted = true;
+        const commands = pendingCommands.splice(0);
+        pendingCommandBytes = 0;
+        for (const command of commands) void handleMessage(ws, command);
+      })
+      .catch((error: unknown) => {
+        console.error('Bridge client admission failed:', error);
+        removeConnection();
+        if (ws.readyState === ws.OPEN) ws.close(1011, 'bridge admission failed');
+        else ws.terminate();
+      });
   });
 
   async function resumeClient(ws: WebSocket, url: URL): Promise<boolean> {

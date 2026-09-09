@@ -12,7 +12,7 @@ test('address bar search and scheme checks use omnibox normalization', () => {
 test('reload controls target the restored browser session instead of reopening its saved URL', () => {
   assert.match(
     source,
-    /onReload=\{\(\) => \{[\s\S]*?if \(browserKey && browser\) reloadBrowser\(browserKey\);[\s\S]*?else openCurrentUrl\(\);/,
+    /onReload=\{\(\) => \{[\s\S]*?if \(browserKey && browser\) reloadBrowser\(browserKey, 'user'\);[\s\S]*?else openCurrentUrl\(\);/,
   );
   assert.doesNotMatch(source, /onReload=\{\(\) => \{[\s\S]*?openBrowser\(/);
 });

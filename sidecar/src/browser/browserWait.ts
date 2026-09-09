@@ -30,7 +30,15 @@ export async function waitForBrowserCondition(options: {
     pollIntervalMs = Math.min(MAX_POLL_MS, pollIntervalMs * 2);
   }
   if (!matches(state, options.input)) {
-    throw new Error('Timed out waiting for the browser condition.');
+    const { text, ref, urlIncludes } = options.input;
+    const conditions = [
+      text ? `text ${JSON.stringify(text)}` : undefined,
+      ref ? `ref ${ref}` : undefined,
+      urlIncludes ? `url containing ${JSON.stringify(urlIncludes)}` : undefined,
+    ].filter((condition) => condition !== undefined);
+    throw new Error(
+      `Timed out waiting for the browser condition: ${conditions.join(', ')}. Current URL: ${state.url}`,
+    );
   }
   return state;
 }
@@ -42,11 +50,11 @@ function matches(
   if (input.urlIncludes && !state.url.includes(input.urlIncludes)) return false;
   if (input.ref && !state.refs.some((item) => item.ref === input.ref)) return false;
   if (!input.text) return true;
-  const expected = input.text.toLocaleLowerCase();
+  const expected = input.text.toLowerCase();
   return state.refs.some(
     (item) =>
-      (item.text ?? '').toLocaleLowerCase().includes(expected) ||
-      (item.name ?? '').toLocaleLowerCase().includes(expected),
+      (item.text ?? '').toLowerCase().includes(expected) ||
+      (item.name ?? '').toLowerCase().includes(expected),
   );
 }
 

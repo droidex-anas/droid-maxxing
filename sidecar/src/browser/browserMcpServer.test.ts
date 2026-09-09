@@ -102,6 +102,51 @@ test('cached Design Mode data is read only after main browser policy authorizes 
   assert.deepEqual(calls, ['authorize:m1', 'context:m1', 'authorize:m1', 'reference:m1:@live-1']);
 });
 
+test('design_context caps returned screenshots and reports the omitted ones', async () => {
+  const state = {
+    url: 'https://example.com',
+    viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
+    viewportMode: 'fit' as const,
+    scroll: { x: 0, y: 0 },
+    refs: [],
+  };
+  const references = Array.from({ length: 6 }, (_, index) => ({
+    id: `@live-${index}`,
+    anchor: { id: `@live-${index}`, kind: 'element', label: 'Save', box: box() },
+    url: state.url,
+    viewport: state.viewport,
+    scroll: state.scroll,
+    screenshot: { base64: `image-${index}`, box: box() },
+    createdAt: '2026-01-01T00:00:00.000Z',
+  }));
+  const manager = {
+    async refresh() {
+      return state;
+    },
+    designContext() {
+      return { state, references };
+    },
+  } as unknown as BrowserSessionManager;
+  const server = createBrowserMcpServer(manager, () => 'm1');
+
+  const result = (await server.tools
+    .find((tool) => tool.name === 'design_context')
+    ?.handler({})) as {
+    content: { type: string; data?: string }[];
+  };
+  const images = result.content.filter((block) => block.type === 'image');
+
+  assert.deepEqual(
+    images.map((block) => block.data),
+    ['image-2', 'image-3', 'image-4', 'image-5'],
+  );
+  assert.match(JSON.stringify(result.content[0]), /omittedScreenshots.{0,4}2/);
+});
+
+function box() {
+  return { x: 0, y: 0, width: 10, height: 10 };
+}
+
 test('open keeps high-detail viewport scale by default', async () => {
   let openedViewport: { width: number; height: number; deviceScaleFactor?: number } | undefined;
   const manager = {

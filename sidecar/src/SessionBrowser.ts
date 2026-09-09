@@ -51,6 +51,7 @@ const BROWSER_NATIVE_TIMEOUT_MS = boundedInt(
 const BROWSER_NATIVE_INTERACTIVE_TIMEOUT_MS = 185_000;
 const INTERACTIVE_BROWSER_ACTIONS = new Set<BrowserNativeRequest['action']>([
   'open',
+  'reload',
   'goBack',
   'goForward',
   'click',
@@ -69,6 +70,7 @@ interface PendingNativeBrowserRequest {
 
 export class SessionBrowser {
   private readonly pendingNativeBrowserRequests = new Map<string, PendingNativeBrowserRequest>();
+  private readonly designQueues = new Map<string, Promise<void>>();
   private isShutdown = false;
 
   constructor(private readonly d: SessionBrowserDependencies) {}
@@ -207,7 +209,6 @@ export class SessionBrowser {
         this.requireBrowserAppSessionId(cmd.appSessionId),
         cmd.direction,
         cmd.pixels,
-        cmd.source,
         cmd.ref,
       ),
     );
@@ -236,27 +237,31 @@ export class SessionBrowser {
   async addReference(
     cmd: Extract<ClientCommand, { type: 'browser.design.addReference' }>,
   ): Promise<void> {
-    await this.handleBrowser(cmd.appSessionId, async () => {
-      await this.d.browsers.addReference(
-        this.requireBrowserAppSessionId(cmd.appSessionId),
-        {
-          anchor: cmd.reference.anchor,
-          detail: cmd.reference.detail,
-          id: cmd.reference.id,
-        },
-        cmd.reference.screenshot,
-      );
-    });
+    await this.queueDesign(cmd.appSessionId, () =>
+      this.handleBrowser(cmd.appSessionId, async () => {
+        await this.d.browsers.addReference(
+          this.requireBrowserAppSessionId(cmd.appSessionId),
+          {
+            anchor: cmd.reference.anchor,
+            detail: cmd.reference.detail,
+            id: cmd.reference.id,
+          },
+          cmd.reference.screenshot,
+        );
+      }),
+    );
   }
 
   async sendDesignPrompt(
     cmd: Extract<ClientCommand, { type: 'browser.design.sendPrompt' }>,
   ): Promise<void> {
-    await this.handleBrowser(cmd.appSessionId, async () => {
-      const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-      const { prompt } = await this.d.browsers.designPrompt({ ...cmd, appSessionId });
-      await this.d.sendPrompt(appSessionId, prompt);
-    });
+    await this.queueDesign(cmd.appSessionId, () =>
+      this.handleBrowser(cmd.appSessionId, async () => {
+        const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
+        const { prompt } = await this.d.browsers.designPrompt({ ...cmd, appSessionId });
+        await this.d.sendPrompt(appSessionId, prompt);
+      }),
+    );
   }
 
   resolveNativeBrowserRequest(result: BrowserNativeResult): void {
@@ -331,6 +336,25 @@ export class SessionBrowser {
       this.pendingNativeBrowserRequests.delete(requestId);
       pending.reject(new Error('Browser session closed before the action completed.'));
     }
+  }
+
+  // A reference and the prompt that cites it arrive as two separate wire
+  // commands, so they run in arrival order per chat: a prompt must never reach
+  // the agent before the reference it names has been stored.
+  private queueDesign(
+    appSessionId: string | undefined,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    const key = appSessionId ?? '';
+    const previous = this.designQueues.get(key) ?? Promise.resolve();
+    // Run next whether or not the predecessor settled cleanly: a rejection must
+    // not strand the rest of this chat's design work behind it.
+    const next = previous.then(action, action);
+    this.designQueues.set(key, next);
+    void next.finally(() => {
+      if (this.designQueues.get(key) === next) this.designQueues.delete(key);
+    });
+    return next;
   }
 
   private async handleBrowser(

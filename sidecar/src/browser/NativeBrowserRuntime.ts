@@ -31,7 +31,7 @@ export class NativeBrowserRuntime implements BrowserRuntime {
   }
 
   async open(url: string, source?: BrowserInputSource): Promise<BrowserSnapshot> {
-    return this.snapshotFrom(await this.send({ action: 'open', url, source }));
+    return this.snapshotFrom(await this.send({ action: 'open', url, source }), 'navigation');
   }
 
   async reload(source?: BrowserInputSource): Promise<BrowserSnapshot> {
@@ -154,11 +154,7 @@ export class NativeBrowserRuntime implements BrowserRuntime {
       throw new Error(`Native browser ${kind} completed without a fresh page snapshot.`);
     }
     if (!isBrowserPageUrl(result.snapshot.url)) {
-      throw new Error(
-        kind === 'action'
-          ? 'Native browser action completed without a fresh page snapshot.'
-          : 'Native browser navigation returned an invalid page snapshot.',
-      );
+      throw new Error(`Native browser ${kind} returned an invalid page snapshot.`);
     }
     return result.snapshot;
   }

@@ -288,8 +288,8 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
     await Promise.resolve();
     const timedOutRequest = latestNativeRequest(h.events);
     assert.ok(
-      (timeouts.currentDelay() ?? Number.POSITIVE_INFINITY) < 60_000,
-      'non-interactive reload must fail promptly instead of waiting for an approval window',
+      (timeouts.currentDelay() ?? 0) >= 60_000,
+      'reload can redirect cross-origin into an approval prompt, so it keeps the approval window',
     );
     timeouts.fireCurrent();
     await reload;

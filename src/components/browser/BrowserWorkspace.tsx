@@ -92,6 +92,9 @@ export default function BrowserWorkspace({
   const [customViewport, setCustomViewport] = useState<BrowserViewport>(CUSTOM_DEFAULT_VIEWPORT);
   const [actualViewport, setActualViewport] = useState<Size>({ width: 1, height: 1 });
   const [loadFailure, setLoadFailure] = useState<NativeBrowserLoadFailed | null>(null);
+  // Bumped by the failure banner's Retry so the surface re-runs its attach
+  // effect; a reload alone leaves a session whose attach failed unmounted.
+  const [attachAttempt, setAttachAttempt] = useState(0);
   const [loading, setLoading] = useState(false);
   const [canGoBack, setCanGoBack] = useState(browser?.canGoBack ?? false);
   const [canGoForward, setCanGoForward] = useState(browser?.canGoForward ?? false);
@@ -322,7 +325,7 @@ export default function BrowserWorkspace({
         onGoForward={() => void navigateHistory('forward')}
         onReload={() => {
           startLoading();
-          if (browserKey && browser) reloadBrowser(browserKey);
+          if (browserKey && browser) reloadBrowser(browserKey, 'user');
           else openCurrentUrl();
         }}
         onToggleDesignMode={() => {
@@ -346,7 +349,8 @@ export default function BrowserWorkspace({
           onRetry={() => {
             setLoadFailure(null);
             startLoading();
-            if (browserKey && browser) reloadBrowser(browserKey);
+            setAttachAttempt((attempt) => attempt + 1);
+            if (browserKey && browser) reloadBrowser(browserKey, 'user');
             else openCurrentUrl();
           }}
           onDismiss={() => {
@@ -361,6 +365,7 @@ export default function BrowserWorkspace({
             isAgentRunning={sessionWorkActive}
             browserKey={browserKey}
             visibleBrowserSessionId={browser?.browserSessionId}
+            attachAttempt={attachAttempt}
             obscured={obscured}
             url={activeUrl}
             viewport={requestedViewport}

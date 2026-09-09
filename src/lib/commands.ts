@@ -391,8 +391,8 @@ export const closeBrowser = (appSessionId: string) => {
   bridge.send({ type: 'browser.close', appSessionId });
 };
 
-export const reloadBrowser = (appSessionId: string) => {
-  bridge.send({ type: 'browser.reload', appSessionId, source: 'user' });
+export const reloadBrowser = (appSessionId: string, source?: BrowserActionSource) => {
+  bridge.send({ type: 'browser.reload', appSessionId, ...(source ? { source } : {}) });
 };
 
 export const refreshBrowser = (appSessionId: string) => {
@@ -430,7 +430,6 @@ export const scrollBrowser = (input: {
   direction: BrowserScrollDirection;
   pixels?: number;
   ref?: string;
-  source?: BrowserActionSource;
 }) => {
   bridge.send({ type: 'browser.scroll', ...input });
 };
