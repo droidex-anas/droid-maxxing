@@ -58,11 +58,12 @@ function hardenAuthenticationPopup(window) {
   window.setMenuBarVisibility?.(false);
   const contents = window.webContents;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Live navigation must stay uncapped; real SAML/OAuth responses exceed the stored-URL limit.
   contents.on('will-navigate', (event, url) => {
-    if (!isSafeHttpUrl(url, POPUP_URL_LIMIT)) event.preventDefault();
+    if (!isSafeHttpUrl(url)) event.preventDefault();
   });
   contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
-    if (isMainFrame && !isSafeHttpUrl(url, POPUP_URL_LIMIT)) event.preventDefault();
+    if (isMainFrame && !isSafeHttpUrl(url)) event.preventDefault();
   });
   contents.on('will-attach-webview', (event) => event.preventDefault());
 }

@@ -128,7 +128,7 @@ test('authentication popups reject unsafe URLs and prevent unsafe child navigati
   );
   assert.equal(prevented, true);
 
-  const redirect = (isMainFrame) => {
+  const redirect = (isMainFrame, url = 'file:///tmp/private') => {
     let redirectPrevented = false;
     handlers.get('will-redirect')(
       {
@@ -136,7 +136,7 @@ test('authentication popups reject unsafe URLs and prevent unsafe child navigati
           redirectPrevented = true;
         },
       },
-      'file:///tmp/private',
+      url,
       false,
       isMainFrame,
     );
@@ -144,4 +144,6 @@ test('authentication popups reject unsafe URLs and prevent unsafe child navigati
   };
   assert.equal(redirect(true), true);
   assert.equal(redirect(false), false);
+  // Real SAML/OAuth responses exceed the stored-URL cap and must still navigate.
+  assert.equal(redirect(true, `https://idp.example/saml?r=${'a'.repeat(9_000)}`), false);
 });

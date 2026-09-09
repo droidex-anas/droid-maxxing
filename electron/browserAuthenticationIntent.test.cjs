@@ -56,6 +56,27 @@ test('OAuth popup authorization requires an authoritative exact destination', ()
   );
 });
 
+test('a long live page URL validates while an over-long popup target is rejected', () => {
+  const currentUrl = `https://app.example/login?saml=${'a'.repeat(9_000)}`;
+  assert.equal(
+    validateAgentAuthenticationIntent({ kind: 'signin', origin: 'https://app.example' }, currentUrl)
+      .origin,
+    'https://app.example',
+  );
+  assert.throws(
+    () =>
+      validateAgentAuthenticationIntent(
+        {
+          kind: 'oauth',
+          origin: 'https://app.example',
+          targetUrl: `https://accounts.example/authorize?state=${'a'.repeat(9_000)}`,
+        },
+        currentUrl,
+      ),
+    /Authentication destination is invalid/,
+  );
+});
+
 test('passkey authentication never grants a web popup', () => {
   const intent = validateAgentAuthenticationIntent(
     { kind: 'passkey', origin: 'https://app.example' },

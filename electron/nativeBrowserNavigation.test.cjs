@@ -104,6 +104,14 @@ test('agent activity cannot spend a physical navigation capability minted before
   assert.equal(approvals.length, 1);
 });
 
+test('unknown navigation transition kinds fail closed', () => {
+  const { entry, navigation, view } = harness();
+  assert.throws(
+    () => navigation.authorizeTransition(entry, view, 'download', 'https://next.test/path'),
+    /Unknown browser navigation transition/,
+  );
+});
+
 test('cross-origin transition begins one approval and consumes its successful load', async () => {
   const approval = deferred();
   const { approvals, entry, loads, navigation, view } = harness({ approval });

@@ -419,6 +419,30 @@ test('a canceled action stops at its next checkpoint and releases the reservatio
   assert.equal(entry.canceledRequestId, null);
 });
 
+test('a canceled open stops before navigation approval and never scripts the page', async () => {
+  const open = deferred();
+  let consumed = false;
+  const { actions, calls, entry } = harness({
+    open,
+    navigation: {
+      consumePendingApproval: async () => {
+        consumed = true;
+        return false;
+      },
+    },
+  });
+  const result = actions.run(request('open', { url: 'https://site.test/page' }));
+  await Promise.resolve();
+
+  assert.equal(actions.cancel('browser-1', 'request-1'), true);
+  open.resolve();
+
+  await assert.rejects(result, /page changed before the browser action completed/);
+  assert.equal(consumed, false);
+  assert.ok(!calls.scripts.some((script) => script.includes('__DROIDMAXX_AGENT_ACTION')));
+  assert.equal(entry.agentActionActive, false);
+});
+
 test('resize delegates semantic viewport handling without attaching', async () => {
   const { actions, calls, entry } = harness();
   const viewport = { width: 640, height: 480, deviceScaleFactor: 2 };

@@ -1,6 +1,9 @@
 const { requireFreshBrowserSnapshot } = require('./browserPageState.cjs');
 const { setBrowserActionActive } = require('./nativeBrowserHost.cjs');
 
+const CANCELED_ACTION_MESSAGE =
+  'The page changed before the browser action completed. No input was sent.';
+
 function createNativeBrowserAgentActions({
   appName,
   ensureView,
@@ -51,6 +54,7 @@ function createNativeBrowserAgentActions({
     try {
       if (!isUserRequest) {
         await browserSettings.authorizeAgentRequest(request);
+        if (entry.canceledRequestId === request.requestId) throw new Error(CANCELED_ACTION_MESSAGE);
         if (
           getEntry(request.browserSessionId) !== entry ||
           entry.view !== reservedView ||
@@ -62,6 +66,7 @@ function createNativeBrowserAgentActions({
 
       if (request.action === 'open') {
         await openBrowser(request.browserSessionId, request.url, request.viewport);
+        if (entry.canceledRequestId === request.requestId) throw new Error(CANCELED_ACTION_MESSAGE);
         if (entry.view !== reservedView || !safeWebContents(reservedView)) {
           throw new Error('The browser view changed while the page was opening.');
         }
@@ -84,11 +89,7 @@ function createNativeBrowserAgentActions({
         !actionContents.isDestroyed() &&
         restoredEntry.documentGeneration === actionDocumentGeneration;
       const assertCurrentActionTarget = () => {
-        if (!isCurrentActionTarget()) {
-          throw new Error(
-            'The page changed before the browser action completed. No input was sent.',
-          );
-        }
+        if (!isCurrentActionTarget()) throw new Error(CANCELED_ACTION_MESSAGE);
       };
       setBrowserActionActive(restoredEntry, true);
 

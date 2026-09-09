@@ -43,7 +43,10 @@ function createNativeBrowserRecovery({
       try {
         ensureView(entry.browserSessionId);
         mountRecovered(entry, bounds, revision);
-        if (targetUrl) void loadUrl(entry, targetUrl, { force: true });
+        if (targetUrl)
+          Promise.resolve(loadUrl(entry, targetUrl, { force: true })).catch((error) => {
+            console.error(`failed to reload native browser URL after recovery: ${error.message}`);
+          });
       } catch (error) {
         console.error(`failed to recover native browser renderer: ${error.message}`);
       }

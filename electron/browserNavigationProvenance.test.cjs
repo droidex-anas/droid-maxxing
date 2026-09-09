@@ -4,7 +4,6 @@ const {
   agentNavigationAutonomy,
   consumeTrustedUserNavigation,
   createTrustedUserNavigation,
-  requiresAgentOriginApproval,
 } = require('./browserNavigationProvenance.cjs');
 
 test('an exact trusted physical navigation is consumed once for its owning browser document', () => {
@@ -98,22 +97,8 @@ test('physical navigation expires and cannot cross browser, view, or document bo
   }
 });
 
-test('trusted physical transitions and active manual redirect chains do not request agent approval', () => {
-  assert.equal(requiresAgentOriginApproval('redirect', true), false);
-  assert.equal(requiresAgentOriginApproval('navigate', true), false);
-  assert.equal(requiresAgentOriginApproval('popup', true), false);
-  assert.equal(requiresAgentOriginApproval('navigate', false), true);
-});
-
 test('out-of-band page transitions cannot inherit stale agent autonomy', () => {
   assert.equal(agentNavigationAutonomy({ autonomy: 'high' }), 'high');
   assert.equal(agentNavigationAutonomy(null), 'low');
   assert.equal(agentNavigationAutonomy(undefined), 'low');
-});
-
-test('unknown navigation transition kinds fail closed', () => {
-  assert.throws(
-    () => requiresAgentOriginApproval('download', true),
-    /Unknown browser navigation transition/,
-  );
 });

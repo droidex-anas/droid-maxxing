@@ -7,12 +7,13 @@ function fixture(restoreSnapshot = async () => {}) {
   const mounted = [];
   const cursorCalls = [];
   const entries = new Map();
+  const throttling = [];
   for (const id of ['first', 'second']) {
     const view = {
       webContents: {
         isDestroyed: () => false,
         getURL: () => 'https://example.test/',
-        setBackgroundThrottling: () => {},
+        setBackgroundThrottling: (value) => throttling.push(value),
       },
       setBounds: (bounds) => {
         view.bounds = bounds;
@@ -59,7 +60,7 @@ function fixture(restoreSnapshot = async () => {}) {
     loadUrl: () => assert.fail('unexpected navigation'),
     requireLoaded: () => {},
   });
-  return { layout, entries, mounted, cursorCalls };
+  return { layout, entries, mounted, cursorCalls, throttling };
 }
 
 test('an idle browser stays attached without presenting an agent cursor', async () => {
@@ -81,6 +82,18 @@ test('ending a run hides its cursor without hiding the browser page', async () =
   ]);
   assert.equal(f.entries.get('first').attached, true);
   assert.equal(f.entries.get('first').visible, true);
+});
+
+test('an in-flight agent action keeps throttling off when its view is hidden or detached', async () => {
+  const f = fixture();
+  await f.layout.attach('first', { width: 800, height: 600 });
+  f.entries.get('first').agentActionActive = true;
+  f.throttling.length = 0;
+
+  f.layout.setVisible('first', false, false);
+  f.layout.detach('first');
+
+  assert.deepEqual(f.throttling, [false, false]);
 });
 
 test('a stopped run cannot regain its cursor when a pending attach finishes', async () => {

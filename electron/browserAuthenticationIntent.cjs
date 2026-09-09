@@ -19,7 +19,10 @@ function validateAgentAuthenticationIntent(intent, currentUrl) {
     kind: intent.kind,
     origin: currentOrigin,
     label: typeof intent.label === 'string' ? intent.label : '',
-    targetUrl: intent.targetUrl === undefined ? undefined : exactHttpUrl(intent.targetUrl),
+    targetUrl:
+      intent.targetUrl === undefined
+        ? undefined
+        : exactHttpUrl(intent.targetUrl, { maxLength: MAX_BROWSER_URL_LENGTH }),
   };
 }
 
@@ -35,11 +38,12 @@ function exactHttpOrigin(value) {
   return new URL(exactHttpUrl(value)).origin;
 }
 
-function exactHttpUrl(value) {
-  if (!isParsableUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH })) {
+// Only the persisted popup target is length-capped; live page URLs must not be.
+function exactHttpUrl(value, { maxLength } = {}) {
+  if (!isParsableUrl(value, { maxLength })) {
     throw new Error('Authentication destination is invalid.');
   }
-  const parsed = parseSafeHttpUrl(value, { maxLength: MAX_BROWSER_URL_LENGTH });
+  const parsed = parseSafeHttpUrl(value, { maxLength });
   if (!parsed) {
     throw new Error('Authentication destination must use HTTP(S) without embedded credentials.');
   }

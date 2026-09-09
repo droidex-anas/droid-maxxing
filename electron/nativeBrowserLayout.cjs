@@ -3,6 +3,7 @@ const {
   safeWebContents,
   isBrowserViewUsable,
   setBrowserViewBoundsIfChanged,
+  setBrowserActionActive,
 } = require('./nativeBrowserHost.cjs');
 
 // Sole owner of renderer attachment intent, including leases across page restores.
@@ -44,9 +45,9 @@ function createNativeBrowserLayout({
       detachNativeBrowser(attachedBrowserSessionId, false);
     }
     if (!view) throw new Error(`${appName} browser is not open.`);
+    entry.attached = true;
     viewHost.attachToMainWindow(entry);
     attachedBrowserSessionId = entry.browserSessionId;
-    entry.attached = true;
     setBrowserViewBoundsIfChanged(view, requestedAttachmentBounds);
     if (entry.visible && entry.agentCursorActive)
       cursor.attach({
@@ -88,7 +89,7 @@ function createNativeBrowserLayout({
     if (attachedBrowserSessionId === targetBrowserSessionId) attachedBrowserSessionId = null;
     entry.attached = false;
     cursor.detach(entry.browserSessionId);
-    safeWebContents(entry.view)?.setBackgroundThrottling(true);
+    setBrowserActionActive(entry, Boolean(entry.agentActionActive));
     viewHost.removeView(entry, entry.view);
     viewHost.setHiddenBounds(entry, entry.viewport);
     viewHost.addHiddenView(entry);
@@ -116,7 +117,7 @@ function createNativeBrowserLayout({
     if (!entry.agentCursorActive) cursor.detach(entry.browserSessionId);
     if (!isBrowserViewUsable(entry.view) || !entry.attached) return;
     entry.view.setVisible(entry.visible);
-    safeWebContents(entry.view)?.setBackgroundThrottling(!entry.visible);
+    setBrowserActionActive(entry, Boolean(entry.agentActionActive));
     if (entry.visible && entry.agentCursorActive)
       cursor.attach({
         browserSessionId: entry.browserSessionId,
@@ -129,8 +130,8 @@ function createNativeBrowserLayout({
   function mountRecovered(entry, bounds, revision) {
     if (attachmentRevision === revision && requestedAttachmentId === entry.browserSessionId) {
       const recoveredBounds = requestedAttachmentBounds ?? bounds;
-      viewHost.attachToMainWindow(entry);
       entry.attached = true;
+      viewHost.attachToMainWindow(entry);
       attachedBrowserSessionId = entry.browserSessionId;
       setBrowserViewBoundsIfChanged(entry.view, recoveredBounds);
       if (entry.visible && entry.agentCursorActive)

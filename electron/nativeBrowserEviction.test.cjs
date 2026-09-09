@@ -56,9 +56,10 @@ function createHarness(entry, overrides = {}) {
   const failures = [];
   const budget =
     overrides.budget ?? createNativeBrowserBudget({ maxLive: 1, idleMs: 0, now: () => 42 });
+  const list = Array.isArray(entry) ? entry : [entry];
   const eviction = createNativeBrowserEviction({
     budget,
-    entries: () => [entry],
+    entries: () => list,
     closeEntry(target, forget) {
       closed.push({ target, forget });
       target.view = null;
@@ -191,6 +192,31 @@ test('browser work that starts during scroll capture cancels the pending evictio
       assert.equal(closed.length, 0);
     });
   }
+});
+
+test('a scroll capture that never settles does not hold back the other evictions', async () => {
+  await withFakeTimers(async (timers) => {
+    const blocked = createEntry({ browserSessionId: 'browser-blocked' }).entry;
+    blocked.view.webContents.executeJavaScript = () => deferred().promise;
+    const { entry } = createEntry({ browserSessionId: 'browser-2' });
+    const { closed, eviction } = createHarness([blocked, entry]);
+
+    const pending = eviction.evictUnattached();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(
+      closed.map(({ target }) => target.browserSessionId),
+      ['browser-2'],
+    );
+    assert.deepEqual(entry.serialized.scroll, { x: 12, y: 34 });
+
+    timers.find((timer) => !timer.cleared && timer.timeoutMs === 2_000).callback();
+    await pending;
+
+    assert.deepEqual(blocked.serialized.scroll, { x: 0, y: 0 });
+    assert.equal(closed.length, 2);
+  });
 });
 
 test('pending eviction cannot settle after its entry identity changes', async (t) => {

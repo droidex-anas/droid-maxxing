@@ -1,12 +1,4 @@
-const TRANSITION_KINDS = new Set(['navigate', 'popup', 'redirect']);
 const TRUSTED_USER_NAVIGATION_TTL_MS = 1_000;
-
-function requiresAgentOriginApproval(kind, trustedUserTransition) {
-  if (!TRANSITION_KINDS.has(kind)) {
-    throw new Error('Unknown browser navigation transition.');
-  }
-  return !trustedUserTransition;
-}
 
 function createTrustedUserNavigation({
   activationId,
@@ -60,5 +52,4 @@ module.exports = {
   agentNavigationAutonomy,
   consumeTrustedUserNavigation,
   createTrustedUserNavigation,
-  requiresAgentOriginApproval,
 };

@@ -60,7 +60,7 @@ function createNativeBrowserViewHost({ BrowserWindow, getMainWindow, listEntries
     const previousHost = entry.hostWindow;
     const moved = attachChildView(entry, mainWindow);
     entry.view.setVisible(entry.visible);
-    safeWebContents(entry.view)?.setBackgroundThrottling(!entry.visible);
+    setBrowserActionActive(entry, Boolean(entry.agentActionActive));
     if (moved && previousHost === hiddenNativeBrowserWindow) {
       closeIfUnused();
       resize();

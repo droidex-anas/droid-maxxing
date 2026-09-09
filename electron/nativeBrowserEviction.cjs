@@ -5,6 +5,20 @@ const {
 } = require('./nativeBrowserBudget.cjs');
 const { safeWebContents, isBrowserViewUsable } = require('./nativeBrowserHost.cjs');
 
+const CAPTURE_SCROLL_TIMEOUT_MS = 2_000;
+
+// A blocked renderer must not hold the view forever; a missing offset degrades to (0, 0).
+function captureScroll(contents) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), CAPTURE_SCROLL_TIMEOUT_MS);
+    const settle = (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    contents.executeJavaScript(CAPTURE_SCROLL_SCRIPT, true).then(settle, () => settle(undefined));
+  });
+}
+
 // Owns idle timers and asynchronous eviction/restore work. The manager retains
 // session identity; eviction may release only the exact unused view it observed.
 function createNativeBrowserEviction({ budget, entries, closeEntry, loadUrl, reportFailure }) {
@@ -57,9 +71,9 @@ function createNativeBrowserEviction({ budget, entries, closeEntry, loadUrl, rep
 
   async function enforce() {
     const targets = new Set(budget.idsToEvict(budgetEntries()));
-    for (const entry of entries()) {
-      if (targets.has(entry.browserSessionId)) await evict(entry);
-    }
+    await Promise.all(
+      [...entries()].filter((entry) => targets.has(entry.browserSessionId)).map(evict),
+    );
   }
 
   function evict(entry) {
@@ -73,7 +87,7 @@ function createNativeBrowserEviction({ budget, entries, closeEntry, loadUrl, rep
     const use = uses.get(entry);
     const generation = entry.documentGeneration;
     const operation = (async () => {
-      const scroll = await contents.executeJavaScript(CAPTURE_SCROLL_SCRIPT, true);
+      const scroll = await captureScroll(contents);
       if (
         entry.view !== view ||
         contents.isDestroyed() ||

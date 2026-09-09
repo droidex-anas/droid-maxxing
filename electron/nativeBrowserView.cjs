@@ -171,8 +171,8 @@ function createNativeBrowserViewFactory({
     contents.on('render-process-gone', (_event, details) => {
       if (entry.view === view) recoverRenderer(entry, view, details);
     });
-    contents.on('did-navigate-in-page', (_event, url) => {
-      if (entry.view !== view) return;
+    contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (entry.view !== view || !isMainFrame) return;
       entry.targetUrl = url;
       emitLoaded(entry, url);
       if (entry.state.designMode && entry.attached && entry.visible) applyDesignState(entry);

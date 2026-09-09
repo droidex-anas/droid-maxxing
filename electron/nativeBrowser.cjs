@@ -179,9 +179,11 @@ function createNativeBrowserManager(options) {
       viewHost.setHiddenBounds(entry, entry.viewport);
       viewHost.addHiddenView(entry);
     }
-    const result = await loadNativeBrowserUrl(entry, url, { force: true });
-    requireLoaded(result);
-    eviction.schedule(entry);
+    try {
+      requireLoaded(await loadNativeBrowserUrl(entry, url, { force: true }));
+    } finally {
+      eviction.schedule(entry);
+    }
   }
 
   function closeNativeBrowser(browserSessionId) {
