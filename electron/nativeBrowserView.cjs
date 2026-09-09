@@ -91,6 +91,7 @@ function createNativeBrowserViewFactory({
       documentGeneration: 0,
       pendingAgentNavigation: null,
       trustedUserNavigation: null,
+      trustedUserTransitionView: null,
       approvedHistoryTransition: null,
       authenticationPopupCapability: null,
       captureActivityCount: 0,
@@ -140,7 +141,9 @@ function createNativeBrowserViewFactory({
       browserSettings.revokePermissionsForNavigation(contents);
     });
     contents.on('did-navigate', (_event, url) => {
-      if (entry.view !== view || urls.isChromeErrorUrl(url)) return;
+      if (entry.view !== view) return;
+      navigation.settleTransition(entry);
+      if (urls.isChromeErrorUrl(url)) return;
       entry.failedRestoreUrl = null;
       entry.targetUrl = url;
       emitLoaded(entry, url);
@@ -148,6 +151,7 @@ function createNativeBrowserViewFactory({
     contents.on('did-finish-load', () => handleFinishedLoad(entry, view));
     contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
       if (entry.view !== view || !isMainFrame || code === -3) return;
+      navigation.settleTransition(entry);
       const fallback = urls.httpFallbackUrl(url, code);
       if (fallback) {
         urls.rememberFailedRestoreUrl(entry, entry.targetUrl || url);

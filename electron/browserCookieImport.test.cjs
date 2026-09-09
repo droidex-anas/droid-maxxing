@@ -238,6 +238,27 @@ test('JSON URL cookies preserve an explicit insecure flag', async (t) => {
   assert.equal(writes[0].url, 'http://example.com/');
 });
 
+test('JSON URL cookies keep a covering explicit domain and reject an unrelated one', async (t) => {
+  const filePath = await writeExport(
+    t,
+    JSON.stringify([
+      { url: 'https://app.example.com/', domain: '.example.com', name: 'a', value: '1' },
+      { url: 'https://app.example.com/', domain: 'other.test', name: 'b', value: '2' },
+    ]),
+  );
+  const writes = [];
+  const plan = await createBrowserCookieImportPlan({ filePath, now: () => NOW_MS });
+
+  await commitBrowserCookieImport(plan, {
+    cookieStore: { set: async (cookie) => writes.push(cookie) },
+  });
+
+  assert.deepEqual(
+    writes.map((cookie) => [cookie.name, cookie.domain]),
+    [['a', '.example.com']],
+  );
+});
+
 test('JSON exports preserve Electron unspecified SameSite cookies', async (t) => {
   const filePath = await writeExport(
     t,

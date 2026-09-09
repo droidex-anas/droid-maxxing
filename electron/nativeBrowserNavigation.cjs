@@ -45,16 +45,30 @@ function createNativeBrowserNavigation({
     }
     const contents = safeWebContents(view);
     if (!contents || entry.view !== view) return false;
+    const trustedUserTransition =
+      kind === 'redirect'
+        ? entry.userNavigationActive || entry.trustedUserTransitionView === view
+        : beginUserTransition(entry, view, destinationUrl);
     if (!isCrossOriginNavigation(contents.getURL(), destinationUrl)) return true;
     if (consumeApprovedHistoryTransition(entry, view, kind, destinationUrl)) {
       return true;
     }
-    const trustedUserTransition =
-      entry.userNavigationActive ||
-      (kind !== 'redirect' && consumeTrustedPhysicalNavigation(entry, view, destinationUrl));
     if (trustedUserTransition) return true;
     beginAgentNavigationApproval(entry, view, destinationUrl);
     return false;
+  }
+
+  // A user-initiated navigation keeps its provenance through the redirect hops
+  // of the same navigation until it commits or fails.
+  function beginUserTransition(entry, view, destinationUrl) {
+    const trusted =
+      entry.userNavigationActive || consumeTrustedPhysicalNavigation(entry, view, destinationUrl);
+    entry.trustedUserTransitionView = trusted ? view : null;
+    return trusted;
+  }
+
+  function settleTransition(entry) {
+    entry.trustedUserTransitionView = null;
   }
 
   function consumeTrustedPhysicalNavigation(entry, view, destinationUrl) {
@@ -171,6 +185,7 @@ function createNativeBrowserNavigation({
 
   return {
     authorizeTransition,
+    settleTransition,
     authorizeHistoryTransition,
     clearTrustedUserNavigation,
     consumePendingApproval,

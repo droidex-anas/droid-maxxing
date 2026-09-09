@@ -28,6 +28,7 @@ function harness(overrides = {}) {
     documentGeneration: 4,
     pendingAgentNavigation: null,
     trustedUserNavigation: null,
+    trustedUserTransitionView: null,
     approvedHistoryTransition: null,
     agentActionActive: false,
     userNavigationActive: false,
@@ -223,6 +224,32 @@ test('same-origin and active user transitions do not request agent approval', ()
     true,
   );
   assert.deepEqual(approvals, []);
+});
+
+test('a physical navigation keeps its trust through cross-origin redirects until it settles', () => {
+  const { approvals, entry, navigation, view } = harness();
+  navigation.recordTrustedUserNavigation(entry, view, 'activation-1', 'https://current.test/login');
+
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'navigate', 'https://current.test/login'),
+    true,
+  );
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'redirect', 'https://idp.test/authorize'),
+    true,
+  );
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'redirect', 'https://consent.test/allow'),
+    true,
+  );
+  assert.deepEqual(approvals, []);
+
+  navigation.settleTransition(entry);
+  assert.equal(
+    navigation.authorizeTransition(entry, view, 'redirect', 'https://other.test/'),
+    false,
+  );
+  assert.equal(approvals.length, 1);
 });
 
 test('document navigation clears physical trust without canceling an approved load', () => {

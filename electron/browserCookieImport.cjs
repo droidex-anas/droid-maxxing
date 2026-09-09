@@ -311,11 +311,16 @@ function normalizeCookieTarget(row) {
   if (typeof row.url === 'string' && row.url.trim()) {
     const parsed = parseSafeHttpUrl(row.url);
     if (!parsed || !isValidHostname(parsed.hostname)) return undefined;
-    return {
-      url: `${secure ? 'https' : 'http'}://${parsed.host}/`,
-      domain: parsed.hostname,
-      secure,
-    };
+    // An explicit domain widens the scope; it must cover the setter host.
+    let domain = parsed.hostname;
+    if (typeof row.domain === 'string') {
+      domain = row.domain.trim().toLowerCase();
+      const hostname = domain.startsWith('.') ? domain.slice(1) : domain;
+      if (parsed.hostname !== hostname && !parsed.hostname.endsWith(`.${hostname}`)) {
+        return undefined;
+      }
+    }
+    return { url: `${secure ? 'https' : 'http'}://${parsed.host}/`, domain, secure };
   }
   if (typeof row.domain !== 'string') return undefined;
   const domain = row.domain.trim().toLowerCase();

@@ -70,6 +70,9 @@ function harness(overrides = {}) {
     clearTrustedUserNavigation: (entry) => {
       entry.trustedUserNavigation = null;
     },
+    settleTransition: (entry) => {
+      entry.trustedUserTransitionView = null;
+    },
     invalidate: () => {
       calls.invalidateNavigation += 1;
     },
