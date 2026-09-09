@@ -12,6 +12,10 @@ export const LAZY_SURFACE_LOADERS = {
     const module = await import('../features/pull-requests/PullRequestsView');
     return { default: module.PullRequestsView };
   },
+  automations: async () => {
+    const module = await import('../features/automations/AutomationsRoute');
+    return { default: module.AutomationsRoute };
+  },
   review: async () => {
     const module = await import('../components/environment/ReviewPanel');
     return { default: module.ReviewPanel };
@@ -38,6 +42,7 @@ export const LazySpecWikiModal = lazy(LAZY_SURFACE_LOADERS.specWiki);
 export const LazyOnboardingWizard = lazy(LAZY_SURFACE_LOADERS.onboarding);
 export const LazyMissionControl = lazy(LAZY_SURFACE_LOADERS.missionControl);
 export const LazyPullRequestsView = lazy(LAZY_SURFACE_LOADERS.pullRequests);
+export const LazyAutomationsRoute = lazy(LAZY_SURFACE_LOADERS.automations);
 export const LazyReviewPanel = lazy(LAZY_SURFACE_LOADERS.review);
 export const LazyBrowserFocusWorkspace = lazy(LAZY_SURFACE_LOADERS.browser);
 export const LazyTerminalWorkspace = lazy(LAZY_SURFACE_LOADERS.terminal);

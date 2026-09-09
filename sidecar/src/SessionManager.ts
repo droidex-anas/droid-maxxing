@@ -60,6 +60,12 @@ import { SessionFileServing } from './SessionFileServing.js';
 import { mergeModelCatalog } from './modelCatalog.js';
 import { readDroidCliModelCatalog, readDroidCliModelCatalogCache } from './DroidCliCatalog.js';
 import { BrowserSessionManager } from './browser/BrowserSessionManager.js';
+import { createAutomationMcpServer } from './automations/automationMcpServer.js';
+import { isUnattendedAutomationSession } from './automations/AutomationManager.js';
+import {
+  normalizeMcpServerName,
+  shouldAttachAutomationMcp,
+} from './automations/permissionPolicy.js';
 import { createBrowserMcpServer } from './browser/browserMcpServer.js';
 import { isDesignPrompt } from './browser/designPromptPacks.js';
 import { SessionRegistry } from './SessionRegistry.js';
@@ -137,6 +143,7 @@ export interface SessionManagerDependencies {
   history: SessionHistory;
   browsers: SessionBrowsers;
   createLocalMcpResource: (appSessionId: () => string) => StartableLocalMcpResource;
+  createAutomationMcpResource?: (appSessionId: () => string) => StartableLocalMcpResource;
   mcpConfiguration: McpConfiguration;
   loadConfiguredMcpServers: (cwd: string) => McpServerConfig[];
   getFactoryDefaults?: () => Promise<FactoryDefaultSettings>;
@@ -230,6 +237,9 @@ export class SessionManager {
   private readonly autonomyMutationTails = new Map<string, Promise<void>>();
   private readonly browsers: SessionBrowsers;
   private readonly createLocalMcpResource: SessionManagerDependencies['createLocalMcpResource'];
+  private readonly createAutomationMcpResource: NonNullable<
+    SessionManagerDependencies['createAutomationMcpResource']
+  >;
   private readonly mcpConfiguration: McpConfiguration;
   private readonly loadConfiguredMcpServers: SessionManagerDependencies['loadConfiguredMcpServers'];
   private readonly mcpSettings: McpSettings;
@@ -249,6 +259,9 @@ export class SessionManager {
       this.history = options.dependencies.history;
       this.browsers = options.dependencies.browsers;
       this.createLocalMcpResource = options.dependencies.createLocalMcpResource;
+      this.createAutomationMcpResource =
+        options.dependencies.createAutomationMcpResource ??
+        ((appSessionId) => createAutomationMcpServer(appSessionId));
       this.mcpConfiguration = options.dependencies.mcpConfiguration;
       this.loadConfiguredMcpServers = options.dependencies.loadConfiguredMcpServers;
       this.factoryDefaultsOverride = options.dependencies.getFactoryDefaults;
@@ -277,6 +290,7 @@ export class SessionManager {
       this.browsers = browsers;
       this.createLocalMcpResource = (appSessionId) =>
         createBrowserMcpServer(browsers, appSessionId);
+      this.createAutomationMcpResource = (appSessionId) => createAutomationMcpServer(appSessionId);
       this.mcpConfiguration = new DroidMcpConfiguration();
       this.loadConfiguredMcpServers = loadFactoryMcpServers;
       this.factoryDefaultsOverride = undefined;
@@ -806,6 +820,35 @@ export class SessionManager {
     }
   }
 
+  async automationSessionContext(appSessionId: string): Promise<{
+    cwd: string | null;
+    modelId: string | null;
+    reasoningEffort: ReasoningEffort | null;
+    autonomy: Autonomy;
+  } | null> {
+    const summary =
+      this.registry.getLive(appSessionId)?.summary ?? this.registry.resolveSummary(appSessionId);
+    if (!summary) return null;
+    const [defaults, models] = await Promise.all([this.getFactoryDefaults(), this.getModels()]);
+    const mode = defaultsModeForSummary(summary);
+    const modelId = summary.modelId ?? defaultModelForAgent('primary', mode, defaults) ?? null;
+    const defaultReasoning =
+      mode === 'spec' ? defaults.specReasoningEffort : defaults.reasoningEffort;
+    return {
+      cwd: summary.cwd.trim() || null,
+      modelId,
+      reasoningEffort: resolveAutomationReasoningEffort(summary, modelId, defaultReasoning, models),
+      autonomy: summary.autonomy,
+    };
+  }
+
+  async validateAutomationSelection(
+    modelId: string,
+    reasoningEffort: ReasoningEffort,
+  ): Promise<void> {
+    assertAutomationSelectionSupported(modelId, reasoningEffort, await this.getModels());
+  }
+
   private async getModels(): Promise<ModelInfo[]> {
     if (this.cachedModels) return this.cachedModels;
     const droidPath = this.runtime.status().droidPath;
@@ -884,10 +927,13 @@ export class SessionManager {
   }
 
   private async startLocalMcpServers(
-    ref: { id: string },
+    ref: { id: string; clientRef?: string },
     cwd?: string,
   ): Promise<StartedLocalMcpResources> {
     const servers = [this.createLocalMcpResource(() => ref.id)];
+    if (shouldAttachAutomationMcp(ref.clientRef, await isUnattendedAutomationSession(ref.id))) {
+      servers.push(this.createAutomationMcpResource(() => ref.id));
+    }
     const configuredCwd = cwd?.trim();
     const configured = this.loadConfiguredMcpServers(
       configuredCwd === undefined || configuredCwd.length === 0 ? homedir() : configuredCwd,
@@ -896,9 +942,13 @@ export class SessionManager {
     try {
       for (const server of servers) {
         const config = await server.start();
-        if (configured.some((candidate) => candidate.name === config.name)) {
+        const collision = configured.find(
+          (candidate) =>
+            normalizeMcpServerName(candidate.name) === normalizeMcpServerName(config.name),
+        );
+        if (collision) {
           throw new Error(
-            `Droid MCP server name "${config.name}" is reserved by DROIDEX. Rename it in your Droid MCP configuration.`,
+            `Droid MCP server "${collision.name}" collides with "${config.name}", which is reserved by DROIDEX. Rename it in your Droid MCP configuration and start the session again.`,
           );
         }
         configs.push(config);
@@ -1692,6 +1742,26 @@ function arrayItems(result: unknown, key: string): unknown[] {
   return [result];
 }
 
+/**
+ * Guards an automation's model selection. Custom and BYOK models are absent
+ * from the CLI catalog, so an unknown id stays valid and a reasoning level is
+ * rejected only when the catalog actually declares the supported levels.
+ */
+function assertAutomationSelectionSupported(
+  modelId: string,
+  reasoningEffort: ReasoningEffort,
+  models: ModelInfo[],
+): void {
+  if (!modelId.trim()) throw new Error('Choose a model for this automation.');
+  const model = models.find((candidate) => candidate.id === modelId);
+  const supported = model?.supportedReasoningEfforts;
+  if (model && supported?.length && !supported.includes(reasoningEffort)) {
+    throw new Error(
+      `${model.displayName} does not support ${reasoningEffort} reasoning. Pick one of: ${supported.join(', ')}.`,
+    );
+  }
+}
+
 export function createSessionSettingsForAgent(
   agent: ConfigurableSessionRole,
   settings: AgentSettingPatch,
@@ -1801,6 +1871,22 @@ function runtimeFactoryDefaultsWithoutCatalog(
 
 function validModelId(modelId: string | undefined, models: ModelInfo[]): string | undefined {
   return modelId && models.some((model) => model.id === modelId) ? modelId : undefined;
+}
+
+function resolveAutomationReasoningEffort(
+  summary: SessionSummary,
+  modelId: string | null,
+  defaultReasoning: ReasoningEffort | undefined,
+  models: ModelInfo[],
+): ReasoningEffort | null {
+  if (summary.reasoningEffort) return summary.reasoningEffort;
+  const model = modelId ? models.find((candidate) => candidate.id === modelId) : undefined;
+  return (
+    validReasoning(modelId ?? undefined, defaultReasoning, models) ??
+    model?.defaultReasoningEffort ??
+    model?.supportedReasoningEfforts?.at(0) ??
+    null
+  );
 }
 
 function validReasoning(

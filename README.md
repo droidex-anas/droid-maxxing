@@ -171,6 +171,7 @@ diagnostics are off, those reports use a non-persisted report-scoped ID.
 
 ## More documentation
 
+- Scheduled tasks: [Automations](docs/automations.md)
 - Architecture overview: `docs/architecture.md`
 - Command reference: `docs/generated/project-reference.md`
 - Runbooks: `docs/runbooks.md`

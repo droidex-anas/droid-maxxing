@@ -38,6 +38,12 @@ const LOCAL_MCP_CONFIG = McpServerConfigSchema.parse({
   url: 'http://127.0.0.1/test',
 });
 
+const AUTOMATION_MCP_CONFIG = McpServerConfigSchema.parse({
+  type: 'http',
+  name: 'droidex-automations',
+  url: 'http://127.0.0.1/automations',
+});
+
 const CLI_MCP_CONFIG = McpServerConfigSchema.parse({
   type: 'http',
   name: 'test-cli',
@@ -108,6 +114,7 @@ export function createSessionManagerTestContext(
     history,
     browsers,
     createLocalMcpResource: () => new FakeLocalMcpResource(calls),
+    createAutomationMcpResource: () => new FakeAutomationMcpResource(),
     loadConfiguredMcpServers: () => [CLI_MCP_CONFIG],
     mcpConfiguration: {
       add: (server, cwd) => {
@@ -319,6 +326,16 @@ class FakeLocalMcpResource implements StartableLocalMcpResource {
 
   close(): Promise<void> {
     this.calls.push({ target: 'cleanup', method: 'mcp.close', args: [] });
+    return Promise.resolve();
+  }
+}
+
+class FakeAutomationMcpResource implements StartableLocalMcpResource {
+  start(): Promise<McpServerConfig> {
+    return Promise.resolve(AUTOMATION_MCP_CONFIG);
+  }
+
+  close(): Promise<void> {
     return Promise.resolve();
   }
 }

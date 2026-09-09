@@ -279,6 +279,27 @@ test('classifyPermission reads the SDK toolUses shape for exec', () => {
   assert.equal(permissionSignature(params), 'exec::rtk rm -rf build');
 });
 
+test('automation permission signatures hash the complete argument payload', () => {
+  const prefix = 'x'.repeat(9_000);
+  const params = (suffix: string) =>
+    ({
+      toolUses: [
+        {
+          details: {
+            type: 'mcp_tool',
+            serverName: 'droidex-automations',
+            toolName: 'automation_update',
+          },
+          toolUse: {
+            input: { prompt: `${prefix}${suffix}` },
+          },
+        },
+      ],
+    }) as never;
+
+  assert.notEqual(permissionSignature(params('a')), permissionSignature(params('b')));
+});
+
 test('captures Task prompt metadata before the subagent session id exists', () => {
   const normalized = normalizeStreamEvent('app-session-1', 'app-session-1', 'primary', {
     type: 'tool_call',

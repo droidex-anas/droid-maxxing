@@ -8,14 +8,15 @@ import {
   type ClientCommand,
   type ServerEvent,
   type ServerEventBatch,
+  type ServerWireMessage,
 } from '../types/bridge';
-import { serverWireMessage } from './bridgeWireValidation';
 
 type OpenListener = (connectionEpoch: number) => void;
 
 type Listener = (event: ServerEvent) => void;
 type BatchListener = (events: readonly ServerEvent[]) => void;
 type ReconnectScheduler = (callback: () => void, delayMs: number) => void;
+type WireMessageValidator = (value: unknown) => ServerWireMessage | null;
 
 interface TurnBaselineAdopter {
   gitAdoptTurnBaseline: (dir: string, clientRef: string, appSessionId: string) => Promise<unknown>;
@@ -37,11 +38,16 @@ export class Bridge {
   private connectionEpoch = 0;
   private lastGeneration: string | null = null;
   private lastSeq = 0;
+  private validateWireMessage: WireMessageValidator | null = null;
 
   constructor(
     private readonly loadBridgeInfo = getBridgeInfo,
     private readonly schedule: ReconnectScheduler = (callback, delayMs) => {
       setTimeout(callback, delayMs);
+    },
+    private readonly loadWireMessageValidator = async (): Promise<WireMessageValidator> => {
+      const module = await import('./bridgeWireValidation');
+      return module.serverWireMessage;
     },
   ) {}
 
@@ -55,16 +61,25 @@ export class Bridge {
     let port: number;
     let token: string;
     try {
-      ({ port, token } = await this.loadBridgeInfo());
+      if (this.validateWireMessage === null) {
+        const [bridgeInfo, validateWireMessage] = await Promise.all([
+          this.loadBridgeInfo(),
+          this.loadWireMessageValidator(),
+        ]);
+        ({ port, token } = bridgeInfo);
+        this.validateWireMessage = validateWireMessage;
+      } else {
+        ({ port, token } = await this.loadBridgeInfo());
+      }
     } catch {
       this.scheduleReconnect();
       return;
     }
     this.url = `ws://127.0.0.1:${String(port)}${token ? `?token=${token}` : ''}`;
-    this.open();
+    this.open(this.validateWireMessage);
   }
 
-  private open(): void {
+  private open(validateWireMessage: WireMessageValidator): void {
     let ws: WebSocket;
     try {
       ws = new WebSocket(this.connectionUrl());
@@ -93,7 +108,7 @@ export class Bridge {
       } catch {
         return;
       }
-      const wireMessage = serverWireMessage(parsed);
+      const wireMessage = validateWireMessage(parsed);
       if (wireMessage === null) {
         if (isRecord(parsed) && parsed.type === 'events.batch') {
           this.handleMalformedBatch(ws);
@@ -249,6 +264,10 @@ export class Bridge {
 
 function eventsFromSnapshot(message: BridgeSnapshotMessage): ServerEvent[] {
   const events: ServerEvent[] = [
+    {
+      type: 'connection',
+      status: 'connected',
+    },
     {
       type: 'runtime.updated',
       status: message.snapshot.runtime,

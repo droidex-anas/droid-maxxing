@@ -1,5 +1,21 @@
 import type { ModelInfo, ReasoningEffort } from '../types/bridge';
 
+const REASONING_EFFORTS: Readonly<Record<ReasoningEffort, true>> = {
+  off: true,
+  none: true,
+  minimal: true,
+  low: true,
+  medium: true,
+  high: true,
+  xhigh: true,
+  max: true,
+  dynamic: true,
+};
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === 'string' && Object.hasOwn(REASONING_EFFORTS, value);
+}
+
 // Shared rule for the reasoning effort shown next to a model (composer badge
 // and context-panel pill): the session's pinned effort wins, the global
 // default is the fallback, and a model known to support no reasoning efforts

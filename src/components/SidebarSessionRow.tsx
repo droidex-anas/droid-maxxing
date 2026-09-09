@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import { MAX_CHAT_TITLE_LENGTH } from '../lib/chatMetadata';
 import { formatRelativeTime } from '../lib/time';
@@ -9,6 +9,11 @@ import { ACTIVITY_LABELS, type SessionActivityStatus } from '../lib/sidebarActiv
 import { SessionAttentionBadge } from './SessionAttentionBadge';
 import { PrStateIcon } from './environment/GithubIcons';
 import type { PrKind } from '../lib/github';
+
+const AutomationSessionBadge = lazy(async () => {
+  const module = await import('../features/automations/AutomationSessionBadge');
+  return { default: module.AutomationSessionBadge };
+});
 
 // Simple, smooth ring spinner shown on the left of a row while its model
 // works. motion-safe keeps it static for reduced-motion users.
@@ -253,6 +258,9 @@ export const SessionRow = memo(function SessionRow({
             </span>
           )}
         </span>
+        <Suspense fallback={null}>
+          <AutomationSessionBadge appSessionId={session.appSessionId} />
+        </Suspense>
         {attention && !detail ? (
           <SessionAttentionBadge kind={attention} />
         ) : (

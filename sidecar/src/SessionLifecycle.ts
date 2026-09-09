@@ -83,7 +83,10 @@ export interface SessionLifecycleDependencies {
   ensureConnected: () => void;
   getFactoryDefaults: () => Promise<FactoryDefaultSettings>;
   maxContextTokensForModel: (modelId?: string) => number | undefined;
-  startLocalMcpServers: (ref: { id: string }, cwd?: string) => Promise<StartedLocalMcpResources>;
+  startLocalMcpServers: (
+    ref: { id: string; clientRef?: string },
+    cwd?: string,
+  ) => Promise<StartedLocalMcpResources>;
   makePermissionHandler: (ref: { id: string }) => PermissionHandler;
   makeAskUserHandler: (ref: { id: string }) => AskUserHandler;
   compaction: Pick<
@@ -115,7 +118,7 @@ export class SessionLifecycle {
     const d = this.dependencies;
     d.ensureConnected();
     const appCwd = command.cwd ?? '';
-    const ref = { id: '' };
+    const ref = { id: '', clientRef: command.clientRef };
     let pendingMcpServers: LocalMcpResource[] = [];
     let pendingSession: FactorySession | undefined;
     let pendingLiveSession: LiveSession | undefined;
