@@ -195,6 +195,10 @@ test('browser URL persistence removes OAuth secrets without corrupting routes', 
     ),
     'https://app.example.test/#callback?tab=activity',
   );
+  assert.equal(
+    sanitizePersistedBrowserUrl('https://user:password@example.test/'),
+    'https://example.test/',
+  );
   assert.equal(sanitizePersistedBrowserUrl('not a browser URL'), '');
 });
 

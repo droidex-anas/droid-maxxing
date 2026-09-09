@@ -67,7 +67,7 @@ function GrantCard({
       <BrowserOriginList
         origins={sites}
         emptyLabel={emptyLabel ?? ''}
-        listLabel="Exact site grants"
+        listLabel={label}
         actionLabel="Remove"
         actionNoun="grant"
         disabled={disabled}
@@ -103,7 +103,11 @@ export function BrowserSiteGrants({
         <GrantCard
           key={`${card.kind}-${card.state}`}
           label={card.label}
-          description={card.description}
+          description={
+            card.state === 'allow' && snapshot.permissionSummary[card.kind] === 'blocked'
+              ? `${card.kind === 'camera' ? 'Camera' : 'Microphone'} is set to Block, so these remembered choices stay inactive until you switch back to Ask.`
+              : card.description
+          }
           sites={snapshot.sitePermissionRules
             .filter((rule) => rule[card.kind] === card.state)
             .map((rule) => rule.origin)}

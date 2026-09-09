@@ -1,4 +1,5 @@
 import { AlertTriangle, KeyRound, PanelTop } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import cursorDesign from '../../../shared/browserAgentCursorDesign.json';
 import {
   BROWSER_AGENT_CURSOR_STYLES,
@@ -73,6 +74,14 @@ function protectedStorageLabel(snapshot: BrowserSettingsSnapshot): string {
   return 'Saved login storage unavailable';
 }
 
+function sitePermissionDescription(snapshot: BrowserSettingsSnapshot): string {
+  const osClause =
+    snapshot.platform === 'darwin'
+      ? 'macOS access is separate - if it blocks, enable DROIDEX in System Settings > Privacy & Security > Camera or Microphone, then restart.'
+      : "Your operating system's camera and microphone privacy settings are separate - if they block, allow DROIDEX there, then restart.";
+  return `Ask me prompts in DROIDEX and remembers each site's choice in the lists below; Block refuses silently. ${osClause} HID and USB remain blocked.`;
+}
+
 function passkeyCapabilityDescription(snapshot: BrowserSettingsSnapshot): string {
   if (snapshot.webAuthn.touchIdPasskeysAvailable) {
     return 'Touch ID passkeys are available in this signed DROIDEX build. Account choice and the macOS confirmation stay under your control; credentials remain device-bound.';
@@ -106,6 +115,49 @@ function cookieImportCounts(snapshot: BrowserSettingsSnapshot): string {
   if (receipt.skippedCount > 0) counts.push(`${String(receipt.skippedCount)} skipped`);
   if (receipt.failedCount > 0) counts.push(`${String(receipt.failedCount)} failed`);
   return counts.join(' · ');
+}
+
+// Patching on every change event is dropped while a save is in flight (and the
+// input is disabled for that round trip), so the thumb would stall at the first
+// step. Track the drag locally and send one patch on release.
+function AgentCursorSizeSlider({
+  size,
+  disabled,
+  onCommit,
+}: {
+  size: number;
+  disabled: boolean;
+  onCommit: (size: number) => void;
+}) {
+  const [dragged, setDragged] = useState(size);
+  useEffect(() => {
+    setDragged(size);
+  }, [size]);
+  const commit = () => {
+    if (dragged !== size) onCommit(dragged);
+  };
+
+  return (
+    <label className="flex items-center gap-2.5 text-xs text-droid-muted">
+      <span className="w-10 text-right tabular-nums">{String(dragged)} px</span>
+      <input
+        type="range"
+        min={cursorDesign.size.min}
+        max={cursorDesign.size.max}
+        step="2"
+        value={dragged}
+        aria-label="Agent cursor size"
+        disabled={disabled}
+        className="h-1.5 w-28 cursor-pointer accent-droid-accent disabled:cursor-not-allowed disabled:opacity-40"
+        onChange={(event) => {
+          setDragged(Number(event.currentTarget.value));
+        }}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+      />
+    </label>
+  );
 }
 
 export interface BrowserSettingsViewProps {
@@ -342,30 +394,19 @@ export function BrowserSettingsView({
                     }}
                   />
                 </div>
-                <label className="flex items-center gap-2.5 text-xs text-droid-muted">
-                  <span className="w-10 text-right tabular-nums">
-                    {String(snapshot.agentCursorSize)} px
-                  </span>
-                  <input
-                    type="range"
-                    min={cursorDesign.size.min}
-                    max={cursorDesign.size.max}
-                    step="2"
-                    value={snapshot.agentCursorSize}
-                    aria-label="Agent cursor size"
-                    disabled={disabled || !snapshot.showAgentCursor}
-                    className="h-1.5 w-28 cursor-pointer accent-droid-accent disabled:cursor-not-allowed disabled:opacity-40"
-                    onChange={(event) => {
-                      onPatch({ agentCursorSize: Number(event.currentTarget.value) });
-                    }}
-                  />
-                </label>
+                <AgentCursorSizeSlider
+                  size={snapshot.agentCursorSize}
+                  disabled={disabled || !snapshot.showAgentCursor}
+                  onCommit={(agentCursorSize) => {
+                    onPatch({ agentCursorSize });
+                  }}
+                />
               </div>
             </BrowserSettingRow>
             <BrowserSettingRow
               border
               label="Camera and microphone"
-              description="Ask me prompts in DROIDEX and remembers each site's choice in the lists below; Block refuses silently. macOS access is separate - if it blocks, enable DROIDEX in System Settings > Privacy & Security > Camera or Microphone, then restart. HID and USB remain blocked."
+              description={sitePermissionDescription(snapshot)}
             >
               <Dropdown
                 value={snapshot.sitePermissionMode}

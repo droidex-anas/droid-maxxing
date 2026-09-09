@@ -15,10 +15,7 @@ test('offscreen anchors keep vertical popover edges inside the viewport', () => 
   }
 });
 
-test('anchor-width popovers escape a clipping card while staying inside the viewport', async () => {
-  const module = await import('./popoverPosition');
-  const calculatePopoverPosition = Reflect.get(module, 'calculatePopoverPosition');
-  assert.equal(typeof calculatePopoverPosition, 'function');
+test('anchor-width popovers escape a clipping card while staying inside the viewport', () => {
   assert.deepEqual(
     calculatePopoverPosition({
       anchor: { top: 520, right: 780, bottom: 556, left: 620, width: 160 },
@@ -36,10 +33,7 @@ test('anchor-width popovers escape a clipping card while staying inside the view
   );
 });
 
-test('fixed-width popovers clamp to the viewport edge', async () => {
-  const module = await import('./popoverPosition');
-  const calculatePopoverPosition = Reflect.get(module, 'calculatePopoverPosition');
-  assert.equal(typeof calculatePopoverPosition, 'function');
+test('fixed-width popovers clamp to the viewport edge', () => {
   assert.deepEqual(
     calculatePopoverPosition({
       anchor: { top: 80, right: 798, bottom: 116, left: 760, width: 38 },
@@ -57,11 +51,7 @@ test('fixed-width popovers clamp to the viewport edge', async () => {
   );
 });
 
-test('popover width shrinks when the viewport is narrower than its requested width', async () => {
-  const module = await import('./popoverPosition');
-  const calculatePopoverPosition = Reflect.get(module, 'calculatePopoverPosition');
-  assert.equal(typeof calculatePopoverPosition, 'function');
-
+test('popover width shrinks when the viewport is narrower than its requested width', () => {
   assert.deepEqual(
     calculatePopoverPosition({
       anchor: { top: 40, right: 180, bottom: 76, left: 140, width: 40 },

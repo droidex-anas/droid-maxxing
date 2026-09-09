@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useStoreSelector } from '../../hooks/useStore';
 import { reloadBrowser } from '../../lib/commands';
 import { isEditTool } from '../../lib/diff';
+import type { TranscriptEvent } from '../../types/bridge';
 
 const LOCAL_DEV_SERVER = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])/;
 const RELOAD_DEBOUNCE_MS = 600;
@@ -17,6 +18,7 @@ export function useBrowserAutoReload(
   requestedChatId: string | undefined,
 ): void {
   const lastEditTsRef = useRef(0);
+  const pendingEditRef = useRef<string | null>(null);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTranscriptEvent = useStoreSelector((current) => {
     const transcript = requestedChatId ? current.transcripts[requestedChatId] : undefined;
@@ -36,8 +38,7 @@ export function useBrowserAutoReload(
       return;
     }
     const last = lastTranscriptEvent;
-    if (last?.kind !== 'tool_result') return;
-    if (!isEditTool(last.toolName) || last.isError) return;
+    if (!last || !completesEdit(last, pendingEditRef)) return;
     if (last.ts <= lastEditTsRef.current) return;
     lastEditTsRef.current = last.ts;
     if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
@@ -57,4 +58,17 @@ export function useBrowserAutoReload(
       }
     };
   }, [browserKey]);
+}
+
+// Result events carry no usable toolName (see chatFeed.isResultFor), so the edit
+// is recognised on its call and the reload fires when that call's result lands.
+function completesEdit(event: TranscriptEvent, pending: { current: string | null }): boolean {
+  if (event.kind === 'tool_call') {
+    if (isEditTool(event.toolName)) pending.current = event.toolUseId ?? '';
+    return false;
+  }
+  if (event.kind !== 'tool_result') return false;
+  const expected = pending.current;
+  pending.current = null;
+  return expected !== null && !event.isError && (event.toolUseId ?? '') === expected;
 }

@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { focusDropdownOption } from './settingsDropdown';
 
-test('opening a settings dropdown focuses its option without scrolling the settings page', async () => {
-  const settingsKit = await import('./settingsDropdown.js');
-  const focusDropdownOption = Reflect.get(settingsKit, 'focusDropdownOption');
-  assert.equal(typeof focusDropdownOption, 'function');
-
+test('opening a settings dropdown focuses its option without scrolling the settings page', () => {
   let receivedOptions: FocusOptions | undefined;
   focusDropdownOption({
     focus(options?: FocusOptions) {

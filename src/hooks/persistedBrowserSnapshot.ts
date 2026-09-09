@@ -103,6 +103,8 @@ export function persistBrowsers(
 export function sanitizePersistedBrowserUrl(value: string): string {
   try {
     const url = new URL(value);
+    url.username = '';
+    url.password = '';
     removeSensitiveBrowserParams(url.searchParams);
     const fragment = url.hash.slice(1);
     if (fragment.includes('?')) {

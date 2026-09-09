@@ -52,3 +52,21 @@ test('exact-site grants expose persisted camera and microphone preferences', () 
   assert.match(html, /https:\/\/meet\.example/);
   assert.match(html, /Remembered exact-site choices/);
 });
+
+test('blocking media marks the remembered allow grants inactive while keeping them removable', () => {
+  const html = renderToStaticMarkup(
+    createElement(BrowserSiteGrants, {
+      snapshot: {
+        ...snapshot,
+        sitePermissionMode: 'block',
+        permissionSummary: { camera: 'blocked', microphone: 'blocked', devices: 'blocked' },
+      },
+      disabled: false,
+      onRevoke: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Microphone is set to Block/);
+  assert.match(html, /https:\/\/meet\.example/);
+  assert.match(html, /Remove/);
+});

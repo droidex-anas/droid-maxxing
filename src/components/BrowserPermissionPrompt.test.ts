@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { completeBrowserPermissionPrompt } from './browserPermissionPromptCompletion';
+import {
+  completeBrowserPermissionPrompt,
+  settleBrowserPermissionPrompt,
+} from './browserPermissionPromptCompletion';
 import { browserPromptReducer, emptyBrowserPromptState } from './browserPermissionPromptState';
 
 test('dismissed or superseded prompt settlements cannot resurrect a prompt or affect the next choice', () => {
@@ -58,9 +61,6 @@ test('browser permission approval waits for the trusted sheet to close and paint
 });
 
 test('browser permission failure resolves to an actionable error instead of rejecting', async () => {
-  const module = await import('./browserPermissionPromptCompletion');
-  const settleBrowserPermissionPrompt = Reflect.get(module, 'settleBrowserPermissionPrompt');
-  assert.equal(typeof settleBrowserPermissionPrompt, 'function');
   const result = await settleBrowserPermissionPrompt('prompt-1', 1, {
     close: () => {},
     waitForClosePaint: async () => {},
@@ -73,8 +73,6 @@ test('browser permission failure resolves to an actionable error instead of reje
 });
 
 test('browser permission choice stays open when the main process did not accept it', async () => {
-  const module = await import('./browserPermissionPromptCompletion');
-  const settleBrowserPermissionPrompt = Reflect.get(module, 'settleBrowserPermissionPrompt');
   const result = await settleBrowserPermissionPrompt('prompt-stale', 1, {
     close: () => {},
     waitForClosePaint: async () => {},

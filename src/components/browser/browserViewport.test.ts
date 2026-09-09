@@ -86,6 +86,10 @@ test('normalizeBrowserOmniboxInput searches ordinary text and opens website addr
     'https://www.google.com/search?q=weather+in+Delhi+today',
   );
   assert.equal(normalizeBrowserOmniboxInput('openai'), 'https://www.google.com/search?q=openai');
+  assert.equal(
+    normalizeBrowserOmniboxInput('note: buy milk'),
+    'https://www.google.com/search?q=note%3A+buy+milk',
+  );
   assert.equal(normalizeBrowserOmniboxInput('example.com/docs'), 'https://example.com/docs');
   assert.equal(normalizeBrowserOmniboxInput('localhost:3000'), 'http://localhost:3000');
   assert.equal(normalizeBrowserOmniboxInput('münchen.de'), 'https://münchen.de');

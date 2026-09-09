@@ -92,7 +92,9 @@ export function normalizeBrowserOmniboxInput(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error('Enter a website address or search terms.');
 
-  const explicitScheme = /^([a-z][a-z\d+.-]*):/i.exec(trimmed)?.[1]?.toLowerCase();
+  const explicitScheme = /\s/.test(trimmed)
+    ? undefined
+    : /^([a-z][a-z\d+.-]*):/i.exec(trimmed)?.[1]?.toLowerCase();
   if (explicitScheme && explicitScheme !== 'http' && explicitScheme !== 'https') {
     return normalizeUrl(trimmed);
   }

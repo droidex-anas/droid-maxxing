@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { pushEscapeLayer } from '../environment/usePopover';
 import { createDialogFocusLifecycle } from './dialogFocus';
 
 const FOCUSABLE =
@@ -28,6 +29,7 @@ export function BrowserSettingsDialogFrame({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
+  const busyRef = useRef(busy);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -53,15 +55,20 @@ export function BrowserSettingsDialogFrame({
     dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
   });
 
+  // Escape goes through the shared LIFO stack (see usePopover.ts) so it closes
+  // only this dialog and not the settings panel behind it. Pushed once with a
+  // stable callback reading the latest busy/onClose, per ThemeEditor: re-pushing
+  // would lift this layer above a nested popover's.
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) closeRef.current();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [busy]);
+    busyRef.current = busy;
+  });
+  useEffect(
+    () =>
+      pushEscapeLayer(() => {
+        if (!busyRef.current) closeRef.current();
+      }),
+    [],
+  );
 
   const trapFocus = (event: ReactKeyboardEvent) => {
     if (event.key !== 'Tab' || !dialogRef.current) return;

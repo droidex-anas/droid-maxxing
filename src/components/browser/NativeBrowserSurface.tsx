@@ -29,6 +29,9 @@ import { createNativeBrowserAttacher, retryNativeBrowserAttach } from './nativeB
 interface NativeBrowserSurfaceProps {
   browserKey: string;
   visibleBrowserSessionId?: string;
+  // Incremented by the workspace's retry control to re-run the attach effect
+  // after an attach failure left the native view unmounted.
+  attachAttempt?: number;
   obscured?: boolean;
   isAgentRunning: boolean;
   url: string;
@@ -48,6 +51,7 @@ interface NativeBrowserSurfaceProps {
 export function NativeBrowserSurface({
   browserKey,
   visibleBrowserSessionId,
+  attachAttempt = 0,
   obscured = false,
   isAgentRunning,
   url,
@@ -267,6 +271,7 @@ export function NativeBrowserSurface({
       };
     }
   }, [
+    attachAttempt,
     attachBrowser,
     native,
     obscured,

@@ -31,12 +31,20 @@ export async function settleBrowserPermissionPrompt(
   }
 }
 
+// Resolve once the closing sheet has painted, but never wait on frames alone:
+// a minimized or occluded window throttles requestAnimationFrame, and the
+// permission request stays unanswered until it is shown again.
 function waitForBrowserPromptClosePaint(): Promise<void> {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    setTimeout(finish, 120);
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        resolve();
-      });
+      requestAnimationFrame(finish);
     });
   });
 }

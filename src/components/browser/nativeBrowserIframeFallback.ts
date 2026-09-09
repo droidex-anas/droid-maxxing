@@ -76,12 +76,7 @@ export async function performIframeRequest(
     } else if (request.action === 'scroll') {
       await scrollIframe(iframe, request.direction ?? 'down', request.pixels);
     } else if (request.action === 'capture') {
-      return {
-        requestId: request.requestId,
-        appSessionId: request.appSessionId,
-        browserSessionId: request.browserSessionId,
-        ok: true,
-      };
+      throw new Error('Screenshots are not available in the browser-only fallback.');
     } else if (request.action !== 'snapshot') {
       throw new Error(`Unsupported browser action: ${request.action}`);
     }
@@ -110,37 +105,26 @@ export async function performIframeRequest(
   }
 }
 
+// Wait for the frame's own navigation: a reload (and an open to the URL already
+// loaded) targets the URL the frame already reports, so comparing URLs resolves
+// before the new document commits and the snapshot comes from the old one.
 function loadIframe(iframe: HTMLIFrameElement, url: string): Promise<void> {
   return new Promise((resolve) => {
-    const targetUrl = absolutizeUrl(url);
-    const startedAt = Date.now();
-    iframe.src = url;
-    const poll = () => {
-      if (!iframe.isConnected) {
-        resolve();
-        return;
-      }
-      const currentUrl = readIframeUrl(iframe);
-      if (currentUrl && currentUrl === targetUrl) {
-        resolve();
-        return;
-      }
-      if (Date.now() - startedAt > 5_000) {
-        resolve();
-        return;
-      }
-      window.setTimeout(poll, 50);
+    const finish = () => {
+      iframe.removeEventListener('load', finish);
+      iframe.removeEventListener('error', finish);
+      window.clearTimeout(timer);
+      resolve();
     };
-    poll();
+    const timer = window.setTimeout(finish, 5_000);
+    iframe.addEventListener('load', finish);
+    iframe.addEventListener('error', finish);
+    if (!iframe.isConnected) {
+      finish();
+      return;
+    }
+    iframe.src = url;
   });
-}
-
-function absolutizeUrl(url: string): string {
-  try {
-    return new URL(url, window.location.href).href;
-  } catch {
-    return url;
-  }
 }
 
 function safeIframeSnapshot(iframe: HTMLIFrameElement, fallbackUrl: string) {
