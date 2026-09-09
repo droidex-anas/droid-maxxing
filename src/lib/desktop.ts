@@ -335,6 +335,7 @@ interface DroidControlApi {
   nativeBrowserAgentAction: (
     request: NativeBrowserAgentAction,
   ) => Promise<NativeBrowserAgentResult | undefined>;
+  nativeBrowserAgentActionCancel: (browserSessionId: string, requestId: string) => Promise<boolean>;
   onNativeBrowserSelection: (handler: (selection: NativeBrowserSelection) => void) => () => void;
   onNativeBrowserDesignPrompt: (handler: (prompt: NativeBrowserDesignPrompt) => void) => () => void;
   onNativeBrowserLoaded: (handler: (event: NativeBrowserLoaded) => void) => () => void;

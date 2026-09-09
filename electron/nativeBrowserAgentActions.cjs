@@ -19,6 +19,15 @@ function createNativeBrowserAgentActions({
   safeWebContents,
   scheduleIdleClose,
 }) {
+  // The renderer gave up on this request; the action stops at its next
+  // checkpoint instead of touching the page after the caller has moved on.
+  function cancel(browserSessionId, requestId) {
+    const entry = getEntry(browserSessionId);
+    if (!entry || entry.agentRequest?.requestId !== requestId) return false;
+    entry.canceledRequestId = requestId;
+    return true;
+  }
+
   async function run(request) {
     if (request.action === 'close') {
       const existing = getEntry(request.browserSessionId);
@@ -69,6 +78,7 @@ function createNativeBrowserAgentActions({
       let abandoned = false;
       const isCurrentActionTarget = () =>
         !abandoned &&
+        restoredEntry.canceledRequestId !== request.requestId &&
         restoredEntry.view === actionView &&
         safeWebContents(actionView) === actionContents &&
         !actionContents.isDestroyed() &&
@@ -190,6 +200,7 @@ function createNativeBrowserAgentActions({
       if (actionContents) setBrowserActionActive(entry, false);
       if (entry.agentActionActive) navigation.finishAgentAction(entry);
       entry.agentRequest = null;
+      entry.canceledRequestId = null;
       entry.agentActionActive = false;
       entry.userNavigationActive = false;
       if (getEntry(request.browserSessionId) === entry) scheduleIdleClose(entry);
@@ -340,7 +351,7 @@ function createNativeBrowserAgentActions({
     );
   }
 
-  return { run };
+  return { cancel, run };
 }
 
 function isCrossOriginNavigation(currentUrl, nextUrl) {

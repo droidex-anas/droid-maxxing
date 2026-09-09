@@ -84,6 +84,7 @@ function harness(overrides = {}) {
     agentActionActive: false,
     userNavigationActive: false,
     agentRequest: null,
+    canceledRequestId: null,
     pendingAgentNavigation: null,
     approvedHistoryTransition: null,
     authenticationPopupCapability: null,
@@ -401,6 +402,21 @@ test('a visible pane without an active run parks the cursor instead of blocking 
 
   assert.equal(result.ok, true);
   assert.deepEqual(cursorCalls, ['park']);
+});
+
+test('a canceled action stops at its next checkpoint and releases the reservation', async () => {
+  const agentApproval = deferred();
+  const { actions, entry } = harness({ agentApproval });
+  const result = actions.run(request('hover', { x: 10, y: 12 }));
+  await Promise.resolve();
+
+  assert.equal(actions.cancel('browser-1', 'request-1'), true);
+  assert.equal(actions.cancel('browser-1', 'request-2'), false);
+  agentApproval.resolve();
+
+  await assert.rejects(result, /page changed before the browser action completed/);
+  assert.equal(entry.agentActionActive, false);
+  assert.equal(entry.canceledRequestId, null);
 });
 
 test('resize delegates semantic viewport handling without attaching', async () => {

@@ -52,7 +52,7 @@ test('every DROIDEX browser renderer command authenticates the main frame', asyn
     await handler(event, payload);
   }
 
-  assert.equal(handlers.size, 21);
+  assert.equal(handlers.size, 22);
   assert.equal(authorized.length, handlers.size);
   assert.ok(authorized.every((authorizedEvent) => authorizedEvent === event));
 });

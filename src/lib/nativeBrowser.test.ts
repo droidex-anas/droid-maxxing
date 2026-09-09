@@ -10,10 +10,18 @@ interface FakeTimer {
 
 function fakeBrowserWindow(nativeBrowserAgentAction: () => Promise<unknown>) {
   const timers: FakeTimer[] = [];
+  const canceled: string[] = [];
   return {
+    canceled,
     timers,
     value: {
-      droidControl: { nativeBrowserAgentAction },
+      droidControl: {
+        nativeBrowserAgentAction,
+        nativeBrowserAgentActionCancel: async (_browserSessionId: string, requestId: string) => {
+          canceled.push(requestId);
+          return true;
+        },
+      },
       setTimeout: (callback: () => void, delay: number) => {
         timers.push({ active: true, callback, delay });
         return timers.length;
@@ -106,6 +114,7 @@ test('non-interactive actions retain the bounded transport timeout', async () =>
     assert.equal(timeout.delay, 10_000);
     timeout.callback();
     await assert.rejects(action, /snapshot timed out/);
+    assert.deepEqual(fake.canceled, ['snapshot-request']);
   }, fake.value);
 });
 

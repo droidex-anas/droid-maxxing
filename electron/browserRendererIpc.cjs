@@ -47,6 +47,11 @@ function registerBrowserRendererIpc(options) {
     };
   });
 
+  handle('native-browser-agent-action-cancel', ({ browserSessionId, requestId }) => {
+    if (typeof browserSessionId !== 'string' || typeof requestId !== 'string') return false;
+    return nativeBrowser.cancelAgentAction(browserSessionId, requestId);
+  });
+
   handle('browser-settings-get', () => browserSettings.snapshot());
   handle('browser-settings-update', ({ patch }) => browserSettings.update(patch));
   handle('browser-cookies-import', () => browserSettings.importCookies());

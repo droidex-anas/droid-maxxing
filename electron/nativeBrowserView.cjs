@@ -87,6 +87,7 @@ function createNativeBrowserViewFactory({
       agentActionActive: false,
       userNavigationActive: false,
       agentRequest: null,
+      canceledRequestId: null,
       navigationGeneration: 0,
       documentGeneration: 0,
       pendingAgentNavigation: null,

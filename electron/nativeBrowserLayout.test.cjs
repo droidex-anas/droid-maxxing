@@ -69,7 +69,7 @@ test('an idle browser stays attached without presenting an agent cursor', async 
   assert.deepEqual(f.cursorCalls, []);
 });
 
-test('ending a run forgets its cursor without hiding the browser page', async () => {
+test('ending a run hides its cursor without hiding the browser page', async () => {
   const f = fixture();
   await f.layout.attach('first', { width: 800, height: 600 });
   f.cursorCalls.length = 0;
@@ -77,7 +77,7 @@ test('ending a run forgets its cursor without hiding the browser page', async ()
   f.layout.setVisible('first', true, false);
   assert.deepEqual(f.cursorCalls, [
     ['attach', 'first'],
-    ['forget', 'first'],
+    ['detach', 'first'],
   ]);
   assert.equal(f.entries.get('first').attached, true);
   assert.equal(f.entries.get('first').visible, true);
@@ -97,7 +97,7 @@ test('a stopped run cannot regain its cursor when a pending attach finishes', as
   f.layout.setVisible('first', true, false);
   finish();
   await pending;
-  assert.deepEqual(f.cursorCalls, [['forget', 'first']]);
+  assert.deepEqual(f.cursorCalls, [['detach', 'first']]);
   assert.equal(f.entries.get('first').attached, true);
 });
 
@@ -110,7 +110,7 @@ test('recovery and overlay dismissal do not restore the cursor of a stopped run'
   f.cursorCalls.length = 0;
   f.layout.mountRecovered(f.entries.get('first'), bounds, f.layout.revision());
   f.layout.setVisible('first', true, false);
-  assert.deepEqual(f.cursorCalls, [['forget', 'first']]);
+  assert.deepEqual(f.cursorCalls, [['detach', 'first']]);
 });
 
 test('pending page restore cannot attach after switching to another pane', async () => {

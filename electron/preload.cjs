@@ -234,6 +234,8 @@ contextBridge.exposeInMainWorld('droidControl', {
     ipcRenderer.invoke('native-browser-set-pencil-mode', { browserSessionId, active }),
   nativeBrowserAgentAction: (request) =>
     ipcRenderer.invoke('native-browser-agent-action', { request }),
+  nativeBrowserAgentActionCancel: (browserSessionId, requestId) =>
+    ipcRenderer.invoke('native-browser-agent-action-cancel', { browserSessionId, requestId }),
   browserSettingsGet: () => ipcRenderer.invoke('browser-settings-get'),
   browserSettingsUpdate: (patch) => ipcRenderer.invoke('browser-settings-update', { patch }),
   browserCookiesImport: () => ipcRenderer.invoke('browser-cookies-import'),

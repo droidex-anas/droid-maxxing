@@ -122,6 +122,9 @@ export async function runNativeBrowserAgentAction(
       api.nativeBrowserAgentAction(request),
       new Promise<never>((_resolve, reject) => {
         timeout = window.setTimeout(() => {
+          void api
+            .nativeBrowserAgentActionCancel(request.browserSessionId, request.requestId)
+            .catch(() => undefined);
           reject(new Error(`DROIDEX Browser action ${request.action} timed out.`));
         }, timeoutMs);
       }),

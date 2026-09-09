@@ -392,6 +392,7 @@ function createNativeBrowserManager(options) {
     navigateHistory: navigateNativeBrowserHistory,
     setDesignMode: page.setDesignMode,
     setPencilMode: page.setPencilMode,
+    cancelAgentAction: actions.cancel,
     runAgentAction: actions.run,
     capture: page.capture,
     captureDesignSelection: page.captureDesignSelection,

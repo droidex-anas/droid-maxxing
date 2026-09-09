@@ -112,7 +112,8 @@ function createNativeBrowserLayout({
     const entry = ensureEntry(browserSessionId);
     entry.visible = Boolean(visible);
     entry.agentCursorActive = agentCursorActive === true;
-    if (!entry.agentCursorActive) cursor.forget(entry.browserSessionId);
+    // Hide the cursor when the run ends but keep its parked point for the next run.
+    if (!entry.agentCursorActive) cursor.detach(entry.browserSessionId);
     if (!isBrowserViewUsable(entry.view) || !entry.attached) return;
     entry.view.setVisible(entry.visible);
     safeWebContents(entry.view)?.setBackgroundThrottling(!entry.visible);
