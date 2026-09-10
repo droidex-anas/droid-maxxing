@@ -205,6 +205,7 @@ contextBridge.exposeInMainWorld('droidControl', {
   terminalCreate: (options) => ipcRenderer.invoke('terminal-create', options),
   terminalResize: (id, cols, rows) => ipcRenderer.invoke('terminal-resize', { id, cols, rows }),
   terminalKill: (id) => ipcRenderer.invoke('terminal-kill', { id }),
+  terminalHasChildren: (id) => ipcRenderer.invoke('terminal-has-children', { id }),
   terminalList: (appSessionId) => ipcRenderer.invoke('terminal-list', { appSessionId }),
   terminalSubscribe: (id) => subscribeTerminalPort(id),
   terminalUnsubscribe: (id) => ipcRenderer.invoke('terminal-unsubscribe', { id }),

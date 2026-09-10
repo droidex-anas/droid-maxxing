@@ -18,6 +18,7 @@ function fixture(options = {}) {
     clearTimeout: options.clearTimeout,
     exitRetentionMs: options.exitRetentionMs,
     defaultCwd: options.defaultCwd,
+    listChildPids: options.listChildPids,
     resolveShell: () => ({ file: '/bin/zsh', args: ['-l'] }),
     buildEnv: () => ({ TERM: 'xterm-256color' }),
     loadPty: () => ({
@@ -31,6 +32,7 @@ function fixture(options = {}) {
           writes: [],
           resizes: [],
           killed: false,
+          pid: 4242,
           onData(handler) {
             dataHandler = handler;
           },
@@ -319,4 +321,18 @@ test('memory pressure trims live replay without dropping the terminal', async ()
   assert.ok(Buffer.byteLength(replay.data) <= 8);
   assert.equal(manager.list().length, 1);
   assert.equal(manager.resourceCounts().live, 1);
+});
+
+test('hasChildren asks the child-pid lister for the shell pid', async () => {
+  const calls = [];
+  const { manager } = fixture({
+    listChildPids: async (pid) => {
+      calls.push(pid);
+      return pid === 4242 ? [5000] : [];
+    },
+  });
+  const info = await manager.create({ appSessionId: 's1', cwd: '/w' });
+  assert.equal(await manager.hasChildren(info.id), true);
+  assert.deepEqual(calls, [4242]);
+  assert.equal(await manager.hasChildren('missing'), false);
 });

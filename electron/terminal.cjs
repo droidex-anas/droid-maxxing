@@ -19,6 +19,7 @@
 
 const fsp = require('node:fs/promises');
 const crypto = require('node:crypto');
+const { execFile } = require('node:child_process');
 
 const MAX_TERMINALS_PER_SESSION = 4;
 const MAX_GLOBAL_TERMINALS = 8;
@@ -53,6 +54,22 @@ function defaultShell(platform, env) {
 function buildPtyEnv(platform, env) {
   void platform;
   return { ...(env || process.env), TERM, COLORTERM };
+}
+
+// pgrep -P lists direct children of the shell; a non-zero exit means none.
+function defaultListChildPids(pid) {
+  if (process.platform === 'win32') return Promise.resolve([pid]);
+  return new Promise((resolve) => {
+    execFile('pgrep', ['-P', String(pid)], (error, stdout) => {
+      if (error) return resolve([]);
+      resolve(
+        String(stdout)
+          .split('\n')
+          .map((line) => Number(line.trim()))
+          .filter((n) => Number.isInteger(n) && n > 0),
+      );
+    });
+  });
 }
 
 // Validate that a cwd is a non-empty path that exists and is a directory, and
@@ -106,6 +123,7 @@ function createTerminalManager(opts) {
   const cancelTimeout = config.clearTimeout || clearTimeout;
   const exitRetentionMs = config.exitRetentionMs ?? EXIT_RETENTION_MS;
   const defaultCwd = config.defaultCwd;
+  const listChildPids = config.listChildPids || defaultListChildPids;
   // Lazy-load node-pty only when the first PTY is spawned. require()ing this
   // module must never throw if node-pty has not been added to package.json.
   const loadPty =
@@ -451,6 +469,15 @@ function createTerminalManager(opts) {
     };
   }
 
+  // True while the shell has at least one child process, so closing it would
+  // stop something the user started. Exited or unknown terminals answer false.
+  async function hasChildren(id) {
+    const e = terminals.get(id);
+    if (!e || e.exited || !e.pty || typeof e.pty.pid !== 'number') return false;
+    const children = await listChildPids(e.pty.pid);
+    return children.length > 0;
+  }
+
   // Snapshot of all terminals (optionally filtered by appSessionId).
   function list(filter) {
     const out = [];
@@ -531,6 +558,7 @@ function createTerminalManager(opts) {
     onExit,
     kill,
     summary,
+    hasChildren,
     list,
     closeAll,
     limits,
