@@ -173,7 +173,9 @@ const AssistantMessage = memo(function AssistantMessage({
   const typing = useStreamingActivity(text, live && !appOwnsLiveStatus);
   if (isSpecEcho(text, specContent)) return null;
   return (
-    <div className="group/msg">
+    // min-w-0 so a wide table or a long unbroken URL scrolls inside the message
+    // rather than widening the row past the transcript.
+    <div className="group/msg min-w-0">
       <MessageBody
         text={text}
         live={live}

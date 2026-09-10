@@ -2,15 +2,18 @@
 // transcript: a long or multi-paragraph prompt would otherwise push the
 // composer off screen. The full text stays reachable by editing the prompt.
 
+import { markdownToPlainText } from '../../lib/markdownText';
+
 export const QUEUED_PREVIEW_MAX_CHARS = 120;
 
 /**
- * One-line, length-capped preview of a queued prompt. Newlines and runs of
+ * One-line, length-capped preview of a queued prompt. The row shows the prose
+ * the markdown renders to rather than its syntax, newlines and runs of
  * whitespace collapse to single spaces so the row height stays predictable, and
  * the cut lands on a word boundary when one is close to the limit.
  */
 export function queuedPromptPreview(text: string, maxChars = QUEUED_PREVIEW_MAX_CHARS): string {
-  const collapsed = text.replace(/\s+/g, ' ').trim();
+  const collapsed = markdownToPlainText(text).replace(/\s+/g, ' ').trim();
   if (collapsed.length <= maxChars) return collapsed;
   const cut = collapsed.slice(0, maxChars);
   const lastSpace = cut.lastIndexOf(' ');

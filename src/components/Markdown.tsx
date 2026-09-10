@@ -1,21 +1,15 @@
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {
-  Children,
-  createContext,
-  isValidElement,
-  useContext,
-  useMemo,
-  memo,
-  type ReactNode,
-} from 'react';
+import remarkBreaks from 'remark-breaks';
+import { Children, createContext, isValidElement, useContext, memo, type ReactNode } from 'react';
 import { AppBlock } from './AppBlock';
 import { appFencesInMarkdown, type MarkdownAppFence } from '../lib/appBlocks';
-import { CodeCard } from './MarkdownCode';
+import { CodeCard, HighlightJson, JSON_HIGHLIGHT_MAX_CHARS } from './MarkdownCode';
+import { markdownTableComponents } from './MarkdownTable';
+import { LinkBadge } from './transcript/LinkBadge';
+import { describeLink, linkTextIsUrl } from '../lib/linkPresentation';
 import { TranscriptImage } from './media/TranscriptImage';
 import { MermaidBlock, SvgCodeBlock } from './MarkdownDiagrams';
-
-export { copyMarkdownCode } from './MarkdownCode';
 
 function slugify(text: string): string {
   return text
@@ -47,59 +41,12 @@ const isSvgLang = (className?: string) => hasLanguage(className, 'svg');
 const isMermaidLang = (className?: string) => hasLanguage(className, 'mermaid');
 const isAppLang = (className?: string) => hasLanguage(className, 'app');
 
-// Per-token JSON spans are fine for a snippet and a long task for a dumped payload.
-export const JSON_HIGHLIGHT_MAX_CHARS = 8_192;
-
-function HighlightJson({ code }: { code: string }) {
-  const nodes = useMemo(() => {
-    const tokens = code.split(
-      /("(?:\\.|[^"\\])*"|:|true|false|null|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[[\]{}!,])/g,
-    );
-    return tokens.map((token, i) => {
-      if (/^"(?:\\.|[^"\\])*"$/.exec(token)) {
-        const next = tokens[i + 1].trimStart();
-        if (next.startsWith(':')) {
-          return (
-            <span key={i} style={{ color: 'var(--droid-accent)' }}>
-              {token}
-            </span>
-          );
-        }
-        return (
-          <span key={i} style={{ color: 'var(--droid-green)' }}>
-            {token}
-          </span>
-        );
-      }
-      if (token === 'true' || token === 'false')
-        return (
-          <span key={i} style={{ color: 'var(--droid-orange)' }}>
-            {token}
-          </span>
-        );
-      if (token === 'null')
-        return (
-          <span key={i} style={{ color: 'var(--droid-text-muted)' }}>
-            {token}
-          </span>
-        );
-      if (/^\d/.exec(token))
-        return (
-          <span key={i} style={{ color: 'var(--droid-orange)' }}>
-            {token}
-          </span>
-        );
-      if (/^[{}[\],:!]$/.test(token))
-        return (
-          <span key={i} style={{ color: 'var(--droid-text-muted)' }}>
-            {token}
-          </span>
-        );
-      return <span key={i}>{token}</span>;
-    });
-  }, [code]);
-
-  return <>{nodes}</>;
+// remark-gfm marks task-list nodes with these classes; reading them off the
+// hast element keeps the presentation driven by the parsed markdown.
+function hastClassNames(node: { properties?: { className?: unknown } } | undefined): string[] {
+  const names = node?.properties?.className;
+  if (Array.isArray(names)) return names.map(String);
+  return typeof names === 'string' ? [names] : [];
 }
 
 /* ── Fenced content that changes while a response streams ──
@@ -161,9 +108,10 @@ function MarkdownFence({
   const inline = !className;
   if (inline)
     return (
-      <code
-        className={`font-mono px-1.5 py-0.5 rounded-md bg-droid-elevated/70 text-droid-text break-words ${specMode ? 'text-[13px]' : 'text-[12px]'}`}
-      >
+      // Inline code sits in the line as a quiet pill: sized from the text around
+      // it, tinted from the text colour so it still reads on a message bubble,
+      // and cloned across a line break so a wrapped pill keeps both ends.
+      <code className="rounded-[5px] bg-droid-text/[0.08] px-[5px] py-px font-mono text-[0.86em] text-droid-text [box-decoration-break:clone] break-words">
         {children}
       </code>
     );
@@ -214,6 +162,9 @@ function MarkdownFence({
 
 function createMarkdownComponents(specMode: boolean): Components {
   return {
+    // Headings read as structure, not as bold text: a clear size ladder with
+    // air above each level, and a hairline under the top level so a document
+    // break is visible even when a model leans on `#`.
     h1: ({ children }) => {
       const id = slugify(reactText(children));
       return specMode ? (
@@ -224,7 +175,10 @@ function createMarkdownComponents(specMode: boolean): Components {
           {children}
         </h1>
       ) : (
-        <h1 className="text-[17px] font-semibold text-droid-text mt-4 first:mt-0 mb-1">
+        <h1
+          id={id}
+          className="text-[19px] font-semibold tracking-tight text-droid-text mt-5 first:mt-0 mb-2 pb-1.5 border-b border-droid-border/70 scroll-mt-8"
+        >
           {children}
         </h1>
       );
@@ -239,7 +193,10 @@ function createMarkdownComponents(specMode: boolean): Components {
           {children}
         </h2>
       ) : (
-        <h2 className="text-[15px] font-semibold text-droid-text mt-4 first:mt-0 mb-1">
+        <h2
+          id={id}
+          className="text-[16px] font-semibold text-droid-text mt-4 first:mt-0 mb-1.5 scroll-mt-8"
+        >
           {children}
         </h2>
       );
@@ -254,31 +211,80 @@ function createMarkdownComponents(specMode: boolean): Components {
           {children}
         </h3>
       ) : (
-        <h3 className="text-[14px] font-semibold text-droid-text mt-3 first:mt-0 mb-1">
+        <h3
+          id={id}
+          className="text-[15px] font-semibold text-droid-text mt-3.5 first:mt-0 mb-1 scroll-mt-8"
+        >
           {children}
         </h3>
       );
     },
-    p: ({ children }) => <p className={specMode ? 'leading-[1.8]' : 'leading-[1.7]'}>{children}</p>,
+    h4: ({ children }) =>
+      specMode ? (
+        <h4 className="text-[14px] font-semibold text-droid-text-secondary mt-4 first:mt-0 mb-1.5">
+          {children}
+        </h4>
+      ) : (
+        <h4 className="text-[14px] font-semibold text-droid-text mt-3.5 first:mt-0 mb-1">
+          {children}
+        </h4>
+      ),
+    h5: ({ children }) => (
+      <h5 className="text-[13.5px] font-semibold text-droid-text-secondary mt-3 first:mt-0 mb-1">
+        {children}
+      </h5>
+    ),
+    h6: ({ children }) => (
+      <h6 className="text-[11.5px] font-medium uppercase tracking-wide text-droid-text-muted mt-3 first:mt-0 mb-1">
+        {children}
+      </h6>
+    ),
+    p: ({ children }) => <p className={specMode ? 'leading-[1.8]' : 'leading-[1.6]'}>{children}</p>,
     ul: ({ children }) => (
       <ul
-        className={`marker:text-droid-text-muted ${specMode ? 'list-disc pl-6 space-y-2' : 'list-disc pl-5 space-y-1.5'}`}
+        className={`marker:text-droid-text-muted ${specMode ? 'list-disc pl-6 space-y-2' : 'list-disc pl-5 space-y-1'}`}
       >
         {children}
       </ul>
     ),
     ol: ({ children }) => (
       <ol
-        className={`marker:text-droid-text-muted ${specMode ? 'list-decimal pl-6 space-y-2' : 'list-decimal pl-5 space-y-1.5'}`}
+        className={`marker:text-droid-text-muted ${specMode ? 'list-decimal pl-6 space-y-2' : 'list-decimal pl-5 space-y-1'}`}
       >
         {children}
       </ol>
     ),
-    li: ({ children }) => (
-      <li className={specMode ? 'leading-[1.75] pl-1' : 'leading-[1.65] pl-0.5'}>{children}</li>
+    // A GFM task item carries its own checkbox, so it drops the bullet marker
+    // and lets the checkbox lead the line instead.
+    li: ({ children, node }) => {
+      const taskItem = hastClassNames(node).includes('task-list-item');
+      return taskItem ? (
+        <li className="list-none pl-0 leading-[1.6]">{children}</li>
+      ) : (
+        <li
+          className={
+            specMode ? 'leading-[1.75] pl-1' : 'leading-[1.6] pl-0.5 [&>ol]:mt-1 [&>ul]:mt-1'
+          }
+        >
+          {children}
+        </li>
+      );
+    },
+    input: ({ checked }) => (
+      <input
+        type="checkbox"
+        defaultChecked={checked}
+        disabled
+        className="mr-1.5 h-3 w-3 translate-y-[0.5px] accent-[var(--droid-accent)]"
+      />
     ),
     strong: ({ children }) => <strong className="font-semibold text-droid-text">{children}</strong>,
     em: ({ children }) => <em className="italic">{children}</em>,
+    del: ({ children }) => (
+      <del className="line-through decoration-droid-text-muted/80 text-droid-text-secondary">
+        {children}
+      </del>
+    ),
     a: ({ children, href, node }) => {
       // A linked markdown image would otherwise produce invalid nested
       // interactive HTML (<a><button>), so the image viewer wins and the
@@ -288,21 +294,36 @@ function createMarkdownComponents(specMode: boolean): Components {
         (child) => child.type === 'element' && child.tagName === 'img',
       );
       if (linkedImage) return <>{children}</>;
+      // The site's mark leads the link so a list of sources can be scanned by
+      // where they point. A bare URL that names its own page — a pull request,
+      // an issue — shows that name instead, with the full address on hover; a
+      // link the author titled keeps their title. Links read by colour and
+      // underline on hover; a bare URL may break anywhere, so it starts beside
+      // its mark instead of leaving the mark alone on the line above.
+      const link = href === undefined ? null : describeLink(href);
+      const textIsUrl = href !== undefined && linkTextIsUrl(reactText(children), href);
+      const named = textIsUrl && link?.label != null;
       return (
         <a
           href={href}
           target="_blank"
           rel="noreferrer"
-          className="underline underline-offset-2 hover:opacity-80 transition-opacity"
-          style={{ color: 'var(--droid-accent)' }}
+          title={href}
+          className="group/link"
+          style={{ color: 'var(--droid-link)' }}
         >
-          {children}
+          {link ? <LinkBadge link={link} /> : null}
+          <span
+            className={`underline decoration-transparent underline-offset-2 transition-colors group-hover/link:decoration-current ${textIsUrl && !named ? 'break-all' : ''}`}
+          >
+            {named ? link.label : children}
+          </span>
         </a>
       );
     },
     blockquote: ({ children }) => (
       <blockquote
-        className={`italic text-droid-text-secondary ${specMode ? 'border-l border-droid-border pl-4 py-0.5 my-4' : 'border-l-2 border-droid-border-hover pl-3.5'}`}
+        className={`text-droid-text-secondary ${specMode ? 'border-l border-droid-border pl-4 py-0.5 my-4' : 'border-l-2 border-droid-border-hover pl-3.5 py-0.5 my-2.5'}`}
       >
         {children}
       </blockquote>
@@ -338,39 +359,23 @@ function createMarkdownComponents(specMode: boolean): Components {
         {children}
       </MarkdownFence>
     ),
-    table: ({ children }) => (
-      <div
-        className={`overflow-x-auto rounded-xl border border-droid-border ${specMode ? 'my-6' : 'my-2.5'}`}
-      >
-        <table className={`w-full border-collapse ${specMode ? 'text-[13.5px]' : 'text-[12.5px]'}`}>
-          {children}
-        </table>
-      </div>
-    ),
-    thead: ({ children }) => <thead className="bg-droid-elevated/25">{children}</thead>,
-    th: ({ children }) => (
-      <th
-        className={`border-b border-droid-border text-left align-top font-medium whitespace-nowrap text-droid-text ${specMode ? 'px-3.5 py-2.5' : 'px-2.5 py-1.5'}`}
-      >
-        {children}
-      </th>
-    ),
-    td: ({ children }) => (
-      <td
-        className={`border-t border-droid-border align-top text-droid-text-secondary first:whitespace-nowrap first:pr-4 first:font-medium first:text-droid-text ${specMode ? 'px-3.5 py-2.5' : 'px-2.5 py-1.5'}`}
-      >
-        {children}
-      </td>
-    ),
+    ...markdownTableComponents(specMode),
   };
 }
 
 const REMARK_PLUGINS = [remarkGfm];
+// For text the user typed line by line (their own messages, the composer
+// preview): every Enter they pressed stays a visible break, the way GitHub
+// renders issue comments, instead of collapsing into prose paragraphs.
+const REMARK_BREAKS_PLUGINS = [remarkGfm, remarkBreaks];
 const CHAT_COMPONENTS = createMarkdownComponents(false);
 const SPEC_COMPONENTS = createMarkdownComponents(true);
 
+// Chat text matches the composer's 14px, so a draft and the message it becomes
+// read at the same size; 1.6 leading keeps paragraphs and lists close without
+// crowding them.
 export function markdownShellClass(specMode: boolean): string {
-  return `text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[13.5px] leading-[1.7] space-y-3'}`;
+  return `min-w-0 max-w-full text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[14px] leading-[1.6] space-y-2.5'}`;
 }
 
 export type MarkdownFenceFlags = Omit<FenceRenderOptions, 'appFences'>;
@@ -387,17 +392,19 @@ export function MarkdownTree({
   specMode,
   fenceOptions,
   allowImages = true,
+  breaks = false,
 }: {
   children: string;
   specMode: boolean;
   fenceOptions: FenceRenderOptions;
   allowImages?: boolean;
+  breaks?: boolean;
 }) {
   return (
     <FenceOptionsContext.Provider value={fenceOptions}>
       <ReactMarkdown
         disallowedElements={allowImages ? undefined : ['img']}
-        remarkPlugins={REMARK_PLUGINS}
+        remarkPlugins={breaks ? REMARK_BREAKS_PLUGINS : REMARK_PLUGINS}
         components={specMode ? SPEC_COMPONENTS : CHAT_COMPONENTS}
       >
         {children}
@@ -406,17 +413,24 @@ export function MarkdownTree({
   );
 }
 
+// One renderer for everything markdown in the app. `authored` is the only
+// difference between a prompt the user typed and a model's reply: their Enters
+// stay visible breaks, and their fences stay code instead of launching
+// generated-content runtimes. Both sides then share the same typography,
+// spacing, tables and code cards, so a sent message reads like the reply to it.
 function MarkdownImpl({
   children,
   specMode = false,
-  allowGeneratedContent = true,
+  authored = false,
   allowImages = true,
+  allowGeneratedContent = !authored,
   autoPlayAppBlocks = false,
   buildingAppBlocks = false,
   cutOffAppBlocks = false,
 }: {
   children: string;
   specMode?: boolean;
+  authored?: boolean;
   allowGeneratedContent?: boolean;
   allowImages?: boolean;
   autoPlayAppBlocks?: boolean;
@@ -431,7 +445,12 @@ function MarkdownImpl({
   });
   return (
     <div className={markdownShellClass(specMode)}>
-      <MarkdownTree specMode={specMode} fenceOptions={fenceOptions} allowImages={allowImages}>
+      <MarkdownTree
+        specMode={specMode}
+        fenceOptions={fenceOptions}
+        allowImages={allowImages}
+        breaks={authored}
+      >
         {children}
       </MarkdownTree>
     </div>

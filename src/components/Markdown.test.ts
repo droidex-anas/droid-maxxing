@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Markdown } from './Markdown';
+import { Markdown, MarkdownTree, markdownFenceOptions } from './Markdown';
 
 interface MarkdownProps {
   children: string;
@@ -245,17 +245,17 @@ test('a streaming response keeps the same element types across renders', () => {
 });
 
 test('copy gracefully declines when the Clipboard API is unavailable', async () => {
-  const markdown = (await import('./Markdown')) as unknown as {
+  const markdownCode = (await import('./MarkdownCode')) as unknown as {
     copyMarkdownCode?: (
       clipboard: Pick<Clipboard, 'writeText'> | undefined,
       text: string,
     ) => Promise<boolean>;
   };
-  assert.equal(await markdown.copyMarkdownCode?.(undefined, 'sample'), false);
+  assert.equal(await markdownCode.copyMarkdownCode?.(undefined, 'sample'), false);
 });
 
 test('small JSON fences keep token highlighting and large ones stay plain', async () => {
-  const { JSON_HIGHLIGHT_MAX_CHARS } = await import('./Markdown');
+  const { JSON_HIGHLIGHT_MAX_CHARS } = await import('./MarkdownCode');
   const small = '```json\n{"accent": true, "count": 3}\n```';
   const largeObject = Object.fromEntries(
     Array.from({ length: 1200 }, (_, index) => [`k${String(index)}`, index]),
@@ -268,4 +268,86 @@ test('small JSON fences keep token highlighting and large ones stay plain', asyn
   assert.match(smallHtml, /--droid-green/);
   assert.doesNotMatch(largeHtml, /--droid-green/);
   assert.match(largeHtml, /k1199/);
+});
+
+test('chat headings form a visible hierarchy instead of reading as bold text', () => {
+  const html = renderToStaticMarkup(
+    createElement(Markdown, null, '# Title\n## Section\n### Sub\n#### Minor'),
+  );
+
+  // Each level gets its own element with distinct scale; the top level also
+  // carries a hairline rule so a document break stays visible.
+  assert.match(html, /<h1[^>]*text-\[19px\][^>]*border-b/);
+  assert.match(html, /<h2[^>]*text-\[16px\]/);
+  assert.match(html, /<h3[^>]*text-\[15px\]/);
+  assert.match(html, /<h4[^>]*text-\[14px\]/);
+});
+
+test('tables render zebra rows with a set-apart header', () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      Markdown,
+      null,
+      ['| Name | Status |', '| --- | --- |', '| alpha | ok |', '| beta | ok |'].join('\n'),
+    ),
+  );
+
+  assert.match(html, /<tbody[^>]*nth-child\(even\)/);
+  assert.match(html, /<thead[^>]*bg-droid-surface\/45/);
+  // Cells wrap instead of forcing the first column onto one line.
+  assert.doesNotMatch(html, /first:whitespace-nowrap/);
+});
+
+test('GFM task lists render as checkbox rows without bullet markers', () => {
+  const html = renderToStaticMarkup(
+    createElement(Markdown, null, ['- [x] done', '- [ ] open'].join('\n')),
+  );
+
+  assert.match(html, /<input[^>]*type="checkbox"[^>]*checked/);
+  assert.match(html, /<li[^>]*list-none/);
+  assert.doesNotMatch(html, /<li[^>]*list-disc/);
+});
+
+test('strikethrough renders struck and dimmed', () => {
+  const html = renderToStaticMarkup(createElement(Markdown, null, '~~old~~ new'));
+
+  assert.match(html, /<del[^>]*line-through/);
+});
+
+test('breaks mode keeps single newlines from typed text as visible breaks', () => {
+  const source = 'first line\nsecond line';
+  const render = (breaks: boolean) =>
+    renderToStaticMarkup(
+      createElement(
+        MarkdownTree,
+        { specMode: false, fenceOptions: markdownFenceOptions(source, {}), breaks },
+        source,
+      ),
+    );
+
+  assert.match(render(true), /<br\/>/);
+  assert.doesNotMatch(render(false), /<br\/>/);
+});
+
+// A sent prompt used to render bare, without the shell the model's replies get,
+// so long words and wide tables pushed straight out of the message bubble.
+test('an authored prompt renders through the same shell as a reply', () => {
+  const authored = renderToStaticMarkup(createElement(Markdown, { authored: true }, 'plan\nnext'));
+  const reply = renderToStaticMarkup(createElement(Markdown, null, 'plan'));
+
+  for (const html of [authored, reply]) {
+    assert.match(html, /break-words/);
+    assert.match(html, /min-w-0/);
+  }
+  // Only the authored side keeps the newline the writer pressed.
+  assert.match(authored, /<br\s*\/?>/);
+});
+
+// Shortening an arbitrary link would hide where it goes.
+test('a bare non-GitHub URL still shows its full address', () => {
+  const html = renderToStaticMarkup(
+    createElement(Markdown, null, 'see https://techcrunch.com/2026/09/08/muse'),
+  );
+
+  assert.match(html, /techcrunch\.com\/2026\/09\/08\/muse<\/span>/);
 });

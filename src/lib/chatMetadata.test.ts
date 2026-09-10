@@ -137,6 +137,28 @@ test('chatDisplayTitle humanizes slash-command titles without rewriting storage'
   );
 });
 
+test('chatDisplayTitle presents markdown titles as their rendered prose', () => {
+  assert.equal(chatDisplayTitle(makeSession('s1', 1_000, '### HI'), undefined), 'HI');
+  assert.equal(
+    chatDisplayTitle(makeSession('s2', 1_000, '**Fix** the `login` flow'), undefined),
+    'Fix the login flow',
+  );
+  assert.equal(
+    chatDisplayTitle(
+      makeSession('s3', 1_000, 'see [docs](https://example.com/a?b=1) now'),
+      undefined,
+    ),
+    'see docs now',
+  );
+  // Underscores survive so snake_case names stay whole, and a title that is
+  // nothing but syntax falls back to the raw string instead of an empty row.
+  assert.equal(
+    chatDisplayTitle(makeSession('s4', 1_000, 'fix_login_flow'), undefined),
+    'fix_login_flow',
+  );
+  assert.equal(chatDisplayTitle(makeSession('s5', 1_000, '#### '), undefined), '#### ');
+});
+
 test('pinChat stamps pinnedAt and unpinChat removes the empty entry', () => {
   const pinned = pinChat({}, 's1', 100);
   assert.deepEqual(pinned, { s1: { pinnedAt: 100 } });

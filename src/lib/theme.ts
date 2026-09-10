@@ -362,6 +362,14 @@ export const SKILL_COLORS = {
   light: '#1d4ed8',
 } as const;
 
+// Hyperlinks read by hue, like skills and status do. The neutral accent governs
+// chrome and is near-white in dark themes, which left links looking like plain
+// underlined text everywhere they appeared.
+export const LINK_COLORS = {
+  dark: '#7cb2ff',
+  light: '#1d4ed8',
+} as const;
+
 export function elevatedSurfaceColor(theme: Pick<ThemeColors, 'bg' | 'surface'>): string {
   return adjustColor(theme.surface, colorLuminance(theme.bg) < 0.4 ? 13 : -13);
 }
@@ -440,6 +448,7 @@ export function applyTheme(theme: ThemeSettings) {
   }
   root.style.setProperty('--droid-accent', theme.accent);
   root.style.setProperty('--droid-skill', bgIsDark ? SKILL_COLORS.dark : SKILL_COLORS.light);
+  root.style.setProperty('--droid-link', bgIsDark ? LINK_COLORS.dark : LINK_COLORS.light);
   // Floating-card shadow: strong and near-black on dark where it separates
   // surfaces, soft and diffuse on light so cards lift without looking dirty.
   root.style.setProperty(
