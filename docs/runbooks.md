@@ -101,7 +101,9 @@ not advise users to disable Gatekeeper globally.
 The local index uses one canonical schema and has no migration or compatibility fallback. If startup reports an incompatible child-session index:
 
 1. Quit DROIDEX.
-2. Remove only the local derived index files:
+2. Remove only the local derived index files. The default app keeps them in
+   `~/.factory/droidex`; an instance launched with `DROIDEX_USER_DATA_DIR` keeps
+   them under `<profile>/history` (or `DROIDEX_HISTORY_DIR` when set):
    ```bash
    rm -f "$HOME/.factory/droidex/session-index.sqlite"
    rm -f "$HOME/.factory/droidex/session-index.sqlite-wal"
@@ -111,6 +113,9 @@ The local index uses one canonical schema and has no migration or compatibility 
 
 These commands do not remove raw Factory session history. Do not delete the broader `~/.factory` directory.
 Do not remove `index.sqlite`; that filename remains reserved for older app/worktree schemas.
+
+Separate dev profiles have independent history databases but share the same
+Factory login and raw Factory sessions.
 
 ## Verify child navigation without Factory authentication
 
@@ -141,6 +146,9 @@ The smoke uses the real Electron main process, preload, and built renderer with 
 
 ## Build or CI failure
 
+See also [browser authentication and permission checks](#browser-authentication-and-permission-checks)
+before treating a desktop release as authentication-ready.
+
 1. Reproduce the failing job locally with the same command listed in `.github/workflows/ci.yml`.
 2. For broad changes, run:
    ```bash
@@ -155,3 +163,55 @@ The smoke uses the real Electron main process, preload, and built renderer with 
    ```
 3. Check whether generated docs are stale. If so, run `npm run docs:generate` and commit the generated file.
 4. Known baseline: lint is non-blocking in CI while the strict lint backlog is being paid down.
+
+## Browser authentication and permission checks
+
+These gates are independent; never solve a denial by disabling sandboxing,
+web security, certificate validation, or OS consent.
+
+In Settings > Browser, choose **Import from Chrome**, select a profile, approve
+access, and confirm the preview. The result shows imported, skipped, and failed
+cookie counts; **Last Chrome import** keeps the receipt after the dialog closes.
+A partial import keeps the cookies that succeeded and displays a warning, not a
+blanket failure. Open a site to check its sign-in; importing cookies does not
+guarantee that every site's session will transfer. Existing cookie-export files
+are available under **Other import options**.
+
+| Capability | Required approval or release configuration | Recovery / limitation |
+| --- | --- | --- |
+| Chrome profile cookies | Explicit DROIDEX import approval, then macOS access to Chrome Safe Storage when encrypted cookies are present | Cancel or deny imports nothing; unlock the login Keychain and retry. Never grant blanket Keychain or Full Disk Access. |
+| Saved DROIDEX logins | OS-protected encryption available; save approval and per-use fill approval, plus Touch ID when available | If decryption fails, delete only the affected saved login in Browser settings and save it again. Do not reset the user's Keychain. |
+| Touch ID WebAuthn | Not available in the current ad-hoc release | Passkeys are out of scope for this release. OS-protected saved-login storage and its own Touch ID confirmation still work. |
+| Website OAuth | Single-use authentication approval and an exact provider-popup target; provider allows embedded sign-in | Google prohibits embedded OAuth. Use a direct website login or an imported Chrome session; an external browser does not transfer its session into DROIDEX. |
+| Camera / microphone | Browser settings set to Ask, exact-site approval, macOS TCC approval, usage descriptions, and hardened-runtime camera/audio-input entitlements | If OS access is denied, enable DROIDEX under System Settings > Privacy & Security > Camera or Microphone and restart. Site approval cannot override OS denial. |
+| USB, HID, other unsupported website permissions | Not supported; denied by the browser permission controller | Do not add broad device, screen-recording, Accessibility, or Full Disk Access grants to work around an authentication failure. |
+
+### Ad-hoc build acceptance
+
+Run these checks on the actual ad-hoc artifact and record which ones still
+need user interaction. Developer ID is not a prerequisite for this release.
+
+1. Verify the app and helper ad-hoc signatures, camera/audio-input entitlements,
+   and camera/microphone usage descriptions. Confirm Browser settings report
+   Touch ID passkeys as unavailable.
+2. In a disposable test account, deny Chrome Keychain access and confirm nothing
+   imports; retry with approval and confirm the receipt and reopened site session.
+3. Save and fill a test login. Check cancel, Touch ID rejection, successful fill,
+   app restart, and exact-origin isolation without logging credential values.
+4. Test an allowed provider popup through redirect, opener completion, cancellation,
+   and closure. Verify provider-rejected embedded OAuth is not advertised as working.
+5. Confirm the UI does not advertise Touch ID passkey registration or use as
+   available.
+6. Test camera and microphone with site denial, OS denial, approval, and revocation.
+   Use a clean test macOS account when first-use prompts must be reproduced; do not
+   reset the user's existing privacy permissions.
+
+Automated tests cover policy and packaging inputs only: an encryption roundtrip,
+a denied media request, and synthetic OAuth fixtures prove nothing about a real
+Keychain, Touch ID hardware, macOS consent prompt, or provider account. Keep that
+distinction in release verification results.
+
+References: [Apple camera entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.camera),
+[Apple audio-input entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.audio-input),
+[Electron WebAuthn configuration](https://www.electronjs.org/docs/latest/api/app#appconfigurewebauthnoptions-macos),
+and [Google OAuth policies](https://developers.google.com/identity/protocols/oauth2/policies).

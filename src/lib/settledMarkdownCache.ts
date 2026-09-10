@@ -11,7 +11,7 @@ interface CacheEntry {
 
 const entries: CacheEntry[] = [];
 
-export function contentHash(value: string): string {
+function contentHash(value: string): string {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index);

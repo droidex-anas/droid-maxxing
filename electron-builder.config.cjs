@@ -8,6 +8,7 @@ const process = require('node:process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { URL } = require('node:url');
+const { prepareMacEntitlements } = require('./electron/macosEntitlements.cjs');
 
 const isReleaseBuild = process.env.DROIDEX_RELEASE_BUILD === '1';
 const isUnsignedReleaseBuild = process.env.DROIDEX_UNSIGNED_RELEASE_BUILD === '1';
@@ -37,6 +38,11 @@ if (isReleaseBuild && !canNotarize) {
     'DROIDEX release builds require Developer ID signing and Apple notarization credentials (APPLE_API_KEY must be an absolute .p8 path).',
   );
 }
+const macEntitlements = prepareMacEntitlements({
+  isReleaseBuild,
+  projectRoot: __dirname,
+  teamId: process.env.APPLE_TEAM_ID,
+});
 if ((isReleaseBuild || isUnsignedReleaseBuild) && !sentryDsn) {
   throw new Error('DROIDEX release builds require SENTRY_DSN for crash and bug reporting.');
 }
@@ -66,12 +72,25 @@ module.exports = {
     sentryDsn,
     sparkleFeedUrl,
     updateInstallMode: isReleaseBuild ? 'automatic' : 'sparkle',
+    webAuthnKeychainAccessGroup: macEntitlements.webAuthnKeychainAccessGroup,
   },
   directories: {
     output: 'release',
     buildResources: 'assets/brand',
   },
-  files: ['package.json', 'dist/**', 'electron/**', '!**/*.test.cjs', '!**/*.test.ts', '!**/*.map'],
+  files: [
+    'package.json',
+    'dist/**',
+    'electron/**',
+    // Layer-neutral assets shared by the Electron main process and the renderer.
+    'shared/**',
+    // The browser preload ships as the bundle built from these ESM sources; the
+    // sources themselves are never loaded at runtime.
+    '!electron/nativeBrowserPreload/**',
+    '!**/*.test.cjs',
+    '!**/*.test.ts',
+    '!**/*.map',
+  ],
   asarUnpack: ['node_modules/node-pty/**', 'node_modules/@droidex/sparkle-updater/**'],
   extraFiles: [
     {
@@ -95,6 +114,10 @@ module.exports = {
         'DROIDEX accesses Documents projects only when you choose them for an agent session.',
       NSDownloadsFolderUsageDescription:
         'DROIDEX accesses downloaded project files only when you choose them for an agent session.',
+      NSCameraUsageDescription:
+        'DROIDEX lets a website use your camera only after you approve its request in the built-in browser.',
+      NSMicrophoneUsageDescription:
+        'DROIDEX lets a website use your microphone only after you approve its request in the built-in browser.',
       SUFeedURL: sparkleFeedUrl,
       SUPublicEDKey: sparklePublicKey,
       SUEnableAutomaticChecks: true,
@@ -107,8 +130,8 @@ module.exports = {
     },
     identity,
     hardenedRuntime: hasSigningCredentials,
-    entitlements: 'assets/brand/entitlements.mac.plist',
-    entitlementsInherit: 'assets/brand/entitlements.mac.plist',
+    entitlements: macEntitlements.entitlementsPath,
+    entitlementsInherit: macEntitlements.entitlementsPath,
     target: [{ target: 'dmg' }, { target: 'zip' }],
     artifactName: `droidex-\${arch}.\${ext}`,
     notarize: canNotarize,

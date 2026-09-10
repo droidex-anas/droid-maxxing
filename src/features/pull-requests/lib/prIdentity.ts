@@ -11,7 +11,7 @@ const AVATAR_HOST = 'https://avatars.githubusercontent.com';
 // gh reports a missing author as this literal, so it must never become a URL.
 const UNKNOWN_LOGIN = 'unknown';
 
-export function normalizeLogin(login: string | null | undefined): string | null {
+function normalizeLogin(login: string | null | undefined): string | null {
   const trimmed = (login ?? '').trim();
   if (!trimmed || trimmed.toLowerCase() === UNKNOWN_LOGIN) return null;
   return trimmed;

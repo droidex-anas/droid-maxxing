@@ -6,7 +6,7 @@ import type {
   DesignReference,
 } from '../../types/bridge';
 import type { Size } from '../canvas/canvasMath';
-import { clamp } from './browserViewport';
+import { browserSurfaceLayout, clamp } from './browserViewport';
 
 export function composerStyleForReferences(
   references: DesignReference[],
@@ -14,7 +14,7 @@ export function composerStyleForReferences(
   viewport: BrowserViewport,
   mode: BrowserViewportMode,
 ): CSSProperties {
-  const surface = surfaceLayout(frame, viewport, mode);
+  const surface = browserSurfaceLayout(frame, viewport, mode);
   const box = unionBoxes(
     references.map(boxForReference).filter((item): item is BrowserBox => Boolean(item)),
   ) ?? {
@@ -35,26 +35,8 @@ export function composerStyleForReferences(
   };
 }
 
-function surfaceLayout(
-  frame: Size,
-  viewport: BrowserViewport,
-  mode: BrowserViewportMode,
-): Size & { left: number; top: number } {
-  const padding = 18;
-  const availableWidth = Math.max(1, frame.width - padding * 2);
-  const availableHeight = Math.max(1, frame.height - padding * 2);
-  const width = mode === 'fit' ? availableWidth : Math.min(viewport.width, availableWidth);
-  const height = mode === 'fit' ? availableHeight : Math.min(viewport.height, availableHeight);
-  return {
-    width: Math.round(width),
-    height: Math.round(height),
-    left: Math.round((frame.width - width) / 2),
-    top: Math.round((frame.height - height) / 2),
-  };
-}
-
 function boxForReference(reference: DesignReference): BrowserBox | undefined {
-  return reference.anchor?.box;
+  return reference.anchor.box;
 }
 
 function unionBoxes(boxes: BrowserBox[]): BrowserBox | undefined {

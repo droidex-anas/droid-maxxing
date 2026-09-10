@@ -1,11 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { activeSessionCwds, sessionIsLive, sessionIsUnread } from './sessions';
+import {
+  activeSessionCwds,
+  sessionIsLive,
+  sessionIsUnread,
+  sessionHasActiveWork,
+} from './sessions';
 import type { SessionSummary } from '../types/bridge';
 
 function session(over: Partial<SessionSummary>): SessionSummary {
   return { appSessionId: 'session', cwd: '', phase: 'completed', ...over } as SessionSummary;
 }
+
+test('parent-scoped activity includes only live, available child sessions', () => {
+  const idle = { phase: 'running', streaming: false };
+  const children = { worker: { status: 'running', queued: false } };
+  assert.equal(sessionHasActiveWork(idle, children, { worker: { available: true } }), true);
+  assert.equal(sessionHasActiveWork(idle, children, { worker: { available: false } }), false);
+  assert.equal(
+    sessionHasActiveWork(
+      idle,
+      { worker: { status: 'completed' } },
+      { worker: { available: true } },
+    ),
+    false,
+  );
+  assert.equal(
+    sessionHasActiveWork(
+      idle,
+      { worker: { status: 'running', queued: true } },
+      { worker: { available: true } },
+    ),
+    false,
+  );
+  assert.equal(sessionHasActiveWork({ phase: 'running', streaming: true }, {}, {}), true);
+  assert.equal(sessionHasActiveWork(idle, {}, {}), false);
+});
 
 test('sessionIsLive treats terminal and awaiting phases as not live', () => {
   assert.equal(sessionIsLive({ phase: 'completed' }), false);

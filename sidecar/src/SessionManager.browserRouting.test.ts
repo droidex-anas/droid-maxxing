@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { ServerEvent } from './protocol.js';
+import type { BrowserNativeRequest, ServerEvent } from './protocol.js';
 import {
   nativeSnapshot,
   nativeSuccess,
@@ -15,11 +15,42 @@ import {
 
 type NativeBrowserRequestEvent = Extract<ServerEvent, { type: 'browser.native.request' }>;
 
-function nativeRequests(events: ServerEvent[]): NativeBrowserRequestEvent[] {
-  return events.filter(
-    (event): event is NativeBrowserRequestEvent => event.type === 'browser.native.request',
-  );
+function latestNativeRequest(events: ServerEvent[]): BrowserNativeRequest {
+  const request = events
+    .filter((event): event is NativeBrowserRequestEvent => event.type === 'browser.native.request')
+    .at(-1)?.request;
+  assert.ok(request);
+  return request;
 }
+
+test(
+  'shutdown closes restored native browsers before stopping their transport',
+  { concurrency: false },
+  async () => {
+    const h = createNativeBrowserTestContext();
+    try {
+      await h.handle({
+        type: 'browser.restore',
+        state: {
+          appSessionId: 'restored-chat',
+          browserSessionId: 'restored-browser',
+          url: 'https://example.test/',
+          viewport: { width: 1200, height: 800, deviceScaleFactor: 1 },
+          viewportMode: 'fit',
+          scroll: { x: 0, y: 0 },
+        },
+      });
+      const shutdown = h.dispose();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const request = latestNativeRequest(h.events);
+      assert.equal(request.action, 'close');
+      await h.handle({ type: 'browser.native.result', result: { ...request, ok: true } });
+      await shutdown;
+    } finally {
+      await h.dispose();
+    }
+  },
+);
 
 test('[B1] Browser command routing', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();
@@ -31,6 +62,7 @@ test('[B1] Browser command routing', { concurrency: false }, async () => {
       type: 'browser.open',
       appSessionId: 'app-b1',
       url: 'https://example.test',
+      source: 'user',
       viewport,
       viewportMode: 'custom',
     });
@@ -43,6 +75,7 @@ test('[B1] Browser command routing', { concurrency: false }, async () => {
           type: 'browser.open',
           appSessionId: 'app-b1',
           url: 'https://example.test',
+          source: 'user',
           viewport,
           viewportMode: 'custom',
         },
@@ -150,6 +183,32 @@ test('[B1] Browser command routing', { concurrency: false }, async () => {
       ),
       true,
     );
+
+    await h.handle({
+      type: 'browser.restore',
+      state: {
+        browserSessionId: 'browser-restored',
+        appSessionId: 'app-restored',
+        url: 'https://restored.example.test',
+        viewport,
+        viewportMode: 'custom',
+        scroll: { x: 0, y: 18 },
+      },
+    });
+    assert.deepEqual(h.browsers.calls.at(-1), {
+      target: 'browser',
+      method: 'restore',
+      args: [
+        {
+          browserSessionId: 'browser-restored',
+          appSessionId: 'app-restored',
+          url: 'https://restored.example.test',
+          viewport,
+          viewportMode: 'custom',
+          scroll: { x: 0, y: 18 },
+        },
+      ],
+    });
   } finally {
     await h.dispose();
   }
@@ -169,8 +228,16 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
     void open.then(() => {
       opened = true;
     });
-    const request = nativeRequests(h.events).at(-1)?.request;
-    assert.ok(request);
+    await Promise.resolve();
+    const request = latestNativeRequest(h.events);
+    assert.match(
+      request.requestId,
+      /^browser-native-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    assert.ok(
+      (timeouts.currentDelay() ?? 0) > 120_000,
+      'approval-capable navigation must outlive the app permission prompt',
+    );
 
     await h.handle({
       type: 'browser.native.result',
@@ -179,6 +246,24 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
         appSessionId: 'app-b2',
         browserSessionId: 'browser-b2',
         ok: true,
+      },
+    });
+    assert.equal(opened, false);
+
+    await h.handle({
+      type: 'browser.native.result',
+      result: {
+        ...nativeSuccess(request, nativeSnapshot('https://wrong-chat.example.test')),
+        appSessionId: 'wrong-app-session',
+      },
+    });
+    assert.equal(opened, false);
+
+    await h.handle({
+      type: 'browser.native.result',
+      result: {
+        ...nativeSuccess(request, nativeSnapshot('https://replacement.example.test')),
+        browserSessionId: 'replacement-browser-session',
       },
     });
     assert.equal(opened, false);
@@ -200,8 +285,12 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
     );
 
     const reload = h.handle({ type: 'browser.reload', appSessionId: 'app-b2' });
-    const timedOutRequest = nativeRequests(h.events).at(-1)?.request;
-    assert.ok(timedOutRequest);
+    await Promise.resolve();
+    const timedOutRequest = latestNativeRequest(h.events);
+    assert.ok(
+      (timeouts.currentDelay() ?? 0) >= 60_000,
+      'reload can redirect cross-origin into an approval prompt, so it keeps the approval window',
+    );
     timeouts.fireCurrent();
     await reload;
     assert.equal(
@@ -222,8 +311,8 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
     assert.equal(h.events.length, eventCountBeforeLateResult);
 
     const close = h.handle({ type: 'browser.close', appSessionId: 'app-b2' });
-    const closeRequest = nativeRequests(h.events).at(-1)?.request;
-    assert.ok(closeRequest);
+    await Promise.resolve();
+    const closeRequest = latestNativeRequest(h.events);
     await h.handle({ type: 'browser.native.result', result: nativeSuccess(closeRequest) });
     await close;
   } finally {
@@ -231,6 +320,60 @@ test('[B2] Native request and result correlation', { concurrency: false }, async
     timeouts.restore();
   }
 });
+
+test(
+  'closing a native browser invalidates its pending action',
+  { concurrency: false },
+  async () => {
+    const h = createNativeBrowserTestContext();
+
+    try {
+      const open = h.handle({
+        type: 'browser.open',
+        appSessionId: 'app-close-race',
+        url: 'https://example.test',
+      });
+      await Promise.resolve();
+      const openRequest = latestNativeRequest(h.events);
+      await h.handle({
+        type: 'browser.native.result',
+        result: nativeSuccess(openRequest, nativeSnapshot('https://example.test')),
+      });
+      await open;
+
+      const reload = h.handle({ type: 'browser.reload', appSessionId: 'app-close-race' });
+      await Promise.resolve();
+      const reloadRequest = latestNativeRequest(h.events);
+
+      const close = h.handle({ type: 'browser.close', appSessionId: 'app-close-race' });
+      await Promise.resolve();
+      await reload;
+      const closeRequest = latestNativeRequest(h.events);
+      assert.equal(closeRequest.action, 'close');
+      assert.equal(
+        h.events.some(
+          (event) =>
+            event.type === 'browser.error' &&
+            event.appSessionId === 'app-close-race' &&
+            event.message === 'Browser session closed before the action completed.',
+        ),
+        true,
+      );
+
+      const eventCountBeforeLateResult = h.events.length;
+      await h.handle({
+        type: 'browser.native.result',
+        result: nativeSuccess(reloadRequest, nativeSnapshot('https://example.test/stale')),
+      });
+      assert.equal(h.events.length, eventCountBeforeLateResult);
+
+      await h.handle({ type: 'browser.native.result', result: nativeSuccess(closeRequest) });
+      await close;
+    } finally {
+      await h.dispose();
+    }
+  },
+);
 
 test('[B3] Browser continuity across compaction', { concurrency: false }, async () => {
   const h = createSessionManagerTestContext();

@@ -388,9 +388,24 @@ export interface BrowserState {
   refs: BrowserElementRef[];
   canGoBack?: boolean;
   canGoForward?: boolean;
+  scrollResult?: BrowserScrollResult;
   agentCursor?: { x: number; y: number };
   error?: string;
 }
+
+export type BrowserActionSource = 'agent' | 'user';
+
+export type BrowserRestoreState = Pick<
+  BrowserState,
+  | 'browserSessionId'
+  | 'url'
+  | 'title'
+  | 'viewport'
+  | 'viewportMode'
+  | 'scroll'
+  | 'canGoBack'
+  | 'canGoForward'
+> & { appSessionId: string };
 
 export interface BrowserNativeSnapshot {
   url: string;
@@ -399,6 +414,20 @@ export interface BrowserNativeSnapshot {
   refs: BrowserElementRef[];
   canGoBack?: boolean;
   canGoForward?: boolean;
+  scrollResult?: BrowserScrollResult;
+}
+
+/**
+ * The outcome of one scroll. `x`/`y` are the resulting absolute scroll offsets
+ * of the scrolled target, while `requested.x`/`requested.y` are the signed
+ * deltas that were asked for.
+ */
+export interface BrowserScrollResult {
+  x: number;
+  y: number;
+  moved: boolean;
+  atBoundary: boolean;
+  requested: { x: number; y: number };
 }
 
 export interface BrowserElementInspection {
@@ -458,12 +487,15 @@ export interface BrowserNativeRequest {
   appSessionId: string;
   browserSessionId: string;
   action: BrowserNativeAction;
+  source?: BrowserActionSource;
+  autonomy?: Autonomy;
   url?: string;
   viewport?: BrowserViewport;
   viewportMode?: BrowserViewportMode;
   x?: number;
   y?: number;
   selector?: string;
+  ref?: string;
   text?: string;
   key?: string;
   direction?: BrowserScrollDirection;
@@ -710,17 +742,20 @@ export type ClientCommand =
       type: 'browser.open';
       appSessionId: string;
       url: string;
+      source?: BrowserActionSource;
       viewport?: BrowserViewport;
       viewportMode?: BrowserViewportMode;
     }
+  | { type: 'browser.restore'; state: BrowserRestoreState }
   | { type: 'browser.close'; appSessionId: string }
-  | { type: 'browser.reload'; appSessionId: string }
+  | { type: 'browser.reload'; appSessionId: string; source?: BrowserActionSource }
   | { type: 'browser.refresh'; appSessionId: string }
   | {
       type: 'browser.resizeViewport';
       appSessionId: string;
       viewport: BrowserViewport;
       viewportMode: BrowserViewportMode;
+      source?: BrowserActionSource;
     }
   | {
       type: 'browser.click';
@@ -728,7 +763,7 @@ export type ClientCommand =
       ref?: string;
       x?: number;
       y?: number;
-      source?: 'agent' | 'user';
+      source?: BrowserActionSource;
     }
   | { type: 'browser.type'; appSessionId: string; text: string }
   | { type: 'browser.keypress'; appSessionId: string; key: string }
@@ -738,7 +773,6 @@ export type ClientCommand =
       direction: BrowserScrollDirection;
       pixels?: number;
       ref?: string;
-      source?: 'agent' | 'user';
     }
   | {
       type: 'browser.screenshot';

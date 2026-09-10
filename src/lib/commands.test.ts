@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bridge } from './bridge';
-import { exportSessionMarkdown, setBackgroundWork, setHistoryIndexingIdle } from './commands';
+import {
+  exportSessionMarkdown,
+  restoreBrowser,
+  setBackgroundWork,
+  setHistoryIndexingIdle,
+} from './commands';
 import type { ClientCommand, ServerEvent } from '../types/bridge';
 
 // Drives the bridge singleton with an in-memory double; exportSessionMarkdown
@@ -77,6 +82,42 @@ test('exportSessionMarkdown resolves the markdown for its own request id only', 
     assert.equal(await pending, '# yes');
   } finally {
     fake.restore();
+  }
+});
+
+test('restoreBrowser sends one canonical hydration command', () => {
+  const sent: ClientCommand[] = [];
+  const originalSend = bridge.send.bind(bridge);
+  bridge.send = (command) => {
+    sent.push(command);
+  };
+  try {
+    restoreBrowser({
+      browserSessionId: 'browser-1',
+      appSessionId: 'app-1',
+      url: 'https://example.test/current',
+      viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
+      viewportMode: 'fit',
+      scroll: { x: 0, y: 24 },
+      canGoBack: true,
+    });
+
+    assert.deepEqual(sent, [
+      {
+        type: 'browser.restore',
+        state: {
+          browserSessionId: 'browser-1',
+          appSessionId: 'app-1',
+          url: 'https://example.test/current',
+          viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
+          viewportMode: 'fit',
+          scroll: { x: 0, y: 24 },
+          canGoBack: true,
+        },
+      },
+    ]);
+  } finally {
+    bridge.send = originalSend;
   }
 });
 

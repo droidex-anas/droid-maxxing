@@ -1,3 +1,41 @@
+const MAX_BROWSER_URL_LENGTH = 8_192;
+
+// Shared browser URL predicate: http(s) only, no embedded credentials.
+// `maxLength` is opt-in: only callers that persist or compare stored URLs cap
+// the length. Live page URLs must not be capped -- real sites (dashboards, SAML
+// responses, SPA pushState) routinely exceed 8 KiB, and rejecting those would
+// break navigation bookkeeping rather than protect anything.
+function parseSafeHttpUrl(value, { maxLength } = {}) {
+  if (typeof value !== 'string') return null;
+  if (maxLength !== undefined && value.length > maxLength) return null;
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function isSafeHttpUrl(value, options) {
+  return parseSafeHttpUrl(value, options) !== null;
+}
+
+// Separates "not a URL at all" from "a URL we refuse": callers report the two
+// cases with different messages, so they cannot lean on parseSafeHttpUrl alone.
+function isParsableUrl(value, { maxLength } = {}) {
+  if (typeof value !== 'string') return false;
+  if (maxLength !== undefined && value.length > maxLength) return false;
+  return URL.canParse(value);
+}
+
+function isLoopbackHost(hostname) {
+  const value = String(hostname || '').toLowerCase();
+  return value === 'localhost' || value === '127.0.0.1' || value === '::1' || value === '[::1]';
+}
+
 function createNativeBrowserUrlPolicy({ appName, getHostAppUrl }) {
   function normalizeNativeBrowserSessionId(browserSessionId) {
     const value = String(browserSessionId || '').trim();
@@ -51,13 +89,6 @@ function createNativeBrowserUrlPolicy({ appName, getHostAppUrl }) {
     return String(url || '').startsWith('chrome-error://');
   }
 
-  function isLoadAbortError(err) {
-    return (
-      String(err?.code || '').includes('ERR_ABORTED') ||
-      String(err?.message || '').includes('ERR_ABORTED')
-    );
-  }
-
   function isHostAppUrl(url) {
     const host = localAppEndpoint(getHostAppUrl());
     const target = localAppEndpoint(url);
@@ -66,6 +97,9 @@ function createNativeBrowserUrlPolicy({ appName, getHostAppUrl }) {
     return host.local && target.local;
   }
 
+  // Deliberately permissive: this only compares host/port against the shell's own
+  // dev server, so URLs the safe-URL predicate rejects (embedded credentials,
+  // over-long) must still be recognised to produce the specific guidance below.
   function localAppEndpoint(url) {
     try {
       const parsed = new URL(url);
@@ -77,11 +111,6 @@ function createNativeBrowserUrlPolicy({ appName, getHostAppUrl }) {
     } catch {
       return undefined;
     }
-  }
-
-  function isLoopbackHost(hostname) {
-    const value = String(hostname || '').toLowerCase();
-    return value === 'localhost' || value === '127.0.0.1' || value === '::1' || value === '[::1]';
   }
 
   // Bare hosts are normalized to https by the renderer; local dev servers are
@@ -118,8 +147,9 @@ function createNativeBrowserUrlPolicy({ appName, getHostAppUrl }) {
 
   function validateUrl(value) {
     const parsed = new URL(value);
-    if (!['http:', 'https:', 'file:', 'about:'].includes(parsed.protocol)) {
-      throw new Error(`Unsupported browser URL scheme: ${parsed.protocol.replace(':', '')}`);
+    if (parsed.href === 'about:blank') return;
+    if (!isSafeHttpUrl(parsed.href)) {
+      throw new Error('Browser URLs must use http(s) without embedded credentials.');
     }
   }
 
@@ -142,14 +172,11 @@ function createNativeBrowserUrlPolicy({ appName, getHostAppUrl }) {
 
   return {
     normalizeNativeBrowserSessionId,
-    nativeBrowserUrlsMatch,
     restorableUrlForEntry,
     rememberFailedRestoreUrl,
     normalizeNativeBrowserUrl,
     rejectHostAppUrl,
     isChromeErrorUrl,
-    isLoadAbortError,
-    isHostAppUrl,
     httpFallbackUrl,
     validateUrl,
     normalizeBounds,
@@ -157,4 +184,11 @@ function createNativeBrowserUrlPolicy({ appName, getHostAppUrl }) {
   };
 }
 
-module.exports = { createNativeBrowserUrlPolicy };
+module.exports = {
+  createNativeBrowserUrlPolicy,
+  isLoopbackHost,
+  isParsableUrl,
+  isSafeHttpUrl,
+  parseSafeHttpUrl,
+  MAX_BROWSER_URL_LENGTH,
+};

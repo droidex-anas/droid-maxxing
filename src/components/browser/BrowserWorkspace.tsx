@@ -1,19 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDesignModeOpen } from '../../hooks/designModeState';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
-import { useSessionLive } from '../../hooks/useSessionLive';
-import {
-  addDesignReference,
-  openBrowser,
-  reloadBrowser,
-  resizeBrowserViewport,
-  sendDesignPrompt,
-} from '../../lib/commands';
-import type { BrowserViewport, BrowserViewportMode, DesignReference } from '../../types/bridge';
+import { useSessionLive, useSessionWorkActive } from '../../hooks/useSessionLive';
+import { openBrowser, reloadBrowser, resizeBrowserViewport } from '../../lib/commands';
+import type { BrowserViewport, BrowserViewportMode } from '../../types/bridge';
 import type { Size } from '../canvas/canvasMath';
 import {
   CUSTOM_DEFAULT_VIEWPORT,
-  normalizeUrl,
+  normalizeBrowserOmniboxInput,
   sameViewport,
   viewportForMode,
   viewportFromFrame,
@@ -23,20 +17,18 @@ import { isDesktop } from '../../lib/desktop';
 import {
   goBackNativeBrowser,
   goForwardNativeBrowser,
-  type NativeBrowserDesignPrompt,
   type NativeBrowserLoadFailed,
-  type NativeBrowserSelection,
 } from '../../lib/nativeBrowser';
+import { BrowserLoadFailureBanner } from './BrowserLoadFailureBanner';
 import { BrowserToolbar } from './BrowserToolbar';
 import { DesignModeComposer } from './DesignModeComposer';
 import { composerStyleForReferences } from './browserComposerPosition';
 import { browserKeyForSession } from '../../lib/browserSessionIdentity';
-import { browserTranscriptReferencesFromDesignReferences } from './browserTranscriptReferences';
 import { browserAddressValue, isSelfBrowserUrl, safeBrowserUrl } from './browserUrlSafety';
 import { shouldResetBrowserLoading } from './browserLoading';
 import { useElementSize } from './useElementSize';
-import { isEditTool } from '../../lib/diff';
-import { createLocalDesignTranscriptEvent, newQueueId } from '../../lib/promptQueue';
+import { useBrowserAutoReload } from './useBrowserAutoReload';
+import { useBrowserDesignPrompt } from './useBrowserDesignPrompt';
 
 export default function BrowserWorkspace({
   expanded = false,
@@ -72,6 +64,7 @@ export default function BrowserWorkspace({
   const browserError = browserKey ? state.browserErrors[browserKey] : state.browserGlobalError;
   const designMode = isDesignModeOpen(state.designModes, browserKey);
   const sessionLive = useSessionLive(requestedChatId ?? null);
+  const sessionWorkActive = useSessionWorkActive(requestedChatId ?? null);
   const nativeBrowser = isDesktop();
   // The native BrowserView is an OS-level layer painted above the React tree,
   // so any full-screen overlay would otherwise be punched through by it. Detach
@@ -98,10 +91,10 @@ export default function BrowserWorkspace({
   );
   const [customViewport, setCustomViewport] = useState<BrowserViewport>(CUSTOM_DEFAULT_VIEWPORT);
   const [actualViewport, setActualViewport] = useState<Size>({ width: 1, height: 1 });
-  const [pencilMode, setPencilMode] = useState(false);
-  const [instruction, setInstruction] = useState('');
-  const [references, setReferences] = useState<DesignReference[]>([]);
   const [loadFailure, setLoadFailure] = useState<NativeBrowserLoadFailed | null>(null);
+  // Bumped by the failure banner's Retry so the surface re-runs its attach
+  // effect; a reload alone leaves a session whose attach failed unmounted.
+  const [attachAttempt, setAttachAttempt] = useState(0);
   const [loading, setLoading] = useState(false);
   const [canGoBack, setCanGoBack] = useState(browser?.canGoBack ?? false);
   const [canGoForward, setCanGoForward] = useState(browser?.canGoForward ?? false);
@@ -109,6 +102,26 @@ export default function BrowserWorkspace({
   const browserIdentityRef = useRef({
     browserKey,
     browserSessionId: browser?.browserSessionId,
+  });
+  const {
+    canSend,
+    disabledReason,
+    handleNativePrompt,
+    handleSelection,
+    instruction,
+    pencilMode,
+    references,
+    sendPrompt,
+    setInstruction,
+    setPencilMode,
+    setReferences,
+  } = useBrowserDesignPrompt({
+    browserKey,
+    browserSessionId: browser?.browserSessionId,
+    browserUrl: browser?.url,
+    designMode,
+    requestedChatId,
+    sessionLive,
   });
   const startLoading = useCallback(() => {
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
@@ -133,51 +146,7 @@ export default function BrowserWorkspace({
     [],
   );
 
-  // Auto-reload: when the agent edits files and the browser shows a local
-  // dev server URL, reload the pane after a short debounce so the new code
-  // is visible immediately.  The timeout id lives in a ref so that
-  // subsequent transcript updates (non-edit events) don't clear a pending
-  // reload that was already scheduled.
-  const lastEditTsRef = useRef(0);
-  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTranscriptEvent = useStoreSelector((current) => {
-    const transcript = requestedChatId ? current.transcripts[requestedChatId] : undefined;
-    return transcript?.[transcript.length - 1];
-  });
-  useEffect(() => {
-    if (!browserKey) return;
-    // Eligibility is checked first so navigating away from a local dev server
-    // cancels any reload that was scheduled while the URL was still eligible;
-    // otherwise a stale edit reload could fire against an unrelated page.
-    if (!/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])/.test(activeUrl)) {
-      if (reloadTimerRef.current) {
-        clearTimeout(reloadTimerRef.current);
-        reloadTimerRef.current = null;
-      }
-      return;
-    }
-    const last = lastTranscriptEvent;
-    if (last?.kind !== 'tool_result') return;
-    if (!isEditTool(last.toolName) || last.isError) return;
-    if (last.ts <= lastEditTsRef.current) return;
-    lastEditTsRef.current = last.ts;
-    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
-    reloadTimerRef.current = setTimeout(() => {
-      reloadTimerRef.current = null;
-      reloadBrowser(browserKey);
-    }, 600);
-  }, [activeUrl, browserKey, lastTranscriptEvent]);
-
-  // Cancel any pending auto-reload when the browser session switches or the
-  // component unmounts, so a stale timer doesn't reload the wrong session.
-  useEffect(() => {
-    return () => {
-      if (reloadTimerRef.current) {
-        clearTimeout(reloadTimerRef.current);
-        reloadTimerRef.current = null;
-      }
-    };
-  }, [browserKey]);
+  useBrowserAutoReload(browserKey, activeUrl, requestedChatId);
 
   useEffect(() => {
     if (!browser?.url) return;
@@ -238,24 +207,10 @@ export default function BrowserWorkspace({
   }, [browser?.viewport, browser?.viewportMode]);
 
   useEffect(() => {
-    setReferences([]);
-    setInstruction('');
-    setPencilMode(false);
     setLoadFailure(null);
   }, [browser?.browserSessionId, browser?.url, browserKey]);
 
-  useEffect(() => {
-    if (!designMode) setPencilMode(false);
-  }, [designMode]);
-
   const requestedViewport = viewportForMode(viewportMode, fitViewport, customViewport);
-  const selectedIds = references.map((ref) => ref.id).filter((id): id is string => Boolean(id));
-  const canSend = Boolean(browserKey && selectedIds.length > 0 && instruction.trim());
-  const disabledReason = !browserKey
-    ? 'Select or create a Droid session'
-    : selectedIds.length === 0
-      ? 'Select a reference'
-      : 'Enter a prompt';
   const composerStyle = useMemo(
     () => composerStyleForReferences(references, frameSize, requestedViewport, viewportMode),
     [frameSize, references, requestedViewport, viewportMode],
@@ -288,7 +243,18 @@ export default function BrowserWorkspace({
   ]);
 
   const openCurrentUrl = () => {
-    const normalizedUrl = normalizeUrl(urlInput);
+    let normalizedUrl: string;
+    try {
+      normalizedUrl = normalizeBrowserOmniboxInput(urlInput);
+    } catch (error) {
+      dispatch({
+        type: 'BROWSER_ERROR',
+        appSessionId: browserKey,
+        message:
+          error instanceof Error ? error.message : 'Enter a website address or search terms.',
+      });
+      return;
+    }
     if (browserKey && isSelfBrowserUrl(normalizedUrl, appOrigin)) {
       setUrlInput(normalizedUrl);
       dispatch({
@@ -337,90 +303,9 @@ export default function BrowserWorkspace({
     [activeUrl, browser?.browserSessionId, startLoading, stopLoading],
   );
 
-  const emitDesignTranscript = useCallback(
-    (text: string, refs: DesignReference[]) => {
-      if (!requestedChatId) return;
-      const browserRefs = browserTranscriptReferencesFromDesignReferences(refs);
-      dispatch({
-        type: 'SESSION_TRANSCRIPT',
-        event: createLocalDesignTranscriptEvent(requestedChatId, text, browserRefs),
-      });
-    },
-    [dispatch, requestedChatId],
-  );
-
-  // Stage a design prompt in the same client-side queue normal prompts use so
-  // it shows up as a draggable item and is delivered (with its references) once
-  // the current turn finishes, instead of hitting the backend mid-turn.
-  const queueDesignPrompt = useCallback(
-    (text: string, refs: DesignReference[], ids: string[]) => {
-      if (!browserKey || !requestedChatId) return;
-      dispatch({
-        type: 'QUEUE_PROMPT',
-        appSessionId: requestedChatId,
-        prompt: {
-          id: newQueueId(),
-          text,
-          skills: [],
-          files: [],
-          design: { browserKey, references: refs, referenceIds: ids },
-        },
-      });
-    },
-    [browserKey, dispatch, requestedChatId],
-  );
-
-  const sendPrompt = () => {
-    if (!browserKey || !canSend) return;
-    const text = instruction.trim();
-    if (sessionLive) {
-      queueDesignPrompt(text, references, selectedIds);
-    } else {
-      sendDesignPrompt(browserKey, text, selectedIds);
-      emitDesignTranscript(text, references);
-    }
-    setReferences([]);
-    setInstruction('');
-    // Re-arm like Cursor: disarm after sending so the user clicks Design Mode
-    // again to start a new selection instead of staying live.
-    dispatch({ type: 'SET_DESIGN_MODE', appSessionId: browserKey, open: false });
-  };
-
-  const handleSelection = useCallback(
-    (selection: NativeBrowserSelection) => {
-      const reference = referenceFromNativeSelection(selection);
-      setReferences([reference]);
-      if (browserKey) addDesignReference(browserKey, reference);
-    },
-    [browserKey],
-  );
-
   const handleLoadFailed = useCallback((failure: NativeBrowserLoadFailed) => {
     setLoadFailure(failure);
   }, []);
-
-  const handleNativePrompt = useCallback(
-    (prompt: NativeBrowserDesignPrompt) => {
-      if (!browserKey) return;
-      const text = prompt.instruction.trim();
-      if (!text) return;
-      const reference = referenceFromNativeSelection(prompt.selection);
-      const referenceId = reference.id;
-      if (!referenceId) return;
-      addDesignReference(browserKey, reference);
-      if (sessionLive) {
-        queueDesignPrompt(text, [reference], [referenceId]);
-      } else {
-        window.setTimeout(() => {
-          sendDesignPrompt(browserKey, text, [referenceId]);
-        }, 0);
-        emitDesignTranscript(text, [reference]);
-      }
-      setReferences([]);
-      dispatch({ type: 'SET_DESIGN_MODE', appSessionId: browserKey, open: false });
-    },
-    [browserKey, dispatch, emitDesignTranscript, sessionLive, queueDesignPrompt],
-  );
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-droid-bg">
@@ -440,7 +325,7 @@ export default function BrowserWorkspace({
         onGoForward={() => void navigateHistory('forward')}
         onReload={() => {
           startLoading();
-          if (browserKey && browser) reloadBrowser(browserKey);
+          if (browserKey && browser) reloadBrowser(browserKey, 'user');
           else openCurrentUrl();
         }}
         onToggleDesignMode={() => {
@@ -459,41 +344,28 @@ export default function BrowserWorkspace({
       )}
 
       {loadFailure && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-droid-border bg-red-500/10 px-4 py-2 text-[12px] text-droid-text-secondary">
-          <span className="min-w-0 flex-1 truncate">
-            Could not load {loadFailure.url}
-            {loadFailure.error ? ` (${loadFailure.error})` : ''}. Check that the server is running.
-          </span>
-          <button
-            type="button"
-            className="shrink-0 rounded border border-droid-border px-2 py-0.5 text-[11px] text-droid-text-muted hover:text-droid-text"
-            onClick={() => {
-              setLoadFailure(null);
-              startLoading();
-              if (browserKey && browser) reloadBrowser(browserKey);
-              else openCurrentUrl();
-            }}
-          >
-            Retry
-          </button>
-          <button
-            type="button"
-            className="shrink-0 rounded px-1 text-[11px] text-droid-text-muted hover:text-droid-text"
-            onClick={() => {
-              setLoadFailure(null);
-            }}
-            aria-label="Dismiss"
-          >
-            x
-          </button>
-        </div>
+        <BrowserLoadFailureBanner
+          failure={loadFailure}
+          onRetry={() => {
+            setLoadFailure(null);
+            startLoading();
+            setAttachAttempt((attempt) => attempt + 1);
+            if (browserKey && browser) reloadBrowser(browserKey, 'user');
+            else openCurrentUrl();
+          }}
+          onDismiss={() => {
+            setLoadFailure(null);
+          }}
+        />
       )}
 
       <div ref={frameRef} className="relative flex-1 min-h-0 min-w-0">
         {browserKey && frameReady ? (
           <NativeBrowserSurface
+            isAgentRunning={sessionWorkActive}
             browserKey={browserKey}
             visibleBrowserSessionId={browser?.browserSessionId}
+            attachAttempt={attachAttempt}
             obscured={obscured}
             url={activeUrl}
             viewport={requestedViewport}
@@ -566,19 +438,4 @@ export default function BrowserWorkspace({
       </div>
     </div>
   );
-}
-
-function referenceFromNativeSelection(selection: NativeBrowserSelection): DesignReference {
-  return {
-    id: selection.anchor.id,
-    anchor: {
-      ...selection.anchor,
-      strokes: selection.anchor.strokes ?? selection.strokes,
-    },
-    detail: selection.detail,
-    url: selection.url,
-    title: selection.title,
-    scroll: selection.scroll,
-    screenshot: selection.screenshot,
-  };
 }

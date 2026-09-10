@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type {
+  Autonomy,
   BrowserNativeRequest,
   BrowserNativeResult,
   ClientCommand,
@@ -15,6 +17,7 @@ type Emit = (event: ServerEvent) => void;
 export type SessionBrowsers = Pick<
   BrowserSessionManager,
   | 'open'
+  | 'restore'
   | 'close'
   | 'closeAll'
   // Runtime retirement asks whether a session is still holding a browser.
@@ -35,6 +38,7 @@ export type SessionBrowsers = Pick<
 export interface SessionBrowserDependencies {
   browsers: SessionBrowsers;
   emit: Emit;
+  getAutonomy: (appSessionId: string) => Autonomy | undefined;
   sendPrompt: (appSessionId: string, prompt: string) => Promise<void>;
 }
 
@@ -44,12 +48,21 @@ const BROWSER_NATIVE_TIMEOUT_MS = boundedInt(
   1_000,
   60_000,
 );
+const BROWSER_NATIVE_INTERACTIVE_TIMEOUT_MS = 185_000;
+const INTERACTIVE_BROWSER_ACTIONS = new Set<BrowserNativeRequest['action']>([
+  'open',
+  'reload',
+  'goBack',
+  'goForward',
+  'click',
+  'fillCredentials',
+]);
 
-let nativeBrowserSeq = 0;
-const nextNativeBrowserRequestId = () =>
-  `browser-native-${Date.now().toString(36)}-${(nativeBrowserSeq++).toString(36)}`;
+const nextNativeBrowserRequestId = () => `browser-native-${randomUUID()}`;
 
 interface PendingNativeBrowserRequest {
+  appSessionId: string;
+  browserSessionId: string;
   resolve: (result: BrowserNativeResult) => void;
   reject: (err: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
@@ -57,8 +70,52 @@ interface PendingNativeBrowserRequest {
 
 export class SessionBrowser {
   private readonly pendingNativeBrowserRequests = new Map<string, PendingNativeBrowserRequest>();
+  private readonly designQueues = new Map<string, Promise<void>>();
+  private isShutdown = false;
 
   constructor(private readonly d: SessionBrowserDependencies) {}
+
+  // Browser wire routing is intentionally centralized here so SessionManager
+  // cannot grow a second, divergent command path. Unhandled commands return
+  // synchronously so this dispatcher cannot perturb their initialization order.
+  // eslint-disable-next-line complexity
+  handle(command: ClientCommand): Promise<void> | false {
+    switch (command.type) {
+      case 'browser.open':
+        return this.open(command);
+      case 'browser.restore':
+        return this.restore(command);
+      case 'browser.close':
+        return this.close(command);
+      case 'browser.reload':
+        return this.reload(command);
+      case 'browser.refresh':
+        return this.refresh(command);
+      case 'browser.resizeViewport':
+        return this.resizeViewport(command);
+      case 'browser.click':
+        return this.click(command);
+      case 'browser.type':
+        return this.type(command);
+      case 'browser.keypress':
+        return this.keypress(command);
+      case 'browser.scroll':
+        return this.scroll(command);
+      case 'browser.screenshot':
+        return this.screenshot(command);
+      case 'browser.inspectPoint':
+        return this.inspectPoint(command);
+      case 'browser.design.addReference':
+        return this.addReference(command);
+      case 'browser.design.sendPrompt':
+        return this.sendDesignPrompt(command);
+      case 'browser.native.result':
+        this.resolveNativeBrowserRequest(command.result);
+        return Promise.resolve();
+      default:
+        return false;
+    }
+  }
 
   createRuntime(
     browserSessionId: string,
@@ -83,6 +140,17 @@ export class SessionBrowser {
     );
   }
 
+  async restore(cmd: Extract<ClientCommand, { type: 'browser.restore' }>): Promise<void> {
+    // Wire commands are unvalidated, so a missing state must fail on the browser channel.
+    const appSessionId = (cmd.state as { appSessionId?: string } | undefined)?.appSessionId;
+    await this.handleBrowser(appSessionId, () =>
+      this.d.browsers.restore({
+        ...cmd.state,
+        appSessionId: this.requireBrowserAppSessionId(appSessionId),
+      }),
+    );
+  }
+
   async close(cmd: Extract<ClientCommand, { type: 'browser.close' }>): Promise<void> {
     await this.handleBrowser(cmd.appSessionId, async () => {
       const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
@@ -93,7 +161,7 @@ export class SessionBrowser {
 
   async reload(cmd: Extract<ClientCommand, { type: 'browser.reload' }>): Promise<void> {
     await this.handleBrowser(cmd.appSessionId, () =>
-      this.d.browsers.reload(this.requireBrowserAppSessionId(cmd.appSessionId)),
+      this.d.browsers.reload(this.requireBrowserAppSessionId(cmd.appSessionId), cmd.source),
     );
   }
 
@@ -141,7 +209,6 @@ export class SessionBrowser {
         this.requireBrowserAppSessionId(cmd.appSessionId),
         cmd.direction,
         cmd.pixels,
-        cmd.source,
         cmd.ref,
       ),
     );
@@ -170,32 +237,42 @@ export class SessionBrowser {
   async addReference(
     cmd: Extract<ClientCommand, { type: 'browser.design.addReference' }>,
   ): Promise<void> {
-    await this.handleBrowser(cmd.appSessionId, async () => {
-      await this.d.browsers.addReference(
-        this.requireBrowserAppSessionId(cmd.appSessionId),
-        {
-          anchor: cmd.reference.anchor,
-          detail: cmd.reference.detail,
-          id: cmd.reference.id,
-        },
-        cmd.reference.screenshot,
-      );
-    });
+    await this.queueDesign(cmd.appSessionId, () =>
+      this.handleBrowser(cmd.appSessionId, async () => {
+        await this.d.browsers.addReference(
+          this.requireBrowserAppSessionId(cmd.appSessionId),
+          {
+            anchor: cmd.reference.anchor,
+            detail: cmd.reference.detail,
+            id: cmd.reference.id,
+          },
+          cmd.reference.screenshot,
+        );
+      }),
+    );
   }
 
   async sendDesignPrompt(
     cmd: Extract<ClientCommand, { type: 'browser.design.sendPrompt' }>,
   ): Promise<void> {
-    await this.handleBrowser(cmd.appSessionId, async () => {
-      const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
-      const { prompt } = await this.d.browsers.designPrompt({ ...cmd, appSessionId });
-      await this.d.sendPrompt(appSessionId, prompt);
-    });
+    await this.queueDesign(cmd.appSessionId, () =>
+      this.handleBrowser(cmd.appSessionId, async () => {
+        const appSessionId = this.requireBrowserAppSessionId(cmd.appSessionId);
+        const { prompt } = await this.d.browsers.designPrompt({ ...cmd, appSessionId });
+        await this.d.sendPrompt(appSessionId, prompt);
+      }),
+    );
   }
 
   resolveNativeBrowserRequest(result: BrowserNativeResult): void {
     const pending = this.pendingNativeBrowserRequests.get(result.requestId);
     if (!pending) return;
+    if (
+      result.appSessionId !== pending.appSessionId ||
+      result.browserSessionId !== pending.browserSessionId
+    ) {
+      return;
+    }
     clearTimeout(pending.timeout);
     this.pendingNativeBrowserRequests.delete(result.requestId);
     if (result.ok) pending.resolve(result);
@@ -203,18 +280,81 @@ export class SessionBrowser {
   }
 
   private requestNativeBrowser(request: BrowserNativeRequest): Promise<BrowserNativeResult> {
+    if (this.isShutdown) {
+      return Promise.reject(new Error('DROIDEX browser stopped before the action completed.'));
+    }
+    if (request.action === 'close') {
+      this.rejectPendingActions(request.appSessionId, request.browserSessionId, request.requestId);
+    }
+    const autonomy = this.d.getAutonomy(request.appSessionId);
+    const authorizedRequest = request.action === 'close' ? request : { ...request, autonomy };
+    const timeoutMs = nativeRequestTimeoutMs(request);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingNativeBrowserRequests.delete(request.requestId);
         reject(
           new Error(
-            `DROIDEX browser did not respond to ${request.action} within ${String(BROWSER_NATIVE_TIMEOUT_MS)}ms.`,
+            `DROIDEX browser did not respond to ${request.action} within ${String(timeoutMs)}ms.`,
           ),
         );
-      }, BROWSER_NATIVE_TIMEOUT_MS);
-      this.pendingNativeBrowserRequests.set(request.requestId, { resolve, reject, timeout });
-      this.d.emit({ type: 'browser.native.request', request });
+      }, timeoutMs);
+      this.pendingNativeBrowserRequests.set(request.requestId, {
+        appSessionId: request.appSessionId,
+        browserSessionId: request.browserSessionId,
+        resolve,
+        reject,
+        timeout,
+      });
+      this.d.emit({ type: 'browser.native.request', request: authorizedRequest });
     });
+  }
+
+  shutdown(): void {
+    if (this.isShutdown) return;
+    this.isShutdown = true;
+    for (const [requestId, pending] of this.pendingNativeBrowserRequests) {
+      clearTimeout(pending.timeout);
+      this.pendingNativeBrowserRequests.delete(requestId);
+      pending.reject(new Error('DROIDEX browser stopped before the action completed.'));
+    }
+  }
+
+  private rejectPendingActions(
+    appSessionId: string,
+    browserSessionId: string,
+    closingRequestId: string,
+  ): void {
+    for (const [requestId, pending] of this.pendingNativeBrowserRequests) {
+      if (
+        requestId === closingRequestId ||
+        pending.appSessionId !== appSessionId ||
+        pending.browserSessionId !== browserSessionId
+      ) {
+        continue;
+      }
+      clearTimeout(pending.timeout);
+      this.pendingNativeBrowserRequests.delete(requestId);
+      pending.reject(new Error('Browser session closed before the action completed.'));
+    }
+  }
+
+  // A reference and the prompt that cites it arrive as two separate wire
+  // commands, so they run in arrival order per chat: a prompt must never reach
+  // the agent before the reference it names has been stored.
+  private queueDesign(
+    appSessionId: string | undefined,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    const key = appSessionId ?? '';
+    const previous = this.designQueues.get(key) ?? Promise.resolve();
+    // Run next whether or not the predecessor settled cleanly: a rejection must
+    // not strand the rest of this chat's design work behind it.
+    const next = previous.then(action, action);
+    this.designQueues.set(key, next);
+    void next.finally(() => {
+      if (this.designQueues.get(key) === next) this.designQueues.delete(key);
+    });
+    return next;
   }
 
   private async handleBrowser(
@@ -231,11 +371,18 @@ export class SessionBrowser {
   }
 
   private requireBrowserAppSessionId(appSessionId?: string): string {
-    if (!appSessionId) {
+    if (typeof appSessionId !== 'string' || !appSessionId.trim()) {
       throw new Error(
         'Browser sessions are scoped to a Droid chat. Select or create a chat before opening the browser.',
       );
     }
     return appSessionId;
   }
+}
+
+function nativeRequestTimeoutMs(request: BrowserNativeRequest): number {
+  const canPromptForAuthentication = request.action === 'keypress' && request.key === 'Enter';
+  return INTERACTIVE_BROWSER_ACTIONS.has(request.action) || canPromptForAuthentication
+    ? BROWSER_NATIVE_INTERACTIVE_TIMEOUT_MS
+    : BROWSER_NATIVE_TIMEOUT_MS;
 }

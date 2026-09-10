@@ -48,6 +48,7 @@ import { useWorkspaceSessionList } from './hooks/useWorkspaceSessionList';
 import { useHistoryIndexingIdle } from './hooks/useHistoryIndexingIdle';
 import { useBackgroundWorkTier } from './hooks/useBackgroundWorkTier';
 import { transcriptRehydrationLimit } from './lib/transcriptStoreMemory';
+import { BrowserPermissionPromptHost } from './components/BrowserPermissionPrompt';
 import {
   bindLazySurfaceIntent,
   scheduleIdleLazyWarmup,
@@ -74,6 +75,7 @@ import {
   utilityToolFallback,
 } from './lib/lazySurfaces';
 import { noteComposerNotApplicable, noteFirstMeaningfulShellPaint } from './lib/rendererPerf';
+import { restorePersistedBrowserSessions } from './hooks/persistedBrowserSnapshot';
 
 function ContextListIcon({ className }: { className?: string }) {
   return (
@@ -116,6 +118,7 @@ export default function App() {
   useChatPullRequests();
   const dispatch = useStoreDispatch();
   const store = useStoreApi();
+  const [browserPromptOpen, setBrowserPromptOpen] = useState(false);
   const state = useStoreSelector((current) => {
     const activeSession = current.activeAppSessionId
       ? current.sessions[current.activeAppSessionId]
@@ -347,15 +350,24 @@ export default function App() {
 
   useEffect(() => {
     if (embedded) return;
-    void (async () => {
-      // Bridge info and the saved API key are independent IPCs; fetch them
-      // together so the connect command reaches the sidecar one round-trip
-      // sooner. Queued commands flush in order once the socket opens.
-      const [, key] = await Promise.all([bridge.start(), getApiKey()]);
-      connect(key ?? '');
-      listFactoryDefaults();
-    })();
-  }, [embedded]);
+    let disposed = false;
+    let stopOpenListener: (() => void) | undefined;
+    void getApiKey()
+      .catch(() => null)
+      .then((key) => {
+        if (disposed) return;
+        stopOpenListener = bridge.subscribeOpen(() => {
+          connect(key ?? '');
+          listFactoryDefaults();
+          restorePersistedBrowserSessions(store.getState().browsers);
+        });
+        void bridge.start();
+      });
+    return () => {
+      disposed = true;
+      stopOpenListener?.();
+    };
+  }, [embedded, store]);
 
   // App update discovery must never wait on CLI/env probing: that work can be
   // slow or unavailable, while the verified appcast is independent.
@@ -425,7 +437,9 @@ export default function App() {
         dispatch({ type: 'SET_RIGHT_PANEL', open: false });
         dispatch({ type: 'OPEN_UTILITY_TOOL', tool: 'browser' });
       }
-      void performNativeBrowserRequest(event.request)
+      void performNativeBrowserRequest(event.request, {
+        surface: requestIsForActiveChat ? 'visible' : 'background',
+      })
         .then(sendNativeBrowserResult)
         .catch((err: unknown) => {
           sendNativeBrowserResult({
@@ -682,7 +696,7 @@ export default function App() {
                           <Suspense fallback={utilityToolFallback('browser')}>
                             <LazyBrowserFocusWorkspace
                               expanded={browserExpanded}
-                              externalObscured={overlayOpen}
+                              externalObscured={overlayOpen || browserPromptOpen}
                               onToggleExpanded={() => {
                                 setExpandedBrowserAppSessionId(
                                   browserExpanded ? null : activeSession.appSessionId,
@@ -820,6 +834,7 @@ export default function App() {
       <Suspense fallback={null}>
         <LazySpecWikiModal />
       </Suspense>
+      <BrowserPermissionPromptHost onOpenChange={setBrowserPromptOpen} />
       <Toaster />
 
       <AnimatePresence>{state.settingsOpen && <SettingsLazyHost />}</AnimatePresence>

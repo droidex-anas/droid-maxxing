@@ -1,18 +1,13 @@
 import { createSdkMcpServer, tool } from '@factory/droid-sdk';
 import { readFile } from 'node:fs/promises';
-import { z } from 'zod';
 import type { BrowserSessionManager } from './BrowserSessionManager.js';
+import { browserMcpToolDefs as defs } from './browserMcpToolDefs.js';
 import type { BrowserState, DesignReference } from './types.js';
 import { jsonResult, safeTool, type ToolHandlerResult } from '../mcpToolUtils.js';
 
-const viewportSchema = z.object({
-  width: z.number().int().min(240).max(4096),
-  height: z.number().int().min(240).max(4096),
-  deviceScaleFactor: z.number().positive().max(4).optional(),
-});
-
-const viewportModeSchema = z.enum(['fit', 'desktop', 'laptop', 'tablet', 'mobile', 'custom']);
-const scrollDirectionSchema = z.enum(['up', 'down', 'left', 'right']);
+// A design_context reply carries at most this many screenshots; the agent
+// fetches any older reference by @id with design_reference.
+const MAX_CONTEXT_IMAGES = 4;
 
 export function createBrowserMcpServer(
   manager: BrowserSessionManager,
@@ -25,29 +20,13 @@ export function createBrowserMcpServer(
   };
 
   return createSdkMcpServer({
-    name: 'droidmaxx-browser',
+    name: 'droidex-browser',
     version: '0.1.0',
     tools: [
       tool(
-        'browser_open',
-        [
-          'Open and show a URL in the live DROIDEX browser pane for this chat session.',
-          'This is the browser the user can see and control in DROIDEX.',
-          'When the user asks to open a site, navigate, click, inspect, or control a browser, call this tool first with the site URL.',
-          'If the user names a domain without a scheme, pass it directly; DROIDEX will load it as https.',
-          'Do not ask the user for a URL when they already named a site or domain.',
-          'Do not use Read, FetchUrl, curl, or agent-browser as a substitute for browser work.',
-        ].join(' '),
-        {
-          url: z
-            .string()
-            .min(1)
-            .describe(
-              'Absolute URL to open, such as https://example.com or http://127.0.0.1:1421/.',
-            ),
-          viewport: viewportSchema.optional().describe('Optional explicit browser viewport.'),
-          viewportMode: viewportModeSchema.optional().describe('Viewport preset label for the UI.'),
-        },
+        'open',
+        defs.open.description,
+        defs.open.input,
         safeTool(async (input) => {
           const state = await manager.open({
             appSessionId: appSessionId(),
@@ -59,64 +38,51 @@ export function createBrowserMcpServer(
           });
           return jsonResult({
             message:
-              'Opened the live DROIDEX browser. The response includes current page refs; use them directly with browser_click, browser_type, and browser_scroll.',
+              'Opened the live DROIDEX browser. The response includes current page refs; use them directly with click, type, and scroll.',
             ...stateForTool(state),
           });
         }),
       ),
       tool(
-        'browser_snapshot',
-        'Refresh compact DOM refs and visible page state when the page changed or current refs became stale.',
-        {},
+        'snapshot',
+        defs.snapshot.description,
+        defs.snapshot.input,
         safeTool(async () => {
           const state = await manager.refresh(appSessionId());
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_reload',
-        'Reload the current live DROIDEX browser page. Use browser_snapshot after reload when fresh refs are needed.',
-        {},
+        'reload',
+        defs.reload.description,
+        defs.reload.input,
         safeTool(async () => {
           const state = await manager.reload(appSessionId());
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_back',
-        'Go back one page in the live DROIDEX browser history and return fresh page refs.',
-        {},
+        'back',
+        defs.back.description,
+        defs.back.input,
         safeTool(async () => {
           const state = await manager.goBack(appSessionId());
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_forward',
-        'Go forward one page in the live DROIDEX browser history and return fresh page refs.',
-        {},
+        'forward',
+        defs.forward.description,
+        defs.forward.input,
         safeTool(async () => {
           const state = await manager.goForward(appSessionId());
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_screenshot',
-        'Capture the current live DROIDEX browser viewport as a high-detail PNG image for visual inspection. Use browser_snapshot for normal navigation refs.',
-        {
-          fullPage: z
-            .boolean()
-            .optional()
-            .describe('Capture the full page instead of only the visible viewport.'),
-          deviceScaleFactor: z
-            .number()
-            .positive()
-            .max(4)
-            .optional()
-            .describe(
-              'Temporary screenshot scale. Defaults to the current high-detail viewport scale.',
-            ),
-        },
+        'screenshot',
+        defs.screenshot.description,
+        defs.screenshot.input,
         safeTool(async (input) => {
           const path = await manager.screenshot(appSessionId(), {
             fullPage: input.fullPage ?? false,
@@ -126,16 +92,9 @@ export function createBrowserMcpServer(
         }),
       ),
       tool(
-        'browser_click',
-        'Move the agent cursor and click in the live DROIDEX browser by ref or viewport coordinates. Prefer refs returned by browser_snapshot.',
-        {
-          ref: z
-            .string()
-            .optional()
-            .describe('Element ref returned by browser_snapshot. Preferred when available.'),
-          x: z.number().optional().describe('Viewport x coordinate when clicking by coordinate.'),
-          y: z.number().optional().describe('Viewport y coordinate when clicking by coordinate.'),
-        },
+        'click',
+        defs.click.description,
+        defs.click.input,
         safeTool(async (input) => {
           const state = await manager.click({
             appSessionId: appSessionId(),
@@ -147,13 +106,9 @@ export function createBrowserMcpServer(
         }),
       ),
       tool(
-        'browser_hover',
-        'Move the trusted browser pointer over an element by ref or viewport coordinates, then return fresh page refs.',
-        {
-          ref: z.string().optional().describe('Element ref returned by browser_snapshot.'),
-          x: z.number().optional().describe('Viewport x coordinate when hovering by coordinate.'),
-          y: z.number().optional().describe('Viewport y coordinate when hovering by coordinate.'),
-        },
+        'hover',
+        defs.hover.description,
+        defs.hover.input,
         safeTool(async (input) => {
           const state = await manager.hover({
             appSessionId: appSessionId(),
@@ -165,49 +120,36 @@ export function createBrowserMcpServer(
         }),
       ),
       tool(
-        'browser_select',
-        'Choose an option in a native select element by ref. The value may be the option value or visible label.',
-        {
-          ref: z.string().describe('Select element ref returned by browser_snapshot.'),
-          value: z.string().describe('Option value or exact visible label to select.'),
-        },
+        'select',
+        defs.select.description,
+        defs.select.input,
         safeTool(async (input) => {
           const state = await manager.selectOption(appSessionId(), input.ref, input.value);
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_type',
-        'Type text into the currently focused element in the live DROIDEX browser. Click or focus an input first.',
-        {
-          text: z.string().describe('Text to type into the currently focused browser element.'),
-        },
+        'type',
+        defs.type.description,
+        defs.type.input,
         safeTool(async (input) => {
           const state = await manager.type(appSessionId(), input.text);
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_keypress',
-        'Press a key in the live DROIDEX browser.',
-        {
-          key: z
-            .string()
-            .min(1)
-            .describe('Key name to press, such as Enter, Escape, Tab, ArrowDown.'),
-        },
+        'keypress',
+        defs.keypress.description,
+        defs.keypress.input,
         safeTool(async (input) => {
           const state = await manager.keypress(appSessionId(), input.key);
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_resize',
-        'Resize the viewport of the live DROIDEX browser. Use this to check responsive layouts or to match a specific screen size.',
-        {
-          viewport: viewportSchema.describe('New viewport dimensions.'),
-          viewportMode: viewportModeSchema.optional().describe('Viewport preset label.'),
-        },
+        'resize',
+        defs.resize.description,
+        defs.resize.input,
         safeTool(async (input) => {
           const state = await manager.resizeViewport({
             appSessionId: appSessionId(),
@@ -221,139 +163,91 @@ export function createBrowserMcpServer(
         }),
       ),
       tool(
-        'browser_scroll',
-        'Scroll the live DROIDEX browser page, then call browser_snapshot to refresh refs.',
-        {
-          direction: scrollDirectionSchema.describe('Direction to scroll.'),
-          pixels: z.number().positive().max(4000).optional().describe('Scroll amount in pixels.'),
-          ref: z.string().optional().describe('Optional ref inside a nested scroll container.'),
-        },
+        'scroll',
+        defs.scroll.description,
+        defs.scroll.input,
         safeTool(async (input) => {
           const state = await manager.scroll(
             appSessionId(),
             input.direction,
             input.pixels,
-            undefined,
             input.ref,
           );
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_wait',
-        'Wait for browser text, a ref, or a URL fragment before continuing. With no condition, waits for the requested duration.',
-        {
-          text: z.string().optional().describe('Visible ref text or accessible name to wait for.'),
-          ref: z.string().optional().describe('Element ref to wait for.'),
-          urlIncludes: z.string().optional().describe('URL fragment to wait for.'),
-          timeoutMs: z
-            .number()
-            .int()
-            .min(0)
-            .max(15_000)
-            .optional()
-            .describe('Maximum wait in milliseconds. Defaults to 5000.'),
-        },
+        'wait',
+        defs.wait.description,
+        defs.wait.input,
         safeTool(async (input) => {
           const state = await manager.wait(appSessionId(), input);
           return jsonResult(stateForTool(state));
         }),
       ),
       tool(
-        'browser_inspect',
-        [
-          'Inspect one element without enabling Design Mode or taking another full-page snapshot.',
-          'Returns bounded HTML, sanitized attributes, geometry, and iframe source/accessibility metadata.',
-          'Use a ref from the latest browser response when possible, or provide a CSS selector.',
-          'Credential values, auth tokens, and sensitive URL parameters are redacted.',
-        ].join(' '),
-        {
-          ref: z.string().optional().describe('Element ref from the latest browser response.'),
-          selector: z.string().optional().describe('CSS selector when no ref is available.'),
-        },
+        'inspect',
+        defs.inspect.description,
+        defs.inspect.input,
         safeTool(async (input) => {
           const inspection = await manager.inspect(appSessionId(), input);
           return jsonResult({ ok: true, inspection });
         }),
       ),
       tool(
-        'browser_network',
-        [
-          'Read the latest bounded network diagnostics for this browser session.',
-          'Returns at most 100 completed or failed requests with method, URL, resource type, status, and error.',
-          'Headers and response bodies are never captured; credentials and sensitive URL parameters are redacted.',
-        ].join(' '),
-        {
-          clear: z
-            .boolean()
-            .optional()
-            .describe('Return the current events and clear the retained buffer afterward.'),
-        },
+        'network',
+        defs.network.description,
+        defs.network.input,
         safeTool(async (input) => {
           const events = await manager.network(appSessionId(), input.clear ?? false);
           return jsonResult({ ok: true, events });
         }),
       ),
       tool(
-        'browser_console',
-        [
-          'Read the latest bounded JavaScript console diagnostics for this browser session.',
-          'Returns at most 100 entries with level, message, line, and source.',
-          'Messages and source URLs are length-limited and credential-like values are redacted.',
-        ].join(' '),
-        {
-          clear: z
-            .boolean()
-            .optional()
-            .describe('Return the current entries and clear the retained buffer afterward.'),
-        },
+        'console',
+        defs.console.description,
+        defs.console.input,
         safeTool(async (input) => {
           const events = await manager.console(appSessionId(), input.clear ?? false);
           return jsonResult({ ok: true, events });
         }),
       ),
       tool(
-        'browser_fill_login',
-        [
-          'Fill the saved login for the current site in the live DROIDEX browser.',
-          'You never see the username or password: the values are injected securely in the app and are redacted from every snapshot. This lets you authorize a sign-in without reading the secret.',
-          'Saved logins are strictly opt-in. Use only when a sign-in form is visible and the user has previously enabled saved logins and saved a credential for this site.',
-          'Returns an error if saved logins are disabled or no credential is saved; in that case ask the user to sign in once and accept the save-login prompt. After filling, you may submit the form with browser_click or browser_keypress.',
-        ].join(' '),
-        {},
+        'fill_login',
+        defs.fill_login.description,
+        defs.fill_login.input,
         safeTool(async () => {
           const state = await manager.fillCredentials(appSessionId());
-          return jsonResult(stateForTool(state));
+          return jsonResult(
+            state
+              ? stateForTool(state)
+              : {
+                  ok: true,
+                  message:
+                    'Saved login filled. No fresh page snapshot is available; use snapshot to inspect the page.',
+                },
+          );
         }),
       ),
       tool(
-        'design-mode',
-        [
-          'Read the current Design Mode browser context for this chat only.',
-          'Use after the user selects, clicks, or sketches an area in the live DROIDEX browser pane.',
-          'Returns compact source-anchored references: each has an @id, label, kind, tag/role/name/text, box, resolved source (framework/component/file), a verified CSS selector, and a cropped screenshotPath.',
-          'When you need the full element detail (all attributes, computed styles, ancestor chain, outerHTML), call design_reference with the @id instead of asking the user.',
-          'Design Mode is for visual/UI work only: change the referenced elements and their styling, and do not modify backend, data, or business logic. If achieving the requested look requires a backend or data change, stop and tell the user what is needed and why instead of changing it yourself or spawning subagents.',
-        ].join(' '),
-        {
-          instruction: z
-            .string()
-            .optional()
-            .describe('Optional user design instruction to keep alongside the returned context.'),
-        },
+        'design_context',
+        defs.design_context.description,
+        defs.design_context.input,
         safeTool(async (input) => {
-          const context = manager.designContext(appSessionId());
+          const id = appSessionId();
+          await manager.refresh(id);
+          const context = manager.designContext(id);
           const refs = context.references;
-          const images = refs
-            .filter((r) => r.screenshot)
-            .map((r) => ({
-              type: 'image' as const,
-              data: r.screenshot!.base64,
-              mimeType: 'image/png' as const,
-            }));
+          const withScreenshots = refs.flatMap((ref) => (ref.screenshot ? [ref.screenshot] : []));
+          const images = withScreenshots.slice(-MAX_CONTEXT_IMAGES).map((screenshot) => ({
+            type: 'image' as const,
+            data: screenshot.base64,
+            mimeType: 'image/png' as const,
+          }));
           const result = jsonResult({
             ok: true,
             instruction: input.instruction,
+            omittedScreenshots: withScreenshots.length - images.length,
             ...stateForTool(context.state, refs),
           });
           if (images.length > 0) {
@@ -364,24 +258,16 @@ export function createBrowserMcpServer(
       ),
       tool(
         'design_reference',
-        [
-          'Fetch the full source-anchored detail for one Design Mode reference by its @id.',
-          'Use the @id values returned by design-mode to inspect the exact verified selector, attributes, computed styles, ancestor chain, resolved source component/file, and the cropped screenshot path before editing code.',
-        ].join(' '),
-        {
-          id: z
-            .string()
-            .min(1)
-            .describe(
-              'Design reference id returned by design-mode, e.g. @live-ab12cd or @region-...',
-            ),
-        },
+        defs.design_reference.description,
+        defs.design_reference.input,
         safeTool(async (input) => {
-          const ref = manager.referenceDetail(appSessionId(), input.id);
+          const id = appSessionId();
+          await manager.refresh(id);
+          const ref = manager.referenceDetail(id, input.id);
           if (!ref) {
             return jsonResult({
               ok: false,
-              error: `No design reference ${input.id}. Call design-mode to list the current references.`,
+              error: `No design reference ${input.id}. Call design_context to list the current references.`,
             });
           }
           const text = jsonResult({ ok: true, reference: designReferenceDetail(ref) });
@@ -416,6 +302,7 @@ function stateForTool(
     viewportMode: state.viewportMode,
     screenshotPath: state.screenshotPath,
     scroll: state.scroll,
+    scrollResult: state.scrollResult,
     canGoBack: state.canGoBack ?? false,
     canGoForward: state.canGoForward ?? false,
     refs: state.refs.map((ref) => ({
@@ -451,7 +338,7 @@ function designReferenceSummary(ref: DesignReference): Record<string, unknown> {
   };
   if (anchor.strokes) out.strokes = anchor.strokes;
   // The annotated screenshot bytes are returned as a separate image block by
-  // the design-mode / design_reference tools; keep them out of the JSON to
+  // the design_context / design_reference tools; keep them out of the JSON to
   // avoid duplicating large base64 payloads.
   if (ref.screenshot) out.hasScreenshot = true;
   return out;

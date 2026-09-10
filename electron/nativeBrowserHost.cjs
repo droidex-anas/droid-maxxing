@@ -1,3 +1,25 @@
+function setBrowserViewBoundsIfChanged(view, bounds) {
+  if (browserBoundsEqual(view.getBounds(), bounds)) return false;
+  view.setBounds(bounds);
+  return true;
+}
+
+function setBrowserActionActive(entry, active) {
+  const contents = safeWebContents(entry.view);
+  if (!contents) return false;
+  contents.setBackgroundThrottling(active ? false : !(entry.attached && entry.visible));
+  return true;
+}
+
+function browserBoundsEqual(left, right) {
+  return (
+    left?.x === right?.x &&
+    left?.y === right?.y &&
+    left?.width === right?.width &&
+    left?.height === right?.height
+  );
+}
+
 function attachChildView(entry, host) {
   if (!entry?.view || !isUsableHost(host)) return false;
   if (entry.windowAttached && entry.hostWindow === host) return false;
@@ -38,7 +60,7 @@ function createNativeBrowserViewHost({ BrowserWindow, getMainWindow, listEntries
     const previousHost = entry.hostWindow;
     const moved = attachChildView(entry, mainWindow);
     entry.view.setVisible(entry.visible);
-    safeWebContents(entry.view)?.setBackgroundThrottling(!entry.visible);
+    setBrowserActionActive(entry, Boolean(entry.agentActionActive));
     if (moved && previousHost === hiddenNativeBrowserWindow) {
       closeIfUnused();
       resize();
@@ -79,7 +101,7 @@ function createNativeBrowserViewHost({ BrowserWindow, getMainWindow, listEntries
     if (!isBrowserViewUsable(entry.view)) return;
     const width = Math.max(1, Math.round(Number(viewport?.width) || 1200));
     const height = Math.max(1, Math.round(Number(viewport?.height) || 800));
-    entry.view.setBounds({ x: 0, y: 0, width, height });
+    setBrowserViewBoundsIfChanged(entry.view, { x: 0, y: 0, width, height });
     if (entry.hostWindow === hiddenNativeBrowserWindow && isUsableHost(hiddenNativeBrowserWindow)) {
       resize();
     }
@@ -101,7 +123,7 @@ function createNativeBrowserViewHost({ BrowserWindow, getMainWindow, listEntries
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        sandbox: true,
         backgroundThrottling: false,
       },
     });
@@ -162,4 +184,6 @@ module.exports = {
   isUsableHost,
   safeWebContents,
   isBrowserViewUsable,
+  setBrowserViewBoundsIfChanged,
+  setBrowserActionActive,
 };

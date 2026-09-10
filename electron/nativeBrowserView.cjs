@@ -7,11 +7,14 @@ function createNativeBrowserViewFactory({
   redactBrowserDiagnosticUrl,
   urls,
   safeWebContents,
+  browserSettings,
+  navigation,
+  cursor,
+  credentials,
   loadUrl,
   emitLoaded,
   emitLoadFailed,
   applyDesignState,
-  autofill,
   recoverRenderer,
   onViewDestroyed,
   listEntries,
@@ -20,28 +23,35 @@ function createNativeBrowserViewFactory({
 
   function configureSession() {
     if (browserSessionConfigured) return;
-    const ses = session.fromPartition(partition);
-    // Keep Electron's safe defaults: deny WebHID/WebUSB device access for the
-    // embedded browser. WebAuthn / passkeys are handled by Chromium natively and
-    // do not flow through these handlers, so granting HID/USB to arbitrary sites
-    // (and auto-selecting a device) would only open a hardware-permission
-    // escalation path with no upside.
-    ses.setDevicePermissionHandler(() => false);
-    ses.setPermissionCheckHandler(() => false);
-    ses.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
-    ses.webRequest.onCompleted({ urls: ['http://*/*', 'https://*/*'] }, (details) => {
-      recordNetworkEvent(details);
-    });
-    ses.webRequest.onErrorOccurred({ urls: ['http://*/*', 'https://*/*'] }, (details) => {
-      recordNetworkEvent(details);
-    });
+    const browserSession = session.fromPartition(partition);
+    browserSession.setDevicePermissionHandler(() => false);
+    browserSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) =>
+      browserSettings.canAccessPermission(contents, permission, requestingOrigin, details),
+    );
+    browserSession.setPermissionRequestHandler((contents, permission, callback, details) =>
+      browserSettings.handlePermissionRequest(contents, permission, callback, details),
+    );
+    browserSession.on('will-download', (_event, item) => browserSettings.prepareDownload(item));
+    browserSession.webRequest.onCompleted(
+      { urls: ['http://*/*', 'https://*/*'] },
+      recordNetworkEvent,
+    );
+    browserSession.webRequest.onErrorOccurred(
+      { urls: ['http://*/*', 'https://*/*'] },
+      recordNetworkEvent,
+    );
     browserSessionConfigured = true;
   }
 
   function recordNetworkEvent(details) {
-    const entry = [...listEntries()].find(
-      (candidate) => safeWebContents(candidate.view)?.id === details.webContentsId,
-    );
+    if (!browserSettings.areDiagnosticsEnabled()) return;
+    let entry;
+    for (const candidate of listEntries()) {
+      if (safeWebContents(candidate.view)?.id === details.webContentsId) {
+        entry = candidate;
+        break;
+      }
+    }
     if (!entry) return;
     entry.networkEvents.push({
       timestamp: Date.now(),
@@ -51,20 +61,20 @@ function createNativeBrowserViewFactory({
       status: Number.isFinite(details.statusCode) ? details.statusCode : undefined,
       error: details.error ? String(details.error).slice(0, 200) : undefined,
     });
-    if (entry.networkEvents.length > 100) {
-      entry.networkEvents.splice(0, entry.networkEvents.length - 100);
-    }
+    trimDiagnostics(entry.networkEvents);
   }
 
   function createEntry(browserSessionId) {
     return {
       browserSessionId,
+      appSessionId: null,
       view: null,
       targetUrl: null,
       failedRestoreUrl: null,
       state: { designMode: false, pencilMode: false },
       attached: false,
       visible: true,
+      agentCursorActive: false,
       windowAttached: false,
       hostWindow: null,
       idleTimer: null,
@@ -74,6 +84,18 @@ function createNativeBrowserViewFactory({
       networkEvents: [],
       consoleEvents: [],
       rendererCrashes: [],
+      agentActionActive: false,
+      userNavigationActive: false,
+      agentRequest: null,
+      canceledRequestId: null,
+      navigationGeneration: 0,
+      documentGeneration: 0,
+      pendingAgentNavigation: null,
+      trustedUserNavigation: null,
+      trustedUserTransitionView: null,
+      approvedHistoryTransition: null,
+      authenticationPopupCapability: null,
+      captureActivityCount: 0,
       lastUsedAt: Date.now(),
       viewCloseReason: null,
       serialized: null,
@@ -88,91 +110,147 @@ function createNativeBrowserViewFactory({
         preload: preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
-        backgroundThrottling: false,
+        sandbox: true,
+        backgroundThrottling: true,
         partition,
       },
     });
     entry.view = view;
     entry.viewCloseReason = null;
+    installViewLifecycle(entry, view);
+    return entry;
+  }
+
+  function installViewLifecycle(entry, view) {
     const contents = view.webContents;
-    contents.setWindowOpenHandler(({ url: nextUrl }) => {
-      if (entry.view === view) loadUrl(entry, nextUrl);
-      return { action: 'deny' };
+    contents.setWindowOpenHandler(({ url }) => handleWindowOpen(entry, view, url));
+    contents.on('did-create-window', (window) => credentials.hardenAuthenticationPopup(window));
+    contents.on('console-message', (details) => recordConsoleEvent(entry, details));
+    contents.on('will-navigate', (event, url) => handleNavigation(entry, view, event, url));
+    contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
+      if (isMainFrame) handleRedirect(entry, view, event, url);
     });
-    contents.on('console-message', (details) => {
-      entry.consoleEvents.push({
-        timestamp: Date.now(),
-        ...normalizeBrowserConsoleMessage(details),
-      });
-      if (entry.consoleEvents.length > 100) {
-        entry.consoleEvents.splice(0, entry.consoleEvents.length - 100);
-      }
-    });
-    contents.on('will-navigate', (_event, requestedUrl) => {
-      if (entry.view !== view) return;
-      // This event is limited to page/user-initiated navigations; programmatic
-      // loadURL retries (including the HTTPS-to-HTTP fallback) do not emit it.
-      entry.failedRestoreUrl = null;
-      entry.targetUrl = requestedUrl;
-    });
-    contents.on('did-navigate', (_event, loadedUrl) => {
-      if (entry.view !== view || urls.isChromeErrorUrl(loadedUrl)) return;
-      entry.failedRestoreUrl = null;
-      entry.targetUrl = loadedUrl;
-      emitLoaded(entry, loadedUrl);
-    });
-    contents.on('did-finish-load', () => {
-      const current = safeWebContents(view);
-      if (entry.view !== view || !current) return;
-      const loadedUrl = current.getURL();
-      if (urls.isChromeErrorUrl(loadedUrl)) {
-        if (entry.targetUrl && !urls.isChromeErrorUrl(entry.targetUrl))
-          emitLoaded(entry, entry.targetUrl);
+    contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+      if (entry.view !== view || !isMainFrame) return;
+      entry.documentGeneration += 1;
+      if (isInPlace) {
+        contents.send('native-browser-agent-snapshot-invalidated');
         return;
       }
-      if (entry.state.designMode && entry.attached && entry.visible) {
-        applyDesignState(entry);
-      }
-      void autofill(current);
+      navigation.clearTrustedUserNavigation(entry);
+      credentials.invalidate(entry);
+      browserSettings.revokePermissionsForNavigation(contents);
     });
-    contents.on('did-fail-load', (_event, errorCode, errorDescription, failedUrl, isMainFrame) => {
-      if (entry.view !== view || !isMainFrame || errorCode === -3) return;
-      const fallback = urls.httpFallbackUrl(failedUrl, errorCode);
+    contents.on('did-navigate', (_event, url) => {
+      if (entry.view !== view) return;
+      navigation.settleTransition(entry);
+      if (urls.isChromeErrorUrl(url)) return;
+      entry.failedRestoreUrl = null;
+      entry.targetUrl = url;
+      emitLoaded(entry, url);
+    });
+    contents.on('did-finish-load', () => handleFinishedLoad(entry, view));
+    contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      if (entry.view !== view || !isMainFrame || code === -3) return;
+      navigation.settleTransition(entry);
+      const fallback = urls.httpFallbackUrl(url, code);
       if (fallback) {
-        urls.rememberFailedRestoreUrl(entry, entry.targetUrl || failedUrl);
+        urls.rememberFailedRestoreUrl(entry, entry.targetUrl || url);
         void loadUrl(entry, fallback, { force: true });
         return;
       }
-      urls.rememberFailedRestoreUrl(entry, entry.targetUrl || failedUrl);
-      emitLoadFailed(entry, failedUrl, errorDescription || `net error ${errorCode}`);
+      urls.rememberFailedRestoreUrl(entry, entry.targetUrl || url);
+      emitLoadFailed(entry, url, description || `net error ${code}`);
     });
     contents.on('dom-ready', () => {
       if (entry.view === view && entry.state.designMode && entry.attached && entry.visible) {
         applyDesignState(entry);
       }
     });
-    contents.on('destroyed', () => {
-      if (entry.view === view) {
-        entry.view = null;
-        entry.attached = false;
-        entry.windowAttached = false;
-        entry.hostWindow = null;
-        onViewDestroyed(entry);
-      }
-    });
+    contents.on('destroyed', () => handleDestroyed(entry, view, contents));
     contents.on('render-process-gone', (_event, details) => {
       if (entry.view === view) recoverRenderer(entry, view, details);
     });
-    contents.on('did-navigate-in-page', (_event, nextUrl) => {
-      if (entry.view !== view) return;
-      entry.targetUrl = nextUrl;
-      emitLoaded(entry, nextUrl);
-      if (entry.state.designMode && entry.attached && entry.visible) {
-        applyDesignState(entry);
-      }
+    contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (entry.view !== view || !isMainFrame) return;
+      entry.targetUrl = url;
+      emitLoaded(entry, url);
+      if (entry.state.designMode && entry.attached && entry.visible) applyDesignState(entry);
     });
-    return entry;
+  }
+
+  function handleWindowOpen(entry, view, url) {
+    const authenticationPopup = credentials.allowAuthenticationPopup(entry, view, url);
+    if (authenticationPopup) return authenticationPopup;
+    try {
+      urls.validateUrl(url);
+      if (entry.view === view && navigation.authorizeTransition(entry, view, 'popup', url)) {
+        void loadUrl(entry, url, { force: true });
+      }
+    } catch {
+      // Popups stay inside the embedded browser and unsafe schemes fail closed.
+    }
+    return { action: 'deny' };
+  }
+
+  function handleNavigation(entry, view, event, url) {
+    if (entry.view !== view) return;
+    try {
+      urls.validateUrl(url);
+    } catch {
+      event.preventDefault();
+      return;
+    }
+    if (!navigation.authorizeTransition(entry, view, 'navigate', url)) {
+      event.preventDefault();
+      return;
+    }
+    entry.failedRestoreUrl = null;
+    entry.targetUrl = url;
+  }
+
+  function handleRedirect(entry, view, event, url) {
+    if (entry.view !== view) return;
+    try {
+      urls.validateUrl(url);
+    } catch {
+      event.preventDefault();
+      return;
+    }
+    if (!navigation.authorizeTransition(entry, view, 'redirect', url)) {
+      event.preventDefault();
+    }
+  }
+
+  function recordConsoleEvent(entry, details) {
+    if (!browserSettings.areDiagnosticsEnabled()) return;
+    entry.consoleEvents.push({ timestamp: Date.now(), ...normalizeBrowserConsoleMessage(details) });
+    trimDiagnostics(entry.consoleEvents);
+  }
+
+  function trimDiagnostics(events) {
+    if (events.length > 100) events.splice(0, events.length - 100);
+  }
+
+  function handleFinishedLoad(entry, view) {
+    const contents = safeWebContents(view);
+    if (entry.view !== view || !contents) return;
+    const url = contents.getURL();
+    if (urls.isChromeErrorUrl(url)) return;
+    if (entry.state.designMode && entry.attached && entry.visible) applyDesignState(entry);
+  }
+
+  function handleDestroyed(entry, view, contents) {
+    if (entry.view !== view) return;
+    cursor.detach(entry.browserSessionId);
+    browserSettings.revokePermissionsForContents(contents);
+    navigation.invalidate(entry);
+    credentials.invalidate(entry);
+    entry.view = null;
+    entry.attached = false;
+    entry.windowAttached = false;
+    entry.hostWindow = null;
+    onViewDestroyed(entry);
   }
 
   function isBrowserViewUsable(view) {

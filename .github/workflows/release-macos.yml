@@ -57,6 +57,7 @@ jobs:
           npm run docs:check
           npm run typecheck
           npm run sidecar:typecheck
+          npm run preload:build
           npm run electron:check
           npm run test
           npm --prefix sidecar run test

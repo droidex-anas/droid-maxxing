@@ -2,7 +2,9 @@ import { bridge } from './bridge';
 import { isAppUpdateInstalling } from './appUpdate';
 import type {
   Autonomy,
+  BrowserActionSource,
   BrowserNativeResult,
+  BrowserRestoreState,
   BrowserScrollDirection,
   BrowserViewport,
   BrowserViewportMode,
@@ -378,15 +380,19 @@ export const openBrowser = (input: {
   viewport?: BrowserViewport;
   viewportMode?: BrowserViewportMode;
 }) => {
-  bridge.send({ type: 'browser.open', ...input });
+  bridge.send({ type: 'browser.open', ...input, source: 'user' });
+};
+
+export const restoreBrowser = (state: BrowserRestoreState) => {
+  bridge.send({ type: 'browser.restore', state });
 };
 
 export const closeBrowser = (appSessionId: string) => {
   bridge.send({ type: 'browser.close', appSessionId });
 };
 
-export const reloadBrowser = (appSessionId: string) => {
-  bridge.send({ type: 'browser.reload', appSessionId });
+export const reloadBrowser = (appSessionId: string, source?: BrowserActionSource) => {
+  bridge.send({ type: 'browser.reload', appSessionId, ...(source ? { source } : {}) });
 };
 
 export const refreshBrowser = (appSessionId: string) => {
@@ -398,7 +404,7 @@ export const resizeBrowserViewport = (input: {
   viewport: BrowserViewport;
   viewportMode: BrowserViewportMode;
 }) => {
-  bridge.send({ type: 'browser.resizeViewport', ...input });
+  bridge.send({ type: 'browser.resizeViewport', ...input, source: 'user' });
 };
 
 export const clickBrowser = (input: {
@@ -406,7 +412,7 @@ export const clickBrowser = (input: {
   ref?: string;
   x?: number;
   y?: number;
-  source?: 'agent' | 'user';
+  source?: BrowserActionSource;
 }) => {
   bridge.send({ type: 'browser.click', ...input });
 };
@@ -424,7 +430,6 @@ export const scrollBrowser = (input: {
   direction: BrowserScrollDirection;
   pixels?: number;
   ref?: string;
-  source?: 'agent' | 'user';
 }) => {
   bridge.send({ type: 'browser.scroll', ...input });
 };

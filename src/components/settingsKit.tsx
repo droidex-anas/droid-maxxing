@@ -2,9 +2,10 @@
 // and the feature settings screens import these; keep them free of feature
 // state).
 
-import { useEffect, useRef, useState } from 'react';
+import { useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
-import { pushEscapeLayer } from './environment/usePopover';
+import { Popover } from './environment/Popover';
+import { focusDropdownOption, nextDropdownOptionIndex } from './settingsDropdown';
 
 export function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -62,6 +63,7 @@ export function Dropdown({
   triggerIcon,
   width = 'w-44',
   align = 'right',
+  disabled = false,
 }: {
   value: string;
   options: DropdownOption[];
@@ -72,67 +74,62 @@ export function Dropdown({
   triggerIcon?: React.ReactNode;
   width?: string;
   align?: 'left' | 'right';
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const listboxId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    // Keyboard/screen-reader contract of a listbox popup: focus lands on the
-    // selected option, arrows move between options, Escape returns focus to
-    // the trigger.
-    const menu = ref.current?.querySelector<HTMLElement>('[role="listbox"]');
-    const selected =
-      menu?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]') ??
-      menu?.querySelector<HTMLElement>('[role="option"]');
-    selected?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    // Escape goes through the shared LIFO layer stack (see usePopover.ts) so a
-    // single keystroke closes only this innermost popup, never the settings
-    // panel or theme editor behind it.
-    const pop = pushEscapeLayer(() => {
+  const navigateOptions = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Tab') {
       setOpen(false);
-      triggerRef.current?.focus();
+      triggerRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    let key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End';
+    switch (event.key) {
+      case 'ArrowDown':
+      case 'ArrowUp':
+      case 'Home':
+      case 'End':
+        key = event.key;
+        break;
+      default:
+        return;
+    }
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'));
+    if (items.length === 0) return;
+    event.preventDefault();
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = nextDropdownOptionIndex({
+      key,
+      currentIndex: index,
+      optionCount: items.length,
     });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-      // Only navigate when focus is actually inside the listbox — otherwise
-      // we'd hijack arrow keys from sliders/inputs the user tabbed to.
-      if (!menu?.contains(document.activeElement)) return;
-      e.preventDefault();
-      const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="option"]'));
-      if (items.length === 0) return;
-      const index = items.indexOf(document.activeElement as HTMLElement);
-      const next =
-        e.key === 'ArrowDown'
-          ? items.at((index + 1) % items.length)
-          : items.at((index - 1 + items.length) % items.length);
-      next?.focus();
-    };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-      pop();
-    };
-  }, [open]);
+    focusDropdownOption(items[nextIndex]);
+  };
 
   const sel = options.find((o) => o.value === value);
 
   return (
-    <div className={`relative ${width === 'w-full' ? 'w-full' : 'shrink-0'}`} ref={ref}>
+    <div className={width === 'w-full' ? 'w-full' : 'shrink-0'}>
       <button
+        type="button"
         ref={triggerRef}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
+        aria-label={ariaLabel}
+        disabled={disabled}
         onClick={() => {
           setOpen((v) => !v);
         }}
-        className={`${width} flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[12px] transition-colors ${
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+          event.preventDefault();
+          setOpen(true);
+        }}
+        className={`${width} flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
           open
             ? 'border-droid-border-hover bg-droid-elevated text-droid-text'
             : 'border-droid-border bg-droid-bg/60 text-droid-text hover:border-droid-border-hover'
@@ -147,48 +144,53 @@ export function Dropdown({
         />
       </button>
 
-      {open && (
-        <div
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1.5 min-w-full rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50`}
-        >
-          <div
-            className="max-h-72 overflow-y-auto space-y-0.5"
-            role="listbox"
-            aria-label={ariaLabel}
-          >
-            {options.map((o) => {
-              const active = o.value === value;
-              return (
-                <button
-                  key={o.value}
-                  role="option"
-                  aria-selected={active}
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
-                    triggerRef.current?.focus();
-                  }}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                    active ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
-                  }`}
-                >
-                  {o.icon}
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text">
-                    {o.label}
-                  </span>
-                  {active && (
-                    <Check
-                      className="w-3.5 h-3.5 shrink-0"
-                      style={{ color: 'var(--droid-accent)' }}
-                      strokeWidth={3}
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <Popover
+        open={open}
+        onClose={() => {
+          setOpen(false);
+        }}
+        anchorRef={triggerRef}
+        id={listboxId}
+        label={ariaLabel}
+        align={align}
+        width="anchor"
+        role="listbox"
+        initialFocusSelector={'[role="option"][aria-selected="true"]'}
+        trapFocus={false}
+        onKeyDown={navigateOptions}
+        className="max-h-72 space-y-0.5 overflow-y-auto p-2"
+      >
+        {options.map((o) => {
+          const active = o.value === value;
+          return (
+            <button
+              key={o.value}
+              role="option"
+              aria-selected={active}
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+                triggerRef.current?.focus({ preventScroll: true });
+              }}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                active ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
+              }`}
+            >
+              {o.icon}
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text">
+                {o.label}
+              </span>
+              {active && (
+                <Check
+                  className="h-3.5 w-3.5 shrink-0"
+                  style={{ color: 'var(--droid-accent)' }}
+                  strokeWidth={3}
+                />
+              )}
+            </button>
+          );
+        })}
+      </Popover>
     </div>
   );
 }

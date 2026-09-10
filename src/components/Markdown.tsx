@@ -318,9 +318,7 @@ function createMarkdownComponents(specMode: boolean): Components {
     pre: ({ children, node }) => {
       const child = node?.children.at(0);
       const className = child && 'properties' in child ? child.properties.className : undefined;
-      const hasFenceLanguage = Array.isArray(className)
-        ? className.length > 0
-        : typeof className === 'string' && className.length > 0;
+      const hasFenceLanguage = Array.isArray(className) && className.length > 0;
       return hasFenceLanguage ? (
         <>{children}</>
       ) : (

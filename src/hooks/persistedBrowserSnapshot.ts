@@ -1,4 +1,5 @@
-import type { BrowserState, BrowserViewportMode } from '../types/bridge';
+import type { BrowserRestoreState, BrowserState, BrowserViewportMode } from '../types/bridge';
+import { restoreBrowser } from '../lib/commands';
 
 const BROWSER_VIEWPORT_MODES = new Set<BrowserViewportMode>([
   'fit',
@@ -8,6 +9,58 @@ const BROWSER_VIEWPORT_MODES = new Set<BrowserViewportMode>([
   'mobile',
   'custom',
 ]);
+
+const SENSITIVE_BROWSER_QUERY_KEYS = new Set([
+  'access_token',
+  'assertion',
+  'authorization_code',
+  'code',
+  'code_verifier',
+  'id_token',
+  'nonce',
+  'oauth_token',
+  'refresh_token',
+  'relaystate',
+  'samlresponse',
+  'session_state',
+  'state',
+  'ticket',
+  'token',
+]);
+
+const UNAMBIGUOUS_BROWSER_SECRET_KEYS = new Set([
+  'access_token',
+  'assertion',
+  'authorization_code',
+  'code_verifier',
+  'id_token',
+  'oauth_token',
+  'refresh_token',
+  'samlresponse',
+  'ticket',
+  'token',
+]);
+
+export function restorePersistedBrowserSessions(
+  browsers: Record<string, BrowserState>,
+  restore: (state: BrowserRestoreState) => void = restoreBrowser,
+): void {
+  for (const [appSessionId, browser] of Object.entries(browsers)) {
+    const url = sanitizePersistedBrowserUrl(browser.url);
+    if (!url) continue;
+    restore({
+      browserSessionId: browser.browserSessionId,
+      appSessionId,
+      url,
+      title: browser.title,
+      viewport: browser.viewport,
+      viewportMode: browser.viewportMode,
+      scroll: browser.scroll,
+      canGoBack: browser.canGoBack,
+      canGoForward: browser.canGoForward,
+    });
+  }
+}
 
 export function loadPersistedBrowsers(value: unknown): Record<string, BrowserState> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -37,6 +90,7 @@ export function persistBrowsers(
       key,
       {
         ...browser,
+        url: sanitizePersistedBrowserUrl(browser.url),
         refs: [],
         agentCursor: undefined,
         screenshotPath: undefined,
@@ -44,6 +98,40 @@ export function persistBrowsers(
       },
     ]),
   );
+}
+
+export function sanitizePersistedBrowserUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    removeSensitiveBrowserParams(url.searchParams);
+    const fragment = url.hash.slice(1);
+    if (fragment.includes('?')) {
+      const queryIndex = fragment.indexOf('?');
+      const route = fragment.slice(0, queryIndex);
+      const fragmentParams = new URLSearchParams(fragment.slice(queryIndex + 1));
+      const hasSecret = [...fragmentParams.keys()].some((key) =>
+        UNAMBIGUOUS_BROWSER_SECRET_KEYS.has(key.toLowerCase()),
+      );
+      removeSensitiveBrowserParams(
+        fragmentParams,
+        hasSecret || /(?:^|\/)(?:auth|callback|login|oauth|signin)(?:\/|$)/i.test(route),
+      );
+      const remaining = fragmentParams.toString();
+      url.hash = `#${route}${remaining ? `?${remaining}` : ''}`;
+    } else if (fragment.includes('=')) {
+      const fragmentParams = new URLSearchParams(
+        fragment.startsWith('?') ? fragment.slice(1) : fragment,
+      );
+      removeSensitiveBrowserParams(fragmentParams);
+      const remaining = fragmentParams.toString();
+      url.hash = remaining ? `#${remaining}` : '';
+    }
+    return url.toString();
+  } catch {
+    return '';
+  }
 }
 
 function sanitizePersistedBrowser(key: string, value: unknown): BrowserState | undefined {
@@ -55,8 +143,7 @@ function sanitizePersistedBrowser(key: string, value: unknown): BrowserState | u
   if (!viewport) return undefined;
   return {
     browserSessionId: browser.browserSessionId,
-    appSessionId:
-      typeof browser.appSessionId === 'string' && browser.appSessionId ? browser.appSessionId : key,
+    appSessionId: key,
     url: browser.url,
     title: typeof browser.title === 'string' ? browser.title : undefined,
     viewport,
@@ -97,4 +184,16 @@ function finitePositiveNumber(value: unknown): number | undefined {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function removeSensitiveBrowserParams(params: URLSearchParams, includeAmbiguous = true): void {
+  for (const key of [...params.keys()]) {
+    const normalizedKey = key.toLowerCase();
+    if (
+      (includeAmbiguous && SENSITIVE_BROWSER_QUERY_KEYS.has(normalizedKey)) ||
+      UNAMBIGUOUS_BROWSER_SECRET_KEYS.has(normalizedKey)
+    ) {
+      params.delete(key);
+    }
+  }
 }

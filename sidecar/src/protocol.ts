@@ -373,8 +373,21 @@ export interface BrowserState {
   refs: BrowserElementRef[];
   canGoBack?: boolean;
   canGoForward?: boolean;
+  scrollResult?: BrowserScrollResult;
   agentCursor?: { x: number; y: number };
   error?: string;
+}
+
+export interface BrowserRestoreState {
+  browserSessionId: string;
+  appSessionId: string;
+  url: string;
+  title?: string;
+  viewport: BrowserViewport;
+  viewportMode: BrowserViewportMode;
+  scroll: { x: number; y: number };
+  canGoBack?: boolean;
+  canGoForward?: boolean;
 }
 
 export interface BrowserNativeSnapshot {
@@ -384,6 +397,20 @@ export interface BrowserNativeSnapshot {
   refs: BrowserElementRef[];
   canGoBack?: boolean;
   canGoForward?: boolean;
+  scrollResult?: BrowserScrollResult;
+}
+
+/**
+ * The outcome of one scroll. `x`/`y` are the resulting absolute scroll offsets
+ * of the scrolled target, while `requested.x`/`requested.y` are the signed
+ * deltas that were asked for.
+ */
+export interface BrowserScrollResult {
+  x: number;
+  y: number;
+  moved: boolean;
+  atBoundary: boolean;
+  requested: { x: number; y: number };
 }
 
 export interface BrowserElementInspection {
@@ -443,12 +470,15 @@ export interface BrowserNativeRequest {
   appSessionId: string;
   browserSessionId: string;
   action: BrowserNativeAction;
+  source?: 'agent' | 'user';
+  autonomy?: Autonomy;
   url?: string;
   viewport?: BrowserViewport;
   viewportMode?: BrowserViewportMode;
   x?: number;
   y?: number;
   selector?: string;
+  ref?: string;
   text?: string;
   key?: string;
   direction?: BrowserScrollDirection;
@@ -695,17 +725,20 @@ export type ClientCommand =
       type: 'browser.open';
       appSessionId: string;
       url: string;
+      source?: 'agent' | 'user';
       viewport?: BrowserViewport;
       viewportMode?: BrowserViewportMode;
     }
+  | { type: 'browser.restore'; state: BrowserRestoreState }
   | { type: 'browser.close'; appSessionId: string }
-  | { type: 'browser.reload'; appSessionId: string }
+  | { type: 'browser.reload'; appSessionId: string; source?: 'agent' | 'user' }
   | { type: 'browser.refresh'; appSessionId: string }
   | {
       type: 'browser.resizeViewport';
       appSessionId: string;
       viewport: BrowserViewport;
       viewportMode: BrowserViewportMode;
+      source?: 'agent' | 'user';
     }
   | {
       type: 'browser.click';
@@ -723,7 +756,6 @@ export type ClientCommand =
       direction: BrowserScrollDirection;
       pixels?: number;
       ref?: string;
-      source?: 'agent' | 'user';
     }
   | {
       type: 'browser.screenshot';

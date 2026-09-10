@@ -9,6 +9,7 @@ import {
   type UpdateSessionSettingsRequestParams,
 } from '@factory/droid-sdk';
 
+import { browserMcpToolNames } from './browser/browserMcpToolDefs.js';
 import type { ServerEvent, SessionSummary } from './protocol.js';
 import { SessionInteractions, type InteractionLiveSession } from './SessionInteractions.js';
 
@@ -106,6 +107,32 @@ function permissionInput(toolUseId: string, command = 'pwd'): RequestPermissionR
   };
 }
 
+function droidexBrowserPermissionInput(
+  toolUseId: string,
+  toolName: string,
+): RequestPermissionRequestParams {
+  return {
+    toolUses: [
+      {
+        toolUse: {
+          type: 'tool_use',
+          id: toolUseId,
+          name: `droidex-browser___${toolName}`,
+          input: { ref: '@b-link' },
+        },
+        confirmationType: 'mcp_tool',
+        details: {
+          type: 'mcp_tool',
+          serverName: 'droidex-browser',
+          toolName,
+          impactLevel: 'high',
+        },
+      },
+    ],
+    options: [],
+  } as RequestPermissionRequestParams;
+}
+
 function specApprovalInput(toolUseId: string): RequestPermissionRequestParams {
   return {
     toolUses: [
@@ -167,6 +194,62 @@ test('permission requests keep stable identity, exact correlation, and one event
   const requestId = latestApprovalRequest(harness.emitted).requestId;
   await harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
   assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
+});
+
+test('every registered DROIDEX browser tool defers approval to the authoritative browser policy', async () => {
+  const harness = createHarness();
+  harness.addLiveSession('app-1', 'provider-1');
+  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
+  const toolNames = browserMcpToolNames();
+
+  assert.ok(toolNames.length > 0);
+  for (const [index, toolName] of toolNames.entries()) {
+    const outcome = await handler(droidexBrowserPermissionInput(`tool-${String(index)}`, toolName));
+    assert.equal(outcome, ToolConfirmationOutcome.ProceedOnce, toolName);
+  }
+
+  assert.equal(approvalRequests(harness.emitted).length, 0);
+});
+
+test('unknown tools cannot gain first-party browser permission deferral by name prefix', async () => {
+  const harness = createHarness();
+  harness.addLiveSession('app-1', 'provider-1');
+  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
+
+  const pending = Promise.resolve(handler(droidexBrowserPermissionInput('tool-1', 'future_tool')));
+  const requestId = latestApprovalRequest(harness.emitted).requestId;
+  await harness.interactions.respondToApproval('app-1', requestId, 'proceed_once');
+
+  assert.equal(await pending, ToolConfirmationOutcome.ProceedOnce);
+  assert.equal(approvalRequests(harness.emitted).length, 1);
+});
+
+test('browser-first mixed batches require approval and cannot cache the first tool as a grant', async () => {
+  const harness = createHarness();
+  harness.addLiveSession('app-1');
+  const handler = harness.interactions.makePermissionHandler({ id: 'app-1' });
+  const browser = droidexBrowserPermissionInput('browser', 'hover');
+  const batch = {
+    ...browser,
+    toolUses: [...browser.toolUses, ...permissionInput('exec').toolUses],
+  };
+  for (const outcome of ['proceed_always', 'cancel']) {
+    const pending = Promise.resolve(handler(batch));
+    const request = latestApprovalRequest(harness.emitted);
+    await harness.interactions.respondToApproval('app-1', request.requestId, outcome);
+    await pending;
+  }
+  assert.equal(approvalRequests(harness.emitted).length, 2);
+  assert.equal(
+    await handler({
+      ...browser,
+      toolUses: [
+        ...browser.toolUses,
+        ...droidexBrowserPermissionInput('snapshot', 'snapshot').toolUses,
+      ],
+    }),
+    ToolConfirmationOutcome.ProceedOnce,
+  );
 });
 
 test('ProceedAlways bypasses only an equivalent later permission signature', async () => {

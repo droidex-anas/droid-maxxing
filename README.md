@@ -70,12 +70,42 @@ Authentication always completes through GitHub CLI's browser/device flow. The
 Context popover keeps the one-time code visible and copyable until `gh` confirms
 the account is connected.
 
+## DROIDEX Browser
+
+DROIDEX includes a native browser an agent can drive while the user keeps
+control of sign-ins and sensitive capabilities. Each task keeps its own browser
+session and background work stays live, while the authenticated profile is
+shared across chats so sites do not ask for a fresh sign-in per chat. An
+optional agent cursor shows where the agent hovers and clicks.
+
+Opening a site follows the chat's autonomy by default: High opens any safe
+HTTP(S) site, Medium asks for each new origin, and Low or Off asks every time.
+Full site access is a separate setting and still refuses local files, embedded
+credentials, executable URLs, and browser-internal pages.
+
+**Settings → Browser** owns agent access, the site policy, the home and search
+page, the agent cursor, saved logins, downloads, camera and microphone
+requests, diagnostics, and clearing browser data.
+
+Sign-in stays user-approved: filling a saved login and submitting an
+authentication form each require their own native approval. On macOS, Settings
+can import current cookies from a local Chrome profile after a DROIDEX
+confirmation and a Chrome Safe Storage Keychain approval; it copies no
+passwords and cannot transfer every session. Safari has no supported import, so
+sign in to those accounts directly in DROIDEX. Google prohibits OAuth in
+embedded browsers, and Touch ID passkeys are unavailable in ad-hoc builds.
+
+Boundaries and module ownership live in
+[docs/architecture.md](docs/architecture.md#native-browser-boundary). Approval
+recovery and release checks live in
+[docs/runbooks.md](docs/runbooks.md#browser-authentication-and-permission-checks).
+
 ## Useful commands
 
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Start the frontend dev server |
-| `npm run electron` | Build the sidecar and launch DROIDEX |
+| `npm run electron` | Build the browser preload bundle and the sidecar, then launch DROIDEX |
 | `npm run build` | Create a production build |
 | `npm run test` | Run app and Electron tests |
 | `npm --prefix sidecar run test` | Run sidecar unit tests |

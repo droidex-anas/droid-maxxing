@@ -47,17 +47,10 @@ test('with no attached view only the most recently used hidden session stays war
   );
 });
 
-test('idle eviction is disabled when idleMs is 0 and enabled after the timeout', () => {
-  let now = 0;
-  const budget = createNativeBrowserBudget({ idleMs: 0, now: () => now });
-  assert.equal(budget.shouldIdleEvict(entry('warm', { lastUsedAt: 0 })), false);
-
-  const timed = createNativeBrowserBudget({ idleMs: 5_000, now: () => now });
-  now = 4_999;
-  assert.equal(timed.shouldIdleEvict(entry('warm', { lastUsedAt: 0 })), false);
-  now = 5_000;
-  assert.equal(timed.shouldIdleEvict(entry('warm', { lastUsedAt: 0 })), true);
-  assert.equal(timed.shouldIdleEvict(entry('attached', { attached: true, lastUsedAt: 0 })), false);
+test('memory and idle budgets never evict a browser with active work', () => {
+  const budget = createNativeBrowserBudget({ maxLive: 1, idleMs: 1, now: () => 100 });
+  const active = entry('active', { active: true });
+  assert.deepEqual(budget.idsToEvict([entry('visible', { attached: true }), active]), []);
 });
 
 test('counts report live, warm, attached, and serialized sessions', () => {
@@ -85,7 +78,6 @@ test('snapshot preserves url, scroll, viewport, and design metadata', () => {
     {
       url: 'https://app.example/path',
       scroll: { x: 12, y: 340 },
-      screenshot: 'png-bytes',
     },
   );
   assert.deepEqual(snapshot, {
@@ -93,7 +85,6 @@ test('snapshot preserves url, scroll, viewport, and design metadata', () => {
     scroll: { x: 12, y: 340 },
     viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
     state: { designMode: true, pencilMode: true },
-    screenshot: 'png-bytes',
     evictedAt: 42,
   });
 });
@@ -136,7 +127,6 @@ function snapshot() {
     scroll: { x: 12, y: 340 },
     viewport: { width: 1440, height: 900, deviceScaleFactor: 2 },
     state: { designMode: true, pencilMode: true },
-    screenshot: 'png-bytes',
     evictedAt: 1,
   };
 }
@@ -144,6 +134,7 @@ function snapshot() {
 function restoreHooks(overrides = {}) {
   const calls = { load: [], scroll: [], failures: [], released: 0 };
   const hooks = {
+    isCurrent: () => true,
     loadUrl: async (_entry, url) => {
       calls.load.push(url);
       return { ok: true };
@@ -237,4 +228,26 @@ test('a successful restore still clears the serialized snapshot', async () => {
   assert.equal(calls.failures.length, 0);
   assert.deepEqual(browser.viewport, held.viewport);
   assert.deepEqual(browser.state, held.state);
+});
+
+test('a closed or replaced browser cannot settle a pending restore', async () => {
+  const held = snapshot();
+  const browser = entry('cold', { serialized: held });
+  let current = true;
+  let finishLoad;
+  const { calls, hooks } = restoreHooks({
+    isCurrent: () => current,
+    loadUrl: () =>
+      new Promise((resolve) => {
+        finishLoad = resolve;
+      }),
+  });
+  const pending = restoreSerialized(browser, hooks);
+  current = false;
+  finishLoad({ ok: true });
+
+  assert.equal(await pending, false);
+  assert.equal(browser.serialized, held);
+  assert.deepEqual(calls.scroll, []);
+  assert.equal(calls.released, 0);
 });

@@ -25,6 +25,7 @@ import { WorktreesSettings } from './WorktreesSettings';
 import { Dropdown, GroupLabel, SectionTitle, SettingRow } from './settingsKit';
 import { HardwareAccelerationSetting } from './HardwareAccelerationSetting';
 import { ArchivedChatsSettings } from './ArchivedChatsSettings';
+import { BrowserSettings } from './BrowserSettings';
 import {
   bestTabForQuery,
   searchSettings,
@@ -869,6 +870,9 @@ export default function SettingsPanel() {
       break;
     case 'MCP servers':
       content = <McpServersSettings cwd={mcpCwd} />;
+      break;
+    case 'Browser':
+      content = <BrowserSettings />;
       break;
     case 'Archived chats':
       content = <ArchivedChatsSettings />;

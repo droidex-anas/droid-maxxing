@@ -28,6 +28,8 @@ import { hotPathMetrics } from './telemetry/hotPathMetrics.js';
 const HOST = '127.0.0.1';
 const SOFT_CLIENT_BUFFER_BYTES = 512 * 1024;
 const HARD_CLIENT_BUFFER_BYTES = 8 * 1024 * 1024;
+const MAX_ADMISSION_COMMANDS = 128;
+const MAX_ADMISSION_COMMAND_BYTES = 1024 * 1024;
 const CLIENT_CLOSE_DRAIN_MS = 250;
 
 export interface BridgeServer {
@@ -46,6 +48,7 @@ export function startBridgeServer(options: {
   getSnapshot?: () => Promise<BridgeRuntimeSnapshot> | BridgeRuntimeSnapshot;
 }): BridgeServer {
   const clients = new Set<WebSocket>();
+  const connections = new Set<WebSocket>();
   const replay = new BridgeReplayBuffer();
   let boundPort = options.requestedPort;
   let closed = false;
@@ -131,17 +134,65 @@ export function startBridgeServer(options: {
       ws.close(1002, 'unsupported bridge protocol');
       return;
     }
-    void admitClient(ws, url);
-  });
+    connections.add(ws);
+    const pendingCommands: string[] = [];
+    let pendingCommandBytes = 0;
+    let admitted = false;
+    let connectionClosed = false;
 
-  async function admitClient(ws: WebSocket, url: URL): Promise<void> {
-    const admitted = await resumeClient(ws, url);
-    if (!admitted || ws.readyState !== ws.OPEN) return;
-    clients.add(ws);
-    ws.on('message', (raw) => void handleMessage(ws, raw));
-    ws.on('close', () => clients.delete(ws));
-    ws.on('error', () => clients.delete(ws));
-  }
+    const discardPendingCommands = () => {
+      pendingCommands.length = 0;
+      pendingCommandBytes = 0;
+    };
+    const removeConnection = () => {
+      connectionClosed = true;
+      clients.delete(ws);
+      connections.delete(ws);
+      discardPendingCommands();
+    };
+
+    ws.on('message', (raw) => {
+      if (connectionClosed) return;
+      const command = messageText(raw);
+      if (admitted) {
+        void handleMessage(ws, command);
+        return;
+      }
+      const commandBytes = Buffer.byteLength(command);
+      if (
+        pendingCommands.length >= MAX_ADMISSION_COMMANDS ||
+        pendingCommandBytes + commandBytes > MAX_ADMISSION_COMMAND_BYTES
+      ) {
+        connectionClosed = true;
+        discardPendingCommands();
+        ws.close(1009, 'too many commands during bridge admission');
+        return;
+      }
+      pendingCommands.push(command);
+      pendingCommandBytes += commandBytes;
+    });
+    ws.on('close', removeConnection);
+    ws.on('error', removeConnection);
+
+    void resumeClient(ws, url)
+      .then((canAdmit) => {
+        if (!canAdmit || closed || connectionClosed || ws.readyState !== ws.OPEN) {
+          discardPendingCommands();
+          return;
+        }
+        clients.add(ws);
+        admitted = true;
+        const commands = pendingCommands.splice(0);
+        pendingCommandBytes = 0;
+        for (const command of commands) void handleMessage(ws, command);
+      })
+      .catch((error: unknown) => {
+        console.error('Bridge client admission failed:', error);
+        removeConnection();
+        if (ws.readyState === ws.OPEN) ws.close(1011, 'bridge admission failed');
+        else ws.terminate();
+      });
+  });
 
   async function resumeClient(ws: WebSocket, url: URL): Promise<boolean> {
     const resumeGeneration = url.searchParams.get('resumeGeneration');
@@ -237,10 +288,10 @@ export function startBridgeServer(options: {
     });
   }
 
-  async function handleMessage(ws: WebSocket, raw: RawData): Promise<void> {
+  async function handleMessage(ws: WebSocket, raw: string): Promise<void> {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(messageText(raw));
+      parsed = JSON.parse(raw);
     } catch {
       sendDirectWire(ws, { type: 'error', message: 'Invalid JSON command' });
       return;
@@ -397,12 +448,13 @@ export function startBridgeServer(options: {
         if (pendingServers === 0) resolve();
       };
       const forceClose = setTimeout(() => {
-        for (const ws of clients.keys()) ws.terminate();
+        for (const ws of connections) ws.terminate();
         clients.clear();
+        connections.clear();
       }, CLIENT_CLOSE_DRAIN_MS);
       forceClose.unref();
 
-      for (const ws of clients.keys()) {
+      for (const ws of connections) {
         if (ws.readyState === ws.OPEN) ws.close(1001, 'sidecar shutting down');
         else ws.terminate();
       }

@@ -32,6 +32,7 @@ function createElectronStub(options) {
     appData: path.join(options.userData, 'appData'),
     userData: options.userData,
     temp: os.tmpdir(),
+    downloads: path.join(options.userData, 'downloads'),
     exe: process.execPath,
     logs: path.join(options.userData, 'logs'),
     crashDumps: path.join(options.userData, 'crashDumps'),

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   browserKeyForSession,
   nativeBrowserRequestTargetsActiveSession,
-  nativeBrowserRequestTargetsVisibleSurface,
 } from './browserSessionIdentity';
 import type { SessionSummary } from '../types/bridge';
 
@@ -38,34 +37,4 @@ test('nativeBrowserRequestTargetsActiveSession never promotes background browser
   assert.equal(nativeBrowserRequestTargetsActiveSession('visible-chat', 'visible-chat'), true);
   assert.equal(nativeBrowserRequestTargetsActiveSession('visible-chat', 'background-chat'), false);
   assert.equal(nativeBrowserRequestTargetsActiveSession(undefined, 'background-chat'), false);
-});
-
-test('nativeBrowserRequestTargetsVisibleSurface only attaches the active browser request', () => {
-  assert.equal(
-    nativeBrowserRequestTargetsVisibleSurface({
-      browserKey: 'visible-chat',
-      requestAppSessionId: 'visible-chat',
-      requestBrowserSessionId: 'browser-visible-chat',
-    }),
-    true,
-  );
-
-  assert.equal(
-    nativeBrowserRequestTargetsVisibleSurface({
-      browserKey: 'visible-chat',
-      visibleBrowserSessionId: 'browser-visible-chat',
-      requestAppSessionId: 'background-chat',
-      requestBrowserSessionId: 'browser-visible-chat',
-    }),
-    true,
-  );
-
-  assert.equal(
-    nativeBrowserRequestTargetsVisibleSurface({
-      browserKey: 'visible-chat',
-      requestAppSessionId: 'background-chat',
-      requestBrowserSessionId: 'browser-background-chat',
-    }),
-    false,
-  );
 });

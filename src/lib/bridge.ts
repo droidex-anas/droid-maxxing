@@ -11,6 +11,8 @@ import {
   type ServerWireMessage,
 } from '../types/bridge';
 
+type OpenListener = (connectionEpoch: number) => void;
+
 type Listener = (event: ServerEvent) => void;
 type BatchListener = (events: readonly ServerEvent[]) => void;
 type ReconnectScheduler = (callback: () => void, delayMs: number) => void;
@@ -28,10 +30,12 @@ export class Bridge {
   private ws: WebSocket | null = null;
   private readonly listeners = new Set<Listener>();
   private readonly batchListeners = new Set<BatchListener>();
+  private readonly openListeners = new Set<OpenListener>();
   private queue: ClientCommand[] = [];
   private backoff = 500;
   private url = '';
   private started = false;
+  private connectionEpoch = 0;
   private lastGeneration: string | null = null;
   private lastSeq = 0;
   private validateWireMessage: WireMessageValidator | null = null;
@@ -87,6 +91,8 @@ export class Bridge {
     ws.onopen = () => {
       if (this.ws !== ws) return;
       this.backoff = 500;
+      this.connectionEpoch += 1;
+      for (const listener of [...this.openListeners]) listener(this.connectionEpoch);
       setTransportHealth('connected');
       const pending = this.queue;
       this.queue = [];
@@ -247,6 +253,12 @@ export class Bridge {
   subscribeBatch(listener: BatchListener): () => void {
     this.batchListeners.add(listener);
     return () => this.batchListeners.delete(listener);
+  }
+
+  subscribeOpen(listener: OpenListener): () => void {
+    this.openListeners.add(listener);
+    if (this.ws?.readyState === WebSocket.OPEN) listener(this.connectionEpoch);
+    return () => this.openListeners.delete(listener);
   }
 }
 

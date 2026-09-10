@@ -20,6 +20,19 @@ export function sessionIsLive(session: Pick<SessionSummary, 'phase' | 'streaming
   return CLEARLY_ACTIVE.includes(session.phase);
 }
 
+export function sessionHasActiveWork(
+  session: Pick<SessionSummary, 'phase' | 'streaming'>,
+  children: Record<string, Pick<ChildSessionSummary, 'status'> & { queued?: boolean }>,
+  runtimes: Record<string, { available: boolean }>,
+): boolean {
+  return (
+    sessionIsLive(session) ||
+    Object.entries(children).some(([childSessionId, child]) =>
+      childSessionIsLive(child, runtimes[childSessionId]),
+    )
+  );
+}
+
 export function hasActiveSessionWork(opts: {
   sessions: Record<string, Pick<SessionSummary, 'phase' | 'streaming'>>;
   childSessions: Record<string, Record<string, Pick<ChildSessionSummary, 'status'>>>;

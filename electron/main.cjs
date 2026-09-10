@@ -12,6 +12,7 @@ const {
   safeStorage,
   session,
   shell,
+  systemPreferences,
   webContents,
 } = require('electron');
 const { execFile, spawn } = require('node:child_process');
@@ -27,7 +28,7 @@ const { createTerminalManager } = require('./terminal.cjs');
 const { createTerminalSubscriptionRegistry } = require('./terminalPort.cjs');
 const { createPerformanceMetricsCollector } = require('./performanceMetrics.cjs');
 const { createNativeBrowserBudget } = require('./nativeBrowserBudget.cjs');
-const { createNativeBrowserManager } = require('./nativeBrowser.cjs');
+const { createNativeBrowserManager, BROWSER_PARTITION } = require('./nativeBrowser.cjs');
 const { createPowerTier } = require('./powerTier.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
@@ -35,6 +36,11 @@ const localImages = require('./localImages.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
+const { createBrowserSettingsController } = require('./browserSettings.cjs');
+const { createBrowserPromptController } = require('./browserPrompt.cjs');
+const { createBrowserAgentCursorController } = require('./browserAgentCursor.cjs');
+const { registerBrowserRendererIpc } = require('./browserRendererIpc.cjs');
+const { createBrowserWebAuthnController } = require('./browserWebAuthn.cjs');
 const { createRendererOomRecovery, isRendererMemoryExit } = require('./rendererOomRecovery.cjs');
 const { autoUpdater } = require('electron-updater');
 const { createAppUpdater } = require('./appUpdater.cjs');
@@ -115,28 +121,33 @@ let appIconMode = 'system';
 /** @type {{ appSessionId: string, expiresAt: number } | null } */
 let pendingNotificationOpen = null;
 const PENDING_NOTIFICATION_OPEN_MS = 30_000;
+const browserPrompts = createBrowserPromptController({
+  isAvailable: () => isWindowUsable(mainWindow),
+  send: (prompt) => mainWindow.webContents.send('browser-permission-prompt', prompt),
+  dismiss: (requestId) =>
+    mainWindow?.webContents.send('browser-permission-prompt-dismiss', requestId),
+});
+const browserAgentCursor = createBrowserAgentCursorController({
+  BrowserWindow,
+  logError: (message, error) => console.error(`${message} ${error?.message ?? error}`),
+});
+const browserWebAuthn = createBrowserWebAuthnController({
+  app,
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  keychainAccessGroup: buildMetadata.webAuthnKeychainAccessGroup,
+  getSession: () => session.fromPartition(BROWSER_PARTITION),
+  showMessageBox: (options) =>
+    isWindowUsable(mainWindow)
+      ? dialog.showMessageBox(mainWindow, options)
+      : dialog.showMessageBox(options),
+});
 // Keep hidden browser sessions warm by default so authenticated pages and
 // compositor state survive while the Browser pane is closed.
 const HIDDEN_BROWSER_IDLE_MS = Number(process.env.DROID_NATIVE_BROWSER_IDLE_MS ?? 0);
 const nativeBrowserBudget = createNativeBrowserBudget({
   maxLive: process.env.DROID_NATIVE_BROWSER_MAX_LIVE,
   idleMs: HIDDEN_BROWSER_IDLE_MS,
-});
-const nativeBrowserManager = createNativeBrowserManager({
-  app,
-  appName: APP_NAME,
-  BrowserWindow,
-  WebContentsView,
-  session,
-  dialog,
-  safeStorage,
-  budget: nativeBrowserBudget,
-  getMainWindow: () => mainWindow,
-  preloadPath: path.join(__dirname, 'nativeBrowserPreload.cjs'),
-  getHostAppUrl: () => process.env.ELECTRON_START_URL || mainWindow?.webContents.getURL(),
-  sendToRenderer: (channel, payload) => {
-    if (isWindowUsable(mainWindow)) mainWindow.webContents.send(channel, payload);
-  },
 });
 const MEMORY_PRESSURE_RSS_BYTES = Number(
   process.env.DROID_MEMORY_PRESSURE_RSS_BYTES ?? 1.5 * 1024 * 1024 * 1024,
@@ -168,6 +179,42 @@ try {
   );
 }
 app.setPath('userData', userDataPath);
+const browserSettings = createBrowserSettingsController({
+  appName: APP_NAME,
+  userDataPath: app.getPath('userData'),
+  downloadsPath: app.getPath('downloads'),
+  platform: process.platform,
+  safeStorage,
+  systemPreferences,
+  dialog,
+  getWindow: () => mainWindow,
+  getSession: () => session.fromPartition(BROWSER_PARTITION),
+  closeBrowsers: () => nativeBrowserManager.closeAll(),
+  suspendBrowsers: () => nativeBrowserManager.suspendAll(),
+  applyAgentCursorStyle: (style) => browserAgentCursor.setStyle(style),
+  applyAgentCursorSize: (size) => browserAgentCursor.setSize(size),
+  applyAgentCursorVisibility: (isVisible) => browserAgentCursor.setEnabled(isVisible),
+  getWebAuthnCapability: () => browserWebAuthn.capability(),
+  clearBrowserDiagnostics: () => nativeBrowserManager.clearDiagnostics(),
+  isNativeBrowserContents: (contents) =>
+    Boolean(nativeBrowserManager.sessionIdForWebContents(contents)),
+  showPrompt: (prompt, requestOptions) => browserPrompts.request(prompt, requestOptions),
+});
+const nativeBrowserManager = createNativeBrowserManager({
+  browserSettings,
+  cursor: browserAgentCursor,
+  appName: APP_NAME,
+  BrowserWindow,
+  WebContentsView,
+  session,
+  budget: nativeBrowserBudget,
+  getMainWindow: () => mainWindow,
+  preloadPath: path.join(__dirname, 'nativeBrowserPreload.cjs'),
+  getHostAppUrl: () => process.env.ELECTRON_START_URL || mainWindow?.webContents.getURL(),
+  sendToRenderer: (channel, payload) => {
+    if (isWindowUsable(mainWindow)) mainWindow.webContents.send(channel, payload);
+  },
+});
 const hardwareAccelerationPreferencePath = hardwareAccelerationPreferenceFilePath(
   app.getPath('userData'),
 );
@@ -177,8 +224,24 @@ if (
   app.disableHardwareAcceleration();
 }
 const diagnosticsInitialization = diagnostics.initialize();
+function failBrowserSettingsStartup(error) {
+  const detail = `${error?.message ?? error}
+
+Remove the file to reset DROIDEX Browser settings and start again:
+${browserSettings.settingsPath}`;
+  console.error(`[startup] ${detail}`);
+  dialog.showErrorBox('DROIDEX Browser settings are invalid', detail);
+  app.exit(1);
+}
 app.whenReady().then(async () => {
   await diagnosticsInitialization;
+  browserWebAuthn.initialize();
+  try {
+    await browserSettings.initialize();
+  } catch (error) {
+    failBrowserSettingsStartup(error);
+    return;
+  }
   installApplicationMenu({
     Menu,
     app,
@@ -220,6 +283,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  browserPrompts.cancelAll();
+  browserAgentCursor.destroy();
   sidecarSupervisor.stop();
   githubVcs.cancelSetup();
   closeAllDesktopNotifications();
@@ -263,7 +328,7 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -288,6 +353,7 @@ function createMainWindow() {
   });
 
   mainWindow.on('closed', () => {
+    browserPrompts.cancelAll();
     rendererOomRecovery.cancel();
     githubVcs.cancelSetup();
     nativeBrowserManager.closeAll();
@@ -692,85 +758,39 @@ function registerIpc() {
     return files.revealInFolder(filesRootAccess.resolve(accessToken), relative, shell);
   });
 
-  ipcMain.handle('native-browser-open', (event, { browserSessionId, url, bounds, viewport }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.open(browserSessionId, url, bounds, viewport);
-  });
-  ipcMain.handle('native-browser-attach', (event, { browserSessionId, bounds, url }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.attach(browserSessionId, bounds, { restoreUrl: url });
-  });
-  ipcMain.handle('native-browser-detach', (event, { browserSessionId }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.detach(browserSessionId);
-  });
-  ipcMain.handle('native-browser-set-bounds', (event, { browserSessionId, bounds }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.setBounds(browserSessionId, bounds);
-  });
-  ipcMain.handle('native-browser-visible', (event, { browserSessionId, visible }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.setVisible(browserSessionId, visible);
-  });
-  ipcMain.handle('native-browser-close', (event, { browserSessionId }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.close(browserSessionId);
-  });
-  ipcMain.handle('native-browser-reload', (event, { browserSessionId }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.reload(browserSessionId);
-  });
-  ipcMain.handle('native-browser-go-back', (event, { browserSessionId }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.goBack(browserSessionId);
-  });
-  ipcMain.handle('native-browser-go-forward', (event, { browserSessionId }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.goForward(browserSessionId);
-  });
-  ipcMain.handle('native-browser-set-design-mode', (event, { browserSessionId, active }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.setDesignMode(browserSessionId, active);
-  });
-  ipcMain.handle('native-browser-set-pencil-mode', (event, { browserSessionId, active }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.setPencilMode(browserSessionId, active);
-  });
-  ipcMain.handle('native-browser-agent-action', (event, { request }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.runAgentAction(request);
-  });
-  ipcMain.handle('native-browser-capture', (event, { browserSessionId, box, options }) => {
-    assertMainRenderer(event);
-    return nativeBrowserManager.capture(browserSessionId, box, options);
+  registerBrowserRendererIpc({
+    ipcMain,
+    assertMainRenderer,
+    browserSettings,
+    browserPrompts,
+    nativeBrowser: nativeBrowserManager,
   });
 
   ipcMain.on('native-browser-selection', (event, selection) => {
-    mainWindow?.webContents.send(
-      'native-browser-selection',
-      nativeBrowserManager.withSession(event, selection),
-    );
+    const selected = nativeBrowserManager.selectionForEvent(event, selection);
+    if (selected) mainWindow?.webContents.send('native-browser-selection', selected);
   });
   ipcMain.on('native-browser-design-prompt', async (event, payload) => {
-    const browserSessionId = nativeBrowserManager.sessionIdForWebContents(event.sender);
-    let selection = { ...payload.selection, browserSessionId };
-    // Capture the annotated region (pencil strokes, highlights) while it is
-    // still on screen so the agent receives the marked screenshot, not a
-    // clean page that lost the user's annotations.
-    const screenshot = await nativeBrowserManager
-      .captureDesignSelection(event.sender, selection)
-      .catch(() => undefined);
-    if (screenshot) selection = { ...selection, screenshot };
-    mainWindow?.webContents.send('native-browser-design-prompt', { ...payload, selection });
-    // Echo the capture id so the preload only clears the matching pending
-    // capture and ignores acks from superseded prompts.
-    event.sender.send('native-browser-design-prompt-sent', { captureId: payload.captureId });
+    try {
+      const prompt = await nativeBrowserManager.prepareDesignPrompt(event, payload);
+      if (prompt) mainWindow?.webContents.send('native-browser-design-prompt', prompt);
+    } catch (error) {
+      console.error(`failed to prepare browser design selection: ${error.message}`);
+    } finally {
+      // Ack every outcome so the page clears its pending capture without
+      // waiting for the preload's watchdog timer.
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('native-browser-design-prompt-sent', { captureId: payload?.captureId });
+      }
+    }
   });
-  ipcMain.on('native-browser-agent-result', (_event, result) => {
-    mainWindow?.webContents.send('native-browser-agent-result', result);
+  ipcMain.on('native-browser-user-navigation', (event, payload) => {
+    nativeBrowserManager.recordUserNavigation(event, payload);
   });
   ipcMain.on('native-browser-credential-capture', (event, payload) => {
-    void nativeBrowserManager.handleCredentialCapture(event.sender, payload);
+    void nativeBrowserManager
+      .captureCredential(event, payload)
+      .catch((error) => console.error(`failed to capture browser login: ${error.message}`));
   });
 }
 
@@ -877,6 +897,7 @@ function installMainRendererLifecycle(contents) {
     if (!hasLoadedMainFrame || cleanedForNavigation) return;
     cleanedForNavigation = true;
     githubVcs.cancelSetup();
+    browserPrompts.cancelAll();
     closeRendererOwnedTerminals();
   };
 
@@ -937,6 +958,7 @@ function readBuildMetadata() {
       sentryDsn: process.env.SENTRY_DSN || '',
       sparkleFeedUrl: process.env.SPARKLE_FEED_URL || '',
       updateInstallMode: 'sparkle',
+      webAuthnKeychainAccessGroup: '',
     };
   }
   try {
@@ -945,9 +967,18 @@ function readBuildMetadata() {
       sentryDsn: typeof metadata.sentryDsn === 'string' ? metadata.sentryDsn : '',
       sparkleFeedUrl: typeof metadata.sparkleFeedUrl === 'string' ? metadata.sparkleFeedUrl : '',
       updateInstallMode: metadata.updateInstallMode === 'automatic' ? 'automatic' : 'sparkle',
+      webAuthnKeychainAccessGroup:
+        typeof metadata.webAuthnKeychainAccessGroup === 'string'
+          ? metadata.webAuthnKeychainAccessGroup
+          : '',
     };
   } catch {
-    return { sentryDsn: '', sparkleFeedUrl: '', updateInstallMode: 'sparkle' };
+    return {
+      sentryDsn: '',
+      sparkleFeedUrl: '',
+      updateInstallMode: 'sparkle',
+      webAuthnKeychainAccessGroup: '',
+    };
   }
 }
 

@@ -21,6 +21,9 @@ test('tabMatchesQuery keeps tabs whose content keywords match', () => {
   assert.equal(tabMatchesQuery('Privacy & diagnostics', 'sentry'), true);
   assert.equal(tabMatchesQuery('Keyboard shortcuts', 'hotkeys'), true);
   assert.equal(tabMatchesQuery('MCP servers', 'mcp'), true);
+  assert.equal(tabMatchesQuery('Browser', 'safari cookies'), true);
+  assert.equal(tabMatchesQuery('Browser', 'agent pointer'), true);
+  assert.equal(tabMatchesQuery('Browser', 'google homepage'), true);
 });
 
 test('searchSettings ranks play sound under Notifications', () => {
@@ -37,6 +40,8 @@ test('searchSettings finds controls across shipped tabs', () => {
   assert.equal(searchSettings('default autonomy')[0]?.tab, 'Configuration');
   assert.equal(searchSettings('crash reports')[0]?.tab, 'Privacy & diagnostics');
   assert.equal(searchSettings('remove worktree')[0]?.tab, 'Worktrees');
+  assert.equal(searchSettings('keychain')[0]?.tab, 'Browser');
+  assert.equal(searchSettings('oauth passkey')[0]?.tab, 'Browser');
 });
 
 test('bestTabForQuery jumps to the right screen for every major area', () => {
@@ -48,6 +53,7 @@ test('bestTabForQuery jumps to the right screen for every major area', () => {
   assert.equal(bestTabForQuery('sentry'), 'Privacy & diagnostics');
   assert.equal(bestTabForQuery('hotkeys'), 'Keyboard shortcuts');
   assert.equal(bestTabForQuery('mcp'), 'MCP servers');
+  assert.equal(bestTabForQuery('import cookies'), 'Browser');
   assert.equal(bestTabForQuery('zzzz-no-match'), null);
   assert.equal(bestTabForQuery(''), null);
 });

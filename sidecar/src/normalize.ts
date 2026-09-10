@@ -587,8 +587,12 @@ export function permissionSignature(params: RequestPermissionRequestParams): str
       return `exec::${fullCommand || command}`;
     }
     case 'mcp_tool': {
-      const serverName = typeof c.serverName === 'string' ? c.serverName : '';
-      const toolName = typeof c.toolName === 'string' ? c.toolName : '';
+      const rawToolName = typeof c.toolName === 'string' ? c.toolName : '';
+      const separatorIndex = rawToolName.indexOf('___');
+      const namespacedServer = separatorIndex >= 0 ? rawToolName.slice(0, separatorIndex) : '';
+      const toolName = separatorIndex >= 0 ? rawToolName.slice(separatorIndex + 3) : rawToolName;
+      const serverName = (typeof c.serverName === 'string' ? c.serverName : '') || namespacedServer;
+      if (!serverName || !toolName) return '';
       const key = `mcp::${serverName}::${toolName}`;
       if (!isAutomationMutationPermission(params)) return key;
       const args = toolArgumentDigest(primaryToolInput(params));

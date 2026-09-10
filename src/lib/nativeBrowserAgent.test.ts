@@ -3,34 +3,63 @@ import test from 'node:test';
 import type { BrowserNativeRequest } from '../types/bridge';
 import { performNativeBrowserRequest, registerNativeBrowserController } from './nativeBrowserAgent';
 
-test('native browser requests run through Electron without a mounted Browser controller', async () => {
-  const requests: unknown[] = [];
-  const globals = globalThis as typeof globalThis & { window?: unknown };
-  const previousWindow = globals.window;
-  globals.window = {
-    setTimeout,
-    clearTimeout,
-    droidControl: {
-      onNativeBrowserAgentResult: () => () => {},
-      nativeBrowserAgentAction: async (request: BrowserNativeRequest) => {
-        requests.push(request);
-        return {
-          requestId: request.requestId,
-          ok: true,
-          networkEvents: [
-            {
-              timestamp: 1,
-              method: 'GET',
-              url: 'https://example.com/api',
-              status: 200,
-            },
-          ],
-        };
-      },
+interface FakeTimer {
+  active: boolean;
+  callback: () => void;
+  delayMs: number;
+}
+
+function fakeBrowserWindow(
+  nativeBrowserAgentAction?: (request: BrowserNativeRequest) => Promise<unknown>,
+) {
+  const timers: FakeTimer[] = [];
+  const value: Record<string, unknown> = {
+    setTimeout: (callback: () => void, delayMs: number) => {
+      timers.push({ active: true, callback, delayMs });
+      return timers.length;
+    },
+    clearTimeout: (timer: number) => {
+      const record = timers[timer - 1];
+      if (record) record.active = false;
     },
   };
+  if (nativeBrowserAgentAction) value.droidControl = { nativeBrowserAgentAction };
+  return { timers, value };
+}
 
+async function withBrowserWindow(run: () => Promise<void>, value: unknown): Promise<void> {
+  const globals = globalThis as typeof globalThis & { window?: unknown };
+  const previousWindow = globals.window;
+  globals.window = value;
   try {
+    await run();
+  } finally {
+    if (previousWindow === undefined) delete globals.window;
+    else globals.window = previousWindow;
+  }
+}
+
+test('desktop browser requests use Electron immediately without a mounted surface', async () => {
+  const requests: BrowserNativeRequest[] = [];
+  const fake = fakeBrowserWindow(async (request) => {
+    requests.push(request);
+    return {
+      requestId: request.requestId,
+      appSessionId: request.appSessionId,
+      browserSessionId: request.browserSessionId,
+      ok: true,
+      networkEvents: [
+        {
+          timestamp: 1,
+          method: 'GET',
+          url: 'https://example.com/api',
+          status: 200,
+        },
+      ],
+    };
+  });
+
+  await withBrowserWindow(async () => {
     const result = await performNativeBrowserRequest({
       requestId: 'request-1',
       appSessionId: 'app-1',
@@ -38,102 +67,200 @@ test('native browser requests run through Electron without a mounted Browser con
       action: 'network',
     });
 
-    assert.equal(requests.length, 1);
     assert.equal(result.ok, true);
-    assert.equal(result.appSessionId, 'app-1');
     assert.equal(result.networkEvents?.[0]?.status, 200);
-  } finally {
-    if (previousWindow === undefined) delete globals.window;
-    else globals.window = previousWindow;
-  }
+    assert.equal(fake.timers.length, 1);
+    assert.equal(fake.timers[0]?.delayMs, 10_000);
+    assert.equal(fake.timers[0]?.active, false);
+    assert.equal(requests.length, 1);
+  }, fake.value);
 });
 
-test('open waits briefly for a visible Browser controller to mount', async () => {
-  const desktopRequests: unknown[] = [];
-  const controllerRequests: unknown[] = [];
-  const globals = globalThis as typeof globalThis & { window?: unknown };
-  const previousWindow = globals.window;
-  globals.window = {
-    setTimeout,
-    clearTimeout,
-    droidControl: {
-      onNativeBrowserAgentResult: () => () => {},
-      nativeBrowserAgentAction: async (request: BrowserNativeRequest) => {
-        desktopRequests.push(request);
-        return { requestId: request.requestId, ok: true };
-      },
+test('desktop requests bypass a mounted renderer controller', async () => {
+  const desktopRequests: BrowserNativeRequest[] = [];
+  const controllerRequests: BrowserNativeRequest[] = [];
+  const fake = fakeBrowserWindow(async (request) => {
+    desktopRequests.push(request);
+    return { ...request, ok: true };
+  });
+  const unregister = registerNativeBrowserController({
+    appSessionId: 'app-1',
+    browserSessionId: 'browser-1',
+    perform: async (request) => {
+      controllerRequests.push(request);
+      return { ...request, ok: true };
     },
-  };
+  });
 
-  let unregister = () => {};
   try {
-    setTimeout(() => {
-      unregister = registerNativeBrowserController({
-        perform: async (request) => {
-          controllerRequests.push(request);
-          return { requestId: request.requestId, appSessionId: request.appSessionId, ok: true };
-        },
-      });
-    }, 0);
-
-    const result = await performNativeBrowserRequest(
-      {
-        requestId: 'request-open',
+    await withBrowserWindow(async () => {
+      const request: BrowserNativeRequest = {
+        requestId: 'desktop-request',
         appSessionId: 'app-1',
         browserSessionId: 'browser-1',
-        action: 'open',
-        url: 'https://example.com',
-      },
-      100,
-    );
+        action: 'snapshot',
+      };
+      const result = await performNativeBrowserRequest(request);
 
-    assert.equal(result.ok, true);
-    assert.equal(controllerRequests.length, 1);
-    assert.equal(desktopRequests.length, 0);
+      assert.equal(result.ok, true);
+      assert.deepEqual(desktopRequests, [request]);
+      assert.deepEqual(controllerRequests, []);
+    }, fake.value);
   } finally {
     unregister();
-    if (previousWindow === undefined) delete globals.window;
-    else globals.window = previousWindow;
   }
 });
 
-test('open falls back to Electron when no Browser controller mounts', async () => {
-  const requests: unknown[] = [];
-  const opens: unknown[] = [];
-  const globals = globalThis as typeof globalThis & { window?: unknown };
-  const previousWindow = globals.window;
-  globals.window = {
-    setTimeout,
-    clearTimeout,
-    droidControl: {
-      onNativeBrowserAgentResult: () => () => {},
-      nativeBrowserOpen: async (...args: unknown[]) => {
-        opens.push(args);
-      },
-      nativeBrowserAgentAction: async (request: BrowserNativeRequest) => {
-        requests.push(request);
-        return { requestId: request.requestId, ok: true };
-      },
-    },
-  };
+test('iframe requests wait deterministically for their renderer controller', async () => {
+  const controllerRequests: BrowserNativeRequest[] = [];
+  const fake = fakeBrowserWindow();
+  let unregister = () => {};
 
   try {
-    const result = await performNativeBrowserRequest(
-      {
-        requestId: 'request-open-fallback',
+    await withBrowserWindow(async () => {
+      const request: BrowserNativeRequest = {
+        requestId: 'iframe-request',
         appSessionId: 'app-1',
         browserSessionId: 'browser-1',
-        action: 'open',
-        url: 'https://example.com',
-      },
-      1,
-    );
+        action: 'snapshot',
+      };
+      const pending = performNativeBrowserRequest(request, { timeoutMs: 100 });
+      unregister = registerNativeBrowserController({
+        appSessionId: 'app-1',
+        browserSessionId: 'browser-1',
+        perform: async (received) => {
+          controllerRequests.push(received);
+          return { ...received, ok: true };
+        },
+      });
 
-    assert.equal(result.ok, true);
-    assert.equal(opens.length, 1);
-    assert.equal(requests.length, 1);
+      const result = await pending;
+      assert.equal(result.ok, true);
+      assert.deepEqual(controllerRequests, [request]);
+      assert.equal(fake.timers[0]?.active, false);
+    }, fake.value);
   } finally {
-    if (previousWindow === undefined) delete globals.window;
-    else globals.window = previousWindow;
+    unregister();
   }
+});
+
+test('background requests never target a mounted renderer controller', async () => {
+  const controllerRequests: BrowserNativeRequest[] = [];
+  const fake = fakeBrowserWindow();
+  const unregister = registerNativeBrowserController({
+    appSessionId: 'app-1',
+    browserSessionId: 'browser-1',
+    perform: async (request) => {
+      controllerRequests.push(request);
+      return { ...request, ok: true };
+    },
+  });
+
+  try {
+    await withBrowserWindow(async () => {
+      const result = await performNativeBrowserRequest(
+        {
+          requestId: 'background-request',
+          appSessionId: 'background-chat',
+          browserSessionId: 'background-browser',
+          action: 'snapshot',
+        },
+        { surface: 'background' },
+      );
+
+      assert.equal(result.ok, false);
+      assert.match(result.error ?? '', /native browser is only available/i);
+      assert.deepEqual(controllerRequests, []);
+    }, fake.value);
+  } finally {
+    unregister();
+  }
+});
+
+test('a controller replaced while a request waits cannot receive the old chat action', async () => {
+  const fake = fakeBrowserWindow();
+  const received: BrowserNativeRequest[] = [];
+  await withBrowserWindow(async () => {
+    const pending = performNativeBrowserRequest({
+      requestId: 'waiting',
+      appSessionId: 'app-1',
+      browserSessionId: 'browser-1',
+      action: 'click',
+    });
+    const first = registerNativeBrowserController({
+      appSessionId: 'app-1',
+      browserSessionId: 'browser-1',
+      perform: async (request) => {
+        received.push(request);
+        return { ...request, ok: true };
+      },
+    });
+    first();
+    const second = registerNativeBrowserController({
+      appSessionId: 'app-2',
+      browserSessionId: 'browser-2',
+      perform: async (request) => {
+        received.push(request);
+        return { ...request, ok: true };
+      },
+    });
+    try {
+      await assert.rejects(pending, /no longer active/);
+      assert.deepEqual(received, []);
+    } finally {
+      second();
+    }
+  }, fake.value);
+});
+
+test('a chat-owned iframe can open its first browser before a browser snapshot exists', async () => {
+  const fake = fakeBrowserWindow();
+  const received: BrowserNativeRequest[] = [];
+  await withBrowserWindow(async () => {
+    const unregister = registerNativeBrowserController({
+      appSessionId: 'app-1',
+      perform: async (request) => {
+        received.push(request);
+        return { ...request, ok: true };
+      },
+    });
+    const request: BrowserNativeRequest = {
+      requestId: 'first-open',
+      appSessionId: 'app-1',
+      browserSessionId: 'browser-new',
+      action: 'open',
+    };
+    try {
+      assert.equal((await performNativeBrowserRequest(request)).ok, true);
+      await assert.rejects(
+        performNativeBrowserRequest({ ...request, appSessionId: 'app-2' }),
+        /no longer active/,
+      );
+      await assert.rejects(
+        performNativeBrowserRequest({ ...request, action: 'click' }),
+        /no longer active/,
+      );
+      assert.deepEqual(received, [request]);
+    } finally {
+      unregister();
+    }
+  }, fake.value);
+});
+
+test('desktop policy failures remain visible in the browser result', async () => {
+  const fake = fakeBrowserWindow(async () => {
+    throw new Error('Agent browser access is disabled in Settings > Browser.');
+  });
+
+  await withBrowserWindow(async () => {
+    const result = await performNativeBrowserRequest({
+      requestId: 'request-denied',
+      appSessionId: 'app-1',
+      browserSessionId: 'browser-1',
+      action: 'snapshot',
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? '', /disabled in Settings > Browser/);
+  }, fake.value);
 });

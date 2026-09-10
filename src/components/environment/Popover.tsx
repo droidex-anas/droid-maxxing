@@ -3,11 +3,13 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type AriaRole,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { calculatePopoverPosition, type PopoverPosition } from './popoverPosition';
 import { pushEscapeLayer } from './usePopover';
 
 // The app scales its UI with a CSS zoom on #root (the UI font size setting),
@@ -32,8 +34,13 @@ export function Popover({
   onClose,
   anchorRef,
   label,
+  id,
   align = 'right',
   width = 288,
+  role = 'dialog',
+  initialFocusSelector,
+  trapFocus = true,
+  onKeyDown,
   className = '',
   children,
 }: {
@@ -41,21 +48,18 @@ export function Popover({
   onClose: () => void;
   anchorRef: RefObject<HTMLElement | null>;
   label?: string;
+  id?: string;
   align?: 'left' | 'right';
-  width?: number;
+  width?: number | 'anchor';
+  role?: AriaRole;
+  initialFocusSelector?: string;
+  trapFocus?: boolean;
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   className?: string;
   children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{
-    top?: number;
-    bottom?: number;
-    left: number;
-    maxHeight: number;
-    // Captured at measure time so the content box renders at exactly the
-    // zoom the positioning math used.
-    zoom: number;
-  } | null>(null);
+  const [pos, setPos] = useState<PopoverPosition | null>(null);
   // Drives the enter transition: mount at opacity-0/scale-95, then flip on the
   // next frame so the CSS transition has a starting state to animate from.
   const [entered, setEntered] = useState(false);
@@ -92,54 +96,42 @@ export function Popover({
     // is trapped. Otherwise focus stays on the trigger and Tab escapes the
     // portal, bypassing the onKeyDown trap which only fires inside the panel.
     if (!focusInsideRef.current && panelRef.current) {
+      const initial = initialFocusSelector
+        ? panelRef.current.querySelector<HTMLElement>(initialFocusSelector)
+        : null;
       const focusables = panelRef.current.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
-      if (focusables.length > 0) focusables[0].focus();
-      else panelRef.current.focus();
+      let focusTarget = initial;
+      focusTarget ??= focusables.length > 0 ? focusables[0] : panelRef.current;
+      focusTarget.focus({ preventScroll: true });
       track();
     }
     document.addEventListener('focusin', track);
     const anchor = anchorRef.current;
     return () => {
       document.removeEventListener('focusin', track);
-      if (focusInsideRef.current) anchor?.focus();
+      if (focusInsideRef.current) anchor?.focus({ preventScroll: true });
       focusInsideRef.current = false;
     };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, initialFocusSelector]);
 
   useLayoutEffect(() => {
     if (!open) return;
-    const margin = 8;
     const update = () => {
       const anchor = anchorRef.current;
       if (!anchor) return;
       const zoom = uiZoomFactor();
       const r = anchor.getBoundingClientRect();
-      // The content box is zoomed, so its on-screen footprint is width*zoom;
-      // top/left/bottom stay in viewport pixels because the positioning shell
-      // is not zoomed.
-      const visualWidth = width * zoom;
-      const rawLeft = align === 'right' ? r.right - visualWidth : r.left;
-      const left = Math.min(Math.max(margin, rawLeft), window.innerWidth - visualWidth - margin);
-      const spaceBelow = window.innerHeight - r.bottom - margin;
-      const spaceAbove = r.top - margin;
-      // Flip above the anchor when there isn't enough room below (e.g. the
-      // composer pickers sit at the bottom of the window).
-      // Cap maxHeight to the room actually available on the chosen side (never a
-      // fixed floor that could exceed it) so the panel is never pushed partly
-      // off-screen; its content scrolls within whatever space remains. The cap
-      // is expressed in the zoomed box's own units, hence the division.
-      if (spaceBelow < 240 && spaceAbove > spaceBelow) {
-        setPos({
-          bottom: window.innerHeight - r.top + 4,
-          left,
-          maxHeight: Math.max(0, spaceAbove / zoom),
+      setPos(
+        calculatePopoverPosition({
+          anchor: r,
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          width,
+          align,
           zoom,
-        });
-      } else {
-        setPos({ top: r.bottom + 4, left, maxHeight: Math.max(0, spaceBelow / zoom), zoom });
-      }
+        }),
+      );
     };
     update();
     // The capture-phase scroll listener fires for every scrollable container
@@ -190,8 +182,9 @@ export function Popover({
 
   // The portal escapes the trigger's DOM order, so Tab would otherwise walk
   // out of the open panel into whatever follows <body>; wrap focus instead.
-  const trapTab = (e: ReactKeyboardEvent) => {
-    if (e.key !== 'Tab') return;
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    onKeyDown?.(e);
+    if (e.defaultPrevented || !trapFocus || e.key !== 'Tab') return;
     const panel = panelRef.current;
     if (!panel) return;
     const focusables = panel.querySelectorAll<HTMLElement>(
@@ -219,11 +212,12 @@ export function Popover({
   if (!open || !pos) return null;
   return createPortal(
     <div
+      id={id}
       ref={panelRef}
-      role="dialog"
+      role={role}
       aria-label={label ?? 'Menu'}
       tabIndex={-1}
-      onKeyDown={trapTab}
+      onKeyDown={handleKeyDown}
       style={{
         position: 'fixed',
         top: pos.top,
@@ -236,7 +230,7 @@ export function Popover({
       }`}
     >
       <div
-        style={{ zoom: pos.zoom, width, maxHeight: pos.maxHeight }}
+        style={{ zoom: pos.zoom, width: pos.width, maxHeight: pos.maxHeight }}
         className={`flex flex-col overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50 ${className}`}
       >
         {children}

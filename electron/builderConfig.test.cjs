@@ -1,8 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join } = require('node:path');
+const { dirname, join } = require('node:path');
+const { prepareMacEntitlements } = require('./macosEntitlements.cjs');
 
 const sparkleBridgeSource = require('node:fs').readFileSync(
   join(__dirname, '..', 'native', 'sparkle-updater', 'src', 'sparkle_updater.mm'),
@@ -60,6 +61,8 @@ test('free mac builds use ad-hoc signing and never attempt notarization', () => 
 
   assert.equal(config.mac.identity, '-');
   assert.equal(config.mac.notarize, false);
+  assert.equal(config.extraMetadata.webAuthnKeychainAccessGroup, '');
+  assert.equal(config.mac.entitlements, 'assets/brand/entitlements.mac.plist');
   assert.equal(config.extraMetadata.updateInstallMode, 'sparkle');
   assert.equal(config.extraMetadata.sparkleFeedUrl, config.mac.extendInfo.SUFeedURL);
   assert.equal(config.mac.extendInfo.SUPublicEDKey, 'czgsBI/YO7amJbwhZidZSO0j7LU5A4NsU0No9fDemWU=');
@@ -125,6 +128,7 @@ test('release builds emit canonical update artifacts', () => {
   const config = loadConfig({
     DROIDEX_RELEASE_BUILD: '1',
     CSC_LINK: 'base64-certificate',
+    APPLE_TEAM_ID: 'A1B2C3D4E5',
     APPLE_API_KEY: '/tmp/AuthKey.p8',
     APPLE_API_KEY_ID: 'KEYID',
     APPLE_API_ISSUER: 'ISSUER',
@@ -133,6 +137,11 @@ test('release builds emit canonical update artifacts', () => {
 
   assert.equal(config.forceCodeSigning, true);
   assert.equal(config.extraMetadata.updateInstallMode, 'automatic');
+  assert.equal(config.extraMetadata.webAuthnKeychainAccessGroup, 'A1B2C3D4E5.app.droidex.webauthn');
+  assert.match(
+    readFileSync(config.mac.entitlements, 'utf8'),
+    /<string>A1B2C3D4E5\.app\.droidex\.webauthn<\/string>/,
+  );
   assert.deepEqual(
     config.mac.target.map((target) => target.target),
     ['dmg', 'zip'],
@@ -145,12 +154,58 @@ test('release builds emit canonical update artifacts', () => {
   });
 });
 
+test('release entitlements support structurally valid root dictionary indentation', (t) => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'droidex-entitlements-source-'));
+  const brandDirectory = join(projectRoot, 'assets', 'brand');
+  mkdirSync(brandDirectory, { recursive: true });
+  t.after(() => rmSync(projectRoot, { recursive: true, force: true }));
+
+  for (const closingIndent of ['', '\t']) {
+    writeFileSync(
+      join(brandDirectory, 'entitlements.mac.plist'),
+      `<?xml version="1.0"?>\n<plist version="1.0">\n<dict>\n${closingIndent}</dict>\n</plist>\n`,
+    );
+    const result = prepareMacEntitlements({
+      isReleaseBuild: true,
+      projectRoot,
+      teamId: 'A1B2C3D4E5',
+    });
+    t.after(() => rmSync(dirname(result.entitlementsPath), { recursive: true, force: true }));
+
+    assert.match(
+      readFileSync(result.entitlementsPath, 'utf8'),
+      /<key>keychain-access-groups<\/key>[\s\S]*A1B2C3D4E5\.app\.droidex\.webauthn/,
+    );
+  }
+
+  writeFileSync(
+    join(brandDirectory, 'entitlements.mac.plist'),
+    '<?xml version="1.0"?>\r\n<plist version="1.0">\r\n<dict>\r\n</dict>\r\n</plist>\r\n',
+  );
+  const crlf = prepareMacEntitlements({ isReleaseBuild: true, projectRoot, teamId: 'A1B2C3D4E5' });
+  t.after(() => rmSync(dirname(crlf.entitlementsPath), { recursive: true, force: true }));
+  assert.match(
+    readFileSync(crlf.entitlementsPath, 'utf8'),
+    /\r\n {2}<key>keychain-access-groups<\/key>\r\n/,
+  );
+
+  writeFileSync(
+    join(brandDirectory, 'entitlements.mac.plist'),
+    '<?xml version="1.0"?>\n<plist version="1.0">\n<dict>\n</plist>\n',
+  );
+  assert.throws(
+    () => prepareMacEntitlements({ isReleaseBuild: true, projectRoot, teamId: 'A1B2C3D4E5' }),
+    /missing the root dictionary closing tag/,
+  );
+});
+
 test('release builds require crash reporting configuration', () => {
   assert.throws(
     () =>
       loadConfig({
         DROIDEX_RELEASE_BUILD: '1',
         CSC_LINK: 'base64-certificate',
+        APPLE_TEAM_ID: 'A1B2C3D4E5',
         APPLE_API_KEY: '/tmp/AuthKey.p8',
         APPLE_API_KEY_ID: 'KEYID',
         APPLE_API_ISSUER: 'ISSUER',
@@ -159,10 +214,26 @@ test('release builds require crash reporting configuration', () => {
   );
 });
 
+test('release builds require a concrete signing Team ID for Touch ID passkeys', () => {
+  assert.throws(
+    () =>
+      loadConfig({
+        DROIDEX_RELEASE_BUILD: '1',
+        CSC_LINK: 'base64-certificate',
+        APPLE_API_KEY: '/tmp/AuthKey.p8',
+        APPLE_API_KEY_ID: 'KEYID',
+        APPLE_API_ISSUER: 'ISSUER',
+        SENTRY_DSN: canonicalSentryDsn,
+      }),
+    /APPLE_TEAM_ID.*10-character Apple Developer Team ID/,
+  );
+});
+
 test('release builds reject a Sentry DSN for another host or project', () => {
   const releaseEnvironment = {
     DROIDEX_RELEASE_BUILD: '1',
     CSC_LINK: 'base64-certificate',
+    APPLE_TEAM_ID: 'A1B2C3D4E5',
     APPLE_API_KEY: '/tmp/AuthKey.p8',
     APPLE_API_KEY_ID: 'KEYID',
     APPLE_API_ISSUER: 'ISSUER',
@@ -215,6 +286,7 @@ test('notarization rejects API key data instead of an absolute key path', () => 
       loadConfig({
         DROIDEX_RELEASE_BUILD: '1',
         CSC_LINK: 'base64-certificate',
+        APPLE_TEAM_ID: 'A1B2C3D4E5',
         APPLE_API_KEY: 'base64-api-key',
         APPLE_API_KEY_ID: 'KEYID',
         APPLE_API_ISSUER: 'ISSUER',
@@ -224,14 +296,34 @@ test('notarization rejects API key data instead of an absolute key path', () => 
   );
 });
 
-test('macOS protected project folders have truthful permission descriptions', () => {
+test('macOS protected resources have truthful permission descriptions', () => {
   const config = loadConfig({});
 
   assert.match(config.mac.extendInfo.NSDesktopFolderUsageDescription, /choose them/);
   assert.match(config.mac.extendInfo.NSDocumentsFolderUsageDescription, /choose them/);
   assert.match(config.mac.extendInfo.NSDownloadsFolderUsageDescription, /choose them/);
-  assert.equal(config.mac.extendInfo.NSCameraUsageDescription, undefined);
-  assert.equal(config.mac.extendInfo.NSMicrophoneUsageDescription, undefined);
+  assert.match(config.mac.extendInfo.NSCameraUsageDescription, /only after you approve/);
+  assert.match(config.mac.extendInfo.NSMicrophoneUsageDescription, /only after you approve/);
+});
+
+test('signed browser builds carry camera and audio-input entitlements into helpers', () => {
+  const config = loadConfig({
+    DROIDEX_RELEASE_BUILD: '1',
+    CSC_LINK: 'base64-certificate',
+    APPLE_TEAM_ID: 'A1B2C3D4E5',
+    APPLE_API_KEY: '/tmp/AuthKey.p8',
+    APPLE_API_KEY_ID: 'KEYID',
+    APPLE_API_ISSUER: 'ISSUER',
+    SENTRY_DSN: canonicalSentryDsn,
+  });
+  for (const file of [config.mac.entitlements, config.mac.entitlementsInherit]) {
+    const entitlements = readFileSync(file, 'utf8');
+    assert.match(entitlements, /<key>com\.apple\.security\.device\.camera<\/key>\s*<true\s*\/>/);
+    assert.match(
+      entitlements,
+      /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/,
+    );
+  }
 });
 
 test('website DMG includes a direct Privacy & Security shortcut', () => {

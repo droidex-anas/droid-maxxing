@@ -27,37 +27,53 @@ test('NativeBrowserRuntime sends live requests with application and browser sess
     },
   });
 
-  const snapshot = await runtime.open('https://example.com/');
-  await runtime.reload();
+  const snapshot = await runtime.open('https://example.com/', 'user');
+  await runtime.reload('user');
   await runtime.goBack();
   await runtime.goForward();
-  await runtime.click(12, 34, '#submit');
-  await runtime.hover(56, 78, '#account');
-  await runtime.selectOption('#country', 'Canada');
+  await runtime.click(12, 34, '#submit', '@b-snapshot-submit');
+  await runtime.hover(56, 78, '#account', '@b-snapshot-account');
+  await runtime.selectOption('#country', 'Canada', '@b-snapshot-country');
+  await runtime.scroll({
+    direction: 'down',
+    pixels: 600,
+    x: 50,
+    y: 100,
+    selector: '#results',
+    ref: '@b-snapshot-results',
+  });
 
   assert.equal(snapshot.url, 'https://example.com/');
   assert.deepEqual(
     requests.map((request) => request.action),
-    ['open', 'reload', 'goBack', 'goForward', 'click', 'hover', 'selectOption'],
+    ['open', 'reload', 'goBack', 'goForward', 'click', 'hover', 'selectOption', 'scroll'],
   );
+  assert.deepEqual(await runtime.fillCredentials(), snapshot);
+  assert.equal(requests.at(-1)?.action, 'fillCredentials');
   assert.equal(requests[0].appSessionId, 'app-session-one');
   assert.equal(requests[0].browserSessionId, 'browser-one');
+  assert.equal(requests[0].source, 'user');
+  assert.equal(requests[1].source, 'user');
   assert.deepEqual(requests[0].viewport, { width: 900, height: 700, deviceScaleFactor: 2 });
   assert.deepEqual(
-    { x: requests[4].x, y: requests[4].y, selector: requests[4].selector },
-    { x: 12, y: 34, selector: '#submit' },
+    { x: requests[4].x, y: requests[4].y, selector: requests[4].selector, ref: requests[4].ref },
+    { x: 12, y: 34, selector: '#submit', ref: '@b-snapshot-submit' },
   );
   assert.deepEqual(
-    { x: requests[5].x, y: requests[5].y, selector: requests[5].selector },
-    { x: 56, y: 78, selector: '#account' },
+    { x: requests[5].x, y: requests[5].y, selector: requests[5].selector, ref: requests[5].ref },
+    { x: 56, y: 78, selector: '#account', ref: '@b-snapshot-account' },
   );
   assert.deepEqual(
-    { selector: requests[6].selector, text: requests[6].text },
-    { selector: '#country', text: 'Canada' },
+    { selector: requests[6].selector, text: requests[6].text, ref: requests[6].ref },
+    { selector: '#country', text: 'Canada', ref: '@b-snapshot-country' },
+  );
+  assert.deepEqual(
+    { selector: requests[7].selector, ref: requests[7].ref },
+    { selector: '#results', ref: '@b-snapshot-results' },
   );
 });
 
-test('open remains usable when navigation succeeds before a DOM snapshot is ready', async () => {
+test('open fails when navigation returns no fresh DOM snapshot', async () => {
   const runtime = new NativeBrowserRuntime({
     appSessionId: 'app-session-one',
     browserSessionId: 'browser-one',
@@ -70,17 +86,64 @@ test('open remains usable when navigation succeeds before a DOM snapshot is read
     }),
   });
 
-  const snapshot = await runtime.open('https://example.com/');
-  assert.deepEqual(snapshot, {
-    url: 'https://example.com/',
-    scroll: { x: 0, y: 0 },
-    refs: [],
-    canGoBack: false,
-    canGoForward: false,
-  });
+  await assert.rejects(
+    runtime.open('https://example.com/'),
+    /navigation completed without a fresh page snapshot/,
+  );
 });
 
-test('open fallback clears metadata from the previous page', async () => {
+test('open rejects an early about:blank snapshot instead of fabricating success', async () => {
+  const runtime = new NativeBrowserRuntime({
+    appSessionId: 'app-session-one',
+    browserSessionId: 'browser-one',
+    viewport: { width: 900, height: 700, deviceScaleFactor: 2 },
+    request: async (request) => ({
+      requestId: request.requestId,
+      appSessionId: request.appSessionId,
+      browserSessionId: request.browserSessionId,
+      ok: true,
+      snapshot: {
+        url: 'about:blank',
+        title: 'Stale renderer',
+        scroll: { x: 80, y: 120 },
+        refs: [],
+      },
+    }),
+  });
+
+  await assert.rejects(
+    runtime.open('https://example.com/account'),
+    /navigation returned an invalid page snapshot/,
+  );
+});
+
+test('reload rejects about:blank instead of reporting the last committed page as fresh', async () => {
+  let action: BrowserNativeRequest['action'] = 'open';
+  const runtime = new NativeBrowserRuntime({
+    appSessionId: 'app-session-one',
+    browserSessionId: 'browser-one',
+    viewport: { width: 900, height: 700, deviceScaleFactor: 2 },
+    request: async (request) => {
+      action = request.action;
+      return {
+        requestId: request.requestId,
+        appSessionId: request.appSessionId,
+        browserSessionId: request.browserSessionId,
+        ok: true,
+        snapshot: {
+          url: action === 'open' ? 'https://example.com/account' : 'about:blank',
+          scroll: { x: 0, y: 0 },
+          refs: [],
+        },
+      };
+    },
+  });
+
+  await runtime.open('https://example.com/account');
+  await assert.rejects(runtime.reload(), /invalid page snapshot/);
+});
+
+test('a second open cannot reuse metadata from the previous page', async () => {
   const runtime = new NativeBrowserRuntime({
     appSessionId: 'app-session-one',
     browserSessionId: 'browser-one',
@@ -105,18 +168,13 @@ test('open fallback clears metadata from the previous page', async () => {
   });
 
   await runtime.open('https://example.com/first');
-  const snapshot = await runtime.open('https://example.com/second');
-
-  assert.deepEqual(snapshot, {
-    url: 'https://example.com/second',
-    scroll: { x: 0, y: 0 },
-    refs: [],
-    canGoBack: false,
-    canGoForward: false,
-  });
+  await assert.rejects(
+    runtime.open('https://example.com/second'),
+    /navigation completed without a fresh page snapshot/,
+  );
 });
 
-test('reload and snapshot actions never reuse a stale page snapshot', async () => {
+test('reload without a snapshot fails without reusing stale page metadata', async () => {
   const runtime = new NativeBrowserRuntime({
     appSessionId: 'app-session-one',
     browserSessionId: 'browser-one',
@@ -140,7 +198,35 @@ test('reload and snapshot actions never reuse a stale page snapshot', async () =
   await runtime.open('https://example.com/current');
   await assert.rejects(runtime.reload(), /navigation completed without a fresh page snapshot/);
   await assert.rejects(runtime.snapshot(), /action completed without a fresh page snapshot/);
-  await assert.rejects(runtime.fillCredentials(), /action completed without a fresh page snapshot/);
+});
+
+test('a successful fill completes without a snapshot even when further probes would fail', async () => {
+  const actions: string[] = [];
+  const runtime = new NativeBrowserRuntime({
+    appSessionId: 'app-session-one',
+    browserSessionId: 'browser-one',
+    viewport: { width: 900, height: 700, deviceScaleFactor: 2 },
+    request: async (request) => {
+      actions.push(request.action);
+      if (request.action === 'snapshot') throw new Error('Page probe unavailable.');
+      return {
+        requestId: request.requestId,
+        appSessionId: request.appSessionId,
+        browserSessionId: request.browserSessionId,
+        ok: true,
+        snapshot:
+          request.action === 'fillCredentials'
+            ? undefined
+            : { url: 'https://example.com/login', scroll: { x: 0, y: 0 }, refs: [] },
+      };
+    },
+  });
+
+  await runtime.open('https://example.com/login');
+  const snapshot = await runtime.fillCredentials();
+
+  assert.equal(snapshot, undefined);
+  assert.deepEqual(actions, ['open', 'fillCredentials']);
 });
 
 test('history navigation never reuses a stale page snapshot', async () => {

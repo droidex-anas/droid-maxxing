@@ -30,6 +30,15 @@ test('safeBrowserUrl drops Chromium internal error pages', () => {
   );
 });
 
+test('safeBrowserUrl drops non-web URLs received from browser state', () => {
+  assert.equal(safeBrowserUrl('about:blank', 'http://127.0.0.1:1427'), DEFAULT_BROWSER_URL);
+  assert.equal(
+    safeBrowserUrl('file:///tmp/private.txt', 'http://127.0.0.1:1427'),
+    DEFAULT_BROWSER_URL,
+  );
+  assert.equal(safeBrowserUrl('javascript:alert(1)', 'http://127.0.0.1:1427'), DEFAULT_BROWSER_URL);
+});
+
 test('browserAddressValue hides internal blank and error pages', () => {
   assert.equal(browserAddressValue(DEFAULT_BROWSER_URL), '');
   assert.equal(browserAddressValue('chrome-error://chromewebdata/'), '');

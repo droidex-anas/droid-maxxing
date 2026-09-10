@@ -2,8 +2,6 @@ import type {
   NativeBrowserAgentAction,
   NativeBrowserAgentResult,
   NativeBrowserBounds,
-  NativeBrowserBox,
-  NativeBrowserCaptureOptions,
   NativeBrowserDesignPrompt,
   NativeBrowserLoadFailed,
   NativeBrowserLoaded,
@@ -46,6 +44,16 @@ import type {
   PullRequestViewResult,
   PushOptions,
 } from '../types/vcs';
+import type {
+  BrowserCookieImportResult,
+  BrowserCookieProfileDiscovery,
+  BrowserCookieProfileImportPrepareResult,
+  BrowserCookieProfileImportResult,
+  BrowserSettingsPatch,
+  BrowserSettingsSnapshot,
+  BrowserSiteGrantKind,
+} from './browserSettings';
+import type { BrowserPermissionPrompt } from './browserPrompt';
 
 interface BridgeInfo {
   port: number;
@@ -291,12 +299,23 @@ interface DroidControlApi {
   filesPreview: (accessToken: string, relative: string) => Promise<FilePreviewPayload>;
   filesOpen: (accessToken: string, relative: string) => Promise<void>;
   filesReveal: (accessToken: string, relative: string) => Promise<void>;
-  nativeBrowserOpen: (
-    browserSessionId: string,
-    url: string,
-    bounds?: NativeBrowserBounds,
-    viewport?: { width: number; height: number; deviceScaleFactor: number },
-  ) => Promise<void>;
+  browserSettingsGet: () => Promise<BrowserSettingsSnapshot>;
+  browserSettingsUpdate: (patch: BrowserSettingsPatch) => Promise<BrowserSettingsSnapshot>;
+  browserCookiesImport: () => Promise<BrowserCookieImportResult>;
+  browserCookieProfilesDiscover: () => Promise<BrowserCookieProfileDiscovery>;
+  browserCookieProfileImportPrepare: (
+    profileId: string,
+  ) => Promise<BrowserCookieProfileImportPrepareResult>;
+  browserCookieProfileImportCommit: (planId: string) => Promise<BrowserCookieProfileImportResult>;
+  browserCookieProfileImportDiscard: (planId: string) => Promise<boolean>;
+  browserDataClear: () => Promise<BrowserSettingsSnapshot>;
+  browserCredentialDelete: (origin: string) => Promise<BrowserSettingsSnapshot>;
+  browserSiteGrantRevoke: (
+    kind: BrowserSiteGrantKind,
+    origin: string,
+  ) => Promise<BrowserSettingsSnapshot>;
+  browserDownloadDirectoryChoose: () => Promise<BrowserSettingsSnapshot | null>;
+  browserPermissionPromptResolve: (requestId: string, response: number) => Promise<boolean>;
   nativeBrowserAttach: (
     browserSessionId: string,
     bounds: NativeBrowserBounds,
@@ -304,9 +323,11 @@ interface DroidControlApi {
   ) => Promise<void>;
   nativeBrowserDetach: (browserSessionId?: string) => Promise<void>;
   nativeBrowserSetBounds: (browserSessionId: string, bounds: NativeBrowserBounds) => Promise<void>;
-  nativeBrowserSetVisible: (browserSessionId: string, visible: boolean) => Promise<void>;
-  nativeBrowserClose: (browserSessionId: string) => Promise<void>;
-  nativeBrowserReload: (browserSessionId: string) => Promise<void>;
+  nativeBrowserSetVisible: (
+    browserSessionId: string,
+    visible: boolean,
+    agentCursorActive: boolean,
+  ) => Promise<void>;
   nativeBrowserGoBack: (browserSessionId: string) => Promise<boolean>;
   nativeBrowserGoForward: (browserSessionId: string) => Promise<boolean>;
   nativeBrowserSetDesignMode: (browserSessionId: string, active: boolean) => Promise<void>;
@@ -314,16 +335,13 @@ interface DroidControlApi {
   nativeBrowserAgentAction: (
     request: NativeBrowserAgentAction,
   ) => Promise<NativeBrowserAgentResult | undefined>;
-  nativeBrowserCapture: (
-    browserSessionId: string,
-    box?: NativeBrowserBox,
-    options?: NativeBrowserCaptureOptions,
-  ) => Promise<string | undefined>;
+  nativeBrowserAgentActionCancel: (browserSessionId: string, requestId: string) => Promise<boolean>;
   onNativeBrowserSelection: (handler: (selection: NativeBrowserSelection) => void) => () => void;
   onNativeBrowserDesignPrompt: (handler: (prompt: NativeBrowserDesignPrompt) => void) => () => void;
   onNativeBrowserLoaded: (handler: (event: NativeBrowserLoaded) => void) => () => void;
   onNativeBrowserLoadFailed: (handler: (event: NativeBrowserLoadFailed) => void) => () => void;
-  onNativeBrowserAgentResult: (handler: (result: NativeBrowserAgentResult) => void) => () => void;
+  onBrowserPermissionPrompt: (handler: (prompt: BrowserPermissionPrompt) => void) => () => void;
+  onBrowserPermissionPromptDismiss: (handler: (requestId: string) => void) => () => void;
 }
 
 declare global {
@@ -393,6 +411,39 @@ export function onDesktopMemoryPressure(handler: (payload: { at: number }) => vo
   const api = desktopApi();
   if (!api) return () => undefined;
   return api.onMemoryPressure(handler);
+}
+
+export interface BrowserCookieImportFailure {
+  code: string;
+  message: string;
+  receiptPersistenceFailed: boolean;
+  snapshotFailed: boolean;
+  storageFlushFailed: boolean;
+}
+
+// Main tags cookie-import rejections with this envelope because Electron drops
+// error properties across `invoke`; the message is all that survives.
+const COOKIE_IMPORT_FAILURE_TAG = 'browser-cookie-import-failure:';
+
+export function browserCookieImportFailure(error: unknown): BrowserCookieImportFailure | null {
+  if (!(error instanceof Error)) return null;
+  const tagAt = error.message.indexOf(COOKIE_IMPORT_FAILURE_TAG);
+  if (tagAt < 0) return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(error.message.slice(tagAt + COOKIE_IMPORT_FAILURE_TAG.length));
+  } catch {
+    return null;
+  }
+  const failure = payload as Partial<BrowserCookieImportFailure> | null;
+  if (!failure || typeof failure.code !== 'string') return null;
+  return {
+    code: failure.code,
+    message: typeof failure.message === 'string' ? failure.message : '',
+    receiptPersistenceFailed: failure.receiptPersistenceFailed === true,
+    snapshotFailed: failure.snapshotFailed === true,
+    storageFlushFailed: failure.storageFlushFailed === true,
+  };
 }
 
 function requireDesktopApi(message: string): DroidControlApi {

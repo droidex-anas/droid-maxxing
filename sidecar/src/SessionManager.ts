@@ -201,7 +201,6 @@ function runtimeLimits(dependencies: SessionManagerDependencies | undefined) {
     sessionRuntimeIdleMs: dependencies?.sessionRuntimeIdleMs ?? SESSION_RUNTIME_IDLE_RETIREMENT_MS,
   };
 }
-
 const ignoreError = (): undefined => undefined;
 
 const nextChildSessionId = () => `child-${randomUUID()}`;
@@ -548,6 +547,7 @@ export class SessionManager {
       emit: (event) => {
         this.emit(event);
       },
+      getAutonomy: (appSessionId) => this.registry.getLive(appSessionId)?.summary.autonomy,
       sendPrompt: (appSessionId, prompt) => this.lifecycle.send(appSessionId, prompt),
     });
   }
@@ -613,7 +613,14 @@ export class SessionManager {
 
   // eslint-disable-next-line complexity -- Public command dispatch is intentionally unchanged in PR 3.
   async handle(cmd: ClientCommand): Promise<void> {
-    if (this.shutdownPromise) throw new Error('Session manager is shutting down.');
+    if (this.shutdownPromise && cmd.type !== 'browser.native.result')
+      throw new Error('Session manager is shutting down.');
+    const browserCommand = this.sessionBrowser.handle(cmd);
+    if (browserCommand !== false) {
+      await browserCommand;
+      if (cmd.type === 'browser.close') this.runtimeRetirement.arm();
+      return;
+    }
     switch (cmd.type) {
       case 'connect':
         this.connect(cmd.apiKey);
@@ -790,50 +797,6 @@ export class SessionManager {
         return;
       case 'settings.compaction.update':
         await this.compaction.updateLimits(cmd, this.compactionRetuneTargets());
-        return;
-      case 'browser.open':
-        await this.sessionBrowser.open(cmd);
-        return;
-      case 'browser.close':
-        await this.sessionBrowser.close(cmd);
-        // Closing the last resource a session was holding can make it retirable.
-        this.runtimeRetirement.arm();
-        return;
-      case 'browser.reload':
-        await this.sessionBrowser.reload(cmd);
-        return;
-      case 'browser.refresh':
-        await this.sessionBrowser.refresh(cmd);
-        return;
-      case 'browser.resizeViewport':
-        await this.sessionBrowser.resizeViewport(cmd);
-        return;
-      case 'browser.click':
-        await this.sessionBrowser.click(cmd);
-        return;
-      case 'browser.type':
-        await this.sessionBrowser.type(cmd);
-        return;
-      case 'browser.keypress':
-        await this.sessionBrowser.keypress(cmd);
-        return;
-      case 'browser.scroll':
-        await this.sessionBrowser.scroll(cmd);
-        return;
-      case 'browser.screenshot':
-        await this.sessionBrowser.screenshot(cmd);
-        return;
-      case 'browser.inspectPoint':
-        await this.sessionBrowser.inspectPoint(cmd);
-        return;
-      case 'browser.design.addReference':
-        await this.sessionBrowser.addReference(cmd);
-        return;
-      case 'browser.design.sendPrompt':
-        await this.sessionBrowser.sendDesignPrompt(cmd);
-        return;
-      case 'browser.native.result':
-        this.sessionBrowser.resolveNativeBrowserRequest(cmd.result);
         return;
       default: {
         // Wire commands are JSON-parsed without runtime validation, so a
@@ -1747,6 +1710,9 @@ export class SessionManager {
       this.compaction.clearAll();
     });
     await run(() => this.browsers.closeAll());
+    await run(() => {
+      this.sessionBrowser.shutdown();
+    });
     await run(() => {
       this.timeline.flushStreaming();
     });

@@ -48,6 +48,15 @@ export class FakeBrowserSessionManager implements SessionBrowserDependencies {
     return Promise.resolve(state);
   }
 
+  restore(input: Parameters<SessionBrowserDependencies['restore']>[0]): BrowserState {
+    const existing = this.states.get(input.appSessionId);
+    const state = existing ?? { ...input, refs: [] };
+    this.states.set(input.appSessionId, state);
+    this.recordCall('browser', 'restore', [input]);
+    this.emit?.({ type: 'browser.updated', state });
+    return state;
+  }
+
   hasSession(appSessionId: string): boolean {
     return this.states.has(appSessionId);
   }
@@ -166,6 +175,7 @@ interface NativeBrowserTimeout {
   timer?: ReturnType<typeof setTimeout>;
   callback: TimerCallback;
   args: unknown[];
+  delay?: number;
   active: boolean;
 }
 
@@ -178,7 +188,7 @@ export function observeNativeBrowserTimeouts() {
     globalThis,
     'setTimeout',
     (callback: TimerCallback, delay?: number, ...args: unknown[]) => {
-      const record: NativeBrowserTimeout = { callback, args, active: true };
+      const record: NativeBrowserTimeout = { callback, args, delay, active: true };
       const timer = setTimeout(() => {
         record.active = false;
         callback(...args);
@@ -195,6 +205,11 @@ export function observeNativeBrowserTimeouts() {
   });
 
   return {
+    currentDelay: () => {
+      const record = timeouts.findLast((candidate) => candidate.active);
+      if (!record) throw new Error('Missing native browser timeout.');
+      return record.delay;
+    },
     fireCurrent: () => {
       const record = timeouts.findLast((candidate) => candidate.active);
       if (!record) throw new Error('Missing native browser timeout.');

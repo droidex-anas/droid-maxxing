@@ -62,7 +62,7 @@ export function listItemIndent(text: string): number | null {
   return match ? match[1].length : null;
 }
 
-export function leadingIndent(text: string): number {
+function leadingIndent(text: string): number {
   const match = /^[ \t]*/.exec(text);
   return match ? match[0].length : 0;
 }

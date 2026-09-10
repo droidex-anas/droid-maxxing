@@ -31,7 +31,7 @@ Record these values with each release candidate:
 | `DROIDEX_RELEASE_BUILD` | Enables the fail-closed signed/notarized release configuration |
 | `CSC_LINK` | Developer ID Application certificate supplied through CI secrets |
 | `APPLE_API_KEY_P8_BASE64` | Base64-encoded App Store Connect key materialized as a temporary `.p8` file in CI |
-| `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` / `APPLE_TEAM_ID` | Apple identities used for notarization and signature verification |
+| `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` / `APPLE_TEAM_ID` | Apple identities used for notarization, signature verification, and the Team-scoped Touch ID passkey keychain entitlement |
 | `SENTRY_DSN` | Public client DSN embedded for crash and `/bug` reporting |
 | `SPARKLE_PRIVATE_KEY` | EdDSA private key used only in protected release automation to sign unsigned-app update feeds and ZIPs |
 | `DROIDEX_RELEASE_TOKEN` | Fine-grained token with Contents write and Administration read access only to the public releases repository |
@@ -151,13 +151,16 @@ notarization, and stapling checks.
 
 The direct-download app is not App Sandbox–restricted. It asks macOS for access
 to Desktop, Documents, or Downloads only when the user selects a protected
-project location. Camera, microphone, Accessibility, Screen Recording, and
-Apple Events permissions are not requested because current DROIDEX features do
-not use those system capabilities.
+project location. Built-in browser camera and microphone requests are covered by
+[browser authentication and permission checks](runbooks.md#browser-authentication-and-permission-checks).
+Accessibility,
+Screen Recording, and Apple Events permissions are not requested because current
+DROIDEX features do not use those system capabilities.
 
 The sidecar uses Electron's bundled Node 22 runtime and its built-in
 `node:sqlite`; users do not install or download SQLite. The canonical session
-index is `~/.factory/droidex/session-index.sqlite`. It is DROIDEX-owned derived
+index is `~/.factory/droidex/session-index.sqlite` (or `<profile>/history` for an
+instance launched with `DROIDEX_USER_DATA_DIR`). It is DROIDEX-owned derived
 state built from raw Factory session history under `~/.factory/sessions`.
 
 ## Crash and bug intake

@@ -22,13 +22,12 @@ function createNativeBrowserBudget(options = {}) {
       viewport: extras.viewport ||
         entry.viewport || { width: 1200, height: 800, deviceScaleFactor: 2 },
       state: extras.state || entry.state || { designMode: false, pencilMode: false },
-      screenshot: extras.screenshot || entry.serialized?.screenshot || null,
       evictedAt: now(),
     };
   }
 
   function liveViewEntries(entries) {
-    return entries.filter((entry) => entry.hasView && !entry.attached);
+    return entries.filter((entry) => entry.hasView && !entry.attached && !entry.active);
   }
 
   function warmHiddenId(entries) {
@@ -52,13 +51,6 @@ function createNativeBrowserBudget(options = {}) {
     return hiddenLive
       .filter((entry) => entry.browserSessionId !== warmId)
       .map((entry) => entry.browserSessionId);
-  }
-
-  function shouldIdleEvict(entry) {
-    if (!entry || entry.attached || !entry.hasView) return false;
-    if (idleMs <= 0) return false;
-    const age = now() - (entry.lastUsedAt ?? 0);
-    return age >= idleMs;
   }
 
   function counts(entries) {
@@ -101,7 +93,6 @@ function createNativeBrowserBudget(options = {}) {
     idleMs,
     snapshotFrom,
     idsToEvict,
-    shouldIdleEvict,
     warmHiddenId,
     counts,
     isEvictionClose,
@@ -111,6 +102,7 @@ function createNativeBrowserBudget(options = {}) {
 async function restoreSerialized(entry, hooks) {
   const snapshot = entry.serialized;
   if (!snapshot) return true;
+  if (!hooks.isCurrent()) return false;
   if (snapshot.viewport) entry.viewport = snapshot.viewport;
   if (snapshot.state) entry.state = snapshot.state;
   const url = snapshot.url || entry.targetUrl;
@@ -120,12 +112,14 @@ async function restoreSerialized(entry, hooks) {
   }
   entry.targetUrl = url;
   const loaded = await hooks.loadUrl(entry, url);
+  if (!hooks.isCurrent()) return false;
   if (loaded?.ok !== true) {
     hooks.reportFailure(entry, url, loaded?.error);
     await hooks.releaseFailedView(entry);
     return false;
   }
   if (snapshot.scroll) await hooks.restoreScroll(entry, snapshot.scroll);
+  if (!hooks.isCurrent()) return false;
   entry.serialized = null;
   return true;
 }

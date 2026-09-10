@@ -161,6 +161,35 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     'ops data',
   ]),
 
+  // ── Browser ──────────────────────────────────────────────────────────────
+  e('Browser', 'Agent browser access', ['built-in browser', 'web agent', 'browser control']),
+  e('Browser', 'Import browser sign-ins', [
+    'cookies',
+    'chrome',
+    'safari',
+    'safari cookies',
+    'import cookies',
+    'browser profile',
+  ]),
+  e('Browser', 'Browsing data', ['clear cache', 'clear cookies', 'site storage']),
+  e('Browser', 'Saved logins', ['password', 'keychain', 'touch id', 'credentials']),
+  e('Browser', 'Agent login fill', ['autofill', 'login approval', 'approved sites']),
+  e('Browser', 'Home and search page', ['google', 'homepage', 'default url', 'search engine']),
+  e('Browser', 'Website opening approval', [
+    'always ask',
+    'new sites',
+    'website permission',
+    'exact origin',
+    'autonomy',
+    'full site access',
+  ]),
+  e('Browser', 'DROIDEX agent cursor', ['agent pointer', 'click indicator', 'browser cursor']),
+  e('Browser', 'Camera and microphone', ['site permissions', 'media permission']),
+  e('Browser', 'Downloads', ['download folder', 'save location', 'ask where to save']),
+  e('Browser', 'Exact-site grants', ['allowlist', 'approved origins', 'revoke access']),
+  e('Browser', 'Authentication', ['signup', 'sign in', 'oauth', 'passkey', 'webauthn']),
+  e('Browser', 'Agent diagnostics', ['inspect', 'network', 'console', 'developer controls']),
+
   // ── Placeholder tabs (name + common aliases until those screens ship) ────
   e('Profile', 'Profile', ['account', 'user', 'avatar', 'identity']),
   e('Personalization', 'Personalization', [
@@ -180,7 +209,6 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   e('Usage & billing', 'Usage & billing', ['billing', 'usage', 'quota', 'invoice', 'plan', 'cost']),
   e('Snapshots', 'Snapshots', ['snapshot', 'checkpoint', 'restore']),
   e('MCP servers', 'MCP servers', ['mcp', 'tools server', 'model context protocol']),
-  e('Browser', 'Browser', ['native browser', 'web browser', 'browser pane']),
   e('Hooks', 'Hooks', ['lifecycle hooks', 'script hooks']),
   e('Connections', 'Connections', ['integrations', 'connected apps']),
   e('Git', 'Git', ['github', 'vcs', 'version control', 'commit', 'branch']),

@@ -328,7 +328,7 @@ export function snapshotIframe(
 
 export async function clickIframe(iframe: HTMLIFrameElement, x: number, y: number): Promise<void> {
   const doc = iframe.contentDocument;
-  if (!doc) throw new Error('Droid Control browser page is not inspectable yet.');
+  if (!doc) throw new Error('DROIDEX Browser page is not inspectable yet.');
   const target = doc.elementFromPoint(x, y);
   if (!target) throw new Error(`No browser element at ${Math.round(x)},${Math.round(y)}.`);
   const eventOptions = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 };
@@ -346,7 +346,7 @@ export async function hoverIframe(
 ): Promise<void> {
   const doc = iframe.contentDocument;
   const win = iframe.contentWindow;
-  if (!doc || !win) throw new Error('Droid Control browser page is not inspectable yet.');
+  if (!doc || !win) throw new Error('DROIDEX Browser page is not inspectable yet.');
   let target: Element | null = null;
   if (selector) {
     try {
@@ -372,7 +372,7 @@ export async function selectOptionIframe(
 ): Promise<void> {
   const doc = iframe.contentDocument;
   const win = iframe.contentWindow;
-  if (!doc || !win) throw new Error('Droid Control browser page is not inspectable yet.');
+  if (!doc || !win) throw new Error('DROIDEX Browser page is not inspectable yet.');
 
   let target: Element | null;
   try {
@@ -400,7 +400,7 @@ export async function selectOptionIframe(
 export async function typeIntoIframe(iframe: HTMLIFrameElement, text: string): Promise<void> {
   const doc = iframe.contentDocument;
   const win = iframe.contentWindow;
-  if (!doc || !win) throw new Error('Droid Control browser page is not inspectable yet.');
+  if (!doc || !win) throw new Error('DROIDEX Browser page is not inspectable yet.');
   const el = doc.activeElement;
   if (!el) throw new Error('No focused browser element for typing.');
   const value = String(text);
@@ -427,7 +427,7 @@ export async function typeIntoIframe(iframe: HTMLIFrameElement, text: string): P
 
 export async function keypressIframe(iframe: HTMLIFrameElement, key: string): Promise<void> {
   const doc = iframe.contentDocument;
-  if (!doc) throw new Error('Droid Control browser page is not inspectable yet.');
+  if (!doc) throw new Error('DROIDEX Browser page is not inspectable yet.');
   const el = doc.activeElement || doc.body;
   const value = String(key);
   el.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
@@ -443,7 +443,7 @@ export async function scrollIframe(
   pixels = 500,
 ): Promise<void> {
   const win = iframe.contentWindow;
-  if (!win) throw new Error('Droid Control browser page is not loaded yet.');
+  if (!win) throw new Error('DROIDEX Browser page is not loaded yet.');
   const amount = Math.max(1, Math.round(pixels));
   const left = direction === 'left' ? -amount : direction === 'right' ? amount : 0;
   const top = direction === 'up' ? -amount : direction === 'down' ? amount : 0;
