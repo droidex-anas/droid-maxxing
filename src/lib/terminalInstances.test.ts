@@ -56,6 +56,14 @@ function fakeDom() {
   return doc;
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function deps(overrides: Partial<TerminalInstanceDeps> = {}) {
   const terminal = new FakeTerminal();
   const events: Array<(event: unknown) => void> = [];
@@ -175,4 +183,116 @@ test('restart replaces an exited PTY', async () => {
   assert.equal(inst.getState().status, 'running');
   assert.deepEqual(d.killed, ['pty-1']);
   await releaseTerminalInstance('tab-d');
+});
+
+test('release during the initial connect kills the PTY once and leaves no subscription', async () => {
+  fakeDom();
+  const deferred = createDeferred<{
+    id: string;
+    appSessionId: string;
+    cwd: string;
+    shell: string;
+    cols: number;
+    rows: number;
+  }>();
+  let subscribeCount = 0;
+  let channelCloseCount = 0;
+  const d = deps({
+    ensureTerminal: () => deferred.promise,
+    subscribe: () => {
+      subscribeCount += 1;
+      return {
+        onEvent: () => () => {},
+        postInput() {},
+        close() {
+          channelCloseCount += 1;
+        },
+      };
+    },
+  });
+  acquireTerminalInstance('tab-race-release', { appSessionId: 's1', cwd: '/w' }, d.base);
+  await new Promise((r) => setTimeout(r, 0));
+  const releasePromise = releaseTerminalInstance('tab-race-release');
+  deferred.resolve({
+    id: 'pty-1',
+    appSessionId: 's1',
+    cwd: '/w',
+    shell: '/bin/zsh',
+    cols: 80,
+    rows: 24,
+  });
+  await releasePromise;
+  assert.deepEqual(d.killed, ['pty-1']);
+  assert.equal(subscribeCount - channelCloseCount, 0);
+  assert.equal(peekTerminalInstance('tab-race-release'), undefined);
+});
+
+test('restart during the initial connect ends with exactly one live subscription', async () => {
+  fakeDom();
+  const deferred = createDeferred<{
+    id: string;
+    appSessionId: string;
+    cwd: string;
+    shell: string;
+    cols: number;
+    rows: number;
+  }>();
+  let ensureCalls = 0;
+  let subscribeCount = 0;
+  let channelCloseCount = 0;
+  let latestHandler: ((event: unknown) => void) | null = null;
+  const d = deps({
+    ensureTerminal: (_tabId, existingId) => {
+      ensureCalls += 1;
+      if (ensureCalls === 1) return deferred.promise;
+      return Promise.resolve({
+        id: existingId ?? 'pty-2',
+        appSessionId: 's1',
+        cwd: '/w',
+        shell: '/bin/zsh',
+        cols: 80,
+        rows: 24,
+      });
+    },
+    subscribe: () => {
+      subscribeCount += 1;
+      return {
+        onEvent: (handler) => {
+          latestHandler = handler;
+          return () => {};
+        },
+        postInput() {},
+        close() {
+          channelCloseCount += 1;
+        },
+      };
+    },
+  });
+  const inst = acquireTerminalInstance(
+    'tab-race-restart',
+    { appSessionId: 's1', cwd: '/w' },
+    d.base,
+  );
+  await new Promise((r) => setTimeout(r, 0));
+  const restartPromise = inst.restart();
+  deferred.resolve({
+    id: 'pty-1',
+    appSessionId: 's1',
+    cwd: '/w',
+    shell: '/bin/zsh',
+    cols: 80,
+    rows: 24,
+  });
+  await restartPromise;
+  assert.equal(subscribeCount - channelCloseCount, 1);
+  assert.equal(inst.getState().status, 'running');
+  const host = {
+    appendChild: (el: { isConnected: boolean }) => {
+      el.isConnected = true;
+    },
+  };
+  inst.attach(host as unknown as HTMLElement);
+  latestHandler?.({ kind: 'data', data: 'hi' });
+  assert.equal(d.terminal.writes.length, 1);
+  await releaseTerminalInstance('tab-race-restart');
 });

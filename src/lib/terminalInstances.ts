@@ -140,6 +140,8 @@ function createInstance(
   let disposed = false;
   let lastSize = { cols: 0, rows: 0 };
   let frame = 0;
+  let connectGeneration = 0;
+  let connectInFlight: Promise<void> = Promise.resolve();
 
   const setState = (patch: Partial<TerminalInstanceState>) => {
     state = { ...state, ...patch };
@@ -179,48 +181,59 @@ function createInstance(
     if (!frame) frame = deps.scheduleFrame(applyFit);
   };
 
-  const connect = async (existingId: string | undefined) => {
-    if (!terminal) return;
-    const info: TerminalSessionInfo = await deps.ensureTerminal(tabId, existingId, {
-      appSessionId: options.appSessionId,
-      cwd: options.cwd,
-      cols: terminal.cols,
-      rows: terminal.rows,
-    });
-    if (disposed) {
-      if (info.id !== existingId) await deps.closeTerminal(tabId, info.id);
-      return;
-    }
-    lastSize = { cols: 0, rows: 0 };
-    setState({
-      terminalId: info.id,
-      shellName: info.shell.split(/[\\/]/).pop() ?? 'Terminal',
-      status: 'running',
-      error: '',
-      truncated: false,
-    });
-    channel = deps.subscribe(info.id);
-    if (!channel) {
-      setState({ status: 'error', error: 'Terminal is only available in the desktop app.' });
-      return;
-    }
-    unlisten = channel.onEvent((event) => {
-      if (event.kind === 'data' || event.kind === 'replay') {
-        if (event.truncated) setState({ truncated: true });
-        pump.push(event.data);
-        return;
-      }
-      if (event.kind === 'error') {
-        setState({ status: 'error', error: event.message });
-        return;
-      }
-      const failed = event.exitCode !== 0;
-      setState({
-        status: failed ? 'error' : 'exited',
-        error: failed ? `Shell exited with code ${String(event.exitCode ?? 'unknown')}.` : '',
+  // Serializes connect() against restart()/dispose(): each connect captures a
+  // generation and bails out after its one await if superseded or disposed,
+  // closing the PTY it created (if any) since nobody else owns it yet.
+  // restart()/dispose() always await connectInFlight before acting, so at
+  // most one connect() is ever in flight at a time.
+  const connect = (existingId: string | undefined): Promise<void> => {
+    const generation = ++connectGeneration;
+    const run = async () => {
+      if (!terminal) return;
+      const info: TerminalSessionInfo = await deps.ensureTerminal(tabId, existingId, {
+        appSessionId: options.appSessionId,
+        cwd: options.cwd,
+        cols: terminal.cols,
+        rows: terminal.rows,
       });
-    });
-    scheduleFit();
+      if (disposed || generation !== connectGeneration) {
+        if (info.id !== existingId) await deps.closeTerminal(tabId, info.id);
+        return;
+      }
+      lastSize = { cols: 0, rows: 0 };
+      setState({
+        terminalId: info.id,
+        shellName: info.shell.split(/[\\/]/).pop() ?? 'Terminal',
+        status: 'running',
+        error: '',
+        truncated: false,
+      });
+      channel = deps.subscribe(info.id);
+      if (!channel) {
+        setState({ status: 'error', error: 'Terminal is only available in the desktop app.' });
+        return;
+      }
+      unlisten = channel.onEvent((event) => {
+        if (event.kind === 'data' || event.kind === 'replay') {
+          if (event.truncated) setState({ truncated: true });
+          pump.push(event.data);
+          return;
+        }
+        if (event.kind === 'error') {
+          setState({ status: 'error', error: event.message });
+          return;
+        }
+        const failed = event.exitCode !== 0;
+        setState({
+          status: failed ? 'error' : 'exited',
+          error: failed ? `Shell exited with code ${String(event.exitCode ?? 'unknown')}.` : '',
+        });
+      });
+      scheduleFit();
+    };
+    const promise = run();
+    connectInFlight = promise;
+    return promise;
   };
 
   const disconnect = async () => {
@@ -276,6 +289,7 @@ function createInstance(
     },
     fit: scheduleFit,
     async restart() {
+      await connectInFlight;
       const previous = state.terminalId;
       await disconnect();
       if (previous) await deps.closeTerminal(tabId, previous);
@@ -291,6 +305,10 @@ function createInstance(
     },
     async dispose() {
       disposed = true;
+      // Wait for any in-flight connect to notice `disposed` and close the
+      // PTY it created, if any — it's the sole owner of that id. Only close
+      // here when a connect already finished and installed a terminalId.
+      await connectInFlight;
       if (frame) deps.cancelFrame(frame);
       globalThis.document.removeEventListener('visibilitychange', onVisibility);
       pump.dispose();
@@ -301,7 +319,6 @@ function createInstance(
       fitAddon = null;
       element.remove();
       if (id) await deps.closeTerminal(tabId, id);
-      else await deps.closeTerminal(tabId);
     },
   };
 }
