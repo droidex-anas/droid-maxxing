@@ -91,10 +91,11 @@ test('toggleHeading leaves a hashtag word alone', () => {
   assert.equal(edit.text, '# #release notes');
 });
 
-test('toggleLinePrefix starts a list on a blank draft', () => {
-  assert.equal(toggleLinePrefix('', 0, 0, '- ').text, '');
-  assert.equal(toggleLinePrefix('\n', 0, 1, '- ').text, '\n');
+test('toggleLinePrefix starts a list on a blank draft and skips blanks elsewhere', () => {
+  assert.equal(toggleLinePrefix('', 0, 0, '- ').text, '- ');
+  assert.equal(toggleLinePrefix('', 0, 0, '1. ', true).text, '1. ');
   assert.equal(toggleLinePrefix('a\n\nb', 0, 4, '- ').text, '- a\n\n- b');
+  assert.equal(toggleLinePrefix('- ', 0, 2, '- ').text, '');
 });
 
 test('insertBlock separates the snippet from surrounding prose', () => {

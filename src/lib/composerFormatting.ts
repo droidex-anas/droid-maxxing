@@ -68,11 +68,13 @@ export function toggleLinePrefix(
   const lines = text.slice(bounds.start, bounds.end).split('\n');
   const strip = numbered ? /^\d+\.\s/ : new RegExp(`^${escapeRegExp(prefix)}`);
   const hasPrefix = (line: string) => strip.test(line);
-  // A run of blank lines has nothing to remove, so the action starts a list.
-  const removing =
-    lines.some((line) => line !== '') && lines.every((line) => hasPrefix(line) || line === '');
+  // Blank lines inside a selection are left alone, but a selection that is
+  // nothing but blank lines (an empty draft) gets the prefix so the action
+  // starts the list or quote the writer asked for.
+  const allBlank = lines.every((line) => line === '');
+  const removing = !allBlank && lines.every((line) => hasPrefix(line) || line === '');
   const nextLines = lines.map((line, index) => {
-    if (line === '') return line;
+    if (line === '' && !allBlank) return line;
     if (removing) return line.replace(strip, '');
     if (hasPrefix(line)) return line;
     return numbered ? `${String(index + 1)}. ${line}` : `${prefix}${line}`;

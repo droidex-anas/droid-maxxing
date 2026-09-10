@@ -77,7 +77,7 @@ const markdownDecorations = StateField.define<MarkdownDecorations>({
   ],
 });
 
-// The structural slice of a lezer SyntaxNode the tree walks here need.
+// The structural slice of a lezer SyntaxNode that the tree walks here need.
 interface LinkNode {
   name: string;
   from: number;

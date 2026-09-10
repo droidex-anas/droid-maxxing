@@ -141,7 +141,7 @@ export function shouldAnimateFeedRow(
 ): boolean {
   if (enteredKeys.has(item.key)) return false;
   if (animateKeys.has(item.key)) return true;
-  return (
-    item.type === 'message' && item.event?.author === 'user' && now - item.event.ts < JUST_SENT_MS
-  );
+  if (item.type !== 'message' || item.event?.author !== 'user') return false;
+  const age = now - item.event.ts;
+  return age >= 0 && age < JUST_SENT_MS;
 }

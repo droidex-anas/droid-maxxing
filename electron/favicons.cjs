@@ -72,17 +72,50 @@ function isPrivateAddress(address) {
       (a === 192 && b === 168)
     );
   }
-  const lower = address.toLowerCase();
-  // IPv4-mapped addresses arrive dotted (`::ffff:127.0.0.1`) or as two hex
-  // groups (`::ffff:7f00:1`); both name the same IPv4 target.
-  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(lower);
-  if (mapped) {
-    const high = Number.parseInt(mapped[1], 16);
-    const low = Number.parseInt(mapped[2], 16);
-    return isPrivateAddress(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  const mappedIPv4 = ipv4MappedIn(address.toLowerCase());
+  if (mappedIPv4) return isPrivateAddress(mappedIPv4);
+  const groups = expandIPv6(address.toLowerCase());
+  if (!groups) return true;
+  const lower = groups.join(':');
+  return (
+    lower === '0:0:0:0:0:0:0:0' ||
+    lower === '0:0:0:0:0:0:0:1' ||
+    /^f[cd]/.test(groups[0]) ||
+    /^fe[89ab]/.test(groups[0].padStart(4, '0'))
+  );
+}
+
+// The eight hex groups of an IPv6 address with `::` expanded and any trailing
+// dotted IPv4 folded in, or null when it is not one. Unparseable input is
+// treated as private by the caller: better no icon than a guessed target.
+function expandIPv6(address) {
+  let text = address;
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted[1].split('.').map(Number);
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
   }
-  if (lower.startsWith('::ffff:')) return isPrivateAddress(lower.slice(7));
-  return lower === '::' || lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower);
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 2 ? missing < 1 : missing !== 0) return null;
+  const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+  if (!groups.every((group) => /^[0-9a-f]{1,4}$/.test(group))) return null;
+  return groups.map((group) => group.replace(/^0+(?=.)/, ''));
+}
+
+// The IPv4 address an IPv4-mapped IPv6 address names, whatever notation it
+// arrived in (`::ffff:127.0.0.1`, `::ffff:7f00:1`, `0:0:0:0:0:ffff:7f00:1`).
+function ipv4MappedIn(address) {
+  const groups = expandIPv6(address);
+  if (!groups || groups.slice(0, 5).some((group) => group !== '0') || groups[5] !== 'ffff') {
+    return null;
+  }
+  const high = Number.parseInt(groups[6], 16);
+  const low = Number.parseInt(groups[7], 16);
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
 }
 
 /** The host a `droidex-favicon://` URL asks about, or throws if it is not one we serve. */

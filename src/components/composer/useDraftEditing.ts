@@ -72,8 +72,8 @@ export function useDraftEditing({
       // A cut only removes text once the clipboard has it.
       navigator.clipboard.writeText(selected).then(
         () => {
-          if (action === 'cut')
-            replace(input.slice(0, start) + input.slice(end), { start, end: start });
+          if (action !== 'cut' || latestInput.current !== input) return;
+          replace(input.slice(0, start) + input.slice(end), { start, end: start });
         },
         (error: unknown) => {
           console.warn('Clipboard write failed', error);
