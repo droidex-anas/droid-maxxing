@@ -6,7 +6,7 @@ export const savedCredentialFields = new WeakSet();
 function sensitiveFieldKind(el) {
   for (let field = el; field; field = field.parentElement) {
     if (savedCredentialFields.has(field)) return 'saved login';
-    if (field.tagName !== 'INPUT' && field.tagName !== 'TEXTAREA' && !field.isContentEditable) {
+    if (field.localName !== 'input' && field.localName !== 'textarea' && !field.isContentEditable) {
       continue;
     }
     const type = (field.getAttribute('type') || '').toLowerCase();
@@ -28,7 +28,7 @@ export function isSensitiveField(el) {
 
 export function sensitiveFocusedField() {
   let active = document.activeElement;
-  while (active?.tagName === 'IFRAME' || active?.tagName === 'FRAME') {
+  while (active?.localName === 'iframe' || active?.localName === 'frame') {
     // Native key events reach child frames even when their DOM is inaccessible.
     const frameDocument = active.contentDocument;
     if (!frameDocument?.activeElement) return { kind: 'protected frame' };

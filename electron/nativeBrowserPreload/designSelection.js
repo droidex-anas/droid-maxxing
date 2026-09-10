@@ -62,6 +62,7 @@ function sketchSelection() {
 function textSelection() {
   if (!state.textRange || state.textRange.collapsed) return null;
   for (const field of document.querySelectorAll(editableFieldSelector)) {
+    if (!field.matches('input,textarea') && !field.isContentEditable) continue;
     if (state.textRange.intersectsNode(field)) return null;
   }
   const text = cleanText(state.textRange.toString(), 400);

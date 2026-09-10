@@ -127,13 +127,13 @@ test('editable text stays out of snapshots and details, and sensitive fields sta
   await expect(page.locator('#passcode span')).toHaveAttribute('style', before ?? '');
 });
 
-test('design text selection omits ordinary editor text but still selects public copy', async ({
+test('design text selection omits editor text but accepts noneditable public copy', async ({
   page,
 }) => {
   await page.locator('body').evaluate((body) => {
     body.innerHTML = `
       <div contenteditable><span id="notes">Private editor text</span></div>
-      <p><span id="public">Public page copy</span></p>
+      <p contenteditable="false"><span id="public">Public page copy</span></p>
     `;
   });
   await page.evaluate(() => window.__DROIDMAXX_APPLY_DESIGN_STATE({ designMode: true }));
@@ -149,6 +149,55 @@ test('design text selection omits ordinary editor text but still selects public 
     const selections = await page.evaluate(() => Reflect.get(window, 'preloadSelections'));
     if (id === 'notes') expect(selections).toEqual([]);
     else expect(selections).toMatchObject([{ anchor: { kind: 'text', text: 'Public page copy' } }]);
+  }
+});
+
+test('agent keypresses are blocked through lowercase XHTML frames and fields', async ({ page }) => {
+  await page.route('https://preload.example/xhtml-frame', (route) =>
+    route.fulfill({
+      contentType: 'application/xhtml+xml',
+      body: `<html xmlns="http://www.w3.org/1999/xhtml"><body>
+        <iframe src="https://preload.example/xhtml-form"></iframe>
+      </body></html>`,
+    }),
+  );
+  await page.route('https://preload.example/xhtml-form', (route) =>
+    route.fulfill({
+      contentType: 'application/xhtml+xml',
+      body: `<html xmlns="http://www.w3.org/1999/xhtml"><body>
+        <input id="password" type="password" value="unchanged" />
+        <textarea id="code" autocomplete="one-time-code">unchanged</textarea>
+      </body></html>`,
+    }),
+  );
+  const formLoaded = page.waitForEvent('framenavigated', {
+    predicate: (frame) => frame.url() === 'https://preload.example/xhtml-form',
+  });
+  await page.locator('body').evaluate((body) => {
+    const frame = document.createElement('iframe');
+    frame.src = 'https://preload.example/xhtml-frame';
+    body.appendChild(frame);
+  });
+  const frame = await formLoaded;
+  for (const [id, kind] of [
+    ['password', 'password'],
+    ['code', 'one-time code'],
+  ]) {
+    const field = frame.locator(`#${id}`);
+    await field.focus();
+    const result = await page.evaluate(async () => {
+      await window.__DROIDMAXX_AGENT_ACTION({ action: 'snapshot' });
+      return window.__DROIDMAXX_AGENT_ACTION({
+        action: 'keypress',
+        key: 'x',
+        __droidexContext: window.__DROIDMAXX_AGENT_CONTEXT(),
+      });
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(`will not send agent-authored text into a ${kind}`);
+    expect(await field.evaluate((el: HTMLInputElement | HTMLTextAreaElement) => el.value)).toBe(
+      'unchanged',
+    );
   }
 });
 
