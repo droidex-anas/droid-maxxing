@@ -21,6 +21,7 @@ function createBrowserPermissionController(options) {
 
   const nextPromptId = options.nextPromptId ?? randomUUID;
   const states = new Map();
+  const pendingSiteWrites = new Set();
 
   function stateFor(contents) {
     let state = states.get(contents);
@@ -155,8 +156,14 @@ function createBrowserPermissionController(options) {
     if (!SITE_DECISIONS.has(decision)) {
       throw new Error('Browser site permission must be allow, ask, or deny.');
     }
+    const write = { origin, mediaTypes: normalizedTypes };
+    pendingSiteWrites.add(write);
     invalidateOrigin(origin, normalizedTypes);
-    await persistDecision(origin, normalizedTypes, decision);
+    try {
+      await persistDecision(origin, normalizedTypes, decision);
+    } finally {
+      pendingSiteWrites.delete(write);
+    }
   }
 
   function revokeForNavigation(contents) {
@@ -177,6 +184,10 @@ function createBrowserPermissionController(options) {
   }
 
   function siteDecision(origin, mediaType) {
+    // Block prompts before their replies can queue a write behind the user's setting.
+    for (const write of pendingSiteWrites) {
+      if (write.origin === origin && write.mediaTypes.includes(mediaType)) return 'deny';
+    }
     try {
       const decision = options.getSiteDecision(origin, mediaType);
       if (decision === undefined) return 'ask';

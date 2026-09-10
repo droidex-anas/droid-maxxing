@@ -181,7 +181,7 @@ export interface BrowserRuntime {
   inspect(selector: string, ref?: string): Promise<BrowserElementInspection>;
   network(clear?: boolean): Promise<BrowserNetworkEvent[]>;
   console(clear?: boolean): Promise<BrowserConsoleEvent[]>;
-  fillCredentials?(): Promise<BrowserSnapshot>;
+  fillCredentials?(): Promise<BrowserSnapshot | undefined>;
   close(): Promise<void>;
 }
 

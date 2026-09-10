@@ -555,6 +555,8 @@ test('OAuth authentication intent includes the exact authoritative anchor destin
     HTMLIFrameElement,
     HTMLAnchorElement,
     cleanText: (value) => String(value || '').trim(),
+    safeElementText: (element) => element.textContent || '',
+    isSensitiveField: () => false,
     location: { href: 'https://app.example/login', origin: 'https://app.example' },
   };
   const anchor = new realm.HTMLAnchorElement();
@@ -653,6 +655,8 @@ test('focusing a credential field is not treated as submitting a sign-in form', 
           .trim()
           .slice(0, limit),
       currentAgentSnapshotTarget: () => username,
+      editableFieldSelector: 'input,textarea,[contenteditable]',
+      safeElementText: (element) => element.textContent || '',
       document: { activeElement: otp, elementFromPoint: () => username },
       isSensitiveField: (field) =>
         field.type === 'password' || field.autocomplete === 'one-time-code',

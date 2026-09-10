@@ -2,7 +2,11 @@
 
 import { ipcRenderer } from 'electron';
 import { INTERNAL_ATTR, firstVisible, isVisible } from './dom.js';
-import { isSensitiveField, savedCredentialFields } from './elementInspection.js';
+import {
+  editableFieldSelector,
+  isSensitiveField,
+  savedCredentialFields,
+} from './sensitiveFields.js';
 
 export { onFormSubmit, fillCredentials, maskSensitiveFields };
 
@@ -103,14 +107,16 @@ function maskSensitiveFields(active) {
     return true;
   }
   if (maskedSensitiveFields.length > 0) return true;
-  for (const field of document.querySelectorAll('input, textarea')) {
-    if (!isSensitiveField(field)) continue;
+  const fields = new Set();
+  for (const field of document.querySelectorAll(editableFieldSelector)) {
+    if (isSensitiveField(field)) {
+      fields.add(field);
+      for (const child of field.querySelectorAll('*')) fields.add(child);
+    }
+  }
+  for (const field of fields) {
     maskedSensitiveFields.push({ field, style: field.getAttribute('style') });
-    field.style.setProperty('color', 'transparent', 'important');
-    field.style.setProperty('-webkit-text-fill-color', 'transparent', 'important');
-    field.style.setProperty('text-shadow', 'none', 'important');
-    field.style.setProperty('caret-color', 'transparent', 'important');
-    field.style.setProperty('background-image', 'none', 'important');
+    field.style.setProperty('visibility', 'hidden', 'important');
   }
   return true;
 }

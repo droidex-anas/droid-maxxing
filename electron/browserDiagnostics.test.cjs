@@ -73,6 +73,21 @@ test('browser URL diagnostics fail closed for malformed secret-bearing values', 
   );
 });
 
+test('nested redirect URLs redact the remainder when the depth budget is exhausted', () => {
+  let url =
+    'https://user:private-password@example.com/?access_token=private-token#private-fragment';
+  for (let depth = 0; depth < 6; depth += 1) {
+    url = `https://example.com/?next=${encodeURIComponent(url)}&safe=yes`;
+  }
+  let redacted = redactBrowserDiagnosticUrl(url);
+  for (let depth = 0; depth < 3; depth += 1) {
+    const parsed = new URL(redacted);
+    assert.equal(parsed.searchParams.get('safe'), 'yes');
+    redacted = parsed.searchParams.get('next');
+  }
+  assert.equal(redacted, '[redacted]');
+});
+
 test('browser console redaction stays bounded on adversarial quoted input', () => {
   const value = `password="${'\\\\'.repeat(20_000)}secret" safe=visible`;
   const redacted = redactBrowserDiagnosticText(value);

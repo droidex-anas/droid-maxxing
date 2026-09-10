@@ -21,7 +21,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function hoverContents(onMouseMoved = async () => ({})) {
+function hoverContents(onCommand = async () => ({})) {
   const commands = [];
   const scripts = [];
   let attached = false;
@@ -33,7 +33,7 @@ function hoverContents(onMouseMoved = async () => ({})) {
       isAttached: () => attached,
       async sendCommand(name, params) {
         commands.push({ name, params });
-        return onMouseMoved();
+        return onCommand(name, params);
       },
     },
     executeJavaScript: async (script) => {
@@ -520,6 +520,60 @@ test('keypress reaches the page as a trusted Chromium key event', async () => {
   );
   assert.equal(result.snapshot.url, 'https://example.test/');
   assert.equal(scripts.filter((script) => script.includes('"action":"snapshot"')).length, 1);
+});
+
+test('cancellation during keydown skips Enter submission and preserves cancellation if keyup fails', async () => {
+  const keyDownStarted = deferred();
+  const keyDownFinished = deferred();
+  let current = true;
+  const { commands, contents, scripts } = hoverContents(async (_name, params) => {
+    if (params.type === 'rawKeyDown') {
+      keyDownStarted.resolve();
+      await keyDownFinished.promise;
+    }
+    if (params.type === 'keyUp') throw new Error('key release failed');
+  });
+  const action = executeBrowserAgentInteraction(
+    contents,
+    { requestId: 'request-enter-race', action: 'keypress', key: 'Enter' },
+    { isCurrent: () => current, pageContext: PAGE_CONTEXT },
+  );
+  const rejected = assert.rejects(action, /page changed before the browser action completed/i);
+  await keyDownStarted.promise;
+  current = false;
+  keyDownFinished.resolve();
+  await rejected;
+
+  assert.deepEqual(
+    commands.map(({ name, params }) => [name, params.type, params.windowsVirtualKeyCode]),
+    [
+      ['Input.dispatchKeyEvent', 'rawKeyDown', 13],
+      ['Input.dispatchKeyEvent', 'keyUp', 13],
+    ],
+  );
+  assert.equal(scripts.length, 1);
+  assert.match(scripts[0], /"action":"keypress"/);
+});
+
+test('failed character dispatch releases the key without masking the dispatch error', async () => {
+  const dispatchError = new Error('character dispatch failed');
+  const { commands, contents, scripts } = hoverContents(async (_name, params) => {
+    if (params.type === 'char') throw dispatchError;
+    if (params.type === 'keyUp') throw new Error('key release failed');
+  });
+  await assert.rejects(
+    executeBrowserAgentInteraction(
+      contents,
+      { requestId: 'request-enter-error', action: 'keypress', key: 'Enter' },
+      { isCurrent: () => true, pageContext: PAGE_CONTEXT },
+    ),
+    (error) => error === dispatchError,
+  );
+  assert.deepEqual(
+    commands.map(({ params }) => params.type),
+    ['rawKeyDown', 'char', 'keyUp'],
+  );
+  assert.equal(scripts.length, 1);
 });
 
 test('native input is blocked when the exact point is outside the live viewport', async () => {

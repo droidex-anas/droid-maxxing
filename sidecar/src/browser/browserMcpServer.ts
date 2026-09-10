@@ -218,7 +218,15 @@ export function createBrowserMcpServer(
         defs.fill_login.input,
         safeTool(async () => {
           const state = await manager.fillCredentials(appSessionId());
-          return jsonResult(stateForTool(state));
+          return jsonResult(
+            state
+              ? stateForTool(state)
+              : {
+                  ok: true,
+                  message:
+                    'Saved login filled. No fresh page snapshot is available; use snapshot to inspect the page.',
+                },
+          );
         }),
       ),
       tool(

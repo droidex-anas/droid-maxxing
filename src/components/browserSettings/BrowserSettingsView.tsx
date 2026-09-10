@@ -79,7 +79,7 @@ function sitePermissionDescription(snapshot: BrowserSettingsSnapshot): string {
     snapshot.platform === 'darwin'
       ? 'macOS access is separate - if it blocks, enable DROIDEX in System Settings > Privacy & Security > Camera or Microphone, then restart.'
       : "Your operating system's camera and microphone privacy settings are separate - if they block, allow DROIDEX there, then restart.";
-  return `Ask me prompts in DROIDEX and remembers each site's choice in the lists below; Block refuses silently. ${osClause} HID and USB remain blocked.`;
+  return `“Ask me” shows a DROIDEX prompt and remembers each site's choice in the lists below. “Block” refuses silently. ${osClause} HID and USB remain blocked.`;
 }
 
 function passkeyCapabilityDescription(snapshot: BrowserSettingsSnapshot): string {
@@ -152,7 +152,10 @@ function AgentCursorSizeSlider({
         onChange={(event) => {
           setDragged(Number(event.currentTarget.value));
         }}
-        onPointerUp={commit}
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onLostPointerCapture={commit}
         onKeyUp={commit}
         onBlur={commit}
       />

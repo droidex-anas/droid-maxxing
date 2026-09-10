@@ -1,18 +1,22 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const MAX_RESERVED_FILENAME_BYTES = 240;
+const MAX_FILENAME_BYTES = 240;
 
-function reserveDownloadPath(directory, filename, reservedPaths) {
+function sanitizeDownloadFilename(filename) {
   const sanitizedName =
     path
       .basename(String(filename || 'download'))
       // eslint-disable-next-line no-control-regex -- Download filenames must sanitize control bytes.
       .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '_')
       .replace(/[. ]+$/g, '') || 'download';
-  const safeName =
-    truncateFilenameUtf8(sanitizedName, MAX_RESERVED_FILENAME_BYTES).replace(/[. ]+$/g, '') ||
-    'download';
+  return (
+    truncateFilenameUtf8(sanitizedName, MAX_FILENAME_BYTES).replace(/[. ]+$/g, '') || 'download'
+  );
+}
+
+function reserveDownloadPath(directory, filename, reservedPaths) {
+  const safeName = sanitizeDownloadFilename(filename);
   const extension = path.extname(safeName);
   const stem = path.basename(safeName, extension);
   let candidate = path.join(directory, safeName);
@@ -51,4 +55,4 @@ function truncateUtf8(value, maxBytes) {
   return result;
 }
 
-module.exports = { downloadReservationKey, reserveDownloadPath };
+module.exports = { downloadReservationKey, reserveDownloadPath, sanitizeDownloadFilename };

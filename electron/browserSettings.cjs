@@ -1,7 +1,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createBrowserCredentialVault } = require('./browserCredentialVault.cjs');
-const { downloadReservationKey, reserveDownloadPath } = require('./browserDownloads.cjs');
+const {
+  downloadReservationKey,
+  reserveDownloadPath,
+  sanitizeDownloadFilename,
+} = require('./browserDownloads.cjs');
 const { createBrowserPermissionController } = require('./browserPermissions.cjs');
 const { browserPromptFromDialogOptions } = require('./browserPrompt.cjs');
 const {
@@ -334,7 +338,10 @@ class BrowserSettingsController {
       try {
         fs.mkdirSync(settings.downloadDirectory, { recursive: true });
         item.setSaveDialogOptions({
-          defaultPath: path.join(settings.downloadDirectory, item.getFilename()),
+          defaultPath: path.join(
+            settings.downloadDirectory,
+            sanitizeDownloadFilename(item.getFilename()),
+          ),
         });
       } catch {
         // An unusable folder just leaves Electron's own default in the save dialog.

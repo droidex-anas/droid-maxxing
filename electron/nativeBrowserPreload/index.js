@@ -2,7 +2,7 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import { isInternalEvent, point, swallow } from './dom.js';
-import { sensitiveFocusedField } from './elementInspection.js';
+import { sensitiveFocusedField } from './sensitiveFields.js';
 import { browserAgentActionContext, invalidateAgentSnapshot } from './agentSnapshot.js';
 import { resolveAgentPointer, runAgentAction } from './agentActions.js';
 import { inspectAuthenticationIntent } from './authIntent.js';
@@ -67,11 +67,10 @@ function onWheel(event) {
 }
 
 function onKey(event) {
-  if (!state.designMode) return;
+  if (!state.designMode || isInternalEvent(event)) return;
   // Freeze keyboard scrolling (space, arrows, page keys) while a capture is
   // pending or the composer is open, so the viewport cannot shift out from
-  // under the selection. The composer stops both events on itself, so typing
-  // and Escape inside it still work.
+  // under the selection. Internal events belong to the composer.
   if (state.capturePending || promptVisible()) {
     if (event.type === 'keydown') swallow(event);
     if (state.capturePending) return;

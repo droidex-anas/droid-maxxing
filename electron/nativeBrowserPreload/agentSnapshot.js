@@ -1,4 +1,4 @@
-/* global crypto, document, window, location, Element, NodeFilter, HTMLIFrameElement, getComputedStyle */
+/* global crypto, document, window, location, Element, NodeFilter, HTMLIFrameElement */
 
 import { agentVisibleUrl, sanitizeUrl } from './diagnostics.js';
 import {
@@ -6,17 +6,13 @@ import {
   boxFor,
   cleanText,
   directText,
+  isVisible,
   roleFor,
   safeElementText,
   stableHash,
 } from './dom.js';
-import {
-  attrsFor,
-  canAccessFrame,
-  sanitizedOuterHtml,
-  selectorFor,
-  sensitiveFocusedField,
-} from './elementInspection.js';
+import { attrsFor, canAccessFrame, sanitizedOuterHtml, selectorFor } from './elementInspection.js';
+import { sensitiveFocusedField } from './sensitiveFields.js';
 
 export {
   agentSnapshotTargets,
@@ -158,11 +154,9 @@ function browserRefForSelector(selector) {
 
 function isCandidate(el) {
   if (!el || el === document.body || el === document.documentElement) return false;
-  if (el.getAttribute(INTERNAL_ATTR)) return false;
+  if (el.closest(`[${INTERNAL_ATTR}]`) || !isVisible(el)) return false;
   const rect = el.getBoundingClientRect();
   if (rect.width < 4 || rect.height < 4) return false;
-  const style = getComputedStyle(el);
-  if (style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
   const area = rect.width * rect.height;
   const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
   if (area > viewportArea * 0.72) return false;

@@ -41,8 +41,11 @@ function redactBrowserDiagnosticUrl(value, baseUrl, depth = 0) {
         continue;
       }
       const nested = url.searchParams.get(key);
-      if (depth < 2 && /^https?:\/\//i.test(nested)) {
-        url.searchParams.set(key, redactBrowserDiagnosticUrl(nested, undefined, depth + 1));
+      if (/^https?:\/\//i.test(nested)) {
+        url.searchParams.set(
+          key,
+          depth < 2 ? redactBrowserDiagnosticUrl(nested, undefined, depth + 1) : '[redacted]',
+        );
       }
     }
     url.username = '';

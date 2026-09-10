@@ -125,3 +125,61 @@ test('a design prompt waits for the reference command that arrived before it', a
     [],
   );
 });
+
+test('a rejected design action is reported without rejecting or blocking the queue', async (t) => {
+  const events: ServerEvent[] = [];
+  const prompts: string[] = [];
+  const browsers = new FakeBrowserSessionManager(() => undefined);
+  t.mock.method(browsers, 'designPrompt', async () => ({
+    path: '/tmp/pack.md',
+    prompt: 'design prompt',
+  }));
+  const browser = new SessionBrowser({
+    browsers,
+    emit: (event) => events.push(event),
+    getAutonomy: () => undefined,
+    sendPrompt: async (_appSessionId, prompt) => {
+      prompts.push(prompt);
+    },
+  });
+
+  const added = browser.handle({
+    type: 'browser.design.addReference',
+    appSessionId: 'app-1',
+    reference: {
+      id: '@ref-1',
+      anchor: {
+        id: '@ref-1',
+        kind: 'element',
+        label: 'Save',
+        box: { x: 0, y: 0, width: 10, height: 10 },
+      },
+      url: 'https://example.test',
+      viewport: { width: 1200, height: 800, deviceScaleFactor: 1 },
+      scroll: { x: 0, y: 0 },
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  });
+  const prompted = browser.handle({
+    type: 'browser.design.sendPrompt',
+    appSessionId: 'app-1',
+    instruction: 'Make it blue',
+    referenceIds: ['@ref-1'],
+  });
+  await Promise.all([added, prompted]);
+
+  assert.deepEqual(events, [
+    {
+      type: 'browser.error',
+      appSessionId: 'app-1',
+      message: 'FakeBrowserSessionManager does not implement addReference.',
+    },
+    {
+      type: 'error',
+      code: 'browser.error',
+      appSessionId: 'app-1',
+      message: 'FakeBrowserSessionManager does not implement addReference.',
+    },
+  ]);
+  assert.deepEqual(prompts, ['design prompt']);
+});

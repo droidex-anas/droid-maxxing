@@ -109,18 +109,27 @@ export async function performIframeRequest(
 // loaded) targets the URL the frame already reports, so comparing URLs resolves
 // before the new document commits and the snapshot comes from the old one.
 function loadIframe(iframe: HTMLIFrameElement, url: string): Promise<void> {
-  return new Promise((resolve) => {
-    const finish = () => {
-      iframe.removeEventListener('load', finish);
-      iframe.removeEventListener('error', finish);
+  return new Promise((resolve, reject) => {
+    const finish = (error?: Error) => {
+      iframe.removeEventListener('load', onLoad);
+      iframe.removeEventListener('error', onError);
       window.clearTimeout(timer);
-      resolve();
+      if (error) reject(error);
+      else resolve();
     };
-    const timer = window.setTimeout(finish, 5_000);
-    iframe.addEventListener('load', finish);
-    iframe.addEventListener('error', finish);
-    if (!iframe.isConnected) {
+    const onLoad = () => {
       finish();
+    };
+    const onError = () => {
+      finish(new Error('Browser frame navigation failed.'));
+    };
+    const timer = window.setTimeout(() => {
+      finish(new Error('Browser frame navigation timed out.'));
+    }, 5_000);
+    iframe.addEventListener('load', onLoad);
+    iframe.addEventListener('error', onError);
+    if (!iframe.isConnected) {
+      finish(new Error('Browser frame was disconnected before navigation.'));
       return;
     }
     iframe.src = url;

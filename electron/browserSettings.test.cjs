@@ -111,6 +111,18 @@ function downloadItem(filename) {
   };
 }
 
+test('save dialogs keep untrusted filenames inside the configured download folder', async () => {
+  await withController(async ({ controller, userDataPath }) => {
+    for (const filename of ['../../outside.txt', '/tmp/outside.txt', '..', 'a\\b:report.txt']) {
+      const item = downloadItem(filename);
+      controller.prepareDownload(item);
+      const destination = item.dialogOptions().defaultPath;
+      assert.equal(path.dirname(destination), path.join(userDataPath, 'Downloads'));
+      assert.doesNotMatch(path.basename(destination), /[\\:]/);
+    }
+  });
+});
+
 test('browser settings default to global autonomy policy, Google, and visible cursor', async () => {
   await withController(
     async ({ appliedCursorSizes, appliedCursorStyles, appliedCursorVisibility, controller }) => {

@@ -48,6 +48,8 @@ test('NativeBrowserRuntime sends live requests with application and browser sess
     requests.map((request) => request.action),
     ['open', 'reload', 'goBack', 'goForward', 'click', 'hover', 'selectOption', 'scroll'],
   );
+  assert.deepEqual(await runtime.fillCredentials(), snapshot);
+  assert.equal(requests.at(-1)?.action, 'fillCredentials');
   assert.equal(requests[0].appSessionId, 'app-session-one');
   assert.equal(requests[0].browserSessionId, 'browser-one');
   assert.equal(requests[0].source, 'user');
@@ -196,10 +198,9 @@ test('reload without a snapshot fails without reusing stale page metadata', asyn
   await runtime.open('https://example.com/current');
   await assert.rejects(runtime.reload(), /navigation completed without a fresh page snapshot/);
   await assert.rejects(runtime.snapshot(), /action completed without a fresh page snapshot/);
-  await assert.rejects(runtime.fillCredentials(), /action completed without a fresh page snapshot/);
 });
 
-test('a successful fill whose probe fails returns a fresh snapshot instead of failing', async () => {
+test('a successful fill completes without a snapshot even when further probes would fail', async () => {
   const actions: string[] = [];
   const runtime = new NativeBrowserRuntime({
     appSessionId: 'app-session-one',
@@ -207,6 +208,7 @@ test('a successful fill whose probe fails returns a fresh snapshot instead of fa
     viewport: { width: 900, height: 700, deviceScaleFactor: 2 },
     request: async (request) => {
       actions.push(request.action);
+      if (request.action === 'snapshot') throw new Error('Page probe unavailable.');
       return {
         requestId: request.requestId,
         appSessionId: request.appSessionId,
@@ -223,8 +225,8 @@ test('a successful fill whose probe fails returns a fresh snapshot instead of fa
   await runtime.open('https://example.com/login');
   const snapshot = await runtime.fillCredentials();
 
-  assert.equal(snapshot.url, 'https://example.com/login');
-  assert.deepEqual(actions, ['open', 'fillCredentials', 'snapshot']);
+  assert.equal(snapshot, undefined);
+  assert.deepEqual(actions, ['open', 'fillCredentials']);
 });
 
 test('history navigation never reuses a stale page snapshot', async () => {

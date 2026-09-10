@@ -1,8 +1,8 @@
 /* global document, location, Element, HTMLAnchorElement, HTMLIFrameElement, URL */
 
-import { cleanText } from './dom.js';
+import { cleanText, safeElementText } from './dom.js';
 import { currentAgentSnapshotTarget } from './agentSnapshot.js';
-import { isSensitiveField } from './elementInspection.js';
+import { editableFieldSelector, isSensitiveField } from './sensitiveFields.js';
 
 export { inspectAuthenticationIntent };
 
@@ -34,13 +34,16 @@ function inspectAuthenticationIntent(request) {
     const label = cleanText(
       control.getAttribute?.('aria-label') ||
         control.getAttribute?.('title') ||
-        control.value ||
-        control.textContent ||
+        (isSensitiveField(control) ? '[redacted]' : control.value) ||
+        safeElementText(control) ||
         form?.getAttribute?.('aria-label') ||
         '',
       100,
     );
-    const context = cleanText(`${label} ${form?.textContent || ''}`, 500).toLowerCase();
+    const context = cleanText(
+      `${label} ${form ? safeElementText(form, 500) : ''}`,
+      500,
+    ).toLowerCase();
     let kind;
     if (/passkey|security key|touch id|webauthn/.test(context)) kind = 'passkey';
     else if (
@@ -55,7 +58,7 @@ function inspectAuthenticationIntent(request) {
         control.matches?.(
           'button,input[type="submit"],input[type="button"],input[type="image"]',
         )) &&
-      Array.from(form?.querySelectorAll('input') || []).some(isSensitiveField)
+      Array.from(form?.querySelectorAll(editableFieldSelector) || []).some(isSensitiveField)
     ) {
       kind = 'signin';
     }

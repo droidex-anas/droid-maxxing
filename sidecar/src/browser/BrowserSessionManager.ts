@@ -268,23 +268,25 @@ export class BrowserSessionManager {
     return this.requireSession(appSessionId).runtime.console(clear);
   }
 
-  async fillCredentials(appSessionId: string): Promise<BrowserState> {
+  async fillCredentials(appSessionId: string): Promise<BrowserState | undefined> {
     const session = this.requireSession(appSessionId);
     const snapshot = await session.runtime.fillCredentials();
-    return this.updateFromSnapshot(session, snapshot);
+    return snapshot ? this.updateFromSnapshot(session, snapshot) : undefined;
   }
 
   async screenshot(appSessionId: string, options: BrowserScreenshotOptions = {}): Promise<string> {
     const session = this.requireSession(appSessionId);
+    const capturedState = session.state;
     const base64 = await session.runtime.screenshot(options);
-    const url = session.state.url;
+    if (this.sessions.get(appSessionId) !== session || session.state !== capturedState) {
+      throw new Error('Browser screenshot was canceled because the page or session changed.');
+    }
     const screenshotPath = await session.designReferences.saveImage(
       `screenshot-${Date.now().toString(36)}.png`,
       base64,
     );
-    // A navigation that landed while the image was being written owns the
-    // state; attaching this stale capture to the new page would mislabel it.
-    if (session.state.url === url) {
+    // State identity also changes on reload and same-URL navigation.
+    if (this.sessions.get(appSessionId) === session && session.state === capturedState) {
       session.state = {
         ...session.state,
         screenshotPath,

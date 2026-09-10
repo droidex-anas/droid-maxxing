@@ -56,7 +56,7 @@ async function executeBrowserAgentInteraction(contents, request, options) {
       const result = await executePageAction(contents, request, options);
       assertCurrentBrowserAction(options);
       if (result?.ok !== true) return result;
-      await dispatchNativeKey(debuggerApi, String(request.key || ''));
+      await dispatchNativeKey(contents, debuggerApi, String(request.key || ''), options);
       return result;
     });
     assertCurrentBrowserAction(options);
@@ -86,20 +86,32 @@ const KEY_CODES = {
 // Keys are dispatched through Chromium so the page receives trusted events;
 // printable keys (and Enter) also need the char event that drives text entry
 // and implicit form submission.
-async function dispatchNativeKey(debuggerApi, key) {
+async function dispatchNativeKey(contents, debuggerApi, key, options) {
   const text = key.length === 1 ? key : key === 'Enter' ? '\r' : '';
   const code = KEY_CODES[key] ?? (text ? text.toUpperCase().charCodeAt(0) : 0);
   const base = { key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code };
-  await debuggerApi.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
-  if (text) {
-    await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
-      ...base,
-      type: 'char',
-      text,
-      unmodifiedText: text,
-    });
+  let keyPressed = true;
+  try {
+    await debuggerApi.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
+    assertCurrentBrowserAction(options);
+    if (text) {
+      await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
+        ...base,
+        type: 'char',
+        text,
+        unmodifiedText: text,
+      });
+      assertCurrentBrowserAction(options);
+    }
+    await debuggerApi.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+    keyPressed = false;
+  } finally {
+    if (keyPressed && !contents.isDestroyed()) {
+      await debuggerApi
+        .sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+        .catch(() => undefined);
+    }
   }
-  await debuggerApi.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
 }
 
 function dispatchNativeClick(contents, request, options, point) {

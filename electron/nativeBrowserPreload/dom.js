@@ -1,8 +1,10 @@
 /* global document, window, CSS, Node, getComputedStyle, requestAnimationFrame */
 
+import { editableFieldSelector, isSensitiveField } from './sensitiveFields.js';
+
 export {
   INTERNAL_ATTR,
-  redactedTextTags,
+  redactedElementClone,
   element,
   swallow,
   isInternalEvent,
@@ -87,7 +89,7 @@ function roleFor(el) {
 }
 
 function directText(el) {
-  if (redactedTextTags.has(el.tagName)) return '[redacted]';
+  if (redactedTextTags.has(el.tagName) || isSensitiveField(el)) return '[redacted]';
   return cleanText(
     Array.from(el.childNodes)
       .filter((node) => node.nodeType === Node.TEXT_NODE)
@@ -97,13 +99,27 @@ function directText(el) {
 }
 
 function safeElementText(el, max = 180) {
-  if (redactedTextTags.has(el.tagName)) return '[redacted]';
-  if (!el.querySelector('script,style,noscript')) {
+  if (redactedTextTags.has(el.tagName) || isSensitiveField(el)) return '[redacted]';
+  if (!el.querySelector(`script,style,noscript,${editableFieldSelector}`)) {
     return cleanText(el.innerText || el.textContent, max);
   }
+  return cleanText(redactedElementClone(el).textContent, max);
+}
+
+function redactedElementClone(el) {
   const clone = el.cloneNode(true);
-  for (const node of clone.querySelectorAll('script,style,noscript')) node.remove();
-  return cleanText(clone.textContent, max);
+  const originals = [el, ...el.querySelectorAll('*')];
+  const copies = [clone, ...clone.querySelectorAll('*')];
+  for (let index = 0; index < originals.length; index += 1) {
+    const original = originals[index];
+    const copy = copies[index];
+    if (isSensitiveField(original)) copy.textContent = '[redacted]';
+    else if (redactedTextTags.has(original.tagName)) {
+      if (index === 0) copy.textContent = '[redacted]';
+      else copy.remove();
+    }
+  }
+  return clone;
 }
 
 function cleanText(value, max = 180) {

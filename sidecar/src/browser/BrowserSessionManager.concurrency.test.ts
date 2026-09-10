@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BrowserDesignReferences } from './BrowserDesignReferences.js';
 import { BrowserSessionManager, type BrowserRuntime } from './BrowserSessionManager.js';
-import type { BrowserSnapshot } from './types.js';
+import type { BrowserSnapshot, BrowserState } from './types.js';
 
 test('browser actions execute in request order within one managed session', async () => {
   const runtime = new ControlledRuntime();
@@ -166,6 +166,45 @@ test('closing a session rejects an update still awaiting design cleanup', async 
   await assert.rejects(staleUpdate, /superseded/);
   assert.equal(manager.state('chat-1'), undefined);
   assert.deepEqual(updates, ['https://example.test']);
+});
+
+test('a saved screenshot cannot publish over a same-URL page or a replacement session', async (t) => {
+  const url = 'https://example.test/reloaded';
+  for (const transition of ['reload', 'open', 'replace'] as const) {
+    await t.test(transition, async (t) => {
+      const updates: BrowserState[] = [];
+      const manager = new BrowserSessionManager({
+        runtimeFactory: () => new ControlledRuntime(),
+        emit: (event) => {
+          if (event.type === 'browser.updated') updates.push(event.state);
+        },
+      });
+      await manager.open({ appSessionId: 'chat-1', url });
+      const saveStarted = deferred<void>();
+      const finishSave = deferred<string>();
+      t.mock.method(BrowserDesignReferences.prototype, 'saveImage', async () => {
+        saveStarted.resolve();
+        return finishSave.promise;
+      });
+
+      const captured = manager.screenshot('chat-1');
+      await saveStarted.promise;
+      if (transition === 'reload') {
+        await manager.reload('chat-1');
+      } else {
+        if (transition === 'replace') await manager.close('chat-1');
+        await manager.open({ appSessionId: 'chat-1', url });
+      }
+      const current = manager.state('chat-1');
+      const updateCount = updates.length;
+      finishSave.resolve('/tmp/old-document.png');
+      await captured;
+
+      assert.equal(manager.state('chat-1'), current);
+      assert.equal(manager.state('chat-1')?.screenshotPath, undefined);
+      assert.equal(updates.length, updateCount);
+    });
+  }
 });
 
 class ControlledRuntime implements BrowserRuntime {

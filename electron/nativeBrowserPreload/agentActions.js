@@ -21,6 +21,15 @@ export {
 };
 
 const RANGE_TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'password']);
+const VALUE_TEXT_INPUT_TYPES = new Set([
+  'email',
+  'number',
+  'date',
+  'datetime-local',
+  'month',
+  'time',
+  'week',
+]);
 
 let agentInputSuppression = null;
 
@@ -123,11 +132,19 @@ function typeIntoFocused(text) {
   if (!active) throw new Error('No focused element for typing.');
   const value = String(text);
   if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+    const type = active instanceof HTMLInputElement ? inputType(active) : 'text';
+    if (
+      active.disabled ||
+      active.readOnly ||
+      (!RANGE_TEXT_INPUT_TYPES.has(type) && !VALUE_TEXT_INPUT_TYPES.has(type))
+    ) {
+      throw new Error('Focused element is not text-editable.');
+    }
     const start = active.selectionStart == null ? active.value.length : active.selectionStart;
     const end = active.selectionEnd == null ? active.value.length : active.selectionEnd;
     // setRangeText throws on inputs whose type has no selection API (number,
     // email, date, ...), so splice those values directly instead.
-    if (active instanceof HTMLInputElement && !RANGE_TEXT_INPUT_TYPES.has(inputType(active))) {
+    if (!RANGE_TEXT_INPUT_TYPES.has(type)) {
       const old = active.value;
       active.value = old.slice(0, start) + value + old.slice(end);
     } else {
@@ -150,7 +167,7 @@ function typeIntoFocused(text) {
 }
 
 function inputType(el) {
-  return (el.getAttribute('type') || 'text').toLowerCase();
+  return el.type;
 }
 
 function selectOption(selector, value, ref) {

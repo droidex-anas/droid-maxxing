@@ -1,11 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useStoreSelector } from '../../hooks/useStore';
 import { reloadBrowser } from '../../lib/commands';
-import { isEditTool } from '../../lib/diff';
 import type { TranscriptEvent } from '../../types/bridge';
+import { createBrowserEditTracker } from './browserEditTracker';
 
-const LOCAL_DEV_SERVER = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])/;
+const LOCAL_DEV_SERVER =
+  /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i;
 const RELOAD_DEBOUNCE_MS = 600;
+const EMPTY_TRANSCRIPT: readonly TranscriptEvent[] = [];
 
 // When the agent edits files and the browser shows a local dev server URL,
 // reload the pane after a short debounce so the new code is visible
@@ -17,15 +19,21 @@ export function useBrowserAutoReload(
   activeUrl: string,
   requestedChatId: string | undefined,
 ): void {
-  const lastEditTsRef = useRef(0);
-  const pendingEditRef = useRef<string | null>(null);
+  const completesEdit = useMemo(createBrowserEditTracker, [browserKey, requestedChatId]);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTranscriptEvent = useStoreSelector((current) => {
-    const transcript = requestedChatId ? current.transcripts[requestedChatId] : undefined;
-    return transcript?.[transcript.length - 1];
-  });
+  const transcript = useStoreSelector(
+    (current) => {
+      const events = requestedChatId ? current.transcripts[requestedChatId] : undefined;
+      return {
+        events: events ?? EMPTY_TRANSCRIPT,
+        mutation: requestedChatId ? current.transcriptMutations[requestedChatId] : undefined,
+      };
+    },
+    (left, right) => left.events === right.events && left.mutation === right.mutation,
+  );
 
   useEffect(() => {
+    const completedEdit = completesEdit(transcript.events, transcript.mutation);
     if (!browserKey) return;
     // Eligibility is checked first so navigating away from a local dev server
     // cancels any reload that was scheduled while the URL was still eligible;
@@ -37,16 +45,13 @@ export function useBrowserAutoReload(
       }
       return;
     }
-    const last = lastTranscriptEvent;
-    if (!last || !completesEdit(last, pendingEditRef)) return;
-    if (last.ts <= lastEditTsRef.current) return;
-    lastEditTsRef.current = last.ts;
+    if (!completedEdit) return;
     if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
     reloadTimerRef.current = setTimeout(() => {
       reloadTimerRef.current = null;
       reloadBrowser(browserKey);
     }, RELOAD_DEBOUNCE_MS);
-  }, [activeUrl, browserKey, lastTranscriptEvent]);
+  }, [activeUrl, browserKey, completesEdit, transcript]);
 
   // Cancel any pending auto-reload when the browser session switches or the
   // component unmounts, so a stale timer doesn't reload the wrong session.
@@ -57,18 +62,5 @@ export function useBrowserAutoReload(
         reloadTimerRef.current = null;
       }
     };
-  }, [browserKey]);
-}
-
-// Result events carry no usable toolName (see chatFeed.isResultFor), so the edit
-// is recognised on its call and the reload fires when that call's result lands.
-function completesEdit(event: TranscriptEvent, pending: { current: string | null }): boolean {
-  if (event.kind === 'tool_call') {
-    if (isEditTool(event.toolName)) pending.current = event.toolUseId ?? '';
-    return false;
-  }
-  if (event.kind !== 'tool_result') return false;
-  const expected = pending.current;
-  pending.current = null;
-  return expected !== null && !event.isError && (event.toolUseId ?? '') === expected;
+  }, [activeUrl, browserKey, requestedChatId]);
 }

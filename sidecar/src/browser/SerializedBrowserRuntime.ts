@@ -94,7 +94,7 @@ export class SerializedBrowserRuntime implements BrowserRuntime {
     return this.actions.run(() => this.runtime.console(clear));
   }
 
-  fillCredentials(): Promise<BrowserSnapshot> {
+  fillCredentials(): Promise<BrowserSnapshot | undefined> {
     const fillCredentials = this.runtime.fillCredentials?.bind(this.runtime);
     if (!fillCredentials) {
       return Promise.reject(

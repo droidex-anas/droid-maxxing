@@ -346,6 +346,124 @@ test('site decisions revoke temporary grants and invalidate pending prompts', as
   assert.equal(canAccess(controller, contents, 'https://camera.example', 'video'), false);
 });
 
+test('requests during a manual policy write cannot queue an approval after it', async () => {
+  const contents = browserContents();
+  const otherContents = browserContents('https://other.example');
+  const writeGate = deferred();
+  const approvalQueued = deferred();
+  const siteDecisions = new Map();
+  const writes = [];
+  const prompts = [];
+  let writeQueue = Promise.resolve();
+  const { controller } = controllerFor(contents, {
+    siteDecisions,
+    isNativeBrowserContents: (candidate) => [contents, otherContents].includes(candidate),
+    persistSiteDecision: (input) => {
+      writes.push(input);
+      if (input.decision === 'allow') approvalQueued.resolve();
+      writeQueue = writeQueue.then(async () => {
+        await writeGate.promise;
+        for (const mediaType of input.mediaTypes) {
+          siteDecisions.set(`${input.origin}\0${mediaType}`, input.decision);
+        }
+      });
+      return writeQueue;
+    },
+    requestPermission: (request) => {
+      prompts.push(request);
+      const affected =
+        request.origin === 'https://camera.example' && request.mediaTypes.includes('video');
+      return {
+        promptId: request.promptId,
+        decision: affected ? 'allow_always' : 'allow_once',
+      };
+    },
+  });
+  const saved = controller.setSiteDecision('https://camera.example', ['video'], 'deny');
+  const requested = requestDecision(controller, contents, {
+    securityOrigin: 'https://camera.example',
+    mediaTypes: ['video'],
+  });
+  await Promise.race([requested, approvalQueued.promise]);
+
+  assert.equal(
+    await requestDecision(controller, otherContents, {
+      securityOrigin: 'https://other.example',
+      mediaTypes: ['video'],
+    }),
+    true,
+  );
+  writeGate.resolve();
+  await saved;
+  assert.equal(await requested, false);
+  assert.equal(siteDecisions.get('https://camera.example\0video'), 'deny');
+  assert.deepEqual(writes, [
+    { origin: 'https://camera.example', mediaTypes: ['video'], decision: 'deny' },
+  ]);
+  assert.deepEqual(
+    prompts.map((prompt) => prompt.origin),
+    ['https://other.example'],
+  );
+});
+
+test('overlapping manual writes block affected access until the last write settles', async () => {
+  const contents = browserContents();
+  const askGate = deferred();
+  const denyGate = deferred();
+  const siteDecisions = new Map([['https://camera.example\0video', 'allow']]);
+  const { controller } = controllerFor(contents, {
+    siteDecisions,
+    persistSiteDecision: async ({ origin, mediaTypes, decision }) => {
+      await (decision === 'ask' ? askGate.promise : denyGate.promise);
+      for (const mediaType of mediaTypes) siteDecisions.set(`${origin}\0${mediaType}`, decision);
+    },
+    requestPermission: ({ promptId }) => ({ promptId, decision: 'allow_once' }),
+  });
+  const first = controller.setSiteDecision('https://camera.example', ['video'], 'ask');
+  const second = controller.setSiteDecision('https://camera.example', ['video'], 'deny');
+  assert.equal(canAccess(controller, contents, 'https://camera.example', 'video'), false);
+  assert.equal(
+    await requestDecision(controller, contents, {
+      securityOrigin: 'https://camera.example',
+      mediaTypes: ['audio'],
+    }),
+    true,
+  );
+  askGate.resolve();
+  await first;
+  assert.equal(
+    await requestDecision(controller, contents, {
+      securityOrigin: 'https://camera.example',
+      mediaTypes: ['video'],
+    }),
+    false,
+  );
+  denyGate.resolve();
+  await second;
+  assert.equal(canAccess(controller, contents, 'https://camera.example', 'video'), false);
+});
+
+test('a failed manual policy write releases the affected permission for a fresh prompt', async () => {
+  const contents = browserContents();
+  const { controller } = controllerFor(contents, {
+    persistSiteDecision: async () => {
+      throw new Error('disk full');
+    },
+    requestPermission: ({ promptId }) => ({ promptId, decision: 'allow_once' }),
+  });
+  await assert.rejects(
+    controller.setSiteDecision('https://camera.example', ['video'], 'deny'),
+    /disk full/,
+  );
+  assert.equal(
+    await requestDecision(controller, contents, {
+      securityOrigin: 'https://camera.example',
+      mediaTypes: ['video'],
+    }),
+    true,
+  );
+});
+
 test('site policy changes cancel only prompts for the affected origin and media', async () => {
   const camera = browserContents('https://camera.example');
   const microphone = browserContents('https://camera.example');

@@ -2,7 +2,55 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createBrowserMcpServer } from './browserMcpServer.js';
 import { browserMcpToolNames } from './browserMcpToolDefs.js';
-import type { BrowserSessionManager } from './BrowserSessionManager.js';
+import { BrowserSessionManager } from './BrowserSessionManager.js';
+import { NativeBrowserRuntime } from './NativeBrowserRuntime.js';
+import type { BrowserState } from './types.js';
+
+test('fill_login reports completion without presenting a stale snapshot when its probe fails', async () => {
+  const actions: string[] = [];
+  const updates: BrowserState[] = [];
+  const manager = new BrowserSessionManager({
+    emit: (event) => {
+      if (event.type === 'browser.updated') updates.push(event.state);
+    },
+    runtimeFactory: (browserSessionId, viewport, appSessionId) =>
+      new NativeBrowserRuntime({
+        browserSessionId,
+        viewport,
+        appSessionId,
+        request: async (request) => {
+          actions.push(request.action);
+          if (request.action === 'snapshot') throw new Error('Page probe unavailable.');
+          return {
+            ...request,
+            ok: true,
+            snapshot:
+              request.action === 'open'
+                ? { url: 'https://example.test/login', scroll: { x: 0, y: 0 }, refs: [] }
+                : undefined,
+          };
+        },
+      }),
+  });
+  const beforeFill = await manager.open({
+    appSessionId: 'm1',
+    url: 'https://example.test/login',
+  });
+  const server = createBrowserMcpServer(manager, () => 'm1');
+  const fillLogin = server.tools.find((tool) => tool.name === 'fill_login');
+  assert.ok(fillLogin);
+
+  const result = await fillLogin.handler({});
+
+  assert.ok(typeof result === 'string');
+  assert.match(result, /"ok":\s*true/);
+  assert.match(result, /Saved login filled/);
+  assert.match(result, /No fresh page snapshot/);
+  assert.doesNotMatch(result, /"url"|"refs"/);
+  assert.equal(manager.state('m1'), beforeFill);
+  assert.deepEqual(updates, [beforeFill]);
+  assert.deepEqual(actions, ['open', 'fillCredentials']);
+});
 
 test('browser MCP server exposes agent-facing names and typed inputs', () => {
   const server = createBrowserMcpServer({} as BrowserSessionManager, () => 'm1');

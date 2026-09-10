@@ -1,17 +1,14 @@
-/* global document, getComputedStyle, HTMLElement, HTMLInputElement, HTMLTextAreaElement, Node */
+/* global document, getComputedStyle, Node */
 
 import { sanitizeUrl, isSensitiveBrowserKey } from './diagnostics.js';
-import { cssEscape, redactedTextTags } from './dom.js';
+import { cssEscape, redactedElementClone } from './dom.js';
 
 export {
-  savedCredentialFields,
   selectorFor,
   verifySelector,
   attrsFor,
   isSensitiveAttribute,
   isMetaRefreshContent,
-  isSensitiveField,
-  sensitiveFocusedField,
   stylesFor,
   ancestorsFor,
   canAccessFrame,
@@ -37,8 +34,6 @@ const urlAttributes = new Set([
 ]);
 
 const redactedUrlAttributes = new Set(['ping', 'srcdoc', 'srcset', 'style']);
-
-const savedCredentialFields = new WeakSet();
 
 function selectorFor(el) {
   if (el.id) {
@@ -84,7 +79,6 @@ function verifySelector(el, selector) {
 
 function attrsFor(el) {
   const out = {};
-  const secret = isSensitiveField(el);
   for (const name of [
     'id',
     'class',
@@ -102,7 +96,7 @@ function attrsFor(el) {
   ]) {
     const value = el.getAttribute && el.getAttribute(name);
     if (!value) continue;
-    if (isSensitiveAttribute(name, el) || (name === 'value' && secret)) {
+    if (isSensitiveAttribute(name, el)) {
       out[name] = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
       continue;
     }
@@ -133,40 +127,6 @@ function isMetaRefreshContent(name, el) {
     el.tagName === 'META' &&
     String(el.getAttribute('http-equiv') || '').toLowerCase() === 'refresh'
   );
-}
-
-// Password and one-time-code fields must never reach the agent transcript, so
-// their live values are redacted from every snapshot/detail payload.
-function isSensitiveField(el) {
-  if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return false;
-  if (savedCredentialFields.has(el)) return true;
-  const type = (el.getAttribute('type') || '').toLowerCase();
-  if (type === 'password') return true;
-  const auto = (el.getAttribute('autocomplete') || '').toLowerCase();
-  return (
-    auto.includes('password') ||
-    auto.split(/\s+/).includes('one-time-code') ||
-    /otp|verification|passcode/i.test(el.name || el.id)
-  );
-}
-
-function sensitiveFocusedField() {
-  const field = document.activeElement;
-  const editable =
-    field instanceof HTMLInputElement ||
-    field instanceof HTMLTextAreaElement ||
-    (field instanceof HTMLElement && field.isContentEditable);
-  if (!editable) return null;
-  const type = (field.getAttribute('type') || '').toLowerCase();
-  const autocomplete = (field.getAttribute('autocomplete') || '').toLowerCase();
-  if (type === 'password' || autocomplete.includes('password')) return { kind: 'password' };
-  if (
-    autocomplete.includes('one-time-code') ||
-    /otp|verification|passcode/i.test(field.name || field.id)
-  ) {
-    return { kind: 'one-time code' };
-  }
-  return null;
 }
 
 function stylesFor(el) {
@@ -211,12 +171,7 @@ function canAccessFrame(frame) {
 }
 
 function sanitizedOuterHtml(el) {
-  const clone = el.cloneNode(true);
-  if (redactedTextTags.has(clone.tagName)) {
-    clone.textContent = '[redacted]';
-  } else {
-    for (const node of clone.querySelectorAll('script,style,noscript')) node.remove();
-  }
+  const clone = redactedElementClone(el);
   const nodes = [clone, ...clone.querySelectorAll('*')];
   for (const node of nodes) {
     for (const attr of Array.from(node.attributes || [])) {
