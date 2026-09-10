@@ -1,0 +1,41 @@
+name: Icon library
+
+on:
+  pull_request:
+    paths:
+      [
+        'packages/icons/**',
+        '.github/workflows/icon-library.yml',
+        'package-lock.json',
+        'eslint.config.js',
+        'LICENSE',
+      ]
+  push:
+    branches: [main, feat/icon-library]
+    paths:
+      [
+        'packages/icons/**',
+        '.github/workflows/icon-library.yml',
+        'package-lock.json',
+        'eslint.config.js',
+        'LICENSE',
+      ]
+
+permissions:
+  contents: read
+
+jobs:
+  icons:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix packages/icons run test
+      - run: npm --prefix packages/icons run lint
+      - run: npx prettier --ignore-path packages/icons/.prettierignore --check packages/icons .github/workflows/icon-library.yml
+      - run: git diff --exit-code -- packages/icons

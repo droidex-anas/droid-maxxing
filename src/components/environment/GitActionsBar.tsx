@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, Loader2, Upload } from 'lucide-react';
+import { ChevronRight, Upload } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { GitCommitIcon, GitHubMarkIcon, PrStateIcon } from './GithubIcons';
 import { Row } from './primitives';
 import { CommitSheet } from './CommitSheet';
@@ -114,7 +115,7 @@ export function GitActionsBar({
             className="mr-1.5 flex shrink-0 items-center gap-1 rounded-md border border-droid-border/70 bg-droid-surface px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:cursor-not-allowed disabled:opacity-40"
           >
             {pushing ? (
-              <Loader2 className="h-3 w-3 motion-safe:animate-spin" />
+              <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />
             ) : (
               <Upload className="h-3 w-3" />
             )}

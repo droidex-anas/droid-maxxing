@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ArrowRight, Check, Loader2 } from 'lucide-react';
+import { ArrowRight, Check } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 
 import type { OnboardingController } from '../../../hooks/useOnboarding';
 import { BrandMark } from '../../BrandMark';
@@ -79,7 +80,7 @@ export function DoneStep({
         >
           {finishing ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" /> Finishing…
+              <Spinner className="w-4 h-4 motion-safe:animate-spin-slow" /> Finishing…
             </>
           ) : (
             <>

@@ -17,10 +17,11 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@droidex/icons": ["packages/icons/src/index.ts"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "packages/icons/src"],
   "exclude": ["src/**/*.test.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

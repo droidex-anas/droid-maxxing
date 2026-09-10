@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { worktreeName } from '../lib/git';
@@ -40,7 +41,7 @@ function RemovalStatus({
   if (isChecking) {
     return (
       <div className="flex items-center gap-2.5 text-[12px] text-droid-text-secondary">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-droid-text-muted" />
+        <Spinner className="h-3.5 w-3.5 motion-safe:animate-spin-slow text-droid-text-muted" />
         Checking for unsaved changes…
       </div>
     );
@@ -211,7 +212,9 @@ export function WorktreeRemovalDialogContent({
             disabled={isChecking || isRemoving}
             className="flex min-w-[118px] items-center justify-center gap-2 rounded-lg bg-red-500/15 px-3.5 py-2 text-[12px] font-semibold text-red-300 transition-all duration-150 hover:bg-red-500/25 active:scale-[0.97] disabled:opacity-50"
           >
-            {(isChecking || isRemoving) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {(isChecking || isRemoving) && (
+              <Spinner className="h-3.5 w-3.5 motion-safe:animate-spin-slow" />
+            )}
             {removalActionLabel(isChecking, hasUnsavedChanges)}
           </button>
         </div>

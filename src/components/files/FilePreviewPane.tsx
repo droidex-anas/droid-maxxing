@@ -6,9 +6,9 @@ import {
   ChevronRight,
   ExternalLink,
   FolderSearch,
-  Loader2,
   X,
 } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { Highlight, type PrismTheme } from 'prism-react-renderer';
 import {
   openFileDefault,
@@ -198,7 +198,7 @@ export function FilePreviewPane({ accessToken, relative, onClear }: FilePreviewP
         )}
         {state.kind === 'loading' && (
           <div className="flex h-full items-center justify-center gap-2 text-[12px] text-droid-text-muted">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" />
             Loading preview…
           </div>
         )}
@@ -472,7 +472,7 @@ function ImagePreview({ data, fileName }: { data?: Uint8Array; fileName: string 
   if (!url) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-[12px] text-droid-text-muted">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" />
         Loading image…
       </div>
     );
@@ -481,7 +481,7 @@ function ImagePreview({ data, fileName }: { data?: Uint8Array; fileName: string 
     <div className="image-checkerboard relative flex h-full items-center justify-center overflow-auto p-4">
       {status === 'loading' && (
         <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md border border-droid-border bg-droid-surface/90 px-2 py-1 text-[10px] text-droid-text-muted shadow-sm">
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />
           Decoding…
         </div>
       )}
@@ -724,7 +724,7 @@ function DocxPreview({ data }: { data?: Uint8Array }) {
     <div className="relative h-full overflow-auto bg-droid-surface/20 p-4">
       {loading && (
         <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md border border-droid-border bg-droid-elevated px-2 py-1 text-[10px] text-droid-text-muted">
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />
           Rendering…
         </div>
       )}
@@ -794,7 +794,7 @@ function XlsxPreview({ data }: { data?: Uint8Array }) {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-[12px] text-droid-text-muted">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" />
         Parsing spreadsheet…
       </div>
     );

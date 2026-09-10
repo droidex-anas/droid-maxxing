@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { gitCommit } from '../../lib/git';
 import { toast } from '../../lib/toast';
 import { useBusyAction } from '../../hooks/useBusyAction';
@@ -25,7 +25,7 @@ export function CommitSheet({ cwd, onDone }: { cwd: string; onDone: () => void }
         } else if (res.reason === 'nothing_to_commit') {
           toast.info('Nothing to commit');
         } else {
-          toast.error(res.message || 'Commit failed');
+          toast.error(res.message?.length ? res.message : 'Commit failed');
         }
       } catch {
         // A rejected IPC call (transport failure, no bridge) would otherwise leave
@@ -39,7 +39,9 @@ export function CommitSheet({ cwd, onDone }: { cwd: string; onDone: () => void }
       <textarea
         autoFocus
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
+        onChange={(e) => {
+          setMessage(e.target.value);
+        }}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void doCommit();
         }}
@@ -52,7 +54,9 @@ export function CommitSheet({ cwd, onDone }: { cwd: string; onDone: () => void }
           <input
             type="checkbox"
             checked={stageAll}
-            onChange={(e) => setStageAll(e.target.checked)}
+            onChange={(e) => {
+              setStageAll(e.target.checked);
+            }}
             className="accent-droid-accent"
           />
           Stage all changes
@@ -62,7 +66,7 @@ export function CommitSheet({ cwd, onDone }: { cwd: string; onDone: () => void }
           disabled={!message.trim() || busy}
           className="flex items-center gap-1.5 rounded-lg bg-droid-accent/15 px-2.5 py-1 text-[11.5px] font-medium text-droid-accent transition-colors hover:bg-droid-accent/25 disabled:opacity-40"
         >
-          {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+          {busy && <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />}
           Commit
         </button>
       </div>

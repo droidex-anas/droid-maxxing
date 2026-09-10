@@ -1,4 +1,5 @@
-import { Download, Loader2 } from 'lucide-react';
+import { Download } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { useStoreSelector } from '../hooks/useStore';
 import { requestAppUpdate, useAppUpdate } from '../lib/appUpdate';
 import { hasActiveSessionWork } from '../lib/sessions';
@@ -37,7 +38,7 @@ export function AppUpdateButtonView({
       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-500 transition-colors hover:bg-droid-elevated disabled:opacity-60"
     >
       {downloading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" />
       ) : (
         <Download className="h-4 w-4" />
       )}

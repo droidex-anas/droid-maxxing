@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { PanelRightClose, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
+import { PanelRight } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
 import { Popover } from '../environment/Popover';
 import type { UtilityPanelState, UtilityTab, UtilityTool } from '../../lib/utilityPanel';
@@ -140,7 +141,7 @@ export function UtilityPane({
             onClick={onClosePane}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
           >
-            <PanelRightClose className="h-4 w-4" />
+            <PanelRight className="h-4 w-4" />
           </button>
         </HoverTooltip>
       </header>

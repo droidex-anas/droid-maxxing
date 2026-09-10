@@ -9,7 +9,8 @@ import { bindLazySurfaceIntent } from '../lib/chunkPreloader';
 import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCard';
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
-import { CirclePlus, Search, Settings, SquarePen } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
+import { SquarePen, MessageCirclePlus } from '@droidex/icons';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import { buildWorkspaceSections, resolveNewChatCwd, type WorkspaceScope } from '../lib/workspaces';
 import { SidebarCustomize } from './SidebarCustomize';
@@ -297,10 +298,7 @@ export default function Sidebar({
             onClick={newChat}
             className="flex w-full items-center gap-2.5 rounded-xl py-1.5 pr-8 pl-2.5 text-left text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-elevated"
           >
-            <SquarePen
-              className="h-4 w-4 shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text"
-              strokeWidth={1.75}
-            />
+            <SquarePen className="h-4 w-4 shrink-0 text-droid-text-secondary transition-colors group-hover:text-droid-text" />
             New chat
           </button>
           <button
@@ -312,7 +310,7 @@ export default function Sidebar({
             aria-label="New chat without a workspace"
             className="absolute top-1/2 right-1.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
           >
-            <CirclePlus className="h-4 w-4" strokeWidth={1.5} />
+            <MessageCirclePlus className="h-4 w-4" />
           </button>
         </div>
         <SidebarNavigation />

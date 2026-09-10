@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { Check, Loader2, Plus, Search, TriangleAlert } from 'lucide-react';
+import { Check, Plus, Search, TriangleAlert } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { GitBranchIcon, GitCommitIcon } from './GithubIcons';
 import { Popover } from './Popover';
 import { Row, RowCaret } from './primitives';
@@ -156,7 +157,7 @@ export function BranchMenu({
             className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
           />
           {(busy || fetching) && (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-droid-accent" />
+            <Spinner className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin-slow text-droid-accent" />
           )}
         </div>
 
@@ -265,7 +266,7 @@ export function BranchMenu({
                 disabled={!newName.trim() || busy}
                 className="flex shrink-0 items-center gap-1 rounded-md bg-droid-accent/15 px-2 py-1 text-[11px] font-medium text-droid-accent disabled:opacity-40"
               >
-                {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+                {busy && <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />}
                 Create
               </button>
             </div>

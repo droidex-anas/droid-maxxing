@@ -4,13 +4,13 @@ import {
   Bug,
   Check,
   CheckCircle2,
-  Copy,
   Ellipsis,
   ShieldCheck,
   ThumbsDown,
   ThumbsUp,
   X,
 } from 'lucide-react';
+import { Copy } from '@droidex/icons';
 import type { FeedbackAttachments, FeedbackCategory, FeedbackReportRequest } from '../lib/desktop';
 import { submitFeedbackReport } from '../lib/feedbackReport';
 

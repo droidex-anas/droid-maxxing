@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, ExternalLink, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ExternalLink, Plus, Trash2, X } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { Popover } from './Popover';
 import { Row, RowCaret } from './primitives';
 import { useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
@@ -251,7 +252,7 @@ export function WorktreeMenu({
                   in use
                 </span>
               ) : removing === w.path ? (
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-droid-text-muted" />
+                <Spinner className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin-slow text-droid-text-muted" />
               ) : confirming === w.path ? (
                 <div className="flex shrink-0 items-center gap-0.5">
                   <button
@@ -353,7 +354,7 @@ export function WorktreeMenu({
                   disabled={!name.trim() || busy}
                   className="flex items-center gap-1 rounded-md bg-droid-accent/15 px-2 py-1 text-[11px] font-medium text-droid-accent disabled:opacity-40"
                 >
-                  {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {busy && <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />}
                   Create & open
                 </button>
               </div>

@@ -13,15 +13,13 @@ import {
   ChevronDown,
   Maximize2,
   X,
-  PanelLeftClose,
-  PanelLeft,
   Boxes,
   Globe,
-  Loader2,
   ArrowLeft,
   CheckCircle2,
   Check,
 } from 'lucide-react';
+import { PanelLeft, Spinner } from '@droidex/icons';
 
 import type {
   TranscriptEvent,
@@ -692,7 +690,7 @@ function PanelHeader({
             title="Collapse"
             className="p-1 rounded-md text-droid-text-muted/60 hover:text-droid-text hover:bg-droid-elevated transition-colors"
           >
-            <PanelLeftClose className="w-3.5 h-3.5" />
+            <PanelLeft className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
@@ -712,7 +710,12 @@ function StatusDot({ status }: { status: string }) {
   if (status === 'completed')
     return <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" style={{ color: ACCENT }} />;
   if (status === 'in_progress')
-    return <Loader2 className="w-4 h-4 mt-0.5 shrink-0 animate-spin" style={{ color: ACCENT }} />;
+    return (
+      <Spinner
+        className="w-4 h-4 mt-0.5 shrink-0 motion-safe:animate-spin-slow"
+        style={{ color: ACCENT }}
+      />
+    );
   return <span className="mt-1.5 w-2.5 h-2.5 rounded-full border border-droid-border shrink-0" />;
 }
 

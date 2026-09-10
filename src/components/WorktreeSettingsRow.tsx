@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronRight, Loader2 } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
+import { Spinner } from '@droidex/icons';
 import { worktreeName } from '../lib/git';
 import { worktreeChatStatus } from '../lib/worktreeSettings';
 import type { SessionSummary } from '../types/bridge';
@@ -59,7 +60,7 @@ function WorktreeAction({
       className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-droid-text-muted transition-all duration-150 hover:bg-red-500/10 hover:text-red-400 active:scale-[0.94] disabled:opacity-40"
     >
       {checking === worktree.path || removing === worktree.path ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />
       ) : (
         'Delete'
       )}

@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { shallowEqual, useStoreApi, useStoreDispatch, useStoreSelector } from './hooks/useStore';
 import { AnimatePresence, motion } from 'framer-motion';
-import { PanelLeft, PanelRight } from 'lucide-react';
+import { PanelLeft, PanelRight } from '@droidex/icons';
 import { bridge } from './lib/bridge';
 import {
   connect,

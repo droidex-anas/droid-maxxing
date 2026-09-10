@@ -1,0 +1,39 @@
+DROIDEX PROPRIETARY SOURCE-AVAILABLE LICENSE
+Version 1.0, 9 August 2026
+
+Copyright (c) 2026 Anas (droidex-anas). All rights reserved.
+
+The source code and other original material in this repository (the
+"Software") are proprietary. Publication of the Software does not grant a
+license to use, copy, modify, merge, publish, distribute, sublicense, sell,
+host, deploy, or create derivative works from it, except as expressly allowed
+below.
+
+You may:
+
+1. view, download, copy, and run the Software locally and privately, solely to
+   evaluate and review DROIDEX; and
+2. create a GitHub fork and modify the Software solely to prepare and submit a
+   contribution to the official DROIDEX repository.
+
+You may not use the Software, or any substantial part of it, in another
+project, product, or service; use it in production; host or deploy it for other
+people; redistribute it; present it as your own work; remove or alter ownership
+notices; or use the DROIDEX name, branding, or identity without prior written
+permission from the copyright holder.
+
+Any other use requires prior written permission from the copyright holder.
+
+Contributions are accepted only under the DROIDEX Contributor Copyright
+Assignment Agreement in CLA.md. That agreement assigns copyright in accepted
+contributions to the copyright holder. Opening a pull request does not grant
+permission to use the rest of the Software for any other purpose.
+
+This license does not apply to third-party components included with or used by
+the Software. Those components remain subject to their respective licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE
+SOFTWARE OR ITS USE.

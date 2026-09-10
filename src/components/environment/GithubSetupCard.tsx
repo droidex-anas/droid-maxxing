@@ -1,13 +1,6 @@
 import { useRef } from 'react';
-import {
-  Check,
-  CircleUserRound,
-  Copy,
-  Download,
-  ExternalLink,
-  GitPullRequest,
-  Loader2,
-} from 'lucide-react';
+import { Check, CircleUserRound, Download, ExternalLink, GitPullRequest } from 'lucide-react';
+import { Copy, Spinner } from '@droidex/icons';
 
 import type { GithubAvailability } from '../../types/vcs';
 import type { GithubSetupAction } from '../../hooks/useGithubSetup';
@@ -141,7 +134,7 @@ export function GithubAuthPromptContent({
 function SetupActionIcon({ icon }: { icon: SetupContent['icon'] }) {
   switch (icon) {
     case 'busy':
-      return <Loader2 className="h-3.5 w-3.5 animate-spin" />;
+      return <Spinner className="h-3.5 w-3.5 motion-safe:animate-spin-slow" />;
     case 'signin':
       return <CircleUserRound className="h-3.5 w-3.5" />;
     case 'external':

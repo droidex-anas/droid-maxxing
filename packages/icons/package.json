@@ -1,0 +1,38 @@
+{
+  "name": "@droidex/icons",
+  "version": "0.1.0",
+  "description": "Curved 24px DROIDEX icons, with React components and plain SVGs.",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./svg/*": "./svg/*"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "dist",
+    "svg",
+    "LICENSE",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "scripts": {
+    "build": "node tools/build.mjs && tsc -p tsconfig.json --emitDeclarationOnly && node tools/build-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "lint": "eslint src tools test gallery/gallery.js",
+    "dev": "vite gallery --config tools/vite.config.mjs --host 127.0.0.1 --port 5198 --strictPort",
+    "prepack": "npm run build"
+  }
+}

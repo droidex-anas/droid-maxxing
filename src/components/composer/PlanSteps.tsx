@@ -31,8 +31,7 @@ function stepTone(item: TodoItem, isActive: boolean): string {
   return 'text-droid-text-muted';
 }
 
-// Per-step status glyph: a filled ring once done, an empty ring for upcoming
-// steps, and the empty ring with a spinning arc only while the model is working.
+// Completed steps stay filled; pending and stopped steps keep an empty ring.
 function StepRing({
   status,
   active,
@@ -49,13 +48,13 @@ function StepRing({
       </span>
     );
   }
+  if (active && spinning) {
+    return (
+      <span className="h-3.5 w-3.5 shrink-0 rounded-full border-[1.5px] border-droid-text border-r-transparent motion-safe:animate-spin-slow" />
+    );
+  }
   return (
-    <span
-      className={`h-3.5 w-3.5 shrink-0 rounded-full border-[1.5px] border-droid-text-muted/30 ${
-        active && spinning ? 'border-t-droid-text' : ''
-      } ${active && spinning ? 'animate-spin' : ''}`}
-      style={active && spinning ? { animationDuration: '1.4s' } : undefined}
-    />
+    <span className="h-3.5 w-3.5 shrink-0 rounded-full border-[1.5px] border-droid-text-muted/30" />
   );
 }
 
