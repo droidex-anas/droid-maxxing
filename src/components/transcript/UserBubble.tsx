@@ -171,7 +171,7 @@ export function UserBubble({
   const hasAttachments = message.files.length > 0 || browserRefs.length > 0;
   const hasPrompt = Boolean(display.text) || display.skills.length > 0 || display.visualize;
   return (
-    <div className="group/msg flex flex-col items-end gap-1.5 py-1">
+    <div className="group/msg flex flex-col items-end gap-1.5">
       {event.steered && (
         <span className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-droid-text-muted">
           <svg
@@ -203,13 +203,13 @@ export function UserBubble({
         </div>
       )}
       {hasPrompt && (
-        <div className="flex min-w-0 max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-relaxed text-droid-text">
+        <div className="flex min-w-0 max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-[1.6] text-droid-text">
           {display.visualize && <PromptChip icon={VisualizeIcon} label="Visualize" />}
           {display.skills.map((skill) => (
             <PromptChip key={skill} icon={Blocks} label={skill} title={`Skill: ${skill}`} />
           ))}
           {display.text ? (
-            <div className="w-full min-w-0 space-y-2 text-droid-text">
+            <div className="w-full min-w-0">
               <ClampedPrompt source={display.text} />
             </div>
           ) : null}

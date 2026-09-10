@@ -230,7 +230,7 @@ function createMarkdownComponents(specMode: boolean): Components {
         </h4>
       ),
     h5: ({ children }) => (
-      <h5 className="text-[13.5px] font-semibold text-droid-text-secondary mt-3 first:mt-0 mb-1">
+      <h5 className="text-[14px] font-semibold text-droid-text-secondary mt-3 first:mt-0 mb-1">
         {children}
       </h5>
     ),

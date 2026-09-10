@@ -6,28 +6,33 @@ import { EditorView } from '@codemirror/view';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
+// Tints are mixed from the text colour rather than white so they hold up on
+// light themes as well as dark ones.
+const textTint = (pct: number) =>
+  `color-mix(in srgb, var(--droid-text) ${String(pct)}%, transparent)`;
+
 export const liveMarkdownTheme = EditorView.theme({
   '&': { fontSize: '14px', minHeight: '44px', maxHeight: '200px' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { fontFamily: 'inherit', lineHeight: '20px', overflow: 'auto' },
   '.cm-content': {
     fontFamily: 'inherit',
-    padding: '12px 16px 10px',
+    padding: '12px 16px 10px calc(16px + var(--composer-indent, 0px))',
     caretColor: 'var(--droid-accent)',
   },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--droid-accent)', borderLeftWidth: '2px' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
-    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: textTint(14),
   },
   '.cm-md-strong': { fontWeight: '600' },
   '.cm-md-em': { fontStyle: 'italic' },
   '.cm-md-strike': { textDecoration: 'line-through', opacity: '0.65' },
   '.cm-md-code': {
     fontFamily: MONO,
-    fontSize: '13px',
-    background: 'rgba(255, 255, 255, 0.07)',
-    borderRadius: '4px',
-    padding: '0 3px',
+    fontSize: '12px',
+    background: textTint(8),
+    borderRadius: '5px',
+    padding: '1px 5px',
   },
   // Links read by colour, as in the transcript; the underline shows on hover.
   '.cm-md-link, .cm-md-url': {
@@ -39,7 +44,7 @@ export const liveMarkdownTheme = EditorView.theme({
   },
   '.cm-md-link:hover, .cm-md-url:hover': { textDecorationColor: 'currentColor' },
   '.cm-md-h1': { fontSize: '19px', fontWeight: '600', lineHeight: '26px' },
-  '.cm-md-h2': { fontSize: '17px', fontWeight: '600', lineHeight: '24px' },
+  '.cm-md-h2': { fontSize: '16px', fontWeight: '600', lineHeight: '24px' },
   '.cm-md-h3': { fontSize: '15px', fontWeight: '600', lineHeight: '22px' },
   '.cm-md-h4, .cm-md-h5, .cm-md-h6': { fontWeight: '600' },
   '.cm-md-quote': {
@@ -50,8 +55,8 @@ export const liveMarkdownTheme = EditorView.theme({
   },
   '.cm-md-codeline': {
     fontFamily: MONO,
-    fontSize: '13px',
-    background: 'rgba(255, 255, 255, 0.045)',
+    fontSize: '12px',
+    background: textTint(4),
   },
   '.cm-md-fence': { color: 'var(--droid-text-muted)' },
   // A block marker showing on the caret's own line: visible enough to see and
@@ -62,7 +67,7 @@ export const liveMarkdownTheme = EditorView.theme({
   '.cm-md-task-done': { color: 'var(--droid-accent)', fontWeight: '600' },
   // Monospace keeps a table's pipes in a column while it is being edited; away
   // from the caret the block is drawn as the table it will become.
-  '.cm-md-table': { fontFamily: MONO, fontSize: '13px' },
+  '.cm-md-table': { fontFamily: MONO, fontSize: '12px' },
   '.cm-md-tablehead': { fontWeight: '600' },
   '.cm-md-tableframe': {
     margin: '6px 0',
@@ -88,7 +93,7 @@ export const liveMarkdownTheme = EditorView.theme({
     fontWeight: '600',
     whiteSpace: 'nowrap',
     color: 'var(--droid-text)',
-    background: 'rgba(255, 255, 255, 0.04)',
+    background: textTint(4),
     borderBottom: '1px solid var(--droid-border-hover)',
   },
   '.cm-md-tableframe td': {
@@ -97,7 +102,7 @@ export const liveMarkdownTheme = EditorView.theme({
     color: 'var(--droid-text-secondary)',
     borderTop: '1px solid var(--droid-border)',
   },
-  '.cm-md-tableframe tbody tr:nth-child(even)': { background: 'rgba(255, 255, 255, 0.02)' },
+  '.cm-md-tableframe tbody tr:nth-child(even)': { background: textTint(2) },
   '.cm-md-hr': {
     display: 'inline-block',
     width: '90%',

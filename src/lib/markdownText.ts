@@ -27,7 +27,7 @@ export function markdownToPlainText(source: string): string {
     .replace(/^[-*+]\s+\[[ xX]\]\s/gm, '') // task items
     .replace(/^[-*+]\s+/gm, '') // bullets
     .replace(/^\d+\.\s+/gm, '') // ordered items
-    .replace(/\*\*|__|~~|`|\*/g, '') // emphasis, code, strikethrough
+    .replace(/\*\*|~~|`|\*/g, '') // emphasis, code, strikethrough
     .replace(/\s{2,}/g, ' ')
     .trim();
   return plain.length > 0 ? plain : source;

@@ -93,9 +93,8 @@ import { ArrowUp, ChevronDown, SlidersHorizontal, Square } from 'lucide-react';
 import { Spinner } from '@droidex/icons';
 import AddMenu from './composer/AddMenu';
 import SelectionMenu from './composer/SelectionMenu';
-import { applyDraftFormat, type DraftFormatAction } from '../lib/composerFormatting';
+import { useDraftEditing } from './composer/useDraftEditing';
 import type { ComposerHandle } from './composer/ComposerEditor';
-import type { DraftEditAction } from './composer/SelectionMenu';
 import { DraftSelections } from './composer/DraftSelections';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
 import ModelSelectorPopover from './ModelSelectorPopover';
@@ -315,14 +314,6 @@ export default function PromptInput({
     }, []),
   );
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  // The right-click formatting menu floats at the pointer, so it carries screen
-  // coordinates instead of anchoring inside the editor's layout.
-  const [selectionMenu, setSelectionMenu] = useState<{
-    x: number;
-    y: number;
-    hasSelection: boolean;
-    link: string | null;
-  } | null>(null);
   // Skills and plugins live on the draft's first line; attachments keep their own
   // row above it. Backspace on an empty draft unwinds both.
   const hasAttachmentChips =
@@ -364,8 +355,6 @@ export default function PromptInput({
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const editorRef = useRef<ComposerHandle>(null);
-
-  // The draft and the selections that share its first line.
   const submittingRef = useRef(false);
   const turnStartingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnStartingTargetKeyRef = useRef<string | null>(null);
@@ -737,28 +726,17 @@ export default function PromptInput({
     dispatch({ type: 'CLEAR_COMPOSER_SEED' });
   }, [composerSeed, input, dispatch, setVisualizeSelected]);
 
-  // Restore the selection after programmatic edits. The editor syncs the new
-  // text in its own effect (child effects run first), so by the time this
-  // runs the selection can land inside the replaced text.
+  // Restore the caret after a programmatic replacement. The editor syncs the
+  // new text in its own effect (child effects run first), so by the time this
+  // runs the caret can land inside the replaced text; the editor reports the
+  // new position back through onCaret.
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor) return;
-    const range = pendingRange.current;
-    if (range) {
-      pendingRange.current = null;
-      pendingCaret.current = null;
-      editor.focus();
-      editor.select(range.start, range.end);
-      setCaret(range.start);
-      return;
-    }
-    if (pendingCaret.current != null) {
-      const pos = pendingCaret.current;
-      pendingCaret.current = null;
-      editor.focus();
-      editor.select(pos, pos);
-      setCaret(pos);
-    }
+    const pos = pendingCaret.current;
+    if (!editor || pos === null) return;
+    pendingCaret.current = null;
+    editor.focus();
+    editor.select(pos, pos);
   }, [input]);
 
   const missionPreview = activeSession
@@ -1334,64 +1312,15 @@ export default function PromptInput({
       dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id });
   };
 
-  // Formatting edits replace a range, not just a caret, so they restore the
-  // selection the action chose (wrapped text, a url placeholder, a snippet).
-  // With no selection the engine applies line-scoped actions (headings, lists,
-  // quotes) to the line the caret is on.
-  const pendingRange = useRef<{ start: number; end: number } | null>(null);
-  const applyFormat = (action: DraftFormatAction) => {
-    const editor = editorRef.current;
-    const selection = editor?.selection() ?? { start: input.length, end: input.length };
-    const edit = applyDraftFormat(input, selection.start, selection.end, action);
+  // Typing, and every edit that behaves like typing, leaves history recall.
+  const editDraft = (text: string) => {
+    setInput(text);
     setHistoryIndex(null);
-    setInput(edit.text);
-    pendingRange.current = { start: edit.selectionStart, end: edit.selectionEnd };
   };
-
-  // Right-clicking anywhere in the draft opens the formatting menu; the actions
-  // it offers are line- or selection-scoped, so it never needs a selection to
-  // be useful.
-  const handleDraftContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const selection = editorRef.current?.selection();
-    setSelectionMenu({
-      x: e.clientX,
-      y: e.clientY,
-      hasSelection: selection ? selection.end > selection.start : false,
-      link: editorRef.current?.linkAt(e.clientX, e.clientY) ?? null,
-    });
-  };
-
-  // Cut, copy, paste and select-all for the draft. The platform menu is
-  // cancelled in favour of the composer's own, so these have to be carried
-  // here; they go through the same text-and-selection path as a formatting
-  // action, which is what puts the caret back afterwards.
-  const applyEdit = (action: DraftEditAction) => {
-    const editor = editorRef.current;
-    const selection = editor?.selection() ?? { start: input.length, end: input.length };
-    if (action === 'selectAll') {
-      editor?.focus();
-      editor?.select(0, input.length);
-      return;
-    }
-    const selected = input.slice(selection.start, selection.end);
-    if (action === 'copy' || action === 'cut') {
-      if (selected === '') return;
-      void navigator.clipboard.writeText(selected);
-      if (action === 'copy') return;
-      setHistoryIndex(null);
-      setInput(input.slice(0, selection.start) + input.slice(selection.end));
-      pendingRange.current = { start: selection.start, end: selection.start };
-      return;
-    }
-    void navigator.clipboard.readText().then((text) => {
-      if (text === '') return;
-      setHistoryIndex(null);
-      setInput(input.slice(0, selection.start) + text + input.slice(selection.end));
-      const caret = selection.start + text.length;
-      pendingRange.current = { start: caret, end: caret };
-    });
-  };
+  // Declared after the pendingCaret effect above so that when both are pending
+  // the formatting selection is the one applied last.
+  const draftEditing = useDraftEditing({ input, editDraft, editorRef });
+  const { applyFormat } = draftEditing;
 
   // Capture-phase keydown from the editor: consuming a key here (prevent +
   // stop propagation) keeps the editor's own keymap from also seeing it.
@@ -1704,19 +1633,16 @@ export default function PromptInput({
                 ariaLabel="Prompt"
                 placeholder={draftSelections.length > 0 ? '' : promptPlaceholder}
                 indentPx={selectionsIndent}
-                onChange={(text) => {
-                  setInput(text);
-                  setHistoryIndex(null);
-                }}
+                onChange={editDraft}
                 onCaret={setCaret}
                 onKeyDown={handleKeyDown}
-                onContextMenu={handleDraftContextMenu}
+                onContextMenu={draftEditing.openMenu}
                 onPasteFiles={addComposerFiles}
               />
             </Suspense>
           </div>
 
-          {/* Toolbar — one seamless surface with the textarea, no divider line.
+          {/* Toolbar — one seamless surface with the draft, no divider line.
               It wraps on narrow windows rather than pushing controls offscreen. */}
           <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1">
             <AddMenu
@@ -1734,8 +1660,6 @@ export default function PromptInput({
                 editorRef.current?.focus();
               }}
             />
-
-            <span className="h-4 w-px bg-droid-border shrink-0" aria-hidden />
 
             <div className="relative shrink-0">
               <button
@@ -1992,14 +1916,10 @@ export default function PromptInput({
         />
       )}
       <SelectionMenu
-        position={selectionMenu}
-        hasSelection={selectionMenu?.hasSelection ?? false}
-        link={selectionMenu?.link ?? null}
+        menu={draftEditing.menu}
         onFormat={applyFormat}
-        onEdit={applyEdit}
-        onClose={() => {
-          setSelectionMenu(null);
-        }}
+        onEdit={draftEditing.applyEdit}
+        onClose={draftEditing.closeMenu}
       />
     </div>
   );

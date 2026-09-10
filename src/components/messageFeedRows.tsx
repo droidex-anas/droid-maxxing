@@ -10,6 +10,7 @@ import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
 import type { ToolActivityDensity } from '../lib/toolActivity';
 import { hasAppBlock } from './appBlockRuntime';
+import type { FeedItem } from './chatFeed';
 import type { FeedItemViewProps } from './chat';
 import type { SubagentsDockData } from './SubagentsDock';
 
@@ -29,12 +30,28 @@ export function areFeedRowPropsEqual(previous: FeedRowProps, next: FeedRowProps)
   );
 }
 
+// A sent prompt gets its own entrance (see index.css) so the send reads as a
+// gesture; everything else that appends slides in quietly.
+function enterClass(isPrompt: boolean): string {
+  return isPrompt ? 'prompt-enter' : 'feed-row-enter';
+}
+
+const JUST_SENT_MS = 2_000;
+
+function justSentPrompt(item: FeedItem): boolean {
+  return (
+    item.type === 'message' &&
+    item.event.author === 'user' &&
+    Date.now() - item.event.ts < JUST_SENT_MS
+  );
+}
+
 export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
   const { animateOnMount, onEnter, itemView, areItemPropsEqual, ...itemProps } = props;
   void areItemPropsEqual;
   const ItemView = itemView;
-  const animate = useRef(animateOnMount).current;
   const { item } = itemProps;
+  const animate = useRef(animateOnMount || justSentPrompt(item)).current;
   useEffect(() => {
     if (animate) onEnter?.(item.key);
   }, [animate, onEnter, item.key]);
@@ -59,7 +76,7 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
       data-anchor-id={isPrompt ? item.key : undefined}
       data-transcript-find-hit={hit}
       className={`mx-auto min-w-0 ${isWideAppResponse ? 'max-w-4xl' : 'max-w-2xl'} ${
-        animate ? 'feed-row-enter' : ''
+        animate ? enterClass(isPrompt) : ''
       } ${reachClass}`}
     >
       {reach.rangeSelecting && (

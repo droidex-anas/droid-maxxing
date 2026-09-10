@@ -33,6 +33,17 @@ import type { DraftFormatAction } from '../../lib/composerFormatting';
 
 export type DraftEditAction = 'cut' | 'copy' | 'paste' | 'selectAll';
 
+// Where the draft was right-clicked and what was under the pointer. Screen
+// coordinates, because the menu floats at the pointer rather than anchoring
+// inside the editor's layout.
+export interface SelectionMenuState {
+  x: number;
+  y: number;
+  hasSelection: boolean;
+  // The address under the pointer when the click landed on a link.
+  link: string | null;
+}
+
 type MenuIcon = ComponentType<{ className?: string }>;
 
 const MENU_WIDTH_PX = 200;
@@ -102,24 +113,19 @@ function TextRow({
 }
 
 export default function SelectionMenu({
-  position,
-  hasSelection,
-  link,
+  menu,
   onFormat,
   onEdit,
   onClose,
 }: {
-  position: { x: number; y: number } | null;
-  hasSelection: boolean;
-  // The address under the pointer when the draft was right-clicked on a link.
-  link: string | null;
+  menu: SelectionMenuState | null;
   onFormat: (action: DraftFormatAction) => void;
   onEdit: (action: DraftEditAction) => void;
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!position) return;
+    if (!menu) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -132,9 +138,10 @@ export default function SelectionMenu({
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('mousedown', onDown);
     };
-  }, [position, onClose]);
+  }, [menu, onClose]);
 
-  if (!position) return null;
+  if (!menu) return null;
+  const { x, y, hasSelection, link } = menu;
 
   const choose = (action: () => void) => () => {
     onClose();
@@ -153,8 +160,8 @@ export default function SelectionMenu({
       // from the cursor and stops short of the right edge.
       style={{
         width: MENU_WIDTH_PX,
-        left: Math.min(position.x, window.innerWidth - MENU_WIDTH_PX - 10),
-        top: position.y - 4,
+        left: Math.min(x, window.innerWidth - MENU_WIDTH_PX - 10),
+        top: y - 4,
         transform: 'translateY(-100%)',
       }}
       className="fixed z-50 max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-droid-border-hover bg-droid-elevated p-1 shadow-[0_16px_40px_rgba(0,0,0,0.45)]"

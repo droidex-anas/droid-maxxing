@@ -142,12 +142,10 @@ const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function 
     view.dispatch({ changes: edit, scrollIntoView: true });
   }, [value]);
 
-  // Chips over the first line indent the whole draft block, matching the
-  // textarea behaviour this replaces.
+  // Chips over the first line indent the whole draft block; the theme adds
+  // this to the content padding it owns.
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    view.contentDOM.style.paddingLeft = indentPx === 0 ? '' : `calc(16px + ${String(indentPx)}px)`;
+    hostRef.current?.style.setProperty('--composer-indent', `${String(indentPx)}px`);
   }, [indentPx]);
 
   useImperativeHandle(
@@ -165,9 +163,7 @@ const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function 
       },
       selection: () => {
         const selection = viewRef.current?.state.selection.main;
-        return selection
-          ? { start: selection.from, end: selection.to }
-          : { start: value.length, end: value.length };
+        return selection ? { start: selection.from, end: selection.to } : { start: 0, end: 0 };
       },
       linkAt: (x: number, y: number) => {
         const view = viewRef.current;
@@ -175,7 +171,7 @@ const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function 
         return view && pos != null ? linkHrefAt(view, pos) : null;
       },
     }),
-    [value.length],
+    [],
   );
 
   return (

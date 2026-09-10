@@ -656,7 +656,9 @@ export default function ChatView({
   } else if (startingCompose) {
     conversationContent = (
       <div className="mx-auto min-w-0 max-w-2xl px-6 py-6">
-        <UserBubble event={startingCompose} />
+        <div className="prompt-enter">
+          <UserBubble event={startingCompose} />
+        </div>
         <div className="mt-5">
           <ChatSkeleton />
         </div>

@@ -96,36 +96,35 @@ function docHref(view: EditorView, from: number, to: number): string | null {
 
 // A click opens a link; a drag that selects across one does not. mousedown only
 // remembers the candidate, and mouseup decides once the gesture is settled.
-let pendingLink: { x: number; y: number; href: string } | null = null;
-
-const linkInteraction = EditorView.domEventHandlers({
-  mousedown(event, view) {
-    pendingLink = null;
-    if (
-      event.button !== 0 ||
-      event.detail > 1 ||
-      event.shiftKey ||
-      event.metaKey ||
-      event.ctrlKey
-    ) {
-      return;
-    }
-    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-    if (pos === null) return;
-    const href = linkHrefAt(view, pos);
-    if (href === null) return;
-    pendingLink = { x: event.clientX, y: event.clientY, href };
-  },
-  mouseup(event, view) {
-    const pending = pendingLink;
-    pendingLink = null;
-    if (!pending) return;
-    if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 4) return;
-    if (!view.state.selection.main.empty) return;
-    event.preventDefault();
-    window.open(pending.href, '_blank', 'noopener,noreferrer');
-  },
-});
+function linkInteraction() {
+  let pending: { x: number; y: number; href: string } | null = null;
+  return EditorView.domEventHandlers({
+    mousedown(event, view) {
+      pending = null;
+      const plainClick =
+        event.button === 0 &&
+        event.detail === 1 &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey;
+      if (!plainClick) return;
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos === null) return;
+      const href = linkHrefAt(view, pos);
+      if (href === null) return;
+      pending = { x: event.clientX, y: event.clientY, href };
+    },
+    mouseup(event, view) {
+      const candidate = pending;
+      pending = null;
+      if (!candidate) return;
+      if (Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) > 4) return;
+      if (!view.state.selection.main.empty) return;
+      event.preventDefault();
+      window.open(candidate.href, '_blank', 'noopener,noreferrer');
+    },
+  });
+}
 
 // `insertNewlineContinueMarkup` only acts inside list and quote markup — on a
 // heading or an ordinary line it declines — so an unconditional newline has to
@@ -147,7 +146,7 @@ export function liveMarkdown() {
     markdown({ base: markdownLanguage }),
     headingAutoSpace,
     markdownDecorations,
-    linkInteraction,
+    linkInteraction(),
     liveMarkdownTheme,
     history(),
     keymap.of([
