@@ -355,6 +355,8 @@ export default function PromptInput({
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const editorRef = useRef<ComposerHandle>(null);
+  // Flips once the lazy editor mounts, so a caret queued for it is applied.
+  const [editorReady, setEditorReady] = useState(false);
   const submittingRef = useRef(false);
   const turnStartingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnStartingTargetKeyRef = useRef<string | null>(null);
@@ -562,10 +564,23 @@ export default function PromptInput({
     },
   ];
 
+  // Typing, and every edit that behaves like typing, leaves history recall.
+  const editDraft = (text: string) => {
+    setInput(text);
+    setHistoryIndex(null);
+  };
+  const draftEditing = useDraftEditing({ input, editDraft, editorRef });
+  const { applyFormat } = draftEditing;
+
   const trigger = useMemo(() => composerTrigger(input, caret), [input, caret]);
-  const overlayOpen = [trigger, modelsOpen, addMenuOpen, feedbackReport, isLive && sendHover].some(
-    Boolean,
-  );
+  const overlayOpen = [
+    trigger,
+    modelsOpen,
+    addMenuOpen,
+    feedbackReport,
+    draftEditing.menu,
+    isLive && sendHover,
+  ].some(Boolean);
 
   useEffect(() => {
     if (!isLive) setSendHover(false);
@@ -737,7 +752,7 @@ export default function PromptInput({
     pendingCaret.current = null;
     editor.focus();
     editor.select(pos, pos);
-  }, [input]);
+  }, [input, editorReady]);
 
   const missionPreview = activeSession
     ? activeSession.sessionPurpose === 'mission-control'
@@ -1312,16 +1327,6 @@ export default function PromptInput({
       dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id });
   };
 
-  // Typing, and every edit that behaves like typing, leaves history recall.
-  const editDraft = (text: string) => {
-    setInput(text);
-    setHistoryIndex(null);
-  };
-  // Declared after the pendingCaret effect above so that when both are pending
-  // the formatting selection is the one applied last.
-  const draftEditing = useDraftEditing({ input, editDraft, editorRef });
-  const { applyFormat } = draftEditing;
-
   // Capture-phase keydown from the editor: consuming a key here (prevent +
   // stop propagation) keeps the editor's own keymap from also seeing it.
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -1335,6 +1340,13 @@ export default function PromptInput({
       target.isContentEditable &&
       target.closest('.cm-md-tableframe') !== null
     ) {
+      // The draft's formatting shortcuts mean nothing in a cell, and letting
+      // them bubble would reach the app's own bindings (Cmd+B toggles the
+      // sidebar).
+      if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'e'].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       return;
     }
     if (menuOpen) {
@@ -1638,6 +1650,9 @@ export default function PromptInput({
                 onKeyDown={handleKeyDown}
                 onContextMenu={draftEditing.openMenu}
                 onPasteFiles={addComposerFiles}
+                onReady={() => {
+                  setEditorReady(true);
+                }}
               />
             </Suspense>
           </div>

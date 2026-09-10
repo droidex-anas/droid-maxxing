@@ -82,6 +82,7 @@ function ExpandButton({ expanded, onClick }: { expanded: boolean; onClick: () =>
   return (
     <button
       onClick={onClick}
+      aria-expanded={expanded}
       className="flex items-center gap-1 rounded-full border border-droid-border bg-droid-surface px-2.5 py-1 text-[11px] font-medium text-droid-text-secondary shadow-sm transition-colors hover:border-droid-border-hover hover:text-droid-text"
     >
       {expanded ? 'Show less' : 'Show more'}

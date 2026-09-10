@@ -78,12 +78,13 @@ export const JSON_HIGHLIGHT_MAX_CHARS = 8_192;
 export function HighlightJson({ code }: { code: string }) {
   const nodes = useMemo(() => {
     const tokens = code.split(
-      /("(?:\\.|[^"\\])*"|:|true|false|null|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[[\]{}!,])/g,
+      /("(?:\\.|[^"\\])*"|:|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[[\]{}!,])/g,
     );
     return tokens.map((token, i) => {
       if (/^"(?:\\.|[^"\\])*"$/.exec(token)) {
-        const next = tokens[i + 1].trimStart();
-        if (next.startsWith(':')) {
+        // Captures alternate with the text between them, so the colon that
+        // makes this a key is two tokens on, across (at most) whitespace.
+        if (tokens[i + 1].trim() === '' && tokens[i + 2] === ':') {
           return (
             <span key={i} style={{ color: 'var(--droid-accent)' }}>
               {token}
@@ -108,7 +109,7 @@ export function HighlightJson({ code }: { code: string }) {
             {token}
           </span>
         );
-      if (/^\d/.exec(token))
+      if (/^-?\d/.exec(token))
         return (
           <span key={i} style={{ color: 'var(--droid-orange)' }}>
             {token}

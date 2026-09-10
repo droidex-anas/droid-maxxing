@@ -75,8 +75,12 @@ function installContextMenu(options) {
       replaceMisspelling: (word) => webContents.replaceMisspelling(word),
       addToDictionary: (word) => webContents.session.addWordToSpellCheckerDictionary(word),
       copyText: (text) => options.clipboard.writeText(text),
-      openExternal: (url) =>
-        void options.shell.openExternal(url).catch((error) => options.logError(error.message)),
+      openExternal: (url) => {
+        // The same http(s)-only rule the renderer's links go through.
+        Promise.resolve()
+          .then(() => options.openExternal(url))
+          .catch((error) => options.logError(error.message));
+      },
     });
     // An empty menu would flash a bare grey box; a right-click on nothing
     // actionable should do nothing at all.

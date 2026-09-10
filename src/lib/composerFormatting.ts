@@ -68,7 +68,9 @@ export function toggleLinePrefix(
   const lines = text.slice(bounds.start, bounds.end).split('\n');
   const strip = numbered ? /^\d+\.\s/ : new RegExp(`^${escapeRegExp(prefix)}`);
   const hasPrefix = (line: string) => strip.test(line);
-  const removing = lines.every((line) => hasPrefix(line) || line === '');
+  // A run of blank lines has nothing to remove, so the action starts a list.
+  const removing =
+    lines.some((line) => line !== '') && lines.every((line) => hasPrefix(line) || line === '');
   const nextLines = lines.map((line, index) => {
     if (line === '') return line;
     if (removing) return line.replace(strip, '');
@@ -92,9 +94,10 @@ function escapeRegExp(text: string): string {
 export function toggleHeading(text: string, start: number, end: number, level: number): DraftEdit {
   const bounds = lineBounds(text, start, start);
   const line = text.slice(bounds.start, bounds.end);
-  const existing = /^(#{1,6})\s?/.exec(line);
+  // A heading needs a space after its hashes: `#release` is a word.
+  const existing = /^(#{1,6})(?: |$)/.exec(line);
   const marker = '#'.repeat(level);
-  const content = existing ? line.replace(/^#{1,6}\s?/, '') : line;
+  const content = existing ? line.slice(existing[0].length) : line;
   const nextLine = existing?.[1].length === level ? content : `${marker} ${content}`;
   const caretInContent = Math.max(0, start - bounds.start - (existing ? existing[0].length : 0));
   const nextCaret = bounds.start + (nextLine === content ? 0 : marker.length + 1) + caretInContent;
@@ -139,7 +142,7 @@ export function insertLink(text: string, start: number, end: number): DraftEdit 
     return {
       text: `${text.slice(0, start)}[label](url)${text.slice(end)}`,
       selectionStart: start + 1,
-      selectionEnd: start + 7,
+      selectionEnd: start + 6,
     };
   }
   const urlStart = start + 1 + selected.length + 2;

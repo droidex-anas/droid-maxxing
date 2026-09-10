@@ -22,9 +22,10 @@ export function faviconUrl(host: string): string {
 function gitHubLabel(path: string): string | null {
   const [owner, repo, kind, rest] = path.replace(/^\//, '').split('/');
   if (!owner || !repo) return null;
-  if (kind === 'pull' && rest) return `PR #${rest}`;
-  if (kind === 'issues' && rest) return `Issue #${rest}`;
-  if (kind === 'commit' && rest) return rest.slice(0, 7);
+  // Only real identifiers get a name; `/pull/new` keeps its address.
+  if (kind === 'pull' && /^\d+$/.test(rest)) return `PR #${rest}`;
+  if (kind === 'issues' && /^\d+$/.test(rest)) return `Issue #${rest}`;
+  if (kind === 'commit' && /^[0-9a-f]{7,40}$/i.test(rest)) return rest.slice(0, 7);
   if (!kind) return `${owner}/${repo}`;
   return null;
 }

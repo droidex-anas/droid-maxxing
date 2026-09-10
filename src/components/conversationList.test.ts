@@ -471,15 +471,29 @@ test('resize restore uses virtual content offsets without a mounted row', () => 
 test('entrance animation fires once per append and not when a settled row remounts', () => {
   const entered = new Set<string>();
   const appended = new Set(['new-tail']);
-  assert.equal(shouldAnimateFeedRow('new-tail', appended, entered), true);
+  const tail = { key: 'new-tail', type: 'tool' };
+  const old = { key: 'old-row', type: 'tool' };
+  assert.equal(shouldAnimateFeedRow(tail, appended, entered), true);
   assert.equal(
-    shouldAnimateFeedRow('new-tail', appended, entered),
+    shouldAnimateFeedRow(tail, appended, entered),
     true,
     'discarded renders must not consume entrance',
   );
   entered.add('new-tail'); // The mounted row records its committed entrance.
-  assert.equal(shouldAnimateFeedRow('new-tail', appended, entered), false);
-  assert.equal(shouldAnimateFeedRow('old-row', appended, entered), false);
+  assert.equal(shouldAnimateFeedRow(tail, appended, entered), false);
+  assert.equal(shouldAnimateFeedRow(old, appended, entered), false);
+});
+
+test('a prompt sent moments ago animates once even when the projection rebuilt it', () => {
+  const entered = new Set<string>();
+  const none = new Set<string>();
+  const now = 10_000;
+  const sent = { key: 'prompt', type: 'message', event: { author: 'user', ts: now - 500 } };
+  const replayed = { key: 'old', type: 'message', event: { author: 'user', ts: now - 60_000 } };
+  assert.equal(shouldAnimateFeedRow(sent, none, entered, now), true);
+  assert.equal(shouldAnimateFeedRow(replayed, none, entered, now), false);
+  entered.add('prompt');
+  assert.equal(shouldAnimateFeedRow(sent, none, entered, now), false);
 });
 
 test('row mount identity follows FeedItem.key while viewport identity follows feedRowId', () => {

@@ -283,7 +283,7 @@ function createMainWindow() {
   installContextMenu({
     Menu,
     clipboard,
-    shell,
+    openExternal,
     window: mainWindow,
     webContents: mainWindow.webContents,
     logError: (message) => console.error('[context-menu] %s', message),

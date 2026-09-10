@@ -26,6 +26,10 @@ export function useDraftEditing({
 }) {
   const [menu, setMenu] = useState<SelectionMenuState | null>(null);
   const pendingRange = useRef<Range | null>(null);
+  // The clipboard resolves later; a paste must splice into the draft as it is
+  // then, not as it was when the menu was clicked.
+  const latestInput = useRef(input);
+  latestInput.current = input;
 
   useEffect(() => {
     const range = pendingRange.current;
@@ -65,21 +69,36 @@ export function useDraftEditing({
     const selected = input.slice(start, end);
     if (action === 'copy' || action === 'cut') {
       if (selected === '') return;
-      void navigator.clipboard.writeText(selected);
-      if (action === 'cut')
-        replace(input.slice(0, start) + input.slice(end), { start, end: start });
+      // A cut only removes text once the clipboard has it.
+      navigator.clipboard.writeText(selected).then(
+        () => {
+          if (action === 'cut')
+            replace(input.slice(0, start) + input.slice(end), { start, end: start });
+        },
+        (error: unknown) => {
+          console.warn('Clipboard write failed', error);
+        },
+      );
       return;
     }
-    void navigator.clipboard.readText().then((text) => {
-      if (text === '') return;
-      const caret = start + text.length;
-      replace(input.slice(0, start) + text + input.slice(end), { start: caret, end: caret });
-    });
+    navigator.clipboard.readText().then(
+      (text) => {
+        if (text === '' || latestInput.current !== input) return;
+        const caret = start + text.length;
+        replace(input.slice(0, start) + text + input.slice(end), { start: caret, end: caret });
+      },
+      (error: unknown) => {
+        console.warn('Clipboard read failed', error);
+      },
+    );
   };
 
   // Right-clicking anywhere in the draft opens the menu; its actions are line-
   // or selection-scoped, so it never needs a selection to be useful.
   const openMenu = (event: MouseEvent) => {
+    // A rendered table's cells are their own editable fields; the platform
+    // menu already serves them, and the draft actions would not.
+    if (event.target instanceof HTMLElement && event.target.closest('.cm-md-tableframe')) return;
     event.preventDefault();
     const { start, end } = selection();
     setMenu({

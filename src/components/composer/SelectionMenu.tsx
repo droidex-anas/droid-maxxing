@@ -1,4 +1,11 @@
-import { useEffect, useRef, type ComponentType, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  useLayoutEffect,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import {
   Bold,
   ClipboardCopy,
@@ -140,6 +147,14 @@ export default function SelectionMenu({
     };
   }, [menu, onClose]);
 
+  // The menu grows upward from the pointer (the draft sits at the bottom of
+  // the window); near the top it flips below so nothing lands off-screen.
+  const [above, setAbove] = useState(true);
+  useLayoutEffect(() => {
+    const height = menuRef.current?.offsetHeight ?? 0;
+    setAbove(menu ? menu.y - height - 4 >= 8 : true);
+  }, [menu]);
+
   if (!menu) return null;
   const { x, y, hasSelection, link } = menu;
 
@@ -156,13 +171,11 @@ export default function SelectionMenu({
       onContextMenu={(e: ReactMouseEvent) => {
         e.preventDefault();
       }}
-      // The draft sits at the bottom of the window, so the menu grows upward
-      // from the cursor and stops short of the right edge.
       style={{
         width: MENU_WIDTH_PX,
         left: Math.min(x, window.innerWidth - MENU_WIDTH_PX - 10),
-        top: y - 4,
-        transform: 'translateY(-100%)',
+        top: above ? y - 4 : y + 4,
+        transform: above ? 'translateY(-100%)' : undefined,
       }}
       className="fixed z-50 max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-droid-border-hover bg-droid-elevated p-1 shadow-[0_16px_40px_rgba(0,0,0,0.45)]"
     >
@@ -176,7 +189,11 @@ export default function SelectionMenu({
           <TextRow
             icon={ClipboardCopy}
             label="Copy Link Address"
-            onSelect={choose(() => void navigator.clipboard.writeText(link))}
+            onSelect={choose(() => {
+              navigator.clipboard.writeText(link).catch((error: unknown) => {
+                console.warn('Clipboard write failed', error);
+              });
+            })}
           />
           <Separator />
         </>

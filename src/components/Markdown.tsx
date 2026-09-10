@@ -312,7 +312,7 @@ function createMarkdownComponents(specMode: boolean): Components {
           className="group/link"
           style={{ color: 'var(--droid-link)' }}
         >
-          {link ? <LinkBadge link={link} /> : null}
+          {link ? <LinkBadge key={link.host} link={link} /> : null}
           <span
             className={`underline decoration-transparent underline-offset-2 transition-colors group-hover/link:decoration-current ${textIsUrl && !named ? 'break-all' : ''}`}
           >

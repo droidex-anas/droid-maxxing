@@ -23,7 +23,7 @@ function splitRow(line: string): string[] {
   return line
     .trim()
     .replace(/^\|/, '')
-    .replace(/\|$/, '')
+    .replace(/(?<!\\)\|$/, '')
     .split(/(?<!\\)\|/)
     .map((cell) => cell.trim().replace(/\\\|/g, '|'));
 }

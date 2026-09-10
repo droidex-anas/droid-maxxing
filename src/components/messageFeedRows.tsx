@@ -10,7 +10,6 @@ import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
 import type { ToolActivityDensity } from '../lib/toolActivity';
 import { hasAppBlock } from './appBlockRuntime';
-import type { FeedItem } from './chatFeed';
 import type { FeedItemViewProps } from './chat';
 import type { SubagentsDockData } from './SubagentsDock';
 
@@ -36,22 +35,12 @@ function enterClass(isPrompt: boolean): string {
   return isPrompt ? 'prompt-enter' : 'feed-row-enter';
 }
 
-const JUST_SENT_MS = 2_000;
-
-function justSentPrompt(item: FeedItem): boolean {
-  return (
-    item.type === 'message' &&
-    item.event.author === 'user' &&
-    Date.now() - item.event.ts < JUST_SENT_MS
-  );
-}
-
 export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
   const { animateOnMount, onEnter, itemView, areItemPropsEqual, ...itemProps } = props;
   void areItemPropsEqual;
   const ItemView = itemView;
   const { item } = itemProps;
-  const animate = useRef(animateOnMount || justSentPrompt(item)).current;
+  const animate = useRef(animateOnMount).current;
   useEffect(() => {
     if (animate) onEnter?.(item.key);
   }, [animate, onEnter, item.key]);

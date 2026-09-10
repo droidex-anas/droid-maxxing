@@ -30,6 +30,8 @@ const MAX_REDIRECTS = 3;
 const FOUND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MISSING_TTL_MS = 24 * 60 * 60 * 1000;
 const RETRY_AFTER_MS = 5 * 60 * 1000;
+// Icons kept in memory; older hosts fall back to the disk cache.
+const SETTLED_LIMIT = 256;
 const RESERVED_TLDS = new Set([
   'localhost',
   'local',
@@ -71,6 +73,14 @@ function isPrivateAddress(address) {
     );
   }
   const lower = address.toLowerCase();
+  // IPv4-mapped addresses arrive dotted (`::ffff:127.0.0.1`) or as two hex
+  // groups (`::ffff:7f00:1`); both name the same IPv4 target.
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(lower);
+  if (mapped) {
+    const high = Number.parseInt(mapped[1], 16);
+    const low = Number.parseInt(mapped[2], 16);
+    return isPrivateAddress(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
   if (lower.startsWith('::ffff:')) return isPrivateAddress(lower.slice(7));
   return lower === '::' || lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower);
 }
@@ -291,6 +301,7 @@ function createFaviconStore({
       pending = resolveIcon(host)
         .then((found) => {
           settled.set(host, found);
+          if (settled.size > SETTLED_LIMIT) settled.delete(settled.keys().next().value);
           return found;
         })
         .catch((error) => {

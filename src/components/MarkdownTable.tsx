@@ -1,4 +1,13 @@
+import type { CSSProperties } from 'react';
 import type { Components } from 'react-markdown';
+
+// GFM only knows left, center and right; the hast type also allows values
+// HTML tables never produce here.
+function alignStyle(align: string | undefined): CSSProperties | undefined {
+  return align === 'left' || align === 'center' || align === 'right'
+    ? { textAlign: align }
+    : undefined;
+}
 
 // GFM tables for the chat and spec presentations. A table wider than its column
 // scrolls inside its own frame instead of stretching the transcript: the frame
@@ -31,15 +40,17 @@ export function markdownTableComponents(specMode: boolean): Components {
         {children}
       </tbody>
     ),
-    th: ({ children }) => (
+    th: ({ children, align }) => (
       <th
+        style={alignStyle(align)}
         className={`border-b border-droid-border-hover text-left align-top font-semibold whitespace-nowrap text-droid-text ${cell}`}
       >
         {children}
       </th>
     ),
-    td: ({ children }) => (
+    td: ({ children, align }) => (
       <td
+        style={alignStyle(align)}
         className={`min-w-[14ch] border-t border-droid-border/60 align-top text-droid-text-secondary first:font-medium first:text-droid-text ${cell}`}
       >
         {children}

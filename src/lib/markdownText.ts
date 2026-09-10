@@ -21,8 +21,9 @@ export function markdownToPlainText(source: string): string {
         .filter((cell) => cell !== '')
         .join(' · '),
     )
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // [label](url) -> label
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // [label](url) and ![alt](src) -> text
     .replace(/^#{1,6}\s+/gm, '') // ATX headings
+    .replace(/^(?:=+|-+)[ \t]*$/gm, '') // setext underlines
     .replace(/^>\s?/gm, '') // blockquotes
     .replace(/^[-*+]\s+\[[ xX]\]\s/gm, '') // task items
     .replace(/^[-*+]\s+/gm, '') // bullets

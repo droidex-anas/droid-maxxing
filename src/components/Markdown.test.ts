@@ -256,7 +256,7 @@ test('copy gracefully declines when the Clipboard API is unavailable', async () 
 
 test('small JSON fences keep token highlighting and large ones stay plain', async () => {
   const { JSON_HIGHLIGHT_MAX_CHARS } = await import('./MarkdownCode');
-  const small = '```json\n{"accent": true, "count": 3}\n```';
+  const small = '```json\n{"accent": true, "count": 3, "name": "droid"}\n```';
   const largeObject = Object.fromEntries(
     Array.from({ length: 1200 }, (_, index) => [`k${String(index)}`, index]),
   );
@@ -265,7 +265,9 @@ test('small JSON fences keep token highlighting and large ones stay plain', asyn
 
   const smallHtml = renderToStaticMarkup(createElement(Markdown, null, small));
   const largeHtml = renderToStaticMarkup(createElement(Markdown, null, large));
-  assert.match(smallHtml, /--droid-green/);
+  // Keys read by accent, string values by green.
+  assert.match(smallHtml, /--droid-accent\)">&quot;accent&quot;/);
+  assert.match(smallHtml, /--droid-green\)">&quot;droid&quot;/);
   assert.doesNotMatch(largeHtml, /--droid-green/);
   assert.match(largeHtml, /k1199/);
 });

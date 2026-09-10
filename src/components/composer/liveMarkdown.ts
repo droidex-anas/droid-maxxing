@@ -22,13 +22,27 @@ import { liveMarkdownTheme } from './liveMarkdownTheme';
 // markdown. A single `#` is left alone: `#1` and `#release` are ordinary words.
 export function needsHeadingSpace(beforeCaret: string, typed: string): boolean {
   if (typed.length !== 1 || typed === ' ' || typed === '#') return false;
-  return /^#{2,6}$/.test(beforeCaret);
+  // Up to three spaces of indentation still make a heading in CommonMark.
+  return /^ {0,3}#{2,6}$/.test(beforeCaret);
+}
+
+function insideCode(view: EditorView, pos: number): boolean {
+  let node: LinkNode | null = syntaxTree(view.state).resolveInner(pos, -1);
+  while (node) {
+    if (node.name === 'FencedCode' || node.name === 'CodeBlock' || node.name === 'InlineCode') {
+      return true;
+    }
+    node = node.parent;
+  }
+  return false;
 }
 
 const headingAutoSpace = EditorView.inputHandler.of((view, from, to, text) => {
   if (from !== to) return false;
   const line = view.state.doc.lineAt(from);
   if (!needsHeadingSpace(line.text.slice(0, from - line.from), text)) return false;
+  // Code is typed verbatim; `##x` inside a fence is the writer's own text.
+  if (insideCode(view, from)) return false;
   view.dispatch({
     changes: { from, insert: ` ${text}` },
     selection: { anchor: from + 2 },
@@ -63,7 +77,7 @@ const markdownDecorations = StateField.define<MarkdownDecorations>({
   ],
 });
 
-// The structural slice of a lezer SyntaxNode link resolution needs.
+// The structural slice of a lezer SyntaxNode the tree walks here need.
 interface LinkNode {
   name: string;
   from: number;

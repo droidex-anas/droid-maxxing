@@ -362,7 +362,7 @@ export function MessageFeed({
               item={item}
               itemView={FeedItemView}
               areItemPropsEqual={feedItemPropsEqual}
-              animateOnMount={shouldAnimateFeedRow(item.key, animateKeys, enteredKeys)}
+              animateOnMount={shouldAnimateFeedRow(item, animateKeys, enteredKeys)}
               onEnter={recordEntrance}
               live={pending && index === lastIdx && !subagentPollActive}
               autoPlayAppBlocks={

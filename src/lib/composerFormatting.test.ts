@@ -82,7 +82,19 @@ test('insertLink wraps a selection and selects the url placeholder', () => {
 test('insertLink with nothing selected offers a label placeholder', () => {
   const edit = insertLink('see ', 4, 4);
   assert.equal(edit.text, 'see [label](url)');
-  assert.deepEqual([edit.selectionStart, edit.selectionEnd], [5, 11]);
+  // Exactly the label, so typing over it keeps the closing bracket.
+  assert.deepEqual([edit.selectionStart, edit.selectionEnd], [5, 10]);
+});
+
+test('toggleHeading leaves a hashtag word alone', () => {
+  const edit = toggleHeading('#release notes', 0, 0, 1);
+  assert.equal(edit.text, '# #release notes');
+});
+
+test('toggleLinePrefix starts a list on a blank draft', () => {
+  assert.equal(toggleLinePrefix('', 0, 0, '- ').text, '');
+  assert.equal(toggleLinePrefix('\n', 0, 1, '- ').text, '\n');
+  assert.equal(toggleLinePrefix('a\n\nb', 0, 4, '- ').text, '- a\n\n- b');
 });
 
 test('insertBlock separates the snippet from surrounding prose', () => {

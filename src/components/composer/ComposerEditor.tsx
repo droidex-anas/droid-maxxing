@@ -34,6 +34,8 @@ interface ComposerEditorProps {
   onKeyDown: (event: KeyboardEvent) => void;
   onContextMenu: (event: React.MouseEvent) => void;
   onPasteFiles: (files: File[]) => void;
+  // The editor loads lazily; edits queued before it exists apply on this.
+  onReady: () => void;
 }
 
 const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function ComposerEditor(
@@ -47,6 +49,7 @@ const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function 
     onKeyDown,
     onContextMenu,
     onPasteFiles,
+    onReady,
   },
   ref,
 ) {
@@ -57,13 +60,8 @@ const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function 
   // them as value changes, not as user typing (which would reset history
   // recall mode in the composer).
   const applyingExternal = useRef(false);
-  const propsRef = useRef({
-    onChange,
-    onCaret,
-    onKeyDown,
-    onPasteFiles,
-  });
-  propsRef.current = { onChange, onCaret, onKeyDown, onPasteFiles };
+  const propsRef = useRef({ onChange, onCaret, onKeyDown, onPasteFiles, onReady });
+  propsRef.current = { onChange, onCaret, onKeyDown, onPasteFiles, onReady };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -112,6 +110,7 @@ const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function 
     };
     host.addEventListener('keydown', onHostKeyDown, true);
     host.addEventListener('paste', onHostPaste, true);
+    propsRef.current.onReady();
     return () => {
       host.removeEventListener('keydown', onHostKeyDown, true);
       host.removeEventListener('paste', onHostPaste, true);

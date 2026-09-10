@@ -164,9 +164,11 @@ function decorateLink(builder: DecorationBuilder, syntax: SyntaxNodeLike) {
   const open = url.prevSibling; // the `](` before the destination
   if (open?.name !== 'LinkMark') return;
   if (url.nextSibling?.to !== syntax.to) return;
-  builder.fold(syntax.from, syntax.from + 1); // leading [
   builder.mark(syntax.from + 1, open.from, 'cm-md-link');
+  // Both brackets fold together, or neither: hiding only the opening one
+  // would leave the draft reading `label](url)` while the url is typed.
   if (destinationIsUrl(builder.doc.sliceString(url.from, url.to))) {
+    builder.fold(syntax.from, syntax.from + 1); // leading [
     builder.fold(open.from - 1, syntax.to); // ](url)
   }
 }
