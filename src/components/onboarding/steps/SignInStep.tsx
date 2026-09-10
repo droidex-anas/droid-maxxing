@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Check, KeyRound, Loader2 } from 'lucide-react';
+import { ArrowRight, Check, KeyRound } from 'lucide-react';
+import { Spinner } from '../../../../packages/icons/src/status';
 
 import type { OnboardingController } from '../../../hooks/useOnboarding';
 import { BackButton, GhostButton, PrimaryButton, StepLabel, StepTitle } from '../kit';
@@ -106,7 +107,11 @@ export function SignInStep({
                 }}
                 disabled={!key.trim() || saving}
               >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save key'}
+                {saving ? (
+                  <Spinner className="w-4 h-4 motion-safe:animate-spin-slow" />
+                ) : (
+                  'Save key'
+                )}
               </PrimaryButton>
               {keyError && <p className="text-[12px] text-droid-red">{keyError}</p>}
             </div>

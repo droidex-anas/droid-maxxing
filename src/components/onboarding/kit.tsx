@@ -1,4 +1,5 @@
-import { ArrowLeft, Check, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Check, RefreshCw } from 'lucide-react';
+import { Spinner } from '../../../packages/icons/src/status';
 import type { ReactNode, Ref } from 'react';
 import { Switch } from '../Switch';
 
@@ -98,7 +99,7 @@ export function StatusDot({ status }: { status: 'pending' | 'ok' | 'missing' }) 
   return (
     <span className="w-5 h-5 flex items-center justify-center shrink-0">
       {status === 'pending' && (
-        <Loader2 className="w-3.5 h-3.5 animate-spin text-droid-text-muted" />
+        <Spinner className="w-3.5 h-3.5 motion-safe:animate-spin-slow text-droid-text-muted" />
       )}
       {status === 'ok' && <Check className="w-4 h-4 text-droid-green" strokeWidth={3} />}
       {status === 'missing' && <span className="w-1.5 h-1.5 rounded-full bg-droid-text-muted" />}

@@ -4,13 +4,13 @@ import {
   ArrowRight,
   CornerDownLeft,
   Globe2,
-  LoaderCircle,
   Maximize2,
   Minimize2,
   MousePointer2,
   PenLine,
   RefreshCw,
 } from 'lucide-react';
+import { Spinner } from '../../../packages/icons/src/status';
 import { HoverTooltip } from '../HoverTooltip';
 
 interface BrowserToolbarProps {
@@ -102,7 +102,7 @@ export function BrowserToolbar({
         onClick={onReload}
       >
         {loading ? (
-          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5 motion-safe:animate-spin-slow" />
         ) : (
           <RefreshCw className="h-3.5 w-3.5" />
         )}

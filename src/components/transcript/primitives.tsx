@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Copy, FoldVertical } from 'lucide-react';
+import { Check, ChevronRight, FoldVertical } from 'lucide-react';
+import { Copy } from '../../../packages/icons/src/actions';
 import { useDocumentVisible } from '../../hooks/useDocumentVisible';
 import { formatDuration } from '../../lib/tools';
 import { openExternal } from '../../lib/onboarding';

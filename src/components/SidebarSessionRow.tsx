@@ -15,18 +15,6 @@ const AutomationSessionBadge = lazy(async () => {
   return { default: module.AutomationSessionBadge };
 });
 
-// Simple, smooth ring spinner shown on the left of a row while its model
-// works. motion-safe keeps it static for reduced-motion users.
-function WorkingSpinner() {
-  return (
-    <span
-      className="w-3 h-3 rounded-full border-[1.5px] border-droid-text-muted/30 border-t-droid-text motion-safe:animate-spin"
-      style={{ animationDuration: '1.5s' }}
-      aria-label="working"
-    />
-  );
-}
-
 const HOVER_ACTION =
   'absolute top-1/2 -translate-y-1/2 flex w-6 h-6 items-center justify-center rounded-md text-droid-text-muted opacity-0 pointer-events-none transition-opacity hover:bg-droid-elevated hover:text-droid-text group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none';
 
@@ -213,7 +201,10 @@ export const SessionRow = memo(function SessionRow({
           className={`w-3 flex items-center justify-center shrink-0 ${side} ${active ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
         >
           {running && !attention ? (
-            <WorkingSpinner />
+            <span
+              className="w-3 h-3 rounded-full border-[1.5px] border-droid-text border-r-transparent motion-safe:animate-spin-slow"
+              aria-label="working"
+            />
           ) : (
             dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden="true" />
           )}

@@ -7,18 +7,17 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Columns2,
-  Copy,
   Eye,
   GitCommitHorizontal,
   GitPullRequest,
-  Loader2,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
   RefreshCw,
   WrapText,
   X,
 } from 'lucide-react';
+import { Copy } from '../../../packages/icons/src/actions';
+import { PanelLeft } from '../../../packages/icons/src/layout';
+import { Spinner } from '../../../packages/icons/src/status';
 import { usePopover } from './usePopover';
 import { Popover } from './Popover';
 import { DiffFileSection } from './DiffFileSection';
@@ -125,7 +124,7 @@ function ToolbarButton({
   onClick,
   innerRef,
 }: {
-  icon: typeof RefreshCw;
+  icon: React.ComponentType<{ className?: string }>;
   label?: string;
   title: string;
   active?: boolean;
@@ -155,7 +154,7 @@ function MenuItem({
   active,
   onClick,
 }: {
-  icon: typeof RefreshCw;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
   active?: boolean;
   onClick: () => void;
@@ -294,7 +293,7 @@ function DetachedFocusPane({
           </div>
         ) : focus.content === null ? (
           <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
-            <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> Loading…
+            <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" /> Loading…
           </div>
         ) : (
           <DetachedFilePreview path={focus.path} content={focus.content} />
@@ -651,7 +650,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
           onClick={toggleAll}
         />
         <ToolbarButton
-          icon={filesOpen ? PanelLeftClose : PanelLeftOpen}
+          icon={PanelLeft}
           title={filesOpen ? 'Hide file list' : 'Show file list'}
           active={!filesOpen}
           onClick={() => {
@@ -839,7 +838,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
             <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
               {review.loadingList ? (
                 <>
-                  <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> Loading…
+                  <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" /> Loading…
                 </>
               ) : (
                 'No changes in this scope'

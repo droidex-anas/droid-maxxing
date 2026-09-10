@@ -47,7 +47,8 @@ test('the current step appears once with its only spinner in the summary row', (
   assert.doesNotMatch(pendingRow ?? '', /animate-spin/);
   assert.equal(html.match(/Start a new app/g)?.length, 1);
   assert.equal(html.match(/animate-spin/g)?.length, 1);
-  assert.equal(html.match(/animation-duration:1\.4s/g)?.length, 1);
+  assert.equal(html.match(/motion-safe:animate-spin-slow/g)?.length, 1);
+  assert.equal(html.match(/border-r-transparent/g)?.length, 1);
   assert.equal(html.match(/border-\[1\.5px\]/g)?.length, 2);
 });
 
@@ -91,7 +92,7 @@ test('the header ring only spins while the session is generating', () => {
 test('an incomplete stopped plan uses an empty ring without a paused spinner arc', () => {
   const html = render([{ status: 'in_progress', text: 'Start a new app' }], false);
   assert.doesNotMatch(html, /animate-spin/);
-  assert.doesNotMatch(html, /border-t-droid-text/);
+  assert.doesNotMatch(html, /border-r-transparent/);
   assert.match(html, /border-droid-text-muted\/30/);
 });
 

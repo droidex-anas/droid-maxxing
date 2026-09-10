@@ -28,7 +28,7 @@
     "react": "^19.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node tools/build-assets.mjs",
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly && node tools/build.mjs && node tools/build-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
     "lint": "eslint --config eslint.config.mjs src tools test gallery/gallery.js",

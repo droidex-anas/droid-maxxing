@@ -4,6 +4,7 @@ import { bindLazySurfaceIntent } from '../lib/chunkPreloader';
 import { isEmbedded } from '../lib/embed';
 import { resolvePrWorkspaceCwd } from '../features/pull-requests/lib/prWorkspaceCwd';
 import { GitPullRequestIcon } from './environment/GithubIcons';
+import { Clock } from '../../packages/icons/src/status';
 
 export function SidebarNavigation() {
   const dispatch = useStoreDispatch();
@@ -67,10 +68,7 @@ export function SidebarNavigation() {
             : 'text-droid-text hover:bg-droid-elevated'
         }`}
       >
-        <span
-          aria-hidden="true"
-          className="h-3.5 w-3.5 shrink-0 rounded-full border border-droid-text-secondary"
-        />
+        <Clock className="h-3.5 w-3.5 shrink-0 text-droid-text-secondary" />
         Automations
       </button>
     </>

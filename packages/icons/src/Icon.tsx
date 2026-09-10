@@ -8,6 +8,7 @@ export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'ref' | 'childr
 
 export type IconComponent = FunctionComponent<IconProps>;
 
+/* @__NO_SIDE_EFFECTS__ */
 export function createIcon(
   name: string,
   glyph: ReactNode,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import { Spinner } from '../../../../packages/icons/src/status';
 
 import type { OnboardingController } from '../../../hooks/useOnboarding';
 import {
@@ -126,7 +127,7 @@ export function PreferencesStep({
           >
             {saving ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Saving…
+                <Spinner className="w-4 h-4 motion-safe:animate-spin-slow" /> Saving…
               </>
             ) : (
               <>

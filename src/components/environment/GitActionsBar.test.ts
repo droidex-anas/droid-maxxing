@@ -4,6 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { GitActionsBar } from './GitActionsBar.js';
+import { CreatePrSheet } from './CreatePrSheet.js';
 import { canRenderPrSheet, reconcileGitActionSheet } from '../../lib/gitActionVisibility.js';
 import type { GitEnvironment, PullRequest } from '../../types/vcs.js';
 
@@ -131,4 +132,18 @@ test('an open PR sheet closes when GitHub readiness is lost', () => {
   assert.equal(canRenderPrSheet('pr', true, true, true, false), false);
   assert.equal(reconcileGitActionSheet('pr', true, false, false, false), 'none');
   assert.equal(reconcileGitActionSheet('commit', true, false, false, false), 'commit');
+});
+
+test('the PR form cannot target its own head when no other base exists', () => {
+  const html = renderToStaticMarkup(
+    createElement(CreatePrSheet, {
+      cwd: '/repo',
+      env: { ...env, branch: 'main', defaultBranch: 'main' },
+      branches: null,
+      onDone: () => undefined,
+    }),
+  );
+
+  assert.match(html, /No base branch available/);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Open PR<\/button>/);
 });

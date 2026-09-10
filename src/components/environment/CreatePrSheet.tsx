@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
+import { Spinner } from '../../../packages/icons/src/status';
 import { usePopover } from './usePopover';
 import { createPullRequest } from '../../lib/github';
 import { baseDescriptor, gitPush, stripRemotePrefix } from '../../lib/git';
@@ -37,9 +38,11 @@ export function CreatePrSheet({
   // run() guards re-entry synchronously so a second Cmd+Enter fired in the
   // same tick can't push/create twice.
   const { busy, run } = useBusyAction();
-  const basePickerRef = usePopover<HTMLDivElement>(
+  const basePickerRef = usePopover(
     pickingBase,
-    useCallback(() => setPickingBase(false), []),
+    useCallback(() => {
+      setPickingBase(false);
+    }, []),
   );
 
   // The PR's own head branch can never be its base, so keep it out of the list.
@@ -55,7 +58,12 @@ export function CreatePrSheet({
   // a branch whose recorded base is itself); gh would reject that with "no
   // commits between X and X". Fall back to the first valid option, and when
   // none exists disable submit instead of dead-ending on the error.
-  const effectiveBase = baseOptions.includes(base) ? base : baseOptions[0];
+  let effectiveBase: string | undefined;
+  if (baseOptions.includes(base)) {
+    effectiveBase = base;
+  } else if (baseOptions.length > 0) {
+    effectiveBase = baseOptions[0];
+  }
 
   const doCreate = () =>
     run(async () => {
@@ -63,10 +71,10 @@ export function CreatePrSheet({
       try {
         // Push when there is no upstream yet, or when the local branch is ahead, so
         // gh opens the PR from the latest commits instead of a stale remote tip.
-        if (!env?.upstream || (env?.ahead ?? 0) > 0) {
+        if (!env?.upstream || (env.ahead ?? 0) > 0) {
           const pushed = await gitPush(cwd, { setUpstream: !env?.upstream });
           if (!pushed.ok) {
-            toast.error(pushed.message || 'Could not push branch');
+            toast.error(pushed.message?.length ? pushed.message : 'Could not push branch');
             return;
           }
         }
@@ -77,14 +85,14 @@ export function CreatePrSheet({
           draft,
         });
         if (res.ok) {
-          toast.success(`Opened PR #${res.number ?? ''}`.trim());
+          toast.success(`Opened PR #${res.number == null ? '' : String(res.number)}`.trim());
           if (res.url) void openExternal(res.url);
           onCreated?.();
           onDone();
         } else if (res.reason === 'gh_unavailable') {
           toast.error('GitHub CLI not available');
         } else {
-          toast.error(res.message || 'Could not open PR');
+          toast.error(res.message?.length ? res.message : 'Could not open PR');
         }
       } catch {
         toast.error('Could not open PR');
@@ -103,14 +111,18 @@ export function CreatePrSheet({
       <input
         autoFocus
         value={title}
-        onChange={(e) => setTitle(e.target.value)}
+        onChange={(e) => {
+          setTitle(e.target.value);
+        }}
         onKeyDown={submitOnMetaEnter}
         placeholder="Pull request title"
         className="w-full rounded-lg bg-droid-bg/60 px-2.5 py-1.5 text-[12.5px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
       />
       <textarea
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={(e) => {
+          setBody(e.target.value);
+        }}
         onKeyDown={submitOnMetaEnter}
         rows={3}
         placeholder="Description (optional)"
@@ -118,7 +130,9 @@ export function CreatePrSheet({
       />
       <div className="relative" ref={basePickerRef}>
         <button
-          onClick={() => setPickingBase((v) => !v)}
+          onClick={() => {
+            setPickingBase((v) => !v);
+          }}
           className="flex w-full items-center gap-1.5 rounded-lg bg-droid-bg/40 px-2.5 py-1.5 text-[11.5px] hover:bg-droid-bg/60"
         >
           <span className="text-droid-text-muted">Base</span>
@@ -151,7 +165,9 @@ export function CreatePrSheet({
           <input
             type="checkbox"
             checked={draft}
-            onChange={(e) => setDraft(e.target.checked)}
+            onChange={(e) => {
+              setDraft(e.target.checked);
+            }}
             className="accent-droid-accent"
           />
           Draft
@@ -161,7 +177,7 @@ export function CreatePrSheet({
           disabled={!title.trim() || !effectiveBase || busy}
           className="flex items-center gap-1.5 rounded-lg bg-droid-accent/15 px-2.5 py-1 text-[11.5px] font-medium text-droid-accent transition-colors hover:bg-droid-accent/25 disabled:opacity-40"
         >
-          {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+          {busy && <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />}
           Open PR
         </button>
       </div>

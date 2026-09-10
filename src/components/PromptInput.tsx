@@ -80,7 +80,8 @@ import {
   type VisibleSessionTarget,
 } from '../lib/childSessions';
 import { commitPrimaryPromptAfterBaseline } from '../lib/promptSend';
-import { ArrowUp, ChevronDown, LoaderCircle, SlidersHorizontal, Square } from 'lucide-react';
+import { ArrowUp, ChevronDown, SlidersHorizontal, Square } from 'lucide-react';
+import { Spinner } from '../../packages/icons/src/status';
 import { noteComposerInteractive } from '../lib/rendererPerf';
 import AddMenu from './composer/AddMenu';
 import { DraftSelections } from './composer/DraftSelections';
@@ -1781,7 +1782,7 @@ export default function PromptInput({
                 className="p-2 rounded-full text-droid-bg shrink-0 opacity-90"
                 style={{ background: ACCENT }}
               >
-                <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+                <Spinner className="w-3.5 h-3.5 motion-safe:animate-spin-slow" />
               </button>
             ) : isLive && !hasContent ? (
               <button

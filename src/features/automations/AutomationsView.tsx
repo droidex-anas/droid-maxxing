@@ -1,5 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Clock, LoaderCircle, MessageSquareText, Plus, Search } from 'lucide-react';
+import { MessageSquareText, Plus, Search } from 'lucide-react';
+import { Clock, Spinner } from '../../../packages/icons/src/status';
 import { useEffect, useMemo, useState } from 'react';
 import type { WorkspaceScope } from '../../lib/workspaces';
 import { toast } from '../../lib/toast';
@@ -417,7 +418,7 @@ export function AutomationsView({
             />
             {saving && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-droid-bg/30 backdrop-blur-[1px]">
-                <LoaderCircle className="h-5 w-5 animate-spin text-droid-text-muted" />
+                <Spinner className="h-5 w-5 motion-safe:animate-spin-slow text-droid-text-muted" />
               </div>
             )}
           </motion.div>

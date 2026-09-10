@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { Copy } from '../../packages/icons/src/actions';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   sh: 'Bash',

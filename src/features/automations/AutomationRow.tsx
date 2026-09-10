@@ -1,14 +1,13 @@
 import {
   CircleAlert,
   CirclePause,
-  Clock,
   History,
-  LoaderCircle,
   MessageSquareText,
   Pencil,
   Play,
   Trash2,
 } from 'lucide-react';
+import { Clock, Spinner } from '../../../packages/icons/src/status';
 import type { ReactNode } from 'react';
 import { HoverTooltip } from '../../components/HoverTooltip';
 import { AUTONOMY_LABELS } from '../../lib/autonomy';
@@ -282,7 +281,9 @@ function RunStatusIcon({
       return <Clock className={`${size} text-droid-text-muted`} />;
     case 'starting':
     case 'running':
-      return <LoaderCircle className={`${size} animate-spin text-droid-text-secondary`} />;
+      return (
+        <Spinner className={`${size} motion-safe:animate-spin-slow text-droid-text-secondary`} />
+      );
     case 'completed':
       return <History className={`${size} text-droid-text-secondary`} />;
     case 'failed':

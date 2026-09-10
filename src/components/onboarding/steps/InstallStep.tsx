@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Check, Download, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowRight, Check, Download, RefreshCw } from 'lucide-react';
+import { Spinner } from '../../../../packages/icons/src/status';
 
 import type { OnboardingController } from '../../../hooks/useOnboarding';
 import type { InstallChannel } from '../../../types/bridge';
@@ -119,7 +120,7 @@ export function InstallStep({
           ))}
           {installing && (
             <div className="flex items-center gap-1.5 text-droid-text-secondary">
-              <Loader2 className="w-3 h-3 animate-spin" /> working…
+              <Spinner className="w-3 h-3 motion-safe:animate-spin-slow" /> working…
             </div>
           )}
         </div>
@@ -133,7 +134,7 @@ export function InstallStep({
 
       {installing ? (
         <PrimaryButton onClick={onNext} disabled>
-          <Loader2 className="w-4 h-4 animate-spin" /> Installing…
+          <Spinner className="w-4 h-4 motion-safe:animate-spin-slow" /> Installing…
         </PrimaryButton>
       ) : channels.length === 0 ? (
         <PrimaryButton

@@ -1,5 +1,6 @@
 import { memo, useCallback } from 'react';
-import { ChevronRight, Loader2 } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
+import { Spinner } from '../../../packages/icons/src/status';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DiffBody } from './DiffBody';
 import type { DiffViewMode } from '../../hooks/persistedUiPreferences';
@@ -67,7 +68,7 @@ export const DiffFileSection = memo(function DiffFileSection({
           <span className="text-droid-text-secondary">{name}</span>
         </span>
         {entry?.loading && (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-droid-text-muted" />
+          <Spinner className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin-slow text-droid-text-muted" />
         )}
         <span className="shrink-0 font-mono text-[10.5px]">
           {file.additions > 0 && (
@@ -102,7 +103,7 @@ export const DiffFileSection = memo(function DiffFileSection({
               />
             ) : (
               <div className="flex items-center gap-2 px-4 py-3 text-[12px] text-droid-text-muted">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading diff…
+                <Spinner className="h-3.5 w-3.5 motion-safe:animate-spin-slow" /> Loading diff…
               </div>
             )}
           </motion.div>

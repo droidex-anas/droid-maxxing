@@ -2,12 +2,12 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
-  Loader2,
   Plus,
   RefreshCw,
   Server,
   Trash2,
 } from 'lucide-react';
+import { Spinner } from '../../packages/icons/src/status';
 import { AnimatePresence } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -153,7 +153,7 @@ export function McpServersSection(props: McpServersSectionProps) {
   if (props.isLoading && props.servers.length === 0) {
     serverList = (
       <div className="flex items-center gap-2 rounded-xl border border-droid-border bg-droid-surface px-4 py-5 text-[12px] text-droid-text-muted">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading MCP servers…
+        <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" /> Loading MCP servers…
       </div>
     );
   } else if (props.servers.length === 0) {
@@ -394,7 +394,7 @@ function canAuthenticate(server: McpServerInfo): boolean {
 function StatusIcon({ status }: { status: McpServerInfo['status'] }) {
   if (status === 'connected') return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
   if (status === 'connecting')
-    return <Loader2 className="h-4 w-4 animate-spin text-droid-accent" />;
+    return <Spinner className="h-4 w-4 motion-safe:animate-spin-slow text-droid-accent" />;
   if (status === 'failed') return <CircleAlert className="h-4 w-4 text-droid-orange" />;
   return <Server className="h-4 w-4 text-droid-text-muted" />;
 }

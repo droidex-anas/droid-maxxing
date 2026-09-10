@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, Loader2, RefreshCw } from 'lucide-react';
+import { ChevronRight, RefreshCw } from 'lucide-react';
+import { Spinner } from '../../../packages/icons/src/status';
 import {
   authorizeFilesRoot,
   listDirectory,
@@ -152,7 +153,7 @@ export function FilesWorkspace({
         <div className="min-h-0 flex-1 overflow-auto py-1" role="tree" aria-label="Session files">
           {!rootListing && !errors[''] && (
             <div className="flex items-center gap-2 px-3 py-3 text-xs text-droid-text-muted">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5 motion-safe:animate-spin-slow" />
               Loading files…
             </div>
           )}
@@ -208,7 +209,7 @@ function FileTreeRow({
 }) {
   const chevron =
     entry.kind !== 'directory' ? null : loading ? (
-      <Loader2 className="h-3 w-3 animate-spin" />
+      <Spinner className="h-3 w-3 motion-safe:animate-spin-slow" />
     ) : (
       <ChevronRight
         className={`h-3 w-3 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}

@@ -49,7 +49,7 @@ export default {
         'fade-in': 'fadeIn 0.2s ease-out',
         'slide-up': 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
-        'spin-slow': 'spin 3s linear infinite',
+        'spin-slow': 'spin 1.8s linear infinite',
       },
       keyframes: {
         fadeIn: {

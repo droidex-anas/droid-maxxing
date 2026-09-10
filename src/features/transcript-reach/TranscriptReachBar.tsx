@@ -1,5 +1,6 @@
 import { useEffect, useRef, type Dispatch, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp, Copy, Search, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Search, X } from 'lucide-react';
+import { Copy } from '../../../packages/icons/src/actions';
 
 import type { TranscriptReachAction, TranscriptReachState } from './transcriptReachState';
 import type { transcriptFindScopeNotice } from './transcriptFind';

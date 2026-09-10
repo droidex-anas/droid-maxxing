@@ -26,7 +26,8 @@ npm --prefix packages/icons run lint
 ```
 
 The repository's locked toolchain builds this package. Install dependencies at
-the repository root, not inside `packages/icons`.
+the repository root, not inside `packages/icons`. TypeScript emits declarations;
+Vite emits ESM with tree-shaking annotations so unused glyphs can be omitted.
 
 ## Use in another project
 
