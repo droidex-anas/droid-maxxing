@@ -96,11 +96,19 @@ interface AgentProcess {
 
 Store: `agentProcesses: Record<appSessionId, AgentProcess[]>`, updated by `session.processes`, cleared by `SESSION_CLOSED`.
 
-`src/components/composer/RunningProcesses.tsx` mounts in `PromptInput` between `QueuedPrompts` and `PlanSteps`, only when the active session has processes. It follows the `QueuedPrompts` visual language: a quiet row list in the composer's tonal ramp, hairline border, no fill, no badges, system sans.
+### Chip
 
-Each row: a 6 px live dot in the accent, the display name, the address `localhost:5173` when a port exists, elapsed time right-aligned in muted text. Controls appear on hover: Open (targets the in-app browser tool for this session through `OPEN_UTILITY_TOOL` plus `openBrowser` with the URL) and Stop (sends `session.processes.stop`). Rows enter and leave with the same short opacity transition `QueuedPrompts` uses. No sidebar indicator.
+`src/components/composer/RunningProcessesChip.tsx` sits in the composer's bottom toolbar, in the left cluster right after the Chat/Spec toggle, and renders only while the active session has processes. It uses the same toolbar button recipe as its neighbours (`px-2 py-1 rounded-lg text-[11px]`, secondary text, `hover:bg-droid-bg/40`, open state `bg-droid-bg/60`), so it reads as part of the row rather than a badge.
 
-The transcript command card keeps its "Running" state while a process whose command line contains the tool call's command is alive; otherwise unchanged.
+Content is a 6 px accent dot followed by a label. One process: its display name (`vite`). Several: `3 running`. The dot breathes with a 2.4 s ease-in-out opacity cycle between 0.45 and 1 and stops under `prefers-reduced-motion`. That breathing is the only indication that something is alive; no glow, no ring, no count bubble.
+
+### Popover
+
+Clicking the chip opens a panel above it using the `ModelSelectorPopover` container recipe: `absolute bottom-full left-0 mb-3`, `motion.div` with the same 8 px rise and 0.98 scale, hairline border, `bg-droid-elevated`, the small rotated caret at the bottom edge. Width 300 px. Escape and outside click close it; the chip toggles it.
+
+Each row: the accent dot, display name in primary text, the address `localhost:5173` in secondary text when a port exists, elapsed time right-aligned in muted tabular numerals. On hover the time yields to two icon buttons in the existing `TerminalButton` style: Open, which opens the in-app browser tool for this session through `OPEN_UTILITY_TOOL` plus `openBrowser` with the URL and closes the popover, and Stop, which sends `session.processes.stop`. A row with no port has only Stop. The panel has no header; when the last process ends the popover closes and the chip fades out with the toolbar's `transition-opacity`.
+
+The transcript command card keeps its "Running" state while a process whose command line contains the tool call's command is alive; otherwise unchanged. No sidebar indicator and no strip above the composer.
 
 ## Out of scope
 
