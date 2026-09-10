@@ -21,6 +21,9 @@ export function UtilityPane({
   onClosePane,
   renderTab,
   expanded = false,
+  confirmCloseTabId = null,
+  onConfirmClose,
+  onCancelClose,
 }: {
   panel: UtilityPanelState;
   width: number;
@@ -34,9 +37,13 @@ export function UtilityPane({
   onClosePane: () => void;
   renderTab: (tab: UtilityTab, context: { overlayOpen: boolean }) => ReactNode;
   expanded?: boolean;
+  confirmCloseTabId?: string | null;
+  onConfirmClose?: (tab: UtilityTab) => void;
+  onCancelClose?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
   const openSingletons = new Set(panel.tabs.map((tab) => tab.tool));
   const availableTools = UTILITY_TOOL_OPTIONS.map((option) => option.tool).filter(
@@ -100,6 +107,10 @@ export function UtilityPane({
                 </button>
                 <HoverTooltip label={`Close ${tab.label}`} placement="bottom">
                   <button
+                    ref={(node) => {
+                      if (node) closeButtonRefs.current.set(tab.id, node);
+                      else closeButtonRefs.current.delete(tab.id);
+                    }}
                     type="button"
                     aria-label={`Close ${tab.label}`}
                     className="ml-0.5 rounded-md p-0.5 text-droid-text-muted opacity-50 transition hover:bg-droid-elevated hover:text-droid-text group-hover:opacity-100"
@@ -171,6 +182,40 @@ export function UtilityPane({
           )}
         </div>
       </Popover>
+
+      {confirmCloseTabId && (
+        <Popover
+          open
+          onClose={() => onCancelClose?.()}
+          anchorRef={{ current: closeButtonRefs.current.get(confirmCloseTabId) ?? null }}
+          align="right"
+          width={240}
+          label="Confirm closing terminal"
+        >
+          <div className="px-3 py-2.5 text-[12px] text-droid-text">
+            A process is still running in this terminal.
+            <div className="mt-2 flex justify-end gap-1">
+              <button
+                type="button"
+                onClick={() => onCancelClose?.()}
+                className="rounded-md px-2 py-1 text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const tab = panel.tabs.find((candidate) => candidate.id === confirmCloseTabId);
+                  if (tab) onConfirmClose?.(tab);
+                }}
+                className="rounded-md bg-droid-elevated px-2 py-1 text-droid-text transition-colors hover:bg-droid-active"
+              >
+                Stop and close
+              </button>
+            </div>
+          </div>
+        </Popover>
+      )}
 
       <div role="tabpanel" className="min-h-0 flex-1 overflow-hidden">
         {activeTab ? (

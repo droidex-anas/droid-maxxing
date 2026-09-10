@@ -12,7 +12,7 @@ import {
   newChildOpenRequestId,
 } from './lib/commands';
 import { isEmbedded } from './lib/embed';
-import { getApiKey, setAppIcon } from './lib/desktop';
+import { getApiKey, setAppIcon, terminalHasChildren } from './lib/desktop';
 import { performNativeBrowserRequest } from './lib/nativeBrowserAgent';
 import {
   browserKeyForSession,
@@ -37,8 +37,8 @@ import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
-import { closeTerminalForTab } from './lib/terminal';
-import { utilityPanelForSession, type UtilityTool } from './lib/utilityPanel';
+import { peekTerminalInstance, releaseTerminalInstance } from './lib/terminalInstances';
+import { utilityPanelForSession, type UtilityTab, type UtilityTool } from './lib/utilityPanel';
 import { isTerminalInputTarget, isTerminalTabShortcut } from './lib/keyboardShortcuts';
 import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
@@ -220,6 +220,7 @@ export default function App() {
   const requestedHistory = useRef(new Set<string>());
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
+  const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null);
   const contentRowRef = useRef<HTMLDivElement>(null);
   const [contentRowWidth, setContentRowWidth] = useState(0);
   const utilityPaneToggleRef = useRef<HTMLButtonElement>(null);
@@ -279,6 +280,20 @@ export default function App() {
       });
     },
     [dispatch, workingDirectory],
+  );
+
+  const closeTerminalTab = useCallback(
+    (tab: UtilityTab) => {
+      setConfirmCloseTabId(null);
+      void releaseTerminalInstance(tab.id).finally(() => {
+        dispatch({
+          type: 'CLOSE_UTILITY_TAB',
+          tabId: tab.id,
+          appSessionId: activeSession?.appSessionId ?? '',
+        });
+      });
+    },
+    [dispatch, activeSession?.appSessionId],
   );
 
   useEffect(() => {
@@ -646,24 +661,25 @@ export default function App() {
                       dispatch({ type: 'ACTIVATE_UTILITY_TAB', tabId });
                     }}
                     onCloseTab={(tab) => {
-                      if (
-                        tab.tool === 'terminal' &&
-                        !window.confirm('Close this terminal and stop its running process?')
-                      ) {
-                        return;
-                      }
                       if (tab.tool === 'terminal') {
-                        void closeTerminalForTab(tab.id, tab.terminalId).finally(() => {
-                          dispatch({
-                            type: 'CLOSE_UTILITY_TAB',
-                            tabId: tab.id,
-                            appSessionId: activeSession.appSessionId,
-                          });
+                        const status = peekTerminalInstance(tab.id)?.getState().status;
+                        if (!tab.terminalId || status !== 'running') {
+                          closeTerminalTab(tab);
+                          return;
+                        }
+                        void terminalHasChildren(tab.terminalId).then((busy) => {
+                          if (busy) setConfirmCloseTabId(tab.id);
+                          else closeTerminalTab(tab);
                         });
                         return;
                       }
                       if (tab.tool === 'browser') setExpandedBrowserAppSessionId(null);
                       dispatch({ type: 'CLOSE_UTILITY_TAB', tabId: tab.id });
+                    }}
+                    confirmCloseTabId={confirmCloseTabId}
+                    onConfirmClose={closeTerminalTab}
+                    onCancelClose={() => {
+                      setConfirmCloseTabId(null);
                     }}
                     onClosePane={() => {
                       setExpandedBrowserAppSessionId(null);
