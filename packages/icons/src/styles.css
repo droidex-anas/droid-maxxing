@@ -40,7 +40,7 @@
 .droid-icon-badge[data-droid-icon-shadow='true'] {
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, currentColor 24%, transparent),
-    0 2px 4px #0002;
+    0 2px 4px color-mix(in srgb, currentColor 14%, transparent);
 }
 
 .droid-icon-chip {

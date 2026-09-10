@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
-import { PanelRight } from '../../../packages/icons/src/layout';
+import { PanelRight } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
 import { Popover } from '../environment/Popover';
 import type { UtilityPanelState, UtilityTab, UtilityTool } from '../../lib/utilityPanel';

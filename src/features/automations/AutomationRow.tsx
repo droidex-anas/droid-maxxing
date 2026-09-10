@@ -7,7 +7,7 @@ import {
   Play,
   Trash2,
 } from 'lucide-react';
-import { Clock, Spinner } from '../../../packages/icons/src/status';
+import { Clock, Spinner } from '@droidex/icons';
 import type { ReactNode } from 'react';
 import { HoverTooltip } from '../../components/HoverTooltip';
 import { AUTONOMY_LABELS } from '../../lib/autonomy';

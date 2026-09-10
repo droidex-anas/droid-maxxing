@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check } from 'lucide-react';
-import { Copy } from '../../packages/icons/src/actions';
+import { Copy } from '@droidex/icons';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   sh: 'Bash',

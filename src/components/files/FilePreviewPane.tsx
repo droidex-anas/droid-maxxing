@@ -8,7 +8,7 @@ import {
   FolderSearch,
   X,
 } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { Highlight, type PrismTheme } from 'prism-react-renderer';
 import {
   openFileDefault,

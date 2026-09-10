@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Check, Plus, Search, TriangleAlert } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { GitBranchIcon, GitCommitIcon } from './GithubIcons';
 import { Popover } from './Popover';
 import { Row, RowCaret } from './primitives';

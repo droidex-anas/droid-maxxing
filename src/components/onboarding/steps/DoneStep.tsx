@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowRight, Check } from 'lucide-react';
-import { Spinner } from '../../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 
 import type { OnboardingController } from '../../../hooks/useOnboarding';
 import { BrandMark } from '../../BrandMark';

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
-import { Spinner } from '../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { worktreeName } from '../lib/git';
 import { worktreeChatStatus } from '../lib/worktreeSettings';
 import type { SessionSummary } from '../types/bridge';

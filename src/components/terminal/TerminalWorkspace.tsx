@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import { RotateCcw, Trash2 } from 'lucide-react';
-import { Copy } from '../../../packages/icons/src/actions';
+import { Copy } from '@droidex/icons';
 import '@xterm/xterm/css/xterm.css';
 import {
   resizeTerminal,

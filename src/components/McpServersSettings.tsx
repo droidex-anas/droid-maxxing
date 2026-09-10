@@ -7,7 +7,7 @@ import {
   Server,
   Trash2,
 } from 'lucide-react';
-import { Spinner } from '../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { AnimatePresence } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 

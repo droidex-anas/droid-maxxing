@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
-import { Copy } from '../../packages/icons/src/actions';
+import { Copy } from '@droidex/icons';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { persistCustomThemes, type ThemeConfig } from '../hooks/persistedThemePreferences';
 import {

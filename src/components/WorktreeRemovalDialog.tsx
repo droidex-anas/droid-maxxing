@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { AlertTriangle } from 'lucide-react';
-import { Spinner } from '../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { worktreeName } from '../lib/git';

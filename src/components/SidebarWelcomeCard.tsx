@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
-import { SquarePen } from '../../packages/icons/src/actions';
+import { SquarePen } from '@droidex/icons';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 

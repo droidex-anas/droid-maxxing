@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { usePopover } from './usePopover';
 import { createPullRequest } from '../../lib/github';
 import { baseDescriptor, gitPush, stripRemotePrefix } from '../../lib/git';

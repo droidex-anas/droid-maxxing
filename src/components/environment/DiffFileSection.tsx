@@ -1,6 +1,6 @@
 import { memo, useCallback } from 'react';
 import { ChevronRight } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DiffBody } from './DiffBody';
 import type { DiffViewMode } from '../../hooks/persistedUiPreferences';

@@ -81,7 +81,7 @@ import {
 } from '../lib/childSessions';
 import { commitPrimaryPromptAfterBaseline } from '../lib/promptSend';
 import { ArrowUp, ChevronDown, SlidersHorizontal, Square } from 'lucide-react';
-import { Spinner } from '../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { noteComposerInteractive } from '../lib/rendererPerf';
 import AddMenu from './composer/AddMenu';
 import { DraftSelections } from './composer/DraftSelections';

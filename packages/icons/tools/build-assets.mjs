@@ -1,4 +1,4 @@
-import { mkdir, writeFile, copyFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile, copyFile } from 'node:fs/promises';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { format, resolveConfig } from 'prettier';
@@ -7,6 +7,7 @@ import { catalog } from './catalog.mjs';
 import { renderGallery } from './render-gallery.mjs';
 
 const root = new URL('../', import.meta.url);
+await rm(new URL('svg/', root), { recursive: true, force: true });
 await mkdir(new URL('svg/', root), { recursive: true });
 await mkdir(new URL('gallery/', root), { recursive: true });
 

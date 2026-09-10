@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, KeyRound } from 'lucide-react';
-import { Spinner } from '../../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 
 import type { OnboardingController } from '../../../hooks/useOnboarding';
 import { BackButton, GhostButton, PrimaryButton, StepLabel, StepTitle } from '../kit';

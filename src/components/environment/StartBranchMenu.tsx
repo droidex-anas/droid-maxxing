@@ -1,6 +1,6 @@
 import { useMemo, useState, type RefObject } from 'react';
 import { Check, ChevronLeft, Plus, Search } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { GitBranchIcon } from './GithubIcons';
 import { Popover } from './Popover';
 import { checkoutGitBranch, createGitBranch, stripRemotePrefix } from '../../lib/git';

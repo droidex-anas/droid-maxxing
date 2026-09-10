@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, Download, RefreshCw } from 'lucide-react';
-import { Spinner } from '../../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 
 import type { OnboardingController } from '../../../hooks/useOnboarding';
 import type { InstallChannel } from '../../../types/bridge';

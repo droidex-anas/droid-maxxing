@@ -2,10 +2,24 @@ name: Icon library
 
 on:
   pull_request:
-    paths: ['packages/icons/**', '.github/workflows/icon-library.yml', 'package-lock.json']
+    paths:
+      [
+        'packages/icons/**',
+        '.github/workflows/icon-library.yml',
+        'package-lock.json',
+        'eslint.config.js',
+        'LICENSE',
+      ]
   push:
     branches: [main, feat/icon-library]
-    paths: ['packages/icons/**', '.github/workflows/icon-library.yml', 'package-lock.json']
+    paths:
+      [
+        'packages/icons/**',
+        '.github/workflows/icon-library.yml',
+        'package-lock.json',
+        'eslint.config.js',
+        'LICENSE',
+      ]
 
 permissions:
   contents: read

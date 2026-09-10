@@ -10,7 +10,7 @@ import {
   ThumbsUp,
   X,
 } from 'lucide-react';
-import { Copy } from '../../packages/icons/src/actions';
+import { Copy } from '@droidex/icons';
 import type { FeedbackAttachments, FeedbackCategory, FeedbackReportRequest } from '../lib/desktop';
 import { submitFeedbackReport } from '../lib/feedbackReport';
 

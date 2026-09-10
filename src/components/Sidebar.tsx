@@ -10,8 +10,7 @@ import { SIDEBAR_WELCOME_CARD_ID, SidebarWelcomeCard } from './SidebarWelcomeCar
 import { BrandMark } from './BrandMark';
 import SidebarSearch from './SidebarSearch';
 import { Search, Settings } from 'lucide-react';
-import { SquarePen } from '../../packages/icons/src/actions';
-import { MessageCirclePlus } from '../../packages/icons/src/status';
+import { SquarePen, MessageCirclePlus } from '@droidex/icons';
 import { UnreadFilterActions } from './UnreadFilterActions';
 import { buildWorkspaceSections, resolveNewChatCwd, type WorkspaceScope } from '../lib/workspaces';
 import { SidebarCustomize } from './SidebarCustomize';

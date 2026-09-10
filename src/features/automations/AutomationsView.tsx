@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { MessageSquareText, Plus, Search } from 'lucide-react';
-import { Clock, Spinner } from '../../../packages/icons/src/status';
+import { Clock, Spinner } from '@droidex/icons';
 import { useEffect, useMemo, useState } from 'react';
 import type { WorkspaceScope } from '../../lib/workspaces';
 import { toast } from '../../lib/toast';

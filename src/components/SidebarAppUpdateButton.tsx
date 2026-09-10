@@ -1,5 +1,5 @@
 import { Download } from 'lucide-react';
-import { Spinner } from '../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { useStoreSelector } from '../hooks/useStore';
 import { requestAppUpdate, useAppUpdate } from '../lib/appUpdate';
 import { hasActiveSessionWork } from '../lib/sessions';

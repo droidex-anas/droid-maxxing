@@ -19,8 +19,7 @@ import {
   CheckCircle2,
   Check,
 } from 'lucide-react';
-import { PanelLeft } from '../../packages/icons/src/layout';
-import { Spinner } from '../../packages/icons/src/status';
+import { PanelLeft, Spinner } from '@droidex/icons';
 
 import type {
   TranscriptEvent,

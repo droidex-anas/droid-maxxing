@@ -28,10 +28,10 @@
     "react": "^19.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --emitDeclarationOnly && node tools/build.mjs && node tools/build-assets.mjs",
+    "build": "node tools/build.mjs && tsc -p tsconfig.json --emitDeclarationOnly && node tools/build-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
-    "lint": "eslint --config eslint.config.mjs src tools test gallery/gallery.js",
+    "lint": "eslint src tools test gallery/gallery.js",
     "dev": "vite gallery --config tools/vite.config.mjs --host 127.0.0.1 --port 5198 --strictPort",
     "prepack": "npm run build"
   }

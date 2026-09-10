@@ -29,11 +29,11 @@ document.querySelector('#size').addEventListener('change', (event) => {
 });
 
 document.querySelector('#theme').addEventListener('change', (event) => {
-  body.dataset.theme = event.target.value;
+  document.documentElement.dataset.theme = event.target.value;
 });
 
 function filterIcons() {
-  const query = search.value.trim().toLowerCase();
+  const query = search.value.replace(/[\s-]+/g, '').toLowerCase();
   let count = 0;
   for (const card of cards) {
     card.hidden =

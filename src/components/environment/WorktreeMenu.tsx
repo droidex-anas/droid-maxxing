@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, ExternalLink, Plus, Trash2, X } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { Popover } from './Popover';
 import { Row, RowCaret } from './primitives';
 import { useStoreDispatch, useStoreSelector } from '../../hooks/useStore';

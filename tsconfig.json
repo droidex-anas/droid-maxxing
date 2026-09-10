@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@droidex/icons": ["packages/icons/src/index.ts"]
     }
   },
   "include": ["src", "packages/icons/src"],

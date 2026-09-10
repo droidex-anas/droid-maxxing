@@ -15,9 +15,7 @@ import {
   WrapText,
   X,
 } from 'lucide-react';
-import { Copy } from '../../../packages/icons/src/actions';
-import { PanelLeft } from '../../../packages/icons/src/layout';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Copy, PanelLeft, Spinner } from '@droidex/icons';
 import { usePopover } from './usePopover';
 import { Popover } from './Popover';
 import { DiffFileSection } from './DiffFileSection';

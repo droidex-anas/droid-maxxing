@@ -1,5 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "paths": {
+    "@droidex/icons": ["packages/icons/src/index.ts"]
+  },
   "entry": [
     "src/main.tsx",
     "vite.config.ts",

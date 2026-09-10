@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Archive, FileText, Folder, Link2, Pencil, CircleCheck, RotateCcw } from 'lucide-react';
-import { Copy, Pin, PinOff } from '../../packages/icons/src/actions';
+import { Copy, Pin, PinOff } from '@droidex/icons';
 import { pushEscapeLayer } from './environment/usePopover';
 import { toast } from '../lib/toast';
 

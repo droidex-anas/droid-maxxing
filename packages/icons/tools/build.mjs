@@ -8,7 +8,7 @@ await build({
   logLevel: 'warn',
   build: {
     outDir: 'dist',
-    emptyOutDir: false, // Keep the declarations emitted by tsc.
+    emptyOutDir: true,
     minify: false,
     lib: {
       entry: fileURLToPath(new URL('../src/index.ts', import.meta.url)),

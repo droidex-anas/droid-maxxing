@@ -1,7 +1,6 @@
 import { useRef } from 'react';
 import { Check, CircleUserRound, Download, ExternalLink, GitPullRequest } from 'lucide-react';
-import { Copy } from '../../../packages/icons/src/actions';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Copy, Spinner } from '@droidex/icons';
 
 import type { GithubAvailability } from '../../types/vcs';
 import type { GithubSetupAction } from '../../hooks/useGithubSetup';

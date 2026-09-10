@@ -1,5 +1,5 @@
 import { ArrowLeft, Check, RefreshCw } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import type { ReactNode, Ref } from 'react';
 import { Switch } from '../Switch';
 

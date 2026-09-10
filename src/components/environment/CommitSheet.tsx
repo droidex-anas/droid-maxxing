@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { gitCommit } from '../../lib/git';
 import { toast } from '../../lib/toast';
 import { useBusyAction } from '../../hooks/useBusyAction';

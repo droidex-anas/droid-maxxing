@@ -10,7 +10,7 @@ import {
   PenLine,
   RefreshCw,
 } from 'lucide-react';
-import { Spinner } from '../../../packages/icons/src/status';
+import { Spinner } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
 
 interface BrowserToolbarProps {

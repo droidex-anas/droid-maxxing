@@ -28,11 +28,15 @@ npm --prefix packages/icons run lint
 The repository's locked toolchain builds this package. Install dependencies at
 the repository root, not inside `packages/icons`. TypeScript emits declarations;
 Vite emits ESM with tree-shaking annotations so unused glyphs can be omitted.
+Both lint commands use the repository's root ESLint configuration. The app
+imports `@droidex/icons` through a source alias to the package's public entry
+point, so development and tests do not need a package build first.
 
 ## Use in another project
 
-This package is **not published to npm**. For your own projects or uses separately
-authorized by the copyright holder, build a local tarball:
+This package is **not published to npm**. Any use in another project, including
+your own projects, requires prior written permission from the copyright holder.
+Only after obtaining that permission, build and install a local tarball:
 
 ```sh
 cd /path/to/droid-maxxing/packages/icons
@@ -132,4 +136,4 @@ its HTML renderer and catalog live in `tools/`.
 The repository's [DROIDEX Proprietary Source-Available License](./LICENSE)
 applies. Source availability does **not** grant third-party reuse, production,
 hosting, or redistribution rights. Those uses require the copyright holder's
-permission. This branch does not change the license.
+prior written permission. This branch does not change the license.
