@@ -11,6 +11,7 @@ declare global {
     __DROIDMAXX_APPLY_DESIGN_STATE: (state: { designMode: boolean }) => void;
     __DROIDMAXX_AUTH_INTENT: (request: Record<string, unknown>) => unknown;
     __DROIDMAXX_MASK_SENSITIVE_FIELDS: (active: boolean) => boolean;
+    __DROIDMAXX_SENSITIVE_FIELD: () => { kind: string } | null;
   }
 }
 
@@ -35,11 +36,18 @@ test.beforeEach(async ({ page }) => {
   );
   await page.goto('https://preload.example/');
   await page.evaluate((source) => {
+    const selections: unknown[] = [];
+    Reflect.set(window, 'preloadSelections', selections);
     const electron = {
       contextBridge: {
         exposeInMainWorld: (name: string, value: unknown) => Reflect.set(window, name, value),
       },
-      ipcRenderer: { on: () => undefined, send: () => undefined },
+      ipcRenderer: {
+        on: () => undefined,
+        send: (channel: string, payload: unknown) => {
+          if (channel === 'native-browser-selection') selections.push(payload);
+        },
+      },
     };
     new Function('require', source)((name: string) => {
       if (name !== 'electron') throw new Error(`Unexpected preload dependency: ${name}`);
@@ -48,7 +56,7 @@ test.beforeEach(async ({ page }) => {
   }, bundle);
 });
 
-test('sensitive editable text stays out of snapshots, details, auth prompts, and captures', async ({
+test('editable text stays out of snapshots and details, and sensitive fields stay masked', async ({
   page,
 }) => {
   await page.locator('body').evaluate(
@@ -62,6 +70,11 @@ test('sensitive editable text stays out of snapshots, details, auth prompts, and
       <div id="passcode" contenteditable="true">
         <span style="color:red;visibility:visible">private-editable-code</span>
       </div>
+      <textarea id="notes">private-ordinary-notes</textarea>
+      <div id="editor" contenteditable>
+        private-editor-text<span>private-nested-text</span>
+      </div>
+      <div id="plain" contenteditable="plaintext-only">private-plain-text</div>
       <button type="submit">Continue</button>
     </form>
   `,
@@ -69,7 +82,16 @@ test('sensitive editable text stays out of snapshots, details, auth prompts, and
   const payloads = await page.evaluate(async () => {
     const snapshot = await window.__DROIDMAXX_AGENT_ACTION({ action: 'snapshot' });
     const inspections = [];
-    for (const selector of ['#otp', '#passcode', '#passcode span', '#form']) {
+    for (const selector of [
+      '#otp',
+      '#passcode',
+      '#passcode span',
+      '#notes',
+      '#editor',
+      '#editor span',
+      '#plain',
+      '#form',
+    ]) {
       inspections.push(
         await window.__DROIDMAXX_AGENT_ACTION({
           action: 'inspect',
@@ -85,9 +107,14 @@ test('sensitive editable text stays out of snapshots, details, auth prompts, and
   expect(payloads.snapshot.ok).toBe(true);
   expect(payloads.inspections.every((result) => result.ok)).toBe(true);
   expect(payloads.intent).toMatchObject({ kind: 'signin' });
-  expect(JSON.stringify(payloads)).not.toMatch(/private-textarea-code|private-editable-code/);
+  expect(JSON.stringify(payloads)).not.toContain('private-');
   expect(JSON.stringify(payloads)).toContain('Public page copy');
   expect(JSON.stringify(payloads)).toContain('[redacted]');
+  for (const result of payloads.inspections.slice(0, -1)) {
+    expect(result.inspection).toMatchObject({ text: '[redacted]', name: '[redacted]' });
+  }
+  await expect(page.locator('#notes')).toHaveValue('private-ordinary-notes');
+  await expect(page.locator('#editor span')).toHaveText('private-nested-text');
 
   const before = await page.locator('#passcode span').getAttribute('style');
   await page.evaluate(() => window.__DROIDMAXX_MASK_SENSITIVE_FIELDS(true));
@@ -99,6 +126,87 @@ test('sensitive editable text stays out of snapshots, details, auth prompts, and
   await expect(page.locator('#otp')).toHaveValue('private-textarea-code');
   await expect(page.locator('#passcode span')).toHaveAttribute('style', before ?? '');
 });
+
+test('design text selection omits ordinary editor text but still selects public copy', async ({
+  page,
+}) => {
+  await page.locator('body').evaluate((body) => {
+    body.innerHTML = `
+      <div contenteditable><span id="notes">Private editor text</span></div>
+      <p><span id="public">Public page copy</span></p>
+    `;
+  });
+  await page.evaluate(() => window.__DROIDMAXX_APPLY_DESIGN_STATE({ designMode: true }));
+  for (const id of ['notes', 'public']) {
+    const box = await page.locator(`#${id}`).boundingBox();
+    if (!box) throw new Error('Missing text selection target');
+    await page.keyboard.down('Shift');
+    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    const selections = await page.evaluate(() => Reflect.get(window, 'preloadSelections'));
+    if (id === 'notes') expect(selections).toEqual([]);
+    else expect(selections).toMatchObject([{ anchor: { kind: 'text', text: 'Public page copy' } }]);
+  }
+});
+
+for (const crossOrigin of [false, true]) {
+  test(`agent text is blocked in nested ${crossOrigin ? 'cross-origin' : 'same-origin'} sensitive frames`, async ({
+    page,
+  }) => {
+    const url = crossOrigin ? 'https://foreign.example/form' : 'https://preload.example/form';
+    await page.route(url, (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `
+          <input id="password" type="password" value="unchanged">
+          <input id="code" autocomplete="one-time-code" value="unchanged">
+          <input id="ordinary" value="unchanged">
+        `,
+      }),
+    );
+    await page.locator('body').evaluate((body, url) => {
+      const outer = document.createElement('iframe');
+      outer.srcdoc = `<iframe src="${url}"></iframe>`;
+      body.appendChild(outer);
+    }, url);
+    const frame = page.frameLocator('iframe').frameLocator('iframe');
+    for (const [id, kind] of [
+      ['password', 'password'],
+      ['code', 'one-time code'],
+      ['ordinary', null],
+    ]) {
+      const field = frame.locator(`#${id}`);
+      await field.focus();
+      const expectedKind = crossOrigin ? 'protected frame' : kind;
+      expect(await page.evaluate(() => window.__DROIDMAXX_SENSITIVE_FIELD())).toEqual(
+        expectedKind ? { kind: expectedKind } : null,
+      );
+      for (const action of ['type', 'keypress']) {
+        const result = await page.evaluate(async (action) => {
+          await window.__DROIDMAXX_AGENT_ACTION({ action: 'snapshot' });
+          return window.__DROIDMAXX_AGENT_ACTION({
+            action,
+            text: 'x',
+            key: 'x',
+            __droidexContext: window.__DROIDMAXX_AGENT_CONTEXT(),
+          });
+        }, action);
+        if (expectedKind) {
+          expect(result.ok).toBe(false);
+          expect(result.error).toContain(
+            `will not send agent-authored text into a ${expectedKind}`,
+          );
+        } else if (action === 'keypress') {
+          expect(result.ok).toBe(true);
+        }
+        await expect(field).toHaveValue('unchanged');
+      }
+    }
+  });
+}
 
 test('typing rejects noneditable controls without mutating values or firing input events', async ({
   page,

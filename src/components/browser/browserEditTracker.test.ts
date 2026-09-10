@@ -73,6 +73,20 @@ test('failed and sibling results do not consume a different source edit', () => 
   assert.equal(edits.observe(), true);
 });
 
+test('missing and empty tool IDs cannot correlate unrelated results or consume tracked edits', () => {
+  for (const toolUseId of [undefined, '']) {
+    const edits = tracker();
+    edits.append(event('tool_call', 'identified'), event('tool_call', 'idless', { toolUseId }));
+    assert.equal(edits.observe(), false);
+    edits.append(event('tool_result', 'unrelated', { toolUseId, toolName: 'Read' }));
+    assert.equal(edits.observe(), false);
+    edits.append(event('tool_result', 'identified'));
+    assert.equal(edits.observe(), true);
+    edits.append(event('tool_result', 'idless', { toolUseId }));
+    assert.equal(edits.observe(), false);
+  }
+});
+
 test('history replacement establishes a baseline without replaying old edits', () => {
   const observe = createBrowserEditTracker();
   const history = [event('tool_call', 'old'), event('tool_result', 'old')];

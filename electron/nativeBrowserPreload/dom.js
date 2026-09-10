@@ -1,6 +1,6 @@
 /* global document, window, CSS, Node, getComputedStyle, requestAnimationFrame */
 
-import { editableFieldSelector, isSensitiveField } from './sensitiveFields.js';
+import { editableFieldSelector } from './sensitiveFields.js';
 
 export {
   INTERNAL_ATTR,
@@ -89,7 +89,7 @@ function roleFor(el) {
 }
 
 function directText(el) {
-  if (redactedTextTags.has(el.tagName) || isSensitiveField(el)) return '[redacted]';
+  if (redactedTextTags.has(el.tagName) || el.closest(editableFieldSelector)) return '[redacted]';
   return cleanText(
     Array.from(el.childNodes)
       .filter((node) => node.nodeType === Node.TEXT_NODE)
@@ -99,7 +99,7 @@ function directText(el) {
 }
 
 function safeElementText(el, max = 180) {
-  if (redactedTextTags.has(el.tagName) || isSensitiveField(el)) return '[redacted]';
+  if (redactedTextTags.has(el.tagName) || el.closest(editableFieldSelector)) return '[redacted]';
   if (!el.querySelector(`script,style,noscript,${editableFieldSelector}`)) {
     return cleanText(el.innerText || el.textContent, max);
   }
@@ -113,7 +113,7 @@ function redactedElementClone(el) {
   for (let index = 0; index < originals.length; index += 1) {
     const original = originals[index];
     const copy = copies[index];
-    if (isSensitiveField(original)) copy.textContent = '[redacted]';
+    if (original.closest(editableFieldSelector)) copy.textContent = '[redacted]';
     else if (redactedTextTags.has(original.tagName)) {
       if (index === 0) copy.textContent = '[redacted]';
       else copy.remove();

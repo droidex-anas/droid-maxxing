@@ -33,7 +33,8 @@ export function createBrowserEditTracker() {
 
 function completesPendingEdit(event: TranscriptEvent, pending: Set<string>): boolean {
   if (event.kind !== 'tool_call' && event.kind !== 'tool_result') return false;
-  const key = JSON.stringify([event.sourceSessionId, event.toolUseId ?? '']);
+  if (!event.toolUseId) return false;
+  const key = JSON.stringify([event.sourceSessionId, event.toolUseId]);
   if (event.kind === 'tool_call') {
     if (isEditTool(event.toolName)) pending.add(key);
     return false;

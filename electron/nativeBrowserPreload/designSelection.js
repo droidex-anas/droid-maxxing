@@ -21,7 +21,7 @@ import {
 import { resolveSource } from './elementSource.js';
 import { state } from './designState.js';
 import { strokesBounds } from './designAnnotations.js';
-import { editableFieldSelector, isSensitiveField } from './sensitiveFields.js';
+import { editableFieldSelector } from './sensitiveFields.js';
 
 export { elementSelection, sketchSelection, textSelection, pickTarget, labelFor };
 
@@ -62,7 +62,7 @@ function sketchSelection() {
 function textSelection() {
   if (!state.textRange || state.textRange.collapsed) return null;
   for (const field of document.querySelectorAll(editableFieldSelector)) {
-    if (isSensitiveField(field) && state.textRange.intersectsNode(field)) return null;
+    if (state.textRange.intersectsNode(field)) return null;
   }
   const text = cleanText(state.textRange.toString(), 400);
   if (!text) return null;

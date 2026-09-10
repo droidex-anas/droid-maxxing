@@ -5,7 +5,7 @@ import type { TranscriptEvent } from '../../types/bridge';
 import { createBrowserEditTracker } from './browserEditTracker';
 
 const LOCAL_DEV_SERVER =
-  /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i;
+  /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:[/?#]|$)/i;
 const RELOAD_DEBOUNCE_MS = 600;
 const EMPTY_TRANSCRIPT: readonly TranscriptEvent[] = [];
 

@@ -27,6 +27,13 @@ export function isSensitiveField(el) {
 }
 
 export function sensitiveFocusedField() {
-  const kind = sensitiveFieldKind(document.activeElement);
+  let active = document.activeElement;
+  while (active?.tagName === 'IFRAME' || active?.tagName === 'FRAME') {
+    // Native key events reach child frames even when their DOM is inaccessible.
+    const frameDocument = active.contentDocument;
+    if (!frameDocument?.activeElement) return { kind: 'protected frame' };
+    active = frameDocument.activeElement;
+  }
+  const kind = sensitiveFieldKind(active);
   return kind ? { kind } : null;
 }
