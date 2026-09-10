@@ -11,6 +11,7 @@ export default tseslint.config(
     ignores: [
       'dist/',
       'sidecar/dist/',
+      'packages/icons/dist/',
       'node_modules/',
       'sidecar/node_modules/',
       '.worktrees/',
@@ -28,7 +29,7 @@ export default tseslint.config(
   js.configs.recommended,
 
   {
-    files: ['src/**/*.{ts,tsx}', 'sidecar/src/**/*.ts'],
+    files: ['src/**/*.{ts,tsx}', 'sidecar/src/**/*.ts', 'packages/icons/src/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}'],
     extends: [...tseslint.configs.strictTypeChecked, ...tseslint.configs.stylisticTypeChecked],
     languageOptions: {
@@ -67,7 +68,7 @@ export default tseslint.config(
   },
 
   {
-    files: ['src/**/*.tsx'],
+    files: ['src/**/*.tsx', 'packages/icons/src/**/*.tsx'],
     plugins: {
       react: reactPlugin,
       'react-hooks': reactHooks,
@@ -94,6 +95,16 @@ export default tseslint.config(
         ...globals.node,
       },
     },
+  },
+
+  {
+    files: ['packages/icons/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+  },
+
+  {
+    files: ['packages/icons/gallery/*.js'],
+    languageOptions: { globals: globals.browser },
   },
 
   {
