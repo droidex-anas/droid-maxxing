@@ -32,13 +32,15 @@ const FALLBACK: Record<EditorId, typeof Code> = {
 };
 
 export function EditorIcon({ editor, size = 16 }: { editor: EditorId; size?: number }) {
-  const [icon, setIcon] = useState<string | null>(() => iconsByEditor.get(editor) ?? null);
+  // Keyed by editor so a menu switching targets never paints the previous
+  // target's icon for the render before the effect below catches up.
+  const [loaded, setLoaded] = useState(() => ({ editor, icon: iconsByEditor.get(editor) ?? null }));
+  const icon = loaded.editor === editor ? loaded.icon : (iconsByEditor.get(editor) ?? null);
 
   useEffect(() => {
     let cancelled = false;
-    setIcon(iconsByEditor.get(editor) ?? null);
     void loadIcon(editor).then((found) => {
-      if (!cancelled) setIcon(found);
+      if (!cancelled) setLoaded({ editor, icon: found });
     });
     return () => {
       cancelled = true;

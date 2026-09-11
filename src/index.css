@@ -368,6 +368,7 @@
     .tool-rows-live > *,
     .prompt-enter,
     .cue-enter,
+    .md-typing .md-shell::after,
     .md-typing .md-shell *::after {
       animation: none;
     }
