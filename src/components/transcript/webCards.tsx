@@ -51,7 +51,7 @@ function WebSourceRow({
       )}
       {url && (
         <div className="mt-1.5 flex items-center text-[12px] text-droid-text-secondary">
-          {link && <LinkBadge link={link} />}
+          {link && <LinkBadge key={link.host} link={link} />}
           <span className="truncate">{webSourceName(url)}</span>
         </div>
       )}

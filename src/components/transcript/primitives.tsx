@@ -243,7 +243,7 @@ export function MessageActions({ text, side }: { text: string; side: 'end' | 'st
   const place = side === 'end' ? 'bottom-0 right-0 translate-y-1/2' : 'bottom-0 right-full mr-2';
   return (
     <div
-      className={`absolute ${place} flex items-center rounded-lg border border-droid-border bg-droid-surface p-0.5 shadow-sm opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/msg:opacity-100`}
+      className={`pointer-events-none absolute ${place} flex items-center rounded-lg border border-droid-border bg-droid-surface p-0.5 shadow-sm opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100`}
     >
       <CopyButton text={text} />
     </div>

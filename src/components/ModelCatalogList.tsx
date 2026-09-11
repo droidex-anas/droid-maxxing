@@ -190,7 +190,7 @@ const ModelRow = memo(function ModelRow({
         e.preventDefault();
         if (!disabled) pick(id);
       }}
-      title={label}
+      title={reasoningLocked ? `${label} · Change the child model to adjust reasoning.` : label}
       className={`group relative flex items-center gap-2.5 h-9 px-2.5 rounded-lg select-none ${
         disabled
           ? 'cursor-not-allowed opacity-50'
@@ -214,7 +214,6 @@ const ModelRow = memo(function ModelRow({
       {/* Effort reads out over the name rather than reserving width from it, so
           the name keeps the full row and never reflows when the meter appears. */}
       <span
-        title={reasoningLocked ? 'Change the child model to adjust reasoning.' : undefined}
         className={`absolute right-2 top-0 h-full flex items-center gap-2 pl-6 pointer-events-none ${
           selected ? 'opacity-100' : 'opacity-0'
         } ${disabled ? '' : 'group-hover:opacity-100'}`}

@@ -25,7 +25,7 @@ function userInstalled(...bundleNames) {
 
 // Where each launch target lives on macOS, most preferred bundle first.
 const MAC_BUNDLES = {
-  vscode: userInstalled('Visual Studio Code.app', 'VSCodium.app'),
+  vscode: userInstalled('Visual Studio Code.app'),
   cursor: userInstalled('Cursor.app'),
   finder: ['/System/Library/CoreServices/Finder.app'],
   terminal: ['/System/Applications/Utilities/Terminal.app', '/Applications/Utilities/Terminal.app'],
@@ -60,7 +60,9 @@ function listEditors() {
   }
   if (commandOnPath('code')) editors.push('vscode');
   if (commandOnPath('cursor')) editors.push('cursor');
-  editors.push('finder', 'terminal');
+  editors.push('finder');
+  if (process.platform === 'win32' || commandOnPath('x-terminal-emulator'))
+    editors.push('terminal');
   return editors;
 }
 
