@@ -19,4 +19,6 @@ test('repoPathInProse leaves ordinary inline code alone', () => {
   assert.equal(repoPathInProse('--no-verify'), null);
   assert.equal(repoPathInProse('src/lib/'), null);
   assert.equal(repoPathInProse('open(path)'), null);
+  assert.equal(repoPathInProse('/usr/bin/node'), null);
+  assert.equal(repoPathInProse('/Users/me/repo/src/app.ts'), '/Users/me/repo/src/app.ts');
 });

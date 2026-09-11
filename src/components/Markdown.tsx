@@ -311,7 +311,9 @@ function createMarkdownComponents(specMode: boolean): Components {
           <span
             className={`underline decoration-transparent underline-offset-2 transition-colors group-hover/link:decoration-current ${textIsUrl && !named ? 'break-all' : ''}`}
           >
-            {named ? link.label : children}
+            {/* A path used as a link label stays a plain pill: the link is the
+                control, and a button cannot nest inside an anchor. */}
+            {named ? link.label : <ProseFileLinks>{children}</ProseFileLinks>}
           </span>
         </a>
       );
