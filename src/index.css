@@ -194,11 +194,27 @@
     animation: agent-pixel-shimmer 1.4s ease-in-out infinite;
   }
 
+  /* Slow breath on the live dot next to an agent-started process. */
+  @keyframes process-breathe {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .process-live-dot {
+    animation: process-breathe 2.4s ease-in-out infinite;
+  }
+
   /* Infinite status indicators must respect reduced-motion preferences. */
   @media (prefers-reduced-motion: reduce) {
     .caret-blink,
     .shimmer-text,
-    .agent-avatar-pixel {
+    .agent-avatar-pixel,
+    .process-live-dot {
       animation: none;
     }
   }
