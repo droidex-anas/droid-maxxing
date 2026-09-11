@@ -2210,8 +2210,46 @@ Expected: PASS.
 
 ---
 
+### Task 14: Terminal chrome redesign
+
+**Files:**
+- Modify: `src/components/terminal/TerminalWorkspace.tsx` (header, status lines, viewport padding)
+- Modify: `src/index.css` (xterm viewport scrollbar and selection polish, inside the existing `@layer` that styles `::-webkit-scrollbar`)
+- Modify: `src/lib/terminalInstances.ts` only if an xterm option (`fontSize`, `lineHeight`, `letterSpacing`, `scrollback`) needs tuning
+
+**Interfaces:**
+- Consumes: `TerminalInstance` from Task 2 (`getState().shellName`, `status`, `error`, `truncated`; `copySelection`, `clear`, `reset`, `restart`).
+- Produces: no new interfaces.
+
+**Design direction (the user's words on 2026-09-11: the terminal shell UI is "so bad and full of monospace ugly UI"):**
+
+- Monospace is allowed only inside the xterm viewport. Every other text in the panel uses the system sans and the `droid-*` tokens.
+- **Header (32 px):** left, the shell name from `shellName` in `text-[12px] text-droid-text` followed by the working directory's last path segment in `text-droid-text-secondary`, the full path in a `HoverTooltip` (`src/components/HoverTooltip.tsx`). Right, the actions Copy selection, Clear, and Reset as 28 px icon buttons that sit at `opacity-0` and become visible on header hover or focus-within (`group` on the header, `group-hover:opacity-100 focus-visible:opacity-100`). No borders around icons, no filled boxes. When the shell has exited, a Restart action replaces Clear and Reset and is always visible.
+- **Status lines:** remove the tinted banners. `starting` shows one muted line inside the viewport area, `Starting zsh…`, in `text-[12px] text-droid-text-muted`, centered vertically, replaced by the viewport once running. `exited` shows a single hairline-bordered row above the viewport, `Shell exited` in `text-droid-text-secondary` with the Restart action inline (`text-droid-text`, hover `bg-droid-elevated`). `error` uses the same row with the message in `text-droid-red` (the `--droid-red` token exists). `truncated` is a one-line muted note `Earlier output was trimmed` that fades in above the viewport and never tints the background.
+- **Viewport:** 12 px padding on the xterm host, background equal to `theme.bg`, and the `.xterm-viewport` scrollbar styled like the app's thin scrollbar (reuse the values from the existing `::-webkit-scrollbar-thumb` rule in `src/index.css`, scoped to `.xterm-viewport`). Selection color stays the accent at 20 percent.
+- **Motion:** header actions fade over 120 ms; nothing else animates.
+
+- [ ] **Step 1: Implement the header, status lines, and viewport styling** per the direction above. Keep `TerminalWorkspace.tsx` under 220 lines; extract `TerminalHeader` and `TerminalStatusRow` as local components in the same file only if it stays readable.
+
+- [ ] **Step 2: Visual verification in an isolated Electron instance** following the memory note `isolated-electron-verification.md`: `npx vite build`, launch with a scratch `HOME`, `DROIDEX_USER_DATA_DIR`, `--user-data-dir`, pre-completed onboarding, and the sidecar env removed. Open a terminal (Ctrl+`), run `ls`, and screenshot the pane in both themes (`resize_window`-equivalent via `page.emulateMedia({ colorScheme })`). Then `exit` the shell and screenshot the exited row. Save screenshots to the plan workspace and list their paths in the report.
+
+- [ ] **Step 3: Typecheck and lint**
+
+Run: `npm run typecheck && npx eslint src/components/terminal src/lib/terminalInstances.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/components/terminal/TerminalWorkspace.tsx src/index.css src/lib/terminalInstances.ts
+git commit -m "feat(terminal): redesign the terminal chrome"
+```
+
+---
+
 ## Self-review
 
+- Terminal chrome redesign (T14) added 2026-09-11 at the user's request.
 - Spec coverage: registry (T2), thin component and key (T3), close flow (T1, T4), chat deletion (T5), restart line (T2/T3), sans header (T3), parsers (T6), monitor and stop command (T7, T9), retirement fact (T9), journal reaping (T9), shutdown (T9 via `closeAll`), event and command wire types (T8), store (T10), chip and popover (T11), command card (T12), verification (T13).
 - Known gap accepted: child runtime retirement leaves that child's servers until the parent closes (noted in T9).
 - Names are consistent: `agentProcesses`, `AgentProcess`, `session.processes`, `session.processes.stop`, `stopAgentProcess`, `terminalHasChildren`, `acquireTerminalInstance` / `releaseTerminalInstance` / `releaseTerminalInstancesExcept` / `peekTerminalInstance`, `processIdOf`.
