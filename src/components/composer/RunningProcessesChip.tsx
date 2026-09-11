@@ -117,40 +117,47 @@ export function RunningProcessesChip({ appSessionId }: { appSessionId: string })
                     className="group flex h-8 items-center gap-2 rounded-xl px-2 text-[12px] transition-colors hover:bg-droid-bg/40"
                   >
                     <span className="process-live-dot h-1.5 w-1.5 shrink-0 rounded-full bg-droid-accent" />
-                    <span className="truncate text-droid-text" title={process.command}>
+                    <span
+                      className="min-w-0 flex-1 truncate text-droid-text"
+                      title={process.command}
+                    >
                       {process.name}
                     </span>
                     {port !== undefined && (
-                      <span className="truncate text-droid-text-secondary">{`localhost:${String(port)}`}</span>
+                      <span className="shrink-0 truncate text-droid-text-secondary">{`localhost:${String(port)}`}</span>
                     )}
-                    <span className="ml-auto shrink-0 tabular-nums text-[11px] text-droid-text-muted group-hover:hidden">
-                      {elapsed(process.startedAt, now)}
-                    </span>
-                    {/* Hover swaps the quiet elapsed time for the two actions,
-                        so the resting list stays a plain list. */}
-                    <span className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                      {port !== undefined && (
+                    {/* Fixed-width slot sized for the two-button cluster, the
+                        widest occupant; the elapsed time overlays it
+                        absolutely so hover/focus swaps between them without
+                        reflowing the row. */}
+                    <span className="relative ml-2 h-6 w-14 shrink-0">
+                      <span className="absolute right-0 top-1/2 -translate-y-1/2 tabular-nums text-[11px] text-droid-text-muted transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+                        {elapsed(process.startedAt, now)}
+                      </span>
+                      <span className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+                        {port !== undefined && (
+                          <button
+                            type="button"
+                            title={`Open localhost:${String(port)}`}
+                            onClick={() => {
+                              openInBrowser(process);
+                            }}
+                            className="flex h-6 w-6 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-bg/60 hover:text-droid-text"
+                          >
+                            <Globe className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
-                          title={`Open localhost:${String(port)}`}
+                          title="Stop"
                           onClick={() => {
-                            openInBrowser(process);
+                            stopAgentProcess(appSessionId, process.pid);
                           }}
                           className="flex h-6 w-6 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-bg/60 hover:text-droid-text"
                         >
-                          <Globe className="h-3.5 w-3.5" />
+                          <Square className="h-3 w-3" fill="currentColor" strokeWidth={0} />
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        title="Stop"
-                        onClick={() => {
-                          stopAgentProcess(appSessionId, process.pid);
-                        }}
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-bg/60 hover:text-droid-text"
-                      >
-                        <Square className="h-3 w-3" fill="currentColor" strokeWidth={0} />
-                      </button>
+                      </span>
                     </span>
                   </div>
                 );
