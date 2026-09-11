@@ -112,7 +112,7 @@ export function SpecOutline({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Find in outline…"
-            className="flex-1 min-w-0 bg-transparent text-[12px] text-droid-text placeholder-droid-text-muted/50 focus:outline-none"
+            className="flex-1 min-w-0 bg-transparent text-[12px] text-droid-text placeholder-droid-text-muted focus:outline-none"
           />
           {searchQuery && (
             <button

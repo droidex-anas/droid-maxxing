@@ -171,7 +171,7 @@ export function AutomationProposalCard({
             disabled={!workingDraft}
             placeholder={workingDraft ? 'Automation title' : 'Preparing automation'}
             aria-label="Automation title"
-            className="mt-2 w-full bg-transparent text-[15px] font-medium leading-6 tracking-[-0.01em] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/50 disabled:cursor-default"
+            className="mt-2 w-full bg-transparent text-[15px] font-medium leading-6 tracking-[-0.01em] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted disabled:cursor-default"
           />
         )}
         <p className="mt-1 line-clamp-3 text-[12.5px] leading-5 text-droid-text-muted">

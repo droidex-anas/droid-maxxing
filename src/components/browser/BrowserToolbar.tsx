@@ -82,7 +82,7 @@ export function BrowserToolbar({
           onChange={(event) => {
             onUrlInputChange(event.target.value);
           }}
-          className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-medium tracking-[-0.01em] text-droid-text outline-none placeholder:font-normal placeholder:text-droid-text-muted/70"
+          className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-medium tracking-[-0.01em] text-droid-text outline-none placeholder:font-normal placeholder:text-droid-text-muted"
           placeholder="Search or enter URL"
           aria-label="Browser address"
         />

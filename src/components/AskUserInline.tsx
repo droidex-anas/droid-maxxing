@@ -196,7 +196,7 @@ export function QuestionCard({
                 }
               }}
               placeholder="Type your own answer"
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-droid-text placeholder:text-droid-text-muted/60 outline-none"
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-droid-text placeholder:text-droid-text-muted outline-none"
             />
           ) : (
             <button

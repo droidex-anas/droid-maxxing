@@ -902,7 +902,7 @@ export default function SettingsPanel() {
                 setQuery(e.target.value);
               }}
               placeholder="Search settings…"
-              className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/80 focus:outline-none"
+              className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
             />
             {q ? (
               <button

@@ -35,7 +35,7 @@ interface AutomationEditorProps {
 }
 
 const CONTROL =
-  'w-full rounded-xl border border-droid-border bg-droid-surface/55 px-3 py-2.5 text-[13px] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/60 focus:border-droid-border-hover focus:bg-droid-surface';
+  'w-full rounded-xl border border-droid-border bg-droid-surface/55 px-3 py-2.5 text-[13px] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-border-hover focus:bg-droid-surface';
 
 export function AutomationEditor({
   editor,
@@ -119,7 +119,7 @@ export function AutomationEditor({
               update('title', event.target.value);
             }}
             placeholder="Automation title"
-            className="mb-4 w-full bg-transparent text-[22px] font-medium tracking-[-0.02em] text-droid-text outline-none placeholder:text-droid-text-muted/50"
+            className="mb-4 w-full bg-transparent text-[22px] font-medium tracking-[-0.02em] text-droid-text outline-none placeholder:text-droid-text-muted"
             autoFocus
           />
           <textarea
@@ -393,7 +393,7 @@ export function ScheduleControls({
                 onChange({ kind: 'cron', expression: event.target.value });
               }}
               placeholder="0 9 * * 1-5"
-              className="w-full rounded-lg border border-droid-border bg-droid-bg/70 px-2.5 py-1.5 text-right text-[12px] tabular-nums text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/50 focus:border-droid-border-hover"
+              className="w-full rounded-lg border border-droid-border bg-droid-bg/70 px-2.5 py-1.5 text-right text-[12px] tabular-nums text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-border-hover"
             />
             <div className="mt-1 text-right text-[10px] text-droid-text-muted">
               minute · hour · day · month · weekday

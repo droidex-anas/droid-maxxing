@@ -116,7 +116,7 @@ export function CreatePrSheet({
         }}
         onKeyDown={submitOnMetaEnter}
         placeholder="Pull request title"
-        className="w-full rounded-lg bg-droid-bg/60 px-2.5 py-1.5 text-[12.5px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+        className="w-full rounded-lg bg-droid-bg/60 px-2.5 py-1.5 text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
       />
       <textarea
         value={body}
@@ -126,7 +126,7 @@ export function CreatePrSheet({
         onKeyDown={submitOnMetaEnter}
         rows={3}
         placeholder="Description (optional)"
-        className="w-full resize-none rounded-lg bg-droid-bg/60 px-2.5 py-2 text-[12.5px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+        className="w-full resize-none rounded-lg bg-droid-bg/60 px-2.5 py-2 text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
       />
       <div className="relative" ref={basePickerRef}>
         <button

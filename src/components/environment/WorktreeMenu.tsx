@@ -303,7 +303,7 @@ export function WorktreeMenu({
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && !pickingBase && void doCreate()}
                 placeholder="new-branch-name"
-                className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+                className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
               />
               <button
                 onClick={() => {

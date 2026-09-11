@@ -353,7 +353,7 @@ export default function ModelSelectorPopover({
                   setQuery(e.target.value);
                 }}
                 placeholder="Search models"
-                className="flex-1 bg-transparent text-[12px] text-droid-text placeholder-droid-text-muted/70 focus:outline-none"
+                className="flex-1 bg-transparent text-[12px] text-droid-text placeholder-droid-text-muted focus:outline-none"
               />
             </div>
 
