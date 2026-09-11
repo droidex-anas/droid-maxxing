@@ -22,6 +22,8 @@ import {
 } from '../lib/childSessions';
 import { DEFAULT_TOOL_ACTIVITY, type ToolActivityDensity } from '../lib/toolActivity';
 import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
+import { useStreamingActivity } from '../hooks/streamingText';
+import { hasAppBlock } from './appBlockRuntime';
 import { asChunkedSequence } from '../lib/chunkedSequence';
 import { ConversationList, type ConversationListHandle } from './ConversationList';
 import { shouldAnimateFeedRow } from './conversationListState';
@@ -281,10 +283,10 @@ export function MessageFeed({
         findChildSessionForTarget(subagentsDock?.sessions ?? [], target)?.status;
       return status === 'running';
     });
-  // Working describes the pending turn, while the assistant caret describes
-  // token flow. Both intentionally appear during prose streaming; Working
-  // remains when the caret idles so a token gap never looks like completion.
-  // Thinking, status, and running-child tails already convey pending work.
+  // One live cue at a time. While the tail message streams, its caret is the
+  // cue; Working takes over the moment the stream idles so a token gap never
+  // reads as completion. Thinking, status, and running-child tails already
+  // convey pending work.
   const tailSelfIndicates =
     !!last &&
     (last.type === 'thinking' ||
@@ -297,9 +299,18 @@ export function MessageFeed({
     () => trailingSubagentPoll(events, dockEnabled),
     [events, dockEnabled],
   );
+  // Mirrors the tail message's own caret timing (same text, same idle window),
+  // so the hand-off from caret to Working is seamless.
+  const tailIsReply = last?.type === 'message' && last.event.author !== 'user';
+  const tailText = tailIsReply ? (last.event.text ?? '') : '';
+  const tailTyping = useStreamingActivity(
+    tailText,
+    pending && tailIsReply && !subagentPoll && !hasAppBlock(tailText),
+  );
   // A dock tail whose children are still running already speaks for the wave
   // with its own pills, timers and total, so the poll cue would only repeat it.
-  const showWorking = pending && (subagentPoll ? !lastDockRunning : !tailSelfIndicates);
+  const showWorking =
+    pending && !tailTyping && (subagentPoll ? !lastDockRunning : !tailSelfIndicates);
   const workingLabel = subagentPoll
     ? 'Checking subagents'
     : last?.type === 'tools'

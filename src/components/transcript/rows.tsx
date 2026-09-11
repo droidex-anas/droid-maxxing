@@ -67,7 +67,7 @@ export function ThinkingItem({
         )}
       </button>
       <Expand open={open}>
-        <div className="mt-2 pl-[18px] text-[12.5px] text-droid-text-muted/55 leading-[1.7] whitespace-pre-wrap break-words">
+        <div className="mt-2 pl-[18px] text-[13px] text-droid-text-muted/55 leading-[1.7] whitespace-pre-wrap break-words">
           {text}
           {active && <StreamingCaret />}
         </div>
@@ -171,7 +171,7 @@ export function ErrorLine({ text }: { text: string }) {
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] leading-relaxed"
+        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[13px] leading-relaxed"
         aria-expanded={open}
       >
         <Caret open={open} />
@@ -181,7 +181,7 @@ export function ErrorLine({ text }: { text: string }) {
       <Expand open={open}>
         <div className="mt-1.5 pl-[18px]">
           <pre
-            className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+            className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words"
             style={{ backgroundColor: RED_TINT, color: RED }}
           >
             {linkify(body)}
@@ -217,7 +217,7 @@ function ToolLine({
     <>
       <span className="text-droid-text-secondary shrink-0">{CAT_LABEL[cat]}</span>
       {raw && (
-        <span className="text-[12px] min-w-0 truncate">
+        <span className="min-w-0 truncate">
           {dir && <span className="text-droid-text-muted/50">{dir}</span>}
           <span className="text-droid-text-muted">{name}</span>
         </span>
@@ -234,7 +234,7 @@ function ToolLine({
           onClick={() => {
             setOpen((o) => !o);
           }}
-          className="group flex w-full items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0 text-left"
+          className="group flex w-full items-center gap-1.5 text-[13px] leading-relaxed min-w-0 text-left"
           aria-expanded={expanded}
         >
           <Caret open={expanded} />
@@ -245,7 +245,7 @@ function ToolLine({
           <Expand open={expanded}>
             <div className="mt-1.5 pl-[18px]">
               <pre
-                className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+                className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words"
                 style={{ backgroundColor: RED_TINT, color: RED }}
               >
                 {out}
@@ -261,7 +261,7 @@ function ToolLine({
   const hasBody = out.length > 0;
   if (!hasBody) {
     return (
-      <div className="flex items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0">
+      <div className="flex items-center gap-1.5 text-[13px] leading-relaxed min-w-0">
         {/* Caret-width spacer keeps the label flush with the expandable rows. */}
         <span className="w-3 shrink-0" aria-hidden="true" />
         {label}
@@ -275,7 +275,7 @@ function ToolLine({
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="group flex w-full items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0 text-left"
+        className="group flex w-full items-center gap-1.5 text-[13px] leading-relaxed min-w-0 text-left"
         aria-expanded={expanded}
       >
         <Caret open={expanded} />
@@ -283,7 +283,7 @@ function ToolLine({
       </button>
       <Expand open={expanded}>
         <div className="mt-1.5 pl-[18px]">
-          <pre className="max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
+          <pre className="max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[12px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
             {linkify(out)}
           </pre>
         </div>
@@ -295,14 +295,14 @@ function ToolLine({
 function TodoChecklist({ event }: { event: TranscriptEvent }) {
   const todos = parseTodos(event.toolArgs);
   if (todos.length === 0)
-    return <div className="text-[12.5px] text-droid-text-secondary">Updated plan</div>;
+    return <div className="text-[13px] text-droid-text-secondary">Updated plan</div>;
   const mark = { completed: '✓', in_progress: '◐', pending: '○' } as const;
   return (
     <div className="space-y-1">
       {todos.map((t, i) => (
         <div
           key={i}
-          className={`flex items-start gap-2 text-[12.5px] leading-relaxed break-words ${
+          className={`flex items-start gap-2 text-[13px] leading-relaxed break-words ${
             t.status === 'completed'
               ? 'text-droid-text-muted line-through'
               : 'text-droid-text-secondary'
@@ -464,7 +464,7 @@ export function renderToolEvents(
     nodes.push(
       <pre
         key={e.id}
-        className="max-h-48 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words"
+        className="max-h-48 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[12px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words"
       >
         {linkify(body)}
       </pre>,

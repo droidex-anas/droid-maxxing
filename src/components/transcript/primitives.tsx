@@ -121,18 +121,18 @@ export function CopyButton({ text }: { text: string }) {
         );
       }}
       title="Copy"
-      className="p-1 rounded-md text-droid-text-muted/60 hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
+      className="p-1 rounded-md text-droid-text-secondary hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
     >
       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
     </button>
   );
 }
 
-// A small red "error" pill shown on the right of a failed tool's header row.
+// A small red "error" pill beside the label of a failed tool's header row.
 export function ErrorTag() {
   return (
     <span
-      className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+      className="shrink-0 rounded-md px-1.5 py-px text-[11px] font-medium"
       style={{
         backgroundColor: 'color-mix(in srgb, var(--droid-red) 15%, transparent)',
         color: RED,
@@ -213,7 +213,8 @@ export function TranscriptSkeleton() {
   );
 }
 
-/* ── Working indicator — minimal shimmer label, no icons/dots/bars ── */
+/* ── Working indicator — one shimmer label in a fixed line box, fading in so
+   the feed's rhythm never jumps when the cue appears ── */
 export function WorkingIndicator({
   label = 'Working',
   startTs,
@@ -224,10 +225,27 @@ export function WorkingIndicator({
   const elapsed = useElapsed(startTs, true);
   const suffix = startTs != null && elapsed >= 1000 ? ` ${formatDuration(elapsed)}` : '';
   return (
-    <span className="shimmer-text text-[13px] font-medium tracking-tight">
-      <span aria-live="polite">{label}</span>
-      <span aria-hidden="true">{suffix}…</span>
-    </span>
+    <div className="cue-enter flex h-5 items-center">
+      <span className="shimmer-text text-[13px] font-medium tracking-tight">
+        <span aria-live="polite">{label}</span>
+        <span aria-hidden="true">{suffix}…</span>
+      </span>
+    </div>
+  );
+}
+
+/* ── Hover toolbar for a message. It floats over the message's free corner —
+   the bottom-right of a reply, the left of a prompt bubble — so it never moves
+   the text or changes the row's height, and fades in on hover or keyboard
+   focus. The host must carry `group/msg relative`. ── */
+export function MessageActions({ text, side }: { text: string; side: 'end' | 'start' }) {
+  const place = side === 'end' ? 'bottom-0 right-0 translate-y-1/2' : 'bottom-0 right-full mr-2';
+  return (
+    <div
+      className={`absolute ${place} flex items-center rounded-lg border border-droid-border bg-droid-surface p-0.5 shadow-sm opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/msg:opacity-100`}
+    >
+      <CopyButton text={text} />
+    </div>
   );
 }
 

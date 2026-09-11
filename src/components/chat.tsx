@@ -16,9 +16,8 @@ import { MessageBody } from './MessageBody';
 import { DiffCard } from './DiffView';
 import type { SubagentsDockData } from './SubagentsDock';
 import TurnChangesPanel from './TurnChangesPanel';
-import { StreamingCaret } from './StreamingCaret';
 import { isCompactionCompleteStatus, sameFeedEvents, type FeedItem } from './chatFeed';
-import { CompactingIndicator, CompactionDivider, CopyButton } from './transcript/primitives';
+import { CompactingIndicator, CompactionDivider, MessageActions } from './transcript/primitives';
 import { correlateResults, ErrorLine, ThinkingItem } from './transcript/rows';
 import { DiffGroup, ToolGroupItem, WorkedGroup } from './transcript/groups';
 import { UserBubble } from './transcript/UserBubble';
@@ -149,11 +148,12 @@ function isSpecEcho(text: string, specContent: string | undefined): boolean {
   return Boolean(specContent && text.trim() && text.trim() === specContent.trim());
 }
 
-// The assistant's streaming text row. The caret means "text is flowing": it
-// stops after a short idle gap (and never appears for app blocks, which render
-// their own building status) so a wedged pending flag cannot leave it blinking.
-// Copy belongs to the turn's settled final response only — mid-turn notes and
-// anything still streaming get neither caret-forever nor a copy button.
+// The assistant's streaming text row. The caret means "text is flowing": it is
+// drawn by CSS at the end of the last line while `md-typing` is set, stops
+// after a short idle gap (and never appears for app blocks, which render their
+// own building status) so a wedged pending flag cannot leave it blinking.
+// Copy belongs to the turn's settled final response only, and floats over the
+// message so a row never changes height when it settles.
 const AssistantMessage = memo(function AssistantMessage({
   text,
   live,
@@ -175,18 +175,15 @@ const AssistantMessage = memo(function AssistantMessage({
   return (
     // min-w-0 so a wide table or a long unbroken URL scrolls inside the message
     // rather than widening the row past the transcript.
-    <div className="group/msg min-w-0">
+    <div className={`group/msg relative min-w-0${typing ? ' md-typing' : ''}`}>
       <MessageBody
         text={text}
         live={live}
         autoPlayAppBlocks={autoPlayAppBlocks}
         cacheId={cacheId}
       />
-      {typing ? <StreamingCaret /> : null}
       {!live && isFinalResponse && text.trim() ? (
-        <div className="mt-1.5 -ml-1 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
-          <CopyButton text={copyTextForMessage(text)} />
-        </div>
+        <MessageActions text={copyTextForMessage(text)} side="end" />
       ) : null}
     </div>
   );

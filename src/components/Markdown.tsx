@@ -375,7 +375,7 @@ const SPEC_COMPONENTS = createMarkdownComponents(true);
 // read at the same size; 1.6 leading keeps paragraphs and lists close without
 // crowding them.
 export function markdownShellClass(specMode: boolean): string {
-  return `min-w-0 max-w-full text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[14px] leading-[1.6] space-y-2.5'}`;
+  return `md-shell min-w-0 max-w-full text-droid-text break-words ${specMode ? 'text-[15px] leading-[1.8] space-y-5' : 'text-[14px] leading-[1.6] space-y-2.5'}`;
 }
 
 export type MarkdownFenceFlags = Omit<FenceRenderOptions, 'appFences'>;

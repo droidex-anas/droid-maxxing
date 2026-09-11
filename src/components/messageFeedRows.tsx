@@ -64,9 +64,11 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
       data-feed-row-id={rowId}
       data-anchor-id={isPrompt ? item.key : undefined}
       data-transcript-find-hit={hit}
+      // A prompt opens a turn, so it carries a little extra air above the
+      // shared row gap and the transcript reads as turns, not as a flat list.
       className={`mx-auto min-w-0 ${isWideAppResponse ? 'max-w-4xl' : 'max-w-2xl'} ${
-        animate ? enterClass(isPrompt) : ''
-      } ${reachClass}`}
+        isPrompt ? 'pt-2' : ''
+      } ${animate ? enterClass(isPrompt) : ''} ${reachClass}`}
     >
       {reach.rangeSelecting && (
         <button

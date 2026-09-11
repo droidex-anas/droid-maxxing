@@ -967,19 +967,15 @@ test('an incomplete live App owns its building state without exposing Play or a 
   assert.doesNotMatch(html, /<iframe/i);
 });
 
-test('ordinary live prose keeps the trailing streaming caret', () => {
+// The caret is the only cue while prose streams (drawn by CSS on the typing
+// message); Working takes over once the stream idles, never alongside it.
+test('ordinary live prose shows the streaming caret and no Working cue', () => {
   const html = renderToStaticMarkup(
     createElement(MessageFeed, { events: [asst('Still writing')], pending: true }),
   );
 
-  assert.match(html, /caret-blink/);
-});
-
-test('a pending assistant tail still shows Working after the streaming caret can idle', () => {
-  const html = renderToStaticMarkup(
-    createElement(MessageFeed, { events: [asst('Still writing')], pending: true }),
-  );
-  assert.match(html, /Working/);
+  assert.match(html, /md-typing/);
+  assert.doesNotMatch(html, /Working/);
 });
 
 test('a running child-session tail without toolUseId still suppresses the Working cue', () => {

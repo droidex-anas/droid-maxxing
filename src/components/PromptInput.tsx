@@ -1479,7 +1479,10 @@ export default function PromptInput({
       style={{ paddingRight: rightInset ? 312 : undefined, transition: 'padding-right 0.2s ease' }}
     >
       <div
-        className={`relative mx-auto min-w-0 ${compact ? 'max-w-4xl' : 'max-w-3xl'}`}
+        // The composer is the transcript column (42rem) plus its own text inset
+        // on each side (1px border, 16px padding, 6px editor line gutter), so
+        // the text you type sits on the same edge as the messages above it.
+        className={`relative mx-auto min-w-0 ${compact ? 'max-w-4xl' : 'max-w-[calc(42rem+52px)]'}`}
         onDragOver={fileDrop.onDragOver}
         onDrop={fileDrop.onDrop}
       >

@@ -27,7 +27,7 @@ export function CommandCard({
           : undefined
       }
     >
-      <div className="px-3.5 py-2.5 font-mono text-[11.5px] leading-[1.6]">
+      <div className="px-3.5 py-2.5 font-mono text-[12px] leading-[1.6]">
         <div className="flex gap-2 break-words">
           <span
             className="select-none text-droid-text-muted"
@@ -37,10 +37,10 @@ export function CommandCard({
           </span>
           <span className="whitespace-pre-wrap text-droid-text">{command}</span>
         </div>
-        {running && <span className="shimmer-text text-[12.5px] font-medium">Running</span>}
+        {running && <span className="shimmer-text text-[13px] font-medium">Running</span>}
         {out && (
           <pre
-            className="mt-2 pt-2 border-t border-droid-border/60 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] break-words text-droid-text-muted"
+            className="mt-2 pt-2 border-t border-droid-border/60 max-h-56 overflow-auto whitespace-pre-wrap text-[12px] leading-[1.55] break-words text-droid-text-muted"
             style={error ? { color: RED } : undefined}
           >
             {error ? out : linkify(out)}
@@ -72,7 +72,7 @@ export function CommandLine({
   if (running) {
     return (
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className="shimmer-text shrink-0 text-[12.5px] font-medium">Running</span>
+        <span className="shimmer-text shrink-0 text-[13px] font-medium">Running</span>
         <span className="min-w-0 truncate font-mono text-[12px] text-droid-text-muted">
           {command}
         </span>
@@ -85,7 +85,7 @@ export function CommandLine({
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] leading-relaxed"
+        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[13px] leading-relaxed"
         aria-expanded={expanded}
       >
         <Caret open={expanded} />
