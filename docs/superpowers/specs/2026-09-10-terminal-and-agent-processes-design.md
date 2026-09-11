@@ -45,7 +45,7 @@ interface TerminalInstance {
 ### Lifecycle
 
 - **Close tab.** If the shell has exited, close immediately. Otherwise ask main whether the PTY has child processes (`terminal-has-children`, a `pgrep -P <shell pid>` check in `electron/terminal.cjs`; Windows answers true so the confirmation stays). Idle shell: close immediately. Running child: show the existing `Popover` anchored to the close button with one line ("Stop `vite` and close?") and a Stop button. No native dialogs.
-- **Delete or archive chat.** `DELETE_CHAT`, `ARCHIVE_CHAT`, and `SESSION_CLOSED` reducers prune `utilityPanels[appSessionId]`; a store effect releases every terminal instance whose tab disappeared and kills its PTY.
+- **Delete or archive chat.** `DELETE_CHAT` and `ARCHIVE_CHAT` reducers prune `utilityPanels[appSessionId]` (`SESSION_CLOSED` does not: idle runtime retirement closes the provider process while the chat and its PTYs stay); a store effect releases every terminal instance whose tab disappeared and kills its PTY.
 - **Renderer reload.** Instances are lost with the document; the existing replay path restores content on the next mount.
 
 ### Tests
