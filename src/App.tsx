@@ -230,6 +230,8 @@ export default function App() {
   // trusting a stale closure over `utilityPanel.tabs`.
   const utilityTabsRef = useRef(utilityPanel.tabs);
   utilityTabsRef.current = utilityPanel.tabs;
+  const activeTabIdRef = useRef(utilityPanel.activeTabId);
+  activeTabIdRef.current = utilityPanel.activeTabId;
   const confirmingTab = utilityPanel.tabs.find((tab) => tab.id === confirmCloseTabId) ?? null;
   const contentRowRef = useRef<HTMLDivElement>(null);
   const [contentRowWidth, setContentRowWidth] = useState(0);
@@ -715,7 +717,7 @@ export default function App() {
                           // mounted, so the confirmation has nowhere to
                           // render unless this tab is brought forward first
                           // — mirror onActivateTab's browser-expanded reset.
-                          if (tab.id !== utilityPanel.activeTabId) {
+                          if (tab.id !== activeTabIdRef.current) {
                             setExpandedBrowserAppSessionId(null);
                             dispatch({ type: 'ACTIVATE_UTILITY_TAB', tabId: tab.id });
                           }
