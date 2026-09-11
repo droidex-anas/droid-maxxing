@@ -178,6 +178,17 @@ export function openChildHistory(
     });
 }
 
+// Child runtimes are tracked under their parent, so closing the parent takes
+// whatever they spawned with it.
+function trackChildProcess(
+  host: ChildRuntimeInstallHost,
+  parentAppSessionId: string,
+  loaded: FactorySession,
+): void {
+  const childPid = host.d.runtime.processIdOf(loaded);
+  if (childPid !== undefined) host.d.agentProcesses.track(parentAppSessionId, childPid);
+}
+
 export async function installChildRuntime(input: {
   parent: ParentChildSessions;
   child: ChildSessionState;
@@ -222,6 +233,7 @@ export async function installChildRuntime(input: {
     const result = await awaitOpenStep(attempt, load, (late) => late.close().catch(ignoreError));
     if (result === CHILD_OPEN_CANCELLED) return;
     loaded = result;
+    trackChildProcess(host, identity.parentAppSessionId, loaded);
     attempt.provisionalSession = loaded;
     await bindLoadedChildRuntime({
       parent,

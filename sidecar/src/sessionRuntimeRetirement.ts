@@ -41,6 +41,7 @@ export interface SessionRetirementFacts {
   hasUnsettledChildren: boolean;
   hasOpenBrowser: boolean;
   hasPendingSettings: boolean;
+  hasAgentProcesses: boolean;
 }
 
 // Every path that could still produce output, own unsaved user intent, or lose
@@ -58,7 +59,10 @@ function isRetirableSession(facts: SessionRetirementFacts): boolean {
     facts.queuedSends === 0 &&
     !facts.hasUnsettledChildren &&
     !facts.hasOpenBrowser &&
-    !facts.hasPendingSettings
+    !facts.hasPendingSettings &&
+    // Retiring would kill the dev server or build watcher the agent started
+    // and the user is still using.
+    !facts.hasAgentProcesses
   );
 }
 
@@ -98,6 +102,8 @@ export function adoptedSessionFacts(identity: {
     focused: false,
     hasOpenBrowser: false,
     hasPendingSettings: false,
+    // A restart took every process the previous run had spawned with it.
+    hasAgentProcesses: false,
   };
 }
 
@@ -132,6 +138,7 @@ export interface SessionRuntimeRetirementDependencies {
   hasUnsettledChildren: (appSessionId: string) => boolean;
   hasOpenBrowser: (appSessionId: string) => boolean;
   hasPendingSettings: (appSessionId: string) => boolean;
+  hasAgentProcesses: (appSessionId: string) => boolean;
   retire: (appSessionId: string) => Promise<void>;
   emitStatus: (appSessionId: string, text: string) => void;
   emitError: (appSessionId: string, message: string) => void;
@@ -242,6 +249,7 @@ export class SessionRuntimeRetirement {
       hasUnsettledChildren: d.hasUnsettledChildren(appSessionId),
       hasOpenBrowser: d.hasOpenBrowser(appSessionId),
       hasPendingSettings: d.hasPendingSettings(appSessionId),
+      hasAgentProcesses: d.hasAgentProcesses(appSessionId),
     };
   }
 

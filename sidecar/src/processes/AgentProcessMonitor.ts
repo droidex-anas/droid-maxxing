@@ -1,12 +1,5 @@
+import type { AgentProcess } from '../protocol.js';
 import { descendantsOf, type ProcessRecord } from './processTree.js';
-
-export interface AgentProcess {
-  pid: number;
-  name: string;
-  command: string;
-  startedAt: number;
-  ports: number[];
-}
 
 export interface AgentProcessMonitorDependencies {
   listProcesses: () => Promise<ProcessRecord[]>;
@@ -125,7 +118,11 @@ export class AgentProcessMonitor {
     await this.killTree(rows);
     this.descendants.set(appSessionId, []);
     this.publish(appSessionId, []);
+    // Same cleanup `untrack` does when a session loses its last root: the
+    // session is gone, so nothing should keep reporting an empty list for it.
     for (const [pid, id] of this.roots) if (id === appSessionId) this.roots.delete(pid);
+    this.descendants.delete(appSessionId);
+    this.current.delete(appSessionId);
     if (this.roots.size === 0) this.disarm();
   }
 

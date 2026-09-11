@@ -200,6 +200,18 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
       },
     },
     isShutdownStarted: () => shutdownStarted,
+    agentProcesses: {
+      track: (appSessionId, pid) => {
+        calls.push({ target: 'runtime', method: 'processes.track', args: [appSessionId, pid] });
+      },
+      untrack: (pid) => {
+        calls.push({ target: 'cleanup', method: 'processes.untrack', args: [pid] });
+      },
+      killSession: (appSessionId) => {
+        calls.push({ target: 'cleanup', method: 'processes.killSession', args: [appSessionId] });
+        return Promise.resolve();
+      },
+    },
     applyPendingSettingsToSummary: (item) => ({ ...item, ...projection }),
     applyPendingSessionSettings: (appSessionId) => applyPending(appSessionId),
     runPrimaryTurn: async (live, prompt) => {
@@ -1187,4 +1199,53 @@ test('pending settings stay projected until successful first-send application', 
   assert.deepEqual(failedProvider.prompts, []);
   assert.equal(failed.registry.getCanonicalSummary('app-pending')?.modelId, 'model-saved');
   assert.equal(failed.registry.resolveSummary('app-pending')?.modelId, 'model-pending');
+});
+
+test('closing a session kills its agent processes while the provider is still their parent', async () => {
+  const h = createHarness();
+  const provider = queueCreate(h, 'created-pid');
+  h.runtime.processIds.set('created-pid', 4321);
+  h.setChildCloser((appSessionId) => {
+    h.calls.push({ target: 'cleanup', method: 'children.close', args: [appSessionId] });
+    return Promise.resolve();
+  });
+  await h.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+
+  await h.lifecycle.close('created-pid');
+
+  assert.deepEqual(
+    h.calls
+      .filter(
+        (call) =>
+          call.method.startsWith('processes.') ||
+          call.method === 'children.close' ||
+          call.method === 'session.close',
+      )
+      .map((call) => [call.method, ...call.args]),
+    [
+      ['processes.track', 'created-pid', 4321],
+      // The kill has to precede every provider close of the session: once
+      // `droid` exits, its dev servers are reparented and no longer reachable
+      // from its pid. Child runtimes are tracked under the same session id, so
+      // their servers go with this one call too.
+      ['processes.killSession', 'created-pid'],
+      ['children.close', 'created-pid'],
+      ['session.close', 'created-pid'],
+      ['processes.untrack', 4321],
+    ],
+  );
+});
+
+test('a resumed session tracks the pid of the provider it reloaded', async () => {
+  const h = createHarness([summary('app-2', 'provider-2')]);
+  queueLoad(h, 'provider-2');
+  h.runtime.processIds.set('provider-2', 991);
+
+  await h.lifecycle.resume('app-2');
+
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === 'processes.track').map((call) => call.args),
+    [['app-2', 991]],
+  );
 });

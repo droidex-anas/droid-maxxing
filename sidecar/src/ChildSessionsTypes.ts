@@ -9,6 +9,7 @@ import type { SessionContext } from './SessionContext.js';
 import type { SessionCompaction } from './SessionCompaction.js';
 import type { SessionInitResult } from './sessionHelpers.js';
 import type { ChildParentLease, ChildRuntimeTarget, ChildSettings } from './ChildSessionState.js';
+import type { AgentProcessMonitor } from './processes/AgentProcessMonitor.js';
 
 export type ChildOperation = 'open' | 'loadHistory' | 'send' | 'sendNow' | 'interrupt' | 'settings';
 
@@ -19,7 +20,10 @@ export type ChildSettingsTarget = ChildRuntimeTarget & {
 };
 
 export interface ChildSessionsDependencies {
-  runtime: Pick<FactoryRuntime, 'loadSession'>;
+  runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf'>;
+  // Child runtimes are tracked under their parent session, so the parent's
+  // close takes their processes with it.
+  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack'>;
   registry: Pick<SessionRegistry<ChildParentLease>, 'getLive'>;
   history: Pick<HistoryIndex, 'childSessions' | 'childSession' | 'sessionLaunchSettings'> & {
     // Mirrors HistoryIndex.upsertChildSession: false means the child update is

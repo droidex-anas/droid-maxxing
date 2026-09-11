@@ -83,6 +83,7 @@ function createHarness(
   let parent = parentLease(parentId, calls);
   const dependencies: ChildSessionsDependencies = {
     runtime,
+    agentProcesses: { track: () => undefined, untrack: () => undefined },
     registry: { getLive: (id) => (id === parentId ? parent : undefined) },
     history,
     timeline: {

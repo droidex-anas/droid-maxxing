@@ -32,6 +32,7 @@ function facts(
     hasUnsettledChildren: false,
     hasOpenBrowser: false,
     hasPendingSettings: false,
+    hasAgentProcesses: false,
     ...patch,
   };
 }
@@ -64,6 +65,7 @@ test('a session with work, unsaved intent, or a resource in use is never retirab
     ['children-working', { hasUnsettledChildren: true }],
     ['browser-open', { hasOpenBrowser: true }],
     ['unapplied-model-choice', { hasPendingSettings: true }],
+    ['agent-processes-running', { hasAgentProcesses: true }],
   ];
 
   for (const [label, patch] of blocked) {
@@ -141,6 +143,7 @@ function ownerHarness(overrides: Partial<SessionRuntimeRetirementDependencies> =
     hasUnsettledChildren: () => false,
     hasOpenBrowser: () => false,
     hasPendingSettings: () => false,
+    hasAgentProcesses: () => false,
     retire: (appSessionId) => {
       retired.push(appSessionId);
       live.delete(appSessionId);

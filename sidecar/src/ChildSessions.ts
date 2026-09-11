@@ -1011,6 +1011,8 @@ export class ChildSessions {
     child.turn.pendingSends = [];
     child.turn.interruptingForSteer = false;
     child.turn.interrupting = false;
+    const childPid = this.d.runtime.processIdOf(runtime.session);
+    if (childPid !== undefined) this.d.agentProcesses.untrack(childPid);
     const cleanupTarget = this.contextTarget(parent, child, runtime);
     void runCleanup(this.d.context.forgetChild.bind(this.d.context, child.identity));
     void runCleanup(this.d.context.stopPolling.bind(this.d.context, cleanupTarget));

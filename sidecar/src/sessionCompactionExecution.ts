@@ -3,6 +3,7 @@ import type { AskUserHandler, PermissionHandler } from '@factory/droid-sdk';
 import { runCompaction } from './compaction.js';
 import type { FactoryRuntime, FactorySession } from './DroidRuntime.js';
 import type { ServerEvent } from './protocol.js';
+import type { AgentProcessMonitor } from './processes/AgentProcessMonitor.js';
 import type { LiveOperationTarget, SessionContext, UsageOffset } from './SessionContext.js';
 import type { LiveSession } from './SessionLifecycle.js';
 import type { SessionRegistry } from './SessionRegistry.js';
@@ -26,7 +27,8 @@ export interface SessionCompactionExecutionDependencies {
   >;
   context: Pick<SessionContext, 'refresh' | 'preserveUsage' | 'recordCompaction'>;
   timeline: Pick<SessionTimeline, 'appendCompaction' | 'appendStatus'>;
-  runtime: Pick<FactoryRuntime, 'loadSession'>;
+  runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf'>;
+  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack'>;
   makePermissionHandler(ref: { id: string }): PermissionHandler;
   makeAskUserHandler(ref: { id: string }): AskUserHandler;
   emitError(error: Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>): void;
@@ -132,11 +134,19 @@ export class SessionCompactionExecution {
       mcpServers: liveSession.mcpConfigs,
     });
     liveSession.session = replacement;
+    // Compaction swaps in a second `droid` process under the same session, so
+    // the tracked root moves with it or the session's processes go dark.
+    const replacementPid = this.dependencies.runtime.processIdOf(replacement);
+    if (replacementPid !== undefined)
+      this.dependencies.agentProcesses.track(appSessionId, replacementPid);
+    const oldPid = this.dependencies.runtime.processIdOf(oldSession);
     let oldSessionRetired = false;
     const retireOldSession = async (): Promise<void> => {
       if (oldSessionRetired) return;
       oldSessionRetired = true;
       await oldSession.close().catch(ignoreError);
+      if (oldPid !== undefined && oldPid !== replacementPid)
+        this.dependencies.agentProcesses.untrack(oldPid);
     };
     try {
       this.effects.subscribePrimary(liveSession);

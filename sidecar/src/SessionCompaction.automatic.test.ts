@@ -88,6 +88,7 @@ function createHarness(
       },
     },
     runtime,
+    agentProcesses: { track: () => undefined, untrack: () => undefined },
     makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
     makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
     emitError: () => undefined,

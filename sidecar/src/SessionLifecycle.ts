@@ -17,6 +17,7 @@ import type { SessionRegistry } from './SessionRegistry.js';
 import type { PrimaryAutomaticCompactionTarget, SessionCompaction } from './SessionCompaction.js';
 import type { LiveOperationTarget, SessionContext } from './SessionContext.js';
 import type { ChildSessions } from './ChildSessions.js';
+import type { AgentProcessMonitor } from './processes/AgentProcessMonitor.js';
 import {
   buildCreatedSessionSummary,
   buildCreateRuntimeOptions,
@@ -95,6 +96,7 @@ export interface SessionLifecycleDependencies {
   >;
   isShutdownStarted: () => boolean;
   childSessions: Pick<ChildSessions, 'attachParent' | 'closeParent'>;
+  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack' | 'killSession'>;
   applyPendingSettingsToSummary: (summary: SessionSummary) => SessionSummary;
   applyPendingSessionSettings: (appSessionId: string) => Promise<boolean>;
   runPrimaryTurn: (liveSession: LiveSession, prompt: string) => Promise<void>;
@@ -195,6 +197,7 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
+      this.trackProviderProcess(appSessionId, session);
       d.childSessions.attachParent(appSessionId);
       d.emit({ type: 'session.created', clientRef: command.clientRef, session: summary });
       this.driveInBackground(appSessionId, command.goal);
@@ -294,6 +297,7 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
+      this.trackProviderProcess(appSessionId, session);
       d.childSessions.attachParent(appSessionId);
       d.emit({
         type: 'session.created',
@@ -475,6 +479,12 @@ export class SessionLifecycle {
       }
     };
 
+    // First, while every provider process of this session is still alive and
+    // still the parent of what it spawned: the dev servers are descendants of
+    // `droid`, and once it exits they are reparented to launchd and no longer
+    // reachable from its pid. Child runtimes are tracked under this same
+    // session id, so this takes their servers too.
+    await run(() => d.agentProcesses.killSession(liveSession.summary.appSessionId));
     await run(() => d.childSessions.closeParent(liveSession.summary.appSessionId));
     await run(() => {
       d.context.stopSession(liveSession);
@@ -492,6 +502,8 @@ export class SessionLifecycle {
       await run(() => server.close());
     }
     await run(() => liveSession.session.close());
+    const processId = d.runtime.processIdOf(liveSession.session);
+    if (processId !== undefined) d.agentProcesses.untrack(processId);
     await run(() => d.closeBrowserSession(liveSession.summary.appSessionId));
     await run(() => {
       d.context.forgetSession(liveSession);
@@ -536,6 +548,13 @@ export class SessionLifecycle {
       }
     }
     if (firstError !== undefined) throw errorFromUnknown(firstError);
+  }
+
+  // Every live provider process of a session must be a tracked root, so the
+  // monitor can find (and later kill) whatever that process spawns.
+  private trackProviderProcess(appSessionId: string, session: FactorySession): void {
+    const processId = this.dependencies.runtime.processIdOf(session);
+    if (processId !== undefined) this.dependencies.agentProcesses.track(appSessionId, processId);
   }
 
   private requireOpenAdmission(): void {
@@ -607,7 +626,11 @@ export class SessionLifecycle {
       );
     if (liveSession) this.dependencies.compaction.forgetSession(liveSession.summary.appSessionId);
     await Promise.all(mcpServers.map((server) => runBestEffortAsync(() => server.close())));
-    if (session) await runBestEffortAsync(() => session.close());
+    if (session) {
+      const processId = this.dependencies.runtime.processIdOf(session);
+      if (processId !== undefined) this.dependencies.agentProcesses.untrack(processId);
+      await runBestEffortAsync(() => session.close());
+    }
     if (
       liveSession &&
       this.dependencies.registry.getLive(liveSession.summary.appSessionId) === liveSession

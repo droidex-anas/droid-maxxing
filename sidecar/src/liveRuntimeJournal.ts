@@ -24,9 +24,19 @@ export interface LiveChildIdentity {
   status: ChildStatus;
 }
 
+// A process the agent spawned, recorded so a sidecar that died without
+// running its cleanup can still reap what it left behind. `startedAt` is the
+// guard against a recycled pid.
+export interface LiveProcessIdentity {
+  appSessionId: string;
+  pid: number;
+  startedAt: number;
+}
+
 export interface LiveRuntimeIdentities {
   sessions: LiveSessionIdentity[];
   children: LiveChildIdentity[];
+  processes: LiveProcessIdentity[];
 }
 
 // Test-harness trap: a SessionManager built without an explicit user data
@@ -42,12 +52,12 @@ export class LiveRuntimeJournal {
   constructor(private readonly filePath: string) {}
 
   read(): LiveRuntimeIdentities {
-    if (!existsSync(this.filePath)) return { sessions: [], children: [] };
+    if (!existsSync(this.filePath)) return emptyIdentities();
     try {
       const parsed: unknown = JSON.parse(readFileSync(this.filePath, 'utf8'));
       return sanitizeIdentities(parsed);
     } catch {
-      return { sessions: [], children: [] };
+      return emptyIdentities();
     }
   }
 
@@ -57,9 +67,13 @@ export class LiveRuntimeJournal {
   }
 }
 
+function emptyIdentities(): LiveRuntimeIdentities {
+  return { sessions: [], children: [], processes: [] };
+}
+
 function sanitizeIdentities(value: unknown): LiveRuntimeIdentities {
-  if (typeof value !== 'object' || value === null) return { sessions: [], children: [] };
-  const record = value as { sessions?: unknown; children?: unknown };
+  if (typeof value !== 'object' || value === null) return emptyIdentities();
+  const record = value as { sessions?: unknown; children?: unknown; processes?: unknown };
   return {
     sessions: Array.isArray(record.sessions)
       ? record.sessions.flatMap((entry) => {
@@ -73,7 +87,26 @@ function sanitizeIdentities(value: unknown): LiveRuntimeIdentities {
           return child ? [child] : [];
         })
       : [],
+    processes: Array.isArray(record.processes)
+      ? record.processes.flatMap((entry) => {
+          const spawned = processIdentity(entry);
+          return spawned ? [spawned] : [];
+        })
+      : [],
   };
+}
+
+function processIdentity(value: unknown): LiveProcessIdentity | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Partial<LiveProcessIdentity>;
+  if (typeof record.appSessionId !== 'string' || record.appSessionId.length === 0) return null;
+  // A non-positive or non-finite pid would signal a process group on `kill`.
+  if (!isPositiveNumber(record.pid) || !isPositiveNumber(record.startedAt)) return null;
+  return { appSessionId: record.appSessionId, pid: record.pid, startedAt: record.startedAt };
+}
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 function sessionIdentity(value: unknown): LiveSessionIdentity | null {

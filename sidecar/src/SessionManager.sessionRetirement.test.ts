@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
+import type { ProcessRecord } from './processes/processTree.js';
 import type { SessionFileChange } from './sessionFileCache.js';
 import type * as Protocol from './protocol.js';
 import { writeProviderConversation } from './testing/historyCharacterizationSupport.js';
@@ -445,6 +446,55 @@ test('retirement never closes a runtime twice across explicit close and shutdown
     await h.shutdown();
     await h.retireIdleSessionRuntimes();
     assert.deepEqual(providerClosures(h), [session.providerSessionId]);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('a session whose agent left a dev server running is never retired', async () => {
+  // `droid` and the dev server it spawned. Retiring the session closes the
+  // provider, which kills the whole tree, so the server has to hold it open.
+  const table: ProcessRecord[] = [
+    { pid: 600, ppid: 1, startedAt: 0, command: '/usr/local/bin/droid' },
+    { pid: 700, ppid: 600, startedAt: 0, command: 'node ./node_modules/.bin/vite dev' },
+  ];
+  const killed: number[] = [];
+  const h = createSessionManagerTestContext({
+    sessionRuntimeIdleMs: 0,
+    agentProcessHost: {
+      listProcesses: () => Promise.resolve([...table]),
+      listListeningPorts: () => Promise.resolve(new Map([[700, [5173]]])),
+      kill: (pid) => {
+        killed.push(pid);
+      },
+    },
+  });
+  try {
+    h.fixture.seedHistorySummaries([historicalSummary('app-parent', 'provider-parent')]);
+    writeProviderConversation(h.home, 'provider-parent', 'parent');
+    h.runtime.processIds.set('provider-parent', 600);
+    await h.handle({ type: 'session.resume', appSessionId: 'app-parent' });
+    await focusElsewhere(h);
+    await h.scanAgentProcesses();
+
+    await h.retireIdleSessionRuntimes();
+    assert.deepEqual(providerClosures(h), [], 'retiring would kill the running dev server');
+    assert.deepEqual(killed, [], 'a retirement that never happened must signal nothing');
+    const published = h.events.findLast(
+      (event): event is Extract<Protocol.ServerEvent, { type: 'session.processes' }> =>
+        event.type === 'session.processes',
+    );
+    assert.deepEqual(
+      published?.processes.map((entry) => [entry.pid, entry.name, entry.ports]),
+      [[700, 'vite dev', [5173]]],
+      'the renderer must be told what the session is holding',
+    );
+
+    // The user stops the server themselves: the session settles and retires.
+    table.splice(1, 1);
+    await h.scanAgentProcesses();
+    await h.retireIdleSessionRuntimes();
+    assert.deepEqual(providerClosures(h), ['provider-parent']);
   } finally {
     await h.dispose();
   }
