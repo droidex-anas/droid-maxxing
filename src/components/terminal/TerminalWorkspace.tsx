@@ -1,8 +1,9 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { RotateCcw, Trash2, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { RotateCcw, Trash2 } from 'lucide-react';
 import { Copy } from '@droidex/icons';
 import '@xterm/xterm/css/xterm.css';
 import { acquireTerminalInstance, type TerminalInstance } from '../../lib/terminalInstances';
+import { HoverTooltip } from '../HoverTooltip';
 import { useStoreSelector } from '../../hooks/useStore';
 import type { ThemeConfig } from '../../hooks/persistedThemePreferences';
 
@@ -56,96 +57,150 @@ export function TerminalWorkspace({
     }
   }, [state.terminalId, state.shellName, terminalId]);
 
+  const stopped = state.status === 'exited' || state.status === 'error';
+  const restart = () => {
+    void instance.restart();
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-droid-bg">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border bg-droid-bg px-2.5">
-        <span className="min-w-0 flex-1 truncate text-[11px] text-droid-text-muted" title={cwd}>
-          {cwd}
-        </span>
-        <TerminalButton
-          title="Copy selection"
+      <TerminalHeader shellName={state.shellName} cwd={cwd} stopped={stopped}>
+        <HeaderAction
+          label="Copy selection"
           onClick={() => {
             const selection = instance.copySelection();
-            if (selection) void navigator.clipboard.writeText(selection);
+            if (selection) {
+              void navigator.clipboard.writeText(selection);
+            }
           }}
         >
-          <Copy className="h-3.5 w-3.5" />
-        </TerminalButton>
-        <TerminalButton
-          title="Clear terminal"
-          onClick={() => {
-            instance.clear();
-          }}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </TerminalButton>
-        <TerminalButton
-          title="Reset terminal display"
-          onClick={() => {
-            instance.reset();
-          }}
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </TerminalButton>
-      </div>
-      {state.status === 'starting' && <Banner>{`Starting shell in ${cwd}…`}</Banner>}
+          <Copy className="h-4 w-4" />
+        </HeaderAction>
+        {!stopped && (
+          <>
+            <HeaderAction
+              label="Clear"
+              onClick={() => {
+                instance.clear();
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </HeaderAction>
+            <HeaderAction
+              label="Reset"
+              onClick={() => {
+                instance.reset();
+              }}
+            >
+              <RotateCcw className="h-4 w-4" />
+            </HeaderAction>
+          </>
+        )}
+      </TerminalHeader>
+      {stopped && (
+        <TerminalStatusRow
+          message={state.status === 'error' ? state.error || 'Shell failed' : 'Shell exited'}
+          tone={state.status === 'error' ? 'error' : 'muted'}
+          onRestart={restart}
+        />
+      )}
       {state.status === 'running' && state.truncated && (
-        <Banner>Earlier output was truncated.</Banner>
+        <div className="shrink-0 animate-fade-in px-3 pb-0.5 pt-1.5 text-[12px] leading-none text-droid-text-muted">
+          Earlier output was trimmed
+        </div>
       )}
-      {(state.status === 'exited' || state.status === 'error') && (
-        <Banner tone={state.status === 'error' ? 'error' : 'muted'}>
-          <span className="min-w-0 flex-1 truncate">{state.error || 'Shell exited.'}</span>
-          <button
-            type="button"
-            onClick={() => void instance.restart()}
-            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-droid-text transition-colors hover:bg-droid-elevated"
-          >
-            <RefreshCw className="h-3 w-3" />
-            Restart
-          </button>
-        </Banner>
-      )}
-      <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden p-2" />
+      <div className="relative min-h-0 flex-1">
+        <div ref={hostRef} className="h-full w-full overflow-hidden p-3" />
+        {state.status === 'starting' && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] text-droid-text-muted">
+            {state.shellName === 'Terminal' ? 'Starting shell…' : `Starting ${state.shellName}…`}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function Banner({
+function TerminalHeader({
+  shellName,
+  cwd,
+  stopped,
   children,
-  tone = 'muted',
 }: {
-  children: React.ReactNode;
-  tone?: 'muted' | 'error';
+  shellName: string;
+  cwd: string;
+  stopped: boolean;
+  children: ReactNode;
+}) {
+  const folder = cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
+  return (
+    <div className="group flex h-8 shrink-0 items-center gap-0.5 border-b border-droid-border pl-3 pr-1.5">
+      {/* HoverTooltip's anchor is `shrink-0`; let it shrink here so a long
+          folder name ellipsizes instead of pushing the actions off the row. */}
+      <div className="flex min-w-0 flex-1 items-center [&>span]:min-w-0 [&>span]:shrink">
+        <HoverTooltip label={cwd} placement="bottom">
+          <span
+            className={`truncate text-[12px] leading-none ${stopped ? 'text-droid-text-secondary' : 'text-droid-text'}`}
+          >
+            {shellName}
+            <span className="text-droid-text-secondary"> · {folder}</span>
+          </span>
+        </HoverTooltip>
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-[120ms] focus-within:opacity-100 group-hover:opacity-100">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TerminalStatusRow({
+  message,
+  tone,
+  onRestart,
+}: {
+  message: string;
+  tone: 'muted' | 'error';
+  onRestart: () => void;
 }) {
   return (
-    <div
-      className={`flex shrink-0 items-center gap-2 border-b border-droid-border px-3 py-2 text-[11.5px] ${
-        tone === 'error' ? 'bg-red-500/10 text-red-200' : 'bg-droid-surface text-droid-text-muted'
-      }`}
-    >
-      {children}
+    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-droid-border pl-3 pr-1.5 text-[12px]">
+      <span
+        className={`min-w-0 flex-1 truncate ${tone === 'error' ? 'text-droid-red' : 'text-droid-text-secondary'}`}
+      >
+        {message}
+      </span>
+      <button
+        type="button"
+        onClick={onRestart}
+        className="shrink-0 rounded-md px-2 py-1 leading-none text-droid-text transition-colors hover:bg-droid-elevated focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent"
+      >
+        Restart
+      </button>
     </div>
   );
 }
 
-function TerminalButton({
-  title,
+function HeaderAction({
+  label,
   onClick,
   children,
 }: {
-  title: string;
+  label: string;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className="flex h-7 w-7 items-center justify-center rounded-lg text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
-    >
-      {children}
-    </button>
+    <HoverTooltip label={label} placement="bottom">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onClick}
+        className="flex h-7 w-7 items-center justify-center rounded-md text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent"
+      >
+        {children}
+      </button>
+    </HoverTooltip>
   );
 }
 
