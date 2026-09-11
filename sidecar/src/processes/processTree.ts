@@ -16,23 +16,38 @@ function asError(error: unknown): Error {
 export function defaultCommandRunner(file: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(file, args, { maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-      if (error && !stdout) reject(asError(error));
+      if (error) reject(asError(error));
       else resolve(stdout);
     });
   });
 }
 
-// `ps -axo pid=,ppid=,etimes=,command=`: three numeric columns then the rest
+// `ps` prints elapsed time as `[[dd-]hh:]mm:ss` (e.g. `05:12`, `21:12:36`,
+// `2-03:04:05`). Returns null when `text` does not match that shape.
+export function parseElapsedSeconds(text: string): number | null {
+  const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(text);
+  if (!match) return null;
+  const days = match[1] ? Number(match[1]) : 0;
+  const hours = match[2] ? Number(match[2]) : 0;
+  const minutes = Number(match[3]);
+  const seconds = Number(match[4]);
+  return days * 86400 + hours * 3600 + minutes * 60 + seconds;
+}
+
+// `ps -axo pid=,ppid=,etime=,command=`: pid, ppid, elapsed time (`etime`,
+// portable to both macOS and Linux — `etimes` is Linux-only), then the rest
 // of the line is the command with its arguments.
 export function parsePsTable(stdout: string, now: number): ProcessRecord[] {
   const rows: ProcessRecord[] = [];
   for (const line of stdout.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
     if (!match) continue;
+    const elapsedSeconds = parseElapsedSeconds(match[3]);
+    if (elapsedSeconds === null) continue;
     rows.push({
       pid: Number(match[1]),
       ppid: Number(match[2]),
-      startedAt: now - Number(match[3]) * 1000,
+      startedAt: now - elapsedSeconds * 1000,
       command: match[4].trim(),
     });
   }
@@ -67,6 +82,6 @@ export async function listProcesses(
   now: () => number,
 ): Promise<ProcessRecord[]> {
   if (process.platform === 'win32') return [];
-  const stdout = await run('ps', ['-axo', 'pid=,ppid=,etimes=,command=']);
+  const stdout = await run('ps', ['-axo', 'pid=,ppid=,etime=,command=']);
   return parsePsTable(stdout, now());
 }
