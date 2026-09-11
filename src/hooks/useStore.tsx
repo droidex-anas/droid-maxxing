@@ -812,6 +812,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         selectedChild: null,
         childAccess: {},
         childRuntime: {},
+        agentProcesses: {},
         contextStats: { ...next.contextStats, child: {} },
       };
     }
