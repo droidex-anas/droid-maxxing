@@ -1,6 +1,19 @@
 import { useState } from 'react';
+import { useStoreSelector } from '../../hooks/useStore';
 import { stripAnsi } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, linkify, RED, ToolPanel } from './primitives';
+
+// A backgrounded server keeps its card "running" after the turn ends as long
+// as a live agent process still carries the command the agent typed.
+function useCommandStillRunning(command: string): boolean {
+  return useStoreSelector((state) => {
+    const id = state.activeAppSessionId;
+    const processes = id ? state.agentProcesses[id] : undefined;
+    if (!processes?.length) return false;
+    const needle = command.trim();
+    return needle.length > 3 && processes.some((p) => p.command.includes(needle));
+  });
+}
 
 /* ── Terminal-style command body: the command and its captured output, in the
    same bordered panel language as expanded diffs. No header chrome — the `$`
@@ -17,6 +30,7 @@ export function CommandCard({
   error?: boolean;
   running?: boolean;
 }) {
+  const alive = useCommandStillRunning(command);
   const out = output ? stripAnsi(output).trimEnd() : '';
   return (
     <ToolPanel
@@ -37,7 +51,9 @@ export function CommandCard({
           </span>
           <span className="whitespace-pre-wrap text-droid-text">{command}</span>
         </div>
-        {running && <span className="shimmer-text text-[12.5px] font-medium">Running</span>}
+        {(running || alive) && (
+          <span className="shimmer-text text-[12.5px] font-medium">Running</span>
+        )}
         {out && (
           <pre
             className="mt-2 pt-2 border-t border-droid-border/60 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] break-words text-droid-text-muted"
@@ -68,8 +84,9 @@ export function CommandLine({
   forceOpen?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const alive = useCommandStillRunning(command);
   const expanded = open || forceOpen;
-  if (running) {
+  if (running || alive) {
     return (
       <div className="flex min-w-0 items-center gap-1.5">
         <span className="shimmer-text shrink-0 text-[12.5px] font-medium">Running</span>
