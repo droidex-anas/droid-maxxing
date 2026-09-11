@@ -62,6 +62,7 @@ export class AgentProcessMonitor {
   private timer: { cancel(): void } | null = null;
   private scanning: Promise<void> | null = null;
   private lastScanFailed = false;
+  private lastPublishFailed = false;
 
   constructor(private readonly d: AgentProcessMonitorDependencies) {}
 
@@ -130,7 +131,14 @@ export class AgentProcessMonitor {
 
   async killRecorded(entries: readonly { pid: number; startedAt: number }[]): Promise<void> {
     if (entries.length === 0) return;
-    const table = await this.d.listProcesses();
+    let table: ProcessRecord[];
+    try {
+      table = await this.d.listProcesses();
+    } catch {
+      // Can't verify start times against a live process table; leave
+      // everything alone rather than risk killing a reused pid.
+      return;
+    }
     const alive = new Map(table.map((row) => [row.pid, row]));
     const matches = entries.flatMap((entry) => {
       const row = alive.get(entry.pid);
@@ -161,52 +169,78 @@ export class AgentProcessMonitor {
     this.timer = null;
   }
 
+  // Groups tracked roots by session and computes each session's descendant
+  // list, carrying forward an empty list for any session `scanOnce` already
+  // knows about but that has no live descendants this tick.
+  private computeDescendants(table: ProcessRecord[]): {
+    computed: Map<string, ProcessRecord[]>;
+    sawNew: boolean;
+  } {
+    const bySession = new Map<string, number[]>();
+    for (const [pid, appSessionId] of this.roots) {
+      const list = bySession.get(appSessionId) ?? [];
+      list.push(pid);
+      bySession.set(appSessionId, list);
+    }
+    let sawNew = false;
+    const computed = new Map<string, ProcessRecord[]>();
+    for (const [appSessionId, rootPids] of bySession) {
+      const rows = descendantsOf(table, rootPids);
+      const known = new Set((this.descendants.get(appSessionId) ?? []).map((row) => row.pid));
+      if (rows.some((row) => !known.has(row.pid))) sawNew = true;
+      computed.set(appSessionId, rows);
+    }
+    for (const appSessionId of this.descendants.keys()) {
+      if (!computed.has(appSessionId)) computed.set(appSessionId, []);
+    }
+    return { computed, sawNew };
+  }
+
+  private visibleProcesses(rows: readonly ProcessRecord[], now: number): AgentProcess[] {
+    return rows
+      .filter((row) => now - row.startedAt >= MIN_AGE_MS && !WRAPPER.test(row.command))
+      .map((row) => ({
+        pid: row.pid,
+        name: displayNameFor(row.command),
+        command: row.command,
+        startedAt: row.startedAt,
+        ports: [...(this.ports.get(row.pid) ?? [])].sort((a, b) => a - b),
+      }));
+  }
+
   private async scanOnce(): Promise<void> {
     if (this.roots.size === 0) return;
+    // Populated only once everything below has succeeded and been committed;
+    // the publish loop runs after this try/catch (see below) so a throwing
+    // `emit` can never be mistaken for a scan failure.
+    let toPublish: Map<string, ProcessRecord[]> | null = null;
+    let now = 0;
     try {
       const table = await this.d.listProcesses();
-      const now = this.d.now();
-      const bySession = new Map<string, number[]>();
-      for (const [pid, appSessionId] of this.roots) {
-        const list = bySession.get(appSessionId) ?? [];
-        list.push(pid);
-        bySession.set(appSessionId, list);
-      }
-      let sawNew = false;
-      const nextDescendants = new Map<string, ProcessRecord[]>();
-      for (const [appSessionId, rootPids] of bySession) {
-        const rows = descendantsOf(table, rootPids);
-        const known = new Set((this.descendants.get(appSessionId) ?? []).map((row) => row.pid));
-        if (rows.some((row) => !known.has(row.pid))) sawNew = true;
-        nextDescendants.set(appSessionId, rows);
-      }
-      for (const appSessionId of this.descendants.keys()) {
-        if (!nextDescendants.has(appSessionId)) nextDescendants.set(appSessionId, []);
-      }
+      now = this.d.now();
+      const { computed, sawNew } = this.computeDescendants(table);
       const nextTick = this.ticks + 1;
       // Fetch ports before committing anything, so a rejection here leaves
       // the previous snapshot (descendants/ports/current) untouched.
       const nextPorts =
         sawNew || nextTick % PORT_SCAN_EVERY === 1 ? await this.d.listListeningPorts() : this.ports;
 
+      // `untrack()` can run synchronously between any of the awaits above
+      // (it isn't gated by `scanning`) and already cleared/republished for
+      // any session that lost its last root. Drop those sessions from what
+      // we're about to commit so we never resurrect a stale snapshot or
+      // re-emit a list `untrack` already cleared.
+      const liveSessions = new Set(this.roots.values());
+      for (const appSessionId of [...computed.keys()]) {
+        if (!liveSessions.has(appSessionId)) computed.delete(appSessionId);
+      }
+
       this.ticks = nextTick;
       this.ports = nextPorts;
       this.descendants.clear();
-      for (const [id, rows] of nextDescendants) this.descendants.set(id, rows);
+      for (const [id, rows] of computed) this.descendants.set(id, rows);
       this.lastScanFailed = false;
-
-      for (const [appSessionId, rows] of nextDescendants) {
-        const visible = rows
-          .filter((row) => now - row.startedAt >= MIN_AGE_MS && !WRAPPER.test(row.command))
-          .map((row) => ({
-            pid: row.pid,
-            name: displayNameFor(row.command),
-            command: row.command,
-            startedAt: row.startedAt,
-            ports: [...(this.ports.get(row.pid) ?? [])].sort((a, b) => a - b),
-          }));
-        this.publish(appSessionId, visible);
-      }
+      toPublish = computed;
     } catch (error) {
       // Keep the previous snapshot untouched; warn once per outage instead
       // of spamming a log line on every 2s tick.
@@ -215,13 +249,28 @@ export class AgentProcessMonitor {
         console.warn('AgentProcessMonitor: scan failed, keeping previous snapshot', error);
       }
     }
+    if (!toPublish) return;
+    for (const [appSessionId, rows] of toPublish) {
+      this.publish(appSessionId, this.visibleProcesses(rows, now));
+    }
   }
 
   private publish(appSessionId: string, processes: AgentProcess[]): void {
     const previous = this.current.get(appSessionId) ?? [];
     if (sameList(previous, processes)) return;
+    try {
+      this.d.emit(appSessionId, processes);
+    } catch (error) {
+      // Leave `current` as it was so the next scan sees a diff again and
+      // retries the emit instead of silently dropping the update.
+      if (!this.lastPublishFailed) {
+        this.lastPublishFailed = true;
+        console.warn('AgentProcessMonitor: emit failed, will retry next scan', error);
+      }
+      return;
+    }
+    this.lastPublishFailed = false;
     this.current.set(appSessionId, processes);
-    this.d.emit(appSessionId, processes);
   }
 
   // Deepest first so a parent cannot respawn a child we already signalled.

@@ -259,3 +259,109 @@ test('stop resolves true and sends only SIGTERM when the post-grace listProcesse
   assert.equal(result, true);
   assert.deepEqual(killed, [[800, 'SIGTERM']]);
 });
+
+test("an emit that throws for one session doesn't block another session's publish, and is retried", async () => {
+  const sessionARows: ProcessRecord[] = [
+    { pid: 600, ppid: 1, startedAt: 0, command: '/usr/local/bin/droid exec' },
+    { pid: 700, ppid: 600, startedAt: 0, command: 'node app-a.js' },
+  ];
+  const sessionBRows: ProcessRecord[] = [
+    { pid: 610, ppid: 1, startedAt: 0, command: '/usr/local/bin/droid exec' },
+    { pid: 710, ppid: 610, startedAt: 0, command: 'node app-b.js' },
+  ];
+  const emitted: Array<[string, unknown]> = [];
+  let failEmitFor: string | null = 's1';
+  const monitor = new AgentProcessMonitor({
+    listProcesses: async () => [...sessionARows, ...sessionBRows],
+    listListeningPorts: async () => new Map(),
+    kill: () => {},
+    emit: (id, processes) => {
+      if (id === failEmitFor) throw new Error('emit failed');
+      emitted.push([id, processes]);
+    },
+    schedule: () => ({ cancel() {} }),
+    now: () => 100_000,
+  });
+  monitor.track('s1', 600);
+  monitor.track('s2', 610);
+
+  await monitor.scan();
+
+  // s1's emit threw: nothing recorded for it, and its `current` must be left
+  // unchanged (still empty) so the next scan sees a diff and retries.
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0][0], 's2');
+  assert.deepEqual(monitor.processesFor('s1'), []);
+
+  // s2's emit succeeded in the same tick, despite s1's throwing first.
+  assert.equal(monitor.processesFor('s2').length, 1);
+
+  failEmitFor = null;
+  await monitor.scan();
+
+  assert.equal(emitted.length, 2);
+  assert.equal(emitted[1][0], 's1');
+  assert.equal(monitor.processesFor('s1').length, 1);
+});
+
+test('untrack during the in-flight ports scan drops the stale snapshot instead of re-emitting it', async () => {
+  let currentRows: ProcessRecord[] = rows;
+  let portsCallCount = 0;
+  let resolvePorts: (map: Map<number, number[]>) => void = () => {};
+  const emitted: Array<[string, unknown]> = [];
+  const monitor = new AgentProcessMonitor({
+    listProcesses: async () => currentRows,
+    listListeningPorts: () => {
+      portsCallCount += 1;
+      if (portsCallCount === 1) return Promise.resolve(new Map([[800, [5173]]]));
+      return new Promise<Map<number, number[]>>((resolve) => {
+        resolvePorts = resolve;
+      });
+    },
+    kill: () => {},
+    emit: (id, processes) => emitted.push([id, processes]),
+    schedule: () => ({ cancel() {} }),
+    now: () => 100_000,
+  });
+  monitor.track('s1', 600);
+
+  // Tick 1 resolves ports immediately and establishes a non-empty snapshot.
+  await monitor.scan();
+  assert.equal(monitor.hasProcesses('s1'), true);
+
+  // Tick 2: a new descendant forces a port refresh, which we hold open.
+  currentRows = [...rows, { pid: 900, ppid: 800, startedAt: 100_000, command: 'node child.js' }];
+  const scanPromise = monitor.scan();
+  await new Promise((r) => setImmediate(r));
+
+  // The session's only root goes away while the ports fetch is still
+  // pending — untrack() clears its state and emits the empty list now.
+  monitor.untrack(600);
+  assert.deepEqual(emitted.at(-1), ['s1', []]);
+
+  resolvePorts(new Map([[800, [5173]]]));
+  await scanPromise;
+
+  // The scan must not resurrect the stale snapshot it computed before the
+  // untrack, nor re-emit it.
+  assert.equal(monitor.hasProcesses('s1'), false);
+  assert.deepEqual(monitor.processesFor('s1'), []);
+  assert.deepEqual(emitted.at(-1), ['s1', []]);
+});
+
+test('killRecorded resolves without killing anything when listProcesses rejects', async () => {
+  const killed: Array<[number, string]> = [];
+  const monitor = new AgentProcessMonitor({
+    listProcesses: async () => {
+      throw new Error('ps failed');
+    },
+    listListeningPorts: async () => new Map(),
+    kill: (pid, signal) => killed.push([pid, signal]),
+    emit: () => {},
+    schedule: () => ({ cancel() {} }),
+    now: () => 100_000,
+  });
+
+  await assert.doesNotReject(() => monitor.killRecorded([{ pid: 800, startedAt: 0 }]));
+  assert.deepEqual(killed, []);
+});
