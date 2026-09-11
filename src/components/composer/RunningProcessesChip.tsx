@@ -108,7 +108,7 @@ export function RunningProcessesChip({ appSessionId }: { appSessionId: string })
             transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
             className="absolute bottom-full left-0 mb-3 w-[300px] z-50"
           >
-            <div className="rounded-2xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/50 overflow-hidden p-1">
+            <div className="max-h-[min(70vh,400px)] overflow-y-auto rounded-2xl border border-droid-border bg-droid-elevated p-1 shadow-2xl shadow-black/50">
               {processes.map((process) => {
                 const port = primaryPort(process);
                 return (

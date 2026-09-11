@@ -248,11 +248,14 @@ export default function App() {
   // arming the dialog), so this only clears when the active tab has changed
   // to something other than the one currently confirming.
   useEffect(() => {
-    setConfirmCloseTabId((current) => (current === utilityPanel.activeTabId ? current : null));
+    setConfirmCloseTabId((current) =>
+      utilityPanel.open && current === utilityPanel.activeTabId ? current : null,
+    );
   }, [activeSession?.appSessionId, utilityPanel.open, utilityPanel.activeTabId]);
 
-  // A chat that is deleted, archived, or whose session closes drops its
-  // utility panel from the store (see the useStore reducer), which removes
+  // A chat that is deleted or archived drops its utility panel from the store
+  // (see the useStore reducer — a closing session keeps its panel, because the
+  // sidecar retires idle runtimes while the chat and its PTYs stay live), which removes
   // any terminal tabs it held. Release the matching xterm/pty instances so
   // they don't keep running in the background with nothing to reopen them.
   const liveTerminalTabIds = useStoreSelector((current) =>

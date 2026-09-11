@@ -84,7 +84,10 @@ export function CommandLine({
   const [open, setOpen] = useState(false);
   const alive = useCommandStillRunning(command);
   const expanded = open || forceOpen;
-  if (running || alive) {
+  // Only a still-running turn hides the expander: a finished call whose
+  // process is still alive already has captured output, and that output must
+  // stay reachable. It keeps the Running indicator in place of "Ran".
+  if (running) {
     return (
       <div className="flex min-w-0 items-center gap-1.5">
         <span className="shimmer-text shrink-0 text-[12.5px] font-medium">Running</span>
@@ -104,7 +107,11 @@ export function CommandLine({
         aria-expanded={expanded}
       >
         <Caret open={expanded} />
-        <span className="shrink-0 text-droid-text-secondary">Ran</span>
+        {alive ? (
+          <span className="shimmer-text shrink-0 text-[12.5px] font-medium">Running</span>
+        ) : (
+          <span className="shrink-0 text-droid-text-secondary">Ran</span>
+        )}
         <span className="min-w-0 truncate font-mono text-[12px] text-droid-text-muted">
           {command}
         </span>

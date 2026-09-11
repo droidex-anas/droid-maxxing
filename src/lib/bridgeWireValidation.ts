@@ -145,12 +145,12 @@ function isServerEvent(value: unknown): value is ServerEvent {
         value.processes.every(
           (p: unknown) =>
             isRecord(p) &&
-            typeof p.pid === 'number' &&
+            positiveSafeInteger(p.pid) &&
             typeof p.name === 'string' &&
             typeof p.command === 'string' &&
-            typeof p.startedAt === 'number' &&
+            nonNegativeSafeInteger(p.startedAt) &&
             Array.isArray(p.ports) &&
-            p.ports.every((port: unknown) => typeof port === 'number'),
+            p.ports.every(positiveSafeInteger),
         )
       );
     case 'sessions.cwdReanchored':

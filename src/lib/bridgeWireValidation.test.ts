@@ -286,6 +286,41 @@ test('validates session.processes events and rejects malformed process entries',
     ),
     null,
   );
+  // pid feeds session.processes.stop, so a non-integer or out-of-range number
+  // must not reach the reducer either.
+  for (const pid of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(
+      serverWireMessage(
+        batch({
+          type: 'session.processes',
+          appSessionId: 'app-1',
+          processes: [{ ...process, pid }],
+        }),
+      ),
+      null,
+      `pid ${String(pid)} must be rejected`,
+    );
+  }
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, startedAt: -1 }],
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, ports: [0] }],
+      }),
+    ),
+    null,
+  );
 });
 
 test('rejects object payloads that are actually arrays', () => {
