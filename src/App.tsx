@@ -221,11 +221,26 @@ export default function App() {
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
   const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null);
+  // Read inside the async terminalHasChildren callback so a late resolution
+  // only reopens the popover for a tab that is still on screen, rather than
+  // trusting a stale closure over `utilityPanel.tabs`.
+  const utilityTabsRef = useRef(utilityPanel.tabs);
+  utilityTabsRef.current = utilityPanel.tabs;
+  const confirmingTab = utilityPanel.tabs.find((tab) => tab.id === confirmCloseTabId) ?? null;
   const contentRowRef = useRef<HTMLDivElement>(null);
   const [contentRowWidth, setContentRowWidth] = useState(0);
   const utilityPaneToggleRef = useRef<HTMLButtonElement>(null);
   const shellPaintMarked = useRef(false);
   const composerStartupResolved = useRef(false);
+
+  // The busy-shell confirmation popover is only meaningful for the tab that
+  // raised it, in the active session's still-open panel. Switching sessions
+  // (utilityPanel now points at a different panel) or closing the panel
+  // (UtilityPane unmounts) must not leave a stale id armed for a tab no
+  // longer on screen.
+  useEffect(() => {
+    setConfirmCloseTabId(null);
+  }, [activeSession?.appSessionId, utilityPanel.open]);
 
   useEffect(() => {
     if (shellPaintMarked.current) return;
@@ -667,16 +682,32 @@ export default function App() {
                           closeTerminalTab(tab);
                           return;
                         }
-                        void terminalHasChildren(tab.terminalId).then((busy) => {
-                          if (busy) setConfirmCloseTabId(tab.id);
-                          else closeTerminalTab(tab);
-                        });
+                        void terminalHasChildren(tab.terminalId)
+                          .then((busy) => {
+                            if (!busy) {
+                              closeTerminalTab(tab);
+                              return;
+                            }
+                            // The check may resolve after the user switched
+                            // sessions or closed the pane; only arm the
+                            // popover if this tab is still on screen.
+                            if (utilityTabsRef.current.some((current) => current.id === tab.id)) {
+                              setConfirmCloseTabId(tab.id);
+                            }
+                          })
+                          .catch(() => {
+                            // Unverifiable shell state: fall back to asking
+                            // rather than silently doing nothing.
+                            if (utilityTabsRef.current.some((current) => current.id === tab.id)) {
+                              setConfirmCloseTabId(tab.id);
+                            }
+                          });
                         return;
                       }
                       if (tab.tool === 'browser') setExpandedBrowserAppSessionId(null);
                       dispatch({ type: 'CLOSE_UTILITY_TAB', tabId: tab.id });
                     }}
-                    confirmCloseTabId={confirmCloseTabId}
+                    confirmCloseTabId={confirmingTab?.id ?? null}
                     onConfirmClose={closeTerminalTab}
                     onCancelClose={() => {
                       setConfirmCloseTabId(null);

@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { PanelRight } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
@@ -44,6 +44,20 @@ export function UtilityPane({
   const [menuOpen, setMenuOpen] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
   const closeButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  // Popover positions off `anchorRef.current` in a layout effect keyed on the
+  // ref identity; a fresh `{ current }` object every render would re-run that
+  // effect on every render, so this stays a single stable ref kept pointed at
+  // the close button for `confirmCloseTabId`.
+  const confirmAnchorRef = useRef<HTMLButtonElement | null>(null);
+  // Keeps `confirmAnchorRef` correct even if the confirming tab's close
+  // button registers (or re-registers) after this id is set, e.g. right
+  // after UtilityPane remounts.
+  useLayoutEffect(() => {
+    confirmAnchorRef.current = confirmCloseTabId
+      ? (closeButtonRefs.current.get(confirmCloseTabId) ?? null)
+      : null;
+  }, [confirmCloseTabId]);
+
   const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
   const openSingletons = new Set(panel.tabs.map((tab) => tab.tool));
   const availableTools = UTILITY_TOOL_OPTIONS.map((option) => option.tool).filter(
@@ -110,6 +124,7 @@ export function UtilityPane({
                     ref={(node) => {
                       if (node) closeButtonRefs.current.set(tab.id, node);
                       else closeButtonRefs.current.delete(tab.id);
+                      if (tab.id === confirmCloseTabId) confirmAnchorRef.current = node;
                     }}
                     type="button"
                     aria-label={`Close ${tab.label}`}
@@ -187,7 +202,7 @@ export function UtilityPane({
         <Popover
           open
           onClose={() => onCancelClose?.()}
-          anchorRef={{ current: closeButtonRefs.current.get(confirmCloseTabId) ?? null }}
+          anchorRef={confirmAnchorRef}
           align="right"
           width={240}
           label="Confirm closing terminal"
