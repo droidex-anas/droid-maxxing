@@ -43,8 +43,10 @@ function fakeDom() {
     visibilityState: 'visible',
     createElement: () => ({
       isConnected: false,
+      className: '',
       clientWidth: 400,
       clientHeight: 300,
+      setAttribute() {},
       remove() {
         this.isConnected = false;
       },

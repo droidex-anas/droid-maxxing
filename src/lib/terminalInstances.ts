@@ -121,9 +121,7 @@ function createInstance(
   const doc = globalThis.document;
   const element = doc.createElement('div');
   element.className = 'h-full w-full';
-  if (typeof element.setAttribute === 'function') {
-    element.setAttribute('data-terminal-input', '');
-  }
+  element.setAttribute('data-terminal-input', '');
   const listeners = new Set<() => void>();
   let state: TerminalInstanceState = {
     terminalId: options.terminalId ?? null,
