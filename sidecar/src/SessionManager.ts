@@ -760,6 +760,9 @@ export class SessionManager {
       case 'session.close':
         await this.lifecycle.close(cmd.appSessionId);
         return;
+      case 'session.processes.stop':
+        // Task 9 wires this to actually stop the agent process.
+        return;
       case 'sessions.list':
         await this.sessionFiles.list(cmd);
         return;

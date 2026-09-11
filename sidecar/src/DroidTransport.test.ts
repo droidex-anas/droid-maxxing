@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { RequestPermissionRequestSchema } from '@factory/droid-sdk';
-import { normalizeDroidTransportMessage } from './DroidTransport.js';
+import { normalizeDroidTransportMessage, wrapDroidTransport } from './DroidTransport.js';
 
 test('normalizes current CLI permission options before SDK validation', () => {
   const message = {
@@ -53,4 +53,17 @@ test('leaves non-permission messages untouched', () => {
   };
 
   assert.equal(normalizeDroidTransportMessage(message), message);
+});
+
+test('processId reads the wrapped process pid', () => {
+  const inner = {
+    isConnected: true,
+    childProcess: { pid: 777 },
+    send() {},
+    onMessage() {},
+    onError() {},
+    close: async () => {},
+  };
+  const transport = wrapDroidTransport(inner as never);
+  assert.equal(transport.processId, 777);
 });

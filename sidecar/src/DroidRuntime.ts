@@ -7,7 +7,6 @@ import {
   ReasoningEffort as SdkReasoningEffort,
   type AskUserHandler,
   type DecompSessionType,
-  type DroidClientTransport,
   type DroidStreamEvent,
   type InitializeSessionRequestParams,
   type LoadSessionRequestParams,
@@ -15,7 +14,7 @@ import {
   type MessageOptions,
   type PermissionHandler,
 } from '@factory/droid-sdk';
-import { createDroidTransport } from './DroidTransport.js';
+import { createDroidTransport, type ConnectableDroidTransport } from './DroidTransport.js';
 import { buildDroidInvocation, resolveDroidPath } from './Environment.js';
 import type { Autonomy, ReasoningEffort, SessionInteractionMode } from './protocol.js';
 
@@ -93,10 +92,12 @@ export interface FactoryRuntime {
   createSession(options: CreateRuntimeSessionOptions): Promise<FactorySession>;
   loadSession(providerSessionId: string, handlers?: RuntimeHandlers): Promise<FactorySession>;
   readContextBreakdown(session: FactorySession): Promise<unknown>;
+  processIdOf(session: FactorySession): number | undefined;
 }
 
 export class DroidRuntime implements FactoryRuntime {
   private explicitApiKey = '';
+  private readonly processIds = new WeakMap<object, number>();
 
   connect(apiKey?: string): void {
     if (apiKey) this.explicitApiKey = apiKey;
@@ -133,6 +134,10 @@ export class DroidRuntime implements FactoryRuntime {
     }
   }
 
+  processIdOf(session: FactorySession): number | undefined {
+    return this.processIds.get(session);
+  }
+
   async createSession(options: CreateRuntimeSessionOptions): Promise<DroidSession> {
     const { client, transport } = await this.createClient(options.cwd, options);
     const params = createInitializeSessionParams(options);
@@ -143,7 +148,10 @@ export class DroidRuntime implements FactoryRuntime {
         SESSION_INIT_TIMEOUT_MS,
         'initialize_session',
       );
-      return new DroidSession(client, init.sessionId, init);
+      const session = new DroidSession(client, init.sessionId, init);
+      const pid = transport.processId;
+      if (pid !== undefined) this.processIds.set(session, pid);
+      return session;
     } catch (err) {
       await transport.close().catch(ignoreError);
       throw err;
@@ -160,7 +168,10 @@ export class DroidRuntime implements FactoryRuntime {
         SESSION_INIT_TIMEOUT_MS,
         'load_session',
       );
-      return new DroidSession(client, sessionId, init);
+      const session = new DroidSession(client, sessionId, init);
+      const pid = transport.processId;
+      if (pid !== undefined) this.processIds.set(session, pid);
+      return session;
     } catch (err) {
       await transport.close().catch(ignoreError);
       throw err;
@@ -170,7 +181,7 @@ export class DroidRuntime implements FactoryRuntime {
   private async createClient(
     cwd?: string,
     handlers: RuntimeHandlers = {},
-  ): Promise<{ client: DroidClient; transport: DroidClientTransport }> {
+  ): Promise<{ client: DroidClient; transport: ConnectableDroidTransport }> {
     const { execPath, execArgs } = buildDroidInvocation(EXEC_ARGS);
     const transport = createDroidTransport({
       execPath,

@@ -437,6 +437,10 @@ export class FakeFactoryRuntime implements FactoryRuntime {
     return Promise.resolve(this.contextBreakdowns.get(session.sessionId));
   }
 
+  processIdOf(): number | undefined {
+    return undefined;
+  }
+
   createSession(options: CreateRuntimeSessionOptions): Promise<FakeFactorySession> {
     this.createCalls.push(options);
     this.calls.push({ target: 'runtime', method: 'createSession', args: [options] });

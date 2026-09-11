@@ -253,6 +253,31 @@ test('validates automation command results by outcome', () => {
   );
 });
 
+test('validates session.processes events and rejects malformed process entries', () => {
+  const process = {
+    pid: 123,
+    name: 'ripgrep',
+    command: 'rg foo',
+    startedAt: 1,
+    ports: [],
+  };
+  assert.ok(
+    serverWireMessage(
+      batch({ type: 'session.processes', appSessionId: 'app-1', processes: [process] }),
+    ),
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, pid: 'not-a-number' }],
+      }),
+    ),
+    null,
+  );
+});
+
 test('rejects object payloads that are actually arrays', () => {
   assert.equal(serverWireMessage(batch({ type: 'settings.defaults', defaults: [] })), null);
   assert.ok(serverWireMessage(batch({ type: 'settings.defaults', defaults: {} })));

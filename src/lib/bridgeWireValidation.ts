@@ -138,6 +138,20 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'session.closed':
     case 'browser.closed':
       return typeof value.appSessionId === 'string';
+    case 'session.processes':
+      return (
+        typeof value.appSessionId === 'string' &&
+        Array.isArray(value.processes) &&
+        value.processes.every(
+          (p: unknown) =>
+            isRecord(p) &&
+            typeof p.pid === 'number' &&
+            typeof p.name === 'string' &&
+            typeof p.command === 'string' &&
+            typeof p.startedAt === 'number' &&
+            Array.isArray(p.ports),
+        )
+      );
     case 'sessions.cwdReanchored':
       return (
         typeof value.requestId === 'string' &&

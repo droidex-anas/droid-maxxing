@@ -152,6 +152,14 @@ export interface SessionSummary {
   updatedAt: number;
 }
 
+export interface AgentProcess {
+  pid: number;
+  name: string;
+  command: string;
+  startedAt: number;
+  ports: number[];
+}
+
 export interface TranscriptEvent {
   id: string;
   appSessionId: string;
@@ -611,6 +619,7 @@ export type ClientCommand =
   | { type: 'session.rewindInfo'; appSessionId: string }
   | { type: 'session.rewind'; appSessionId: string; rewindId?: string }
   | { type: 'session.close'; appSessionId: string }
+  | { type: 'session.processes.stop'; appSessionId: string; pid: number }
   | {
       type: 'sessions.list';
       workspaceCwds?: string[];
@@ -797,6 +806,7 @@ export type ServerEvent =
   | { type: 'session.created'; clientRef: string; session: SessionSummary }
   | { type: 'session.updated'; session: SessionSummary }
   | { type: 'session.closed'; appSessionId: string }
+  | { type: 'session.processes'; appSessionId: string; processes: AgentProcess[] }
   | {
       type: 'sessions.cwdReanchored';
       requestId: string;
