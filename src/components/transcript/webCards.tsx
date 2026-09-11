@@ -59,8 +59,12 @@ function WebSourceRow({
   );
 }
 
-function Count({ label }: { label: string }) {
-  return <span className="shrink-0 tabular-nums text-[12px] text-droid-text-muted">{label}</span>;
+function CountBadge({ label }: { label: string }) {
+  return (
+    <span className="ml-auto shrink-0 rounded-md border border-droid-border bg-droid-elevated/60 px-1.5 py-0.5 tabular-nums text-[11px] text-droid-text-secondary">
+      {label}
+    </span>
+  );
 }
 
 function fetchSnippet(body: string): string {
@@ -103,7 +107,7 @@ function WebSearchRunningRow({ isX, query }: { isX: boolean; query: string }) {
 
 function searchTrailing(error: boolean, total: number): React.ReactNode {
   if (error) return <ErrorTag />;
-  if (total > 0) return <Count label={String(total)} />;
+  if (total > 0) return <CountBadge label={String(total)} />;
   return null;
 }
 
@@ -253,7 +257,7 @@ function WebFetchRunningRow({ url }: { url: string }) {
 
 function fetchTrailing(error: boolean, badge: string | null): React.ReactNode {
   if (error) return <ErrorTag />;
-  if (badge) return <Count label={badge} />;
+  if (badge) return <CountBadge label={badge} />;
   return null;
 }
 

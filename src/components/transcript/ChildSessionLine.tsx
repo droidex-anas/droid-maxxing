@@ -13,6 +13,23 @@ import { SubagentsDock, type SubagentsDockData } from '../SubagentsDock';
 import { sameFeedEvents, type FeedItem } from '../chatFeed';
 import { Caret, Expand, useElapsed } from './primitives';
 
+/* ── Per-agent name color: deterministic pick so each droid keeps one hue ── */
+const CHILD_SESSION_COLORS = [
+  '#e0a458',
+  '#6ea8fe',
+  '#5cc8a8',
+  '#c58af9',
+  '#e8728f',
+  '#7bd88f',
+  '#f0a06a',
+  '#9d8cff',
+] as const;
+function childSessionColor(label: string): string {
+  let h = 0;
+  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) >>> 0;
+  return CHILD_SESSION_COLORS[h % CHILD_SESSION_COLORS.length];
+}
+
 /* ── In-chat spawned child session: inline thinking-style line + click to navigate ── */
 export function ChildSessionLine({
   event,
@@ -26,6 +43,7 @@ export function ChildSessionLine({
   const [open, setOpen] = useState(false);
   const { label, description } = childSessionInfo(event.toolArgs);
   const name = label ?? 'child session';
+  const color = childSessionColor(name);
   const running = childSessionLineIsRunning(activity);
   const startTs = activity?.startedAt;
   const elapsed = useElapsed(startTs, running);
@@ -55,7 +73,8 @@ export function ChildSessionLine({
         <button
           type="button"
           onClick={navigate}
-          className="font-medium text-droid-text underline-offset-2 hover:underline"
+          className="font-semibold underline-offset-2 hover:underline"
+          style={{ color }}
           title="Open child session"
         >
           {name}

@@ -129,10 +129,16 @@ export function CopyButton({ text }: { text: string }) {
   );
 }
 
-// The word "error" in the danger colour beside a failed row's label.
+// A small red "error" pill beside the label of a failed tool's header row.
 export function ErrorTag() {
   return (
-    <span className="shrink-0 text-[12px]" style={{ color: RED }}>
+    <span
+      className="shrink-0 rounded-md px-1.5 py-px text-[11px] font-medium"
+      style={{
+        backgroundColor: 'color-mix(in srgb, var(--droid-red) 15%, transparent)',
+        color: RED,
+      }}
+    >
       error
     </span>
   );
@@ -248,7 +254,7 @@ export function MessageActions({ text, side }: { text: string; side: 'end' | 'st
 export function CompactingIndicator() {
   return (
     <div className="flex justify-center py-3">
-      <span className="shimmer-text text-[13px] font-medium tracking-tight" aria-live="polite">
+      <span className="shimmer-text text-[16px] font-semibold tracking-tight" aria-live="polite">
         Compacting…
       </span>
     </div>

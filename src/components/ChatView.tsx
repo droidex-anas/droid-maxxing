@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
-import { ChevronRight, Square } from 'lucide-react';
+import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { openReviewAt, type OpenReviewFileHandler } from '../lib/reviewFocus';
 import type { FileChange } from '../lib/diff';
@@ -144,8 +144,9 @@ function ChatHeader({
   sub?: { label: string; meta?: string; running: boolean; onBack: () => void; onStop?: () => void };
 }) {
   return (
-    <div data-electron-drag-region className="shrink-0 flex items-center gap-2 h-9 px-4">
-      <div className="flex min-w-0 items-center gap-1.5">
+    <div data-electron-drag-region className="shrink-0 flex items-center gap-2 h-9 pr-4 pl-4">
+      <div className="flex min-w-0 items-center gap-1.5 rounded-xl bg-droid-elevated/60 pl-2 pr-3 py-1.5">
+        <GripVertical className="w-3.5 h-3.5 shrink-0 text-droid-text-muted/40" />
         {sub ? (
           <button
             type="button"
@@ -181,7 +182,7 @@ function ChatHeader({
           type="button"
           onClick={sub.onStop}
           title="Stop child session"
-          className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[12px] text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-droid-elevated/60 px-2.5 py-1.5 text-[11px] text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
         >
           <Square className="h-3 w-3" />
           Stop
