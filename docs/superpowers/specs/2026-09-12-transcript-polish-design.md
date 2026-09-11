@@ -33,9 +33,11 @@ after the virtualized row was measured.
 ## Changes
 
 ### Assistant message (`chat.tsx`)
-- Actions become a floating toolbar anchored to the message's top-right,
-  straddling the top edge (`-translate-y-1/2`), on a surface with a hairline
-  border. Hidden until hover or focus-within. Zero layout footprint.
+- Actions become a floating toolbar anchored to the message's bottom-right,
+  straddling the bottom edge into the 16px row gap (`translate-y-1/2`), on a
+  surface with a hairline border. The last line of a reply rarely reaches the
+  right edge, so the toolbar sits on free space; the top-right would cover the
+  first line. Hidden until hover or focus-within. Zero layout footprint.
 - The streaming caret moves into the text: a CSS pseudo-element on the last
   block of the markdown shell (`.md-typing`), so it sits at the end of the last
   line instead of wrapping onto its own line.
@@ -71,8 +73,27 @@ after the virtualized row was measured.
   plus the composer's own inset), so the prompt you type lands where it will
   read.
 
+### Tool rows (`rows.tsx`, `tools.tsx`)
+- A call reads as a sentence: verb from the tool's category ("Read", "Ran",
+  "Searched"), progressive while in flight ("Reading"), then the object. Tools
+  outside the categories show a humanised name and their MCP source instead of
+  the raw identifier. No monospace on the row line; paths open in Review.
+
+### Chrome (`App.tsx`, `windowChrome.ts`)
+- Floating window controls follow the measured height of the banner stack;
+  chrome insets past the traffic lights only on macOS.
+
 ## Out of scope
 Right panel, sidebar, welcome screen, composer internals, code card chrome.
+
+## Follow-ups queued (audit 2026-09-12)
+- Light theme with the default preset is unusable; audit and fix tokens.
+- File paths in assistant prose open in Review (inline code that names a
+  repo file becomes a link).
+- Arrow keys in the model selector show a focus ring on the row.
+- Onboarding and composer half-pixel sizes, tracked caps labels, raw Tailwind
+  palette in file chips, always-visible remove badges, spec-mode label.
+- Sidebar collapse inserts a 36px strip and shifts the transcript.
 
 ## Verification
 Isolated Electron instance (scratch HOME, own user-data dir, replay sidecar on
