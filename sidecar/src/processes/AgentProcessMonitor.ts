@@ -4,10 +4,15 @@ import { descendantsOf, type ProcessRecord } from './processTree.js';
 
 export interface AgentProcessMonitorDependencies {
   listProcesses: () => Promise<ProcessRecord[]>;
-  listListeningPorts: () => Promise<Map<number, number[]>>;
+  // Resolves null when the port scan produced nothing usable; the previous
+  // snapshot is then kept rather than blanking every port chip.
+  listListeningPorts: () => Promise<Map<number, number[]> | null>;
   kill: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => void;
   emit: (appSessionId: string, processes: AgentProcess[]) => void;
   schedule: (callback: () => void, ms: number) => { cancel(): void };
+  // Referenced twin of `schedule`, used only for the kill grace poll so a
+  // shutdown cannot exit the loop before the SIGKILL sweep runs.
+  scheduleKillPoll: (callback: () => void, ms: number) => { cancel(): void };
   now: () => number;
 }
 
@@ -71,6 +76,9 @@ export class AgentProcessMonitor {
   // a provider root, the process itself is one of the session's, so it belongs
   // in the published list rather than only its children.
   private readonly adoptedRoots = new Set<number>();
+  // Start time each adopted root had when it was adopted, so a recycled pid
+  // is recognised as a different process rather than re-attached.
+  private readonly adoptedStartedAt = new Map<number, number>();
   // appSessionId -> command lines the session spawns on the provider's behalf
   // (stdio MCP servers), which belong to no one the user can act on.
   private readonly ignoredCommands = new Map<string, readonly string[]>();
@@ -104,27 +112,32 @@ export class AgentProcessMonitor {
   // Compaction retires the provider that spawned this session's processes, so
   // re-root its children before it goes: once it exits they are reparented to
   // launchd and nothing can find them from its pid again.
-  async adoptDescendantsAsRoots(appSessionId: string, rootPid: number): Promise<void> {
+  // Resolves false when the process table could not be read: the caller must
+  // then keep the old root tracked, or its children become unkillable orphans.
+  async adoptDescendantsAsRoots(appSessionId: string, rootPid: number): Promise<boolean> {
     let table: ProcessRecord[];
     try {
       table = await this.d.listProcesses();
     } catch {
       // Nothing to adopt from; the session keeps whatever it already had.
-      return;
+      return false;
     }
     // Direct children only — the walk from each of them is transitive, and a
     // grandchild tracked as well would be listed twice.
     for (const row of table) {
       if (row.ppid !== rootPid) continue;
       this.adoptedRoots.add(row.pid);
+      this.adoptedStartedAt.set(row.pid, row.startedAt);
       this.track(appSessionId, row.pid);
     }
+    return true;
   }
 
   untrack(rootPid: number): void {
     const appSessionId = this.roots.get(rootPid);
     this.roots.delete(rootPid);
     this.adoptedRoots.delete(rootPid);
+    this.adoptedStartedAt.delete(rootPid);
     if (appSessionId !== undefined) this.dropIfRootless(appSessionId);
     if (this.roots.size === 0) this.disarm();
   }
@@ -236,6 +249,7 @@ export class AgentProcessMonitor {
     this.disarm();
     this.roots.clear();
     this.adoptedRoots.clear();
+    this.adoptedStartedAt.clear();
     this.ignoredCommands.clear();
   }
 
@@ -366,7 +380,9 @@ export class AgentProcessMonitor {
       // Fetch ports before committing anything, so a rejection here leaves
       // the previous snapshot (descendants/ports/current) untouched.
       const nextPorts =
-        sawNew || nextTick % PORT_SCAN_EVERY === 1 ? await this.d.listListeningPorts() : this.ports;
+        sawNew || nextTick % PORT_SCAN_EVERY === 1
+          ? ((await this.d.listListeningPorts()) ?? this.ports)
+          : this.ports;
 
       // `untrack()` can run synchronously between any of the awaits above
       // (it isn't gated by `scanning`) and already cleared/republished for
@@ -404,13 +420,20 @@ export class AgentProcessMonitor {
   }
 
   private publish(appSessionId: string, processes: AgentProcess[]): void {
-    const previous = this.current.get(appSessionId) ?? [];
-    if (sameList(previous, processes)) return;
+    const previous = this.current.get(appSessionId);
+    // The first publication always emits, even when it is empty: it is what
+    // writes a freshly tracked root into the crash-reap journal.
+    if (previous !== undefined && sameList(previous, processes)) return;
+    // Commit before emitting: the consumer reads `processesFor`/`hasProcesses`
+    // from inside the callback and must see the list it is being handed.
+    this.current.set(appSessionId, processes);
     try {
       this.d.emit(appSessionId, processes);
     } catch (error) {
-      // Leave `current` as it was so the next scan sees a diff again and
-      // retries the emit instead of silently dropping the update.
+      // Roll back so the next scan sees a diff again and retries the emit
+      // instead of silently dropping the update.
+      if (previous === undefined) this.current.delete(appSessionId);
+      else this.current.set(appSessionId, previous);
       if (!this.lastPublishFailed) {
         this.lastPublishFailed = true;
         console.warn('AgentProcessMonitor: emit failed, will retry next scan', error);
@@ -418,18 +441,27 @@ export class AgentProcessMonitor {
       return;
     }
     this.lastPublishFailed = false;
-    this.current.set(appSessionId, processes);
   }
 
   // An adopted root is a process whose lifetime we don't own. Drop it once it
   // exits, or a recycled pid would later re-attach a stranger to this session.
   private pruneDeadAdoptedRoots(table: readonly ProcessRecord[]): void {
     if (this.adoptedRoots.size === 0) return;
-    const alive = new Set(table.map((row) => row.pid));
+    const byPid = new Map(table.map((row) => [row.pid, row] as const));
     const orphaned = new Set<string>();
     for (const pid of this.adoptedRoots) {
-      if (alive.has(pid)) continue;
+      // pid alone is not identity: a recycled pid would re-attach a stranger
+      // to this session, so the live row must still be the process we adopted.
+      const live = byPid.get(pid);
+      const adoptedAt = this.adoptedStartedAt.get(pid);
+      if (
+        live !== undefined &&
+        (adoptedAt === undefined || Math.abs(live.startedAt - adoptedAt) < START_TIME_TOLERANCE_MS)
+      ) {
+        continue;
+      }
       this.adoptedRoots.delete(pid);
+      this.adoptedStartedAt.delete(pid);
       const appSessionId = this.roots.get(pid);
       this.roots.delete(pid);
       if (appSessionId !== undefined) orphaned.add(appSessionId);
@@ -449,7 +481,7 @@ export class AgentProcessMonitor {
     let survivors: ProcessRecord[] = [];
     for (let waited = 0; waited < KILL_GRACE_MS; waited += KILL_POLL_MS) {
       await new Promise<void>((resolve) => {
-        this.d.schedule(resolve, KILL_POLL_MS);
+        this.d.scheduleKillPoll(resolve, KILL_POLL_MS);
       });
       let table: ProcessRecord[];
       try {
@@ -460,8 +492,15 @@ export class AgentProcessMonitor {
         // pick up any survivor.
         return;
       }
-      const alive = new Set(table.map((row) => row.pid));
-      survivors = ordered.filter((row) => alive.has(row.pid));
+      const byPid = new Map(table.map((row) => [row.pid, row] as const));
+      // Same identity check every other kill path makes: a pid recycled during
+      // the grace window must not be SIGKILLed as if it were our target.
+      survivors = ordered.filter((row) => {
+        const live = byPid.get(row.pid);
+        return (
+          live !== undefined && Math.abs(live.startedAt - row.startedAt) < START_TIME_TOLERANCE_MS
+        );
+      });
       if (survivors.length === 0) return;
     }
     for (const row of survivors) this.signal(row.pid, 'SIGKILL');

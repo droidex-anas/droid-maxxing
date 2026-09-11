@@ -543,6 +543,7 @@ test('post-open create and resume failures close provider and MCP resources', as
 test('registration failure closes resources without indexing the failed session', async () => {
   const harness = createHarness();
   queueCreate(harness, 'failed-registration');
+  harness.runtime.processIds.set('failed-registration', 4321);
   harness.history.nextSyncError = new Error('persist failed');
 
   await harness.lifecycle.create(createCommand());
@@ -560,6 +561,14 @@ test('registration failure closes resources without indexing the failed session'
   assert.equal(
     harness.events.some((event) => event.type === 'error' && event.message === 'persist failed'),
     true,
+  );
+  // Kill-then-untrack, same order as the normal close path: anything the
+  // provider spawned before the failure is only reachable while it is alive.
+  assert.deepEqual(
+    harness.calls
+      .filter((call) => call.method.startsWith('processes.') && call.method !== 'processes.track')
+      .map((call) => call.method),
+    ['processes.killSession', 'processes.untrack'],
   );
 });
 

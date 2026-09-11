@@ -21,13 +21,19 @@ export function parseLsofListeners(stdout: string): Map<number, number[]> {
   return ports;
 }
 
-export async function listListeningPorts(run: CommandRunner): Promise<Map<number, number[]>> {
+// Resolves null when `lsof` produced nothing usable (missing binary, denied,
+// killed). The caller must then keep the ports it already has: committing an
+// empty map would blank every port chip until the next port scan.
+export async function listListeningPorts(
+  run: CommandRunner,
+): Promise<Map<number, number[]> | null> {
   if (process.platform === 'win32') return new Map();
   try {
+    // Exit 1 with output means "warned but listed"; exit 1 with no output
+    // means nothing is listening — both are results, not failures.
     const stdout = await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn']);
     return parseLsofListeners(stdout);
   } catch {
-    // lsof exits 1 when nothing listens; that is an empty result, not a failure.
-    return new Map();
+    return null;
   }
 }

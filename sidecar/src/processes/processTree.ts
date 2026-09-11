@@ -22,6 +22,19 @@ export function defaultCommandRunner(file: string, args: string[]): Promise<stri
   });
 }
 
+// `lsof` exits 1 both when nothing is listening and when it prints a warning
+// alongside perfectly good output, so stdout is authoritative whenever it is
+// non-empty. Only a run that produced nothing is a failure.
+export function tolerantCommandRunner(file: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+      if (stdout) resolve(stdout);
+      else if (error) reject(asError(error));
+      else resolve('');
+    });
+  });
+}
+
 // `ps` prints elapsed time as `[[dd-]hh:]mm:ss` (e.g. `05:12`, `21:12:36`,
 // `2-03:04:05`). Returns null when `text` does not match that shape.
 export function parseElapsedSeconds(text: string): number | null {

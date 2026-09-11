@@ -59,7 +59,7 @@ function createHarness(): Harness {
     agentProcesses: {
       track: () => undefined,
       untrack: () => undefined,
-      adoptDescendantsAsRoots: () => Promise.resolve(),
+      adoptDescendantsAsRoots: () => Promise.resolve(true),
     },
     makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
     makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),

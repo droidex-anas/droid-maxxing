@@ -88,8 +88,9 @@ class TestRegistry {
   }
 }
 
-function createHarness() {
+function createHarness(options: { adoptSucceeds?: boolean } = {}) {
   const calls: RecordedCall[] = [];
+  const untracked: number[] = [];
   const errors: CompactionError[] = [];
   const preserved: { appSessionId: string; tokensIn: number; tokensOut: number }[] = [];
   const refreshed: string[] = [];
@@ -131,8 +132,10 @@ function createHarness() {
     runtime,
     agentProcesses: {
       track: () => undefined,
-      untrack: () => undefined,
-      adoptDescendantsAsRoots: () => Promise.resolve(),
+      untrack: (pid) => {
+        untracked.push(pid);
+      },
+      adoptDescendantsAsRoots: () => Promise.resolve(options.adoptSucceeds ?? true),
     },
     makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
     makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
@@ -148,6 +151,7 @@ function createHarness() {
   });
   return {
     calls,
+    untracked,
     compaction,
     errors,
     preserved,
@@ -270,6 +274,22 @@ test('provider adoption retries cleanly after a partial first adoption', async (
     h.errors.some((error) => error.message.includes('first persistence failed')),
     true,
   );
+});
+
+test('a retiring provider stays tracked when its descendants could not be adopted', async () => {
+  for (const adoptSucceeds of [true, false]) {
+    const h = createHarness({ adoptSucceeds });
+    const { session: original } = addLive(h);
+    h.runtime.processIds.set('provider-1', 600);
+    original.nextCompactResult = { newSessionId: 'provider-2', removedCount: 1 };
+    h.runtime.loadQueue.set('provider-2', [new FakeFactorySession('provider-2', {}, h.calls)]);
+
+    await h.compaction.compact('app-1');
+
+    // Untracking a root whose children were never re-rooted would leave them
+    // unreachable from any session.
+    assert.deepEqual(h.untracked, adoptSucceeds ? [600] : []);
+  }
 });
 
 test('provider adoption continuations become inert after shutdown starts', async () => {

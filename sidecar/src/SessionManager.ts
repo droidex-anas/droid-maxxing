@@ -312,13 +312,18 @@ export class SessionManager {
         // The monitor must never see a bridge failure: it would read as a
         // scan failure and stall the next publish.
         try {
-          this.emit({ type: 'session.processes', appSessionId, processes });
+          // Journal first: a throwing emit must not cost the reap record too,
+          // since the monitor commits the publish either way.
           // Pids reach the journal as they appear, so a sidecar that dies
           // without cleanup leaves the next boot something to reap.
           this.adoption.persistLiveSet();
+          this.emit({ type: 'session.processes', appSessionId, processes });
         } catch (error) {
           console.warn('SessionManager: could not publish agent processes', error);
         }
+        // The `hasAgentProcesses` gate cancels retirement; when the last
+        // process exits nothing else re-arms it, so do it here.
+        this.runtimeRetirement.arm();
       },
     });
     this.mcpSettings = new McpSettings(
@@ -801,6 +806,15 @@ export class SessionManager {
         return;
       case 'sessions.list':
         await this.sessionFiles.list(cmd);
+        // The renderer drops sidecar-owned process lists when the bridge
+        // disconnects, and the monitor only emits on change — so re-send the
+        // current lists alongside the bootstrap listing.
+        for (const live of this.registry.liveSessionsSnapshot()) {
+          const appSessionId = live.summary.appSessionId;
+          const processes = this.agentProcesses.processesFor(appSessionId);
+          if (processes.length > 0)
+            this.emit({ type: 'session.processes', appSessionId, processes });
+        }
         return;
       case 'history.list':
         this.timeline.list();

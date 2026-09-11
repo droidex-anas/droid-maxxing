@@ -490,10 +490,25 @@ test('a session whose agent left a dev server running is never retired', async (
       'the renderer must be told what the session is holding',
     );
 
-    // The user stops the server themselves: the session settles and retires.
+    // A reconnecting renderer clears its sidecar-owned lists and bootstraps
+    // with sessions.list; the monitor only emits on change, so the listing has
+    // to carry the current processes with it.
+    const beforeList = h.events.length;
+    await h.handle({ type: 'sessions.list' });
+    assert.deepEqual(
+      h.events
+        .slice(beforeList)
+        .flatMap((event) => (event.type === 'session.processes' ? [event.appSessionId] : [])),
+      ['app-parent'],
+    );
+
+    // The user stops the server themselves: the session settles and retires on
+    // its own — the process publish has to re-arm the timer the dev server
+    // cancelled, or nothing would ever wake up to retire it.
     table.splice(1, 1);
     await h.scanAgentProcesses();
-    await h.retireIdleSessionRuntimes();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await h.waitForIdle();
     assert.deepEqual(providerClosures(h), ['provider-parent']);
   } finally {
     await h.dispose();

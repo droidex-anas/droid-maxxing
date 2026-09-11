@@ -150,13 +150,16 @@ export class SessionCompactionExecution {
       // provider. It should outlive the compaction, but once its parent exits
       // it is reparented to launchd and invisible, so re-root it first: while
       // the old provider is still alive it is still findable from its pid.
+      let adopted = true;
       if (oldPid !== undefined) {
-        await this.dependencies.agentProcesses
+        adopted = await this.dependencies.agentProcesses
           .adoptDescendantsAsRoots(appSessionId, oldPid)
-          .catch(ignoreError);
+          .catch(() => false);
       }
       await oldSession.close().catch(ignoreError);
-      if (oldPid !== undefined) this.dependencies.agentProcesses.untrack(oldPid);
+      // Untracking a root whose children were never adopted would leave them
+      // unreachable: keep it so the session close path can still reap them.
+      if (oldPid !== undefined && adopted) this.dependencies.agentProcesses.untrack(oldPid);
     };
     try {
       this.effects.subscribePrimary(liveSession);

@@ -16,6 +16,12 @@ function harness(rows: ProcessRecord[], ports = new Map<number, number[]>()) {
       rows = rows.filter((r) => r.pid !== pid);
     },
     emit: (id, processes) => emitted.push([id, processes]),
+    // The kill grace poll always fires immediately here; `kill` above drops
+    // the pid from the table so the poll sees it gone.
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     schedule: (cb, ms) => {
       // Only the scan tick is held for `tick()`; the kill grace and the 150ms
       // liveness polls inside it fire immediately, and `kill` above drops the
@@ -109,8 +115,20 @@ test('processes younger than MIN_AGE_MS are not shown yet', async () => {
   const h = harness(young);
   h.monitor.track('s1', 600);
   await h.monitor.scan();
-  assert.equal(h.emitted.length, 0);
+  // The first publication always goes out so the root reaches the reap
+  // journal, but it carries nothing yet.
+  assert.deepEqual(h.emitted, [['s1', []]]);
   h.advance(2000);
+  await h.monitor.scan();
+  assert.equal(h.emitted.length, 2);
+});
+
+test('a tracked root with no visible descendants still emits once', async () => {
+  const h = harness([{ pid: 600, ppid: 1, startedAt: 90_000, command: 'droid' }]);
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+  assert.deepEqual(h.emitted, [['s1', []]]);
+  // ...and does not repeat it every tick.
   await h.monitor.scan();
   assert.equal(h.emitted.length, 1);
 });
@@ -163,6 +181,10 @@ test('scan leaves the previous snapshot untouched when listProcesses rejects, an
     kill: () => {},
     emit: (id, processes) => emitted.push([id, processes]),
     schedule: () => ({ cancel() {} }),
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     now: () => 100_000,
   });
   monitor.track('s1', 600);
@@ -194,6 +216,10 @@ test('a rejecting listListeningPorts leaves the previous snapshot untouched and 
     kill: () => {},
     emit: (id, processes) => emitted.push([id, processes]),
     schedule: () => ({ cancel() {} }),
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     now: () => 100_000,
   });
   monitor.track('s1', 600);
@@ -257,6 +283,12 @@ test('stop resolves true and sends only SIGTERM when the post-grace listProcesse
     listListeningPorts: async () => new Map(),
     kill: (pid, signal) => killed.push([pid, signal]),
     emit: () => {},
+    // The kill grace poll always fires immediately here; `kill` above drops
+    // the pid from the table so the poll sees it gone.
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     schedule: (cb, ms) => {
       if (ms !== TICK_MS) {
         setImmediate(cb);
@@ -300,6 +332,10 @@ test("an emit that throws for one session doesn't block another session's publis
       emitted.push([id, processes]);
     },
     schedule: () => ({ cancel() {} }),
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     now: () => 100_000,
   });
   monitor.track('s1', 600);
@@ -341,6 +377,10 @@ test('untrack during the in-flight ports scan drops the stale snapshot instead o
     kill: () => {},
     emit: (id, processes) => emitted.push([id, processes]),
     schedule: () => ({ cancel() {} }),
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     now: () => 100_000,
   });
   monitor.track('s1', 600);
@@ -379,6 +419,10 @@ test('killRecorded resolves without killing anything when listProcesses rejects'
     kill: (pid, signal) => killed.push([pid, signal]),
     emit: () => {},
     schedule: () => ({ cancel() {} }),
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     now: () => 100_000,
   });
 
@@ -449,6 +493,12 @@ test('killTree SIGKILLs only what is still alive when the grace expires', async 
     listListeningPorts: async () => new Map(),
     kill: (pid, signal) => killed.push([pid, signal]),
     emit: () => {},
+    // The kill grace poll always fires immediately here; `kill` above drops
+    // the pid from the table so the poll sees it gone.
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
     schedule: (cb, ms) => {
       if (ms !== TICK_MS) setImmediate(cb);
       return { cancel() {} };
@@ -503,6 +553,80 @@ test("pruning a session's last adopted root publishes an empty list", async () =
   assert.equal(h.monitor.hasProcesses('s1'), false);
   assert.deepEqual(h.monitor.processesFor('s1'), []);
   assert.deepEqual(h.emitted.at(-1), ['s1', []]);
+});
+
+test('an adopted root whose pid is recycled is dropped, not re-attached', async () => {
+  const h = harness(compactionRows);
+  h.monitor.track('s1', 600);
+  await h.monitor.adoptDescendantsAsRoots('s1', 600);
+  h.monitor.untrack(600);
+  await h.monitor.scan();
+  assert.deepEqual(
+    h.monitor.processesFor('s1').map((entry) => entry.pid),
+    [800, 900],
+  );
+
+  // pid 800 exited and the OS handed the number to a stranger.
+  h.setRows([
+    { pid: 800, ppid: 1, startedAt: 50_000, command: '/usr/bin/someone-elses-daemon' },
+    { pid: 900, ppid: 1, startedAt: 0, command: 'node /w/node_modules/.bin/tsc --watch' },
+  ]);
+  await h.monitor.scan();
+
+  assert.deepEqual(
+    h.monitor.processesFor('s1').map((entry) => entry.pid),
+    [900],
+  );
+});
+
+test('the SIGKILL sweep skips a pid that was recycled during the grace window', async () => {
+  const killed: Array<[number, string]> = [];
+  let table: ProcessRecord[] = [...rows];
+  const monitor = new AgentProcessMonitor({
+    listProcesses: async () => table,
+    listListeningPorts: async () => new Map(),
+    kill: (pid, signal) => killed.push([pid, signal]),
+    emit: () => {},
+    scheduleKillPoll: (cb) => {
+      // The grace window: 800 died and its pid now belongs to someone else.
+      table = [
+        rows[0],
+        rows[1],
+        { pid: 800, ppid: 1, startedAt: 90_000, command: '/usr/bin/someone-elses-daemon' },
+      ];
+      setImmediate(cb);
+      return { cancel() {} };
+    },
+    schedule: (cb, ms) => {
+      if (ms !== TICK_MS) setImmediate(cb);
+      return { cancel() {} };
+    },
+    now: () => 100_000,
+  });
+  monitor.track('s1', 600);
+  await monitor.scan();
+
+  await monitor.killSession('s1');
+
+  assert.deepEqual(killed, [
+    [800, 'SIGTERM'],
+    [700, 'SIGTERM'],
+    [700, 'SIGKILL'],
+  ]);
+});
+
+test('adoptDescendantsAsRoots reports failure when the process table is unreadable', async () => {
+  const monitor = new AgentProcessMonitor({
+    listProcesses: () => Promise.reject(new Error('ps: cannot fork')),
+    listListeningPorts: async () => new Map(),
+    kill: () => {},
+    emit: () => {},
+    schedule: () => ({ cancel() {} }),
+    scheduleKillPoll: () => ({ cancel() {} }),
+    now: () => 100_000,
+  });
+  monitor.track('s1', 600);
+  assert.equal(await monitor.adoptDescendantsAsRoots('s1', 600), false);
 });
 
 // `droid` spawns the stdio MCP servers from `.factory/mcp.json` as its own
