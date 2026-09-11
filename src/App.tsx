@@ -239,12 +239,15 @@ export default function App() {
 
   // The busy-shell confirmation popover is only meaningful for the tab that
   // raised it, in the active session's still-open panel. Switching sessions
-  // (utilityPanel now points at a different panel) or closing the panel
-  // (UtilityPane unmounts) must not leave a stale id armed for a tab no
-  // longer on screen.
+  // (utilityPanel now points at a different panel), closing the panel
+  // (UtilityPane unmounts), or activating a different tab must not leave a
+  // stale id armed for a tab no longer on screen. `onCloseTab` activates the
+  // confirming tab itself (to bring its TerminalWorkspace on screen before
+  // arming the dialog), so this only clears when the active tab has changed
+  // to something other than the one currently confirming.
   useEffect(() => {
-    setConfirmCloseTabId(null);
-  }, [activeSession?.appSessionId, utilityPanel.open]);
+    setConfirmCloseTabId((current) => (current === utilityPanel.activeTabId ? current : null));
+  }, [activeSession?.appSessionId, utilityPanel.open, utilityPanel.activeTabId]);
 
   // A chat that is deleted, archived, or whose session closes drops its
   // utility panel from the store (see the useStore reducer), which removes
@@ -701,25 +704,35 @@ export default function App() {
                           closeTerminalTab(tab);
                           return;
                         }
+                        const armCloseConfirm = () => {
+                          // The check may resolve after the user switched
+                          // sessions or closed the pane; only arm the
+                          // confirmation if this tab is still on screen.
+                          if (!utilityTabsRef.current.some((current) => current.id === tab.id)) {
+                            return;
+                          }
+                          // Only the active tab's TerminalWorkspace is
+                          // mounted, so the confirmation has nowhere to
+                          // render unless this tab is brought forward first
+                          // — mirror onActivateTab's browser-expanded reset.
+                          if (tab.id !== utilityPanel.activeTabId) {
+                            setExpandedBrowserAppSessionId(null);
+                            dispatch({ type: 'ACTIVATE_UTILITY_TAB', tabId: tab.id });
+                          }
+                          setConfirmCloseTabId(tab.id);
+                        };
                         void terminalHasChildren(tab.terminalId)
                           .then((busy) => {
                             if (!busy) {
                               closeTerminalTab(tab);
                               return;
                             }
-                            // The check may resolve after the user switched
-                            // sessions or closed the pane; only arm the
-                            // popover if this tab is still on screen.
-                            if (utilityTabsRef.current.some((current) => current.id === tab.id)) {
-                              setConfirmCloseTabId(tab.id);
-                            }
+                            armCloseConfirm();
                           })
                           .catch(() => {
                             // Unverifiable shell state: fall back to asking
                             // rather than silently doing nothing.
-                            if (utilityTabsRef.current.some((current) => current.id === tab.id)) {
-                              setConfirmCloseTabId(tab.id);
-                            }
+                            armCloseConfirm();
                           });
                         return;
                       }

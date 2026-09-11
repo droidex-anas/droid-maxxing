@@ -39,11 +39,19 @@ export function TerminalWorkspace({
   );
   const onCreatedRef = useRef(onCreated);
   onCreatedRef.current = onCreated;
+  // A tab that arms its close confirmation by being activated (see App.tsx's
+  // onCloseTab) mounts this component with `confirmClose` already true, in
+  // the same commit as the confirmation dialog's autoFocus on Keep. Reading
+  // `confirmClose` here (rather than via a prop passed to the effect)
+  // captures only its value from this initial render — the attach effect
+  // below runs once, on mount — so the terminal doesn't steal focus back
+  // from Keep right after the dialog claims it.
+  const focusOnAttachRef = useRef(!confirmClose);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    instance.attach(host);
+    instance.attach(host, { focus: focusOnAttachRef.current });
     const observer = new ResizeObserver(() => {
       instance.fit();
     });
@@ -125,7 +133,13 @@ export function TerminalWorkspace({
         )}
         {confirmClose && (
           <TerminalCloseConfirm
-            onKeepOpen={() => onKeepOpen?.()}
+            onKeepOpen={() => {
+              // Keep/Escape dismiss the dialog and leave focus on
+              // `document.body`; without this the user has to click the
+              // terminal again before they can type.
+              instance.focus();
+              onKeepOpen?.();
+            }}
             onStopAndClose={() => onStopAndClose?.()}
           />
         )}

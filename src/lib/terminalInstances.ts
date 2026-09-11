@@ -43,8 +43,9 @@ export interface TerminalInstance {
   readonly element: HTMLDivElement;
   getState(): TerminalInstanceState;
   subscribe(listener: () => void): () => void;
-  attach(host: HTMLElement): void;
+  attach(host: HTMLElement, options?: { focus?: boolean }): void;
   detach(): void;
+  focus(): void;
   fit(): void;
   restart(): Promise<void>;
   copySelection(): string;
@@ -279,13 +280,16 @@ function createInstance(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    attach(host) {
+    attach(host, options) {
       host.appendChild(element);
       applyFit();
-      terminal?.focus();
+      if (options?.focus !== false) terminal?.focus();
     },
     detach() {
       element.remove();
+    },
+    focus() {
+      terminal?.focus();
     },
     fit: scheduleFit,
     async restart() {
