@@ -34,6 +34,7 @@ const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
 const localImages = require('./localImages.cjs');
 const favicons = require('./favicons.cjs');
+const editorApps = require('./editorApps.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
@@ -470,7 +471,8 @@ function registerIpc() {
   });
   ipcMain.handle('read-file', (_event, { path: filePath }) => readFile(filePath));
   ipcMain.handle('repo-status', (_event, { dir }) => repoStatus(dir));
-  ipcMain.handle('list-editors', () => listEditors());
+  ipcMain.handle('list-editors', () => editorApps.listEditors());
+  ipcMain.handle('editor-icon', (_event, { editor }) => editorApps.editorIcon(editor));
   ipcMain.handle('open-project', (_event, { dir, editor, target }) =>
     openProject(dir, editor, target),
   );
@@ -1205,39 +1207,6 @@ async function openPathOrThrow(targetPath) {
 
 function normalizeEditor(value) {
   return ['vscode', 'cursor', 'finder', 'terminal', 'xcode'].includes(value) ? value : 'vscode';
-}
-
-// Report which launch targets are actually installed on this machine so the UI
-// only offers editors the user can really open.
-function listEditors() {
-  if (process.platform === 'darwin') {
-    const editors = [];
-    if (appBundleExists(['Visual Studio Code.app', 'VSCodium.app'])) editors.push('vscode');
-    if (appBundleExists(['Cursor.app'])) editors.push('cursor');
-    editors.push('finder', 'terminal');
-    if (appBundleExists(['Xcode.app'])) editors.push('xcode');
-    return editors;
-  }
-  const editors = [];
-  if (commandOnPath('code')) editors.push('vscode');
-  if (commandOnPath('cursor')) editors.push('cursor');
-  editors.push('finder', 'terminal');
-  return editors;
-}
-
-function appBundleExists(bundleNames) {
-  const dirs = ['/Applications', path.join(os.homedir(), 'Applications')];
-  return bundleNames.some((name) => dirs.some((dir) => fs.existsSync(path.join(dir, name))));
-}
-
-function commandOnPath(command) {
-  const probe = process.platform === 'win32' ? 'where' : 'which';
-  try {
-    require('node:child_process').execFileSync(probe, [command], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function openApp(macAppName, command, targetPath) {

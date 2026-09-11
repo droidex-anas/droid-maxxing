@@ -152,6 +152,7 @@ contextBridge.exposeInMainWorld('droidControl', {
   readFile: (path) => ipcRenderer.invoke('read-file', { path }),
   repoStatus: (dir) => ipcRenderer.invoke('repo-status', { dir }),
   listEditors: () => ipcRenderer.invoke('list-editors'),
+  editorIcon: (editor) => ipcRenderer.invoke('editor-icon', { editor }),
   openProject: (dir, editor, target) => ipcRenderer.invoke('open-project', { dir, editor, target }),
 
   gitEnvironment: (dir) => ipcRenderer.invoke('git-environment', { dir }),
