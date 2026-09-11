@@ -1,5 +1,7 @@
 // Matches the command an agent typed against a live process's full command
 // line, on whole tokens only — `npm run dev` must not match `npm run dev:api`.
+// Duplicated as `sidecar/src/processes/commandLineMatch.ts` (the sidecar builds
+// separately); keep the two function bodies byte-for-byte identical.
 export function commandLineContains(commandLine: string, needle: string): boolean {
   let from = 0;
   while (from <= commandLine.length) {

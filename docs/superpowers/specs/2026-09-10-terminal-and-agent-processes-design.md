@@ -64,7 +64,7 @@ interface TerminalInstance {
 `sidecar/src/processes/AgentProcessMonitor.ts`:
 
 - Roots: the `droid exec` pid of each live top-level session and of each live child runtime, mapped to the owning `appSessionId`. `DroidTransport` exposes `processId` from the wrapped `ProcessTransport`; `DroidSession` carries it; `SessionLifecycle` registers and unregisters roots on open and close.
-- Tick: every 2 s while any root exists, `ps` once; every third tick, or immediately when a new descendant appears, `lsof`. Descendants younger than 1.5 s and shell wrappers (`sh -c`, `zsh -c`, `bash -c`, `droid` itself) are hidden; the displayed name is the leaf executable basename with its first argument when it is not a flag (`vite`, `next dev`, `node server.js`).
+- Tick: every 2 s while any root exists, `ps` once; every third tick, or immediately when a new descendant appears, `lsof`. Descendants younger than 1.5 s and shell wrappers (`sh -c`, `zsh -c`, `bash -c`, `droid` itself) are hidden; the displayed name is the leaf executable basename with its first argument when it is not a flag (`vite`, `next dev`) — except for interpreters (`node`, `python`, `ruby`, …), where the script basename alone is shown (`node server.js` displays as `server.js`).
 - Emits `session.processes` only when the per-session list changes:
 
 ```ts
