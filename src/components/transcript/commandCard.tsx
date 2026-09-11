@@ -3,6 +3,20 @@ import { useStoreSelector } from '../../hooks/useStore';
 import { stripAnsi } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, linkify, RED, ToolPanel } from './primitives';
 
+export function commandLineContains(commandLine: string, needle: string): boolean {
+  let from = 0;
+  while (from <= commandLine.length) {
+    const at = commandLine.indexOf(needle, from);
+    if (at < 0) return false;
+    const before = at === 0 || /\s/.test(commandLine[at - 1]);
+    const afterIndex = at + needle.length;
+    const after = afterIndex === commandLine.length || /\s/.test(commandLine[afterIndex]);
+    if (before && after) return true;
+    from = at + 1;
+  }
+  return false;
+}
+
 // A backgrounded server keeps its card "running" after the turn ends as long
 // as a live agent process still carries the command the agent typed.
 function useCommandStillRunning(command: string): boolean {
@@ -11,7 +25,7 @@ function useCommandStillRunning(command: string): boolean {
     const processes = id ? state.agentProcesses[id] : undefined;
     if (!processes?.length) return false;
     const needle = command.trim();
-    return needle.length > 3 && processes.some((p) => p.command.includes(needle));
+    return needle.length > 3 && processes.some((p) => commandLineContains(p.command, needle));
   });
 }
 
