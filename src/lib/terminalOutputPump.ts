@@ -86,11 +86,22 @@ export function createTerminalOutputPump(options: {
     pendingBytes = 0;
   }
 
+  // Restart clears the screen: buffered output from the previous shell must
+  // not land in it, and the trimmed banner must not stick across it.
+  function reset() {
+    cancel();
+    pending = '';
+    pendingBytes = 0;
+    droppedBytes = 0;
+    truncated = false;
+  }
+
   return {
     push,
     flush,
     reveal,
     dispose,
+    reset,
     get truncated() {
       return truncated;
     },

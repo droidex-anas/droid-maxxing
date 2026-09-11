@@ -56,12 +56,15 @@ function buildPtyEnv(platform, env) {
   return { ...(env || process.env), TERM, COLORTERM };
 }
 
-// pgrep -P lists direct children of the shell; a non-zero exit means none.
+// pgrep -P lists direct children of the shell; exit 1 means none. Any other
+// failure (ENOENT, EPERM) is not an answer — reject so the caller can arm the
+// confirmation rather than close a busy shell outright.
 function defaultListChildPids(pid) {
   if (process.platform === 'win32') return Promise.resolve([pid]);
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     execFile('pgrep', ['-P', String(pid)], (error, stdout) => {
-      if (error) return resolve([]);
+      if (error && error.code === 1) return resolve([]);
+      if (error) return reject(error);
       resolve(
         String(stdout)
           .split('\n')
@@ -474,7 +477,11 @@ function createTerminalManager(opts) {
   async function hasChildren(id) {
     const e = terminals.get(id);
     if (!e || e.exited || !e.pty || typeof e.pty.pid !== 'number') return false;
-    const children = await listChildPids(e.pty.pid);
+    const pid = e.pty.pid;
+    const children = await listChildPids(pid);
+    // Revalidate: the shell can exit (or be replaced) while `pgrep` runs, and
+    // a dead terminal must still answer false.
+    if (terminals.get(id) !== e || e.exited || e.pty?.pid !== pid) return false;
     return children.length > 0;
   }
 

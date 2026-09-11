@@ -85,7 +85,9 @@ export function TerminalWorkspace({
           onClick={() => {
             const selection = instance.copySelection();
             if (selection) {
-              void navigator.clipboard.writeText(selection);
+              navigator.clipboard.writeText(selection).catch((error: unknown) => {
+                console.warn('Copy failed', error);
+              });
             }
           }}
         >

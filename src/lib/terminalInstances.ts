@@ -141,6 +141,9 @@ function createInstance(
   let frame = 0;
   let connectGeneration = 0;
   let connectInFlight: Promise<void> = Promise.resolve();
+  // Held until xterm is loaded: setTheme() can be called from the mount effect
+  // long before the dynamic import resolves, and XTERM_OPTIONS carries no theme.
+  let theme: Record<string, string> | null = null;
 
   const setState = (patch: Partial<TerminalInstanceState>) => {
     state = { ...state, ...patch };
@@ -214,8 +217,10 @@ function createInstance(
       }
       unlisten = channel.onEvent((event) => {
         if (event.kind === 'data' || event.kind === 'replay') {
-          if (event.truncated) setState({ truncated: true });
           pump.push(event.data);
+          // Either side can trim: the sidecar replay buffer, or the local pump
+          // while this tab is detached/hidden.
+          if (event.truncated || pump.truncated) setState({ truncated: true });
           return;
         }
         if (event.kind === 'error') {
@@ -231,7 +236,9 @@ function createInstance(
       scheduleFit();
     };
     const promise = run();
-    connectInFlight = promise;
+    // Keep the guard promise settled: restart()/dispose() await it, and a
+    // rejected connect must not poison them.
+    connectInFlight = promise.catch(() => undefined);
     return promise;
   };
 
@@ -249,7 +256,7 @@ function createInstance(
     .loadXterm()
     .then(async ({ Terminal: xtermCtor, FitAddon: fitAddonCtor }) => {
       if (disposed) return;
-      terminal = new xtermCtor(XTERM_OPTIONS);
+      terminal = new xtermCtor(theme ? { ...XTERM_OPTIONS, theme } : XTERM_OPTIONS);
       fitAddon = new fitAddonCtor();
       terminal.loadAddon(fitAddon);
       terminal.attachCustomKeyEventHandler((event) => {
@@ -296,14 +303,16 @@ function createInstance(
       await disconnect();
       if (previous) await deps.closeTerminal(tabId, previous);
       terminal?.reset();
+      pump.reset();
       setState({ terminalId: null, status: 'starting', error: '', truncated: false });
       await connect(undefined);
     },
     copySelection: () => terminal?.getSelection() ?? '',
     clear: () => terminal?.clear(),
     reset: () => terminal?.reset(),
-    setTheme(theme) {
-      if (terminal) terminal.options.theme = theme;
+    setTheme(next) {
+      theme = next;
+      if (terminal) terminal.options.theme = next;
     },
     async dispose() {
       disposed = true;

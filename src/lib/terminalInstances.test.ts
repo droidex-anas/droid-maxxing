@@ -72,7 +72,8 @@ function deps(overrides: Partial<TerminalInstanceDeps> = {}) {
   const killed: string[] = [];
   const base: TerminalInstanceDeps = {
     loadXterm: async () => ({
-      Terminal: function () {
+      Terminal: function (options: Record<string, unknown>) {
+        terminal.options = { ...options };
         return terminal;
       } as never,
       FitAddon: function () {
@@ -297,4 +298,75 @@ test('restart during the initial connect ends with exactly one live subscription
   latestHandler?.({ kind: 'data', data: 'hi' });
   assert.equal(d.terminal.writes.length, 1);
   await releaseTerminalInstance('tab-race-restart');
+});
+
+test('a failed connect does not poison restart or dispose', async () => {
+  fakeDom();
+  let attempt = 0;
+  const d = deps({
+    ensureTerminal: async (_tabId, existingId) => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('bridge down');
+      return {
+        id: existingId ?? 'pty-2',
+        appSessionId: 's1',
+        cwd: '/w',
+        shell: '/bin/zsh',
+        cols: 80,
+        rows: 24,
+      };
+    },
+  });
+  const inst = acquireTerminalInstance('tab-reject', { appSessionId: 's1', cwd: '/w' }, d.base);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(inst.getState().status, 'error');
+
+  await inst.restart();
+  assert.equal(inst.getState().status, 'running');
+  assert.equal(inst.getState().terminalId, 'pty-2');
+
+  await releaseTerminalInstance('tab-reject');
+  assert.equal(d.terminal.disposed, true);
+  assert.deepEqual(d.killed, ['pty-2']);
+});
+
+test('a theme set before xterm loads is applied when it is constructed', async () => {
+  fakeDom();
+  const loaded = createDeferred<void>();
+  const d = deps();
+  const base = d.base;
+  const instance = acquireTerminalInstance(
+    'tab-theme',
+    { appSessionId: 's1', cwd: '/w' },
+    {
+      ...base,
+      loadXterm: async () => {
+        await loaded.promise;
+        return base.loadXterm();
+      },
+    },
+  );
+  instance.setTheme({ background: '#101010' });
+  loaded.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(d.terminal.options.theme, { background: '#101010' });
+
+  instance.setTheme({ background: '#ffffff' });
+  assert.deepEqual(d.terminal.options.theme, { background: '#ffffff' });
+  await releaseTerminalInstance('tab-theme');
+});
+
+test('local pump truncation surfaces the trimmed banner and clears on restart', async () => {
+  fakeDom();
+  const d = deps();
+  const inst = acquireTerminalInstance('tab-trim', { appSessionId: 's1', cwd: '/w' }, d.base);
+  await new Promise((r) => setTimeout(r, 0));
+  // Detached: the pump buffers and caps at 2 MiB, dropping the earliest bytes.
+  d.events[0]({ kind: 'data', data: 'x'.repeat(3 * 1024 * 1024) });
+  assert.equal(inst.getState().truncated, true);
+  await inst.restart();
+  assert.equal(inst.getState().truncated, false);
+  d.events.at(-1)?.({ kind: 'data', data: 'short' });
+  assert.equal(inst.getState().truncated, false);
+  await releaseTerminalInstance('tab-trim');
 });

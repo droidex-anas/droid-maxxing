@@ -336,3 +336,24 @@ test('hasChildren asks the child-pid lister for the shell pid', async () => {
   assert.deepEqual(calls, [4242]);
   assert.equal(await manager.hasChildren('missing'), false);
 });
+
+test('hasChildren answers false for a shell that exits while pgrep runs', async () => {
+  const { manager, instances } = fixture({
+    listChildPids: async () => {
+      instances[0].emitExit(0, 0);
+      return [5000];
+    },
+  });
+  const info = await manager.create({ appSessionId: 's1', cwd: '/w' });
+  assert.equal(await manager.hasChildren(info.id), false);
+});
+
+test('hasChildren propagates a child-pid lookup failure so the caller can confirm', async () => {
+  const { manager } = fixture({
+    listChildPids: async () => {
+      throw new Error('pgrep: not found');
+    },
+  });
+  const info = await manager.create({ appSessionId: 's1', cwd: '/w' });
+  await assert.rejects(() => manager.hasChildren(info.id), /pgrep/);
+});
