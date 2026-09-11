@@ -20,7 +20,7 @@ export function TerminalCloseConfirm({
       }}
       className="absolute inset-0 z-10 flex animate-fade-in items-center justify-center bg-droid-bg/70 p-4"
     >
-      <div className="w-[280px] rounded-2xl border border-droid-border bg-droid-surface p-4">
+      <div className="w-[280px] rounded-2xl border border-droid-border bg-droid-surface p-4 shadow-2xl shadow-black/50">
         <p className="text-[12px] leading-relaxed text-droid-text">
           A process is still running in this terminal.
         </p>
@@ -29,7 +29,7 @@ export function TerminalCloseConfirm({
             type="button"
             autoFocus
             onClick={onKeepOpen}
-            className="rounded-md px-2 py-1 leading-none text-droid-text-muted transition-colors hover:bg-droid-active hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent"
+            className="rounded-md px-2 py-1 leading-none text-droid-text-muted transition-colors hover:bg-droid-active hover:text-droid-text focus:bg-droid-active focus:text-droid-text focus:outline-none"
           >
             Keep
           </button>
