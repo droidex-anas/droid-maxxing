@@ -987,6 +987,8 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'SESSION_PROCESSES': {
+      if (action.processes.length === 0 && !(action.appSessionId in state.agentProcesses))
+        return state;
       const agentProcesses =
         action.processes.length === 0
           ? Object.fromEntries(
