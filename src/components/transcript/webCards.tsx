@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { Globe } from 'lucide-react';
 import type { TranscriptEvent } from '../../types/bridge';
 import { Markdown } from '../Markdown';
 import {
@@ -13,6 +12,8 @@ import {
   toolArgStringArray,
 } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, httpHref, linkify, openLink, RED, RED_TINT } from './primitives';
+import { LinkBadge } from './LinkBadge';
+import { describeLink } from '../../lib/linkPresentation';
 
 /* ── Shared source-row chrome for web search results + fetched pages ── */
 function WebSourceRow({
@@ -27,6 +28,7 @@ function WebSourceRow({
   emphasize?: boolean;
 }) {
   const href = httpHref(url);
+  const link = href ? describeLink(href) : null;
   return (
     <a
       {...(href
@@ -37,7 +39,7 @@ function WebSourceRow({
             },
           }
         : {})}
-      className={`block rounded-lg px-3 py-2 transition-colors hover:bg-droid-elevated/60 ${
+      className={`block rounded-lg px-3 py-2 transition-colors hover:bg-droid-elevated/60 focus-visible:bg-droid-elevated/60 focus-visible:outline-none ${
         emphasize ? 'bg-droid-elevated/40' : ''
       }`}
     >
@@ -48,23 +50,17 @@ function WebSourceRow({
         </div>
       )}
       {url && (
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <Globe aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-          <span className="truncate text-[11px] text-droid-text-secondary">
-            {webSourceName(url)}
-          </span>
+        <div className="mt-1.5 flex items-center text-[12px] text-droid-text-secondary">
+          {link && <LinkBadge link={link} />}
+          <span className="truncate">{webSourceName(url)}</span>
         </div>
       )}
     </a>
   );
 }
 
-function CountBadge({ label }: { label: string }) {
-  return (
-    <span className="ml-auto shrink-0 rounded-md border border-droid-border bg-droid-elevated/60 px-1.5 py-0.5 tabular-nums text-[11px] text-droid-text-secondary">
-      {label}
-    </span>
-  );
+function Count({ label }: { label: string }) {
+  return <span className="shrink-0 tabular-nums text-[12px] text-droid-text-muted">{label}</span>;
 }
 
 function fetchSnippet(body: string): string {
@@ -87,11 +83,11 @@ export function fetchSizeBadge(chars: number, truncatedChars: number | null): st
 /* ── In-flight web tool row: shimmer label while the call has no result yet ── */
 function WebToolRunningRow({ label, detail }: { label: string; detail?: string }) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <span className="shimmer-text shrink-0 text-[12.5px] font-medium">{label}</span>
-      {detail ? (
-        <span className="min-w-0 truncate text-[12px] text-droid-text-muted">{detail}</span>
-      ) : null}
+    <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-relaxed">
+      {/* Caret-width spacer: the settled row gains a caret, never a new indent. */}
+      <span className="w-3 shrink-0" aria-hidden="true" />
+      <span className="shimmer-text shrink-0 font-medium">{label}</span>
+      {detail ? <span className="min-w-0 truncate text-droid-text-muted">{detail}</span> : null}
     </div>
   );
 }
@@ -107,7 +103,7 @@ function WebSearchRunningRow({ isX, query }: { isX: boolean; query: string }) {
 
 function searchTrailing(error: boolean, total: number): React.ReactNode {
   if (error) return <ErrorTag />;
-  if (total > 0) return <CountBadge label={String(total)} />;
+  if (total > 0) return <Count label={String(total)} />;
   return null;
 }
 
@@ -156,7 +152,7 @@ export function WebSearchCard({
     );
   } else if (expanded && raw) {
     body = (
-      <pre className="mt-1.5 max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
+      <pre className="mt-1.5 max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[12px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
         {linkify(raw)}
       </pre>
     );
@@ -168,16 +164,14 @@ export function WebSearchCard({
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left"
+        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[13px] leading-relaxed"
         aria-expanded={expanded}
       >
         <Caret open={expanded} />
-        <span className="shrink-0 text-[12.5px] text-droid-text-secondary">
+        <span className="shrink-0 text-droid-text-secondary">
           {isX ? 'Searched X' : 'Searched web'}
         </span>
-        {query ? (
-          <span className="min-w-0 truncate text-[12px] text-droid-text-muted">{query}</span>
-        ) : null}
+        {query ? <span className="min-w-0 truncate text-droid-text-muted">{query}</span> : null}
         {trailing}
       </button>
       <Expand open={expanded}>{body}</Expand>
@@ -203,7 +197,7 @@ export function WebFetchBody({
   if (error && hasBody) {
     return (
       <pre
-        className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+        className="mt-1.5 max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words"
         style={{ backgroundColor: RED_TINT, color: RED }}
       >
         {body}
@@ -237,7 +231,7 @@ function FetchBodyContent({ body }: { body: string }) {
   // Raw HTML dumps stay mono — they render poorly as markdown.
   if (looksLikeHtml(body)) {
     return (
-      <pre className="max-h-44 overflow-auto rounded-lg bg-droid-elevated/30 px-3 py-2 text-[12px] leading-relaxed text-droid-text-muted whitespace-pre-wrap break-words">
+      <pre className="max-h-44 overflow-auto rounded-lg bg-droid-elevated/30 px-3 py-2 font-mono text-[12px] leading-relaxed text-droid-text-muted whitespace-pre-wrap break-words">
         {linkify(body)}
       </pre>
     );
@@ -259,7 +253,7 @@ function WebFetchRunningRow({ url }: { url: string }) {
 
 function fetchTrailing(error: boolean, badge: string | null): React.ReactNode {
   if (error) return <ErrorTag />;
-  if (badge) return <CountBadge label={badge} />;
+  if (badge) return <Count label={badge} />;
   return null;
 }
 
@@ -308,12 +302,12 @@ export function WebFetchCard({
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left"
+        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[13px] leading-relaxed"
         aria-expanded={expanded}
       >
         <Caret open={expanded} />
-        <span className="shrink-0 text-[12.5px] text-droid-text-secondary">Fetched</span>
-        <span className="min-w-0 truncate text-[12px] text-droid-text-muted">
+        <span className="shrink-0 text-droid-text-secondary">Fetched</span>
+        <span className="min-w-0 truncate text-droid-text-muted">
           {url.length > 0 ? url : displayTitle}
         </span>
         {trailing}

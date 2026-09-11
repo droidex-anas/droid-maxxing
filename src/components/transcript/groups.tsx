@@ -100,7 +100,7 @@ export function WorkedGroup({
         </span>
       </button>
       <Expand open={open}>
-        <div className="mt-3 space-y-2.5 border-l border-droid-border pl-4">{children}</div>
+        <div className="mt-3 space-y-2.5 border-l border-droid-border pl-[17px]">{children}</div>
       </Expand>
     </div>
   );
@@ -167,18 +167,15 @@ export function DiffGroup({
         <span className="min-w-0 truncate text-[13px] font-medium text-droid-text-muted group-hover:text-droid-text-secondary">
           {label}
         </span>
-        <span
-          className="ml-auto text-[11px] tabular-nums shrink-0"
-          style={{ color: 'var(--diff-add-fg)' }}
-        >
+        <span className="shrink-0 text-[12px] tabular-nums" style={{ color: 'var(--diff-add-fg)' }}>
           +{added}
         </span>
-        <span className="text-[11px] tabular-nums shrink-0" style={{ color: 'var(--diff-del-fg)' }}>
+        <span className="shrink-0 text-[12px] tabular-nums" style={{ color: 'var(--diff-del-fg)' }}>
           −{removed}
         </span>
       </button>
       <Expand open={open}>
-        <div className="mt-2 space-y-2 border-l border-droid-border pl-3">
+        <div className="mt-2 space-y-2.5 border-l border-droid-border pl-[17px]">
           {shown.map((c) => (
             <DiffCard
               key={c.event.id}
@@ -203,7 +200,7 @@ export function DiffGroup({
               onClick={() => {
                 setDisclosure((current) => revealNextDiffCards(current, changes.length));
               }}
-              className="text-[11px] text-droid-text-muted/70 transition-colors hover:text-droid-text-secondary"
+              className="rounded-md px-1.5 py-0.5 text-[12px] text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
             >
               Show next {revealCount} {revealCount === 1 ? 'edit' : 'edits'} ({hiddenCount}{' '}
               remaining)

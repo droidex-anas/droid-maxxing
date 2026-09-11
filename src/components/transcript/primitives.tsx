@@ -121,23 +121,18 @@ export function CopyButton({ text }: { text: string }) {
         );
       }}
       title="Copy"
-      className="p-1 rounded-md text-droid-text-secondary hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
+      aria-label="Copy"
+      className="shrink-0 rounded-md p-1.5 text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
     >
       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
     </button>
   );
 }
 
-// A small red "error" pill beside the label of a failed tool's header row.
+// The word "error" in the danger colour beside a failed row's label.
 export function ErrorTag() {
   return (
-    <span
-      className="shrink-0 rounded-md px-1.5 py-px text-[11px] font-medium"
-      style={{
-        backgroundColor: 'color-mix(in srgb, var(--droid-red) 15%, transparent)',
-        color: RED,
-      }}
-    >
+    <span className="shrink-0 text-[12px]" style={{ color: RED }}>
       error
     </span>
   );
@@ -253,7 +248,7 @@ export function MessageActions({ text, side }: { text: string; side: 'end' | 'st
 export function CompactingIndicator() {
   return (
     <div className="flex justify-center py-3">
-      <span className="shimmer-text text-[16px] font-semibold tracking-tight" aria-live="polite">
+      <span className="shimmer-text text-[13px] font-medium tracking-tight" aria-live="polite">
         Compacting…
       </span>
     </div>

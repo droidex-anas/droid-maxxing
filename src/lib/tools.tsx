@@ -470,11 +470,15 @@ export function formatCharCount(n: number): string {
 
 // Human-friendly source label from a URL: the registrable name, capitalized
 // (e.g. https://www.theregister.com/… → "Theregister"). Falls back to the URL.
+// "bbc.co.uk" → "Bbc", "vitejs.dev" → "Vitejs": the label before a public
+// suffix, where a two-letter second level (co.uk, com.au) is part of the suffix.
 export function webSourceName(url: string): string {
   try {
     const host = new URL(url).hostname.replace(/^www\./, '');
     const parts = host.split('.');
-    const label = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+    const secondLevelSuffix =
+      parts.length >= 3 && /^(co|com|org|net|ac|gov|edu)$/.test(parts[parts.length - 2]);
+    const label = parts[Math.max(0, parts.length - (secondLevelSuffix ? 3 : 2))];
     return label.charAt(0).toUpperCase() + label.slice(1);
   } catch {
     return url;

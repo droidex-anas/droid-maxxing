@@ -31,7 +31,9 @@ import { useChatPullRequests } from './hooks/useChatPullRequests';
 import { useDocumentVisible } from './hooks/useDocumentVisible';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
-import SetupBanner, { SETUP_BANNER_HEIGHT } from './components/onboarding/SetupBanner';
+import SetupBanner from './components/onboarding/SetupBanner';
+import { useMeasuredHeight } from './hooks/useMeasuredHeight';
+import { WINDOW_CONTROLS_INSET_PX } from './lib/windowChrome';
 import RuntimeStatusBanner from './components/RuntimeStatusBanner';
 import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
@@ -529,26 +531,32 @@ export default function App() {
     onboard.onboarding?.completed === true &&
     hasSetupBlocker(onboard.env);
   const showBanner = !bannerDismissed && setupBlocker;
+  // Banners stack above the title row; the floating window controls sit just
+  // below whatever is showing.
+  const bannerStackRef = useRef<HTMLDivElement>(null);
+  const bannerStackHeight = useMeasuredHeight(bannerStackRef);
 
   return (
     <div
       id="app-root"
       className="h-screen w-screen flex flex-col bg-droid-bg text-droid-text overflow-hidden relative"
     >
-      {showBanner && (
-        <SetupBanner
-          kind="blocker"
-          message="Finish setting up Droid to start running agents."
-          actionLabel="Finish setup"
-          onAction={() => {
-            setForceWizard(true);
-          }}
-          onDismiss={() => {
-            setBannerDismissed(true);
-          }}
-        />
-      )}
-      <RuntimeStatusBanner />
+      <div ref={bannerStackRef} className="shrink-0">
+        {showBanner && (
+          <SetupBanner
+            kind="blocker"
+            message="Finish setting up Droid to start running agents."
+            actionLabel="Finish setup"
+            onAction={() => {
+              setForceWizard(true);
+            }}
+            onDismiss={() => {
+              setBannerDismissed(true);
+            }}
+          />
+        )}
+        <RuntimeStatusBanner />
+      </div>
       <div className="flex-1 flex min-h-0 relative">
         {/* Sidebar with collapse animation */}
         <AnimatePresence initial={false}>
@@ -763,8 +771,8 @@ export default function App() {
           layout are unchanged. */}
       <div
         data-electron-drag-region
-        className="absolute left-[92px] h-9 z-40 flex items-center gap-1.5"
-        style={{ top: showBanner ? SETUP_BANNER_HEIGHT : 0 }}
+        className="absolute h-9 z-40 flex items-center gap-1.5"
+        style={{ top: bannerStackHeight, left: WINDOW_CONTROLS_INSET_PX }}
       >
         <button
           onClick={() => {
@@ -781,7 +789,7 @@ export default function App() {
         <div
           data-electron-drag-region
           className="absolute right-0 h-9 z-40 flex items-center gap-1 pr-3"
-          style={{ top: showBanner ? SETUP_BANNER_HEIGHT : 0 }}
+          style={{ top: bannerStackHeight }}
         >
           {workingDirectory && (
             <EditorOpenMenu cwd={workingDirectory} hasRepo={!!repoStatus} variant="toolbar" />

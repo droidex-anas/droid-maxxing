@@ -13,23 +13,6 @@ import { SubagentsDock, type SubagentsDockData } from '../SubagentsDock';
 import { sameFeedEvents, type FeedItem } from '../chatFeed';
 import { Caret, Expand, useElapsed } from './primitives';
 
-/* ── Per-agent name color: deterministic pick so each droid keeps one hue ── */
-const CHILD_SESSION_COLORS = [
-  '#e0a458',
-  '#6ea8fe',
-  '#5cc8a8',
-  '#c58af9',
-  '#e8728f',
-  '#7bd88f',
-  '#f0a06a',
-  '#9d8cff',
-] as const;
-function childSessionColor(label: string): string {
-  let h = 0;
-  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) >>> 0;
-  return CHILD_SESSION_COLORS[h % CHILD_SESSION_COLORS.length];
-}
-
 /* ── In-chat spawned child session: inline thinking-style line + click to navigate ── */
 export function ChildSessionLine({
   event,
@@ -43,7 +26,6 @@ export function ChildSessionLine({
   const [open, setOpen] = useState(false);
   const { label, description } = childSessionInfo(event.toolArgs);
   const name = label ?? 'child session';
-  const color = childSessionColor(name);
   const running = childSessionLineIsRunning(activity);
   const startTs = activity?.startedAt;
   const elapsed = useElapsed(startTs, running);
@@ -63,7 +45,7 @@ export function ChildSessionLine({
           onClick={() => {
             setOpen((o) => !o);
           }}
-          className="flex items-center"
+          className="-m-0.5 flex items-center rounded p-0.5"
           aria-label="Toggle child session activity"
           aria-expanded={open}
         >
@@ -73,8 +55,7 @@ export function ChildSessionLine({
         <button
           type="button"
           onClick={navigate}
-          className="font-semibold underline-offset-2 hover:underline"
-          style={{ color }}
+          className="font-medium text-droid-text underline-offset-2 hover:underline"
           title="Open child session"
         >
           {name}
@@ -84,12 +65,12 @@ export function ChildSessionLine({
       <Expand open={open}>
         <div className="mt-2 pl-[18px]">
           {description && (
-            <div className="text-[12.5px] text-droid-text-muted/70 leading-relaxed break-words">
+            <div className="text-[13px] text-droid-text-muted/70 leading-relaxed break-words">
               {description}
             </div>
           )}
           {latest && (
-            <div className="mt-1.5 text-[12.5px] leading-relaxed break-words">
+            <div className="mt-1.5 text-[13px] leading-relaxed break-words">
               <span
                 className={
                   running ? 'shimmer-text font-medium' : 'text-droid-text-secondary font-medium'

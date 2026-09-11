@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Check } from 'lucide-react';
 import type { TranscriptEvent } from '../../types/bridge';
 import {
   describeToolCall,
@@ -11,6 +12,7 @@ import {
   isWebFetchTool,
   toolArgString,
   type ToolCallLabel,
+  type TodoStatus,
 } from '../../lib/tools';
 import type { OpenReviewFileHandler } from '../../lib/reviewFocus';
 import { classifyEvent } from '../../lib/transcript';
@@ -308,11 +310,29 @@ function ToolLine({
   );
 }
 
+// Same ring language as the composer's plan strip: filled when done, a ring
+// otherwise, with the running step's ring in the text colour.
+function TodoMark({ status }: { status: TodoStatus }) {
+  if (status === 'completed') {
+    return (
+      <span className="mt-[5px] flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-droid-text-muted">
+        <Check className="h-2 w-2 text-droid-bg" strokeWidth={3} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`mt-[5px] h-3 w-3 shrink-0 rounded-full border-[1.5px] ${
+        status === 'in_progress' ? 'border-droid-text' : 'border-droid-text-muted/40'
+      }`}
+    />
+  );
+}
+
 function TodoChecklist({ event }: { event: TranscriptEvent }) {
   const todos = parseTodos(event.toolArgs);
   if (todos.length === 0)
     return <div className="text-[13px] text-droid-text-secondary">Updated plan</div>;
-  const mark = { completed: '✓', in_progress: '◐', pending: '○' } as const;
   return (
     <div className="space-y-1">
       {todos.map((t, i) => (
@@ -324,7 +344,7 @@ function TodoChecklist({ event }: { event: TranscriptEvent }) {
               : 'text-droid-text-secondary'
           }`}
         >
-          <span className="select-none text-droid-text-muted">{mark[t.status]}</span>
+          <TodoMark status={t.status} />
           <span>{t.text}</span>
         </div>
       ))}
