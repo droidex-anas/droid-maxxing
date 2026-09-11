@@ -44,7 +44,12 @@ function sameList(a: AgentProcess[], b: AgentProcess[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((x, i) => {
     const y = b[i];
-    return x.pid === y.pid && x.command === y.command && x.ports.join(',') === y.ports.join(',');
+    return (
+      x.pid === y.pid &&
+      x.command === y.command &&
+      x.startedAt === y.startedAt &&
+      x.ports.join(',') === y.ports.join(',')
+    );
   });
 }
 
@@ -66,7 +71,17 @@ export class AgentProcessMonitor {
   }
 
   untrack(rootPid: number): void {
+    const appSessionId = this.roots.get(rootPid);
     this.roots.delete(rootPid);
+    if (appSessionId !== undefined && ![...this.roots.values()].includes(appSessionId)) {
+      // That was the session's last tracked root: drop its snapshot so
+      // processesFor/hasProcesses stop reporting stale processes, and clear
+      // the renderer if it was showing something.
+      this.descendants.delete(appSessionId);
+      const previous = this.current.get(appSessionId);
+      if (previous && previous.length > 0) this.d.emit(appSessionId, []);
+      this.current.delete(appSessionId);
+    }
     if (this.roots.size === 0) this.disarm();
   }
 
@@ -148,9 +163,50 @@ export class AgentProcessMonitor {
 
   private async scanOnce(): Promise<void> {
     if (this.roots.size === 0) return;
-    let table: ProcessRecord[];
     try {
-      table = await this.d.listProcesses();
+      const table = await this.d.listProcesses();
+      const now = this.d.now();
+      const bySession = new Map<string, number[]>();
+      for (const [pid, appSessionId] of this.roots) {
+        const list = bySession.get(appSessionId) ?? [];
+        list.push(pid);
+        bySession.set(appSessionId, list);
+      }
+      let sawNew = false;
+      const nextDescendants = new Map<string, ProcessRecord[]>();
+      for (const [appSessionId, rootPids] of bySession) {
+        const rows = descendantsOf(table, rootPids);
+        const known = new Set((this.descendants.get(appSessionId) ?? []).map((row) => row.pid));
+        if (rows.some((row) => !known.has(row.pid))) sawNew = true;
+        nextDescendants.set(appSessionId, rows);
+      }
+      for (const appSessionId of this.descendants.keys()) {
+        if (!nextDescendants.has(appSessionId)) nextDescendants.set(appSessionId, []);
+      }
+      const nextTick = this.ticks + 1;
+      // Fetch ports before committing anything, so a rejection here leaves
+      // the previous snapshot (descendants/ports/current) untouched.
+      const nextPorts =
+        sawNew || nextTick % PORT_SCAN_EVERY === 1 ? await this.d.listListeningPorts() : this.ports;
+
+      this.ticks = nextTick;
+      this.ports = nextPorts;
+      this.descendants.clear();
+      for (const [id, rows] of nextDescendants) this.descendants.set(id, rows);
+      this.lastScanFailed = false;
+
+      for (const [appSessionId, rows] of nextDescendants) {
+        const visible = rows
+          .filter((row) => now - row.startedAt >= MIN_AGE_MS && !WRAPPER.test(row.command))
+          .map((row) => ({
+            pid: row.pid,
+            name: displayNameFor(row.command),
+            command: row.command,
+            startedAt: row.startedAt,
+            ports: [...(this.ports.get(row.pid) ?? [])].sort((a, b) => a - b),
+          }));
+        this.publish(appSessionId, visible);
+      }
     } catch (error) {
       // Keep the previous snapshot untouched; warn once per outage instead
       // of spamming a log line on every 2s tick.
@@ -158,43 +214,6 @@ export class AgentProcessMonitor {
         this.lastScanFailed = true;
         console.warn('AgentProcessMonitor: scan failed, keeping previous snapshot', error);
       }
-      return;
-    }
-    this.lastScanFailed = false;
-    const now = this.d.now();
-    const bySession = new Map<string, number[]>();
-    for (const [pid, appSessionId] of this.roots) {
-      const list = bySession.get(appSessionId) ?? [];
-      list.push(pid);
-      bySession.set(appSessionId, list);
-    }
-    let sawNew = false;
-    const nextDescendants = new Map<string, ProcessRecord[]>();
-    for (const [appSessionId, rootPids] of bySession) {
-      const rows = descendantsOf(table, rootPids);
-      const known = new Set((this.descendants.get(appSessionId) ?? []).map((row) => row.pid));
-      if (rows.some((row) => !known.has(row.pid))) sawNew = true;
-      nextDescendants.set(appSessionId, rows);
-    }
-    for (const appSessionId of this.descendants.keys()) {
-      if (!nextDescendants.has(appSessionId)) nextDescendants.set(appSessionId, []);
-    }
-    this.descendants.clear();
-    for (const [id, rows] of nextDescendants) this.descendants.set(id, rows);
-    this.ticks += 1;
-    if (sawNew || this.ticks % PORT_SCAN_EVERY === 1)
-      this.ports = await this.d.listListeningPorts();
-    for (const [appSessionId, rows] of nextDescendants) {
-      const visible = rows
-        .filter((row) => now - row.startedAt >= MIN_AGE_MS && !WRAPPER.test(row.command))
-        .map((row) => ({
-          pid: row.pid,
-          name: displayNameFor(row.command),
-          command: row.command,
-          startedAt: row.startedAt,
-          ports: [...(this.ports.get(row.pid) ?? [])].sort((a, b) => a - b),
-        }));
-      this.publish(appSessionId, visible);
     }
   }
 
@@ -213,7 +232,15 @@ export class AgentProcessMonitor {
     await new Promise<void>((resolve) => {
       this.d.schedule(resolve, KILL_GRACE_MS);
     });
-    const table = await this.d.listProcesses();
+    let table: ProcessRecord[];
+    try {
+      table = await this.d.listProcesses();
+    } catch {
+      // Can't confirm who's still alive; skip the SIGKILL sweep rather than
+      // risk signalling a pid that's since been reused. The next scan will
+      // pick up any survivor.
+      return;
+    }
     const alive = new Set(table.map((row) => row.pid));
     for (const row of ordered) if (alive.has(row.pid)) this.signal(row.pid, 'SIGKILL');
   }
