@@ -14,6 +14,7 @@ import type { TranscriptEvent } from '../types/bridge';
 import { SpecRenderer } from './SpecRenderer';
 import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
+import { ProseFileLinks } from './transcript/ProseFileLink';
 import {
   childSessionTargetFromEvent,
   findChildSessionForTarget,
@@ -352,55 +353,59 @@ export function MessageFeed({
   const subagentPollActive = Boolean(subagentPoll);
 
   return (
-    <div className="space-y-4">
-      {showSpecCard && (
-        <div className="mx-auto min-w-0 max-w-2xl">
-          <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
-        </div>
-      )}
-
-      <ConversationList
-        items={items}
-        {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
-        {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
-        {...(listRef !== undefined ? { listRef } : {})}
-        {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
-        {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
-      >
-        {(item, index) => (
-          <>
-            <FeedRow
-              item={item}
-              itemView={FeedItemView}
-              areItemPropsEqual={feedItemPropsEqual}
-              animateOnMount={shouldAnimateFeedRow(item, animateKeys, enteredKeys)}
-              onEnter={recordEntrance}
-              live={pending && index === lastIdx && !subagentPollActive}
-              autoPlayAppBlocks={
-                item.type === 'message' &&
-                item.event.author !== 'user' &&
-                freshAppResponseTexts.has(item.event.text ?? '')
-              }
-              sessionLive={pending}
-              compacting={compacting && index === lastIdx}
-              {...optionalItemProps}
-              liveTiming={rowSharedProps.liveTiming}
-              isFinalResponse={isCopyableFinalResponse(item.key, finalResponseState, pending)}
-            />
-            {index === worktreeInsertAfter && createdWorktreePath ? (
-              <div className="mx-auto min-w-0 max-w-2xl">
-                <WorktreeCreatedCard path={createdWorktreePath} />
-              </div>
-            ) : null}
-          </>
+    // A reply's prose names files as it works; inside the transcript those
+    // mentions are live and open in Review, the same handler a tool row uses.
+    <ProseFileLinks onOpenReviewFile={stableOnOpenReviewFile}>
+      <div className="space-y-4">
+        {showSpecCard && (
+          <div className="mx-auto min-w-0 max-w-2xl">
+            <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
+          </div>
         )}
-      </ConversationList>
 
-      {showWorking && (
-        <div className="mx-auto min-w-0 max-w-2xl">
-          <WorkingIndicator label={workingLabel} startTs={workingStart} />
-        </div>
-      )}
-    </div>
+        <ConversationList
+          items={items}
+          {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
+          {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
+          {...(listRef !== undefined ? { listRef } : {})}
+          {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
+          {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
+        >
+          {(item, index) => (
+            <>
+              <FeedRow
+                item={item}
+                itemView={FeedItemView}
+                areItemPropsEqual={feedItemPropsEqual}
+                animateOnMount={shouldAnimateFeedRow(item, animateKeys, enteredKeys)}
+                onEnter={recordEntrance}
+                live={pending && index === lastIdx && !subagentPollActive}
+                autoPlayAppBlocks={
+                  item.type === 'message' &&
+                  item.event.author !== 'user' &&
+                  freshAppResponseTexts.has(item.event.text ?? '')
+                }
+                sessionLive={pending}
+                compacting={compacting && index === lastIdx}
+                {...optionalItemProps}
+                liveTiming={rowSharedProps.liveTiming}
+                isFinalResponse={isCopyableFinalResponse(item.key, finalResponseState, pending)}
+              />
+              {index === worktreeInsertAfter && createdWorktreePath ? (
+                <div className="mx-auto min-w-0 max-w-2xl">
+                  <WorktreeCreatedCard path={createdWorktreePath} />
+                </div>
+              ) : null}
+            </>
+          )}
+        </ConversationList>
+
+        {showWorking && (
+          <div className="mx-auto min-w-0 max-w-2xl">
+            <WorkingIndicator label={workingLabel} startTs={workingStart} />
+          </div>
+        )}
+      </div>
+    </ProseFileLinks>
   );
 }
