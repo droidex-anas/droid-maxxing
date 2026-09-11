@@ -504,3 +504,36 @@ test("pruning a session's last adopted root publishes an empty list", async () =
   assert.deepEqual(h.monitor.processesFor('s1'), []);
   assert.deepEqual(h.emitted.at(-1), ['s1', []]);
 });
+
+// `droid` spawns the stdio MCP servers from `.factory/mcp.json` as its own
+// children, so the walk finds them under the session's root.
+const mcpRows: ProcessRecord[] = [
+  { pid: 600, ppid: 1, startedAt: 0, command: '/usr/local/bin/droid exec' },
+  { pid: 700, ppid: 600, startedAt: 0, command: 'npx -y some-mcp --stdio' },
+  { pid: 710, ppid: 700, startedAt: 0, command: 'node /w/some-mcp/dist/server.js' },
+  { pid: 800, ppid: 600, startedAt: 0, command: 'node /w/node_modules/.bin/vite' },
+  { pid: 810, ppid: 600, startedAt: 0, command: 'npx -y some-mcp-two' },
+];
+
+test('an ignored command hides its whole subtree and nothing else', async () => {
+  const h = harness(mcpRows);
+  h.monitor.setIgnoredCommands('s1', ['npx -y some-mcp']);
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+
+  assert.deepEqual(
+    h.monitor.processesFor('s1').map((entry) => entry.pid),
+    [800, 810],
+  );
+  assert.equal(h.monitor.hasProcesses('s1'), true);
+});
+
+test('a session whose only descendants are ignored has no processes', async () => {
+  const h = harness(mcpRows.filter((row) => row.pid !== 800 && row.pid !== 810));
+  h.monitor.setIgnoredCommands('s1', ['npx -y some-mcp']);
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+
+  assert.deepEqual(h.monitor.processesFor('s1'), []);
+  assert.equal(h.monitor.hasProcesses('s1'), false);
+});

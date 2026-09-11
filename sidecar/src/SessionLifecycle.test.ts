@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   ReasoningEffort,
   type AskUserResult,
+  type McpServerConfig,
   type RequestPermissionHandlerResult,
 } from '@factory/droid-sdk';
 import type { HistoricalSession } from './history.js';
@@ -94,6 +95,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   let nextEmitFailure: { type: ServerEvent['type']; error: Error } | undefined;
   let now = 10_000;
   let mcpId = 0;
+  let mcpConfigs: McpServerConfig[] = [];
   const historical = (): HistoricalSession[] =>
     ordinarySummaries.map((item) => ({ summary: { ...item }, progress: [] }));
   const recordEvent = (event: ServerEvent): void => {
@@ -155,7 +157,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
             },
           },
         ],
-        configs: [],
+        configs: mcpConfigs,
       });
     },
     makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
@@ -201,6 +203,13 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     },
     isShutdownStarted: () => shutdownStarted,
     agentProcesses: {
+      setIgnoredCommands: (appSessionId, patterns) => {
+        calls.push({
+          target: 'runtime',
+          method: 'processes.setIgnoredCommands',
+          args: [appSessionId, ...patterns],
+        });
+      },
       track: (appSessionId, pid) => {
         calls.push({ target: 'runtime', method: 'processes.track', args: [appSessionId, pid] });
       },
@@ -310,6 +319,9 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     },
     setChildCloser: (action: (appSessionId: string) => Promise<void>) => {
       closeChildren = action;
+    },
+    setMcpConfigs: (configs: McpServerConfig[]) => {
+      mcpConfigs = configs;
     },
     failNextEmit: (type: ServerEvent['type'], error: Error) => {
       nextEmitFailure = { type, error };
@@ -1250,6 +1262,7 @@ test('closing a session kills its agent processes while the provider is still th
       )
       .map((call) => [call.method, ...call.args]),
     [
+      ['processes.setIgnoredCommands', 'created-pid'],
       ['processes.track', 'created-pid', 4321],
       // The kill has to precede every provider close of the session: once
       // `droid` exits, its dev servers are reparented and no longer reachable
@@ -1273,5 +1286,24 @@ test('a resumed session tracks the pid of the provider it reloaded', async () =>
   assert.deepEqual(
     h.calls.filter((call) => call.method === 'processes.track').map((call) => call.args),
     [['app-2', 991]],
+  );
+});
+
+test("configured stdio MCP servers become the session's ignored command lines", async () => {
+  const h = createHarness();
+  h.setMcpConfigs([
+    { name: 'local', command: 'npx', args: ['-y', 'some-mcp'], env: {} },
+    { name: 'remote', type: 'http', url: 'https://mcp.example', headers: [] },
+  ]);
+  const provider = queueCreate(h, 'created-ignored');
+  h.runtime.processIds.set('created-ignored', 4321);
+  await h.lifecycle.create(createCommand());
+  await provider.waitForPrompts(1);
+
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === 'processes.setIgnoredCommands')
+      .map((call) => call.args),
+    [['created-ignored', 'npx -y some-mcp']],
   );
 });

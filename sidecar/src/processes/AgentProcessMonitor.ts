@@ -1,4 +1,5 @@
 import type { AgentProcess } from '../protocol.js';
+import { commandLineContains } from './commandLineMatch.js';
 import { descendantsOf, type ProcessRecord } from './processTree.js';
 
 export interface AgentProcessMonitorDependencies {
@@ -70,6 +71,9 @@ export class AgentProcessMonitor {
   // a provider root, the process itself is one of the session's, so it belongs
   // in the published list rather than only its children.
   private readonly adoptedRoots = new Set<number>();
+  // appSessionId -> command lines the session spawns on the provider's behalf
+  // (stdio MCP servers), which belong to no one the user can act on.
+  private readonly ignoredCommands = new Map<string, readonly string[]>();
   private readonly current = new Map<string, AgentProcess[]>();
   private readonly descendants = new Map<string, ProcessRecord[]>();
   private rootStartedAt = new Map<number, number>(); // rootPid -> startedAt, last scan
@@ -83,6 +87,14 @@ export class AgentProcessMonitor {
   private lastPublishFailed = false;
 
   constructor(private readonly d: AgentProcessMonitorDependencies) {}
+
+  // Stdio MCP servers are spawned by the provider as its own children, so the
+  // walk finds them; they are the agent's plumbing, not the session's work, and
+  // a chip row for one would also block idle retirement forever.
+  setIgnoredCommands(appSessionId: string, patterns: readonly string[]): void {
+    if (patterns.length === 0) this.ignoredCommands.delete(appSessionId);
+    else this.ignoredCommands.set(appSessionId, [...patterns]);
+  }
 
   track(appSessionId: string, rootPid: number): void {
     this.roots.set(rootPid, appSessionId);
@@ -122,6 +134,7 @@ export class AgentProcessMonitor {
   // clear the renderer if it was showing something.
   private dropIfRootless(appSessionId: string): void {
     if ([...this.roots.values()].includes(appSessionId)) return;
+    this.ignoredCommands.delete(appSessionId);
     this.descendants.delete(appSessionId);
     const previous = this.current.get(appSessionId);
     if (previous && previous.length > 0) this.d.emit(appSessionId, []);
@@ -191,6 +204,7 @@ export class AgentProcessMonitor {
       this.roots.delete(pid);
       this.adoptedRoots.delete(pid);
     }
+    this.ignoredCommands.delete(appSessionId);
     this.descendants.delete(appSessionId);
     this.current.delete(appSessionId);
     if (this.roots.size === 0) this.disarm();
@@ -222,6 +236,7 @@ export class AgentProcessMonitor {
     this.disarm();
     this.roots.clear();
     this.adoptedRoots.clear();
+    this.ignoredCommands.clear();
   }
 
   private arm(): void {
@@ -263,7 +278,11 @@ export class AgentProcessMonitor {
       // During the compaction adopt window the retiring provider is still a
       // root while its children are roots too, so the walk reaches each of
       // them from both — first occurrence wins.
-      const rows = dedupeByPid([...adopted, ...descendantsOf(table, rootPids)]);
+      const rows = this.withoutIgnored(
+        appSessionId,
+        dedupeByPid([...adopted, ...descendantsOf(table, rootPids)]),
+        table,
+      );
       const known = new Set((this.descendants.get(appSessionId) ?? []).map((row) => row.pid));
       if (rows.some((row) => !known.has(row.pid))) sawNew = true;
       computed.set(appSessionId, rows);
@@ -272,6 +291,25 @@ export class AgentProcessMonitor {
       if (!computed.has(appSessionId)) computed.set(appSessionId, []);
     }
     return { computed, sawNew };
+  }
+
+  // An ignored process takes its whole subtree with it: an MCP server's own
+  // children are its implementation detail, not the session's work.
+  private withoutIgnored(
+    appSessionId: string,
+    rows: ProcessRecord[],
+    table: readonly ProcessRecord[],
+  ): ProcessRecord[] {
+    const patterns = this.ignoredCommands.get(appSessionId);
+    if (!patterns || patterns.length === 0) return rows;
+    const hidden = new Set(
+      rows
+        .filter((row) => patterns.some((pattern) => commandLineContains(row.command, pattern)))
+        .map((row) => row.pid),
+    );
+    if (hidden.size === 0) return rows;
+    for (const row of descendantsOf(table, hidden)) hidden.add(row.pid);
+    return rows.filter((row) => !hidden.has(row.pid));
   }
 
   // A process that has not changed must compare equal between scans, or

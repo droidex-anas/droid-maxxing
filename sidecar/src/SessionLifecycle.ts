@@ -96,7 +96,10 @@ export interface SessionLifecycleDependencies {
   >;
   isShutdownStarted: () => boolean;
   childSessions: Pick<ChildSessions, 'attachParent' | 'closeParent'>;
-  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack' | 'killSession'>;
+  agentProcesses: Pick<
+    AgentProcessMonitor,
+    'track' | 'untrack' | 'killSession' | 'setIgnoredCommands'
+  >;
   applyPendingSettingsToSummary: (summary: SessionSummary) => SessionSummary;
   applyPendingSessionSettings: (appSessionId: string) => Promise<boolean>;
   runPrimaryTurn: (liveSession: LiveSession, prompt: string) => Promise<void>;
@@ -197,7 +200,7 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
-      this.trackProviderProcess(appSessionId, session);
+      this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
       d.emit({ type: 'session.created', clientRef: command.clientRef, session: summary });
       this.driveInBackground(appSessionId, command.goal);
@@ -297,7 +300,7 @@ export class SessionLifecycle {
       pendingLiveSession = liveSession;
       d.compaction.subscribePrimary(this.primaryAutomaticCompactionTarget(liveSession));
       d.registry.register(liveSession);
-      this.trackProviderProcess(appSessionId, session);
+      this.trackProviderProcess(appSessionId, session, mcp.configs);
       d.childSessions.attachParent(appSessionId);
       d.emit({
         type: 'session.created',
@@ -562,9 +565,16 @@ export class SessionLifecycle {
 
   // Every live provider process of a session must be a tracked root, so the
   // monitor can find (and later kill) whatever that process spawns.
-  private trackProviderProcess(appSessionId: string, session: FactorySession): void {
-    const processId = this.dependencies.runtime.processIdOf(session);
-    if (processId !== undefined) this.dependencies.agentProcesses.track(appSessionId, processId);
+  private trackProviderProcess(
+    appSessionId: string,
+    session: FactorySession,
+    mcpConfigs: readonly McpServerConfig[],
+  ): void {
+    const d = this.dependencies;
+    // Before the first scan, so a configured MCP server never reaches the chip.
+    d.agentProcesses.setIgnoredCommands(appSessionId, stdioMcpCommandLines(mcpConfigs));
+    const processId = d.runtime.processIdOf(session);
+    if (processId !== undefined) d.agentProcesses.track(appSessionId, processId);
   }
 
   private requireOpenAdmission(): void {
@@ -752,6 +762,14 @@ function createLiveSession(
     mcpConfigs: mcp.configs,
     autoCompacting: false,
   };
+}
+
+// The command line `droid` spawns for each stdio MCP server, in the shape a
+// process table prints it.
+function stdioMcpCommandLines(configs: readonly McpServerConfig[]): string[] {
+  return configs.flatMap((config) =>
+    'command' in config ? [[config.command, ...config.args].join(' ')] : [],
+  );
 }
 
 async function runBestEffortAsync(action: () => Promise<void>): Promise<void> {
