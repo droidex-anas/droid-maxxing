@@ -1,32 +1,16 @@
-import { useState } from 'react';
-import { useStoreSelector } from '../../hooks/useStore';
+import { useContext, useState } from 'react';
+import { commandLineContains } from '../../lib/commandLineMatch';
+import { LiveProcessesContext } from './liveProcessesContext';
 import { stripAnsi } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, linkify, RED, ToolPanel } from './primitives';
-
-export function commandLineContains(commandLine: string, needle: string): boolean {
-  let from = 0;
-  while (from <= commandLine.length) {
-    const at = commandLine.indexOf(needle, from);
-    if (at < 0) return false;
-    const before = at === 0 || /\s/.test(commandLine[at - 1]);
-    const afterIndex = at + needle.length;
-    const after = afterIndex === commandLine.length || /\s/.test(commandLine[afterIndex]);
-    if (before && after) return true;
-    from = at + 1;
-  }
-  return false;
-}
 
 // A backgrounded server keeps its card "running" after the turn ends as long
 // as a live agent process still carries the command the agent typed.
 function useCommandStillRunning(command: string): boolean {
-  return useStoreSelector((state) => {
-    const id = state.activeAppSessionId;
-    const processes = id ? state.agentProcesses[id] : undefined;
-    if (!processes?.length) return false;
-    const needle = command.trim();
-    return needle.length > 3 && processes.some((p) => commandLineContains(p.command, needle));
-  });
+  const processes = useContext(LiveProcessesContext);
+  if (processes.length === 0) return false;
+  const needle = command.trim();
+  return needle.length > 3 && processes.some((p) => commandLineContains(p.command, needle));
 }
 
 /* ── Terminal-style command body: the command and its captured output, in the

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { commandLineContains } from './commandCard';
+import { commandLineContains } from './commandLineMatch';
 
 test('commandLineContains matches whole-token command sequences', async (t) => {
   await t.test(
