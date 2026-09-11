@@ -40,6 +40,17 @@ export function displayNameFor(command: string): string {
   return next && !next.startsWith('-') && !next.includes('/') ? `${head} ${next}` : head;
 }
 
+function dedupeByPid(rows: readonly ProcessRecord[]): ProcessRecord[] {
+  const seen = new Set<number>();
+  const out: ProcessRecord[] = [];
+  for (const row of rows) {
+    if (seen.has(row.pid)) continue;
+    seen.add(row.pid);
+    out.push(row);
+  }
+  return out;
+}
+
 function sameList(a: AgentProcess[], b: AgentProcess[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((x, i) => {
@@ -102,16 +113,19 @@ export class AgentProcessMonitor {
     const appSessionId = this.roots.get(rootPid);
     this.roots.delete(rootPid);
     this.adoptedRoots.delete(rootPid);
-    if (appSessionId !== undefined && ![...this.roots.values()].includes(appSessionId)) {
-      // That was the session's last tracked root: drop its snapshot so
-      // processesFor/hasProcesses stop reporting stale processes, and clear
-      // the renderer if it was showing something.
-      this.descendants.delete(appSessionId);
-      const previous = this.current.get(appSessionId);
-      if (previous && previous.length > 0) this.d.emit(appSessionId, []);
-      this.current.delete(appSessionId);
-    }
+    if (appSessionId !== undefined) this.dropIfRootless(appSessionId);
     if (this.roots.size === 0) this.disarm();
+  }
+
+  // Called once a root is gone: if it was the session's last one, drop its
+  // snapshot so processesFor/hasProcesses stop reporting stale processes, and
+  // clear the renderer if it was showing something.
+  private dropIfRootless(appSessionId: string): void {
+    if ([...this.roots.values()].includes(appSessionId)) return;
+    this.descendants.delete(appSessionId);
+    const previous = this.current.get(appSessionId);
+    if (previous && previous.length > 0) this.d.emit(appSessionId, []);
+    this.current.delete(appSessionId);
   }
 
   processesFor(appSessionId: string): AgentProcess[] {
@@ -242,11 +256,14 @@ export class AgentProcessMonitor {
     const byPid = new Map(table.map((row) => [row.pid, row]));
     const computed = new Map<string, ProcessRecord[]>();
     for (const [appSessionId, rootPids] of bySession) {
-      const rows = descendantsOf(table, rootPids);
-      for (const pid of rootPids) {
+      const adopted = rootPids.flatMap((pid) => {
         const row = this.adoptedRoots.has(pid) ? byPid.get(pid) : undefined;
-        if (row) rows.unshift(row);
-      }
+        return row ? [row] : [];
+      });
+      // During the compaction adopt window the retiring provider is still a
+      // root while its children are roots too, so the walk reaches each of
+      // them from both — first occurrence wins.
+      const rows = dedupeByPid([...adopted, ...descendantsOf(table, rootPids)]);
       const known = new Set((this.descendants.get(appSessionId) ?? []).map((row) => row.pid));
       if (rows.some((row) => !known.has(row.pid))) sawNew = true;
       computed.set(appSessionId, rows);
@@ -371,11 +388,17 @@ export class AgentProcessMonitor {
   private pruneDeadAdoptedRoots(table: readonly ProcessRecord[]): void {
     if (this.adoptedRoots.size === 0) return;
     const alive = new Set(table.map((row) => row.pid));
+    const orphaned = new Set<string>();
     for (const pid of this.adoptedRoots) {
       if (alive.has(pid)) continue;
       this.adoptedRoots.delete(pid);
+      const appSessionId = this.roots.get(pid);
       this.roots.delete(pid);
+      if (appSessionId !== undefined) orphaned.add(appSessionId);
     }
+    // Same cleanup `untrack` does: a session whose last root just died must
+    // stop reporting the processes that root used to own.
+    for (const appSessionId of orphaned) this.dropIfRootless(appSessionId);
   }
 
   // Deepest first so a parent cannot respawn a child we already signalled.

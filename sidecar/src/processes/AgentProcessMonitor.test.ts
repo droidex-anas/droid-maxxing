@@ -467,3 +467,40 @@ test('killTree SIGKILLs only what is still alive when the grace expires', async 
     [700, 'SIGKILL'],
   ]);
 });
+
+// The adopt window: the retiring provider is still tracked while its children
+// already are, so every descendant is reachable from two roots.
+const compactionRows: ProcessRecord[] = [
+  { pid: 600, ppid: 1, startedAt: 0, command: '/usr/local/bin/droid exec' },
+  { pid: 800, ppid: 600, startedAt: 0, command: 'node /w/node_modules/.bin/vite' },
+  { pid: 900, ppid: 600, startedAt: 0, command: 'node /w/node_modules/.bin/tsc --watch' },
+];
+
+test('a pid reachable from two roots is published once', async () => {
+  const h = harness(compactionRows);
+  h.monitor.track('s1', 600);
+  await h.monitor.adoptDescendantsAsRoots('s1', 600);
+  await h.monitor.scan();
+
+  assert.deepEqual(
+    h.monitor.processesFor('s1').map((entry) => entry.pid),
+    [800, 900],
+  );
+});
+
+test("pruning a session's last adopted root publishes an empty list", async () => {
+  const h = harness(compactionRows);
+  h.monitor.track('s1', 600);
+  await h.monitor.adoptDescendantsAsRoots('s1', 600);
+  h.monitor.untrack(600);
+  await h.monitor.scan();
+  assert.equal(h.monitor.hasProcesses('s1'), true);
+
+  // Both adopted roots exit; nothing is left to attribute to the session.
+  h.setRows([]);
+  await h.monitor.scan();
+
+  assert.equal(h.monitor.hasProcesses('s1'), false);
+  assert.deepEqual(h.monitor.processesFor('s1'), []);
+  assert.deepEqual(h.emitted.at(-1), ['s1', []]);
+});
