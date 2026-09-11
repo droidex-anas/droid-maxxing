@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { PanelRight } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
@@ -21,9 +21,6 @@ export function UtilityPane({
   onClosePane,
   renderTab,
   expanded = false,
-  confirmCloseTabId = null,
-  onConfirmClose,
-  onCancelClose,
 }: {
   panel: UtilityPanelState;
   width: number;
@@ -37,26 +34,9 @@ export function UtilityPane({
   onClosePane: () => void;
   renderTab: (tab: UtilityTab, context: { overlayOpen: boolean }) => ReactNode;
   expanded?: boolean;
-  confirmCloseTabId?: string | null;
-  onConfirmClose?: (tab: UtilityTab) => void;
-  onCancelClose?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
-  const closeButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  // Popover positions off `anchorRef.current` in a layout effect keyed on the
-  // ref identity; a fresh `{ current }` object every render would re-run that
-  // effect on every render, so this stays a single stable ref kept pointed at
-  // the close button for `confirmCloseTabId`.
-  const confirmAnchorRef = useRef<HTMLButtonElement | null>(null);
-  // Keeps `confirmAnchorRef` correct even if the confirming tab's close
-  // button registers (or re-registers) after this id is set, e.g. right
-  // after UtilityPane remounts.
-  useLayoutEffect(() => {
-    confirmAnchorRef.current = confirmCloseTabId
-      ? (closeButtonRefs.current.get(confirmCloseTabId) ?? null)
-      : null;
-  }, [confirmCloseTabId]);
 
   const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
   const openSingletons = new Set(panel.tabs.map((tab) => tab.tool));
@@ -121,11 +101,6 @@ export function UtilityPane({
                 </button>
                 <HoverTooltip label={`Close ${tab.label}`} placement="bottom">
                   <button
-                    ref={(node) => {
-                      if (node) closeButtonRefs.current.set(tab.id, node);
-                      else closeButtonRefs.current.delete(tab.id);
-                      if (tab.id === confirmCloseTabId) confirmAnchorRef.current = node;
-                    }}
                     type="button"
                     aria-label={`Close ${tab.label}`}
                     className="ml-0.5 rounded-md p-0.5 text-droid-text-muted opacity-50 transition hover:bg-droid-elevated hover:text-droid-text group-hover:opacity-100"
@@ -197,40 +172,6 @@ export function UtilityPane({
           )}
         </div>
       </Popover>
-
-      {confirmCloseTabId && (
-        <Popover
-          open
-          onClose={() => onCancelClose?.()}
-          anchorRef={confirmAnchorRef}
-          align="right"
-          width={240}
-          label="Confirm closing terminal"
-        >
-          <div className="px-3 py-2.5 text-[12px] text-droid-text">
-            A process is still running in this terminal.
-            <div className="mt-2 flex justify-end gap-1">
-              <button
-                type="button"
-                onClick={() => onCancelClose?.()}
-                className="rounded-md px-2 py-1 text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
-              >
-                Keep
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const tab = panel.tabs.find((candidate) => candidate.id === confirmCloseTabId);
-                  if (tab) onConfirmClose?.(tab);
-                }}
-                className="rounded-md bg-droid-elevated px-2 py-1 text-droid-text transition-colors hover:bg-droid-active"
-              >
-                Stop and close
-              </button>
-            </div>
-          </div>
-        </Popover>
-      )}
 
       <div role="tabpanel" className="min-h-0 flex-1 overflow-hidden">
         {activeTab ? (

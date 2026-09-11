@@ -4,6 +4,7 @@ import { Copy } from '@droidex/icons';
 import '@xterm/xterm/css/xterm.css';
 import { acquireTerminalInstance, type TerminalInstance } from '../../lib/terminalInstances';
 import { HoverTooltip } from '../HoverTooltip';
+import { TerminalCloseConfirm } from './TerminalCloseConfirm';
 import { useStoreSelector } from '../../hooks/useStore';
 import type { ThemeConfig } from '../../hooks/persistedThemePreferences';
 
@@ -13,12 +14,18 @@ export function TerminalWorkspace({
   appSessionId,
   cwd,
   onCreated,
+  confirmClose = false,
+  onKeepOpen,
+  onStopAndClose,
 }: {
   tabId: string;
   terminalId?: string;
   appSessionId: string;
   cwd: string;
   onCreated: (terminalId: string, label: string) => void;
+  confirmClose?: boolean;
+  onKeepOpen?: () => void;
+  onStopAndClose?: () => void;
 }) {
   const theme = useStoreSelector((state) => state.theme);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -115,6 +122,12 @@ export function TerminalWorkspace({
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] text-droid-text-muted">
             {state.shellName === 'Terminal' ? 'Starting shell…' : `Starting ${state.shellName}…`}
           </div>
+        )}
+        {confirmClose && (
+          <TerminalCloseConfirm
+            onKeepOpen={() => onKeepOpen?.()}
+            onStopAndClose={() => onStopAndClose?.()}
+          />
         )}
       </div>
     </div>

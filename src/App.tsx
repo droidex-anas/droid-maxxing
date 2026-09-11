@@ -726,11 +726,6 @@ export default function App() {
                       if (tab.tool === 'browser') setExpandedBrowserAppSessionId(null);
                       dispatch({ type: 'CLOSE_UTILITY_TAB', tabId: tab.id });
                     }}
-                    confirmCloseTabId={confirmingTab?.id ?? null}
-                    onConfirmClose={closeTerminalTab}
-                    onCancelClose={() => {
-                      setConfirmCloseTabId(null);
-                    }}
                     onClosePane={() => {
                       setExpandedBrowserAppSessionId(null);
                       dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: false });
@@ -766,6 +761,13 @@ export default function App() {
                               terminalId={tab.terminalId}
                               appSessionId={activeSession.appSessionId}
                               cwd={tab.cwd ?? workingDirectory}
+                              confirmClose={tab.id === confirmingTab?.id}
+                              onKeepOpen={() => {
+                                setConfirmCloseTabId(null);
+                              }}
+                              onStopAndClose={() => {
+                                closeTerminalTab(tab);
+                              }}
                               onCreated={(terminalId, label) => {
                                 dispatch({
                                   type: 'UPDATE_UTILITY_TAB',
