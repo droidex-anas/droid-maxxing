@@ -51,7 +51,7 @@ export function CommandCard({
   );
 }
 
-/* ── One-line form of a shell call: "› Ran `cmd`", expanding to the full
+/* ── One-line form of a shell call: "› Ran cmd", expanding to the full
    CommandCard. This is how exec tools render at the compact and balanced
    densities; a failed call carries the error tag on the line itself. ── */
 export function CommandLine({
@@ -71,11 +71,10 @@ export function CommandLine({
   const expanded = open || forceOpen;
   if (running) {
     return (
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span className="shimmer-text shrink-0 text-[13px] font-medium">Running</span>
-        <span className="min-w-0 truncate font-mono text-[12px] text-droid-text-muted">
-          {command}
-        </span>
+      <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-relaxed">
+        <span className="w-3 shrink-0" aria-hidden="true" />
+        <span className="shimmer-text shrink-0 font-medium">Running</span>
+        <span className="min-w-0 truncate text-droid-text-muted">{command}</span>
       </div>
     );
   }
@@ -90,9 +89,7 @@ export function CommandLine({
       >
         <Caret open={expanded} />
         <span className="shrink-0 text-droid-text-secondary">Ran</span>
-        <span className="min-w-0 truncate font-mono text-[12px] text-droid-text-muted">
-          {command}
-        </span>
+        <span className="min-w-0 truncate text-droid-text-muted">{command}</span>
         {error && <ErrorTag />}
       </button>
       <Expand open={expanded}>

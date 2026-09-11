@@ -2,6 +2,9 @@ import { AlertTriangle, ArrowUpCircle, X } from 'lucide-react';
 
 export type SetupBannerKind = 'blocker' | 'update';
 
+// The banner sits above the title row; floating window controls offset by this.
+export const SETUP_BANNER_HEIGHT = 36;
+
 export default function SetupBanner({
   kind,
   message,
@@ -18,7 +21,10 @@ export default function SetupBanner({
   const Icon = kind === 'blocker' ? AlertTriangle : ArrowUpCircle;
   const accent = kind === 'blocker' ? 'text-droid-orange' : 'text-droid-accent';
   return (
-    <div className="shrink-0 flex items-center gap-2 px-4 h-9 border-b border-droid-border bg-droid-elevated/60 text-[12px]">
+    <div
+      className="shrink-0 flex items-center gap-2 px-4 border-b border-droid-border bg-droid-elevated/60 text-[12px]"
+      style={{ height: SETUP_BANNER_HEIGHT }}
+    >
       <Icon className={`w-3.5 h-3.5 ${accent}`} />
       <span className="text-droid-text">{message}</span>
       <button

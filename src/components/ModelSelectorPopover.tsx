@@ -290,7 +290,7 @@ export default function ModelSelectorPopover({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 8, scale: 0.98 }}
       transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-      className="absolute bottom-full left-0 mb-3 w-[380px] z-50"
+      className="absolute bottom-full left-0 mb-3 w-[420px] z-50"
     >
       <div className="rounded-2xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/50 overflow-hidden">
         {/* Header */}

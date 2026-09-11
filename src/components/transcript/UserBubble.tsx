@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { Blocks, MousePointer2, PenLine } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../../types/bridge';
+import type { OpenReviewFileHandler } from '../../lib/reviewFocus';
 import { ImageAttachmentChip } from '../media/ImageAttachmentChip';
 import { FileChip } from '../composer/FileChip';
 import { isImagePath } from '../../lib/localImage';
@@ -161,8 +162,10 @@ function ClampedPrompt({ source }: { source: string }) {
 
 export function UserBubble({
   event,
+  onOpenReviewFile,
 }: {
   event: Pick<TranscriptEvent, 'text' | 'skills' | 'files' | 'browserRefs' | 'steered'>;
+  onOpenReviewFile?: OpenReviewFileHandler;
 }) {
   const browserRefs = event.browserRefs ?? [];
   // A replayed message has no files metadata, only the composed text it was sent
@@ -198,7 +201,17 @@ export function UserBubble({
             isImagePath(f) ? (
               <ImageAttachmentChip key={f} path={f} />
             ) : (
-              <FileChip key={f} path={f} />
+              <FileChip
+                key={f}
+                path={f}
+                {...(onOpenReviewFile
+                  ? {
+                      onOpen: () => {
+                        onOpenReviewFile(f);
+                      },
+                    }
+                  : {})}
+              />
             ),
           )}
         </div>

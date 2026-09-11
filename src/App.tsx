@@ -31,7 +31,7 @@ import { useChatPullRequests } from './hooks/useChatPullRequests';
 import { useDocumentVisible } from './hooks/useDocumentVisible';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
-import SetupBanner from './components/onboarding/SetupBanner';
+import SetupBanner, { SETUP_BANNER_HEIGHT } from './components/onboarding/SetupBanner';
 import RuntimeStatusBanner from './components/RuntimeStatusBanner';
 import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
@@ -763,7 +763,8 @@ export default function App() {
           layout are unchanged. */}
       <div
         data-electron-drag-region
-        className="absolute top-0 left-[92px] h-9 z-40 flex items-center gap-1.5"
+        className="absolute left-[92px] h-9 z-40 flex items-center gap-1.5"
+        style={{ top: showBanner ? SETUP_BANNER_HEIGHT : 0 }}
       >
         <button
           onClick={() => {
@@ -779,7 +780,8 @@ export default function App() {
       {!showUtilityPane && !fullContentRoute && (
         <div
           data-electron-drag-region
-          className="absolute top-0 right-0 h-9 z-40 flex items-center gap-1 pr-3"
+          className="absolute right-0 h-9 z-40 flex items-center gap-1 pr-3"
+          style={{ top: showBanner ? SETUP_BANNER_HEIGHT : 0 }}
         >
           {workingDirectory && (
             <EditorOpenMenu cwd={workingDirectory} hasRepo={!!repoStatus} variant="toolbar" />

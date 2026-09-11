@@ -59,14 +59,23 @@ function AutomationToolGroup({
   events,
   active,
   density,
+  onOpenReviewFile,
 }: {
   events: TranscriptEvent[];
   active: boolean;
   density: ToolActivityDensity;
+  onOpenReviewFile?: OpenReviewFileHandler;
 }) {
   const { proposals, remaining } = splitAutomationProposals(events);
-  if (proposals.length === 0)
-    return <ToolGroupItem events={events} active={active} density={density} />;
+  const group = (groupEvents: TranscriptEvent[]) => (
+    <ToolGroupItem
+      events={groupEvents}
+      active={active}
+      density={density}
+      onOpenReviewFile={onOpenReviewFile}
+    />
+  );
+  if (proposals.length === 0) return group(events);
   return (
     <div className="space-y-2.5">
       {proposals.map(({ call, result }) => (
@@ -84,9 +93,7 @@ function AutomationToolGroup({
           <AutomationProposalCard call={call} result={result} running={active && !result} />
         </Suspense>
       ))}
-      {remaining.length > 0 ? (
-        <ToolGroupItem events={remaining} active={active} density={density} />
-      ) : null}
+      {remaining.length > 0 ? group(remaining) : null}
     </div>
   );
 }
@@ -265,7 +272,8 @@ export const FeedItemView = memo(function FeedItemView({
 }: FeedItemViewProps) {
   switch (item.type) {
     case 'message': {
-      if (item.event.author === 'user') return <UserBubble event={item.event} />;
+      if (item.event.author === 'user')
+        return <UserBubble event={item.event} onOpenReviewFile={onOpenReviewFile} />;
       return (
         <AssistantMessage
           text={item.event.text ?? ''}
@@ -344,7 +352,14 @@ export const FeedItemView = memo(function FeedItemView({
         />
       );
     case 'tools':
-      return <AutomationToolGroup events={item.events} active={live} density={density} />;
+      return (
+        <AutomationToolGroup
+          events={item.events}
+          active={live}
+          density={density}
+          onOpenReviewFile={onOpenReviewFile}
+        />
+      );
     case 'turnChanges':
       return <TurnChangesPanel item={item} cwd={cwd} onOpenFile={onOpenReviewFile} />;
     case 'worked':

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { TranscriptEvent } from '../../types/bridge';
 import {
-  CAT_LABEL,
+  describeToolCall,
   toolMeta,
   safeJson,
   stripAnsi,
@@ -10,7 +10,9 @@ import {
   isWebSearchTool,
   isWebFetchTool,
   toolArgString,
+  type ToolCallLabel,
 } from '../../lib/tools';
+import type { OpenReviewFileHandler } from '../../lib/reviewFocus';
 import { classifyEvent } from '../../lib/transcript';
 import { compactPath } from '../../lib/pathDisplay';
 import { StreamingCaret } from '../StreamingCaret';
@@ -192,102 +194,116 @@ export function ErrorLine({ text }: { text: string }) {
   );
 }
 
+// The row's object: a path opens in Review when the transcript can, anything
+// else is plain text. Paths compact to their tail with the directory dimmed so
+// the file name carries the line.
+function ToolTarget({
+  call,
+  onOpenReviewFile,
+}: {
+  call: ToolCallLabel;
+  onOpenReviewFile?: OpenReviewFileHandler;
+}) {
+  if (call.objectKind === 'none') return null;
+  if (call.objectKind !== 'path') {
+    return <span className="min-w-0 truncate text-droid-text-muted">{call.object}</span>;
+  }
+  const shown = compactPath(call.object);
+  const slash = shown.lastIndexOf('/');
+  const dir = slash >= 0 ? shown.slice(0, slash + 1) : '';
+  const name = slash >= 0 ? shown.slice(slash + 1) : shown;
+  const parts = (
+    <>
+      {dir && <span className="text-droid-text-muted/50">{dir}</span>}
+      <span className="text-droid-text-muted transition-colors group-hover/path:text-droid-text">
+        {name}
+      </span>
+    </>
+  );
+  if (!onOpenReviewFile) return <span className="min-w-0 truncate">{parts}</span>;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenReviewFile(call.object);
+      }}
+      title={`Open ${call.object} in Review`}
+      className="group/path min-w-0 truncate text-left"
+    >
+      {parts}
+    </button>
+  );
+}
+
+// One tool call as a sentence: "Read src/app.tsx", "Searched src", or a
+// readable tool name. In flight the verb shimmers in its live form; a body
+// (captured output or the error) sits behind the caret.
 function ToolLine({
   event,
   output,
   error = false,
+  running = false,
   forceOpen = false,
+  onOpenReviewFile,
 }: {
   event: TranscriptEvent;
   output?: string;
   error?: boolean;
+  running?: boolean;
   forceOpen?: boolean;
+  onOpenReviewFile?: OpenReviewFileHandler;
 }) {
-  const { cat, detail } = toolMeta(event.toolName, event.toolArgs);
+  const call = describeToolCall(event.toolName, event.toolArgs);
   const out = output ? stripAnsi(output).trimEnd() : '';
-  const raw = detail || (event.toolName ?? '');
-  const slash = raw.lastIndexOf('/');
-  const looksLikePath = slash > 0 && !raw.includes(' ');
-  const shown = looksLikePath ? compactPath(raw) : raw;
-  const shownSlash = shown.lastIndexOf('/');
-  const dir = looksLikePath && shownSlash >= 0 ? shown.slice(0, shownSlash + 1) : '';
-  const name = looksLikePath && shownSlash >= 0 ? shown.slice(shownSlash + 1) : shown;
   const [open, setOpen] = useState(false);
-  const label = (
-    <>
-      <span className="text-droid-text-secondary shrink-0">{CAT_LABEL[cat]}</span>
-      {raw && (
-        <span className="min-w-0 truncate">
-          {dir && <span className="text-droid-text-muted/50">{dir}</span>}
-          <span className="text-droid-text-muted">{name}</span>
-        </span>
-      )}
-    </>
-  );
-  // A failed tool collapses to its header row with an "error" tag; expand to
-  // read the error output.
-  if (error) {
-    const expanded = open || forceOpen;
-    return (
-      <div>
-        <button
-          onClick={() => {
-            setOpen((o) => !o);
-          }}
-          className="group flex w-full items-center gap-1.5 text-[13px] leading-relaxed min-w-0 text-left"
-          aria-expanded={expanded}
-        >
-          <Caret open={expanded} />
-          {label}
-          <ErrorTag />
-        </button>
-        {out && (
-          <Expand open={expanded}>
-            <div className="mt-1.5 pl-[18px]">
-              <pre
-                className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-                style={{ backgroundColor: RED_TINT, color: RED }}
-              >
-                {out}
-              </pre>
-            </div>
-          </Expand>
-        )}
-      </div>
-    );
-  }
-  // Web and command tools have dedicated cards. Other tool outputs, including
-  // successful Read contents, stay available behind their disclosure.
-  const hasBody = out.length > 0;
-  if (!hasBody) {
-    return (
-      <div className="flex items-center gap-1.5 text-[13px] leading-relaxed min-w-0">
-        {/* Caret-width spacer keeps the label flush with the expandable rows. */}
-        <span className="w-3 shrink-0" aria-hidden="true" />
-        {label}
-      </div>
-    );
-  }
   const expanded = open || forceOpen;
+  const hasBody = out.length > 0;
+  const verb = running ? (
+    <span className="shimmer-text shrink-0 font-medium">{call.liveVerb}</span>
+  ) : (
+    <span className="shrink-0 text-droid-text-secondary">{call.verb}</span>
+  );
   return (
     <div>
-      <button
-        onClick={() => {
-          setOpen((o) => !o);
-        }}
-        className="group flex w-full items-center gap-1.5 text-[13px] leading-relaxed min-w-0 text-left"
-        aria-expanded={expanded}
-      >
-        <Caret open={expanded} />
-        {label}
-      </button>
-      <Expand open={expanded}>
-        <div className="mt-1.5 pl-[18px]">
-          <pre className="max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[12px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
-            {linkify(out)}
-          </pre>
-        </div>
-      </Expand>
+      <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-relaxed">
+        {hasBody ? (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen((o) => !o);
+            }}
+            aria-expanded={expanded}
+            className="group flex shrink-0 items-center gap-1.5 text-left"
+          >
+            <Caret open={expanded} />
+            {verb}
+          </button>
+        ) : (
+          <>
+            {/* Caret-width spacer keeps the label flush with the expandable rows. */}
+            <span className="w-3 shrink-0" aria-hidden="true" />
+            {verb}
+          </>
+        )}
+        <ToolTarget call={call} onOpenReviewFile={onOpenReviewFile} />
+        {call.source && <span className="shrink-0 text-droid-text-muted/60">· {call.source}</span>}
+        {error && <ErrorTag />}
+      </div>
+      {hasBody && (
+        <Expand open={expanded}>
+          <div className="mt-1.5 pl-[18px]">
+            <pre
+              className={`max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words ${
+                error ? '' : 'bg-droid-bg/50 text-droid-text-muted/80'
+              }`}
+              style={error ? { backgroundColor: RED_TINT, color: RED } : undefined}
+            >
+              {error ? out : linkify(out)}
+            </pre>
+          </div>
+        </Expand>
+      )}
     </div>
   );
 }
@@ -369,6 +385,7 @@ export function renderToolEvents(
   events: TranscriptEvent[],
   live = false,
   detailed = false,
+  onOpenReviewFile?: OpenReviewFileHandler,
 ): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const { resultByCall, consumed } = correlateResults(events);
@@ -444,7 +461,9 @@ export function renderToolEvents(
             event={e}
             output={result?.text}
             error={isError}
+            running={running}
             forceOpen={detailed}
+            onOpenReviewFile={onOpenReviewFile}
           />,
         );
       }

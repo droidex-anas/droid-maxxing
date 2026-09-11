@@ -29,17 +29,25 @@ export function FileChip({
   path,
   name,
   onRemove,
+  onOpen,
 }: {
   path: string;
   name?: string;
   onRemove?: () => void;
+  // In the transcript a chip opens its file in Review; the composer's chips
+  // only remove.
+  onOpen?: () => void;
 }) {
   const displayName = name !== undefined && name.length > 0 ? name : attachmentDisplayName(path);
   const info = fileKindInfo(displayName);
+  const Host = onOpen ? 'button' : 'span';
   return (
-    <span
-      className="group relative flex max-w-60 items-center gap-2.5 rounded-xl border border-droid-border bg-droid-bg/60 py-2 pl-2 pr-2.5"
-      title={displayName}
+    <Host
+      {...(onOpen ? { type: 'button' as const, onClick: onOpen } : {})}
+      className={`group relative flex max-w-60 items-center gap-2.5 rounded-xl border border-droid-border bg-droid-bg/60 py-2 pl-2 pr-2.5 text-left ${
+        onOpen ? 'transition-colors hover:border-droid-border-hover' : ''
+      }`}
+      title={onOpen ? `Open ${displayName} in Review` : displayName}
     >
       <span
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${TILE_BY_KIND[info.kind]}`}
@@ -64,6 +72,6 @@ export function FileChip({
           <X className="h-2.5 w-2.5" strokeWidth={3} />
         </button>
       )}
-    </span>
+    </Host>
   );
 }

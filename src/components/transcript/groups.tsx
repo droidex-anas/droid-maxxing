@@ -25,10 +25,12 @@ export function ToolGroupItem({
   events,
   active = false,
   density = 'balanced',
+  onOpenReviewFile,
 }: {
   events: TranscriptEvent[];
   active?: boolean;
   density?: ToolActivityDensity;
+  onOpenReviewFile?: OpenReviewFileHandler;
 }) {
   const [open, setOpen] = useState(false);
   const summary = useMemo(() => summarizeTools(events), [events]);
@@ -36,7 +38,11 @@ export function ToolGroupItem({
   // a settled group is history and renders still.
   const rows = `space-y-2.5${active ? ' tool-rows-live' : ''}`;
   if (density !== 'compact') {
-    return <div className={rows}>{renderToolEvents(events, active, density === 'detailed')}</div>;
+    return (
+      <div className={rows}>
+        {renderToolEvents(events, active, density === 'detailed', onOpenReviewFile)}
+      </div>
+    );
   }
   return (
     <div>
@@ -58,7 +64,9 @@ export function ToolGroupItem({
         )}
       </button>
       <Expand open={open}>
-        <div className={`mt-2 pl-[18px] ${rows}`}>{renderToolEvents(events, active, false)}</div>
+        <div className={`mt-2 pl-[18px] ${rows}`}>
+          {renderToolEvents(events, active, false, onOpenReviewFile)}
+        </div>
       </Expand>
     </div>
   );
@@ -92,7 +100,7 @@ export function WorkedGroup({
         </span>
       </button>
       <Expand open={open}>
-        <div className="mt-3 space-y-4 border-l border-droid-border pl-4">{children}</div>
+        <div className="mt-3 space-y-2.5 border-l border-droid-border pl-4">{children}</div>
       </Expand>
     </div>
   );

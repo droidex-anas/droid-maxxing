@@ -55,6 +55,68 @@ export function toolMeta(name?: string, args?: unknown): { cat: ToolCat; detail:
   return { cat, detail: file ?? cmd ?? pattern ?? url ?? childSessionDetail ?? skill ?? '' };
 }
 
+export interface ToolCallLabel {
+  // "Read", "Ran", "Searched" — or the tool's own name, made readable, when
+  // it fits no category.
+  verb: string;
+  // The same action while the call is still in flight: "Reading", "Running".
+  liveVerb: string;
+  object: string;
+  objectKind: 'path' | 'command' | 'text' | 'none';
+  // The MCP server a tool came from, so "Navigate · claude browser" says
+  // where the capability lives without leaking the raw identifier.
+  source?: string;
+}
+
+const CAT_VERBS: Record<Exclude<ToolCat, 'other'>, [done: string, live: string]> = {
+  read: ['Read', 'Reading'],
+  create: ['Created', 'Creating'],
+  edit: ['Edited', 'Editing'],
+  exec: ['Ran', 'Running'],
+  search: ['Searched', 'Searching'],
+  web: ['Fetched', 'Fetching'],
+  skill: ['Skill', 'Skill'],
+  task: ['Child session', 'Child session'],
+  subagent: ['Subagent', 'Subagent'],
+};
+
+// `mcp__claude_browser__navigate` → "Navigate" from "claude browser";
+// `preview_start` → "Preview start"; `TodoWrite` → "Todo write".
+export function humanizeToolName(name: string): { label: string; source?: string } {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  const raw = mcp ? mcp[2] : name;
+  const words = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_\-.]+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const label = words.charAt(0).toUpperCase() + words.slice(1);
+  return mcp ? { label, source: mcp[1].replace(/[_-]+/g, ' ') } : { label };
+}
+
+function toolObjectKind(
+  detail: string,
+  args: Record<string, unknown>,
+): ToolCallLabel['objectKind'] {
+  const has = (keys: string[]) => keys.some((key) => typeof args[key] === 'string');
+  if (!detail) return 'none';
+  if (has(['file_path', 'path', 'filename', 'target_file'])) return 'path';
+  if (has(['command', 'cmd', 'script'])) return 'command';
+  return 'text';
+}
+
+export function describeToolCall(name?: string, args?: unknown): ToolCallLabel {
+  const { cat, detail } = toolMeta(name, args);
+  const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
+  const objectKind = toolObjectKind(detail, a);
+  if (cat === 'other') {
+    const { label, source } = humanizeToolName(name ?? '');
+    return { verb: label || 'Tool', liveVerb: label || 'Tool', object: detail, objectKind, source };
+  }
+  const [verb, liveVerb] = CAT_VERBS[cat];
+  return { verb, liveVerb, object: detail, objectKind };
+}
+
 export type TodoStatus = 'completed' | 'in_progress' | 'pending';
 export interface TodoItem {
   text: string;

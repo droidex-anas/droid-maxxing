@@ -213,6 +213,7 @@ const ModelRow = memo(function ModelRow({
         e.preventDefault();
         if (!disabled) pick(id);
       }}
+      title={label}
       className={`relative flex items-center gap-2.5 h-9 px-2.5 rounded-lg select-none ${
         disabled
           ? 'cursor-not-allowed opacity-50'
@@ -227,7 +228,7 @@ const ModelRow = memo(function ModelRow({
         <ModelIcon provider={providerOf(model)} size={16} />
       </span>
       <span
-        className={`min-w-0 flex-1 text-[12.5px] truncate ${
+        className={`min-w-0 flex-1 text-[13px] truncate ${
           selected ? 'text-droid-text' : 'text-droid-text-secondary'
         }`}
       >
@@ -268,7 +269,7 @@ const ModelRow = memo(function ModelRow({
       </span>
       {arrow(1)}
       <span
-        className={`w-[52px] shrink-0 text-[11.5px] capitalize truncate ${
+        className={`w-[52px] shrink-0 text-[12px] capitalize truncate ${
           selected ? 'text-droid-text' : 'text-droid-text-muted'
         }`}
       >
