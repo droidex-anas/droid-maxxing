@@ -1005,7 +1005,6 @@ function baseReducer(state: AppState, action: Action): AppState {
           state.selectedChild?.parentAppSessionId === action.appSessionId
             ? null
             : state.selectedChild,
-        utilityPanels: removeSessionPanel(state.utilityPanels, action.appSessionId),
       };
     }
 
@@ -1051,6 +1050,8 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'DELETE_CHAT': {
+      // SESSION_CLOSED does not prune panels because sidecar retires idle runtimes while
+      // chats and their PTYs remain live; only explicit deletion/archival cleans up panels.
       const chatMetadata = deleteChat(state.chatMetadata, action.appSessionId, Date.now());
       const utilityPanels = removeSessionPanel(state.utilityPanels, action.appSessionId);
       if (!chatMetadata && utilityPanels === state.utilityPanels) return state;
