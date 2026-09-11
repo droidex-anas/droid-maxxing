@@ -539,20 +539,40 @@ test('a pid reachable from two roots is published once', async () => {
 });
 
 test("pruning a session's last adopted root publishes an empty list", async () => {
-  const h = harness(compactionRows);
-  h.monitor.track('s1', 600);
-  await h.monitor.adoptDescendantsAsRoots('s1', 600);
-  h.monitor.untrack(600);
-  await h.monitor.scan();
-  assert.equal(h.monitor.hasProcesses('s1'), true);
+  const emitted: Array<[string, unknown]> = [];
+  let currentRows = compactionRows;
+  const monitor = new AgentProcessMonitor({
+    listProcesses: async () => currentRows,
+    listListeningPorts: async () => new Map(),
+    kill: () => {},
+    emit: (id, processes) => {
+      // Verify that the state is committed before the emit fires.
+      if (id === 's1' && Array.isArray(processes) && processes.length === 0) {
+        assert.equal(monitor.hasProcesses(id), false);
+      }
+      emitted.push([id, processes]);
+    },
+    schedule: () => ({ cancel() {} }),
+    scheduleKillPoll: (cb) => {
+      setImmediate(cb);
+      return { cancel() {} };
+    },
+    now: () => 100_000,
+  });
+
+  monitor.track('s1', 600);
+  await monitor.adoptDescendantsAsRoots('s1', 600);
+  monitor.untrack(600);
+  await monitor.scan();
+  assert.equal(monitor.hasProcesses('s1'), true);
 
   // Both adopted roots exit; nothing is left to attribute to the session.
-  h.setRows([]);
-  await h.monitor.scan();
+  currentRows = [];
+  await monitor.scan();
 
-  assert.equal(h.monitor.hasProcesses('s1'), false);
-  assert.deepEqual(h.monitor.processesFor('s1'), []);
-  assert.deepEqual(h.emitted.at(-1), ['s1', []]);
+  assert.equal(monitor.hasProcesses('s1'), false);
+  assert.deepEqual(monitor.processesFor('s1'), []);
+  assert.deepEqual(emitted.at(-1), ['s1', []]);
 });
 
 test('an adopted root whose pid is recycled is dropped, not re-attached', async () => {

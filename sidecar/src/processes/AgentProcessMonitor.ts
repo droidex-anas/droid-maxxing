@@ -150,8 +150,8 @@ export class AgentProcessMonitor {
     this.ignoredCommands.delete(appSessionId);
     this.descendants.delete(appSessionId);
     const previous = this.current.get(appSessionId);
-    if (previous && previous.length > 0) this.d.emit(appSessionId, []);
     this.current.delete(appSessionId);
+    if (previous && previous.length > 0) this.d.emit(appSessionId, []);
   }
 
   processesFor(appSessionId: string): AgentProcess[] {

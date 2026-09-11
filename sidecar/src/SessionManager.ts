@@ -318,12 +318,12 @@ export class SessionManager {
           // without cleanup leaves the next boot something to reap.
           this.adoption.persistLiveSet();
           this.emit({ type: 'session.processes', appSessionId, processes });
+          // The `hasAgentProcesses` gate cancels retirement; when the last
+          // process exits nothing else re-arms it, so do it here.
+          this.runtimeRetirement.arm();
         } catch (error) {
           console.warn('SessionManager: could not publish agent processes', error);
         }
-        // The `hasAgentProcesses` gate cancels retirement; when the last
-        // process exits nothing else re-arms it, so do it here.
-        this.runtimeRetirement.arm();
       },
     });
     this.mcpSettings = new McpSettings(
