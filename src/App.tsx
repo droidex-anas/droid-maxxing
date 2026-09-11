@@ -37,7 +37,11 @@ import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
-import { peekTerminalInstance, releaseTerminalInstance } from './lib/terminalInstances';
+import {
+  peekTerminalInstance,
+  releaseTerminalInstance,
+  releaseTerminalInstancesExcept,
+} from './lib/terminalInstances';
 import { utilityPanelForSession, type UtilityTab, type UtilityTool } from './lib/utilityPanel';
 import { isTerminalInputTarget, isTerminalTabShortcut } from './lib/keyboardShortcuts';
 import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
@@ -241,6 +245,21 @@ export default function App() {
   useEffect(() => {
     setConfirmCloseTabId(null);
   }, [activeSession?.appSessionId, utilityPanel.open]);
+
+  // A chat that is deleted, archived, or whose session closes drops its
+  // utility panel from the store (see the useStore reducer), which removes
+  // any terminal tabs it held. Release the matching xterm/pty instances so
+  // they don't keep running in the background with nothing to reopen them.
+  const liveTerminalTabIds = useStoreSelector((current) =>
+    Object.values(current.utilityPanels)
+      .flatMap((panel) => panel.tabs)
+      .filter((tab) => tab.tool === 'terminal')
+      .map((tab) => tab.id)
+      .join('\n'),
+  );
+  useEffect(() => {
+    void releaseTerminalInstancesExcept(new Set(liveTerminalTabIds.split('\n').filter(Boolean)));
+  }, [liveTerminalTabIds]);
 
   useEffect(() => {
     if (shellPaintMarked.current) return;

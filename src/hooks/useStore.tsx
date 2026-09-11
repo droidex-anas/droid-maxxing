@@ -116,6 +116,7 @@ import {
   activateUtilityTab,
   closeUtilityTab,
   openUtilityTool,
+  removeSessionPanel,
   removeUtilityTool,
   setUtilityPanelOpen,
   updateUtilityTab,
@@ -1004,6 +1005,7 @@ function baseReducer(state: AppState, action: Action): AppState {
           state.selectedChild?.parentAppSessionId === action.appSessionId
             ? null
             : state.selectedChild,
+        utilityPanels: removeSessionPanel(state.utilityPanels, action.appSessionId),
       };
     }
 
@@ -1038,7 +1040,9 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     case 'ARCHIVE_CHAT': {
       const chatMetadata = archiveChat(state.chatMetadata, action.appSessionId, Date.now());
-      return chatMetadata ? { ...state, chatMetadata } : state;
+      const utilityPanels = removeSessionPanel(state.utilityPanels, action.appSessionId);
+      if (!chatMetadata && utilityPanels === state.utilityPanels) return state;
+      return { ...state, chatMetadata: chatMetadata ?? state.chatMetadata, utilityPanels };
     }
 
     case 'RESTORE_CHAT': {
@@ -1048,7 +1052,9 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     case 'DELETE_CHAT': {
       const chatMetadata = deleteChat(state.chatMetadata, action.appSessionId, Date.now());
-      return chatMetadata ? { ...state, chatMetadata } : state;
+      const utilityPanels = removeSessionPanel(state.utilityPanels, action.appSessionId);
+      if (!chatMetadata && utilityPanels === state.utilityPanels) return state;
+      return { ...state, chatMetadata: chatMetadata ?? state.chatMetadata, utilityPanels };
     }
 
     case 'SESSION_FEATURES': {

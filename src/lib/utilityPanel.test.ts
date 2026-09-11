@@ -5,6 +5,7 @@ import {
   closeUtilityTab,
   openUtilityTool,
   persistUtilityPanels,
+  removeSessionPanel,
   sanitizeUtilityPanels,
   updateUtilityTab,
   utilityTerminalCwds,
@@ -83,4 +84,14 @@ test('running terminal tabs pin their session worktree', () => {
   assert.deepEqual(utilityTerminalCwds({ session: panel }, { session: '/repo/new-worktree' }), [
     '/repo/original-worktree',
   ]);
+});
+
+test('removeSessionPanel drops only the given session', () => {
+  const panels = {
+    a: { open: true, tabs: [], activeTabId: null },
+    b: { open: false, tabs: [], activeTabId: null },
+  };
+  const next = removeSessionPanel(panels, 'a');
+  assert.deepEqual(Object.keys(next), ['b']);
+  assert.equal(removeSessionPanel(next, 'zzz'), next);
 });
