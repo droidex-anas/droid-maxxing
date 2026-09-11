@@ -18,6 +18,9 @@ const KILL_GRACE_MS = 3000;
 // later: waiting out the whole grace for a process that already died would
 // spend the entire budget on the first session.
 const KILL_POLL_MS = 150;
+// `ps etime` resolves only to the second, so a start time derived from it can
+// read up to a second either side of the real one.
+const START_TIME_TOLERANCE_MS = 2000;
 const WRAPPER = /^(?:\S*\/)?(?:sh|zsh|bash|fish|dash)\s+-l?c\b/;
 
 export function displayNameFor(command: string): string {
@@ -59,6 +62,8 @@ export class AgentProcessMonitor {
   private readonly current = new Map<string, AgentProcess[]>();
   private readonly descendants = new Map<string, ProcessRecord[]>();
   private rootStartedAt = new Map<number, number>(); // rootPid -> startedAt, last scan
+  // pid -> the start time first seen for it, held steady against `ps` jitter.
+  private readonly startedAtByPid = new Map<number, number>();
   private ports = new Map<number, number[]>();
   private ticks = 0;
   private timer: { cancel(): void } | null = null;
@@ -192,7 +197,9 @@ export class AgentProcessMonitor {
       const row = alive.get(entry.pid);
       // A reused pid has a different start time; leave it alone. `ps etime`
       // only resolves to the second, so allow a small window either way.
-      return row && Math.abs(row.startedAt - entry.startedAt) < 2000 ? [row] : [];
+      return row && Math.abs(row.startedAt - entry.startedAt) < START_TIME_TOLERANCE_MS
+        ? [row]
+        : [];
     });
     await this.killTree(matches);
   }
@@ -250,6 +257,32 @@ export class AgentProcessMonitor {
     return { computed, sawNew };
   }
 
+  // A process that has not changed must compare equal between scans, or
+  // `publish` re-emits the whole list every tick and the chip's elapsed column
+  // ticks backwards. Reuse the first start time seen for a pid while later
+  // readings stay inside the `ps` rounding window; a reading outside it is a
+  // different process on a recycled pid, so take the new value.
+  private stableStartTimes(table: ProcessRecord[]): ProcessRecord[] {
+    const seen = new Set<number>();
+    const stable = table.map((row) => {
+      seen.add(row.pid);
+      const remembered = this.startedAtByPid.get(row.pid);
+      if (remembered === row.startedAt) return row;
+      if (
+        remembered !== undefined &&
+        Math.abs(remembered - row.startedAt) < START_TIME_TOLERANCE_MS
+      ) {
+        return { ...row, startedAt: remembered };
+      }
+      this.startedAtByPid.set(row.pid, row.startedAt);
+      return row;
+    });
+    for (const pid of this.startedAtByPid.keys()) {
+      if (!seen.has(pid)) this.startedAtByPid.delete(pid);
+    }
+    return stable;
+  }
+
   private visibleProcesses(rows: readonly ProcessRecord[], now: number): AgentProcess[] {
     return rows
       .filter((row) => now - row.startedAt >= MIN_AGE_MS && !WRAPPER.test(row.command))
@@ -270,7 +303,7 @@ export class AgentProcessMonitor {
     let toPublish: Map<string, ProcessRecord[]> | null = null;
     let now = 0;
     try {
-      const table = await this.d.listProcesses();
+      const table = this.stableStartTimes(await this.d.listProcesses());
       now = this.d.now();
       this.pruneDeadAdoptedRoots(table);
       const { computed, sawNew } = this.computeDescendants(table);

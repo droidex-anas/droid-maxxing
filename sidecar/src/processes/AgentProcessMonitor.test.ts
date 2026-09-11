@@ -66,6 +66,23 @@ test('displayNameFor uses the leaf basename and a non-flag first argument', () =
   assert.equal(displayNameFor('/w/node_modules/.bin/next dev'), 'next dev');
 });
 
+test('second-granular startedAt jitter does not re-emit an unchanged list', async () => {
+  const h = harness(rows);
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+  assert.equal(h.emitted.length, 1);
+
+  // Same processes, `ps etime` rounding read them 700ms later.
+  h.setRows(rows.map((row) => ({ ...row, startedAt: row.startedAt + 700 })));
+  await h.monitor.scan();
+  assert.equal(h.emitted.length, 1);
+
+  // Outside the rounding window: a different process on a recycled pid.
+  h.setRows(rows.map((row) => ({ ...row, startedAt: row.startedAt + 9000 })));
+  await h.monitor.scan();
+  assert.equal(h.emitted.length, 2);
+});
+
 test('scan hides shell wrappers, emits once per change, and attaches ports', async () => {
   const h = harness(rows, new Map([[800, [5173]]]));
   h.monitor.track('s1', 600);
