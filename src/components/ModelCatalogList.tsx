@@ -24,7 +24,7 @@ export function stepEffort(efforts: ReasoningEffort[], current: ReasoningEffort,
   return efforts[Math.min(efforts.length - 1, Math.max(0, base + delta))];
 }
 
-type Pick = (modelId: string | undefined, effort?: ReasoningEffort) => void;
+type Pick = (modelId: string | undefined) => void;
 
 function ModelCatalogList({
   models,
@@ -34,7 +34,6 @@ function ModelCatalogList({
   reasoning,
   query,
   onSelectModel,
-  onSelectReasoning,
   disabled,
   reasoningLocked,
   showDefault = true,
@@ -46,7 +45,6 @@ function ModelCatalogList({
   reasoning: ReasoningEffort;
   query: string;
   onSelectModel: (modelId?: string) => void;
-  onSelectReasoning: (reasoning: ReasoningEffort) => void;
   disabled: boolean;
   reasoningLocked: boolean;
   showDefault?: boolean;
@@ -77,12 +75,11 @@ function ModelCatalogList({
     if (selectedIndex > 0) virtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
   }, [selectedIndex, virtualizer]);
 
-  const latest = useRef({ selectedModelId, onSelectModel, onSelectReasoning });
-  latest.current = { selectedModelId, onSelectModel, onSelectReasoning };
-  const pick = useCallback<Pick>((modelId, effort) => {
+  const latest = useRef({ selectedModelId, onSelectModel });
+  latest.current = { selectedModelId, onSelectModel };
+  const pick = useCallback<Pick>((modelId) => {
     const cur = latest.current;
     if (modelId !== cur.selectedModelId) cur.onSelectModel(modelId);
-    if (effort) cur.onSelectReasoning(effort);
   }, []);
 
   const rowProps = { pick, disabled, reasoningLocked };
@@ -138,12 +135,12 @@ function ModelCatalogList({
         })}
       </div>
       {!hasRealModels && (
-        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+        <div className="px-2 py-3 text-[12px] text-droid-text-muted text-center">
           Loading models…
         </div>
       )}
       {hasRealModels && models.length === 0 && (
-        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+        <div className="px-2 py-3 text-[12px] text-droid-text-muted text-center">
           No matches for “{query}”
         </div>
       )}
@@ -178,26 +175,6 @@ const ModelRow = memo(function ModelRow({
   const efforts = effortsFor(model, fallback);
   const shown = reasoning ?? model?.defaultReasoningEffort ?? efforts[efforts.length - 1];
   const current = efforts.indexOf(shown);
-  const canStep = efforts.length > 1 && !reasoningLocked;
-  const lockTitle = reasoningLocked ? 'Change the child model to adjust reasoning.' : undefined;
-
-  const arrow = (delta: -1 | 1) => (
-    <button
-      type="button"
-      tabIndex={-1}
-      aria-label={delta < 0 ? 'Lower reasoning effort' : 'Raise reasoning effort'}
-      disabled={disabled || !canStep}
-      onClick={(e) => {
-        e.stopPropagation();
-        pick(id, stepEffort(efforts, shown, delta));
-      }}
-      className={`w-4 shrink-0 text-[11px] text-droid-text-secondary hover:text-droid-text transition-opacity ${
-        selected && canStep ? '' : 'opacity-0 pointer-events-none'
-      }`}
-    >
-      {delta < 0 ? '←' : '→'}
-    </button>
-  );
 
   return (
     <div
@@ -214,12 +191,12 @@ const ModelRow = memo(function ModelRow({
         if (!disabled) pick(id);
       }}
       title={label}
-      className={`relative flex items-center gap-2.5 h-9 px-2.5 rounded-lg select-none ${
+      className={`group relative flex items-center gap-2.5 h-9 px-2.5 rounded-lg select-none ${
         disabled
           ? 'cursor-not-allowed opacity-50'
           : selected
             ? 'cursor-default'
-            : 'cursor-pointer hover:bg-droid-surface/60'
+            : 'cursor-pointer hover:bg-droid-surface'
       }`}
     >
       <span
@@ -234,46 +211,38 @@ const ModelRow = memo(function ModelRow({
       >
         {label}
       </span>
-      {arrow(-1)}
-      <span className="flex gap-[3px] shrink-0" title={lockTitle}>
-        {efforts.map((effort, i) => {
-          const filled = i <= current;
-          return (
-            <button
+      {/* Effort reads out over the name rather than reserving width from it, so
+          the name keeps the full row and never reflows when the meter appears. */}
+      <span
+        title={reasoningLocked ? 'Change the child model to adjust reasoning.' : undefined}
+        className={`absolute right-2 top-0 h-full flex items-center gap-2 pl-6 pointer-events-none ${
+          selected ? 'opacity-100' : 'opacity-0'
+        } ${disabled ? '' : 'group-hover:opacity-100'}`}
+        style={{
+          background: 'linear-gradient(to right, transparent, var(--droid-surface) 1.5rem)',
+          transition: 'opacity .15s',
+        }}
+      >
+        <span className="flex gap-[3px]">
+          {efforts.map((effort, i) => (
+            <span
               key={effort}
-              type="button"
-              tabIndex={-1}
-              aria-label={`${label}: ${effort}`}
-              disabled={disabled || reasoningLocked}
-              onClick={(e) => {
-                e.stopPropagation();
-                pick(id, effort);
-              }}
               className={`w-[9px] h-[9px] rounded-[2px] ${
-                filled
+                i <= current
                   ? selected
                     ? 'bg-droid-accent'
                     : 'bg-droid-text-muted'
-                  : selected
-                    ? 'bg-[#333]'
-                    : 'bg-droid-active'
-              } ${disabled || reasoningLocked ? 'cursor-not-allowed' : ''}`}
-              style={{
-                transition: 'background .2s, transform .25s cubic-bezier(.34,1.56,.64,1)',
-                transitionDelay: `${String(i * 25)}ms`,
-                transform: filled && selected ? 'scale(1.08)' : undefined,
-              }}
+                  : 'bg-droid-active'
+              }`}
+              style={{ transition: 'background .2s' }}
             />
-          );
-        })}
-      </span>
-      {arrow(1)}
-      <span
-        className={`w-[52px] shrink-0 text-[12px] capitalize truncate ${
-          selected ? 'text-droid-text' : 'text-droid-text-muted'
-        }`}
-      >
-        {shown}
+          ))}
+        </span>
+        <span
+          className={`text-[12px] capitalize ${selected ? 'text-droid-text' : 'text-droid-text-muted'}`}
+        >
+          {shown}
+        </span>
       </span>
     </div>
   );

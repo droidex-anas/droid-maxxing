@@ -249,10 +249,6 @@ export function AutomationModelPicker({
                 reasoning={selectedReasoning}
                 query={query}
                 onSelectModel={selectModel}
-                onSelectReasoning={(reasoning) => {
-                  if (!selectedModel) return;
-                  onChange({ modelId: selectedModel.id, reasoningEffort: reasoning });
-                }}
                 disabled={false}
                 reasoningLocked={false}
                 showDefault={false}
