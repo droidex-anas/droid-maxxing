@@ -276,6 +276,16 @@ test('validates session.processes events and rejects malformed process entries',
     ),
     null,
   );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, ports: ['8080', null] }],
+      }),
+    ),
+    null,
+  );
 });
 
 test('rejects object payloads that are actually arrays', () => {

@@ -149,7 +149,8 @@ function isServerEvent(value: unknown): value is ServerEvent {
             typeof p.name === 'string' &&
             typeof p.command === 'string' &&
             typeof p.startedAt === 'number' &&
-            Array.isArray(p.ports),
+            Array.isArray(p.ports) &&
+            p.ports.every((port: unknown) => typeof port === 'number'),
         )
       );
     case 'sessions.cwdReanchored':
