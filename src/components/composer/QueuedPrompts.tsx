@@ -154,7 +154,7 @@ export function QueuedPrompts({
                 </Fragment>
               ))}
               {p.design && p.design.references.length > 0 && (
-                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-black/20 px-1.5 py-0.5 text-[10px] text-droid-text-muted">
+                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-droid-active px-1.5 py-0.5 text-[10px] text-droid-text-muted">
                   <MousePointerSquareDashed className="w-3 h-3" />
                   {p.design.references.length} reference
                   {p.design.references.length === 1 ? '' : 's'}
@@ -167,7 +167,7 @@ export function QueuedPrompts({
                   onClick={() => {
                     onEdit(p);
                   }}
-                  className="rounded p-1 text-droid-text-muted hover:text-droid-text hover:bg-black/20"
+                  className="rounded p-1 text-droid-text-muted hover:text-droid-text hover:bg-droid-active/70"
                   title="Edit in composer"
                 >
                   <Pencil className="w-3.5 h-3.5" />
@@ -177,7 +177,7 @@ export function QueuedPrompts({
                 onClick={() => {
                   onRemove(p.id);
                 }}
-                className="rounded p-1 text-droid-text-muted hover:text-droid-orange hover:bg-black/20"
+                className="rounded p-1 text-droid-text-muted hover:text-droid-orange hover:bg-droid-active/70"
                 title="Delete"
               >
                 <X className="w-3.5 h-3.5" />

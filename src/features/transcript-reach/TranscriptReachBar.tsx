@@ -43,7 +43,7 @@ export function TranscriptReachBar({
     <div
       role="search"
       data-testid="transcript-find-bar"
-      className="pointer-events-auto flex max-w-[min(100%,42rem)] flex-col gap-1.5 rounded-xl border border-droid-border bg-droid-surface/95 px-2 py-1.5 shadow-lg shadow-black/30 backdrop-blur"
+      className="pointer-events-auto flex max-w-[min(100%,42rem)] flex-col gap-1.5 rounded-xl border border-droid-border bg-droid-surface/95 px-2 py-1.5 shadow-droid-sm backdrop-blur"
     >
       <form onSubmit={onSubmit} className="flex items-center gap-1.5">
         <Search className="h-3.5 w-3.5 shrink-0 text-droid-text-muted/70" />

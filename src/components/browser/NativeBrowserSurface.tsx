@@ -346,13 +346,11 @@ export function NativeBrowserSurface({
   }, [native, visibleBrowserSessionId]);
 
   return (
-    <div className="relative h-full min-h-0 w-full overflow-hidden bg-[#070707]">
+    <div className="relative h-full min-h-0 w-full overflow-hidden bg-droid-bg">
       <div
         ref={slotRef}
         className={`absolute overflow-hidden bg-white ${
-          expanded
-            ? 'rounded-none'
-            : 'rounded-[6px] shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_24px_80px_rgba(0,0,0,0.45)]'
+          expanded ? 'rounded-none' : 'rounded-[6px] shadow-droid ring-1 ring-droid-border-hover'
         }`}
         style={{
           left: surface.left,

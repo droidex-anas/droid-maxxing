@@ -90,7 +90,7 @@ export function AutomationEditor({
   };
 
   return (
-    <aside className="flex h-full w-[410px] flex-col border-l border-droid-border bg-droid-bg shadow-2xl shadow-black/25">
+    <aside className="flex h-full w-[410px] flex-col border-l border-droid-border bg-droid-bg shadow-droid">
       <div data-electron-drag-region className="h-9 shrink-0" />
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center justify-between px-5 pb-3 pt-2">

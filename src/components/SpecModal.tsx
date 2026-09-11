@@ -85,7 +85,7 @@ export function SpecModal({
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ duration: 0.3, ease: EASE }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[1120px] h-[88vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/60 overflow-hidden"
+            className="w-full max-w-[1120px] h-[88vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-droid overflow-hidden"
           >
             {/* Header */}
             <div className="shrink-0 flex items-center justify-between px-5 h-12 border-b border-droid-border">

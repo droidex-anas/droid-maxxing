@@ -167,7 +167,7 @@ export function ThemeEditor({
         role="dialog"
         aria-modal="true"
         aria-labelledby="theme-editor-title"
-        className="w-[560px] max-w-full rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50"
+        className="w-[560px] max-w-full rounded-2xl border border-droid-border bg-droid-surface shadow-droid"
       >
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
           <h3 id="theme-editor-title" className="text-[14px] font-semibold text-droid-text">

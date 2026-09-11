@@ -292,7 +292,7 @@ export default function ModelSelectorPopover({
       transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
       className="absolute bottom-full left-0 mb-3 w-[min(420px,calc(100vw-2rem))] z-50"
     >
-      <div className="rounded-2xl border border-droid-border bg-droid-elevated shadow-md overflow-hidden">
+      <div className="rounded-2xl border border-droid-border bg-droid-elevated shadow-droid overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
           <span className="shrink-0 text-[12px] font-medium text-droid-text-secondary">
