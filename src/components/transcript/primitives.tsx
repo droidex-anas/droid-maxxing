@@ -59,13 +59,19 @@ export function Expand({ open, children }: { open: boolean; children: React.Reac
     <div
       aria-hidden={!open}
       inert={!open}
-      className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+      className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-[280ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
         open
           ? 'pointer-events-auto grid-rows-[1fr] opacity-100'
           : 'pointer-events-none grid-rows-[0fr] opacity-0'
       }`}
     >
-      <div className="min-h-0 overflow-hidden">{renderedChildren}</div>
+      <div
+        className={`min-h-0 overflow-hidden transition-transform duration-[280ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+          open ? 'translate-y-0' : '-translate-y-1.5'
+        }`}
+      >
+        {renderedChildren}
+      </div>
     </div>
   );
 }

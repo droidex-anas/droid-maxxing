@@ -128,10 +128,20 @@ export function nearestOverflowParent(start: HTMLElement): HTMLElement | null {
   return null;
 }
 
+// A prompt sent moments ago always enters with motion, whatever the projection
+// reported: its row can be rebuilt (a new session, a tail regroup) in the same
+// tick it appears, which the append detection cannot see.
+const JUST_SENT_MS = 2_000;
+
 export function shouldAnimateFeedRow(
-  key: string,
+  item: { key: string; type: string; event?: { author?: string; ts: number } },
   animateKeys: ReadonlySet<string>,
   enteredKeys: ReadonlySet<string>,
+  now = Date.now(),
 ): boolean {
-  return animateKeys.has(key) && !enteredKeys.has(key);
+  if (enteredKeys.has(item.key)) return false;
+  if (animateKeys.has(item.key)) return true;
+  if (item.type !== 'message' || item.event?.author !== 'user') return false;
+  const age = now - item.event.ts;
+  return age >= 0 && age < JUST_SENT_MS;
 }

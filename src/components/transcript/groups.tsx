@@ -32,10 +32,11 @@ export function ToolGroupItem({
 }) {
   const [open, setOpen] = useState(false);
   const summary = useMemo(() => summarizeTools(events), [events]);
+  // While the group is live each new row enters with motion (see index.css);
+  // a settled group is history and renders still.
+  const rows = `space-y-2.5${active ? ' tool-rows-live' : ''}`;
   if (density !== 'compact') {
-    return (
-      <div className="space-y-2.5">{renderToolEvents(events, active, density === 'detailed')}</div>
-    );
+    return <div className={rows}>{renderToolEvents(events, active, density === 'detailed')}</div>;
   }
   return (
     <div>
@@ -57,7 +58,7 @@ export function ToolGroupItem({
         )}
       </button>
       <Expand open={open}>
-        <div className="mt-2 pl-[18px] space-y-2.5">{renderToolEvents(events, active, false)}</div>
+        <div className={`mt-2 pl-[18px] ${rows}`}>{renderToolEvents(events, active, false)}</div>
       </Expand>
     </div>
   );

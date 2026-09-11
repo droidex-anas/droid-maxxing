@@ -25,6 +25,9 @@
     /* Skill invocations stay blue, with applyTheme selecting the accessible
        light-theme shade. */
     --droid-skill: #93c5fd;
+    /* Links stay blue for the same reason skills do: the neutral accent is
+       near-white in dark themes, so accent-coloured links read as body text. */
+    --droid-link: #7cb2ff;
     /* Fixed semantic status colors: success green, warning amber, and danger red
        stay vivid across every theme (including monochrome) so diffs, status, and
        callouts always read by hue. The neutral accent governs UI chrome only and
@@ -134,6 +137,37 @@
 
   .no-scrollbar::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Horizontal overflow inside a message (code cards, tables) scrolls quietly:
+     the thumb shows while the reader is over the block, not as a permanent bar
+     under every wide snippet. */
+  .scrollbar-on-hover::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+
+  .scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--droid-text) 16%, transparent);
+  }
+
+  .scrollbar-on-hover::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--droid-text) 26%, transparent);
+  }
+
+  /* A block wider than its frame fades at the edge it continues past, so it
+     reads as scrollable without a permanent scrollbar. The fade tracks the
+     scroll position through a scroll-driven animation, and when nothing
+     overflows the timeline is inactive and no fade is drawn. */
+  .scroll-fade-x {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--fade-start),
+      #000 calc(100% - var(--fade-end)),
+      transparent
+    );
+    animation: scroll-fade-x linear both;
+    animation-timeline: scroll(self inline);
   }
 
   ::selection {
@@ -268,11 +302,37 @@
   }
 
   .feed-row-enter {
-    animation: feed-row-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation: feed-row-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  /* Tool rows landing in a live group share the same entrance. */
+  .tool-rows-live > * {
+    animation: feed-row-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  /* A prompt the user just sent rises out of the composer beneath it and
+     settles into the transcript: slow, with real travel and a long expo ease,
+     so the send reads as a gesture rather than a row popping in. */
+  @keyframes prompt-enter {
+    from {
+      opacity: 0;
+      transform: translateY(24px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .prompt-enter {
+    transform-origin: bottom right;
+    animation: prompt-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .feed-row-enter {
+    .feed-row-enter,
+    .tool-rows-live > *,
+    .prompt-enter {
       animation: none;
     }
   }
@@ -569,5 +629,29 @@
 
   .transcript-range-bound {
     outline: 2px dashed color-mix(in srgb, var(--droid-accent) 55%, transparent);
+  }
+}
+
+/* Registered so the fade edges can animate as lengths (see .scroll-fade-x). */
+@property --fade-start {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fade-end {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes scroll-fade-x {
+  from {
+    --fade-start: 0px;
+    --fade-end: 28px;
+  }
+  to {
+    --fade-start: 28px;
+    --fade-end: 0px;
   }
 }

@@ -13,7 +13,7 @@ test('slash feedback returns a durable copyable report receipt', async ({ page, 
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto(appUrl);
 
-  const composer = page.locator('textarea').first();
+  const composer = page.getByRole('textbox', { name: 'Prompt' });
   await composer.fill('/');
   await page.getByText('bug', { exact: true }).click();
 

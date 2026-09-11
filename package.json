@@ -20,7 +20,7 @@
     "release:verify:mac": "node tools/verify-macos-release.mjs",
     "electron": "npm run electron:dev",
     "electron:dev": "npm run sidecar:build && node electron/dev.cjs",
-    "electron:check": "node --check electron/main.cjs && node --check electron/applicationMenu.cjs && node --check electron/preload.cjs && node --check electron/nativeBrowserPreload.cjs && node --check electron/dev.cjs && node --check electron/git.cjs && node --check electron/executable.cjs && node --check electron/github.cjs && node --check electron/githubPrConversation.cjs && node --check electron/githubSetup.cjs && node --check electron/notifications.cjs && node --check electron/terminal.cjs && node --check electron/terminalPort.cjs && node --check electron/files.cjs && node --check electron/attachments.cjs && node --check electron/localImages.cjs && node --check electron/sidecar.cjs && node --check electron/rendererSecurity.cjs && node --check electron/rendererOomRecovery.cjs && node --check electron/appUpdater.cjs && node --check electron/diagnostics.cjs && node --check electron/hardwareAcceleration.cjs && node --check electron/performanceMetrics.cjs && node --check electron/nativeBrowserBudget.cjs && node --check electron/nativeBrowser.cjs && node --check electron/nativeBrowserView.cjs && node --check electron/nativeBrowserPage.cjs && node --check electron/nativeBrowserCredentials.cjs && node --check electron/nativeBrowserUrls.cjs && node --check electron/nativeBrowserHost.cjs && node --check electron/powerTier.cjs",
+    "electron:check": "node --check electron/main.cjs && node --check electron/applicationMenu.cjs && node --check electron/contextMenu.cjs && node --check electron/favicons.cjs && node --check electron/preload.cjs && node --check electron/nativeBrowserPreload.cjs && node --check electron/dev.cjs && node --check electron/git.cjs && node --check electron/executable.cjs && node --check electron/github.cjs && node --check electron/githubPrConversation.cjs && node --check electron/githubSetup.cjs && node --check electron/notifications.cjs && node --check electron/terminal.cjs && node --check electron/terminalPort.cjs && node --check electron/files.cjs && node --check electron/attachments.cjs && node --check electron/localImages.cjs && node --check electron/sidecar.cjs && node --check electron/rendererSecurity.cjs && node --check electron/rendererOomRecovery.cjs && node --check electron/appUpdater.cjs && node --check electron/diagnostics.cjs && node --check electron/hardwareAcceleration.cjs && node --check electron/performanceMetrics.cjs && node --check electron/nativeBrowserBudget.cjs && node --check electron/nativeBrowser.cjs && node --check electron/nativeBrowserView.cjs && node --check electron/nativeBrowserPage.cjs && node --check electron/nativeBrowserCredentials.cjs && node --check electron/nativeBrowserUrls.cjs && node --check electron/nativeBrowserHost.cjs && node --check electron/powerTier.cjs",
     "electron:boot-smoke": "node tools/electron-boot-smoke.mjs",
     "electron:rebuild": "electron-rebuild -f -w node-pty",
     "sidecar:build": "npm --prefix sidecar run build",
@@ -68,6 +68,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.2",
+    "@codemirror/view": "^6.43.10",
     "@sentry/core": "^10.67.0",
     "@sentry/electron": "^7.16.0",
     "@tanstack/react-virtual": "^3.14.10",
@@ -88,6 +93,7 @@
     "react-icons": "^5.7.0",
     "react-markdown": "^9.1.0",
     "read-excel-file": "^9.3.1",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1"
   },
   "optionalDependencies": {

@@ -14,6 +14,7 @@
 // map instead of breaking the sidebar.
 
 import type { SessionSummary } from '../types/bridge';
+import { markdownToPlainText } from './markdownText';
 import { toast } from './toast';
 import type { PullRequest } from '../types/vcs';
 import { prKind, type PrKind } from './github';
@@ -147,9 +148,10 @@ function presentSlashCommandTitle(title: string): string {
 }
 
 // The title the UI shows: the user's override when present, else the
-// harness-generated session title, with slash-command invocations humanized.
+// harness-generated session title, with slash-command invocations humanized and
+// markdown syntax stripped.
 export function chatDisplayTitle(session: SessionSummary, meta: ChatMetadata | undefined): string {
-  return presentSlashCommandTitle(meta?.displayTitle ?? session.title);
+  return markdownToPlainText(presentSlashCommandTitle(meta?.displayTitle ?? session.title));
 }
 
 // Chats for the Pinned section: pinned and not hidden. Callers keep their

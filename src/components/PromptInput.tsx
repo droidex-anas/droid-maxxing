@@ -1,4 +1,13 @@
-import { useState, useRef, useEffect, useMemo, useCallback, type SetStateAction } from 'react';
+import {
+  Suspense,
+  lazy,
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+  type SetStateAction,
+} from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   shallowEqual,
@@ -82,8 +91,10 @@ import {
 import { commitPrimaryPromptAfterBaseline } from '../lib/promptSend';
 import { ArrowUp, ChevronDown, SlidersHorizontal, Square } from 'lucide-react';
 import { Spinner } from '@droidex/icons';
-import { noteComposerInteractive } from '../lib/rendererPerf';
 import AddMenu from './composer/AddMenu';
+import SelectionMenu from './composer/SelectionMenu';
+import { useDraftEditing } from './composer/useDraftEditing';
+import type { ComposerHandle } from './composer/ComposerEditor';
 import { DraftSelections } from './composer/DraftSelections';
 import ComposerMenu, { type MenuItem, type SlashCommand } from './ComposerMenu';
 import ModelSelectorPopover from './ModelSelectorPopover';
@@ -103,6 +114,10 @@ import { feedbackDraftFromCommand } from '../lib/feedbackReport';
 import { useSessionWorkingDirectory } from '../hooks/useSessionWorkingDirectory';
 import { useRuntimeHealth } from '../hooks/useRuntimeHealth';
 import { toast } from '../lib/toast';
+
+// The live-markdown editor is a heavy chunk of the bundle, so it loads on
+// first composer paint rather than blocking the app's initial JavaScript.
+const ComposerEditor = lazy(() => import('./composer/ComposerEditor'));
 
 const ACCENT = 'var(--droid-accent)';
 const accentMix = (pct: number) =>
@@ -339,15 +354,9 @@ export default function PromptInput({
   };
   const [sendHover, setSendHover] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (!textareaRef.current) return;
-    noteComposerInteractive();
-  }, []);
-  // The draft and the selections that share its first line. Autosize holds this
-  // box still while it measures the draft.
-  const draftBoxRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<ComposerHandle>(null);
+  // Flips once the lazy editor mounts, so a caret queued for it is applied.
+  const [editorReady, setEditorReady] = useState(false);
   const submittingRef = useRef(false);
   const turnStartingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnStartingTargetKeyRef = useRef<string | null>(null);
@@ -555,10 +564,23 @@ export default function PromptInput({
     },
   ];
 
+  // Typing, and every edit that behaves like typing, leaves history recall.
+  const editDraft = (text: string) => {
+    setInput(text);
+    setHistoryIndex(null);
+  };
+  const draftEditing = useDraftEditing({ input, editDraft, editorRef });
+  const { applyFormat } = draftEditing;
+
   const trigger = useMemo(() => composerTrigger(input, caret), [input, caret]);
-  const overlayOpen = [trigger, modelsOpen, addMenuOpen, feedbackReport, isLive && sendHover].some(
-    Boolean,
-  );
+  const overlayOpen = [
+    trigger,
+    modelsOpen,
+    addMenuOpen,
+    feedbackReport,
+    draftEditing.menu,
+    isLive && sendHover,
+  ].some(Boolean);
 
   useEffect(() => {
     if (!isLive) setSendHover(false);
@@ -719,36 +741,18 @@ export default function PromptInput({
     dispatch({ type: 'CLEAR_COMPOSER_SEED' });
   }, [composerSeed, input, dispatch, setVisualizeSelected]);
 
+  // Restore the caret after a programmatic replacement. The editor syncs the
+  // new text in its own effect (child effects run first), so by the time this
+  // runs the caret can land inside the replaced text; the editor reports the
+  // new position back through onCaret.
   useEffect(() => {
-    const draft = textareaRef.current;
-    const box = draftBoxRef.current;
-    if (!draft || !box) return;
-    // A textarea reports its content height in scrollHeight only while the
-    // content overflows the box, so measuring the draft means collapsing it to
-    // `auto` first. Left alone, that collapse hands the composer's space back to
-    // the transcript above for one layout pass: the browser clamps the
-    // transcript's scroll position away from the bottom and never restores it,
-    // so during a live turn the pin-to-bottom effect yanks it down again on the
-    // next token, once per keystroke. Holding this box at the height it already
-    // has keeps the collapse from reaching anything outside the composer, and
-    // the box goes back to sizing itself before the browser paints.
-    box.style.height = `${String(box.offsetHeight)}px`;
-    draft.style.height = 'auto';
-    draft.style.height = `${String(Math.min(draft.scrollHeight, 200))}px`;
-    box.style.height = '';
-    // The indent moves where the first line wraps, so it can change the height.
-  }, [input, selectionsIndent]);
-
-  // Restore caret after programmatic token replacement.
-  useEffect(() => {
-    if (pendingCaret.current != null && textareaRef.current) {
-      const pos = pendingCaret.current;
-      pendingCaret.current = null;
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(pos, pos);
-      setCaret(pos);
-    }
-  }, [input]);
+    const editor = editorRef.current;
+    const pos = pendingCaret.current;
+    if (!editor || pos === null) return;
+    pendingCaret.current = null;
+    editor.focus();
+    editor.select(pos, pos);
+  }, [input, editorReady]);
 
   const missionPreview = activeSession
     ? activeSession.sessionPurpose === 'mission-control'
@@ -1310,7 +1314,7 @@ export default function PromptInput({
     // would add a second copy of the command.
     setVisualizeSelected(false);
     dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id: p.id });
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => editorRef.current?.focus());
   };
 
   const reorderQueue = (from: number, to: number) => {
@@ -1323,47 +1327,82 @@ export default function PromptInput({
       dispatch({ type: 'REMOVE_QUEUED_PROMPT', appSessionId: activeSession.appSessionId, id });
   };
 
-  const syncCaret = (el: HTMLTextAreaElement) => {
-    setCaret(el.selectionStart);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  // Capture-phase keydown from the editor: consuming a key here (prevent +
+  // stop propagation) keeps the editor's own keymap from also seeing it.
+  const handleKeyDown = (e: KeyboardEvent) => {
+    // A key pressed inside a rendered table's cell belongs to that cell. The
+    // composer sees it first (it listens in the capture phase), so without this
+    // Enter would send the draft mid-edit and ArrowUp would swap it for a past
+    // prompt while the writer is typing in a column.
+    const target = e.target;
+    if (
+      target instanceof HTMLElement &&
+      target.isContentEditable &&
+      target.closest('.cm-md-tableframe') !== null
+    ) {
+      // The draft's formatting shortcuts mean nothing in a cell, and letting
+      // them bubble would reach the app's own bindings (Cmd+B toggles the
+      // sidebar).
+      if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'e'].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
     if (menuOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        e.stopPropagation();
         setMenuIndex((i) => (i + 1) % menuItems.length);
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
+        e.stopPropagation();
         setMenuIndex((i) => (i - 1 + menuItems.length) % menuItems.length);
         return;
       }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         e.preventDefault();
+        e.stopPropagation();
         runMenuItem(menuItems[Math.min(menuIndex, menuItems.length - 1)]);
         return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         replaceTrigger('');
         return;
       }
     }
     if (e.key === 'Backspace' && input === '' && hasChips) {
       e.preventDefault();
+      e.stopPropagation();
       removeLastChip();
       return;
+    }
+    // Draft formatting shortcuts. These belong to the draft while it is
+    // focused, so they are consumed here instead of bubbling to the app's
+    // window-level shortcuts (Cmd+B toggles the sidebar elsewhere).
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+      const formatKey = e.key.toLowerCase();
+      if (formatKey === 'b' || formatKey === 'i' || formatKey === 'e') {
+        e.preventDefault();
+        e.stopPropagation();
+        applyFormat(formatKey === 'b' ? 'bold' : formatKey === 'i' ? 'italic' : 'inlineCode');
+        return;
+      }
     }
     // Shell-style history recall. ArrowUp starts only from the top of the field
     // (so it doesn't hijack caret movement in a multi-line draft); once in
     // history, arrows step through past prompts and ArrowDown exits at the draft.
     const plain = !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey;
     if (e.key === 'ArrowUp' && plain && promptHistory.length > 0) {
-      const el = e.currentTarget;
-      const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+      const selection = editorRef.current?.selection();
+      const atStart = selection ? selection.start === 0 && selection.end === 0 : false;
       if (historyIndex !== null || atStart) {
         e.preventDefault();
+        e.stopPropagation();
         if (historyIndex === null) draftBeforeHistory.current = input;
         const nextIndex =
           historyIndex === null ? promptHistory.length - 1 : Math.max(0, historyIndex - 1);
@@ -1376,6 +1415,7 @@ export default function PromptInput({
     }
     if (e.key === 'ArrowDown' && plain && historyIndex !== null) {
       e.preventDefault();
+      e.stopPropagation();
       const text =
         historyIndex >= promptHistory.length - 1
           ? draftBeforeHistory.current
@@ -1385,8 +1425,11 @@ export default function PromptInput({
       pendingCaret.current = text.length;
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Shift+Enter and Alt+Enter break the line instead of sending; both fall
+    // through to the editor's newline binding, which continues a list or quote.
+    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault();
+      e.stopPropagation();
       const enterMode: SubmitMode =
         isLive && state.liveEnterBehavior === 'interrupt' ? 'now' : 'queue';
       void handleSubmit(
@@ -1584,51 +1627,39 @@ export default function PromptInput({
             </div>
           )}
 
-          <div className="relative" ref={draftBoxRef}>
+          <div className="relative">
             <DraftSelections items={draftSelections} onWidthChange={setSelectionsIndent} />
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                syncCaret(e.target);
-                setHistoryIndex(null);
-              }}
-              onKeyUp={(e) => {
-                syncCaret(e.currentTarget);
-              }}
-              onClick={(e) => {
-                syncCaret(e.currentTarget);
-              }}
-              onSelect={(e) => {
-                syncCaret(e.currentTarget);
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={(e) => {
-                const items = Array.from(e.clipboardData.items).filter((it) => it.kind === 'file');
-                if (items.length === 0) return;
-                e.preventDefault();
-                addComposerFiles(
-                  items
-                    .map((item) => item.getAsFile())
-                    .filter((file): file is File => file !== null),
-                );
-              }}
-              // A staged skill or plugin already says what this prompt will do,
-              // and the hint would only crowd it off the line.
-              placeholder={draftSelections.length > 0 ? '' : promptPlaceholder}
-              rows={1}
-              // A selection occupies the start of the first line, so the draft
-              // starts after it and the placeholder stays out from under it.
-              style={{
-                textIndent: selectionsIndent === 0 ? undefined : `${String(selectionsIndent)}px`,
-              }}
-              className="w-full bg-transparent px-4 pt-3 pb-2 text-sm text-droid-text placeholder-droid-text-muted/50 resize-none focus:outline-none min-h-[44px] max-h-[200px]"
-            />
+            {/* The draft renders markdown as it is typed; the editor owns
+                typing while `input` here stays the source of truth for sends,
+                seeds, and formatting actions. */}
+            <Suspense
+              fallback={
+                <div className="min-h-[44px] px-4 pt-3 pb-2 text-sm text-droid-text-muted/50">
+                  {promptPlaceholder}
+                </div>
+              }
+            >
+              <ComposerEditor
+                ref={editorRef}
+                value={input}
+                ariaLabel="Prompt"
+                placeholder={draftSelections.length > 0 ? '' : promptPlaceholder}
+                indentPx={selectionsIndent}
+                onChange={editDraft}
+                onCaret={setCaret}
+                onKeyDown={handleKeyDown}
+                onContextMenu={draftEditing.openMenu}
+                onPasteFiles={addComposerFiles}
+                onReady={() => {
+                  setEditorReady(true);
+                }}
+              />
+            </Suspense>
           </div>
 
-          {/* Toolbar — one seamless surface with the textarea, no divider line */}
-          <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
+          {/* Toolbar — one seamless surface with the draft, no divider line.
+              It wraps on narrow windows rather than pushing controls offscreen. */}
+          <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1">
             <AddMenu
               open={addMenuOpen}
               onOpenChange={setAddMenuOpen}
@@ -1636,12 +1667,12 @@ export default function PromptInput({
               // Both rows hand focus to the draft, which is where the prompt
               // continues once the menu has added to it.
               onAttachFiles={() => {
-                textareaRef.current?.focus();
+                editorRef.current?.focus();
                 void handleAttachFiles();
               }}
               onToggleVisualize={() => {
                 setVisualizeSelected(!visualizeSelected);
-                textareaRef.current?.focus();
+                editorRef.current?.focus();
               }}
             />
 
@@ -1899,6 +1930,12 @@ export default function PromptInput({
           }}
         />
       )}
+      <SelectionMenu
+        menu={draftEditing.menu}
+        onFormat={applyFormat}
+        onEdit={draftEditing.applyEdit}
+        onClose={draftEditing.closeMenu}
+      />
     </div>
   );
 }

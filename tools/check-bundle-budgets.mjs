@@ -9,9 +9,22 @@ import { join } from 'node:path';
 // the transcript digest, and the flyout view menu added ~6KB to the entry.
 // Raised from 680_000 for Mermaid 11.16.1's security fixes: its new optional
 // Cynefin diagram chunk is ~691KB; the initial renderer remains unchanged.
+// Raised from 1_295_000 for the markdown initiative: the shared renderer's GFM
+// tables and code cards, the live composer editor's wiring, and the sidebar
+// title presentation added ~14KB to the entry. The editor engine itself stays
+// lazy (ComposerEditor chunk, ~487KB).
+//
+// Raised again to 1_325_000 for link presentation (site marks, GitHub labels)
+// and the composer's right-click menu, ~7KB together. The headroom above the
+// current ~1_312_000 is deliberate: enough for ordinary work, small enough that
+// a genuinely large addition still has to be argued for here.
+//
+// initialCssBytes raised from 95_000 to 97_000 for the transcript polish: the
+// scroll-position edge fade on wide tables and code, hover-only scrollbars, and
+// the tightened typography and inline-code pill added ~0.9KB of CSS.
 const BUDGETS = {
-  initialRendererJsBytes: 1_295_000,
-  initialCssBytes: 95_000,
+  initialRendererJsBytes: 1_325_000,
+  initialCssBytes: 97_000,
   largestLazyChunkBytes: 700_000,
   duplicatePackageMaxBytes: 120_000,
 };

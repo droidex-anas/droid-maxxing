@@ -2,6 +2,7 @@ const {
   app,
   BrowserWindow,
   Menu,
+  clipboard,
   Notification,
   WebContentsView,
   dialog,
@@ -32,9 +33,11 @@ const { createPowerTier } = require('./powerTier.cjs');
 const files = require('./files.cjs');
 const attachments = require('./attachments.cjs');
 const localImages = require('./localImages.cjs');
+const favicons = require('./favicons.cjs');
 const { createSidecarSupervisor } = require('./sidecar.cjs');
 const { installRendererNavigationGuard } = require('./rendererSecurity.cjs');
 const { installApplicationMenu } = require('./applicationMenu.cjs');
+const { installContextMenu } = require('./contextMenu.cjs');
 const { createRendererOomRecovery, isRendererMemoryExit } = require('./rendererOomRecovery.cjs');
 const { autoUpdater } = require('electron-updater');
 const { createAppUpdater } = require('./appUpdater.cjs');
@@ -155,6 +158,11 @@ protocol.registerSchemesAsPrivileged([
     scheme: localImages.LOCAL_IMAGE_SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
   },
+  // Site icons for links in the transcript (see favicons.cjs).
+  {
+    scheme: favicons.FAVICON_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
 ]);
 // Overridable so a second dev instance (e.g. a feature worktree) can run beside
 // the main one without fighting over the Chromium profile lock.
@@ -190,6 +198,7 @@ app.whenReady().then(async () => {
   });
   registerIpc();
   registerLocalImageProtocol();
+  registerFaviconProtocol();
   createMainWindow();
   powerTier.start();
   const metricsTimer = setInterval(() => performanceMetrics.collect(), 30_000);
@@ -271,6 +280,14 @@ function createMainWindow() {
     shell.openExternal(url),
   );
   installMainRendererLifecycle(mainWindow.webContents);
+  installContextMenu({
+    Menu,
+    clipboard,
+    openExternal,
+    window: mainWindow,
+    webContents: mainWindow.webContents,
+    logError: (message) => console.error('[context-menu] %s', message),
+  });
 
   if (devStartUrl) mainWindow.loadURL(devStartUrl);
   else mainWindow.loadFile(rendererFile);
@@ -326,6 +343,36 @@ function registerLocalImageProtocol() {
       // useful when debugging, so keep it out of the UI and in the log.
       console.warn('Could not serve local image %s:', request.url, error);
       return new Response('Image unavailable', { status: 404 });
+    }
+  });
+}
+
+// Serves site icons for transcript links (see favicons.cjs). Default session
+// only, like local images: pages in the Browser pane cannot use the app to
+// fetch on their behalf.
+function registerFaviconProtocol() {
+  const store = favicons.createFaviconStore({
+    cacheDir: path.join(app.getPath('userData'), 'favicons'),
+    userAgent: session.defaultSession.getUserAgent(),
+    logError: (message) => console.warn('[favicon] %s', message),
+  });
+  session.defaultSession.protocol.handle(favicons.FAVICON_SCHEME, async (request) => {
+    try {
+      const icon = await store.load(favicons.faviconRequestHost(request.url));
+      if (!icon) return new Response('No icon', { status: 404 });
+      // The same inert-body headers as local images: a third-party SVG stays an
+      // image even if something navigates to it directly.
+      return new Response(icon.data, {
+        headers: {
+          'content-type': icon.mime,
+          'cache-control': 'max-age=86400',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+          'x-content-type-options': 'nosniff',
+        },
+      });
+    } catch (error) {
+      console.warn('Could not serve favicon %s:', request.url, error);
+      return new Response('Icon unavailable', { status: 404 });
     }
   });
 }
