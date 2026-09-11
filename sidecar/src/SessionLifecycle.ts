@@ -534,6 +534,16 @@ export class SessionLifecycle {
   }
 
   async closeAll(): Promise<void> {
+    // One concurrent kill pass before the serialized closes. Each close kills
+    // its own processes too (idempotent, and the only owner when a single
+    // session closes), but paying the kill grace one session at a time would
+    // overrun the sidecar's force-exit budget and leave the last session's
+    // dev server running — and its history unflushed.
+    const live = this.dependencies.registry
+      .liveSessionsSnapshot()
+      .map((liveSession) => liveSession.summary.appSessionId);
+    await Promise.allSettled(live.map((id) => this.dependencies.agentProcesses.killSession(id)));
+    // Re-read: the kill pass awaited, so the live set may have moved.
     const scheduled = this.dependencies.registry.liveSessionsSnapshot().map((liveSession) => ({
       liveSession,
       close: this.beginClose(liveSession, 'discard-pending'),

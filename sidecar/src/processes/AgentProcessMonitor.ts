@@ -14,6 +14,10 @@ export const TICK_MS = 2000;
 const PORT_SCAN_EVERY = 3;
 const MIN_AGE_MS = 1500;
 const KILL_GRACE_MS = 3000;
+// Shutdown closes every session, and the sidecar force-exits a few seconds
+// later: waiting out the whole grace for a process that already died would
+// spend the entire budget on the first session.
+const KILL_POLL_MS = 150;
 const WRAPPER = /^(?:\S*\/)?(?:sh|zsh|bash|fish|dash)\s+-l?c\b/;
 
 export function displayNameFor(command: string): string {
@@ -48,8 +52,13 @@ function sameList(a: AgentProcess[], b: AgentProcess[]): boolean {
 
 export class AgentProcessMonitor {
   private readonly roots = new Map<number, string>(); // rootPid -> appSessionId
+  // Roots inherited from a provider that is about to exit (compaction). Unlike
+  // a provider root, the process itself is one of the session's, so it belongs
+  // in the published list rather than only its children.
+  private readonly adoptedRoots = new Set<number>();
   private readonly current = new Map<string, AgentProcess[]>();
   private readonly descendants = new Map<string, ProcessRecord[]>();
+  private rootStartedAt = new Map<number, number>(); // rootPid -> startedAt, last scan
   private ports = new Map<number, number[]>();
   private ticks = 0;
   private timer: { cancel(): void } | null = null;
@@ -64,9 +73,30 @@ export class AgentProcessMonitor {
     this.arm();
   }
 
+  // Compaction retires the provider that spawned this session's processes, so
+  // re-root its children before it goes: once it exits they are reparented to
+  // launchd and nothing can find them from its pid again.
+  async adoptDescendantsAsRoots(appSessionId: string, rootPid: number): Promise<void> {
+    let table: ProcessRecord[];
+    try {
+      table = await this.d.listProcesses();
+    } catch {
+      // Nothing to adopt from; the session keeps whatever it already had.
+      return;
+    }
+    // Direct children only — the walk from each of them is transitive, and a
+    // grandchild tracked as well would be listed twice.
+    for (const row of table) {
+      if (row.ppid !== rootPid) continue;
+      this.adoptedRoots.add(row.pid);
+      this.track(appSessionId, row.pid);
+    }
+  }
+
   untrack(rootPid: number): void {
     const appSessionId = this.roots.get(rootPid);
     this.roots.delete(rootPid);
+    this.adoptedRoots.delete(rootPid);
     if (appSessionId !== undefined && ![...this.roots.values()].includes(appSessionId)) {
       // That was the session's last tracked root: drop its snapshot so
       // processesFor/hasProcesses stop reporting stale processes, and clear
@@ -83,14 +113,31 @@ export class AgentProcessMonitor {
     return this.current.get(appSessionId) ?? [];
   }
 
+  // Deliberately the published list, not the raw descendants: a process the
+  // user cannot see (a shell wrapper, an MCP stdio server, an infant) must
+  // never be the reason a session refuses to retire.
   hasProcesses(appSessionId: string): boolean {
-    return (this.descendants.get(appSessionId)?.length ?? 0) > 0;
+    return this.processesFor(appSessionId).length > 0;
   }
 
   snapshotPids(): { appSessionId: string; pid: number; startedAt: number }[] {
     const out: { appSessionId: string; pid: number; startedAt: number }[] = [];
+    const seen = new Set<number>();
+    // Roots first, so `killRecorded` (which signals deepest-last) reaps a
+    // parent only after the children it owns. Without them a sidecar that was
+    // killed outright leaves the previous run's `droid` processes forever.
+    for (const [pid, appSessionId] of this.roots) {
+      const startedAt = this.rootStartedAt.get(pid);
+      if (startedAt === undefined) continue;
+      seen.add(pid);
+      out.push({ appSessionId, pid, startedAt });
+    }
     for (const [appSessionId, rows] of this.descendants) {
-      for (const row of rows) out.push({ appSessionId, pid: row.pid, startedAt: row.startedAt });
+      for (const row of rows) {
+        if (seen.has(row.pid)) continue;
+        seen.add(row.pid);
+        out.push({ appSessionId, pid: row.pid, startedAt: row.startedAt });
+      }
     }
     return out;
   }
@@ -120,7 +167,11 @@ export class AgentProcessMonitor {
     this.publish(appSessionId, []);
     // Same cleanup `untrack` does when a session loses its last root: the
     // session is gone, so nothing should keep reporting an empty list for it.
-    for (const [pid, id] of this.roots) if (id === appSessionId) this.roots.delete(pid);
+    for (const [pid, id] of this.roots) {
+      if (id !== appSessionId) continue;
+      this.roots.delete(pid);
+      this.adoptedRoots.delete(pid);
+    }
     this.descendants.delete(appSessionId);
     this.current.delete(appSessionId);
     if (this.roots.size === 0) this.disarm();
@@ -149,6 +200,7 @@ export class AgentProcessMonitor {
   dispose(): void {
     this.disarm();
     this.roots.clear();
+    this.adoptedRoots.clear();
   }
 
   private arm(): void {
@@ -180,9 +232,14 @@ export class AgentProcessMonitor {
       bySession.set(appSessionId, list);
     }
     let sawNew = false;
+    const byPid = new Map(table.map((row) => [row.pid, row]));
     const computed = new Map<string, ProcessRecord[]>();
     for (const [appSessionId, rootPids] of bySession) {
       const rows = descendantsOf(table, rootPids);
+      for (const pid of rootPids) {
+        const row = this.adoptedRoots.has(pid) ? byPid.get(pid) : undefined;
+        if (row) rows.unshift(row);
+      }
       const known = new Set((this.descendants.get(appSessionId) ?? []).map((row) => row.pid));
       if (rows.some((row) => !known.has(row.pid))) sawNew = true;
       computed.set(appSessionId, rows);
@@ -215,6 +272,7 @@ export class AgentProcessMonitor {
     try {
       const table = await this.d.listProcesses();
       now = this.d.now();
+      this.pruneDeadAdoptedRoots(table);
       const { computed, sawNew } = this.computeDescendants(table);
       const nextTick = this.ticks + 1;
       // Fetch ports before committing anything, so a rejection here leaves
@@ -234,6 +292,11 @@ export class AgentProcessMonitor {
 
       this.ticks = nextTick;
       this.ports = nextPorts;
+      this.rootStartedAt = new Map(
+        table.flatMap((row) =>
+          this.roots.has(row.pid) ? [[row.pid, row.startedAt] as const] : [],
+        ),
+      );
       this.descendants.clear();
       for (const [id, rows] of computed) this.descendants.set(id, rows);
       this.lastScanFailed = false;
@@ -270,25 +333,44 @@ export class AgentProcessMonitor {
     this.current.set(appSessionId, processes);
   }
 
+  // An adopted root is a process whose lifetime we don't own. Drop it once it
+  // exits, or a recycled pid would later re-attach a stranger to this session.
+  private pruneDeadAdoptedRoots(table: readonly ProcessRecord[]): void {
+    if (this.adoptedRoots.size === 0) return;
+    const alive = new Set(table.map((row) => row.pid));
+    for (const pid of this.adoptedRoots) {
+      if (alive.has(pid)) continue;
+      this.adoptedRoots.delete(pid);
+      this.roots.delete(pid);
+    }
+  }
+
   // Deepest first so a parent cannot respawn a child we already signalled.
+  // Returns as soon as every target is gone; the grace is a cap, not a sleep,
+  // because shutdown pays this for every session inside a few seconds.
   private async killTree(rows: readonly ProcessRecord[]): Promise<void> {
     if (rows.length === 0) return;
     const ordered = [...rows].reverse();
     for (const row of ordered) this.signal(row.pid, 'SIGTERM');
-    await new Promise<void>((resolve) => {
-      this.d.schedule(resolve, KILL_GRACE_MS);
-    });
-    let table: ProcessRecord[];
-    try {
-      table = await this.d.listProcesses();
-    } catch {
-      // Can't confirm who's still alive; skip the SIGKILL sweep rather than
-      // risk signalling a pid that's since been reused. The next scan will
-      // pick up any survivor.
-      return;
+    let survivors: ProcessRecord[] = [];
+    for (let waited = 0; waited < KILL_GRACE_MS; waited += KILL_POLL_MS) {
+      await new Promise<void>((resolve) => {
+        this.d.schedule(resolve, KILL_POLL_MS);
+      });
+      let table: ProcessRecord[];
+      try {
+        table = await this.d.listProcesses();
+      } catch {
+        // Can't confirm who's still alive; skip the SIGKILL sweep rather than
+        // risk signalling a pid that's since been reused. The next scan will
+        // pick up any survivor.
+        return;
+      }
+      const alive = new Set(table.map((row) => row.pid));
+      survivors = ordered.filter((row) => alive.has(row.pid));
+      if (survivors.length === 0) return;
     }
-    const alive = new Set(table.map((row) => row.pid));
-    for (const row of ordered) if (alive.has(row.pid)) this.signal(row.pid, 'SIGKILL');
+    for (const row of survivors) this.signal(row.pid, 'SIGKILL');
   }
 
   private signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void {

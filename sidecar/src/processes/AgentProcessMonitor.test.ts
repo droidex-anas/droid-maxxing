@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AgentProcessMonitor, displayNameFor } from './AgentProcessMonitor.js';
+import { AgentProcessMonitor, TICK_MS, displayNameFor } from './AgentProcessMonitor.js';
 import type { ProcessRecord } from './processTree.js';
 
 function harness(rows: ProcessRecord[], ports = new Map<number, number[]>()) {
@@ -17,7 +17,10 @@ function harness(rows: ProcessRecord[], ports = new Map<number, number[]>()) {
     },
     emit: (id, processes) => emitted.push([id, processes]),
     schedule: (cb, ms) => {
-      if (ms === 3000) {
+      // Only the scan tick is held for `tick()`; the kill grace and the 150ms
+      // liveness polls inside it fire immediately, and `kill` above drops the
+      // pid from the table so a poll sees it gone.
+      if (ms !== TICK_MS) {
         setImmediate(cb);
         return { cancel() {} };
       }
@@ -238,7 +241,7 @@ test('stop resolves true and sends only SIGTERM when the post-grace listProcesse
     kill: (pid, signal) => killed.push([pid, signal]),
     emit: () => {},
     schedule: (cb, ms) => {
-      if (ms === 3000) {
+      if (ms !== TICK_MS) {
         setImmediate(cb);
         return { cancel() {} };
       }
@@ -364,4 +367,86 @@ test('killRecorded resolves without killing anything when listProcesses rejects'
 
   await assert.doesNotReject(() => monitor.killRecorded([{ pid: 800, startedAt: 0 }]));
   assert.deepEqual(killed, []);
+});
+
+test('hasProcesses ignores descendants the user can never see', async () => {
+  const hidden: ProcessRecord[] = [
+    { pid: 600, ppid: 1, startedAt: 0, command: '/usr/local/bin/droid exec' },
+    { pid: 700, ppid: 600, startedAt: 0, command: '/bin/zsh -c npm run dev' },
+    { pid: 900, ppid: 600, startedAt: 99_500, command: 'node infant.js' },
+  ];
+  const h = harness(hidden);
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+
+  // A shell wrapper and a process too young to publish: nothing the user
+  // could stop, so nothing that may hold the session open.
+  assert.deepEqual(h.monitor.processesFor('s1'), []);
+  assert.equal(h.monitor.hasProcesses('s1'), false);
+});
+
+test('snapshotPids journals the tracked roots as well as their descendants', async () => {
+  const h = harness(rows);
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+
+  assert.deepEqual(h.monitor.snapshotPids(), [
+    { appSessionId: 's1', pid: 600, startedAt: 0 },
+    { appSessionId: 's1', pid: 700, startedAt: 0 },
+    { appSessionId: 's1', pid: 800, startedAt: 0 },
+  ]);
+});
+
+test('adopted roots survive the root that spawned them and still belong to the session', async () => {
+  const h = harness(rows);
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+
+  // What compaction does: re-root the old provider's children, then drop it.
+  await h.monitor.adoptDescendantsAsRoots('s1', 600);
+  h.monitor.untrack(600);
+  h.setRows(
+    rows
+      .filter((row) => row.pid !== 600)
+      .map((row) => (row.ppid === 600 ? { ...row, ppid: 1 } : row)),
+  );
+  await h.monitor.scan();
+
+  assert.deepEqual(
+    h.monitor.processesFor('s1').map((entry) => entry.pid),
+    [800],
+  );
+  assert.equal(h.monitor.hasProcesses('s1'), true);
+
+  await h.monitor.killSession('s1');
+  assert.deepEqual(
+    h.killed.map(([pid]) => pid),
+    [800, 700],
+  );
+});
+
+test('killTree SIGKILLs only what is still alive when the grace expires', async () => {
+  const killed: Array<[number, string]> = [];
+  const monitor = new AgentProcessMonitor({
+    listProcesses: async () => rows, // nothing ever dies
+    listListeningPorts: async () => new Map(),
+    kill: (pid, signal) => killed.push([pid, signal]),
+    emit: () => {},
+    schedule: (cb, ms) => {
+      if (ms !== TICK_MS) setImmediate(cb);
+      return { cancel() {} };
+    },
+    now: () => 100_000,
+  });
+  monitor.track('s1', 600);
+  await monitor.scan();
+
+  await monitor.killSession('s1');
+
+  assert.deepEqual(killed, [
+    [800, 'SIGTERM'],
+    [700, 'SIGTERM'],
+    [800, 'SIGKILL'],
+    [700, 'SIGKILL'],
+  ]);
 });

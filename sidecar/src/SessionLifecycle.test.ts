@@ -1000,6 +1000,32 @@ test('close follows ownership order and closeAll closes its initial snapshot', a
   assert.equal(all.registry.liveSessionsSnapshot().length, 0);
 });
 
+test('closeAll kills every session in one pass before the serialized closes', async () => {
+  const h = createHarness();
+  const first = queueCreate(h, 'first');
+  await h.lifecycle.create(createCommand());
+  await first.waitForPrompts(1);
+  const second = queueCreate(h, 'second');
+  await h.lifecycle.create(createCommand());
+  await second.waitForPrompts(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  h.calls.length = 0;
+
+  await h.lifecycle.closeAll();
+
+  // Shutdown is on a budget the sidecar force-exits: the kill grace has to be
+  // paid once for all sessions, not once per session. Each close still kills
+  // its own (a single close has no other owner), which is a no-op by then.
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === 'processes.killSession' || call.method === 'session.close')
+      .map(
+        (call) => `${call.method === 'session.close' ? 'close' : 'kill'}:${String(call.args[0])}`,
+      ),
+    ['kill:first', 'kill:second', 'kill:first', 'close:first', 'kill:second', 'close:second'],
+  );
+});
+
 test('close waits for the authoritative post-close session list', async () => {
   const harness = createHarness();
   const provider = queueCreate(harness, 'await-list');

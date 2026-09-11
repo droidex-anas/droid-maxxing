@@ -47,6 +47,7 @@ function createHarness(
     failDriveSetup?: 'beginTurn' | 'commit' | 'startPolling';
     failFlushStreamingOnce?: boolean;
     failSettleStreamingOnce?: boolean;
+    failResolveLimitOnce?: boolean;
     missReplayChildOnce?: boolean;
     deferDurabilityForStatus?: PersistedChildSession['status'];
     childRuntimeIdleMs?: number;
@@ -62,6 +63,7 @@ function createHarness(
   let failDriveSetup = options.failDriveSetup;
   let failFlushStreaming = options.failFlushStreamingOnce;
   let failSettleStreaming = options.failSettleStreamingOnce;
+  let failResolveLimit = options.failResolveLimitOnce;
   let deferDurabilityForStatus = options.deferDurabilityForStatus;
   let clock = 100;
   const throwDriveSetup = (stage: NonNullable<typeof options.failDriveSetup>) => {
@@ -83,7 +85,14 @@ function createHarness(
   let parent = parentLease(parentId, calls);
   const dependencies: ChildSessionsDependencies = {
     runtime,
-    agentProcesses: { track: () => undefined, untrack: () => undefined },
+    agentProcesses: {
+      track: (appSessionId, pid) => {
+        calls.push({ target: 'runtime', method: 'processes.track', args: [appSessionId, pid] });
+      },
+      untrack: (pid) => {
+        calls.push({ target: 'cleanup', method: 'processes.untrack', args: [pid] });
+      },
+    },
     registry: { getLive: (id) => (id === parentId ? parent : undefined) },
     history,
     timeline: {
@@ -166,7 +175,11 @@ function createHarness(
         return false;
       },
       rearmModelChangedChild: () => Promise.resolve(),
-      resolveLimit: () => Promise.resolve(800),
+      resolveLimit: () => {
+        if (!failResolveLimit) return Promise.resolve(800);
+        failResolveLimit = false;
+        return Promise.reject(new Error('limit lookup failed'));
+      },
     },
     resolveDefaultSettings: () => ({
       modelId: 'model-default',
@@ -1773,6 +1786,33 @@ test('interrupt during in-flight admission delivers nothing', async () => {
   assert.equal(reported?.queued, undefined);
   assert.notEqual(reported?.status, 'running');
   assert.equal(h.owner.counts().queued, 0);
+});
+
+test('an open abandoned after its provider loaded leaves no tracked process', async () => {
+  // The context-limit lookup fails after the provider loaded: the open throws,
+  // closes the provisional session, and never installs a runtime. Nothing will
+  // ever call `closeRuntime` for it, so nothing may have been tracked.
+  const abandoned = childRecord('abandoned', 'provider-abandoned');
+  const healthy = childRecord('healthy', 'provider-healthy');
+  const h = createHarness([abandoned, healthy], { failResolveLimitOnce: true });
+  h.runtime.processIds.set('provider-abandoned', 811);
+  h.runtime.processIds.set('provider-healthy', 822);
+
+  await h.open(abandoned);
+
+  assert.ok(h.sequence.includes('child.error:child.open_failed'));
+  assert.deepEqual(
+    h.calls.filter((call) => call.method.startsWith('processes.')),
+    [],
+  );
+
+  // An open that reaches the install point is still tracked, under the parent.
+  await h.open(healthy);
+
+  assert.deepEqual(
+    h.calls.filter((call) => call.method.startsWith('processes.')).map((call) => call.args),
+    [['parent', 822]],
+  );
 });
 
 test('a queued child interrupted then re-prompted delivers only the new prompt', async () => {

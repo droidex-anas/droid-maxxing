@@ -28,7 +28,7 @@ export interface SessionCompactionExecutionDependencies {
   context: Pick<SessionContext, 'refresh' | 'preserveUsage' | 'recordCompaction'>;
   timeline: Pick<SessionTimeline, 'appendCompaction' | 'appendStatus'>;
   runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf'>;
-  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack'>;
+  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack' | 'adoptDescendantsAsRoots'>;
   makePermissionHandler(ref: { id: string }): PermissionHandler;
   makeAskUserHandler(ref: { id: string }): AskUserHandler;
   emitError(error: Omit<Extract<ServerEvent, { type: 'error' }>, 'type'>): void;
@@ -139,14 +139,24 @@ export class SessionCompactionExecution {
     const replacementPid = this.dependencies.runtime.processIdOf(replacement);
     if (replacementPid !== undefined)
       this.dependencies.agentProcesses.track(appSessionId, replacementPid);
-    const oldPid = this.dependencies.runtime.processIdOf(oldSession);
+    const rawOldPid = this.dependencies.runtime.processIdOf(oldSession);
+    // Only a pid the replacement does not share is actually going away.
+    const oldPid = rawOldPid !== replacementPid ? rawOldPid : undefined;
     let oldSessionRetired = false;
     const retireOldSession = async (): Promise<void> => {
       if (oldSessionRetired) return;
       oldSessionRetired = true;
+      // A dev server started before this compaction is a child of the old
+      // provider. It should outlive the compaction, but once its parent exits
+      // it is reparented to launchd and invisible, so re-root it first: while
+      // the old provider is still alive it is still findable from its pid.
+      if (oldPid !== undefined) {
+        await this.dependencies.agentProcesses
+          .adoptDescendantsAsRoots(appSessionId, oldPid)
+          .catch(ignoreError);
+      }
       await oldSession.close().catch(ignoreError);
-      if (oldPid !== undefined && oldPid !== replacementPid)
-        this.dependencies.agentProcesses.untrack(oldPid);
+      if (oldPid !== undefined) this.dependencies.agentProcesses.untrack(oldPid);
     };
     try {
       this.effects.subscribePrimary(liveSession);

@@ -45,12 +45,11 @@ import {
 import { HistoryPersistence } from './HistoryPersistence.js';
 import { serverEventForHistoryStatus } from './historyStatusEvents.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
+import type { AgentProcessMonitor } from './processes/AgentProcessMonitor.js';
 import {
-  AgentProcessMonitor,
-  type AgentProcessMonitorDependencies,
-} from './processes/AgentProcessMonitor.js';
-import { defaultCommandRunner, listProcesses } from './processes/processTree.js';
-import { listListeningPorts } from './processes/listeningPorts.js';
+  createAgentProcessMonitor,
+  type AgentProcessHost,
+} from './processes/createAgentProcessMonitor.js';
 import { SessionAdoption } from './sessionAdoption.js';
 import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
 import { droidexUserDataDir } from './droidexPaths.js';
@@ -162,13 +161,7 @@ export interface SessionManagerDependencies {
   // delta coalescing and assert appended events synchronously; the merge
   // behavior itself is covered by SessionTimeline unit tests.
   streamingCoalesceMs?: number;
-  // The OS surface the agent-process monitor drives. Injectable so integration
-  // tests can script a process table instead of reading the host's real `ps`
-  // and `lsof` — and never signal one of the host's own pids.
-  agentProcessHost?: Pick<
-    AgentProcessMonitorDependencies,
-    'listProcesses' | 'listListeningPorts' | 'kill'
-  >;
+  agentProcessHost?: AgentProcessHost;
   maxLiveRuntimes?: number;
   maxQueuedRuntimes?: number;
   childRuntimeIdleMs?: number;
@@ -313,15 +306,8 @@ export class SessionManager {
       startWatcher = startSessionFileWatcher;
     }
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
-    const agentProcessHost = options.dependencies?.agentProcessHost ?? {
-      listProcesses: () => listProcesses(defaultCommandRunner, Date.now),
-      listListeningPorts: () => listListeningPorts(defaultCommandRunner),
-      kill: (pid, signal) => {
-        process.kill(pid, signal);
-      },
-    };
-    this.agentProcesses = new AgentProcessMonitor({
-      ...agentProcessHost,
+    this.agentProcesses = createAgentProcessMonitor({
+      ...options.dependencies?.agentProcessHost,
       emit: (appSessionId, processes) => {
         // The monitor must never see a bridge failure: it would read as a
         // scan failure and stall the next publish.
@@ -334,16 +320,6 @@ export class SessionManager {
           console.warn('SessionManager: could not publish agent processes', error);
         }
       },
-      schedule: (callback, ms) => {
-        const timer = setTimeout(callback, ms);
-        timer.unref();
-        return {
-          cancel: () => {
-            clearTimeout(timer);
-          },
-        };
-      },
-      now: Date.now,
     });
     this.mcpSettings = new McpSettings(
       (cwd) => {

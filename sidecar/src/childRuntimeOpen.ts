@@ -233,7 +233,6 @@ export async function installChildRuntime(input: {
     const result = await awaitOpenStep(attempt, load, (late) => late.close().catch(ignoreError));
     if (result === CHILD_OPEN_CANCELLED) return;
     loaded = result;
-    trackChildProcess(host, identity.parentAppSessionId, loaded);
     attempt.provisionalSession = loaded;
     await bindLoadedChildRuntime({
       parent,
@@ -308,6 +307,12 @@ async function bindLoadedChildRuntime(input: {
   };
   child.runtime = runtime;
   attempt.provisionalSession = undefined;
+  // Tracked at the install point, not at load: every abandonment path above
+  // (supersession, cancellation, a throw) closes the provisional session
+  // without an untrack, so a root tracked earlier would never be released.
+  // `closeRuntime` is the one owner of the untrack, and it only sees runtimes
+  // that reached here.
+  trackChildProcess(host, identity.parentAppSessionId, loaded);
   child.queued = false;
   child.queuedRequestId = undefined;
   child.modelId = settings.modelId;
