@@ -205,6 +205,29 @@ test('sync measure skips resize when the cached size already matches', () => {
   assert.deepEqual(calls, [[3, 40]]);
 });
 
+test('a width change re-measures the mounted rows and keeps the rest', () => {
+  const { virtualizer } = createListEngine({ items: history(80), scrollTop: 2_000 });
+  virtualizer.getVirtualItems();
+  measureVariedRows(virtualizer, 80);
+  virtualizer.getVirtualItems();
+  const measuredTotal = virtualizer.getTotalSize();
+  assert.ok(measuredTotal > estimatedListSize(80));
+
+  // A sidebar toggle or context panel reflows every row, but only the mounted
+  // ones are in the DOM to measure; the rest must keep the height they have.
+  for (const index of virtualizer.getVirtualIndexes()) {
+    virtualizer.resizeItem(index, variedRowHeight(index));
+  }
+  virtualizer.getVirtualItems();
+  assert.equal(virtualizer.getTotalSize(), measuredTotal);
+
+  // Clearing the whole size cache instead throws away every unmounted row's
+  // height, collapsing the list back towards the estimate.
+  virtualizer.measure();
+  virtualizer.getVirtualItems();
+  assert.ok(virtualizer.getTotalSize() < measuredTotal);
+});
+
 test('row measure reads the index attribute and rounds layout height', () => {
   const row = {
     dataset: { index: '12' },
