@@ -22,7 +22,7 @@ export function StepLabel({ children }: { children: ReactNode }) {
 export function StepTitle({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="mb-6">
-      <h2 className="text-[18px] font-semibold tracking-tight text-droid-text">{title}</h2>
+      <h2 className="text-[16px] font-semibold tracking-tight text-droid-text">{title}</h2>
       {sub && <p className="mt-2 text-[13px] leading-relaxed text-droid-text-secondary">{sub}</p>}
     </div>
   );

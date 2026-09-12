@@ -72,7 +72,7 @@ export function BrowserFocusWorkspace({
                     className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-droid-green' : 'bg-droid-text-muted/40'}`}
                   />
                   <span className="flex-1 text-left">Recent activity</span>
-                  <span className="text-[10px] font-normal tabular-nums text-droid-text-muted/60">
+                  <span className="text-[11px] font-normal tabular-nums text-droid-text-muted/60">
                     {live ? 'Working' : `${String(recent.length)} recent`}
                   </span>
                   {activityOpen ? (
@@ -100,7 +100,7 @@ export function BrowserFocusWorkspace({
                                 key={event.id}
                                 className="flex h-7 min-w-0 items-center gap-2 rounded-lg px-2 text-[11px] hover:bg-droid-surface/35"
                               >
-                                <span className="w-12 shrink-0 text-[10px] font-medium text-droid-text-muted/60">
+                                <span className="w-12 shrink-0 text-[11px] font-medium text-droid-text-muted/60">
                                   {activityAuthor(event)}
                                 </span>
                                 <span title={text} className="truncate text-droid-text-muted">

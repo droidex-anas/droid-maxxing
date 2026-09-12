@@ -177,7 +177,7 @@ export function UserBubble({
   return (
     <div className="group/msg flex flex-col items-end gap-1.5">
       {event.steered && (
-        <span className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-droid-text-muted">
+        <span className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-droid-text-muted">
           <svg
             className="h-3 w-3"
             viewBox="0 0 16 16"

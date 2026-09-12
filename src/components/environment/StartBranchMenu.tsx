@@ -216,7 +216,7 @@ export function StartBranchMenu({
             )}
           </div>
           <div className="max-h-[280px] overflow-y-auto py-1">
-            <div className="px-2.5 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+            <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
               Branches
             </div>
             {locals.map((b) => (
@@ -254,7 +254,7 @@ export function StartBranchMenu({
             ))}
 
             {remotes.length > 0 && (
-              <div className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+              <div className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
                 Remote
               </div>
             )}

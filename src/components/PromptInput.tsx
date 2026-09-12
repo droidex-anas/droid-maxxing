@@ -1510,14 +1510,14 @@ export default function PromptInput({
 
         {missionPreview ? (
           <div
-            className="absolute -top-5 left-1 flex items-center gap-1.5 text-[10px] font-medium tracking-wide"
+            className="absolute -top-5 left-1 flex items-center gap-1.5 text-[11px] font-medium tracking-wide"
             style={{ color: ACCENT }}
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: ACCENT }} />
             Mission preview
           </div>
         ) : isSpecMode ? (
-          <div className="absolute -top-5 left-1 text-[10px] font-medium text-droid-orange tracking-wide">
+          <div className="absolute -top-5 left-1 text-[11px] font-medium text-droid-orange tracking-wide">
             SPEC MODE
           </div>
         ) : null}
@@ -1765,7 +1765,7 @@ export default function PromptInput({
             <div className="flex-1 min-w-0" />
 
             {queue.length > 0 ? (
-              <span className="rounded-md border border-droid-border bg-droid-elevated/70 px-1.5 py-0.5 tabular-nums text-[10px] text-droid-text-secondary">
+              <span className="rounded-md border border-droid-border bg-droid-elevated/70 px-1.5 py-0.5 tabular-nums text-[11px] text-droid-text-secondary">
                 {queue.length} queued
               </span>
             ) : null}

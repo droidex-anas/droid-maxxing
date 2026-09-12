@@ -56,7 +56,7 @@ export function UtilityToolPicker({
             <span className="min-w-0 flex-1 truncate">{option.label}</span>
             <kbd
               className={`shrink-0 rounded-md bg-droid-elevated font-mono text-droid-text-muted ${
-                spacious ? 'px-2 py-0.5 text-[10px]' : 'px-1.5 py-0.5 text-[9.5px]'
+                spacious ? 'px-2 py-0.5 text-[11px]' : 'px-1.5 py-0.5 text-[11px]'
               }`}
             >
               {option.shortcut}

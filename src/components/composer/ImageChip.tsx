@@ -32,7 +32,7 @@ export function ImageChip({
           // once, and an anonymous icon says nothing about which one is gone.
           <span className="flex h-full w-full flex-col items-center justify-center gap-0.5 px-1 text-droid-text-muted">
             <ImageOff className="h-4 w-4 shrink-0" />
-            <span className="max-w-full truncate text-[9px] leading-none">{label}</span>
+            <span className="max-w-full truncate text-[11px] leading-none">{label}</span>
           </span>
         ) : (
           <img

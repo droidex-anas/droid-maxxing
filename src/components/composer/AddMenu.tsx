@@ -71,7 +71,7 @@ function MenuRow({
 function SectionTitle({ children, first = false }: { children: string; first?: boolean }) {
   return (
     <div
-      className={`px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/50 ${
+      className={`px-2.5 pb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/50 ${
         first ? 'pt-1' : 'pt-2.5'
       }`}
     >

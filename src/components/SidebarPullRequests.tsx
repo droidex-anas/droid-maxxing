@@ -81,7 +81,7 @@ export function SidebarPullRequests({
               <span className="min-w-0 flex-1 truncate">
                 #{pr.number} {pr.title}
               </span>
-              <span className="shrink-0 text-[10px] text-droid-text-muted">
+              <span className="shrink-0 text-[11px] text-droid-text-muted">
                 {prKindLabel(kind)}
               </span>
             </button>

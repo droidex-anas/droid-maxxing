@@ -23,7 +23,7 @@ function ChatStatus({
 }) {
   const label = worktreeChatStatus(session, activeAppSessionId);
   return (
-    <span className="rounded bg-droid-elevated px-1.5 py-0.5 text-[10px] text-droid-text-muted">
+    <span className="rounded bg-droid-elevated px-1.5 py-0.5 text-[11px] text-droid-text-muted">
       {label}
     </span>
   );
@@ -46,7 +46,7 @@ function WorktreeAction({
     return (
       <span
         title="An open or working chat is using this worktree"
-        className="shrink-0 rounded-full bg-droid-elevated/70 px-2 py-0.5 text-[10px] text-droid-text-muted"
+        className="shrink-0 rounded-full bg-droid-elevated/70 px-2 py-0.5 text-[11px] text-droid-text-muted"
       >
         in use
       </span>
@@ -102,7 +102,7 @@ function WorktreeSummary({
           </span>
           {isMerged && <GitHubMergedIcon />}
           {pullRequest && (
-            <span className="rounded-full border border-droid-accent/15 bg-droid-accent/[0.07] px-1.5 py-0.5 text-[10px] text-droid-accent">
+            <span className="rounded-full border border-droid-accent/15 bg-droid-accent/[0.07] px-1.5 py-0.5 text-[11px] text-droid-accent">
               #{pullRequest.number}{' '}
               {pullRequest.isDraft ? 'draft' : pullRequest.state.toLowerCase()}
             </span>

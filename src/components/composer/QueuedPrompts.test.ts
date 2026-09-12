@@ -40,7 +40,7 @@ test('a long prompt is collapsed to a clamped preview', () => {
 test('one queued image renders a thumbnail without a count badge', () => {
   const html = render([prompt({ files: ['/tmp/attach/paste-1.png', '/src/index.ts'] })]);
   assert.match(html, /<img src="droidex-img:\/\/local\/\?p=%2Ftmp%2Fattach%2Fpaste-1\.png"/);
-  assert.doesNotMatch(html, /text-\[8px\]/);
+  assert.doesNotMatch(html, /min-w-3\.5/);
 });
 
 test('several queued images collapse to one thumbnail with a count badge', () => {
@@ -49,7 +49,7 @@ test('several queued images collapse to one thumbnail with a count badge', () =>
   ]);
   assert.equal(html.match(/<img src="droidex-img:\/\/local/g)?.length, 1);
   assert.match(html, /<img src="droidex-img:\/\/local\/\?p=%2Ftmp%2Fa\.png"/);
-  assert.match(html, /text-\[8px\][^>]*">3</);
+  assert.match(html, /min-w-3\.5[^>]*">3</);
 });
 
 test('a queued non-image file renders a FileChip', () => {
@@ -71,7 +71,7 @@ test('queued mixed attachments keep paste order', () => {
   assert.ok(pdf >= 0 && img >= 0 && spec >= 0);
   assert.ok(pdf < img && img < spec);
   assert.equal(html.match(/<img src="droidex-img:\/\/local/g)?.length, 1);
-  assert.match(html, /text-\[8px\][^>]*">2</);
+  assert.match(html, /min-w-3\.5[^>]*">2</);
 });
 
 test('queued duplicate native paths still render two chips', () => {

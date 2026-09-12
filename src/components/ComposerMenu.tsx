@@ -85,7 +85,7 @@ export default function ComposerMenu({
           className="absolute bottom-full left-0 right-0 z-50 mb-2 max-h-72 overflow-y-auto rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
         >
           {triggerKind === 'file' && (
-            <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/55">
+            <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/55">
               Files{filesLoading ? ' · Loading' : ''}
             </div>
           )}
@@ -104,7 +104,7 @@ export default function ComposerMenu({
             };
             const sectionHeader = section ? (
               <div
-                className={`px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/50 ${
+                className={`px-2.5 pb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/50 ${
                   i === 0 ? 'pt-1' : 'pt-2.5'
                 }`}
               >

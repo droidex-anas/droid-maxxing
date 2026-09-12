@@ -153,13 +153,13 @@ export function AutomationProposalCard({
     >
       <div className="px-4 pb-3 pt-3.5">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-droid-text-muted">
+          <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-droid-text-muted">
             DROIDEX automation
           </span>
           <StateIndicator state={state} />
         </div>
         {scheduledAutomationId && workingDraft ? (
-          <h3 className="mt-2 text-[15px] font-medium leading-6 tracking-[-0.01em] text-droid-text">
+          <h3 className="mt-2 text-[16px] font-medium leading-6 tracking-[-0.01em] text-droid-text">
             {workingDraft.title}
           </h3>
         ) : (
@@ -171,7 +171,7 @@ export function AutomationProposalCard({
             disabled={!workingDraft}
             placeholder={workingDraft ? 'Automation title' : 'Preparing automation'}
             aria-label="Automation title"
-            className="mt-2 w-full bg-transparent text-[15px] font-medium leading-6 tracking-[-0.01em] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted disabled:cursor-default"
+            className="mt-2 w-full bg-transparent text-[16px] font-medium leading-6 tracking-[-0.01em] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted disabled:cursor-default"
           />
         )}
         <p className="mt-1 line-clamp-3 text-[13px] leading-5 text-droid-text-muted">

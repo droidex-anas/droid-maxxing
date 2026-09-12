@@ -243,7 +243,7 @@ export function AutomationsView({
           <div className="flex items-start justify-between gap-6">
             <div className="min-w-0">
               <div className="flex items-center gap-2.5">
-                <h1 className="text-[28px] font-medium tracking-[-0.03em]">Automations</h1>
+                <h1 className="text-[22px] font-medium tracking-[-0.03em]">Automations</h1>
                 {statusSummary && (
                   <span className="rounded-full border border-droid-border bg-droid-surface/60 px-2 py-1 text-[11px] text-droid-text-muted">
                     {statusSummary}

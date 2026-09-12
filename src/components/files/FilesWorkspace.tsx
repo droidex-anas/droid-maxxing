@@ -242,7 +242,7 @@ function FileTreeRow({
       </button>
       {error && (
         <p
-          className="truncate py-1 pr-2 text-[10px] text-red-300"
+          className="truncate py-1 pr-2 text-[11px] text-red-300"
           style={{ paddingLeft: `${String(26 + entry.depth * 14)}px` }}
           title={error}
         >

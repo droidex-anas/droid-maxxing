@@ -535,7 +535,7 @@ function renderNode(
 function ErrorFallback({ raw }: { raw: string }) {
   return (
     <div className="rounded-xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-2.5">
-      <div className="px-3.5 h-7 flex items-center text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60 border-b border-droid-border">
+      <div className="px-3.5 h-7 flex items-center text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60 border-b border-droid-border">
         Render spec (unparseable)
       </div>
       <pre className="overflow-x-auto p-3.5">

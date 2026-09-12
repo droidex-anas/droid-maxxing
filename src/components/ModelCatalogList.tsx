@@ -138,12 +138,12 @@ function ModelCatalogList({
         })}
       </div>
       {!hasRealModels && (
-        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+        <div className="px-2 py-3 text-[11px] text-droid-text-muted text-center">
           Loading models…
         </div>
       )}
       {hasRealModels && models.length === 0 && (
-        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+        <div className="px-2 py-3 text-[11px] text-droid-text-muted text-center">
           No matches for “{query}”
         </div>
       )}
