@@ -319,7 +319,7 @@ export function AutomationProposalCard({
         <div className="border-t border-droid-border/70 px-4 py-2.5">
           <p
             className={`text-[12px] leading-4 ${
-              toolError ? 'text-red-300/90' : 'text-amber-200/80'
+              toolError ? 'text-droid-red' : 'text-droid-orange'
             }`}
           >
             {toolError ?? displayModelIssue}
@@ -365,9 +365,9 @@ export function AutomationProposalCard({
 function StateIndicator({ state }: { state: ProposalCardState }) {
   const dot =
     state.kind === 'failed'
-      ? 'bg-red-400/80'
+      ? 'bg-droid-red'
       : state.kind === 'review'
-        ? 'bg-amber-300/70'
+        ? 'bg-droid-orange'
         : state.kind === 'preparing'
           ? 'bg-droid-text-muted motion-safe:animate-pulse'
           : 'bg-droid-text-secondary';

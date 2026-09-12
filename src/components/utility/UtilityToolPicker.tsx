@@ -44,8 +44,8 @@ export function UtilityToolPicker({
             }}
             className={
               spacious
-                ? 'group flex h-11 w-full items-center gap-3 rounded-xl border border-droid-border bg-droid-surface px-3 text-left text-[13px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent'
-                : 'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent'
+                ? 'group flex h-11 w-full items-center gap-3 rounded-xl border border-droid-border bg-droid-surface px-3 text-left text-[13px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover'
+                : 'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover'
             }
           >
             <Icon

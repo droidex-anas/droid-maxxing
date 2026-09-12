@@ -94,7 +94,10 @@ function PrInboxRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-start justify-between gap-2">
-            <span className="min-w-0 truncate text-[13px] leading-snug font-medium text-droid-text">
+            <span
+              title={pr.title}
+              className="min-w-0 truncate text-[13px] leading-snug font-medium text-droid-text"
+            >
               {pr.title}
             </span>
             {time ? (

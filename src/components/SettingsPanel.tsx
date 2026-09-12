@@ -134,7 +134,7 @@ function TokenLimitSelect({
           active ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
         }`}
       >
-        <span className="flex-1 font-mono text-[13px] text-droid-text">{l}</span>
+        <span className="flex-1 text-[13px] tabular-nums text-droid-text">{l}</span>
         {sub && <span className="text-[11px] text-droid-text-muted">{sub}</span>}
         {active && (
           <Check
@@ -159,7 +159,7 @@ function TokenLimitSelect({
             : 'border-droid-border bg-droid-bg/60 text-droid-text hover:border-droid-border-hover'
         }`}
       >
-        <span className="truncate font-mono">{label}</span>
+        <span className="truncate tabular-nums">{label}</span>
         <ChevronDown
           className={`w-3.5 h-3.5 text-droid-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
         />

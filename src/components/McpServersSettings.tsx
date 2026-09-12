@@ -21,6 +21,7 @@ import {
 } from '../lib/commands';
 import type { McpServerInfo, McpServerInput, McpStatusSummary, McpToolInfo } from '../types/bridge';
 import { AddMcpServerDialog } from './McpServerForm';
+import { SectionTitle } from './settingsKit';
 import { Switch } from './Switch';
 
 let requestSequence = 0;
@@ -168,7 +169,7 @@ export function McpServersSection(props: McpServersSectionProps) {
     );
   } else {
     serverList = (
-      <div className="divide-y divide-droid-border/80 overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-[0_10px_30px_rgba(0,0,0,0.08)]">
+      <div className="divide-y divide-droid-border/80 overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-droid">
         {props.servers.map((server) => (
           <McpServerCard
             key={`${server.source}:${server.name}`}
@@ -186,14 +187,11 @@ export function McpServersSection(props: McpServersSectionProps) {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-droid-text">MCP servers</h1>
-          <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-droid-text-muted">
-            Shows Droid&apos;s effective server catalog and authentication state. User and project
-            servers are merged with DROIDEX browser tools when sessions start.
-          </p>
-        </div>
+      <div className="flex items-start justify-between gap-4">
+        <SectionTitle
+          title="MCP servers"
+          sub="Shows Droid's effective server catalog and authentication state. User and project servers are merged with DROIDEX browser tools when sessions start."
+        />
         <button
           type="button"
           onClick={props.onRefresh}
@@ -284,7 +282,7 @@ function McpServerCard({
             setExpanded((value) => !value);
           }}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left active:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/35"
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left active:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
         >
           <ChevronRight
             className={`h-3.5 w-3.5 shrink-0 text-droid-text-muted transition-transform duration-100 ${expanded ? 'rotate-90' : ''}`}
@@ -392,7 +390,7 @@ function canAuthenticate(server: McpServerInfo): boolean {
 }
 
 function StatusIcon({ status }: { status: McpServerInfo['status'] }) {
-  if (status === 'connected') return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+  if (status === 'connected') return <CheckCircle2 className="h-4 w-4 text-droid-green" />;
   if (status === 'connecting')
     return <Spinner className="h-4 w-4 motion-safe:animate-spin-slow text-droid-accent" />;
   if (status === 'failed') return <CircleAlert className="h-4 w-4 text-droid-orange" />;
