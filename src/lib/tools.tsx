@@ -82,7 +82,7 @@ const CAT_VERBS: Record<Exclude<ToolCat, 'other'>, [done: string, live: string]>
 
 // `mcp__claude_browser__navigate` → "Navigate" from "claude browser";
 // `preview_start` → "Preview start"; `TodoWrite` → "Todo write".
-export function humanizeToolName(name: string): { label: string; source?: string } {
+function humanizeToolName(name: string): { label: string; source?: string } {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   const raw = mcp ? mcp[2] : name;
   const words = raw

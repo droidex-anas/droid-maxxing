@@ -93,7 +93,7 @@ export function ToolPanel({
   );
 }
 
-export function CopyButton({ text }: { text: string }) {
+function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
