@@ -90,7 +90,7 @@ export function BrowserToolbar({
           <button
             type="submit"
             aria-label="Open address"
-            className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent"
+            className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
           >
             <CornerDownLeft className="h-3.5 w-3.5" />
           </button>
@@ -172,7 +172,7 @@ function IconButton({
         aria-pressed={active}
         disabled={disabled}
         onClick={onClick}
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent disabled:cursor-not-allowed disabled:opacity-35 ${
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover disabled:cursor-not-allowed disabled:opacity-35 ${
           active
             ? 'bg-droid-active text-droid-text'
             : 'text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text'
