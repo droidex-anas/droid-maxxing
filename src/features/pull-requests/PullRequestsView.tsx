@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { useGithubSetup } from '../../hooks/useGithubSetup';
@@ -12,6 +12,17 @@ import type { InboxPullRequest } from './lib/prInbox';
 import { selectedInboxPullRequest } from './lib/prInbox';
 import { droidReviewSeed } from './lib/prReview';
 import { resolvePrInboxContext } from './lib/prWorkspaceCwd';
+
+// The view's top row is the window drag row every view under `main` owns, so
+// the workspace keeps its place when the sidebar collapses into it.
+function PrWorkspace({ children }: { children: ReactNode }) {
+  return (
+    <div data-testid="pull-requests-workspace" className="flex h-full min-h-0 flex-col">
+      <div data-electron-drag-region className="h-9 shrink-0" />
+      <div className="flex min-h-0 flex-1">{children}</div>
+    </div>
+  );
+}
 
 function WorkspaceDetail({
   cwd,
@@ -99,19 +110,19 @@ export function PullRequestsView() {
 
   if (!canList) {
     return (
-      <div data-testid="pull-requests-workspace" className="flex h-full min-h-0">
+      <PrWorkspace>
         <PrWorkspaceEmpty
           cwd={inbox.listingCwds[0] ?? null}
           gitLoaded={true}
           isGitHub={true}
           setup={setup}
         />
-      </div>
+      </PrWorkspace>
     );
   }
 
   return (
-    <div data-testid="pull-requests-workspace" className="flex h-full min-h-0">
+    <PrWorkspace>
       <div className="flex h-full min-h-0 w-[360px] shrink-0 flex-col">
         <PrInbox
           prs={list.prs}
@@ -156,6 +167,6 @@ export function PullRequestsView() {
           dispatch({ type: 'SEED_COMPOSER', text: droidReviewSeed(pr), replace: true });
         }}
       />
-    </div>
+    </PrWorkspace>
   );
 }

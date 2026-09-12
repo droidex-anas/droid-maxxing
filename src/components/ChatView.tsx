@@ -144,7 +144,10 @@ function ChatHeader({
   sub?: { label: string; meta?: string; running: boolean; onBack: () => void; onStop?: () => void };
 }) {
   return (
-    <div data-electron-drag-region className="shrink-0 flex items-center gap-2 h-9 pr-4 pl-4">
+    <div
+      data-electron-drag-region
+      className="shrink-0 flex items-center gap-2 h-9 pr-4 pl-[var(--window-controls-lead,1rem)]"
+    >
       <div className="flex min-w-0 items-center gap-1.5 rounded-xl bg-droid-elevated/60 pl-2 pr-3 py-1.5">
         <GripVertical className="w-3.5 h-3.5 shrink-0 text-droid-text-muted/40" />
         {sub ? (
@@ -677,12 +680,16 @@ export default function ChatView({
 
   return (
     <div data-testid="chat-view" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-      {activeSession && (
+      {activeSession ? (
         <ChatHeader
           title={chatDisplayTitle(activeSession, state.chatMetadata[activeSession.appSessionId])}
           live={live}
           {...(chatHeaderSub !== undefined ? { sub: chatHeaderSub } : {})}
         />
+      ) : (
+        // The welcome screen has no header of its own, but the top row still
+        // belongs to the window chrome.
+        <div data-electron-drag-region className="h-9 shrink-0" />
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
         <TranscriptReachHost
