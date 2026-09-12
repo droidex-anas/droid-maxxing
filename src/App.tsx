@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { shallowEqual, useStoreApi, useStoreDispatch, useStoreSelector } from './hooks/useStore';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PanelLeft, PanelRight } from '@droidex/icons';
@@ -423,8 +423,9 @@ export default function App() {
 
   // The pane animates out of a full-content route for 180ms, and the native
   // browser inside it would stay painted and clickable over the new route for
-  // that long. Treat the route as an overlay so the view hides at once.
-  useEffect(() => {
+  // that long. Treat the route as an overlay so the view hides at once: a
+  // layout effect, so it is gone in the commit that paints the new route.
+  useLayoutEffect(() => {
     if (!fullContentRoute) return;
     return addNativeSurfaceObscurer();
   }, [fullContentRoute]);

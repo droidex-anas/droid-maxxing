@@ -12,10 +12,14 @@ const pendingByEditor = new Map<EditorId, Promise<string | null>>();
 function loadIcon(editor: EditorId): Promise<string | null> {
   let pending = pendingByEditor.get(editor);
   if (!pending) {
-    pending = editorIcon(editor).then((icon) => {
-      iconsByEditor.set(editor, icon);
+    const request = editorIcon(editor).then((icon) => {
+      // Only a real icon is kept; a failed read is asked again next time,
+      // as the main process does, instead of pinning the fallback glyph.
+      if (icon) iconsByEditor.set(editor, icon);
+      else if (pendingByEditor.get(editor) === request) pendingByEditor.delete(editor);
       return icon;
     });
+    pending = request;
     pendingByEditor.set(editor, pending);
   }
   return pending;
