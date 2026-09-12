@@ -182,6 +182,14 @@ const ModelRow = memo(function ModelRow({
       tabIndex={selected ? 0 : -1}
       aria-selected={selected}
       aria-disabled={disabled || undefined}
+      onMouseDown={(e) => {
+        // A pointer press must not park focus on the row: the popover steps
+        // effort from ←/→ on a window listener, and the first key after a click
+        // would flip the browser's focus-visible heuristic on and ring the row
+        // it had quietly focused. Focus stays in the search field, and Tab can
+        // still reach the row (and its ring) on purpose.
+        e.preventDefault();
+      }}
       onClick={() => {
         if (!disabled) pick(id);
       }}

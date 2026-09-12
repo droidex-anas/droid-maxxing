@@ -10,6 +10,7 @@ import { LinkBadge } from './transcript/LinkBadge';
 import { describeLink, linkTextIsUrl } from '../lib/linkPresentation';
 import { TranscriptImage } from './media/TranscriptImage';
 import { MermaidBlock, SvgCodeBlock } from './MarkdownDiagrams';
+import { InlineCode, ProseFileLinks } from './transcript/ProseFileLink';
 
 function slugify(text: string): string {
   return text
@@ -106,15 +107,9 @@ function MarkdownFence({
     appFences,
   } = useContext(FenceOptionsContext);
   const inline = !className;
-  if (inline)
-    return (
-      // Inline code sits in the line as a quiet pill: sized from the text around
-      // it, tinted from the text colour so it still reads on a message bubble,
-      // and cloned across a line break so a wrapped pill keeps both ends.
-      <code className="rounded-[5px] bg-droid-text/[0.08] px-[5px] py-px font-mono text-[0.86em] text-droid-text [box-decoration-break:clone] break-words">
-        {children}
-      </code>
-    );
+  // Inline code owns its own pill, and inside a transcript a mention that names
+  // a file opens it in Review.
+  if (inline) return <InlineCode>{children}</InlineCode>;
 
   const codeText = typeof children === 'string' ? children : '';
 
@@ -316,7 +311,9 @@ function createMarkdownComponents(specMode: boolean): Components {
           <span
             className={`underline decoration-transparent underline-offset-2 transition-colors group-hover/link:decoration-current ${textIsUrl && !named ? 'break-all' : ''}`}
           >
-            {named ? link.label : children}
+            {/* A path used as a link label stays a plain pill: the link is the
+                control, and a button cannot nest inside an anchor. */}
+            {named ? link.label : <ProseFileLinks>{children}</ProseFileLinks>}
           </span>
         </a>
       );
@@ -443,7 +440,7 @@ function MarkdownImpl({
     buildingAppBlocks,
     cutOffAppBlocks,
   });
-  return (
+  const tree = (
     <div className={markdownShellClass(specMode)}>
       <MarkdownTree
         specMode={specMode}
@@ -455,6 +452,9 @@ function MarkdownImpl({
       </MarkdownTree>
     </div>
   );
+  // Text the user typed names files they already have in front of them, so a
+  // prompt bubble stays reading matter: its mentions keep the plain pill.
+  return authored ? <ProseFileLinks>{tree}</ProseFileLinks> : tree;
 }
 
 export const Markdown = memo(MarkdownImpl);
