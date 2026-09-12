@@ -490,16 +490,15 @@ test('a session whose agent left a dev server running is never retired', async (
       'the renderer must be told what the session is holding',
     );
 
-    // A reconnecting renderer clears its sidecar-owned lists and bootstraps
-    // with sessions.list; the monitor only emits on change, so the listing has
-    // to carry the current processes with it.
+    // A fresh renderer needs the current processes even when the monitor
+    // has nothing new to publish.
     const beforeList = h.events.length;
     await h.handle({ type: 'sessions.list' });
     assert.deepEqual(
       h.events
         .slice(beforeList)
-        .flatMap((event) => (event.type === 'session.processes' ? [event.appSessionId] : [])),
-      ['app-parent'],
+        .flatMap((event) => (event.type === 'sessions.processes' ? [event.processes] : [])),
+      [{ 'app-parent': published?.processes }],
     );
 
     // The user stops the server themselves: the session settles and retires on

@@ -74,6 +74,7 @@ export function TerminalWorkspace({
 
   const stopped = state.status === 'exited' || state.status === 'error';
   const restart = () => {
+    instance.focus();
     void instance.restart();
   };
 
@@ -164,10 +165,8 @@ function TerminalHeader({
   const folder = cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
   return (
     <div className="group flex h-8 shrink-0 items-center gap-0.5 border-b border-droid-border pl-3 pr-1.5">
-      {/* HoverTooltip's anchor is `shrink-0`; let it shrink here so a long
-          folder name ellipsizes instead of pushing the actions off the row. */}
-      <div className="flex min-w-0 flex-1 items-center [&>span]:min-w-0 [&>span]:shrink">
-        <HoverTooltip label={cwd} placement="bottom">
+      <div className="flex min-w-0 flex-1 items-center">
+        <HoverTooltip label={cwd} placement="bottom" className="min-w-0">
           <span
             className={`truncate text-[12px] leading-none ${stopped ? 'text-droid-text-secondary' : 'text-droid-text'}`}
           >
@@ -176,7 +175,7 @@ function TerminalHeader({
           </span>
         </HoverTooltip>
       </div>
-      <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-[120ms] focus-within:opacity-100 group-hover:opacity-100">
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
         {children}
       </div>
     </div>

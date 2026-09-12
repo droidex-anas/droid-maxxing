@@ -14,11 +14,13 @@ export function HoverTooltip({
   children,
   placement = 'top',
   delay = 350,
+  className = 'shrink-0',
 }: {
   label: string;
   children: ReactNode;
   placement?: 'top' | 'bottom';
   delay?: number;
+  className?: string;
 }) {
   const id = useId();
   const anchorRef = useRef<HTMLSpanElement>(null);
@@ -86,7 +88,7 @@ export function HoverTooltip({
     <>
       <span
         ref={anchorRef}
-        className="inline-flex shrink-0"
+        className={`inline-flex ${className}`}
         aria-describedby={open ? id : undefined}
         onMouseEnter={showSoon}
         onMouseLeave={hide}

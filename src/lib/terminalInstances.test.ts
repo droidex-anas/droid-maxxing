@@ -140,18 +140,6 @@ test('output while detached is buffered and flushed on attach', async () => {
   await releaseTerminalInstance('tab-b');
 });
 
-test('release disposes the xterm and kills the PTY once', async () => {
-  fakeDom();
-  const d = deps();
-  acquireTerminalInstance('tab-c', { appSessionId: 's1', cwd: '/w' }, d.base);
-  await new Promise((r) => setTimeout(r, 0));
-  await releaseTerminalInstance('tab-c');
-  await releaseTerminalInstance('tab-c');
-  assert.equal(d.terminal.disposed, true);
-  assert.deepEqual(d.killed, ['pty-1']);
-  assert.equal(peekTerminalInstance('tab-c'), undefined);
-});
-
 test('releaseTerminalInstancesExcept drops tabs that disappeared', async () => {
   fakeDom();
   const d = deps();
@@ -225,6 +213,8 @@ test('release during the initial connect kills the PTY once and leaves no subscr
     rows: 24,
   });
   await releasePromise;
+  await releaseTerminalInstance('tab-race-release');
+  assert.equal(d.terminal.disposed, true);
   assert.deepEqual(d.killed, ['pty-1']);
   assert.equal(subscribeCount - channelCloseCount, 0);
   assert.equal(peekTerminalInstance('tab-race-release'), undefined);
@@ -300,36 +290,6 @@ test('restart during the initial connect ends with exactly one live subscription
   await releaseTerminalInstance('tab-race-restart');
 });
 
-test('a failed connect does not poison restart or dispose', async () => {
-  fakeDom();
-  let attempt = 0;
-  const d = deps({
-    ensureTerminal: async (_tabId, existingId) => {
-      attempt += 1;
-      if (attempt === 1) throw new Error('bridge down');
-      return {
-        id: existingId ?? 'pty-2',
-        appSessionId: 's1',
-        cwd: '/w',
-        shell: '/bin/zsh',
-        cols: 80,
-        rows: 24,
-      };
-    },
-  });
-  const inst = acquireTerminalInstance('tab-reject', { appSessionId: 's1', cwd: '/w' }, d.base);
-  await new Promise((r) => setTimeout(r, 0));
-  assert.equal(inst.getState().status, 'error');
-
-  await inst.restart();
-  assert.equal(inst.getState().status, 'running');
-  assert.equal(inst.getState().terminalId, 'pty-2');
-
-  await releaseTerminalInstance('tab-reject');
-  assert.equal(d.terminal.disposed, true);
-  assert.deepEqual(d.killed, ['pty-2']);
-});
-
 test('a theme set before xterm loads is applied when it is constructed', async () => {
   fakeDom();
   const loaded = createDeferred<void>();
@@ -356,6 +316,45 @@ test('a theme set before xterm loads is applied when it is constructed', async (
   await releaseTerminalInstance('tab-theme');
 });
 
+test('failed initialization and restart report errors and remain retryable', async () => {
+  fakeDom();
+  let loads = 0;
+  let connects = 0;
+  const initialLoad = createDeferred<void>();
+  const d = deps();
+  const instance = acquireTerminalInstance(
+    'tab-retry-errors',
+    { appSessionId: 's1', cwd: '/w' },
+    {
+      ...d.base,
+      loadXterm: async () => {
+        if (++loads === 1) {
+          await initialLoad.promise;
+          throw new Error('xterm failed to load');
+        }
+        return d.base.loadXterm();
+      },
+      ensureTerminal: async (...args) => {
+        if (++connects === 1) throw new Error('bridge down');
+        return d.base.ensureTerminal(...args);
+      },
+    },
+  );
+  initialLoad.resolve();
+  await instance.restart();
+  assert.equal(loads, 2);
+  assert.equal(instance.getState().status, 'error');
+  assert.equal(instance.getState().error, 'bridge down');
+
+  await instance.restart();
+  assert.equal(instance.getState().status, 'running');
+  assert.equal(instance.getState().error, '');
+  assert.equal(loads, 2);
+  await releaseTerminalInstance('tab-retry-errors');
+  assert.equal(d.terminal.disposed, true);
+  assert.deepEqual(d.killed, ['pty-1']);
+});
+
 test('local pump truncation surfaces the trimmed banner and clears on restart', async () => {
   fakeDom();
   const d = deps();
@@ -364,9 +363,59 @@ test('local pump truncation surfaces the trimmed banner and clears on restart', 
   // Detached: the pump buffers and caps at 2 MiB, dropping the earliest bytes.
   d.events[0]({ kind: 'data', data: 'x'.repeat(3 * 1024 * 1024) });
   assert.equal(inst.getState().truncated, true);
+  let updates = 0;
+  const unsubscribe = inst.subscribe(() => {
+    updates++;
+  });
+  d.events[0]({ kind: 'data', data: 'more output' });
+  assert.equal(updates, 0);
+  unsubscribe();
   await inst.restart();
   assert.equal(inst.getState().truncated, false);
   d.events.at(-1)?.({ kind: 'data', data: 'short' });
   assert.equal(inst.getState().truncated, false);
   await releaseTerminalInstance('tab-trim');
+});
+
+test('concurrent restarts share teardown and release waits for that teardown', async () => {
+  fakeDom();
+  const closing = createDeferred<void>();
+  const closeStarted = createDeferred<void>();
+  const connected = createDeferred<void>();
+  let creates = 0;
+  const d = deps({
+    ensureTerminal: async () => ({
+      id: `pty-${++creates}`,
+      appSessionId: 's1',
+      cwd: '/w',
+      shell: '/bin/zsh',
+      cols: 80,
+      rows: 24,
+    }),
+    subscribe: () => {
+      connected.resolve();
+      return { onEvent: () => () => {}, postInput() {}, close() {} };
+    },
+    closeTerminal: async (_tab, id) => {
+      if (id) d.killed.push(id);
+      closeStarted.resolve();
+      await closing.promise;
+    },
+  });
+  const instance = acquireTerminalInstance(
+    'tab-double-restart',
+    { appSessionId: 's1', cwd: '/w' },
+    d.base,
+  );
+  await connected.promise;
+  const first = instance.restart();
+  await closeStarted.promise;
+  const second = instance.restart();
+  assert.equal(first, second);
+  const released = releaseTerminalInstance('tab-double-restart');
+  closing.resolve();
+  await Promise.all([first, second, released]);
+  assert.equal(creates, 1);
+  assert.deepEqual(d.killed, ['pty-1']);
+  assert.equal(d.terminal.disposed, true);
 });

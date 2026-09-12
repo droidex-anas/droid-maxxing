@@ -9,6 +9,14 @@ export interface ProcessRecord {
 
 export type CommandRunner = (file: string, args: string[]) => Promise<string>;
 
+// `ps etime` is second-granular; tolerate its rounding, not a new process.
+export function sameProcess(
+  expected: Pick<ProcessRecord, 'startedAt'>,
+  observed: Pick<ProcessRecord, 'startedAt'> | undefined,
+): boolean {
+  return observed !== undefined && Math.abs(expected.startedAt - observed.startedAt) < 2000;
+}
+
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -24,11 +32,12 @@ export function defaultCommandRunner(file: string, args: string[]): Promise<stri
 
 // `lsof` exits 1 both when nothing is listening and when it prints a warning
 // alongside perfectly good output, so stdout is authoritative whenever it is
-// non-empty. Only a run that produced nothing is a failure.
+// non-empty. Exit 1 without diagnostics is the normal no-listeners result.
 export function tolerantCommandRunner(file: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+    execFile(file, args, { maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (stdout) resolve(stdout);
+      else if (error?.code === 1 && !stderr.trim()) resolve('');
       else if (error) reject(asError(error));
       else resolve('');
     });

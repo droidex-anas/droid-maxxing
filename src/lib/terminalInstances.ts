@@ -139,8 +139,7 @@ function createInstance(
   let disposed = false;
   let lastSize = { cols: 0, rows: 0 };
   let frame = 0;
-  let connectGeneration = 0;
-  let connectInFlight: Promise<void> = Promise.resolve();
+  let restarting: Promise<void> | null = null;
   // Held until xterm is loaded: setTheme() can be called from the mount effect
   // long before the dynamic import resolves, and XTERM_OPTIONS carries no theme.
   let theme: Record<string, string> | null = null;
@@ -183,63 +182,51 @@ function createInstance(
     if (!frame) frame = deps.scheduleFrame(applyFit);
   };
 
-  // Serializes connect() against restart()/dispose(): each connect captures a
-  // generation and bails out after its one await if superseded or disposed,
-  // closing the PTY it created (if any) since nobody else owns it yet.
-  // restart()/dispose() always await connectInFlight before acting, so at
-  // most one connect() is ever in flight at a time.
-  const connect = (existingId: string | undefined): Promise<void> => {
-    const generation = ++connectGeneration;
-    const run = async () => {
-      if (!terminal) return;
-      const info: TerminalSessionInfo = await deps.ensureTerminal(tabId, existingId, {
-        appSessionId: options.appSessionId,
-        cwd: options.cwd,
-        cols: terminal.cols,
-        rows: terminal.rows,
-      });
-      if (disposed || generation !== connectGeneration) {
-        if (info.id !== existingId) await deps.closeTerminal(tabId, info.id);
+  const connect = async (existingId: string | undefined): Promise<void> => {
+    if (disposed || !terminal) return;
+    const info: TerminalSessionInfo = await deps.ensureTerminal(tabId, existingId, {
+      appSessionId: options.appSessionId,
+      cwd: options.cwd,
+      cols: terminal.cols,
+      rows: terminal.rows,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Disposal can occur while the PTY is being created.
+    if (disposed) {
+      if (info.id !== existingId) await deps.closeTerminal(tabId, info.id);
+      return;
+    }
+    lastSize = { cols: 0, rows: 0 };
+    setState({
+      terminalId: info.id,
+      shellName: info.shell.split(/[\\/]/).pop() ?? 'Terminal',
+      status: 'running',
+      error: '',
+      truncated: false,
+    });
+    channel = deps.subscribe(info.id);
+    if (!channel) {
+      setState({ status: 'error', error: 'Terminal is only available in the desktop app.' });
+      return;
+    }
+    unlisten = channel.onEvent((event) => {
+      if (event.kind === 'data' || event.kind === 'replay') {
+        pump.push(event.data);
+        // Either side can trim: the sidecar replay buffer, or the local pump
+        // while this tab is detached/hidden.
+        if (!state.truncated && (event.truncated || pump.truncated)) setState({ truncated: true });
         return;
       }
-      lastSize = { cols: 0, rows: 0 };
+      if (event.kind === 'error') {
+        setState({ status: 'error', error: event.message });
+        return;
+      }
+      const failed = event.exitCode !== 0;
       setState({
-        terminalId: info.id,
-        shellName: info.shell.split(/[\\/]/).pop() ?? 'Terminal',
-        status: 'running',
-        error: '',
-        truncated: false,
+        status: failed ? 'error' : 'exited',
+        error: failed ? `Shell exited with code ${String(event.exitCode ?? 'unknown')}.` : '',
       });
-      channel = deps.subscribe(info.id);
-      if (!channel) {
-        setState({ status: 'error', error: 'Terminal is only available in the desktop app.' });
-        return;
-      }
-      unlisten = channel.onEvent((event) => {
-        if (event.kind === 'data' || event.kind === 'replay') {
-          pump.push(event.data);
-          // Either side can trim: the sidecar replay buffer, or the local pump
-          // while this tab is detached/hidden.
-          if (event.truncated || pump.truncated) setState({ truncated: true });
-          return;
-        }
-        if (event.kind === 'error') {
-          setState({ status: 'error', error: event.message });
-          return;
-        }
-        const failed = event.exitCode !== 0;
-        setState({
-          status: failed ? 'error' : 'exited',
-          error: failed ? `Shell exited with code ${String(event.exitCode ?? 'unknown')}.` : '',
-        });
-      });
-      scheduleFit();
-    };
-    const promise = run();
-    // Keep the guard promise settled: restart()/dispose() await it, and a
-    // rejected connect must not poison them.
-    connectInFlight = promise.catch(() => undefined);
-    return promise;
+    });
+    scheduleFit();
   };
 
   const disconnect = async () => {
@@ -252,9 +239,19 @@ function createInstance(
     if (state.terminalId) await deps.unsubscribe(state.terminalId);
   };
 
-  void deps
-    .loadXterm()
-    .then(async ({ Terminal: xtermCtor, FitAddon: fitAddonCtor }) => {
+  const showError = (reason: unknown) => {
+    if (disposed) return;
+    setState({
+      status: 'error',
+      error: reason instanceof Error ? reason.message : String(reason),
+    });
+  };
+
+  const initialize = async (existingId?: string) => {
+    if (disposed) return;
+    if (!terminal) {
+      const { Terminal: xtermCtor, FitAddon: fitAddonCtor } = await deps.loadXterm();
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Disposal can occur during the module import.
       if (disposed) return;
       terminal = new xtermCtor(theme ? { ...XTERM_OPTIONS, theme } : XTERM_OPTIONS);
       fitAddon = new fitAddonCtor();
@@ -267,15 +264,12 @@ function createInstance(
       });
       terminal.open(element);
       terminal.onData((data) => channel?.postInput(data));
-      await connect(options.terminalId);
-    })
-    .catch((reason: unknown) => {
-      if (disposed) return;
-      setState({
-        status: 'error',
-        error: reason instanceof Error ? reason.message : String(reason),
-      });
-    });
+    }
+    await connect(existingId);
+  };
+
+  // Initialization, restart, and disposal share one queue, including teardown.
+  let lifecycle = initialize(options.terminalId).catch(showError);
 
   return {
     tabId,
@@ -297,15 +291,25 @@ function createInstance(
       terminal?.focus();
     },
     fit: scheduleFit,
-    async restart() {
-      await connectInFlight;
-      const previous = state.terminalId;
-      await disconnect();
-      if (previous) await deps.closeTerminal(tabId, previous);
-      terminal?.reset();
-      pump.reset();
-      setState({ terminalId: null, status: 'starting', error: '', truncated: false });
-      await connect(undefined);
+    restart() {
+      if (restarting) return restarting;
+      restarting = lifecycle
+        .then(async () => {
+          if (disposed) return;
+          const previous = state.terminalId;
+          await disconnect();
+          if (previous) await deps.closeTerminal(tabId, previous);
+          terminal?.reset();
+          pump.reset();
+          setState({ terminalId: null, status: 'starting', error: '', truncated: false });
+          await initialize();
+        })
+        .catch(showError)
+        .finally(() => {
+          restarting = null;
+        });
+      lifecycle = restarting;
+      return restarting;
     },
     copySelection: () => terminal?.getSelection() ?? '',
     clear: () => terminal?.clear(),
@@ -319,17 +323,20 @@ function createInstance(
       // Wait for any in-flight connect to notice `disposed` and close the
       // PTY it created, if any — it's the sole owner of that id. Only close
       // here when a connect already finished and installed a terminalId.
-      await connectInFlight;
+      await lifecycle;
       if (frame) deps.cancelFrame(frame);
       globalThis.document.removeEventListener('visibilitychange', onVisibility);
       pump.dispose();
-      await disconnect();
-      const id = state.terminalId;
-      terminal?.dispose();
-      terminal = null;
-      fitAddon = null;
-      element.remove();
-      if (id) await deps.closeTerminal(tabId, id);
+      try {
+        await disconnect();
+      } finally {
+        const id = state.terminalId;
+        terminal?.dispose();
+        terminal = null;
+        fitAddon = null;
+        element.remove();
+        if (id) await deps.closeTerminal(tabId, id);
+      }
     },
   };
 }

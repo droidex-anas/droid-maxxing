@@ -575,10 +575,21 @@ test('registration failure closes resources without indexing the failed session'
 test('post-registration publication failures unregister and close opened resources', async () => {
   const created = createHarness();
   queueCreate(created, 'failed-create-publication');
+  created.setChildCloser(async () => {
+    created.calls.push({ target: 'cleanup', method: 'children.close', args: [] });
+  });
   created.failNextEmit('session.created', new Error('create publication failed'));
 
   await created.lifecycle.create(createCommand());
 
+  assert.deepEqual(
+    created.calls
+      .map((call) => call.method)
+      .filter((method) =>
+        ['processes.killSession', 'children.close', 'session.close'].includes(method),
+      ),
+    ['processes.killSession', 'children.close', 'session.close'],
+  );
   assert.equal(created.registry.getLive('failed-create-publication'), undefined);
   assert.deepEqual(
     created.calls

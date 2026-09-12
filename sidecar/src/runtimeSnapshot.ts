@@ -19,6 +19,7 @@ export function emptyRuntimeSnapshot(
     runtime,
     sessions: [],
     children: [],
+    processes: {},
     persistence: { durable: true, hadUnflushedWork: false },
     interrupted: [],
   };
@@ -28,6 +29,7 @@ export function buildRuntimeSnapshot(input: {
   runtime: BridgeRuntimeSnapshot['runtime'];
   sessions: readonly SessionSummary[];
   children: readonly ChildSessionSummary[];
+  processes: BridgeRuntimeSnapshot['processes'];
   persistence: PersistenceRecovery;
   interrupted: readonly InterruptedSessionRecord[];
 }): BridgeRuntimeSnapshot {
@@ -35,6 +37,7 @@ export function buildRuntimeSnapshot(input: {
     runtime: { ...input.runtime },
     sessions: [...input.sessions],
     children: [...input.children],
+    processes: { ...input.processes },
     persistence: { ...input.persistence },
     interrupted: [...input.interrupted],
   };

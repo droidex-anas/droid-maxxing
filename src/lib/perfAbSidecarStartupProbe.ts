@@ -5,8 +5,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { pathToFileURL } from 'node:url';
 
-const BRIDGE_PROTOCOL = 3;
 const READY_TIMEOUT_MS = 20_000;
 const SESSIONS_LIST_TIMEOUT_MS = 30_000;
 const READY_PATTERN = /SIDECAR_READY (\d+)/;
@@ -35,7 +35,7 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
   const { WebSocket: WebSocketClass } = requireFromTree(wsPath) as {
     WebSocket: WebSocketConstructor;
   };
-  const orderedBridge = usesOrderedBridge(treeRoot);
+  const bridgeProtocol = await bridgeProtocolForTree(treeRoot);
   const runs = startupRuns();
   const readySamples: number[] = [];
   const listSamples: number[] = [];
@@ -45,7 +45,7 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
     await rm(home, { recursive: true, force: true });
     await mkdir(home, { recursive: true });
     try {
-      const sample = await measureOnce(entry, home, WebSocketClass, orderedBridge);
+      const sample = await measureOnce(entry, home, WebSocketClass, bridgeProtocol);
       readySamples.push(sample.readyMs);
       listSamples.push(sample.firstSessionsListMs);
     } finally {
@@ -53,7 +53,7 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
     }
   }
 
-  const wire = orderedBridge ? 'ordered bridge batches' : 'direct server events';
+  const wire = bridgeProtocol === undefined ? 'direct server events' : 'ordered bridge batches';
   return [
     metric(
       'sidecar.readyMs',
@@ -74,7 +74,7 @@ async function measureOnce(
   entry: string,
   home: string,
   webSocketCtor: WebSocketConstructor,
-  orderedBridge: boolean,
+  bridgeProtocol: number | undefined,
 ): Promise<{ readyMs: number; firstSessionsListMs: number }> {
   const token = randomBytes(32).toString('hex');
   const assetToken = randomBytes(32).toString('hex');
@@ -115,7 +115,7 @@ async function measureOnce(
   });
   const readyMs = performance.now() - spawnAt;
 
-  await waitForSessionsList(webSocketCtor, port, token, orderedBridge);
+  await waitForSessionsList(webSocketCtor, port, token, bridgeProtocol);
   const firstSessionsListMs = performance.now() - spawnAt;
   child.kill();
 
@@ -126,9 +126,9 @@ async function waitForSessionsList(
   webSocketCtor: WebSocketConstructor,
   port: number,
   token: string,
-  orderedBridge: boolean,
+  bridgeProtocol: number | undefined,
 ): Promise<SessionsListEvent> {
-  const socket = new webSocketCtor(bridgeUrl(port, token, orderedBridge));
+  const socket = new webSocketCtor(bridgeUrl(port, token, bridgeProtocol));
   await new Promise<void>((resolveOpen, reject) => {
     socket.once('open', () => {
       resolveOpen();
@@ -161,13 +161,19 @@ async function waitForSessionsList(
   return event;
 }
 
-function usesOrderedBridge(treeRoot: string): boolean {
-  return existsSync(join(treeRoot, 'sidecar/src/bridgeServer.ts'));
+async function bridgeProtocolForTree(treeRoot: string): Promise<number | undefined> {
+  if (!existsSync(join(treeRoot, 'sidecar/src/bridgeServer.ts'))) return undefined;
+  const protocol: unknown = Reflect.get(
+    await import(pathToFileURL(join(treeRoot, 'sidecar/src/protocol.ts')).href),
+    'BRIDGE_PROTOCOL_VERSION',
+  );
+  if (typeof protocol !== 'number') throw new Error('Tree does not export its bridge protocol.');
+  return protocol;
 }
 
-function bridgeUrl(port: number, token: string, orderedBridge: boolean): string {
+function bridgeUrl(port: number, token: string, bridgeProtocol: number | undefined): string {
   const params = new URLSearchParams({ token });
-  if (orderedBridge) params.set('bridgeProtocol', String(BRIDGE_PROTOCOL));
+  if (bridgeProtocol !== undefined) params.set('bridgeProtocol', String(bridgeProtocol));
   return `ws://127.0.0.1:${String(port)}/?${params.toString()}`;
 }
 

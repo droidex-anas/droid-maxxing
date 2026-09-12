@@ -16,6 +16,7 @@ export type AgentProcessHost = Pick<
 
 export type CreateAgentProcessMonitorOptions = Partial<AgentProcessHost> & {
   emit: (appSessionId: string, processes: AgentProcess[]) => void;
+  onSnapshotChanged?: () => void;
 };
 
 function scheduleTimer(callback: () => void, ms: number, referenced: boolean): { cancel(): void } {
@@ -41,6 +42,7 @@ export function createAgentProcessMonitor(
         process.kill(pid, signal);
       }),
     emit: options.emit,
+    onSnapshotChanged: options.onSnapshotChanged,
     // Unref'd: the scan tick must never be the reason the process stays up.
     schedule: (callback, ms) => scheduleTimer(callback, ms, false),
     // Referenced: the kill grace poll runs during shutdown, and an unref'd

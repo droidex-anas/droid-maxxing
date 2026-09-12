@@ -37,11 +37,7 @@ import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
-import {
-  peekTerminalInstance,
-  releaseTerminalInstance,
-  releaseTerminalInstancesExcept,
-} from './lib/terminalInstances';
+import { peekTerminalInstance, releaseTerminalInstancesExcept } from './lib/terminalInstances';
 import { utilityPanelForSession, type UtilityTab, type UtilityTool } from './lib/utilityPanel';
 import { isTerminalInputTarget, isTerminalTabShortcut } from './lib/keyboardShortcuts';
 import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
@@ -225,13 +221,9 @@ export default function App() {
   const [utilityPaneWidth, setUtilityPaneWidth] = useState(() => initialUtilityPaneWidth());
   const [utilityPaneMax, setUtilityPaneMax] = useState(() => utilityPaneMaxWidth());
   const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null);
-  // Read inside the async terminalHasChildren callback so a late resolution
-  // only reopens the popover for a tab that is still on screen, rather than
-  // trusting a stale closure over `utilityPanel.tabs`.
-  const utilityTabsRef = useRef(utilityPanel.tabs);
-  utilityTabsRef.current = utilityPanel.tabs;
-  const activeTabIdRef = useRef(utilityPanel.activeTabId);
-  activeTabIdRef.current = utilityPanel.activeTabId;
+  // A late busy-check must not restore a dialog in a hidden or replaced pane.
+  const visibleUtilityPanelRef = useRef(showUtilityPane ? utilityPanel : null);
+  visibleUtilityPanelRef.current = showUtilityPane ? utilityPanel : null;
   const confirmingTab = utilityPanel.tabs.find((tab) => tab.id === confirmCloseTabId) ?? null;
   const contentRowRef = useRef<HTMLDivElement>(null);
   const [contentRowWidth, setContentRowWidth] = useState(0);
@@ -266,7 +258,12 @@ export default function App() {
       .join('\n'),
   );
   useEffect(() => {
-    void releaseTerminalInstancesExcept(new Set(liveTerminalTabIds.split('\n').filter(Boolean)));
+    void releaseTerminalInstancesExcept(
+      new Set(liveTerminalTabIds.split('\n').filter(Boolean)),
+    ).catch((error: unknown) => {
+      console.warn('Terminal cleanup failed', error);
+      toast.error('Could not close a terminal.');
+    });
   }, [liveTerminalTabIds]);
 
   useEffect(() => {
@@ -327,12 +324,10 @@ export default function App() {
   const closeTerminalTab = useCallback(
     (tab: UtilityTab) => {
       setConfirmCloseTabId(null);
-      void releaseTerminalInstance(tab.id).finally(() => {
-        dispatch({
-          type: 'CLOSE_UTILITY_TAB',
-          tabId: tab.id,
-          appSessionId: activeSession?.appSessionId ?? '',
-        });
+      dispatch({
+        type: 'CLOSE_UTILITY_TAB',
+        tabId: tab.id,
+        appSessionId: activeSession?.appSessionId ?? '',
       });
     },
     [dispatch, activeSession?.appSessionId],
@@ -713,14 +708,15 @@ export default function App() {
                           // The check may resolve after the user switched
                           // sessions or closed the pane; only arm the
                           // confirmation if this tab is still on screen.
-                          if (!utilityTabsRef.current.some((current) => current.id === tab.id)) {
+                          const panel = visibleUtilityPanelRef.current;
+                          if (!panel?.tabs.some((current) => current.id === tab.id)) {
                             return;
                           }
                           // Only the active tab's TerminalWorkspace is
                           // mounted, so the confirmation has nowhere to
                           // render unless this tab is brought forward first
                           // — mirror onActivateTab's browser-expanded reset.
-                          if (tab.id !== activeTabIdRef.current) {
+                          if (tab.id !== panel.activeTabId) {
                             setExpandedBrowserAppSessionId(null);
                             dispatch({ type: 'ACTIVATE_UTILITY_TAB', tabId: tab.id });
                           }

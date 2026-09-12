@@ -39,14 +39,14 @@ test('session.processes replaces the list and session close clears it', () => {
   assert.equal(nextState, state);
 });
 
-test('a bridge disconnect drops the sidecar-owned process lists', () => {
+test('a connection error drops the sidecar-owned process lists', () => {
   const connected = reducer(initialState, {
     type: 'SESSION_PROCESSES',
     appSessionId: 's1',
     processes: [process()],
   });
 
-  const state = reducer(connected, { type: 'SET_CONNECTION', status: 'disconnected' });
+  const state = reducer(connected, { type: 'SET_CONNECTION', status: 'error' });
 
   assert.deepEqual(state.agentProcesses, {});
 });

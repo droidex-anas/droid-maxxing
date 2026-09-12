@@ -23,7 +23,7 @@ export interface ChildSessionsDependencies {
   runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf'>;
   // Child runtimes are tracked under their parent session, so the parent's
   // close takes their processes with it.
-  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack'>;
+  agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack' | 'adoptDescendantsAsRoots'>;
   registry: Pick<SessionRegistry<ChildParentLease>, 'getLive'>;
   history: Pick<HistoryIndex, 'childSessions' | 'childSession' | 'sessionLaunchSettings'> & {
     // Mirrors HistoryIndex.upsertChildSession: false means the child update is

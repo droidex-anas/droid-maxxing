@@ -639,6 +639,12 @@ export class SessionLifecycle {
     session: FactorySession | undefined,
     liveSession: LiveSession | undefined,
   ): Promise<void> {
+    if (liveSession) {
+      liveSession.closeMode = 'discard-pending';
+      await runBestEffortAsync(() =>
+        this.dependencies.agentProcesses.killSession(liveSession.summary.appSessionId),
+      );
+    }
     liveSession?.unsubscribe?.();
     if (liveSession)
       await runBestEffortAsync(() =>
@@ -648,14 +654,8 @@ export class SessionLifecycle {
     await Promise.all(mcpServers.map((server) => runBestEffortAsync(() => server.close())));
     if (session) {
       const processId = this.dependencies.runtime.processIdOf(session);
-      // Kill-then-untrack, same order as the normal close path: descendants
-      // are only reachable from the root while it is still alive and tracked.
-      if (liveSession)
-        await runBestEffortAsync(() =>
-          this.dependencies.agentProcesses.killSession(liveSession.summary.appSessionId),
-        );
-      if (processId !== undefined) this.dependencies.agentProcesses.untrack(processId);
       await runBestEffortAsync(() => session.close());
+      if (processId !== undefined) this.dependencies.agentProcesses.untrack(processId);
     }
     if (
       liveSession &&

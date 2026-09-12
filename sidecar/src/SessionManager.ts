@@ -308,21 +308,14 @@ export class SessionManager {
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
     this.agentProcesses = createAgentProcessMonitor({
       ...options.dependencies?.agentProcessHost,
+      onSnapshotChanged: () => {
+        this.adoption.persistLiveSet();
+      },
       emit: (appSessionId, processes) => {
-        // The monitor must never see a bridge failure: it would read as a
-        // scan failure and stall the next publish.
         try {
-          // Journal first: a throwing emit must not cost the reap record too,
-          // since the monitor commits the publish either way.
-          // Pids reach the journal as they appear, so a sidecar that dies
-          // without cleanup leaves the next boot something to reap.
-          this.adoption.persistLiveSet();
           this.emit({ type: 'session.processes', appSessionId, processes });
-          // The `hasAgentProcesses` gate cancels retirement; when the last
-          // process exits nothing else re-arms it, so do it here.
+        } finally {
           this.runtimeRetirement.arm();
-        } catch (error) {
-          console.warn('SessionManager: could not publish agent processes', error);
         }
       },
     });
@@ -618,6 +611,7 @@ export class SessionManager {
       runtime: this.runtime.status(),
       sessions: this.registry.liveSessionsSnapshot().map((live) => ({ ...live.summary })),
       children: this.childSessions.liveChildSummaries(),
+      processes: this.agentProcesses.snapshot(),
       persistence,
       interrupted: [...this.adoption.records()],
     });
@@ -806,15 +800,7 @@ export class SessionManager {
         return;
       case 'sessions.list':
         await this.sessionFiles.list(cmd);
-        // The renderer drops sidecar-owned process lists when the bridge
-        // disconnects, and the monitor only emits on change — so re-send the
-        // current lists alongside the bootstrap listing.
-        for (const live of this.registry.liveSessionsSnapshot()) {
-          const appSessionId = live.summary.appSessionId;
-          const processes = this.agentProcesses.processesFor(appSessionId);
-          if (processes.length > 0)
-            this.emit({ type: 'session.processes', appSessionId, processes });
-        }
+        this.emit({ type: 'sessions.processes', processes: this.agentProcesses.snapshot() });
         return;
       case 'history.list':
         this.timeline.list();

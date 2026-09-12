@@ -61,6 +61,7 @@ export class SessionCompactionExecution {
     customInstructions: string | undefined,
   ): Promise<CompactionExecutionResult> {
     const appSessionId = liveSession.summary.appSessionId;
+    const isCurrent = () => this.effects.primaryTarget(liveSession).isCurrent();
     const preCompactSessionId = liveSession.summary.providerSessionId;
     const carryover: UsageOffset = {
       tokensIn: liveSession.summary.tokensIn,
@@ -73,9 +74,11 @@ export class SessionCompactionExecution {
         liveSession.session,
         {
           status: (text, compactType) => {
+            if (!isCurrent()) return;
             this.dependencies.timeline.appendStatus(appSessionId, text, compactType);
           },
           error: (message) => {
+            if (!isCurrent()) return;
             this.dependencies.emitError({
               providerSessionId: liveSession.summary.providerSessionId,
               appSessionId,
@@ -84,6 +87,7 @@ export class SessionCompactionExecution {
             });
           },
           refresh: () => {
+            if (!isCurrent()) return Promise.resolve();
             const current = this.dependencies.registry.getLive(appSessionId);
             if (current?.summary.providerSessionId === preCompactSessionId) {
               // In-place compaction: recordCompaction owns the reset so its
@@ -105,13 +109,14 @@ export class SessionCompactionExecution {
             return this.dependencies.context.refresh(this.effects.primaryTarget(liveSession));
           },
           reload: async (newSessionId) => {
+            if (!isCurrent()) return;
             swapTarget = newSessionId;
             await this.adoptProvider(liveSession, newSessionId, carryover);
           },
         },
         { customInstructions, compactType: 'manual' },
       );
-      if (outcome === 'stale' && swapTarget)
+      if (outcome === 'stale' && swapTarget && isCurrent())
         return await this.recoverStaleProvider(liveSession, swapTarget, carryover);
       return { kind: 'ready-to-settle' };
     } finally {
@@ -127,50 +132,46 @@ export class SessionCompactionExecution {
     const appSessionId = liveSession.summary.appSessionId;
     const ref = { id: appSessionId };
     const oldSession = liveSession.session;
+    const target = this.effects.primaryTarget(liveSession);
     const replacement = await this.dependencies.runtime.loadSession(providerSessionId, {
       permissionHandler: this.dependencies.makePermissionHandler(ref),
       askUserHandler: this.dependencies.makeAskUserHandler(ref),
       cwd: liveSession.summary.cwd,
       mcpServers: liveSession.mcpConfigs,
     });
-    liveSession.session = replacement;
-    // Compaction swaps in a second `droid` process under the same session, so
-    // the tracked root moves with it or the session's processes go dark.
     const replacementPid = this.dependencies.runtime.processIdOf(replacement);
-    if (replacementPid !== undefined)
-      this.dependencies.agentProcesses.track(appSessionId, replacementPid);
     const rawOldPid = this.dependencies.runtime.processIdOf(oldSession);
-    // Only a pid the replacement does not share is actually going away.
     const oldPid = rawOldPid !== replacementPid ? rawOldPid : undefined;
-    let oldSessionRetired = false;
-    const retireOldSession = async (): Promise<void> => {
-      if (oldSessionRetired) return;
-      oldSessionRetired = true;
-      // A dev server started before this compaction is a child of the old
-      // provider. It should outlive the compaction, but once its parent exits
-      // it is reparented to launchd and invisible, so re-root it first: while
-      // the old provider is still alive it is still findable from its pid.
-      let adopted = true;
-      if (oldPid !== undefined) {
-        adopted = await this.dependencies.agentProcesses
-          .adoptDescendantsAsRoots(appSessionId, oldPid)
-          .catch(() => false);
-      }
-      await oldSession.close().catch(ignoreError);
-      // Untracking a root whose children were never adopted would leave them
-      // unreachable: keep it so the session close path can still reap them.
-      if (oldPid !== undefined && adopted) this.dependencies.agentProcesses.untrack(oldPid);
-    };
+    let installed = false;
     try {
+      if (!target.isCurrent()) return;
+      // Keep the old provider alive and owned until discovery succeeds.
+      // Closing it on a failed scan would orphan its unobserved children.
+      if (oldPid !== undefined) {
+        const adopted = await this.dependencies.agentProcesses.adoptDescendantsAsRoots(
+          appSessionId,
+          oldPid,
+          () => target.isCurrent(),
+        );
+        if (!target.isCurrent()) return;
+        if (!adopted)
+          throw new Error('Could not preserve processes before replacing the provider.');
+      }
+      await oldSession.close();
+      if (!target.isCurrent()) return;
+      if (oldPid !== undefined) this.dependencies.agentProcesses.untrack(oldPid);
+      liveSession.session = replacement;
+      installed = true;
+      if (replacementPid !== undefined)
+        this.dependencies.agentProcesses.track(appSessionId, replacementPid);
       this.effects.subscribePrimary(liveSession);
       await this.effects.rearmPrimary(liveSession).catch(ignoreError);
+      if (!this.effects.primaryTarget(liveSession).isCurrent()) return;
       liveSession.todoDisabledForDesign = undefined;
-      await retireOldSession();
       this.dependencies.context.preserveUsage(appSessionId, carryover);
       this.replaceProvider(appSessionId, providerSessionId, carryover);
-    } catch (error) {
-      await retireOldSession();
-      throw error;
+    } finally {
+      if (!installed) await replacement.close();
     }
   }
 
@@ -187,6 +188,7 @@ export class SessionCompactionExecution {
       // Persist the daemon-authoritative id; Manager performs close-and-resume.
       reloadError = errMsg(error);
     }
+    if (!this.effects.primaryTarget(liveSession).isCurrent()) return { kind: 'ready-to-settle' };
     const appSessionId = liveSession.summary.appSessionId;
     try {
       this.replaceProvider(appSessionId, providerSessionId, carryover);

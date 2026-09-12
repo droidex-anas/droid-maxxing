@@ -17,12 +17,6 @@ function elapsed(startedAt: number, now: number): string {
   return `${String(Math.floor(m / 60))}h ${String(m % 60)}m`;
 }
 
-// Processes report every port they listen on; the first is the one worth
-// opening, and a process with none (a watcher, a build) simply has no link.
-function primaryPort(process: AgentProcess): number | undefined {
-  return process.ports[0];
-}
-
 /**
  * Live dev servers and other processes the agent started, as one toolbar chip
  * that opens a list. Absent entirely while nothing is running.
@@ -72,9 +66,7 @@ export function RunningProcessesChip({ appSessionId }: { appSessionId: string })
   if (count === 0) return null;
   const label = count === 1 ? processes[0].name : `${String(count)} running`;
 
-  const openInBrowser = (process: AgentProcess) => {
-    const port = primaryPort(process);
-    if (port === undefined) return;
+  const openInBrowser = (port: number) => {
     dispatch({ type: 'OPEN_UTILITY_TOOL', tool: 'browser' });
     openBrowser({ appSessionId, url: `http://localhost:${String(port)}` });
     setOpen(false);
@@ -110,7 +102,7 @@ export function RunningProcessesChip({ appSessionId }: { appSessionId: string })
           >
             <div className="max-h-[min(70vh,400px)] overflow-y-auto rounded-2xl border border-droid-border bg-droid-elevated p-1 shadow-2xl shadow-black/50">
               {processes.map((process) => {
-                const port = primaryPort(process);
+                const port = process.ports.at(0);
                 return (
                   <div
                     key={process.pid}
@@ -140,7 +132,7 @@ export function RunningProcessesChip({ appSessionId }: { appSessionId: string })
                             type="button"
                             title={`Open localhost:${String(port)}`}
                             onClick={() => {
-                              openInBrowser(process);
+                              openInBrowser(port);
                             }}
                             className="flex h-6 w-6 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-bg/60 hover:text-droid-text"
                           >

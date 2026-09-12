@@ -394,6 +394,7 @@ type Action =
   | { type: 'SESSION_UPDATED'; session: SessionSummary }
   | { type: 'SESSION_CLOSED'; appSessionId: string }
   | { type: 'SESSION_PROCESSES'; appSessionId: string; processes: AgentProcess[] }
+  | { type: 'SESSIONS_PROCESSES'; processes: Record<string, AgentProcess[]> }
   // App-level chat organization (rename/pin/archive/delete); see lib/chatMetadata.
   // A blank RENAME_CHAT title clears the override back to the generated title.
   | { type: 'LINK_CHATS_PR'; appSessionIds: readonly string[]; cwd: string; pr: ChatPullRequest }
@@ -987,6 +988,8 @@ function baseReducer(state: AppState, action: Action): AppState {
       return releaseSessionTranscriptWindow(next, m.appSessionId, INACTIVE_TRANSCRIPT_POLICY);
     }
 
+    case 'SESSIONS_PROCESSES':
+      return { ...state, agentProcesses: action.processes };
     case 'SESSION_PROCESSES': {
       if (action.processes.length === 0 && !(action.appSessionId in state.agentProcesses))
         return state;
@@ -2175,6 +2178,8 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       return { type: 'SESSION_CLOSED', appSessionId: ev.appSessionId };
     case 'session.processes':
       return { type: 'SESSION_PROCESSES', appSessionId: ev.appSessionId, processes: ev.processes };
+    case 'sessions.processes':
+      return { type: 'SESSIONS_PROCESSES', processes: ev.processes };
     case 'mission.features':
       return { type: 'SESSION_FEATURES', appSessionId: ev.appSessionId, features: ev.features };
     case 'mission.progress':

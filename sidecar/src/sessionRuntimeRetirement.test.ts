@@ -259,6 +259,38 @@ test('a closed session stops carrying the moment the user last looked at it', as
   assert.deepEqual(h.retired, ['reopened']);
 });
 
+test('overlapping retirement sweeps wait for the same pending close', async () => {
+  let finishClose = (): void => undefined;
+  const h = ownerHarness({
+    retire: (id) => {
+      h.live.delete(id);
+      return new Promise<void>((resolve) => {
+        finishClose = resolve;
+      });
+    },
+  });
+  h.add('pending-close', 0);
+  h.focus.current = 'elsewhere';
+  h.owner.noteFocus(null);
+  h.clock.now = IDLE_MS * 10;
+  try {
+    const first = h.owner.sweep();
+    let finished = false;
+    const second = h.owner.sweep().then(() => {
+      finished = true;
+    });
+    await Promise.resolve();
+    assert.equal(finished, false, 'an empty live set does not mean cleanup has finished');
+    finishClose();
+    await Promise.all([first, second]);
+    assert.equal(finished, true);
+    assert.equal(h.statuses.length, 1);
+  } finally {
+    finishClose();
+    h.owner.stop();
+  }
+});
+
 test('a failed release is reported and does not stop the rest of the sweep', async () => {
   const h = ownerHarness({
     retire: (appSessionId) => {

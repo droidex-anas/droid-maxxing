@@ -258,6 +258,7 @@ test('validates session.processes events and rejects malformed process entries',
     pid: 123,
     name: 'ripgrep',
     command: 'rg foo',
+    originCommand: 'rg foo &',
     startedAt: 1,
     ports: [],
   };
@@ -265,6 +266,37 @@ test('validates session.processes events and rejects malformed process entries',
     serverWireMessage(
       batch({ type: 'session.processes', appSessionId: 'app-1', processes: [process] }),
     ),
+  );
+  assert.ok(
+    serverWireMessage(batch({ type: 'sessions.processes', processes: { 'app-1': [process] } })),
+  );
+  const malformed = { ...process, originCommand: 123 };
+  assert.equal(
+    serverWireMessage(
+      batch({ type: 'session.processes', appSessionId: 'app-1', processes: [malformed] }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(batch({ type: 'sessions.processes', processes: { 'app-1': [malformed] } })),
+    null,
+  );
+  assert.equal(
+    serverWireMessage({
+      type: 'bridge.snapshot',
+      generation: 'generation-1',
+      lastSeq: 1,
+      reason: 'replay_unavailable',
+      snapshot: {
+        runtime: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
+        sessions: [],
+        children: [],
+        processes: { 'app-1': [malformed] },
+        persistence: { durable: true, hadUnflushedWork: false },
+        interrupted: [],
+      },
+    }),
+    null,
   );
   assert.equal(
     serverWireMessage(

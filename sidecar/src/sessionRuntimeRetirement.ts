@@ -156,6 +156,7 @@ export class SessionRuntimeRetirement {
   private readonly unfocusedAt = new Map<string, number>();
   private focusReported = false;
   private stopped = false;
+  private sweeping: Promise<void> | null = null;
 
   constructor(private readonly dependencies: SessionRuntimeRetirementDependencies) {}
 
@@ -194,7 +195,15 @@ export class SessionRuntimeRetirement {
   // Release the provider process behind every session settled and untouched
   // past the idle budget. The transcript, history, and sidebar entry survive;
   // the next prompt reloads the provider session.
-  async sweep(): Promise<void> {
+  sweep(): Promise<void> {
+    if (this.sweeping) return this.sweeping;
+    this.sweeping = this.sweepOnce().finally(() => {
+      this.sweeping = null;
+    });
+    return this.sweeping;
+  }
+
+  private async sweepOnce(): Promise<void> {
     const d = this.dependencies;
     for (const appSessionId of retirableSessions(this.facts(), d.now(), d.idleMs)) {
       if (this.stopped) break;
