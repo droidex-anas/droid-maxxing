@@ -24,6 +24,13 @@ let catalogRequested = false;
 
 // Rows see the readable form of `mcp__<server>__<tool>` that `humanizeToolName`
 // produces, so server names are matched in that form rather than raw.
+// Services whose mark is known by name alone.
+const KNOWN_HOSTS: readonly [name: string, host: string][] = [['github', 'github.com']];
+
+function knownHost(key: string): string | undefined {
+  return KNOWN_HOSTS.find(([name]) => key.includes(name))?.[1];
+}
+
 function sourceKey(name: string): string {
   return name.replace(/[_-]+/g, ' ').trim().toLowerCase();
 }
@@ -58,7 +65,10 @@ export function toolSourceMark(source: string | undefined): LinkPresentation | n
   if (!source) return null;
   const memoised = marks.get(source);
   if (memoised !== undefined) return memoised;
-  const host = hostsBySource.get(sourceKey(source));
+  const key = sourceKey(source);
+  // Metadata first; a server without a configured host (a stdio install of a
+  // well-known service) is still recognised by its name.
+  const host = hostsBySource.get(key) ?? knownHost(key);
   // A host is shown the way a link to it would be, so a GitHub server wears the
   // bundled octocat and every other site wears its favicon.
   const mark = host ? describeLink(`https://${host}/`) : null;
