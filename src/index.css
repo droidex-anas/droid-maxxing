@@ -467,6 +467,18 @@
     overflow: auto;
   }
 
+  /* Diff rows are blocks sized to the scroll container, so their add/del tone
+     and focused left border stop at the viewport edge while the
+     `white-space: pre` code keeps going. Giving the scrolled content an
+     intrinsic width — the widest line, never narrower than the viewport —
+     makes every row as wide as the scrollable area, so the tones cover the
+     whole scroll range and the gutters stay aligned. Wrapping modes opt out:
+     `max-content` would undo their soft wrapping. */
+  .review-diff-content {
+    width: max-content;
+    min-width: 100%;
+  }
+
   .review-diff-row,
   .review-split-cell {
     border-left: 2px solid transparent;
@@ -541,6 +553,12 @@
 
     .review-diff-scroll {
       overflow-x: hidden;
+    }
+
+    /* Narrow panes wrap instead of scrolling, so the rows are viewport-width
+       again and an intrinsic width would only defeat the wrapping. */
+    .review-diff-content {
+      width: auto;
     }
 
     .review-diff-code {
