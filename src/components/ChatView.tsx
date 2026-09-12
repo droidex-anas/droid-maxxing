@@ -1,4 +1,12 @@
-import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
+import {
+  useRef,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  type ReactNode,
+  type CSSProperties,
+} from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import { openReviewAt, type OpenReviewFileHandler } from '../lib/reviewFocus';
@@ -300,6 +308,9 @@ export default function ChatView({
     },
     [dispatch],
   );
+  // Review previews a file from the workspace; a folderless chat has nothing
+  // to open, so its paths and chips stay plain text.
+  const canOpenFiles = Boolean(activeSession?.cwd);
   const openDiff = useCallback(
     (change: FileChange) => {
       openReviewFile(change.path, change);
@@ -606,7 +617,7 @@ export default function ChatView({
           pending={live}
           {...(messageFeedCwd !== undefined ? { cwd: messageFeedCwd } : {})}
           onOpenDiff={openDiff}
-          onOpenReviewFile={openReviewFile}
+          onOpenReviewFile={canOpenFiles ? openReviewFile : undefined}
           onOpenChildSession={openChildSession}
           childSessionActivity={childSessionActivity}
           {...(messageFeedSubagentsDock !== undefined
@@ -691,7 +702,10 @@ export default function ChatView({
         // belongs to the window chrome.
         <div data-electron-drag-region className="h-9 shrink-0" />
       )}
-      <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
+      <div
+        className="relative flex-1 min-h-0 min-w-0 flex flex-col"
+        style={{ '--transcript-inset-right': rightInset ? '312px' : '0px' } as CSSProperties}
+      >
         <TranscriptReachHost
           items={feedItems}
           updateKind={feedUpdateKind}

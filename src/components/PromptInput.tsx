@@ -1477,7 +1477,12 @@ export default function PromptInput({
   return (
     <div
       className={`w-full min-w-0 shrink-0 ${compact ? 'px-3 pb-3 pt-2' : 'px-6 pb-5 pt-2'}`}
-      style={{ paddingRight: rightInset ? 312 : undefined, transition: 'padding-right 0.2s ease' }}
+      // The transcript keeps its own 24px padding inside the panel inset; the
+      // composer must too, or its centre drifts 12px off the transcript's.
+      style={{
+        paddingRight: rightInset ? 312 + 24 : undefined,
+        transition: 'padding-right 0.2s ease',
+      }}
     >
       <div
         // The composer is the transcript column (42rem) plus its own text inset
@@ -1906,7 +1911,7 @@ export default function PromptInput({
                       ? idleSendTooltip
                       : 'Agent runtime is unavailable'
                 }
-                className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-25 disabled:cursor-not-allowed shrink-0"
+                className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                 style={{ background: ACCENT }}
               >
                 <ArrowUp className="w-3.5 h-3.5" />
