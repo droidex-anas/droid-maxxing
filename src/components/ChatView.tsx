@@ -733,7 +733,6 @@ export default function ChatView({
             className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden"
             style={{
               paddingRight: rightInset ? 312 : undefined,
-              transition: 'padding-right 0.2s ease',
               overflowAnchor: 'none',
             }}
           >

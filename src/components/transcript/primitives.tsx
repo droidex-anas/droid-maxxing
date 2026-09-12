@@ -122,9 +122,9 @@ function CopyButton({ text }: { text: string }) {
       }}
       title="Copy"
       aria-label="Copy"
-      className="shrink-0 rounded-md p-1 text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+      className="shrink-0 rounded-md p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
     >
-      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
   );
 }
@@ -241,11 +241,11 @@ export function WorkingIndicator({
    host carries `group/msg relative`. ── */
 export function MessageActions({ text, side }: { text: string; side: 'end' | 'start' }) {
   const place = side === 'end' ? 'left-0 -ml-1 pr-6' : 'right-0 -mr-1 pl-6';
-  // Padding, not margin, so the hit area touches the message: the pointer can
-  // travel from the last line onto the button without leaving the group.
+  // Padding, not margin, so the hit area touches the message, and a short hold
+  // before hiding so the pointer can travel from the last line onto the button.
   return (
     <div
-      className={`pointer-events-none absolute top-full ${place} pt-0.5 pb-1 opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100`}
+      className={`pointer-events-none absolute top-full ${place} pt-0.5 pb-1 opacity-0 transition-opacity duration-150 delay-300 focus-within:pointer-events-auto focus-within:opacity-100 focus-within:delay-0 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100 group-hover/msg:delay-0`}
     >
       <CopyButton text={text} />
     </div>

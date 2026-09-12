@@ -1478,10 +1478,7 @@ export default function PromptInput({
       className={`w-full min-w-0 shrink-0 ${compact ? 'px-3 pb-3 pt-2' : 'px-6 pb-5 pt-2'}`}
       // The transcript keeps its own 24px padding inside the panel inset; the
       // composer must too, or its centre drifts 12px off the transcript's.
-      style={{
-        paddingRight: rightInset ? 312 + 24 : undefined,
-        transition: 'padding-right 0.2s ease',
-      }}
+      style={{ paddingRight: rightInset ? 312 + 24 : undefined }}
     >
       <div
         // The composer is the transcript column (42rem) plus its own text inset
@@ -1762,12 +1759,6 @@ export default function PromptInput({
             </button>
 
             <div className="flex-1 min-w-0" />
-
-            {queue.length > 0 ? (
-              <span className="rounded-md border border-droid-border bg-droid-elevated/70 px-1.5 py-0.5 tabular-nums text-[11px] text-droid-text-secondary">
-                {queue.length} queued
-              </span>
-            ) : null}
 
             {/* Autonomy: read-only for a targeted child, live control for an
                 open session, draft override before a session exists. */}
