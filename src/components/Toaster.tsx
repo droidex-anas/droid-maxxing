@@ -18,7 +18,8 @@ const DOT: Record<ToastVariant, string> = {
 
 // Minimal pro toast: uniform hairline border (no side accent bars), a small
 // status dot, a close button revealed on hover, and a 2px TTL hairline along
-// the bottom edge that drains as the toast ages. Hovering pauses the countdown.
+// the bottom edge that drains as the toast ages. Hovering or focusing pauses
+// the countdown.
 export default function Toaster() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -47,6 +48,12 @@ export default function Toaster() {
             }}
             onMouseLeave={() => {
               resumeToast(t.id);
+            }}
+            onFocus={() => {
+              pauseToast(t.id);
+            }}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) resumeToast(t.id);
             }}
             className="group pointer-events-auto relative min-w-[240px] max-w-[380px] overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/95 shadow-droid-sm backdrop-blur-sm"
           >
