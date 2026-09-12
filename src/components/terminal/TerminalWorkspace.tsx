@@ -214,7 +214,10 @@ export function TerminalWorkspace({
   return (
     <div className="flex h-full min-h-0 flex-col bg-droid-bg">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border bg-droid-bg px-2.5">
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-droid-text-muted">
+        <span
+          title={cwd}
+          className="min-w-0 flex-1 truncate font-mono text-[11px] text-droid-text-muted"
+        >
           {cwd}
         </span>
         <TerminalButton
@@ -237,7 +240,7 @@ export function TerminalWorkspace({
         <div
           className={`shrink-0 border-b border-droid-border px-3 py-2 text-[12px] ${
             status === 'error'
-              ? 'bg-red-500/10 text-red-200'
+              ? 'bg-droid-red/10 text-droid-red'
               : 'bg-droid-surface text-droid-text-muted'
           }`}
         >

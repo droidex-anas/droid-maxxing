@@ -91,7 +91,9 @@ export function SidebarPullRequests({
       })}
       {unlinked.length > 0 && (
         <section aria-label="No linked PR">
-          <h3 className="px-3 py-1 text-[11px] font-medium text-droid-text-muted">No linked PR</h3>
+          <h3 className="px-2 py-1.5 text-[12px] font-medium text-droid-text-muted">
+            No linked PR
+          </h3>
           {list('unlinked', unlinked)}
         </section>
       )}

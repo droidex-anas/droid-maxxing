@@ -61,6 +61,7 @@ export default function RightPanel() {
 
   const sessionSpecsById: Partial<typeof state.sessionSpecs> = state.sessionSpecs;
   const activeSpec = activeSession ? sessionSpecsById[activeSession.appSessionId] : undefined;
+  const specTitle = activeSpec?.title.trim() ?? '';
 
   // Authoritative "is the model generating right now" signal — respects the
   // backend `streaming` flag and terminal phases, so the spinner stops on reply.
@@ -120,6 +121,7 @@ export default function RightPanel() {
     <Row
       icon={<ModelIcon provider={providerOf(modelInfo, activeSession.modelId)} size={16} />}
       label={<span className="font-medium">{modelLabel}</span>}
+      title={modelLabel}
       trailing={
         reasoningEffort ? (
           <span className="shrink-0 rounded-md border border-droid-border/70 bg-droid-elevated px-1.5 py-0.5 text-[11px] font-medium capitalize leading-none text-droid-text-secondary">
@@ -231,9 +233,11 @@ export default function RightPanel() {
           {activeSession && activeSpec && (
             <div>
               <Divider />
+              <SectionHeader label="Spec" />
               <Row
                 icon={<FileText className="h-4 w-4" />}
-                label="Spec"
+                label={specTitle || 'Open spec'}
+                title={specTitle || undefined}
                 onClick={() => {
                   dispatch({ type: 'SPEC_OPEN_WIKI', appSessionId: activeSession.appSessionId });
                 }}

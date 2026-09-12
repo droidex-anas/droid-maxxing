@@ -392,7 +392,8 @@
     opacity: 0.45;
   }
 
-  .group:hover .droid-toast-ttl {
+  .group:hover .droid-toast-ttl,
+  .group:focus-within .droid-toast-ttl {
     animation-play-state: paused;
   }
 

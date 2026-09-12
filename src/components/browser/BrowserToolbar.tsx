@@ -53,7 +53,7 @@ export function BrowserToolbar({
   onToggleExpanded,
 }: BrowserToolbarProps) {
   return (
-    <header className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border bg-droid-bg px-1.5">
+    <header className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border bg-droid-bg px-2.5">
       <IconButton
         title="Back: return to the previous page (⌘[)"
         disabled={!canGoBack || loading}

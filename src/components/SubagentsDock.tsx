@@ -283,7 +283,7 @@ export function SubagentsDock({
       onKeyDown={(e) => {
         if (e.key === 'Escape') setExpanded(false);
       }}
-      className="w-full overflow-hidden rounded-[20px] border border-droid-border bg-droid-surface shadow-[0_10px_30px_rgba(0,0,0,0.30)] transition-colors hover:border-droid-border-hover"
+      className="w-full overflow-hidden rounded-[20px] border border-droid-border bg-droid-surface shadow-droid transition-colors hover:border-droid-border-hover"
     >
       <button
         type="button"

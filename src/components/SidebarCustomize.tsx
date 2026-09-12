@@ -181,7 +181,7 @@ export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAll
   };
 
   return (
-    <div className="mx-3 mb-1 flex items-center justify-between">
+    <div className="mx-4 mb-1 flex items-center justify-between">
       <span className="text-[11px] font-medium text-droid-text-muted">
         {VIEWS.find((view) => view.value === preferences.view)?.label}
       </span>
