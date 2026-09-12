@@ -167,7 +167,7 @@ export function QueuedPrompts({
                   onClick={() => {
                     onEdit(p);
                   }}
-                  className="rounded p-1 text-droid-text-muted hover:text-droid-text hover:bg-droid-active/70"
+                  className="rounded p-1 text-droid-text-muted transition-colors hover:bg-droid-active/70 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
                   title="Edit in composer"
                 >
                   <Pencil className="w-3.5 h-3.5" />
@@ -177,7 +177,7 @@ export function QueuedPrompts({
                 onClick={() => {
                   onRemove(p.id);
                 }}
-                className="rounded p-1 text-droid-text-muted hover:text-droid-orange hover:bg-droid-active/70"
+                className="rounded p-1 text-droid-text-muted transition-colors hover:bg-droid-active/70 hover:text-droid-red focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
                 title="Delete"
               >
                 <X className="w-3.5 h-3.5" />

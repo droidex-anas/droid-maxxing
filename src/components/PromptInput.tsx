@@ -352,7 +352,7 @@ export default function PromptInput({
         return;
     }
   };
-  const [sendHover, setSendHover] = useState(false);
+  const [sendHintOpen, setSendHintOpen] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const editorRef = useRef<ComposerHandle>(null);
   // Flips once the lazy editor mounts, so a caret queued for it is applied.
@@ -579,11 +579,11 @@ export default function PromptInput({
     addMenuOpen,
     feedbackReport,
     draftEditing.menu,
-    isLive && sendHover,
+    isLive && sendHintOpen,
   ].some(Boolean);
 
   useEffect(() => {
-    if (!isLive) setSendHover(false);
+    if (!isLive) setSendHintOpen(false);
   }, [isLive]);
 
   useEffect(() => {
@@ -1831,17 +1831,25 @@ export default function PromptInput({
                 <Square className="w-3.5 h-3.5" fill="currentColor" strokeWidth={0} />
               </button>
             ) : isLive ? (
+              // Keyboard users reach the send button by tab, never by pointer, so
+              // focus opens the same hint that hover does.
               <div
                 className="relative shrink-0"
                 onMouseEnter={() => {
-                  setSendHover(true);
+                  setSendHintOpen(true);
                 }}
                 onMouseLeave={() => {
-                  setSendHover(false);
+                  setSendHintOpen(false);
+                }}
+                onFocus={() => {
+                  setSendHintOpen(true);
+                }}
+                onBlur={() => {
+                  setSendHintOpen(false);
                 }}
               >
                 <AnimatePresence>
-                  {sendHover && (
+                  {sendHintOpen && (
                     <motion.div
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}

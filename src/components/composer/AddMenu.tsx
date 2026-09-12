@@ -57,10 +57,10 @@ function MenuRow({
       className="flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-droid-surface/55 focus:bg-droid-surface focus:outline-none"
     >
       <Icon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-      <span className="shrink-0 text-[12.5px] font-medium text-droid-text">{label}</span>
-      <span className="min-w-0 truncate text-[11.5px] text-droid-text-muted/75">{hint}</span>
+      <span className="shrink-0 text-[13px] font-medium text-droid-text">{label}</span>
+      <span className="min-w-0 truncate text-[12px] text-droid-text-muted/75">{hint}</span>
       {checked && (
-        <span className="ml-auto shrink-0 text-[10.5px] font-medium" style={{ color: ACCENT }}>
+        <span className="ml-auto shrink-0 text-[11px] font-medium" style={{ color: ACCENT }}>
           Added
         </span>
       )}
@@ -190,7 +190,7 @@ export default function AddMenu({
             exit={{ opacity: 0, y: 6 }}
             transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
             style={fit}
-            className="absolute bottom-full left-0 z-50 mb-2 w-[340px] rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
+            className="absolute bottom-full left-0 z-50 mb-2 w-[340px] rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-droid"
             role="menu"
             aria-label="Add to this prompt"
           >

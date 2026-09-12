@@ -46,7 +46,7 @@ export default function OnboardingWizard({
           data-electron-drag-region
           className="h-11 shrink-0 flex items-center justify-end px-5 select-none"
         >
-          <span className="font-mono text-[10px] tracking-[0.18em] text-droid-text-muted">
+          <span className="text-[11px] tabular-nums tracking-[0.18em] text-droid-text-muted">
             {index + 1} / {steps.length}
           </span>
         </header>
