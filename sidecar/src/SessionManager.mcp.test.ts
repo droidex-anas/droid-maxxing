@@ -131,6 +131,7 @@ test('MCP catalog publishes tools after a connecting server settles', async () =
   const events: ServerEvent[] = [];
   const settings = new McpSettings(
     async () => session,
+    () => [],
     { add: async () => undefined, remove: async () => undefined },
     (event) => events.push(event),
     async () => {

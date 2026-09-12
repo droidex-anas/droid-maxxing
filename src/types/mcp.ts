@@ -17,6 +17,9 @@ export interface McpServerInfo {
   source: McpServerSource;
   isManaged: boolean;
   serverType?: McpServerType;
+  // Host of the configured HTTP/SSE endpoint, so the UI can show the server's
+  // site icon. Only the host travels: never the URL's path, headers, or tokens.
+  host?: string;
   error?: string;
   toolCount?: number;
   hasAuthTokens?: boolean;
