@@ -105,6 +105,22 @@ function ImageLightboxContent({
       className="fixed inset-0 z-[1200] flex flex-col bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
+      {/* The bar is chrome, not backdrop: clicking the file name should not
+          dismiss the image the user is inspecting. */}
+      <div
+        className="flex items-center gap-3 border-b border-droid-border/60 bg-droid-bg/80 px-5 py-3"
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+      >
+        <span className="min-w-0 flex-1 truncate text-[12px] text-droid-text-muted">{label}</span>
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text"
+        >
+          <X className="h-3.5 w-3.5" /> Close
+        </button>
+      </div>
       <div className="flex flex-1 items-center justify-center overflow-hidden p-8">
         {failed ? (
           <div
@@ -132,22 +148,6 @@ function ImageLightboxContent({
             }}
           />
         )}
-      </div>
-      {/* The bar is chrome, not backdrop: clicking the file name should not
-          dismiss the image the user is inspecting. */}
-      <div
-        className="flex items-center gap-3 border-t border-droid-border/60 bg-droid-bg/80 px-5 py-3"
-        onClick={(e) => {
-          e.stopPropagation();
-        }}
-      >
-        <span className="min-w-0 flex-1 truncate text-[12px] text-droid-text-muted">{label}</span>
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text"
-        >
-          <X className="h-3.5 w-3.5" /> Close
-        </button>
       </div>
     </motion.div>
   );

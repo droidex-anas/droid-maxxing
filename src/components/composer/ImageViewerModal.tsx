@@ -140,27 +140,8 @@ function ImageViewerModalContent({
       className="fixed inset-0 z-[1200] flex flex-col bg-black/70 backdrop-blur-sm"
       onClick={cropping ? undefined : onClose}
     >
-      <div className="flex flex-1 items-center justify-center overflow-hidden p-8">
-        <motion.div
-          {...imageViewerContentMotion(reduceMotion)}
-          className="relative max-h-full"
-          onClick={(e) => {
-            e.stopPropagation();
-          }}
-        >
-          <img
-            ref={imgRef}
-            src={image.preview}
-            alt="Attached image preview"
-            draggable={false}
-            className="block max-h-[75vh] max-w-[88vw] select-none rounded-lg border border-droid-border object-contain"
-          />
-          {cropping && <CropOverlay rect={rect} onChange={setRect} />}
-        </motion.div>
-      </div>
-
       <div
-        className="flex items-center gap-3 border-t border-droid-border/60 bg-droid-bg/80 px-5 py-3"
+        className="flex items-center gap-3 border-b border-droid-border/60 bg-droid-bg/80 px-5 py-3"
         onClick={(e) => {
           e.stopPropagation();
         }}
@@ -205,6 +186,24 @@ function ImageViewerModalContent({
             </button>
           </>
         )}
+      </div>
+      <div className="flex flex-1 items-center justify-center overflow-hidden p-8">
+        <motion.div
+          {...imageViewerContentMotion(reduceMotion)}
+          className="relative max-h-full"
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        >
+          <img
+            ref={imgRef}
+            src={image.preview}
+            alt="Attached image preview"
+            draggable={false}
+            className="block max-h-[75vh] max-w-[88vw] select-none rounded-lg border border-droid-border object-contain"
+          />
+          {cropping && <CropOverlay rect={rect} onChange={setRect} />}
+        </motion.div>
       </div>
     </motion.div>
   );
