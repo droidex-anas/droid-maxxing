@@ -1049,6 +1049,10 @@ export default function MissionControl() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
+      {/* Mission Control starts with its own drag row instead of leading its
+          headers past the window controls: the rail below is a fixed-width
+          column, and the collapsed rail is narrower than that lead. */}
+      <div data-electron-drag-region className="h-9 shrink-0" />
       <div className="flex-1 flex min-h-0 min-w-0">
         {/* ─── Features rail ─── */}
         {railCollapsed ? (
