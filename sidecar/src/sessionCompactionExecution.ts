@@ -27,7 +27,7 @@ export interface SessionCompactionExecutionDependencies {
   >;
   context: Pick<SessionContext, 'refresh' | 'preserveUsage' | 'recordCompaction'>;
   timeline: Pick<SessionTimeline, 'appendCompaction' | 'appendStatus'>;
-  runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf'>;
+  runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf' | 'isProcessAlive'>;
   agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack' | 'adoptDescendantsAsRoots'>;
   makePermissionHandler(ref: { id: string }): PermissionHandler;
   makeAskUserHandler(ref: { id: string }): AskUserHandler;
@@ -146,7 +146,12 @@ export class SessionCompactionExecution {
     try {
       if (!target.isCurrent()) return;
       if (replacementPid !== undefined)
-        this.dependencies.agentProcesses.track(appSessionId, replacementPid, 'provisional');
+        this.dependencies.agentProcesses.track(
+          appSessionId,
+          replacementPid,
+          () => this.dependencies.runtime.isProcessAlive(replacement),
+          'provisional',
+        );
       // Keep the old provider alive and owned until discovery succeeds.
       // Closing it on a failed scan would orphan its unobserved children.
       if (oldPid !== undefined) {
@@ -165,7 +170,9 @@ export class SessionCompactionExecution {
       liveSession.session = replacement;
       installed = true;
       if (replacementPid !== undefined)
-        this.dependencies.agentProcesses.track(appSessionId, replacementPid);
+        this.dependencies.agentProcesses.track(appSessionId, replacementPid, () =>
+          this.dependencies.runtime.isProcessAlive(replacement),
+        );
       this.effects.subscribePrimary(liveSession);
       await this.effects.rearmPrimary(liveSession).catch(ignoreError);
       if (!this.effects.primaryTarget(liveSession).isCurrent()) return;

@@ -186,7 +186,10 @@ function trackChildProcess(
   loaded: FactorySession,
 ): void {
   const childPid = host.d.runtime.processIdOf(loaded);
-  if (childPid !== undefined) host.d.agentProcesses.track(parentAppSessionId, childPid);
+  if (childPid !== undefined)
+    host.d.agentProcesses.track(parentAppSessionId, childPid, () =>
+      host.d.runtime.isProcessAlive(loaded),
+    );
 }
 
 export async function installChildRuntime(input: {

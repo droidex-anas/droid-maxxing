@@ -3,6 +3,7 @@ import {
   type DroidClientTransport,
   type ProcessTransportOptions,
 } from '@factory/droid-sdk';
+import type { ChildProcess } from 'node:child_process';
 
 const PERMISSION_OPTION_ALIASES: Record<string, string> = {
   proceed_always_file: 'proceed_always',
@@ -57,19 +58,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 class PermissionNormalizingTransport implements ConnectableDroidTransport {
+  private childProcess: ChildProcess | undefined;
+
   constructor(private readonly inner: DroidClientTransport) {}
 
   get isConnected(): boolean {
     return this.inner.isConnected;
   }
 
-  // The SDK keeps the child private; the pid is the only thing read from it.
+  // The SDK clears its reference before close finishes; retain the actual
+  // child so a failed close cannot erase its still-live process identity.
   get processId(): number | undefined {
-    const child = (this.inner as { childProcess?: { pid?: number } }).childProcess;
-    return typeof child?.pid === 'number' ? child.pid : undefined;
+    this.childProcess ??=
+      (this.inner as { childProcess?: ChildProcess | null }).childProcess ?? undefined;
+    const child = this.childProcess;
+    return child?.exitCode === null && child.signalCode === null ? child.pid : undefined;
   }
 
   connect(): Promise<void> {
+    this.childProcess = undefined;
     return this.inner.connect?.() ?? Promise.resolve();
   }
 

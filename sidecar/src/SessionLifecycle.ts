@@ -602,7 +602,8 @@ export class SessionLifecycle {
     // Before the first scan, so a configured MCP server never reaches the chip.
     d.agentProcesses.setIgnoredCommands(appSessionId, stdioMcpCommandLines(mcpConfigs));
     const processId = d.runtime.processIdOf(session);
-    if (processId !== undefined) d.agentProcesses.track(appSessionId, processId);
+    if (processId !== undefined)
+      d.agentProcesses.track(appSessionId, processId, () => d.runtime.isProcessAlive(session));
   }
 
   private requireOpenAdmission(): void {

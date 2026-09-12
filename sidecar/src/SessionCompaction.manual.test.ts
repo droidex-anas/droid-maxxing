@@ -132,7 +132,7 @@ function createHarness(options: { adoptSucceeds?: boolean; adopt?: () => Promise
     },
     runtime,
     agentProcesses: {
-      track: (_appSessionId, pid, kind = 'provider') => {
+      track: (_appSessionId, pid, _isAlive, kind = 'provider') => {
         tracked.set(pid, kind);
       },
       untrack: (pid) => {

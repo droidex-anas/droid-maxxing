@@ -22,20 +22,17 @@ export interface AgentProcessMonitorDependencies {
 export const TICK_MS = 2000;
 const PORT_SCAN_EVERY = 3;
 
-interface TrackedRoot {
+type TrackedRoot = {
   appSessionId: string;
-  kind: 'provider' | 'adopted' | 'provisional';
-  trackedAt: number;
-  startedAt?: number;
-}
+} & (
+  | { kind: 'provider' | 'provisional'; isAlive: () => boolean; startedAt?: number }
+  | { kind: 'adopted'; startedAt: number }
+);
 
 function matchesRoot(root: TrackedRoot, row: ProcessRecord | undefined): boolean {
-  if (!row) return false;
-  // An unobserved provider must already have existed when it was registered.
-  // Allow the same second-granular ps rounding as subsequent identity checks.
-  return root.startedAt === undefined
-    ? row.startedAt - root.trackedAt < 2000
-    : sameProcess({ startedAt: root.startedAt }, row);
+  if (!row || (root.kind !== 'adopted' && !root.isAlive())) return false;
+  // Only the exact live provider can establish its first start-time identity.
+  return root.startedAt === undefined || sameProcess({ startedAt: root.startedAt }, row);
 }
 
 function dedupeByPid(rows: readonly ProcessRecord[]): ProcessRecord[] {
@@ -83,15 +80,20 @@ export class AgentProcessMonitor {
   track(
     appSessionId: string,
     rootPid: number,
+    isAlive: () => boolean,
     kind: 'provider' | 'provisional' = 'provider',
   ): void {
-    if (this.disposed || this.closing.has(appSessionId)) return;
+    if (this.disposed || this.closing.has(appSessionId) || !isAlive()) return;
     const previous = this.roots.get(rootPid);
-    if (previous?.appSessionId === appSessionId) {
+    if (
+      previous?.appSessionId === appSessionId &&
+      previous.kind !== 'adopted' &&
+      previous.isAlive()
+    ) {
       if (previous.kind === 'provisional') previous.kind = kind;
       return;
     }
-    this.roots.set(rootPid, { appSessionId, kind, trackedAt: this.d.now() });
+    this.roots.set(rootPid, { appSessionId, kind, isAlive });
     this.arm();
   }
 
@@ -126,7 +128,6 @@ export class AgentProcessMonitor {
       this.roots.set(row.pid, {
         appSessionId,
         kind: 'adopted',
-        trackedAt: this.d.now(),
         startedAt: row.startedAt,
       });
     }

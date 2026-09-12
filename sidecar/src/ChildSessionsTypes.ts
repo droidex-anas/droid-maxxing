@@ -20,7 +20,7 @@ export type ChildSettingsTarget = ChildRuntimeTarget & {
 };
 
 export interface ChildSessionsDependencies {
-  runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf'>;
+  runtime: Pick<FactoryRuntime, 'loadSession' | 'processIdOf' | 'isProcessAlive'>;
   // Child runtimes are tracked under their parent session, so the parent's
   // close takes their processes with it.
   agentProcesses: Pick<AgentProcessMonitor, 'track' | 'untrack' | 'adoptDescendantsAsRoots'>;

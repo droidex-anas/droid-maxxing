@@ -93,11 +93,15 @@ export interface FactoryRuntime {
   loadSession(providerSessionId: string, handlers?: RuntimeHandlers): Promise<FactorySession>;
   readContextBreakdown(session: FactorySession): Promise<unknown>;
   processIdOf(session: FactorySession): number | undefined;
+  isProcessAlive(session: FactorySession): boolean;
 }
 
 export class DroidRuntime implements FactoryRuntime {
   private explicitApiKey = '';
-  private readonly processIds = new WeakMap<object, number>();
+  private readonly processes = new WeakMap<
+    object,
+    { pid: number; transport: ConnectableDroidTransport }
+  >();
 
   connect(apiKey?: string): void {
     if (apiKey) this.explicitApiKey = apiKey;
@@ -135,7 +139,12 @@ export class DroidRuntime implements FactoryRuntime {
   }
 
   processIdOf(session: FactorySession): number | undefined {
-    return this.processIds.get(session);
+    return this.processes.get(session)?.pid;
+  }
+
+  isProcessAlive(session: FactorySession): boolean {
+    const owned = this.processes.get(session);
+    return owned !== undefined && owned.transport.processId === owned.pid;
   }
 
   async createSession(options: CreateRuntimeSessionOptions): Promise<DroidSession> {
@@ -150,7 +159,7 @@ export class DroidRuntime implements FactoryRuntime {
       );
       const session = new DroidSession(client, init.sessionId, init);
       const pid = transport.processId;
-      if (pid !== undefined) this.processIds.set(session, pid);
+      if (pid !== undefined) this.processes.set(session, { pid, transport });
       return session;
     } catch (err) {
       await transport.close().catch(ignoreError);
@@ -170,7 +179,7 @@ export class DroidRuntime implements FactoryRuntime {
       );
       const session = new DroidSession(client, sessionId, init);
       const pid = transport.processId;
-      if (pid !== undefined) this.processIds.set(session, pid);
+      if (pid !== undefined) this.processes.set(session, { pid, transport });
       return session;
     } catch (err) {
       await transport.close().catch(ignoreError);
