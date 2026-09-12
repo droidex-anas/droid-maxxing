@@ -104,11 +104,11 @@ function SvgVisualCard({ svgContent, index }: { svgContent: string; index: numbe
     >
       {/* Subtle top bar */}
       <div className="absolute top-0 inset-x-0 h-7 flex items-center justify-between px-3.5 bg-droid-surface/30 border-b border-droid-border">
-        <span className="flex items-center gap-1.5 text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60">
+        <span className="flex items-center gap-1.5 text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60">
           <LayoutTemplate className="w-3 h-3" />
           Diagram
         </span>
-        <span className="text-[10px] font-mono text-droid-text-muted/40">SVG</span>
+        <span className="text-[11px] font-mono text-droid-text-muted/40">SVG</span>
       </div>
 
       {/* Rendered SVG */}

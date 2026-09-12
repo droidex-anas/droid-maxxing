@@ -395,7 +395,7 @@ export function ScheduleControls({
               placeholder="0 9 * * 1-5"
               className="w-full rounded-lg border border-droid-border bg-droid-bg/70 px-2.5 py-1.5 text-right text-[12px] tabular-nums text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-border-hover"
             />
-            <div className="mt-1 text-right text-[10px] text-droid-text-muted">
+            <div className="mt-1 text-right text-[11px] text-droid-text-muted">
               minute · hour · day · month · weekday
             </div>
           </div>

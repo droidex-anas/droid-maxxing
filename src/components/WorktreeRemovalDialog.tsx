@@ -155,7 +155,7 @@ export function WorktreeRemovalDialogContent({
         <div className="px-6 pb-5 pt-6">
           <h2
             id="worktree-removal-title"
-            className="text-[17px] font-semibold tracking-[-0.015em] text-droid-text"
+            className="text-[16px] font-semibold tracking-[-0.015em] text-droid-text"
           >
             {removalTitle(isChecking, hasUnsavedChanges)}
           </h2>

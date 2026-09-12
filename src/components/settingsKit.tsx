@@ -9,7 +9,7 @@ import { pushEscapeLayer } from './environment/usePopover';
 export function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-[15px] font-semibold text-droid-text">{title}</h2>
+      <h2 className="text-[16px] font-semibold text-droid-text">{title}</h2>
       {sub && <p className="text-[12px] text-droid-text-muted mt-0.5">{sub}</p>}
     </div>
   );

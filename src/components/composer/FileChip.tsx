@@ -72,7 +72,7 @@ export function FileChip({
         <span className="block truncate text-[12px] font-medium text-droid-text">
           {displayName}
         </span>
-        <span className="block text-[10px] text-droid-text-muted">{info.label}</span>
+        <span className="block text-[11px] text-droid-text-muted">{info.label}</span>
       </span>
       {onRemove && (
         <button

@@ -260,7 +260,7 @@ export function NotesPanel({
                     {tag && (
                       <div className="mb-1 flex">
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
                         >
                           {tag}
                           <button
@@ -340,7 +340,7 @@ export function NotesPanel({
                         text exists a plain save affordance and the key hints appear. */}
                     {draft.trim() !== '' && (
                       <div className="mt-1 flex items-center justify-end gap-2.5">
-                        <span className="text-[10px] text-droid-text-muted/60">
+                        <span className="text-[11px] text-droid-text-muted/60">
                           Enter to save · Shift+Enter for a new line
                         </span>
                         <button
@@ -383,7 +383,7 @@ export function NotesPanel({
                             }`}
                           >
                             <span
-                              className={`px-1.5 py-px text-[9.5px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[option]}`}
+                              className={`px-1.5 py-px text-[11px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[option]}`}
                             >
                               {option}
                             </span>
@@ -435,7 +435,7 @@ export function NotesPanel({
                             >
                               {tag && (
                                 <span
-                                  className={`mr-1.5 px-1.5 py-px text-[9.5px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
+                                  className={`mr-1.5 px-1.5 py-px text-[11px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
                                 >
                                   {tag}
                                 </span>

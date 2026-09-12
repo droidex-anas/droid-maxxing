@@ -293,11 +293,11 @@ function McpServerCard({
               <span className="truncate text-[13px] font-medium text-droid-text">
                 {server.name}
               </span>
-              <span className="rounded-full border border-droid-border px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-droid-text-muted">
+              <span className="rounded-full border border-droid-border px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-droid-text-muted">
                 {sourceLabel(server.source)}
               </span>
               {server.serverType && (
-                <span className="text-[9.5px] uppercase text-droid-text-muted">
+                <span className="text-[11px] uppercase text-droid-text-muted">
                   {server.serverType}
                 </span>
               )}
@@ -351,7 +351,7 @@ function McpServerCard({
             <div className="py-1 text-[11px] text-droid-text-muted">No tools reported.</div>
           ) : (
             <>
-              <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted">
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-droid-text-muted">
                 Available tools
               </div>
               <div className="grid gap-x-6 gap-y-3 pb-1 sm:grid-cols-2">
@@ -362,7 +362,7 @@ function McpServerCard({
                         {tool.name}
                       </span>
                       {!tool.isEnabled && (
-                        <span className="shrink-0 rounded-full bg-droid-elevated px-1.5 py-0.5 text-[9px] text-droid-text-muted">
+                        <span className="shrink-0 rounded-full bg-droid-elevated px-1.5 py-0.5 text-[11px] text-droid-text-muted">
                           Off
                         </span>
                       )}

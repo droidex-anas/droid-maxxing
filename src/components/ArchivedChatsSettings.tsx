@@ -26,7 +26,7 @@ export function ArchivedChatsSettings() {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="mb-4">
-        <h2 className="text-[15px] font-semibold text-droid-text">Archived chats</h2>
+        <h2 className="text-[16px] font-semibold text-droid-text">Archived chats</h2>
         <p className="text-[12px] text-droid-text-muted mt-0.5">
           Hidden from your sidebar. Restore a chat to bring it back, or delete it for good.
         </p>

@@ -160,7 +160,7 @@ export function AutonomyMenu({
         <span className="text-[11px] font-medium text-droid-text-secondary tracking-wide">
           Autonomy
         </span>
-        <span className="text-[10px] text-droid-text-muted">{SCOPE_CAPTIONS[scope]}</span>
+        <span className="text-[11px] text-droid-text-muted">{SCOPE_CAPTIONS[scope]}</span>
       </div>
       <div className="px-2 pb-2 space-y-0.5">
         {AUTONOMY_LEVELS.map((level, i) => {
@@ -187,7 +187,7 @@ export function AutonomyMenu({
               >
                 {AUTONOMY_LABELS[level]}
               </span>
-              <span className="block text-[10px] text-droid-text-muted leading-snug">
+              <span className="block text-[11px] text-droid-text-muted leading-snug">
                 {AUTONOMY_DESCRIPTIONS[level]}
               </span>
             </button>

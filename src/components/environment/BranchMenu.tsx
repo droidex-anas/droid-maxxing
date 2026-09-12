@@ -178,7 +178,7 @@ export function BranchMenu({
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto py-1">
-          <div className="px-2.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+          <div className="px-2.5 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
             Branches
           </div>
           {local.map((b) => {
@@ -198,7 +198,7 @@ export function BranchMenu({
                   {b.name}
                 </span>
                 {ab && (
-                  <span className="shrink-0 text-[10px] tabular-nums text-droid-text-muted">
+                  <span className="shrink-0 text-[11px] tabular-nums text-droid-text-muted">
                     {ab}
                   </span>
                 )}
@@ -219,7 +219,7 @@ export function BranchMenu({
           )}
 
           {remote.length > 0 && (
-            <div className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+            <div className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
               Remote
             </div>
           )}

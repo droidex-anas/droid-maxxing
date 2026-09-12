@@ -111,7 +111,7 @@ export function PrHeader({
 
   return (
     <header>
-      <h1 className="text-[21px] leading-snug font-semibold text-droid-text">
+      <h1 className="text-[22px] leading-snug font-semibold text-droid-text">
         {pr ? (
           <>
             {pr.title}

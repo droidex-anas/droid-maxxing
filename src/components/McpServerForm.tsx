@@ -130,7 +130,7 @@ export function AddMcpServerDialog({
             <div>
               <h2
                 id="add-mcp-title"
-                className="text-[18px] font-semibold tracking-[-0.015em] text-droid-text"
+                className="text-[16px] font-semibold tracking-[-0.015em] text-droid-text"
               >
                 Add MCP server
               </h2>

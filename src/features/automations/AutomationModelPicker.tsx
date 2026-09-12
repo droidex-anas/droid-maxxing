@@ -147,7 +147,7 @@ export function AutomationModelPicker({
               <div className="text-[11px] font-medium text-droid-text-secondary">
                 Model and reasoning
               </div>
-              <div className="mt-0.5 text-[10px] text-droid-text-muted">
+              <div className="mt-0.5 text-[11px] text-droid-text-muted">
                 Uses the same live catalog as the chat composer
               </div>
             </div>
@@ -165,7 +165,7 @@ export function AutomationModelPicker({
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="px-4 pb-2 pt-3.5">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wider text-droid-text-muted">
+                <span className="text-[11px] uppercase tracking-wider text-droid-text-muted">
                   Reasoning
                 </span>
                 <span className="text-[11px] font-medium capitalize" style={{ color: ACCENT }}>

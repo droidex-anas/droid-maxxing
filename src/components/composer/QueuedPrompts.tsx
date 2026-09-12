@@ -69,7 +69,7 @@ function QueuedImages({ paths }: { paths: string[] }) {
         )}
       </span>
       {paths.length > 1 && (
-        <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-droid-border bg-droid-elevated px-0.5 text-[8px] font-semibold leading-none text-droid-text">
+        <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-droid-border bg-droid-elevated px-0.5 text-[11px] font-semibold leading-none text-droid-text">
           {paths.length}
         </span>
       )}
@@ -104,7 +104,7 @@ export function QueuedPrompts({
 
   return (
     <div className="mb-2 flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 px-1 text-[10px] font-medium tracking-wide text-droid-text-muted">
+      <div className="flex items-center gap-1.5 px-1 text-[11px] font-medium tracking-wide text-droid-text-muted">
         <ListPlus className="w-3 h-3" />
         Queued · sends after the current turn
       </div>
@@ -154,7 +154,7 @@ export function QueuedPrompts({
                 </Fragment>
               ))}
               {p.design && p.design.references.length > 0 && (
-                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-droid-active px-1.5 py-0.5 text-[10px] text-droid-text-muted">
+                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-droid-active px-1.5 py-0.5 text-[11px] text-droid-text-muted">
                   <MousePointerSquareDashed className="w-3 h-3" />
                   {p.design.references.length} reference
                   {p.design.references.length === 1 ? '' : 's'}

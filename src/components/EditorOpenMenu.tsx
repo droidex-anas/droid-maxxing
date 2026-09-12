@@ -160,7 +160,7 @@ export default function EditorOpenMenu({
           />
 
           <div className="my-1.5 h-px bg-droid-border/70" />
-          <div className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+          <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
             Default editor
           </div>
 
@@ -214,7 +214,7 @@ function MenuAction({
     >
       <span className="shrink-0 text-droid-text-muted">{icon}</span>
       <span className="flex-1 truncate">{label}</span>
-      {hint && <span className="text-[10px] text-droid-text-muted">{hint}</span>}
+      {hint && <span className="text-[11px] text-droid-text-muted">{hint}</span>}
     </button>
   );
 }

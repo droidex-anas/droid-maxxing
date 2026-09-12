@@ -88,10 +88,10 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
         className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5"
       >
         <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
-          <span className="text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60">
+          <span className="text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60">
             Diagram source
           </span>
-          <span className="text-[10px] font-mono text-droid-text-muted/40">Mermaid</span>
+          <span className="text-[11px] font-mono text-droid-text-muted/40">Mermaid</span>
         </div>
         <pre className="overflow-x-auto p-4">
           <code className="font-mono text-[12px] text-droid-text-secondary whitespace-pre">
@@ -108,10 +108,10 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
       className="rounded-2xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-5"
     >
       <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
-        <span className="text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60">
+        <span className="text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60">
           Diagram
         </span>
-        <span className="text-[10px] font-mono text-droid-text-muted/40">Mermaid</span>
+        <span className="text-[11px] font-mono text-droid-text-muted/40">Mermaid</span>
       </div>
       <div
         className="p-4 flex items-center justify-center [&_svg]:max-w-full [&_svg]:h-auto"
@@ -139,10 +139,10 @@ export function SvgCodeBlock({ content }: { content: string }) {
   return (
     <div className="rounded-2xl border border-droid-border bg-droid-elevated/30 overflow-hidden my-4">
       <div className="flex items-center justify-between px-3.5 h-7 bg-droid-surface/30 border-b border-droid-border">
-        <span className="text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60">
+        <span className="text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60">
           Diagram
         </span>
-        <span className="text-[10px] font-mono text-droid-text-muted/40">SVG</span>
+        <span className="text-[11px] font-mono text-droid-text-muted/40">SVG</span>
       </div>
       <div className="p-4 flex items-center justify-center min-h-[100px]">
         <div

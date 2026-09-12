@@ -89,7 +89,7 @@ export default function CommandPalette() {
           >
             <Icon className="w-4 h-4 text-droid-text-muted" />
             <span className="flex-1 text-sm text-droid-text">{cmd.label}</span>
-            <span className="text-[10px] text-droid-text-muted font-mono">{cmd.shortcut}</span>
+            <span className="text-[11px] text-droid-text-muted font-mono">{cmd.shortcut}</span>
             {i === selected && <ArrowRight className="w-3.5 h-3.5 text-droid-accent" />}
           </button>
         );

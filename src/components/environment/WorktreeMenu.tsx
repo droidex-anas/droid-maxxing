@@ -197,7 +197,7 @@ export function WorktreeMenu({
         width={288}
       >
         <div className="min-h-0 flex-1 overflow-y-auto py-1">
-          <div className="px-2.5 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+          <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
             This session
           </div>
           {current && (
@@ -210,12 +210,12 @@ export function WorktreeMenu({
               <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text">
                 {worktreeName(current)}
               </span>
-              <span className="shrink-0 text-[10px] text-droid-text-muted">{current.head}</span>
+              <span className="shrink-0 text-[11px] text-droid-text-muted">{current.head}</span>
             </div>
           )}
 
           {others.length > 0 && (
-            <div className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+            <div className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
               Other worktrees
             </div>
           )}
@@ -240,14 +240,14 @@ export function WorktreeMenu({
               {w.isMain ? (
                 <span
                   title="The repository's main worktree can't be removed"
-                  className="shrink-0 rounded bg-droid-elevated px-1.5 py-0.5 text-[10px] text-droid-text-muted"
+                  className="shrink-0 rounded bg-droid-elevated px-1.5 py-0.5 text-[11px] text-droid-text-muted"
                 >
                   main
                 </span>
               ) : w.path && isWorktreeInUse(w.path, sessionCwds) ? (
                 <span
                   title="A chat is currently using this worktree"
-                  className="shrink-0 rounded bg-droid-elevated px-1.5 py-0.5 text-[10px] text-droid-text-muted"
+                  className="shrink-0 rounded bg-droid-elevated px-1.5 py-0.5 text-[11px] text-droid-text-muted"
                 >
                   in use
                 </span>

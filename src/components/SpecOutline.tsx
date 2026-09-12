@@ -163,7 +163,7 @@ export function SpecOutline({
 
       {/* Footer count */}
       <div className="shrink-0 h-8 border-t border-droid-border flex items-center justify-center">
-        <span className="text-[10px] font-mono text-droid-text-muted/50">
+        <span className="text-[11px] font-mono text-droid-text-muted/50">
           {q ? `${filtered.length}/${headings.length}` : `${headings.length} sections`}
         </span>
       </div>

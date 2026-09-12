@@ -281,7 +281,7 @@ export function WorktreesSettings() {
     >
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-droid-text">
+          <h2 className="text-[16px] font-semibold tracking-[-0.015em] text-droid-text">
             Worktrees
           </h2>
           <p className="mt-1 text-[13px] text-droid-text-muted">

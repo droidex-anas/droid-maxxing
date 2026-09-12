@@ -116,7 +116,7 @@ export function NotificationsSettings({ highlightQuery = '' }: { highlightQuery?
         </p>
       </div>
 
-      <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+      <div className="mb-3 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
         Finish alerts
       </div>
       <div className="mb-6 overflow-hidden rounded-2xl border border-droid-border/80 bg-droid-surface">

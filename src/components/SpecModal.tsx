@@ -95,7 +95,7 @@ export function SpecModal({
                   {title || 'Specification'}
                 </span>
                 {outline.length > 0 && (
-                  <span className="text-[10px] font-mono text-droid-text-muted/70 ml-1">
+                  <span className="text-[11px] font-mono text-droid-text-muted/70 ml-1">
                     {outline.length} sections
                   </span>
                 )}

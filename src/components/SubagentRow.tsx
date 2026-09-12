@@ -122,7 +122,7 @@ export const SubagentRow = memo(function SubagentRow({
               ) : null}
             </span>
             {child.reasoningEffort ? (
-              <span className="shrink-0 rounded-md bg-droid-accent/15 px-1.5 py-0.5 text-[10px] font-medium capitalize text-droid-accent">
+              <span className="shrink-0 rounded-md bg-droid-accent/15 px-1.5 py-0.5 text-[11px] font-medium capitalize text-droid-accent">
                 {child.reasoningEffort}
               </span>
             ) : null}

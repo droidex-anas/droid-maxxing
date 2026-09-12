@@ -36,7 +36,7 @@ export function UnreadFilterActions({
       >
         <Bell className="h-4 w-4" strokeWidth={1.75} />
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-droid-accent px-0.5 text-[8px] font-semibold tabular-nums text-droid-bg">
+          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-droid-accent px-0.5 text-[11px] font-semibold leading-none tabular-nums text-droid-bg">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}

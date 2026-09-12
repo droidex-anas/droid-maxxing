@@ -924,7 +924,7 @@ export default function SettingsPanel() {
             if (filtered.length === 0) return null;
             return (
               <div key={group}>
-                <div className="mb-1 px-2.5 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted/80">
+                <div className="mb-1 px-2.5 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted/80">
                   {group}
                 </div>
                 <div className="flex flex-col gap-0.5">

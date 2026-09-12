@@ -295,7 +295,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                   files, browser content, keys, and credentials are not attached unless you opt in
                   to a screenshot below.
                 </p>
-                <span className="shrink-0 font-mono text-[10px] text-droid-text-muted">
+                <span className="shrink-0 font-mono text-[11px] text-droid-text-muted">
                   {description.length}/2000
                 </span>
               </div>
@@ -335,7 +335,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                     </label>
                   ))}
                 </div>
-                <p className="mt-2 text-[10px] leading-[15px] text-droid-text-muted">
+                <p className="mt-2 text-[11px] leading-[15px] text-droid-text-muted">
                   Optional. Session log and app state contain anonymized operational facts only. The
                   screenshot captures the full app window, which may include chats, file paths, and
                   browser content. Uncheck all to exclude these optional attachments.
