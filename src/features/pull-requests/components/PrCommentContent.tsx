@@ -67,18 +67,21 @@ export function HunkPreview({ diffHunk }: { diffHunk: string }) {
         </button>
       ) : null}
       <div className="overflow-x-auto py-1">
-        {lines.map((line, index) => {
-          const tone = hunkLineTone(line);
-          return (
-            <div
-              key={`${String(index)}-${line}`}
-              style={HUNK_TONE_STYLE[tone]}
-              className="px-3 font-mono text-[12px] leading-[1.5] whitespace-pre text-droid-text-secondary"
-            >
-              {line || ' '}
-            </div>
-          );
-        })}
+        {/* Sized to the widest line so row tones cover the whole scroll range. */}
+        <div className="review-diff-content">
+          {lines.map((line, index) => {
+            const tone = hunkLineTone(line);
+            return (
+              <div
+                key={`${String(index)}-${line}`}
+                style={HUNK_TONE_STYLE[tone]}
+                className="px-3 font-mono text-[12px] leading-[1.5] whitespace-pre text-droid-text-secondary"
+              >
+                {line || ' '}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
