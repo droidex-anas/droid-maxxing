@@ -28,7 +28,10 @@ let catalogRequested = false;
 const KNOWN_HOSTS: readonly [name: string, host: string][] = [['github', 'github.com']];
 
 function knownHost(key: string): string | undefined {
-  return KNOWN_HOSTS.find(([name]) => key.includes(name))?.[1];
+  // The service names the server ("github", "github mcp"), not merely appears
+  // in its name ("not github").
+  const [first] = key.split(' ');
+  return KNOWN_HOSTS.find(([name]) => first === name)?.[1];
 }
 
 function sourceKey(name: string): string {
