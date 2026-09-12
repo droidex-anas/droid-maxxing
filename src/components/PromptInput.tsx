@@ -583,10 +583,6 @@ export default function PromptInput({
   ].some(Boolean);
 
   useEffect(() => {
-    if (!isLive) setSendHintOpen(false);
-  }, [isLive]);
-
-  useEffect(() => {
     if (
       turnStarting &&
       shouldStopTurnStarting({
@@ -1472,6 +1468,11 @@ export default function PromptInput({
     attachedFiles.length > 0 ||
     fileAttachments.files.length > 0 ||
     imageAttachments.images.length > 0;
+  // The hint's host unmounts while a turn starts or the draft is empty; clear
+  // the state with it so the hint never reopens without a hover or focus.
+  useEffect(() => {
+    if (!isLive || !hasContent || turnStarting) setSendHintOpen(false);
+  }, [isLive, hasContent, turnStarting]);
 
   return (
     <div
