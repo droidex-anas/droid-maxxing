@@ -60,7 +60,7 @@ export function FileChip({
         : {})}
       className={`group relative flex max-w-60 items-center gap-2.5 rounded-xl border border-droid-border bg-droid-bg/60 py-2 pl-2 pr-2.5 text-left ${
         onOpen
-          ? 'transition-colors hover:border-droid-border-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover'
+          ? 'transition-colors hover:border-droid-border-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60'
           : ''
       }`}
       title={onOpen ? `Open ${displayName} in Review` : displayName}
@@ -82,7 +82,7 @@ export function FileChip({
             e.stopPropagation();
             onRemove();
           }}
-          className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-droid-border bg-droid-elevated text-droid-text-muted shadow-sm transition-colors after:absolute after:-inset-0.5 after:content-[''] hover:border-droid-border-hover hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+          className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-droid-border bg-droid-elevated text-droid-text-muted shadow-sm transition-colors after:absolute after:-inset-0.5 after:content-[''] hover:border-droid-border-hover hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
           title="Remove file"
         >
           <X className="h-2.5 w-2.5" strokeWidth={3} />

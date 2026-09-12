@@ -84,14 +84,25 @@ export function useSmoothStreamingText(source: string, live: boolean): string {
 // upstream — must not blink forever; fresh text restarts it.
 const TYPING_IDLE_MS = 1600;
 
+// The stream's last observed text and when it arrived, shared by every
+// instance watching it (the feed's Working cue and the tail row's caret). A
+// row that remounts around text that already idled — the virtualizer recycling
+// the tail — must not restart its caret beside the cue that took over.
+let lastSeen = { text: '', at: 0 };
+
+function idleSince(text: string): boolean {
+  return lastSeen.text === text && Date.now() - lastSeen.at >= TYPING_IDLE_MS;
+}
+
 export function useStreamingActivity(text: string, active: boolean): boolean {
-  const [typing, setTyping] = useState(active);
+  const [typing, setTyping] = useState(() => active && !idleSince(text));
 
   useEffect(() => {
-    if (!active) {
+    if (!active || idleSince(text)) {
       setTyping(false);
       return;
     }
+    if (lastSeen.text !== text) lastSeen = { text, at: Date.now() };
     setTyping(true);
     const timer = setTimeout(() => {
       setTyping(false);

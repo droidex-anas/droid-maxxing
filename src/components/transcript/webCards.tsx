@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { TranscriptEvent } from '../../types/bridge';
+import { ProseFileLinks } from './ProseFileLink';
 import { Markdown } from '../Markdown';
 import {
   stripAnsi,
@@ -243,10 +244,13 @@ function FetchBodyContent({ body }: { body: string }) {
   return (
     <div className="max-h-96 overflow-auto rounded-lg bg-droid-elevated/30 px-3.5 py-2.5">
       {/* Fetched pages are untrusted: diagrams must stay off so an ```svg fence
-          in the body can never reach SvgCodeBlock's dangerouslySetInnerHTML. */}
-      <Markdown allowGeneratedContent={false} allowImages={false}>
-        {body}
-      </Markdown>
+          in the body can never reach SvgCodeBlock's dangerouslySetInnerHTML, and
+          a `src/app.ts` in the page must not become a control for a local file. */}
+      <ProseFileLinks>
+        <Markdown allowGeneratedContent={false} allowImages={false}>
+          {body}
+        </Markdown>
+      </ProseFileLinks>
     </div>
   );
 }

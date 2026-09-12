@@ -227,7 +227,7 @@ function RowAction({
         onClick={onClick}
         disabled={disabled}
         aria-label={label}
-        className={`rounded-lg p-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover disabled:cursor-not-allowed disabled:opacity-35 ${
+        className={`rounded-lg p-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-35 ${
           danger
             ? 'bg-droid-red/12 text-droid-red hover:bg-droid-red/20'
             : 'text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text'

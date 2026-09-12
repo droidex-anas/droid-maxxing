@@ -288,9 +288,13 @@ export function MessageFeed({
   // cue; Working takes over the moment the stream idles so a token gap never
   // reads as completion. Thinking, status, and running-child tails already
   // convey pending work.
+  const tailIsReply = last?.type === 'message' && last.event.author !== 'user';
+  const tailText = tailIsReply ? (last.event.text ?? '') : '';
   const tailSelfIndicates =
     !!last &&
     (last.type === 'thinking' ||
+      // An App tail shows its own "Building interactive app" progress.
+      (tailIsReply && hasAppBlock(tailText)) ||
       last.type === 'status' ||
       (last.type === 'child_session' && lastChildSessionRunning) ||
       (last.type === 'child_sessions' && lastDockRunning));
@@ -302,8 +306,6 @@ export function MessageFeed({
   );
   // Mirrors the tail message's own caret timing (same text, same idle window),
   // so the hand-off from caret to Working is seamless.
-  const tailIsReply = last?.type === 'message' && last.event.author !== 'user';
-  const tailText = tailIsReply ? (last.event.text ?? '') : '';
   // A tail that only echoes the pinned spec renders nothing, so it cannot
   // carry the live cue either.
   const tailTyping = useStreamingActivity(

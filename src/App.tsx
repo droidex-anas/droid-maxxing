@@ -35,6 +35,7 @@ import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
 import SetupBanner from './components/onboarding/SetupBanner';
 import { useMeasuredHeight } from './hooks/useMeasuredHeight';
+import { addNativeSurfaceObscurer } from './hooks/useObscuresNativeSurfaces';
 import { WINDOW_CONTROLS_INSET_PX } from './lib/windowChrome';
 import RuntimeStatusBanner from './components/RuntimeStatusBanner';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
@@ -405,10 +406,27 @@ export default function App() {
   }, [onboard.lastResult]);
 
   // The native browser is a separate Electron layer that floats above the DOM,
-  // so close it while the full-screen wizard is up or it paints over the tour.
+  // so close it while the full-screen wizard is up or it paints over the tour,
+  // and bring the pane back once the tour is done.
+  const paneClosedForWizard = useRef(false);
   useEffect(() => {
-    if (showWizard && utilityPanel.open) dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: false });
+    if (showWizard) {
+      if (!utilityPanel.open) return;
+      paneClosedForWizard.current = true;
+      dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: false });
+    } else if (paneClosedForWizard.current) {
+      paneClosedForWizard.current = false;
+      dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: true });
+    }
   }, [showWizard, utilityPanel.open, dispatch]);
+
+  // The pane animates out of a full-content route for 180ms, and the native
+  // browser inside it would stay painted and clickable over the new route for
+  // that long. Treat the route as an overlay so the view hides at once.
+  useEffect(() => {
+    if (!fullContentRoute) return;
+    return addNativeSurfaceObscurer();
+  }, [fullContentRoute]);
 
   // "Run setup again" from Settings re-opens the tour.
   useEffect(() => {
@@ -509,7 +527,12 @@ export default function App() {
       // action onto one of them takes effect instead of being swallowed.
       for (const { action } of SHORTCUT_DEFINITIONS) {
         if (!matchesChord(e, state.shortcutBindings[action])) continue;
+        // A shell owns its Ctrl chords (Ctrl+\ is SIGQUIT); Cmd chords never
+        // reach it, so on macOS they still toggle from inside the terminal.
+        if (isTerminalInputTarget(e.target) && !e.metaKey) return;
         e.preventDefault();
+        // A held key auto-repeats and would toggle straight back.
+        if (e.repeat) return;
         run[action]();
         return;
       }

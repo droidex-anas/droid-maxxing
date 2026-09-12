@@ -55,7 +55,7 @@ export function InlineCode({ children }: { children?: ReactNode }) {
         event.preventDefault();
         open();
       }}
-      className={`${PILL} cursor-pointer underline decoration-transparent underline-offset-2 transition-colors hover:bg-droid-text/[0.14] hover:decoration-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover`}
+      className={`${PILL} cursor-pointer underline decoration-transparent underline-offset-2 transition-colors hover:bg-droid-text/[0.14] hover:decoration-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60`}
     >
       {children}
     </code>

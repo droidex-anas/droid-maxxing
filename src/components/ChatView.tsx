@@ -191,7 +191,7 @@ function ChatHeader({
           type="button"
           onClick={sub.onStop}
           title="Stop child session"
-          className="flex shrink-0 items-center gap-1 rounded-lg bg-droid-elevated/60 px-2.5 py-1.5 text-[11px] text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-droid-elevated/60 px-2.5 py-1.5 text-[11px] text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
         >
           <Square className="h-3 w-3" />
           Stop

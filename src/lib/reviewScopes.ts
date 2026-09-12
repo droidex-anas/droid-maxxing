@@ -80,6 +80,22 @@ function longestSuffixMatch(files: readonly { path: string }[], absPath: string)
   return best;
 }
 
+// An absolute path is only this repo's file when the repo root it implies is
+// the session cwd or one of its ancestors; "/elsewhere/repo/src/app.ts" must
+// not open this repo's src/app.ts. Without a cwd nothing pins the repo, so the
+// longest suffix still decides.
+function absolutePathMatch(
+  files: readonly { path: string }[],
+  absPath: string,
+  cwd: string | undefined,
+): string | null {
+  const match = longestSuffixMatch(files, absPath);
+  if (!match || !cwd) return match;
+  const root = absPath.slice(0, absPath.length - match.length - 1);
+  const cwdNorm = canonicalizeAbsolutePath(cwd.replace(/\\/g, '/'));
+  return cwdNorm === root || cwdNorm.startsWith(`${root}/`) ? match : null;
+}
+
 // Match a focus-request path against a git diff file list. Focus paths come
 // from transcript edits and may be absolute, repo-root-relative, or relative
 // to the session cwd (which can be a repo subdirectory); git paths are always
@@ -111,7 +127,7 @@ export function matchReviewFocusPath(
   for (const file of files) {
     if (file.path === focusPath || file.path === norm) return file.path;
   }
-  if (isAbsolute) return longestSuffixMatch(files, canonicalizeAbsolutePath(norm));
+  if (isAbsolute) return absolutePathMatch(files, canonicalizeAbsolutePath(norm), cwd);
   for (const file of files) {
     if (norm.endsWith(`/${file.path}`) || file.path.endsWith(`/${norm}`)) return file.path;
   }

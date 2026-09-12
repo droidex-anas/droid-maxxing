@@ -1,4 +1,5 @@
-import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import { useRef, useEffect, useState, useMemo, useCallback, useLayoutEffect } from 'react';
+import { addNativeSurfaceObscurer } from '../hooks/useObscuresNativeSurfaces';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, FileText } from 'lucide-react';
 import { SpecRenderer } from './SpecRenderer';
@@ -30,7 +31,9 @@ function useActiveHeading(scrollRef: React.RefObject<HTMLDivElement | null>, hea
       if (el) observer.observe(el);
     });
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+    };
   }, [scrollRef, headingIds]);
 
   return activeId;
@@ -49,6 +52,8 @@ export function SpecModal({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // A full-window overlay: the native browser view would paint through it.
+  useLayoutEffect(() => (open ? addNativeSurfaceObscurer() : undefined), [open]);
 
   const outline = useSpecOutline(open ? content : '');
   const headingIds = useMemo(() => outline.map((h) => h.id), [outline]);
@@ -84,7 +89,9 @@ export function SpecModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ duration: 0.3, ease: EASE }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
             className="w-full max-w-[1120px] h-[88vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-droid overflow-hidden"
           >
             {/* Header */}
@@ -92,7 +99,7 @@ export function SpecModal({
               <div className="flex items-center gap-2.5 min-w-0">
                 <FileText className="w-4 h-4 shrink-0 text-droid-text-muted" />
                 <span className="text-[13px] font-medium text-droid-text truncate">
-                  {title || 'Specification'}
+                  {title?.length ? title : 'Specification'}
                 </span>
                 {outline.length > 0 && (
                   <span className="text-[11px] font-mono text-droid-text-muted/70 ml-1">

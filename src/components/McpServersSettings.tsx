@@ -291,7 +291,7 @@ function McpServerCard({
             setExpanded((value) => !value);
           }}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left active:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left active:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
         >
           <ChevronRight
             className={`h-3.5 w-3.5 shrink-0 text-droid-text-muted transition-transform duration-100 ${expanded ? 'rotate-90' : ''}`}

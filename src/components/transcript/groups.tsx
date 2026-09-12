@@ -200,7 +200,7 @@ export function DiffGroup({
               onClick={() => {
                 setDisclosure((current) => revealNextDiffCards(current, changes.length));
               }}
-              className="rounded-md px-1.5 py-0.5 text-[12px] text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+              className="rounded-md px-1.5 py-0.5 text-[12px] text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
             >
               Show next {revealCount} {revealCount === 1 ? 'edit' : 'edits'} ({hiddenCount}{' '}
               remaining)

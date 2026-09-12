@@ -62,7 +62,7 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
             type="button"
             disabled={busy}
             onClick={setup.runPrimaryAction}
-            className="rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {setupActionLabel(setup)}
           </button>
@@ -70,7 +70,7 @@ export function PrGithubSetupEmpty({ setup }: { setup: GithubSetupController }) 
             <button
               type="button"
               onClick={setup.cancelAuthentication}
-              className="rounded-xl px-3 py-2 text-[13px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+              className="rounded-xl px-3 py-2 text-[13px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
             >
               {setup.action === 'installing' ? 'Cancel installation' : 'Cancel sign-in'}
             </button>
@@ -115,7 +115,7 @@ export function PrWorkspaceEmpty({
           onClick={() => {
             void openWorkspace();
           }}
-          className="mt-4 rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+          className="mt-4 rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
         >
           Open workspace
         </button>
@@ -135,7 +135,7 @@ export function PrWorkspaceEmpty({
           onClick={() => {
             void openWorkspace();
           }}
-          className="mt-4 rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+          className="mt-4 rounded-xl bg-droid-elevated px-3 py-2 text-[13px] font-medium text-droid-text transition-colors hover:bg-droid-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
         >
           Choose another workspace
         </button>

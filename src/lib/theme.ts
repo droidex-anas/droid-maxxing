@@ -481,10 +481,11 @@ export function applyTheme(theme: ThemeSettings) {
   );
   // Semantic status colors are FIXED, never accent-derived, so success/warning
   // and diff add/remove always read as green/amber/red even when the accent is a
-  // neutral monochrome tone.
-  root.style.setProperty('--droid-green', '#4fae82');
-  root.style.setProperty('--droid-orange', '#d9913a');
-  root.style.setProperty('--droid-red', '#cf5d54');
+  // neutral monochrome tone. Each scheme gets the shade that passes AA for
+  // 11–13px status text on its own canvas.
+  root.style.setProperty('--droid-green', bgIsDark ? '#4fae82' : '#1f7a4d');
+  root.style.setProperty('--droid-orange', bgIsDark ? '#d9913a' : '#9a5a0f');
+  root.style.setProperty('--droid-red', bgIsDark ? '#cf5d54' : '#b3312a');
   root.setAttribute('data-diff-style', theme.diffStyle);
   const diffPalette = diffPaletteForTheme(bgIsDark, theme.diffStyle);
   root.style.setProperty('--diff-add-fg', diffPalette.addFg);

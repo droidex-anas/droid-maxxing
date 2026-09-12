@@ -122,7 +122,7 @@ function CopyButton({ text }: { text: string }) {
       }}
       title="Copy"
       aria-label="Copy"
-      className="shrink-0 rounded-md p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+      className="shrink-0 rounded-md p-1.5 text-droid-text-muted transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
     >
       {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
     </button>

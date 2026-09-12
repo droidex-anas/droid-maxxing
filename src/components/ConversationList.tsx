@@ -216,6 +216,10 @@ export function ConversationList({
               key={virtualRow.key}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
+              // Rows are positioned siblings, so a later row paints over the
+              // one before it. A message's copy control floats in the row gap
+              // and would sit under the next row; the hovered row rises above.
+              className="hover:z-[1] focus-within:z-[1]"
               style={{
                 position: 'absolute',
                 top: 0,

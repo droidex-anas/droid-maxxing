@@ -269,7 +269,8 @@ function ToolLine({
   const out = output ? stripAnsi(output).trimEnd() : '';
   const [open, setOpen] = useState(false);
   const expanded = open || forceOpen;
-  const hasBody = out.length > 0;
+  // Detailed density opens every call to its arguments, result or not.
+  const hasBody = out.length > 0 || forceOpen;
   // An MCP tool wears its server's mark instead of spelling its source.
   const mark = useToolSourceMark(call.source);
   const verb = (

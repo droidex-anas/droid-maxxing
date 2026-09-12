@@ -88,14 +88,25 @@ export function AutomationModelPicker({
     modelId ??
     (models.length === 0 ? 'Loading models…' : 'Choose model');
 
+  // Picking an effort dot on another row selects that model and then its
+  // effort in one gesture, before this component re-renders; the second call
+  // must write the model just picked, not the one the last render knew.
+  const pickedModelId = useRef(modelId);
+  pickedModelId.current = modelId;
   const selectModel = (nextModelId?: string) => {
     if (!nextModelId) return;
     const nextModel = models.find((model) => model.id === nextModelId);
     if (!nextModel) return;
+    pickedModelId.current = nextModel.id;
     onChange({
       modelId: nextModel.id,
       reasoningEffort: reasoningForModel(nextModel, selectedReasoning),
     });
+  };
+  const selectReasoning = (reasoning: ReasoningEffort) => {
+    const id = pickedModelId.current;
+    if (!id) return;
+    onChange({ modelId: id, reasoningEffort: reasoning });
   };
 
   return (
@@ -184,7 +195,7 @@ export function AutomationModelPicker({
                         onChange({ modelId: selectedModel.id, reasoningEffort: reasoning });
                       }}
                       disabled={!selectedModel}
-                      className={`relative rounded-lg px-2.5 py-1.5 text-[11px] capitalize outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-border-hover disabled:cursor-not-allowed disabled:opacity-40 ${
+                      className={`relative rounded-lg px-2.5 py-1.5 text-[11px] capitalize outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-40 ${
                         selected ? 'text-droid-text' : 'text-droid-text-muted hover:text-droid-text'
                       }`}
                       style={
@@ -249,10 +260,7 @@ export function AutomationModelPicker({
                 reasoning={selectedReasoning}
                 query={query}
                 onSelectModel={selectModel}
-                onSelectReasoning={(reasoning) => {
-                  if (!selectedModel) return;
-                  onChange({ modelId: selectedModel.id, reasoningEffort: reasoning });
-                }}
+                onSelectReasoning={selectReasoning}
                 disabled={false}
                 reasoningLocked={false}
                 showDefault={false}
@@ -298,7 +306,7 @@ function CategoryButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-lg px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-border-hover ${
+      className={`rounded-lg px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-accent/60 ${
         active
           ? 'bg-droid-surface text-droid-text'
           : 'text-droid-text-muted hover:bg-droid-surface/60 hover:text-droid-text'
