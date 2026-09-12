@@ -45,6 +45,7 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
     if (animate) onEnter?.(item.key);
   }, [animate, onEnter, item.key]);
   const isPrompt = item.type === 'message' && item.event.author === 'user';
+  const isMessage = item.type === 'message';
   const isWideAppResponse =
     item.type === 'message' && item.event.author !== 'user' && hasAppBlock(item.event.text ?? '');
   const rowId = feedRowId(item);
@@ -66,9 +67,12 @@ export const FeedRow = memo(function FeedRow(props: FeedRowProps) {
       data-transcript-find-hit={hit}
       // A prompt opens a turn, so it carries a little extra air above the
       // shared row gap and the transcript reads as turns, not as a flat list.
+      // A message also keeps air below: its copy control sits in the gap and
+      // needs clearance from whatever follows. Both are constant, so a row's
+      // height never changes when a turn settles.
       className={`mx-auto min-w-0 ${isWideAppResponse ? 'max-w-4xl' : 'max-w-2xl'} ${
         isPrompt ? 'pt-2' : ''
-      } ${animate ? enterClass(isPrompt) : ''} ${reachClass}`}
+      } ${isMessage ? 'pb-2' : ''} ${animate ? enterClass(isPrompt) : ''} ${reachClass}`}
     >
       {reach.rangeSelecting && (
         <button
