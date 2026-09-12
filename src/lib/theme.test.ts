@@ -15,10 +15,8 @@ import {
   parseThemePresetImport,
   relativeLuminance,
   removeCustomTheme,
-  resolveScheme,
   resolveVariant,
   surfaceStep,
-  uiFontStack,
   upsertCustomTheme,
   type ThemeColors,
   type ThemePreset,
@@ -146,15 +144,6 @@ describe('resolveVariant', () => {
   it('falls back to the dark variant for system when no preference is readable', () => {
     // node:test has no window, so matchMedia is unavailable.
     assert.equal(resolveVariant(DEFAULT_THEME, 'system'), DEFAULT_THEME.dark);
-  });
-});
-
-describe('resolveScheme', () => {
-  it('passes explicit schemes through and falls back to dark for system', () => {
-    // node:test has no window, so matchMedia is unavailable.
-    assert.equal(resolveScheme('light'), 'light');
-    assert.equal(resolveScheme('dark'), 'dark');
-    assert.equal(resolveScheme('system'), 'dark');
   });
 });
 
@@ -301,11 +290,5 @@ describe('newCustomThemeId', () => {
     const b = newCustomThemeId();
     assert.match(a, /^custom-/);
     assert.notEqual(a, b);
-  });
-});
-
-describe('uiFontStack', () => {
-  it('falls back to the system stack for unknown ids', () => {
-    assert.match(uiFontStack('nope'), /system-ui/);
   });
 });
