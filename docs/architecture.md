@@ -146,8 +146,9 @@ Renderers must advertise bridge protocol 4, apply one wire batch as one
 ordered store transition, and reconnect with the last fully applied generation
 and sequence. Same-generation reconnects replay the retained buffer. A new
 process generation or a replay gap delivers a compact `bridge.snapshot` of
-live sessions, runtime state, and the authoritative agent-process map instead of a hard resync; `bridge.reset` is
-reserved for an invalid resume cursor. Electron owns sidecar health
+live sessions, runtime state, and the authoritative agent-process map instead
+of a hard resync; `bridge.reset` is reserved for an invalid resume cursor.
+Electron owns sidecar health
 (`starting`, `healthy`, `degraded`, `restarting`, `recovery-required`,
 `stopped`) and bounded restart; `GET /health` is a cheap liveness probe, not a
 death signal while the process is still alive. A missed or slow `/health`

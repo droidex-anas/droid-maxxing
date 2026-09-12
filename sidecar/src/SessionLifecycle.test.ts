@@ -90,6 +90,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
   let compactionLimit = (): Promise<number> => Promise.resolve(800);
   let shutdownStarted = false;
   let closeChildren: (appSessionId: string) => Promise<void> = () => Promise.resolve();
+  let killProcesses: (appSessionId: string) => Promise<void> = () => Promise.resolve();
   let emitSessionList: (closedProviderSessionId: string) => void | Promise<void> = () =>
     recordEvent({ type: 'sessions.list', ...registry.listSummaries() });
   let nextEmitFailure: { type: ServerEvent['type']; error: Error } | undefined;
@@ -218,7 +219,7 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
       },
       killSession: (appSessionId) => {
         calls.push({ target: 'cleanup', method: 'processes.killSession', args: [appSessionId] });
-        return Promise.resolve();
+        return killProcesses(appSessionId);
       },
     },
     applyPendingSettingsToSummary: (item) => ({ ...item, ...projection }),
@@ -319,6 +320,9 @@ function createHarness(ordinarySummaries: SessionSummary[] = []) {
     },
     setChildCloser: (action: (appSessionId: string) => Promise<void>) => {
       closeChildren = action;
+    },
+    setProcessKiller: (action: (appSessionId: string) => Promise<void>) => {
+      killProcesses = action;
     },
     setMcpConfigs: (configs: McpServerConfig[]) => {
       mcpConfigs = configs;
@@ -943,6 +947,32 @@ test('create and resume abandon in-flight opens when shutdown admission closes',
     resuming.events.some((event) => event.type === 'error'),
     false,
   );
+});
+
+test('failed process cleanup preserves the provider and allows closing to retry', async () => {
+  const h = createHarness([summary('owned')]);
+  queueLoad(h, 'owned');
+  await h.lifecycle.resume('owned');
+  const live = requireLive(h, 'owned');
+  h.calls.length = 0;
+  h.setProcessKiller(() => Promise.reject(new Error('ps unavailable')));
+
+  await assert.rejects(h.lifecycle.close('owned'), /ps unavailable/);
+  assert.equal(h.registry.getLive('owned'), live);
+  assert.equal(live.closeMode, undefined);
+  assert.equal(live.closePromise, undefined);
+  assert.equal(
+    h.calls.some((call) => call.method === 'session.close'),
+    false,
+  );
+  await assert.rejects(h.lifecycle.closeAll(), /ps unavailable/);
+  assert.equal(h.calls.filter((call) => call.method === 'processes.killSession').length, 2);
+  assert.equal(h.registry.getLive('owned'), live);
+
+  h.setProcessKiller(() => Promise.resolve());
+  await h.lifecycle.close('owned');
+  assert.equal(h.registry.getLive('owned'), undefined);
+  assert.equal(h.calls.filter((call) => call.method === 'session.close').length, 1);
 });
 
 test('close follows ownership order and closeAll closes its initial snapshot', async () => {

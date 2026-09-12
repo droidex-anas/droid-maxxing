@@ -33,7 +33,8 @@ export function createAgentProcessMonitor(
   options: CreateAgentProcessMonitorOptions,
 ): AgentProcessMonitor {
   return new AgentProcessMonitor({
-    listProcesses: options.listProcesses ?? (() => listProcesses(defaultCommandRunner, Date.now)),
+    listProcesses:
+      options.listProcesses ?? ((signal) => listProcesses(defaultCommandRunner, Date.now, signal)),
     listListeningPorts:
       options.listListeningPorts ?? (() => listListeningPorts(tolerantCommandRunner)),
     kill:

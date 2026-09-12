@@ -94,7 +94,11 @@ test('second-granular startedAt jitter does not re-emit an unchanged list', asyn
 });
 
 test('scan hides shell wrappers, emits once per change, and attaches ports', async () => {
-  const h = harness(rows, new Map([[800, [5173]]]));
+  const wrapper = '/bin/bash --login -o pipefail -ec npm run dev';
+  const h = harness(
+    rows.map((row) => (row.pid === 700 ? { ...row, command: wrapper } : row)),
+    new Map([[800, [5173]]]),
+  );
   h.monitor.track('s1', 600);
   await h.monitor.scan();
   assert.equal(h.emitted.length, 1);
@@ -105,7 +109,7 @@ test('scan hides shell wrappers, emits once per change, and attaches ports', asy
         pid: 800,
         name: 'vite',
         command: 'node /w/node_modules/.bin/vite',
-        originCommand: '/bin/zsh -c npm run dev',
+        originCommand: wrapper,
         startedAt: 0,
         ports: [5173],
       },
@@ -148,18 +152,30 @@ test('stop validates the pid against the session snapshot and tree-kills it', as
 });
 
 test('overlapping session kills wait for the same process cleanup', async () => {
-  let releasePorts: (ports: Map<number, number[]>) => void = () => {};
-  let portsStarted: () => void = () => {};
-  const pendingPorts = new Promise<Map<number, number[]>>((resolve) => {
-    releasePorts = resolve;
+  let releaseTable: (table: ProcessRecord[]) => void = () => {};
+  let discoveryStarted: () => void = () => {};
+  const pendingTable = new Promise<ProcessRecord[]>((resolve) => {
+    releaseTable = resolve;
   });
   const started = new Promise<void>((resolve) => {
-    portsStarted = resolve;
+    discoveryStarted = resolve;
   });
+  let currentRows = rows;
+  let firstRead = true;
+  const killed: Array<[number, string]> = [];
   const h = harness(rows, new Map(), {
+    listProcesses: () => {
+      discoveryStarted();
+      if (!firstRead) return Promise.resolve(currentRows);
+      firstRead = false;
+      return pendingTable;
+    },
     listListeningPorts: () => {
-      portsStarted();
-      return pendingPorts;
+      throw new Error('shutdown must not wait for lsof');
+    },
+    kill: (pid, signal) => {
+      killed.push([pid, signal]);
+      currentRows = currentRows.filter((row) => row.pid !== pid);
     },
   });
   h.monitor.track('s1', 600);
@@ -173,16 +189,110 @@ test('overlapping session kills wait for the same process cleanup', async () => 
     await Promise.resolve();
     assert.equal(cleanupFinished, false, 'provider cleanup must not overtake the kill pass');
   } finally {
-    releasePorts(new Map());
+    releaseTable(rows);
     await Promise.all([closing, overlapping]);
     h.monitor.dispose();
   }
   assert.equal(cleanupFinished, true);
-  assert.deepEqual(h.killed, [
+  assert.deepEqual(killed, [
     [800, 'SIGTERM'],
     [700, 'SIGTERM'],
   ]);
   assert.deepEqual(h.emitted.at(-1), ['s1', []]);
+});
+
+test('hung discovery is aborted within the shutdown budget and retains ownership for retry', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 100_000 });
+  let hung = false;
+  const reads: AbortSignal[] = [];
+  let currentRows = rows;
+  const h = harness(rows, new Map(), {
+    now: Date.now,
+    listProcesses: (signal) => {
+      if (hung) {
+        if (signal) reads.push(signal);
+        return new Promise(() => {});
+      }
+      return Promise.resolve(currentRows);
+    },
+    scheduleKillPoll: (callback, ms) => {
+      const timer = setTimeout(callback, ms);
+      return { cancel: () => clearTimeout(timer) };
+    },
+    kill: (pid) => {
+      currentRows = currentRows.filter((row) => row.pid !== pid);
+    },
+  });
+  h.monitor.track('s1', 600);
+  await h.monitor.scan();
+  const owned = h.monitor.snapshotPids();
+  hung = true;
+  const closing = assert.rejects(h.monitor.killSession('s1'), /discovery timed out/);
+  for (let elapsed = 0; elapsed <= 3500; elapsed += 50) {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(50);
+  }
+  await closing;
+  assert.ok(reads.length > 1);
+  assert.ok(reads.every((signal) => signal.aborted));
+  assert.deepEqual(h.monitor.snapshotPids(), owned);
+  hung = false;
+  const retry = h.monitor.killSession('s1');
+  for (let elapsed = 0; elapsed <= 3500; elapsed += 50) {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(50);
+  }
+  await retry;
+  assert.deepEqual(
+    currentRows.map((row) => row.pid),
+    [600],
+  );
+  assert.deepEqual(h.monitor.snapshotPids(), []);
+  h.monitor.dispose();
+});
+
+test('the grace sweep discovers new descendants and counts process-read time', async () => {
+  let now = 100_000;
+  let currentRows = [
+    ...rows,
+    { pid: 610, ppid: 1, startedAt: 0, command: 'droid unused-provider' },
+  ];
+  const killed: Array<[number, string]> = [];
+  const h = harness(rows, new Map(), {
+    now: () => now,
+    listProcesses: async () => {
+      now += 400;
+      return currentRows;
+    },
+    scheduleKillPoll: (callback, ms) => {
+      now += ms;
+      setImmediate(callback);
+      return { cancel() {} };
+    },
+    kill: (pid, signal) => {
+      killed.push([pid, signal]);
+      if (pid === 800 && signal === 'SIGTERM') {
+        currentRows = [
+          ...currentRows,
+          { pid: 900, ppid: 800, startedAt: now, command: 'node late-child.js' },
+          { pid: 901, ppid: 600, startedAt: now, command: 'node late-sibling.js' },
+        ];
+      }
+    },
+  });
+  h.monitor.track('s1', 600);
+  h.monitor.track('s1', 610, 'provisional');
+  await h.monitor.killSession('s1');
+  assert.ok(now - 100_000 <= 3500, 'ps time is part of the grace budget');
+  assert.deepEqual(
+    killed
+      .filter(([, signal]) => signal === 'SIGKILL')
+      .map(([pid]) => pid)
+      .sort(),
+    [610, 700, 800, 900, 901],
+  );
+  assert.ok(killed.some(([pid, signal]) => pid === 900 && signal === 'SIGTERM'));
+  h.monitor.dispose();
 });
 
 test('killRecorded only touches pids whose start time still matches', async () => {

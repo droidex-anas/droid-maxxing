@@ -7,7 +7,7 @@ export interface ProcessRecord {
   command: string;
 }
 
-export type CommandRunner = (file: string, args: string[]) => Promise<string>;
+export type CommandRunner = (file: string, args: string[], signal?: AbortSignal) => Promise<string>;
 
 // `ps etime` is second-granular; tolerate its rounding, not a new process.
 export function sameProcess(
@@ -21,12 +21,21 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-export function defaultCommandRunner(file: string, args: string[]): Promise<string> {
+export function defaultCommandRunner(
+  file: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-      if (error) reject(asError(error));
-      else resolve(stdout);
-    });
+    execFile(
+      file,
+      args,
+      { maxBuffer: 8 * 1024 * 1024, timeout: 1000, killSignal: 'SIGKILL', signal },
+      (error, stdout) => {
+        if (error) reject(asError(error));
+        else resolve(stdout);
+      },
+    );
   });
 }
 
@@ -102,8 +111,9 @@ export function descendantsOf(
 export async function listProcesses(
   run: CommandRunner,
   now: () => number,
+  signal?: AbortSignal,
 ): Promise<ProcessRecord[]> {
   if (process.platform === 'win32') return [];
-  const stdout = await run('ps', ['-axo', 'pid=,ppid=,etime=,command=']);
+  const stdout = await run('ps', ['-axo', 'pid=,ppid=,etime=,command='], signal);
   return parsePsTable(stdout, now());
 }

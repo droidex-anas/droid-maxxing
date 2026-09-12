@@ -91,6 +91,7 @@ class TestRegistry {
 function createHarness(options: { adoptSucceeds?: boolean; adopt?: () => Promise<boolean> } = {}) {
   const calls: RecordedCall[] = [];
   const untracked: number[] = [];
+  const tracked = new Map<number, string>();
   const errors: CompactionError[] = [];
   const preserved: { appSessionId: string; tokensIn: number; tokensOut: number }[] = [];
   const refreshed: string[] = [];
@@ -131,9 +132,12 @@ function createHarness(options: { adoptSucceeds?: boolean; adopt?: () => Promise
     },
     runtime,
     agentProcesses: {
-      track: () => undefined,
+      track: (_appSessionId, pid, kind = 'provider') => {
+        tracked.set(pid, kind);
+      },
       untrack: (pid) => {
         untracked.push(pid);
+        tracked.delete(pid);
       },
       adoptDescendantsAsRoots: () =>
         options.adopt?.() ?? Promise.resolve(options.adoptSucceeds ?? true),
@@ -153,6 +157,7 @@ function createHarness(options: { adoptSucceeds?: boolean; adopt?: () => Promise
   return {
     calls,
     untracked,
+    tracked,
     compaction,
     errors,
     preserved,
@@ -313,6 +318,41 @@ test('a failed provider close retains ownership until a successful retry', async
   assert.equal(closeCount(h.calls, 'provider-2'), 1);
   assert.deepEqual(h.untracked, [600]);
   assert.ok(h.errors.some((error) => error.message.includes('provider close failed')));
+});
+
+test('failed provisional close preserves the adoption error and leaves its pid owned', async () => {
+  const h = createHarness({ adoptSucceeds: false });
+  const { live, session: original } = addLive(h);
+  original.nextCompactResult = { newSessionId: 'provider-2', removedCount: 1 };
+  h.runtime.processIds.set('provider-1', 600);
+  const first = new FakeFactorySession('provider-2', {}, h.calls);
+  const second = new FakeFactorySession('provider-2', {}, h.calls);
+  first.nextCloseError = new Error('replacement close failed');
+  second.nextCloseError = new Error('replacement close failed');
+  const pids = new Map([
+    [original, 600],
+    [first, 610],
+    [second, 620],
+  ]);
+  h.runtime.processIdOf = (session) => {
+    for (const [provider, pid] of pids) if (session === provider) return pid;
+    return undefined;
+  };
+  h.runtime.loadQueue.set('provider-2', [first, second]);
+  const result = await h.compaction.compact('app-1');
+  assert.equal(result.kind, 'close-and-resume');
+  if (result.kind === 'close-and-resume')
+    assert.match(result.reloadError, /Could not preserve processes/);
+  assert.equal(live.session, original);
+  assert.deepEqual(
+    [...h.tracked],
+    [
+      [610, 'provisional'],
+      [620, 'provisional'],
+    ],
+  );
+  assert.deepEqual(h.untracked, []);
+  assert.equal(closeCount(h.calls, 'provider-1'), 0);
 });
 
 test('provider load completing after close cannot replace a reopened session', async () => {

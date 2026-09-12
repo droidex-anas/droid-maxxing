@@ -145,6 +145,8 @@ export class SessionCompactionExecution {
     let installed = false;
     try {
       if (!target.isCurrent()) return;
+      if (replacementPid !== undefined)
+        this.dependencies.agentProcesses.track(appSessionId, replacementPid, 'provisional');
       // Keep the old provider alive and owned until discovery succeeds.
       // Closing it on a failed scan would orphan its unobserved children.
       if (oldPid !== undefined) {
@@ -171,7 +173,21 @@ export class SessionCompactionExecution {
       this.dependencies.context.preserveUsage(appSessionId, carryover);
       this.replaceProvider(appSessionId, providerSessionId, carryover);
     } finally {
-      if (!installed) await replacement.close();
+      if (!installed) {
+        try {
+          await replacement.close();
+          if (replacementPid !== undefined)
+            this.dependencies.agentProcesses.untrack(replacementPid);
+        } catch (error) {
+          // Leave the provisional root owned by the session's kill pass.
+          this.dependencies.emitError({
+            appSessionId,
+            providerSessionId,
+            message: `Could not close unused compaction provider: ${errMsg(error)}`,
+            recoverable: true,
+          });
+        }
+      }
     }
   }
 

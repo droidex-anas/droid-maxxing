@@ -464,6 +464,10 @@ export class SessionLifecycle {
       await this.closeSessionResources(liveSession);
       deferred.resolve();
     } catch (error) {
+      if (this.dependencies.registry.getLive(liveSession.summary.appSessionId) === liveSession) {
+        liveSession.closeMode = undefined;
+        liveSession.closePromise = undefined;
+      }
       deferred.reject(error);
     } finally {
       this.deferredCloses.delete(liveSession);
@@ -487,7 +491,7 @@ export class SessionLifecycle {
     // `droid`, and once it exits they are reparented to launchd and no longer
     // reachable from its pid. Child runtimes are tracked under this same
     // session id, so this takes their servers too.
-    await run(() => d.agentProcesses.killSession(liveSession.summary.appSessionId));
+    await d.agentProcesses.killSession(liveSession.summary.appSessionId);
     await run(() => d.childSessions.closeParent(liveSession.summary.appSessionId));
     await run(() => {
       d.context.stopSession(liveSession);
@@ -545,13 +549,19 @@ export class SessionLifecycle {
     const live = this.dependencies.registry
       .liveSessionsSnapshot()
       .map((liveSession) => liveSession.summary.appSessionId);
-    await Promise.allSettled(live.map((id) => this.dependencies.agentProcesses.killSession(id)));
+    const killed = await Promise.allSettled(
+      live.map((id) => this.dependencies.agentProcesses.killSession(id)),
+    );
+    const failed = new Set(live.filter((_id, index) => killed[index].status === 'rejected'));
+    let firstError: unknown = killed.find((result) => result.status === 'rejected')?.reason;
     // Re-read: the kill pass awaited, so the live set may have moved.
-    const scheduled = this.dependencies.registry.liveSessionsSnapshot().map((liveSession) => ({
-      liveSession,
-      close: this.beginClose(liveSession, 'discard-pending'),
-    }));
-    let firstError: unknown;
+    const scheduled = this.dependencies.registry
+      .liveSessionsSnapshot()
+      .filter((liveSession) => !failed.has(liveSession.summary.appSessionId))
+      .map((liveSession) => ({
+        liveSession,
+        close: this.beginClose(liveSession, 'discard-pending'),
+      }));
     for (const { liveSession, close } of scheduled) {
       if (close.created) await this.finishClose(liveSession);
       try {
@@ -641,9 +651,13 @@ export class SessionLifecycle {
   ): Promise<void> {
     if (liveSession) {
       liveSession.closeMode = 'discard-pending';
-      await runBestEffortAsync(() =>
-        this.dependencies.agentProcesses.killSession(liveSession.summary.appSessionId),
-      );
+      try {
+        await this.dependencies.agentProcesses.killSession(liveSession.summary.appSessionId);
+      } catch (error) {
+        liveSession.closeMode = undefined;
+        console.warn(`Failed-open provider cleanup deferred: ${errMsg(error)}`);
+        return;
+      }
     }
     liveSession?.unsubscribe?.();
     if (liveSession)

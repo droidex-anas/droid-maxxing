@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
@@ -6,6 +6,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 
 const READY_TIMEOUT_MS = 20_000;
 const SESSIONS_LIST_TIMEOUT_MS = 30_000;
@@ -30,6 +31,11 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
       metric('sidecar.firstSessionsListMs', NaN, 'ms', 'sidecar/dist/sidecar.mjs missing'),
     ];
   }
+  // Build outside the timed runs so the source protocol and launched artifact agree.
+  await promisify(execFile)(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {
+    cwd: resolve(treeRoot, 'sidecar'),
+    timeout: 120_000,
+  });
   const requireFromTree = createRequire(entry);
   const wsPath = resolve(treeRoot, 'sidecar/node_modules/ws');
   const { WebSocket: WebSocketClass } = requireFromTree(wsPath) as {

@@ -5,7 +5,7 @@ import { killProcessTree } from './processTermination.js';
 import { sameProcessList, visibleProcesses } from './processPresentation.js';
 
 export interface AgentProcessMonitorDependencies {
-  listProcesses: () => Promise<ProcessRecord[]>;
+  listProcesses: (signal?: AbortSignal) => Promise<ProcessRecord[]>;
   // Resolves null when the port scan produced nothing usable; the previous
   // snapshot is then kept rather than blanking every port chip.
   listListeningPorts: () => Promise<Map<number, number[]> | null>;
@@ -24,7 +24,7 @@ const PORT_SCAN_EVERY = 3;
 
 interface TrackedRoot {
   appSessionId: string;
-  adopted: boolean;
+  kind: 'provider' | 'adopted' | 'provisional';
   startedAt?: number;
 }
 
@@ -70,10 +70,18 @@ export class AgentProcessMonitor {
     else this.ignoredCommands.set(appSessionId, [...patterns]);
   }
 
-  track(appSessionId: string, rootPid: number): void {
+  track(
+    appSessionId: string,
+    rootPid: number,
+    kind: 'provider' | 'provisional' = 'provider',
+  ): void {
     if (this.disposed || this.closing.has(appSessionId)) return;
-    if (this.roots.get(rootPid)?.appSessionId === appSessionId) return;
-    this.roots.set(rootPid, { appSessionId, adopted: false });
+    const previous = this.roots.get(rootPid);
+    if (previous?.appSessionId === appSessionId) {
+      if (previous.kind === 'provisional') previous.kind = kind;
+      return;
+    }
+    this.roots.set(rootPid, { appSessionId, kind });
     this.arm();
   }
 
@@ -109,7 +117,7 @@ export class AgentProcessMonitor {
     // grandchild tracked as well would be listed twice.
     for (const row of table) {
       if (row.ppid !== rootPid) continue;
-      this.roots.set(row.pid, { appSessionId, adopted: true, startedAt: row.startedAt });
+      this.roots.set(row.pid, { appSessionId, kind: 'adopted', startedAt: row.startedAt });
     }
     this.persistSnapshot();
     return true;
@@ -191,8 +199,46 @@ export class AgentProcessMonitor {
     if (pending) return pending;
     const closing = Promise.resolve().then(async () => {
       try {
-        await this.scan();
-        await killProcessTree(this.descendants.get(appSessionId) ?? [], this.d);
+        const roots = [...this.roots].filter(([, root]) => root.appSessionId === appSessionId);
+        // Do not wait for the UI/port scan during shutdown. Keep provider roots
+        // available for discovery until the final identity-checked kill sweep.
+        const discover = (table: ProcessRecord[]) => {
+          const byPid = new Map(table.map((row) => [row.pid, row]));
+          const verified = roots.flatMap(([pid, root]) => {
+            const row = byPid.get(pid);
+            if (
+              !row ||
+              (root.startedAt !== undefined && !sameProcess({ startedAt: root.startedAt }, row))
+            )
+              return [];
+            root.startedAt ??= row.startedAt;
+            return [{ row, root }];
+          });
+          return this.withoutIgnored(
+            appSessionId,
+            dedupeByPid([
+              ...verified.filter(({ root }) => root.kind !== 'provider').map(({ row }) => row),
+              ...descendantsOf(
+                table,
+                verified.map(({ row }) => row.pid),
+              ),
+            ]),
+            table,
+          );
+        };
+        await killProcessTree(
+          this.descendants.get(appSessionId) ?? [],
+          this.d,
+          roots.length > 0
+            ? {
+                discover,
+                remember: (rows) => {
+                  this.descendants.set(appSessionId, rows);
+                  this.persistSnapshot();
+                },
+              }
+            : undefined,
+        );
         for (const [pid, root] of this.roots) {
           if (root.appSessionId === appSessionId) this.roots.delete(pid);
         }
@@ -284,7 +330,7 @@ export class AgentProcessMonitor {
     const computed = new Map<string, ProcessRecord[]>();
     for (const [appSessionId, rootPids] of bySession) {
       const adopted = rootPids.flatMap((pid) => {
-        const row = this.roots.get(pid)?.adopted ? byPid.get(pid) : undefined;
+        const row = this.roots.get(pid)?.kind === 'adopted' ? byPid.get(pid) : undefined;
         return row ? [row] : [];
       });
       // During the compaction adopt window the retiring provider is still a

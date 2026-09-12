@@ -2,7 +2,17 @@ import type { AgentProcess } from '../protocol.js';
 import type { ProcessRecord } from './processTree.js';
 
 const MIN_AGE_MS = 1500;
-const WRAPPER = /^(?:\S*\/)?(?:sh|zsh|bash|fish|dash)\s+-l?c\b/;
+function isShellWrapper(command: string): boolean {
+  const [executable, ...args] = command.trim().split(/\s+/);
+  if (!/^(?:\S*\/)?(?:sh|zsh|bash|fish|dash)$/.test(executable)) return false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--' || !/^[+-]/.test(arg)) return false;
+    if (arg === '--command' || /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) return true;
+    if (/^[+-][oO]$/.test(arg) || arg === '--rcfile' || arg === '--init-file') index += 1;
+  }
+  return false;
+}
 
 function displayNameFor(command: string): string {
   const words = command.split(/\s+/).filter(Boolean);
@@ -42,14 +52,14 @@ export function visibleProcesses(
 ): AgentProcess[] {
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   return rows
-    .filter((row) => now - row.startedAt >= MIN_AGE_MS && !WRAPPER.test(row.command))
+    .filter((row) => now - row.startedAt >= MIN_AGE_MS && !isShellWrapper(row.command))
     .map((row) => {
       let parent = byPid.get(row.ppid);
       let originCommand: string | undefined;
       const seen = new Set([row.pid]);
       while (parent && !seen.has(parent.pid)) {
         seen.add(parent.pid);
-        if (WRAPPER.test(parent.command)) originCommand = parent.command;
+        if (isShellWrapper(parent.command)) originCommand = parent.command;
         parent = byPid.get(parent.ppid);
       }
       return {
