@@ -721,7 +721,6 @@ export default function ChatView({
           {activeSession && !isTimelinePriming && timelineAnchors.length >= 2 && (
             <ConversationTimeline
               scrollRef={scrollRef}
-              insetRight={rightInset ? 312 : 0}
               anchors={timelineAnchors}
               onJumpToAnchor={(id) => {
                 conversationListRef.current?.scrollToRow(id);

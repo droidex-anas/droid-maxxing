@@ -14,14 +14,10 @@ import type { ConversationAnchor } from './chatFeedTurns';
 export const ConversationTimeline = memo(function ConversationTimeline({
   scrollRef,
   anchors,
-  insetRight,
   onJumpToAnchor,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   anchors: ConversationAnchor[];
-  // Width of the panel overlaying the transcript's right side, so the rail
-  // stays beside the column the transcript actually centres in.
-  insetRight: number;
   onJumpToAnchor?: (id: string) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -107,15 +103,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   };
 
   return (
-    <div
-      className="pointer-events-none absolute top-1/2 z-10 hidden -translate-y-1/2 lg:block"
-      // Sits beside the transcript column (42rem, centred inside any panel
-      // inset) rather than at the container's edge, so collapsing the sidebar
-      // never strands it in the margin.
-      style={{
-        left: `max(0.25rem, calc((100% - ${String(insetRight)}px - 42rem) / 2 - 3.5rem))`,
-      }}
-    >
+    <div className="pointer-events-none absolute left-1 top-1/2 z-10 hidden -translate-y-1/2 lg:block">
       <div
         ref={railRef}
         className="no-scrollbar pointer-events-auto flex max-h-[68vh] flex-col items-start gap-2.5 overflow-y-auto py-1 pl-2 pr-3"
