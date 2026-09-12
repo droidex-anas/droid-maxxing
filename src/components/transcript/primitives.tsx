@@ -240,10 +240,12 @@ export function WorkingIndicator({
    changes height when a turn settles. Fades in on hover or keyboard focus; the
    host carries `group/msg relative`. ── */
 export function MessageActions({ text, side }: { text: string; side: 'end' | 'start' }) {
-  const place = side === 'end' ? 'left-0 -ml-1' : 'right-0 -mr-1';
+  const place = side === 'end' ? 'left-0 -ml-1 pr-6' : 'right-0 -mr-1 pl-6';
+  // Padding, not margin, so the hit area touches the message: the pointer can
+  // travel from the last line onto the button without leaving the group.
   return (
     <div
-      className={`pointer-events-none absolute top-full mt-0.5 ${place} opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100`}
+      className={`pointer-events-none absolute top-full ${place} pt-0.5 pb-1 opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100`}
     >
       <CopyButton text={text} />
     </div>
