@@ -19,10 +19,6 @@ export interface ConversationRowLookup {
   byViewportId: ReadonlyMap<string, number>;
 }
 
-export function conversationRowMountKey(item: FeedItem): string {
-  return item.key;
-}
-
 export function conversationRowViewportId(item: FeedItem): string {
   return feedRowId(item);
 }

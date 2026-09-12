@@ -50,6 +50,8 @@ export function FileChip({
             tabIndex: 0,
             onClick: onOpen,
             onKeyDown: (event: React.KeyboardEvent) => {
+              // The remove badge handles its own keys; they bubble here.
+              if (event.target !== event.currentTarget) return;
               if (event.key !== 'Enter' && event.key !== ' ') return;
               event.preventDefault();
               onOpen();

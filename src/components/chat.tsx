@@ -23,7 +23,6 @@ import { DiffGroup, ToolGroupItem, WorkedGroup } from './transcript/groups';
 import { UserBubble } from './transcript/UserBubble';
 import { ChildSessionLine, ChildSessionsWave } from './transcript/ChildSessionLine';
 
-export { StreamingCaret } from './StreamingCaret';
 // Row chrome and renderers live in the transcript modules; re-export the ones
 // callers and tests historically imported from here.
 export { ChatSkeleton, TranscriptSkeleton, WorkingIndicator } from './transcript/primitives';
@@ -151,7 +150,7 @@ function openCapturedChange(
 // The spec is rendered in the pinned card. Suppress an assistant message only
 // when it is exactly that spec text (avoid double-rendering the same plan);
 // never hide other prose just because spec mode is active (#14).
-function isSpecEcho(text: string, specContent: string | undefined): boolean {
+export function isSpecEcho(text: string, specContent: string | undefined): boolean {
   return Boolean(specContent && text.trim() && text.trim() === specContent.trim());
 }
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  describeToolCall,
   isWebSearchTool,
   isWebFetchTool,
   parseWebSearch,
@@ -286,4 +287,13 @@ test('only a real spawn is labeled a child session', () => {
     assert.equal(CAT_LABEL[toolMeta(name, { task_id: 'abc' }).cat], 'Subagent');
     assert.ok(!isChildSessionTool(name, { task_id: 'abc' }));
   }
+});
+
+test('describeToolCall categorises a namespaced tool by its bare name and keeps its server', () => {
+  const open = describeToolCall('droidmaxx-browser___browser_open', { url: 'https://a.dev' });
+  assert.equal(open.verb, 'Browser open');
+  assert.equal(open.source, 'droidmaxx browser');
+  const issue = describeToolCall('mcp__github__create_issue', { title: 'x' });
+  assert.equal(issue.verb, 'Created');
+  assert.equal(issue.source, 'github');
 });

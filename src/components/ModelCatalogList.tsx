@@ -250,6 +250,7 @@ const ModelRow = memo(function ModelRow({
               type="button"
               tabIndex={-1}
               aria-label={`${label}: ${effort}`}
+              aria-pressed={effort === shown}
               disabled={disabled || reasoningLocked}
               onClick={(e) => {
                 e.stopPropagation();

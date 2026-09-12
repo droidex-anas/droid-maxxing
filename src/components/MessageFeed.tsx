@@ -40,7 +40,7 @@ import {
 } from './messageFeedState';
 import { buildFeed, isCompactingStatus, type FeedItem } from './chatFeed';
 import { groupTurns, tailTimestamp, trailingSubagentPoll } from './chatFeedTurns';
-import { FeedItemView, feedItemPropsEqual } from './chat';
+import { FeedItemView, feedItemPropsEqual, isSpecEcho } from './chat';
 import { WorkingIndicator } from './transcript/primitives';
 import type { SubagentsDockData } from './SubagentsDock';
 
@@ -304,9 +304,15 @@ export function MessageFeed({
   // so the hand-off from caret to Working is seamless.
   const tailIsReply = last?.type === 'message' && last.event.author !== 'user';
   const tailText = tailIsReply ? (last.event.text ?? '') : '';
+  // A tail that only echoes the pinned spec renders nothing, so it cannot
+  // carry the live cue either.
   const tailTyping = useStreamingActivity(
     tailText,
-    pending && tailIsReply && !subagentPoll && !hasAppBlock(tailText),
+    pending &&
+      tailIsReply &&
+      !subagentPoll &&
+      !hasAppBlock(tailText) &&
+      !isSpecEcho(tailText, specContent),
   );
   // A dock tail whose children are still running already speaks for the wave
   // with its own pills, timers and total, so the poll cue would only repeat it.

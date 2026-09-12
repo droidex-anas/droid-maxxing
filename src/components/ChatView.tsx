@@ -615,7 +615,7 @@ export default function ChatView({
           rebuiltFromItemIndex={rebuiltFromFeedItemIndex}
           pending={live}
           {...(messageFeedCwd !== undefined ? { cwd: messageFeedCwd } : {})}
-          onOpenDiff={openDiff}
+          onOpenDiff={canOpenFiles ? openDiff : undefined}
           onOpenReviewFile={canOpenFiles ? openReviewFile : undefined}
           onOpenChildSession={openChildSession}
           childSessionActivity={childSessionActivity}

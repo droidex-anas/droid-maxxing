@@ -418,7 +418,7 @@ export const UI_FONTS: { id: string; label: string; stack: string }[] = [
   { id: 'mono', label: 'Mono', stack: `"JetBrains Mono", "Fira Code", ui-monospace, monospace` },
 ];
 
-export function uiFontStack(id: string): string {
+function uiFontStack(id: string): string {
   return UI_FONTS.find((f) => f.id === id)?.stack ?? SYSTEM_FONT_STACK;
 }
 

@@ -28,7 +28,8 @@ export const CAT_LABEL: Record<ToolCat, string> = {
 };
 
 export function toolMeta(name?: string, args?: unknown): { cat: ToolCat; detail: string } {
-  const n = (name ?? '').toLowerCase();
+  const { server, tool } = splitToolName(name ?? '');
+  const n = tool.toLowerCase();
   const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
   const s = (k: string) => (typeof a[k] === 'string' ? a[k] : undefined);
   const file = s('file_path') ?? s('path') ?? s('filename') ?? s('target_file');
@@ -50,7 +51,9 @@ export function toolMeta(name?: string, args?: unknown): { cat: ToolCat; detail:
   else if (isChildSessionTool(name, args)) cat = 'task';
   else if (/^task/i.test(n)) cat = 'subagent';
   else if (n.includes('skill')) cat = 'skill';
-  else if (/read|cat|view|open|list|ls/.test(n)) cat = 'read';
+  // The read fallback is broad ("open", "ls") and only safe for first-party
+  // tools; an MCP server's `browser_open` keeps its own name instead.
+  else if (!server && /read|cat|view|open|list|ls/.test(n)) cat = 'read';
 
   return { cat, detail: file ?? cmd ?? pattern ?? url ?? childSessionDetail ?? skill ?? '' };
 }
@@ -80,18 +83,15 @@ const CAT_VERBS: Record<Exclude<ToolCat, 'other'>, [done: string, live: string]>
   subagent: ['Subagent', 'Subagent'],
 };
 
-// `mcp__claude_browser__navigate` → "Navigate" from "claude browser";
-// `preview_start` → "Preview start"; `TodoWrite` → "Todo write".
-function humanizeToolName(name: string): { label: string; source?: string } {
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
-  const raw = mcp ? mcp[2] : name;
-  const words = raw
+// `mcp__claude_browser__navigate` → "Navigate"; `preview_start` → "Preview
+// start"; `TodoWrite` → "Todo write".
+function humanizeToolName(tool: string): string {
+  const words = tool
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_\-.]+/g, ' ')
     .trim()
     .toLowerCase();
-  const label = words.charAt(0).toUpperCase() + words.slice(1);
-  return mcp ? { label, source: mcp[1].replace(/[_-]+/g, ' ') } : { label };
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function toolObjectKind(
@@ -109,12 +109,16 @@ export function describeToolCall(name?: string, args?: unknown): ToolCallLabel {
   const { cat, detail } = toolMeta(name, args);
   const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
   const objectKind = toolObjectKind(detail, a);
+  const { server, tool } = splitToolName(name ?? '');
+  // Every namespaced tool names its server, categorised or not, so a GitHub
+  // server's create call can wear the octocat like its uncategorised siblings.
+  const source = server ? server.replace(/[_-]+/g, ' ') : undefined;
   if (cat === 'other') {
-    const { label, source } = humanizeToolName(name ?? '');
-    return { verb: label || 'Tool', liveVerb: label || 'Tool', object: detail, objectKind, source };
+    const label = humanizeToolName(tool) || 'Tool';
+    return { verb: label, liveVerb: label, object: detail, objectKind, source };
   }
   const [verb, liveVerb] = CAT_VERBS[cat];
-  return { verb, liveVerb, object: detail, objectKind };
+  return { verb, liveVerb, object: detail, objectKind, source };
 }
 
 export type TodoStatus = 'completed' | 'in_progress' | 'pending';
@@ -229,13 +233,15 @@ export function parseTruncatedTail(text: string): { body: string; truncatedChars
 }
 
 // MCP-style tool names carry a server prefix (`server___tool`, `mcp__server__tool`).
-// Match on the bare tool name so a namespaced fetch/search still routes correctly.
-function bareToolName(name: string): string {
+// Categories and labels come from the bare tool, so a namespaced fetch still
+// routes as a fetch and `droidmaxx-browser___browser_open` is not a "read".
+function splitToolName(name: string): { server?: string; tool: string } {
   const tri = name.lastIndexOf('___');
-  if (tri >= 0 && tri + 3 < name.length) return name.slice(tri + 3);
-  const mcp = /^mcp__[^_]+__(.+)$/i.exec(name);
-  if (mcp) return mcp[1];
-  return name;
+  if (tri > 0 && tri + 3 < name.length)
+    return { server: name.slice(0, tri), tool: name.slice(tri + 3) };
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (mcp) return { server: mcp[1], tool: mcp[2] };
+  return { tool: name };
 }
 
 // Lowercase word tokens of a tool name: `_`/`-`/`.`/space separators and
@@ -243,7 +249,7 @@ function bareToolName(name: string): string {
 // keep "browser" distinct from "browse", so browser-automation tools never
 // match the fetch patterns.
 function toolNameTokens(name?: string): string[] {
-  const bare = bareToolName((name ?? '').trim());
+  const bare = splitToolName((name ?? '').trim()).tool;
   return bare
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .toLowerCase()
