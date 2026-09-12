@@ -2,17 +2,17 @@ import { useState } from 'react';
 import { stripAnsi } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, linkify, RED, ToolPanel } from './primitives';
 
-/* ── Terminal-style command body: the command and its captured output, in the
-   same bordered panel language as expanded diffs. No header chrome — the `$`
-   prompt says what this is. Rendered inline at the detailed density and as the
-   expansion of a CommandLine. ── */
-export function CommandCard({
-  command,
+/* ── Terminal-style body shared by every tool call: what was called, then
+   what came back, in the same bordered panel language as expanded diffs. No
+   header chrome — the heading (a `$` prompt for a shell call, the arguments
+   for any other tool) says what this is. ── */
+export function ToolCallCard({
+  heading,
   output,
   error = false,
   running = false,
 }: {
-  command: string;
+  heading: React.ReactNode;
   output?: string;
   error?: boolean;
   running?: boolean;
@@ -28,15 +28,7 @@ export function CommandCard({
       }
     >
       <div className="px-3.5 py-2.5 font-mono text-[12px] leading-[1.6]">
-        <div className="flex gap-2 break-words">
-          <span
-            className="select-none text-droid-text-muted"
-            style={error ? { color: RED } : undefined}
-          >
-            $
-          </span>
-          <span className="whitespace-pre-wrap text-droid-text">{command}</span>
-        </div>
+        {heading}
         {running && <span className="shimmer-text text-[13px] font-medium">Running</span>}
         {out && (
           <pre
@@ -48,6 +40,37 @@ export function CommandCard({
         )}
       </div>
     </ToolPanel>
+  );
+}
+
+export function CommandCard({
+  command,
+  output,
+  error = false,
+  running = false,
+}: {
+  command: string;
+  output?: string;
+  error?: boolean;
+  running?: boolean;
+}) {
+  return (
+    <ToolCallCard
+      heading={
+        <div className="flex gap-2 break-words">
+          <span
+            className="select-none text-droid-text-muted"
+            style={error ? { color: RED } : undefined}
+          >
+            $
+          </span>
+          <span className="whitespace-pre-wrap text-droid-text">{command}</span>
+        </div>
+      }
+      output={output}
+      error={error}
+      running={running}
+    />
   );
 }
 

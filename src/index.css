@@ -632,7 +632,7 @@
   }
 
   .droid-tool-panel {
-    @apply overflow-hidden rounded-xl border border-droid-border bg-droid-surface;
+    @apply overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/50;
 
     box-shadow: var(--droid-shadow-sm, 0 4px 16px rgba(0, 0, 0, 0.28));
   }

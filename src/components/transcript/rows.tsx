@@ -28,7 +28,8 @@ import {
   RED_TINT,
   useElapsed,
 } from './primitives';
-import { CommandCard, CommandLine } from './commandCard';
+import { CommandCard, CommandLine, ToolCallCard } from './commandCard';
+import { GitHubMark } from './LinkBadge';
 import { WebFetchCard, WebSearchCard } from './webCards';
 
 /* ── Thinking / Thought ── */
@@ -84,6 +85,8 @@ export function ThinkingItem({
 
 interface ActivityCounts {
   editedPaths: Set<string>;
+  // The one file read when exactly one was, so the fold can name it.
+  readFile?: string;
   file: number;
   search: number;
   command: number;
@@ -125,11 +128,13 @@ function countToolCall(counts: ActivityCounts, e: TranscriptEvent): void {
     return;
   }
   counts.onlyPlan = false;
-  const { cat } = toolMeta(e.toolName, e.toolArgs);
+  const { cat, detail } = toolMeta(e.toolName, e.toolArgs);
   if (cat !== 'exec') counts.onlyExec = false;
   if (cat !== 'web') counts.onlyWeb = false;
-  if (cat === 'read') counts.file++;
-  else if (cat === 'search') counts.search++;
+  if (cat === 'read') {
+    counts.file++;
+    counts.readFile = detail;
+  } else if (cat === 'search') counts.search++;
   else if (cat === 'exec') counts.command++;
   else if (cat === 'web') counts.page++;
   else if (cat === 'task') counts.task++;
@@ -142,7 +147,8 @@ function formatCounts(counts: ActivityCounts): string {
   const add = (n: number, s: string, p: string) => {
     if (n > 0) parts.push(`${String(n)} ${n === 1 ? s : p}`);
   };
-  add(counts.file, 'file', 'files');
+  if (counts.file === 1 && counts.readFile) parts.push(compactPath(counts.readFile));
+  else add(counts.file, 'file', 'files');
   add(counts.search, 'search', 'searches');
   add(counts.command, 'command', 'commands');
   add(counts.page, 'page', 'pages');
@@ -261,10 +267,21 @@ function ToolLine({
   const [open, setOpen] = useState(false);
   const expanded = open || forceOpen;
   const hasBody = out.length > 0;
-  const verb = running ? (
-    <span className="shimmer-text shrink-0 font-medium">{call.liveVerb}</span>
-  ) : (
-    <span className="shrink-0 text-droid-text-secondary">{call.verb}</span>
+  // A GitHub MCP tool wears the octocat instead of spelling its source.
+  const githubSource = /github/i.test(call.source ?? '');
+  const verb = (
+    <>
+      {githubSource && (
+        <span className="h-3.5 w-3.5 shrink-0 text-droid-text-secondary">
+          <GitHubMark />
+        </span>
+      )}
+      {running ? (
+        <span className="shimmer-text shrink-0 font-medium">{call.liveVerb}</span>
+      ) : (
+        <span className="shrink-0 text-droid-text-secondary">{call.verb}</span>
+      )}
+    </>
   );
   return (
     <div>
@@ -289,20 +306,23 @@ function ToolLine({
           </>
         )}
         <ToolTarget call={call} onOpenReviewFile={onOpenReviewFile} />
-        {call.source && <span className="shrink-0 text-droid-text-muted/60">· {call.source}</span>}
+        {call.source && !githubSource && (
+          <span className="shrink-0 text-droid-text-muted/60">· {call.source}</span>
+        )}
         {error && <ErrorTag />}
       </div>
       {hasBody && (
         <Expand open={expanded}>
           <div className="mt-1.5 pl-[18px]">
-            <pre
-              className={`max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words ${
-                error ? '' : 'bg-droid-bg/50 text-droid-text-muted/80'
-              }`}
-              style={error ? { backgroundColor: RED_TINT, color: RED } : undefined}
-            >
-              {error ? out : linkify(out)}
-            </pre>
+            <ToolCallCard
+              heading={
+                <pre className="whitespace-pre-wrap break-words text-droid-text">
+                  {safeJson(event.toolArgs)}
+                </pre>
+              }
+              output={out}
+              error={error}
+            />
           </div>
         </Expand>
       )}
