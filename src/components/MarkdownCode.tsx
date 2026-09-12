@@ -62,7 +62,7 @@ function CodeCopyButton({ text }: { text: string }) {
           }, 1200);
         });
       }}
-      className="flex items-center gap-1 text-[10.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+      className="flex items-center gap-1 text-[11px] text-droid-text-muted hover:text-droid-text transition-colors"
       title="Copy"
     >
       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -173,7 +173,7 @@ function CardControls({
       {collapsible && (
         <button
           onClick={onToggleCollapse}
-          className="text-[10.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+          className="text-[11px] text-droid-text-muted hover:text-droid-text transition-colors"
           title={collapsed ? 'Expand' : 'Collapse'}
         >
           {collapsed ? 'Expand' : 'Collapse'}

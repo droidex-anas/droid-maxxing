@@ -80,7 +80,7 @@ export function BackButton({ onClick, disabled }: { onClick: () => void; disable
     <button
       onClick={onClick}
       disabled={disabled}
-      className="px-3 h-10 inline-flex items-center gap-1.5 text-[12.5px] text-droid-text-muted hover:text-droid-text transition-colors shrink-0 disabled:opacity-40 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-droid-bg"
+      className="px-3 h-10 inline-flex items-center gap-1.5 text-[13px] text-droid-text-muted hover:text-droid-text transition-colors shrink-0 disabled:opacity-40 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-droid-bg"
     >
       <ArrowLeft className="w-3.5 h-3.5" /> Back
     </button>
@@ -124,8 +124,8 @@ export function ToggleRow({
   return (
     <div className="flex items-center justify-between px-4 py-3.5">
       <div className="pr-4">
-        <div className="text-[13.5px] text-droid-text">{label}</div>
-        {sub && <div className="text-[11.5px] text-droid-text-muted mt-0.5">{sub}</div>}
+        <div className="text-[13px] text-droid-text">{label}</div>
+        {sub && <div className="text-[12px] text-droid-text-muted mt-0.5">{sub}</div>}
       </div>
       <Switch label={label} checked={checked} onChange={onChange} disabled={disabled} />
     </div>

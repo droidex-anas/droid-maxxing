@@ -70,7 +70,7 @@ export const DiffFileSection = memo(function DiffFileSection({
         {entry?.loading && (
           <Spinner className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin-slow text-droid-text-muted" />
         )}
-        <span className="shrink-0 font-mono text-[10.5px]">
+        <span className="shrink-0 font-mono text-[11px]">
           {file.additions > 0 && (
             <span style={{ color: 'var(--diff-add-fg)' }}>+{file.additions}</span>
           )}{' '}

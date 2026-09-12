@@ -18,7 +18,7 @@ const ROW_TONE: Record<DiffOp['type'], string> = {
 
 export function DiffLines({ ops }: { ops: DiffOp[] }) {
   return (
-    <div className="overflow-x-auto font-mono text-[11.5px] leading-[1.65]">
+    <div className="overflow-x-auto font-mono text-[12px] leading-[1.65]">
       {ops.map((o, i) => (
         <div key={`${o.type}-${String(i)}`} className={`flex ${ROW_TONE[o.type]}`}>
           <span

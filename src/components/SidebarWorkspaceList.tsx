@@ -202,7 +202,7 @@ export function SidebarWorkspaceList({
                     className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/40 transition-colors"
                   >
                     <FolderOpen className="w-4 h-4 shrink-0" />
-                    <span className="text-[13.5px]">Open workspace</span>
+                    <span className="text-[13px]">Open workspace</span>
                   </button>
                 )}
               </div>

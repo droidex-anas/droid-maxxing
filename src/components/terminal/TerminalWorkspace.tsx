@@ -235,7 +235,7 @@ export function TerminalWorkspace({
       </div>
       {(status !== 'running' || truncated) && (
         <div
-          className={`shrink-0 border-b border-droid-border px-3 py-2 text-[11.5px] ${
+          className={`shrink-0 border-b border-droid-border px-3 py-2 text-[12px] ${
             status === 'error'
               ? 'bg-red-500/10 text-red-200'
               : 'bg-droid-surface text-droid-text-muted'

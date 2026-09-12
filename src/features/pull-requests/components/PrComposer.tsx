@@ -58,7 +58,7 @@ export function PrComposer({
         }}
         rows={1}
         placeholder="Leave a comment"
-        className="max-h-[200px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13.5px] leading-[1.6] text-droid-text outline-none placeholder:text-droid-text-muted"
+        className="max-h-[200px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13px] leading-[1.6] text-droid-text outline-none placeholder:text-droid-text-muted"
       />
       <div className="flex items-center gap-2 px-3 pb-2.5">
         <GithubAvatar login={viewerLogin} size={20} />

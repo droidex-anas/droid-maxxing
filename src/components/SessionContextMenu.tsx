@@ -21,7 +21,7 @@ const MENU_ROW_PX = 30;
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 const itemClass =
-  'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:bg-droid-elevated/60 focus-visible:text-droid-text focus-visible:outline-none';
+  'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:bg-droid-elevated/60 focus-visible:text-droid-text focus-visible:outline-none';
 
 // Where the Factory web app renders a synced session. Deep links only resolve
 // for sessions that cloud sync has uploaded (signed-in, non-airgap).

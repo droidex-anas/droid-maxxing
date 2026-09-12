@@ -51,11 +51,11 @@ function RemovalStatus({
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
         <div>
-          <p className="text-[12.5px] font-medium text-red-300">
+          <p className="text-[13px] font-medium text-red-300">
             {String(changedFileCount)} changed {changedFileCount === 1 ? 'file will' : 'files will'}{' '}
             be permanently discarded.
           </p>
-          <p className="mt-1 text-[11.5px] leading-5 text-droid-text-secondary">
+          <p className="mt-1 text-[12px] leading-5 text-droid-text-secondary">
             This includes modified and untracked files. This action cannot be undone.
           </p>
         </div>
@@ -180,7 +180,7 @@ export function WorktreeRemovalDialogContent({
             <RemovalStatus changedFileCount={changedFileCount} isChecking={isChecking} />
           </div>
 
-          <ul className="mt-4 space-y-2 text-[11.5px] leading-5 text-droid-text-muted">
+          <ul className="mt-4 space-y-2 text-[12px] leading-5 text-droid-text-muted">
             {linkedSessionCount > 0 && (
               <li>
                 {String(linkedSessionCount)} idle{' '}

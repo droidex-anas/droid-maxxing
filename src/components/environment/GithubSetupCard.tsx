@@ -97,7 +97,7 @@ export function GithubAuthPromptContent({
   return (
     <div className="p-3.5">
       <div className="text-[13px] font-semibold text-droid-text">Enter this code on GitHub</div>
-      <p className="mt-1 text-[11.5px] leading-4 text-droid-text-muted">
+      <p className="mt-1 text-[12px] leading-4 text-droid-text-muted">
         Paste this code into GitHub’s device activation page. The browser is already open.
       </p>
       <div className="mt-3 flex items-center gap-2 rounded-lg border border-droid-border bg-droid-elevated p-2">
@@ -107,14 +107,14 @@ export function GithubAuthPromptContent({
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-droid-border bg-droid-surface px-2 py-1.5 text-[11.5px] font-medium text-droid-text-secondary hover:border-droid-border-hover hover:text-droid-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-droid-border bg-droid-surface px-2 py-1.5 text-[12px] font-medium text-droid-text-secondary hover:border-droid-border-hover hover:text-droid-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
         >
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           {copied ? 'Copied' : 'Copy code'}
         </button>
       </div>
       {copyFailed && (
-        <p aria-live="polite" className="mt-2 text-[11.5px] leading-4 text-droid-red">
+        <p aria-live="polite" className="mt-2 text-[12px] leading-4 text-droid-red">
           Could not copy the code. Select it and copy it manually.
         </p>
       )}
@@ -122,7 +122,7 @@ export function GithubAuthPromptContent({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md px-2 py-1.5 text-[11.5px] font-medium text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
+          className="rounded-md px-2 py-1.5 text-[12px] font-medium text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
         >
           Cancel sign-in
         </button>
@@ -168,12 +168,12 @@ export function GithubSetupCard({
       <div className="flex items-start gap-2">
         <GitPullRequest className="mt-0.5 h-4 w-4 shrink-0 text-droid-text-muted" />
         <div className="min-w-0 flex-1">
-          <div className="text-[12.5px] font-semibold text-droid-text">{content.title}</div>
-          <p className="mt-0.5 text-[11.5px] leading-4 text-droid-text-muted">
+          <div className="text-[13px] font-semibold text-droid-text">{content.title}</div>
+          <p className="mt-0.5 text-[12px] leading-4 text-droid-text-muted">
             {content.description}
           </p>
           <div aria-live="polite">
-            {error && <p className="mt-1.5 text-[11.5px] leading-4 text-droid-red">{error}</p>}
+            {error && <p className="mt-1.5 text-[12px] leading-4 text-droid-red">{error}</p>}
           </div>
           <button
             ref={actionRef}
@@ -182,7 +182,7 @@ export function GithubSetupCard({
             onClick={authCode ? onShowAuthPrompt : onPrimaryAction}
             aria-haspopup={authCode ? 'dialog' : undefined}
             aria-expanded={authCode ? isAuthPopoverOpen : undefined}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-droid-border bg-droid-elevated px-2.5 py-1.5 text-[11.5px] font-medium text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-droid-border bg-droid-elevated px-2.5 py-1.5 text-[12px] font-medium text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <SetupActionIcon icon={content.icon} />
             {content.label}
@@ -191,7 +191,7 @@ export function GithubSetupCard({
             <button
               type="button"
               onClick={onCancelAuthentication}
-              className="ml-2 mt-2 rounded-lg px-2.5 py-1.5 text-[11.5px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
+              className="ml-2 mt-2 rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-droid-accent/60"
             >
               {action === 'installing' ? 'Cancel installation' : 'Cancel sign-in'}
             </button>

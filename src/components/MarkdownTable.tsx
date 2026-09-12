@@ -26,11 +26,7 @@ export function markdownTableComponents(specMode: boolean): Components {
         className={`max-w-full overflow-hidden rounded-xl border border-droid-border ${specMode ? 'my-6' : 'my-2.5'}`}
       >
         <div className="scrollbar-on-hover scroll-fade-x overflow-x-auto overscroll-x-contain">
-          <table
-            className={`min-w-full border-collapse ${specMode ? 'text-[13.5px]' : 'text-[12.5px]'}`}
-          >
-            {children}
-          </table>
+          <table className="min-w-full border-collapse text-[13px]">{children}</table>
         </div>
       </div>
     ),

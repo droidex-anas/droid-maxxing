@@ -220,10 +220,10 @@ export function DiffBody({
   const pendingRows = Math.max(0, rows.length - mounted * CHUNK_ROWS);
 
   if (binary || parsed.binary) {
-    return <div className="p-4 text-[12.5px] text-droid-text-muted">Binary file not shown</div>;
+    return <div className="p-4 text-[13px] text-droid-text-muted">Binary file not shown</div>;
   }
   if (parsed.hunks.length === 0) {
-    return <div className="p-4 text-[12.5px] text-droid-text-muted">No textual changes</div>;
+    return <div className="p-4 text-[13px] text-droid-text-muted">No textual changes</div>;
   }
 
   return (
@@ -235,7 +235,7 @@ export function DiffBody({
           while the progressive mount catches up. */}
       {pendingRows > 0 && <div style={{ height: Math.round(pendingRows * EST_ROW_PX) }} />}
       {hiddenLines > 0 && (
-        <div className="px-3 py-2 text-[11.5px] text-droid-text-muted">
+        <div className="px-3 py-2 text-[12px] text-droid-text-muted">
           Diff truncated: {hiddenLines.toLocaleString()} more lines not shown
         </div>
       )}

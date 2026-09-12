@@ -251,7 +251,7 @@ export function ThemeEditor({
               }}
               placeholder="My theme"
               spellCheck={false}
-              className="h-8 w-full rounded-lg border border-droid-border bg-droid-bg/60 px-2.5 text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:border-droid-border-hover focus:outline-none"
+              className="h-8 w-full rounded-lg border border-droid-border bg-droid-bg/60 px-2.5 text-[13px] text-droid-text placeholder:text-droid-text-muted focus:border-droid-border-hover focus:outline-none"
             />
           </div>
 
@@ -271,7 +271,7 @@ export function ThemeEditor({
         </div>
 
         {error && (
-          <p role="alert" className="px-5 pb-2 text-[11.5px] text-droid-red">
+          <p role="alert" className="px-5 pb-2 text-[12px] text-droid-red">
             {error}
           </p>
         )}

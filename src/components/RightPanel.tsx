@@ -122,7 +122,7 @@ export default function RightPanel() {
       label={<span className="font-medium">{modelLabel}</span>}
       trailing={
         reasoningEffort ? (
-          <span className="shrink-0 rounded-md border border-droid-border/70 bg-droid-elevated px-1.5 py-0.5 text-[10.5px] font-medium capitalize leading-none text-droid-text-secondary">
+          <span className="shrink-0 rounded-md border border-droid-border/70 bg-droid-elevated px-1.5 py-0.5 text-[11px] font-medium capitalize leading-none text-droid-text-secondary">
             {reasoningEffort}
           </span>
         ) : undefined
@@ -273,7 +273,7 @@ export default function RightPanel() {
                     className="overflow-hidden"
                   >
                     <div className="mx-3 my-1.5 rounded-xl bg-droid-elevated/50 px-3 py-2.5 space-y-2">
-                      <div className="text-[12.5px] text-droid-text leading-relaxed">
+                      <div className="text-[13px] text-droid-text leading-relaxed">
                         {f.description}
                       </div>
                       {f.skillName && (
@@ -289,7 +289,7 @@ export default function RightPanel() {
                           {f.preconditions.map((p, i) => (
                             <div
                               key={i}
-                              className="text-[11.5px] text-droid-text-muted pl-3 border-l-2 border-droid-border"
+                              className="text-[12px] text-droid-text-muted pl-3 border-l-2 border-droid-border"
                             >
                               {p}
                             </div>

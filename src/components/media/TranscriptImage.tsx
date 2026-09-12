@@ -36,7 +36,7 @@ export function TranscriptImage({
     return (
       <span
         title={title ?? reference}
-        className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-droid-border bg-droid-elevated/50 px-2 py-1 text-[11.5px] text-droid-text-muted"
+        className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-droid-border bg-droid-elevated/50 px-2 py-1 text-[12px] text-droid-text-muted"
       >
         <ImageOff className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">{label}</span>

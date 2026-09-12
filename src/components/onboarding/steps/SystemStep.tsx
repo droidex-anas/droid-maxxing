@@ -54,8 +54,8 @@ export function SystemStep({
           <div key={row.label} className="flex items-center gap-3.5 px-4 py-3.5">
             <StatusDot status={row.status} />
             <div className="min-w-0 flex-1">
-              <div className="text-[13.5px] text-droid-text">{row.label}</div>
-              <div className="text-[11.5px] font-mono text-droid-text-muted truncate mt-0.5">
+              <div className="text-[13px] text-droid-text">{row.label}</div>
+              <div className="text-[12px] font-mono text-droid-text-muted truncate mt-0.5">
                 {row.detail}
               </div>
             </div>

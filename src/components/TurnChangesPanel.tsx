@@ -58,7 +58,7 @@ export default function TurnChangesPanel({
             open ? 'rotate-90' : ''
           }`}
         />
-        <span className="text-[12.5px] font-medium text-droid-text-secondary">Changes</span>
+        <span className="text-[13px] font-medium text-droid-text-secondary">Changes</span>
         <span className="ml-auto flex shrink-0 items-center gap-2.5">
           <span className="text-[11px] text-droid-text-muted">
             {files.length} {files.length === 1 ? 'file' : 'files'}
@@ -78,7 +78,7 @@ export default function TurnChangesPanel({
                 title={file.path}
                 className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors enabled:hover:bg-droid-elevated/40 disabled:cursor-default"
               >
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
+                <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text-secondary">
                   {display}
                 </span>
                 <ChangeCount added={file.added} removed={file.removed} />

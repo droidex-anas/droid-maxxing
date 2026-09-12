@@ -134,8 +134,8 @@ function TokenLimitSelect({
           active ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
         }`}
       >
-        <span className="flex-1 font-mono text-[12.5px] text-droid-text">{l}</span>
-        {sub && <span className="text-[10.5px] text-droid-text-muted">{sub}</span>}
+        <span className="flex-1 font-mono text-[13px] text-droid-text">{l}</span>
+        {sub && <span className="text-[11px] text-droid-text-muted">{sub}</span>}
         {active && (
           <Check
             className="w-3.5 h-3.5 shrink-0"
@@ -178,7 +178,7 @@ function TokenLimitSelect({
               />
             ))}
           </div>
-          <p className="mt-2 border-t border-droid-border px-1.5 pt-2 text-[10.5px] leading-[1.5] text-droid-text-muted">
+          <p className="mt-2 border-t border-droid-border px-1.5 pt-2 text-[11px] leading-[1.5] text-droid-text-muted">
             If a model&apos;s context window is lower than the selected value, the session starts
             with the lower effective limit.
           </p>
@@ -266,8 +266,8 @@ function CompactionModelPicker({
           />
         )}
         <div className="min-w-0 flex-1">
-          <div className="text-[12.5px] text-droid-text truncate">{l}</div>
-          {sub && <div className="text-[10.5px] text-droid-text-muted truncate">{sub}</div>}
+          <div className="text-[13px] text-droid-text truncate">{l}</div>
+          {sub && <div className="text-[11px] text-droid-text-muted truncate">{sub}</div>}
         </div>
         {active && (
           <Check
@@ -902,7 +902,7 @@ export default function SettingsPanel() {
                 setQuery(e.target.value);
               }}
               placeholder="Search settings…"
-              className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
+              className="w-full bg-transparent text-[13px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
             />
             {q ? (
               <button
@@ -934,7 +934,7 @@ export default function SettingsPanel() {
                       onClick={() => {
                         setActive(label);
                       }}
-                      className={`flex h-8 w-full items-center rounded-xl px-2.5 text-left text-[12.5px] transition-colors ${
+                      className={`flex h-8 w-full items-center rounded-xl px-2.5 text-left text-[13px] transition-colors ${
                         active === label
                           ? 'bg-droid-active text-droid-text'
                           : 'text-droid-text-secondary hover:bg-droid-elevated/40 hover:text-droid-text'

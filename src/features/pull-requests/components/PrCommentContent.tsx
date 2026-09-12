@@ -73,7 +73,7 @@ export function HunkPreview({ diffHunk }: { diffHunk: string }) {
             <div
               key={`${String(index)}-${line}`}
               style={HUNK_TONE_STYLE[tone]}
-              className="px-3 font-mono text-[11.5px] leading-[1.5] whitespace-pre text-droid-text-secondary"
+              className="px-3 font-mono text-[12px] leading-[1.5] whitespace-pre text-droid-text-secondary"
             >
               {line || ' '}
             </div>

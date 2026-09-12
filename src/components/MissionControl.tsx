@@ -214,7 +214,7 @@ function FeaturesColumn({
                     {numberOf.get(f.id)}
                   </span>
                   <span
-                    className={`min-w-0 flex-1 truncate ${big ? 'text-[12.5px]' : 'text-[12px]'} ${
+                    className={`min-w-0 flex-1 truncate ${big ? 'text-[13px]' : 'text-[12px]'} ${
                       completed
                         ? 'text-droid-text-muted'
                         : active
@@ -269,7 +269,7 @@ function EnvRow({
       className="w-full flex items-center gap-3 px-2 py-2 rounded-lg text-droid-text-secondary hover:text-droid-text hover:bg-droid-elevated/60 transition-colors"
     >
       <span className="text-droid-text-muted shrink-0">{icon}</span>
-      <span className="text-[13.5px] leading-none">{label}</span>
+      <span className="text-[13px] leading-none">{label}</span>
       {chevron && <ChevronDown className="w-3.5 h-3.5 ml-1 text-droid-text-muted/60" />}
     </button>
   );
@@ -583,7 +583,7 @@ function ProgressSection({
             onClick={() => {
               setShowAll(true);
             }}
-            className="w-full text-left px-2 py-1 text-[11.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+            className="w-full text-left px-2 py-1 text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
           >
             Show {hidden} more
           </button>
@@ -593,7 +593,7 @@ function ProgressSection({
             onClick={() => {
               setShowAll(false);
             }}
-            className="w-full text-left px-2 py-1 text-[11.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+            className="w-full text-left px-2 py-1 text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
           >
             Show less
           </button>
@@ -832,7 +832,7 @@ function FeatureFocus({
 
         <div className="space-y-4 rounded-xl bg-droid-elevated/25 p-4 mb-6">
           {noSpec ? (
-            <div className="text-[12.5px] text-droid-text-muted">
+            <div className="text-[13px] text-droid-text-muted">
               No spec details provided for this feature.
             </div>
           ) : (
@@ -867,7 +867,7 @@ function FeatureFocus({
             <ActionRow key={e.id} event={e} cwd={cwd} onOpenDiff={onOpenDiff} />
           ))}
           {shown.length === 0 && (
-            <div className="py-8 text-center text-[12.5px] text-droid-text-muted">
+            <div className="py-8 text-center text-[13px] text-droid-text-muted">
               No worker activity recorded yet.
             </div>
           )}
@@ -1101,7 +1101,7 @@ export default function MissionControl() {
             <div className="flex items-center gap-2 shrink-0">
               {visibleIsLive ? (
                 <>
-                  <span className="shimmer-text text-[11.5px] font-medium leading-none">
+                  <span className="shimmer-text text-[12px] font-medium leading-none">
                     {visibleAgentLabel} working
                   </span>
                   <button

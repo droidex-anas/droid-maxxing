@@ -52,13 +52,13 @@ function CommitRow({ commit }: { commit: PrCommit }) {
       <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text">
         {commit.headline || shortSha(commit.oid)}
       </span>
-      <span className="shrink-0 font-mono text-[11.5px] text-droid-text-muted">
+      <span className="shrink-0 font-mono text-[12px] text-droid-text-muted">
         {shortSha(commit.oid)}
       </span>
       {time ? (
         <span
           title={prAbsoluteTime(commit.committedDate)}
-          className="shrink-0 text-[11.5px] text-droid-text-muted"
+          className="shrink-0 text-[12px] text-droid-text-muted"
         >
           {time} ago
         </span>
@@ -95,7 +95,7 @@ function CommitsEntry({ commits }: { commits: PrCommit[] }) {
             {commits.length} {commits.length === 1 ? 'commit' : 'commits'}
           </span>
           {time ? (
-            <span className="ml-auto shrink-0 text-[11.5px] text-droid-text-muted">{time} ago</span>
+            <span className="ml-auto shrink-0 text-[12px] text-droid-text-muted">{time} ago</span>
           ) : null}
         </button>
         <PrCollapse open={open}>

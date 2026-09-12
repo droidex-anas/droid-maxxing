@@ -113,7 +113,7 @@ function TextRow({
       className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-droid-surface/55 focus:bg-droid-surface focus:outline-none disabled:opacity-40 disabled:hover:bg-transparent"
     >
       <Icon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-      <span className="text-[12.5px] font-medium text-droid-text">{label}</span>
+      <span className="text-[13px] font-medium text-droid-text">{label}</span>
       {hint ? <span className="ml-auto text-[11px] text-droid-text-muted">{hint}</span> : null}
     </button>
   );
