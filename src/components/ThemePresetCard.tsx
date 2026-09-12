@@ -425,7 +425,9 @@ export function ThemePresetCard({ resolvedScheme }: { resolvedScheme: 'light' | 
                   className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
                     selected ? 'border-droid-text' : 'border-transparent'
                   }`}
-                  style={{ backgroundColor: c }}
+                  // A hairline inside the ring keeps a swatch the colour of the
+                  // panel (white on a light theme) from reading as an empty slot.
+                  style={{ backgroundColor: c, boxShadow: 'inset 0 0 0 1px var(--droid-border)' }}
                 >
                   {selected && (
                     <Check className="w-3 h-3 mx-auto" style={{ color: ink }} strokeWidth={3} />
