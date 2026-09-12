@@ -6,6 +6,7 @@ import {
   FINISH_NOTIFICATION_TEST_ACTION,
   FINISH_NOTIFICATION_TOGGLES,
 } from './finishNotificationControls';
+import { SHORTCUT_DEFINITIONS } from './shortcuts';
 
 export interface SettingsSearchEntry {
   /** Settings nav tab to open. */
@@ -24,6 +25,8 @@ function e(tab: string, label: string, keywords: string[] = []): SettingsSearchE
  * Indexed settings content for every shipped tab. Placeholder tabs are indexed
  * by name/aliases so search still navigates even before those screens exist.
  */
+const SHORTCUT_KEYWORDS = ['hotkeys', 'keymap', 'bindings', 'shortcuts', 'cmd'];
+
 export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   // ── Notifications (shared control definitions) ───────────────────────────
   ...FINISH_NOTIFICATION_TOGGLES.map((row) => e('Notifications', row.label, [...row.keywords])),
@@ -161,6 +164,11 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     'ops data',
   ]),
 
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  ...SHORTCUT_DEFINITIONS.map((definition) =>
+    e('Keyboard shortcuts', definition.label, SHORTCUT_KEYWORDS),
+  ),
+
   // ── Placeholder tabs (name + common aliases until those screens ship) ────
   e('Profile', 'Profile', ['account', 'user', 'avatar', 'identity']),
   e('Personalization', 'Personalization', [
@@ -169,13 +177,6 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     'custom instructions',
     'memory',
     'preferences',
-  ]),
-  e('Keyboard shortcuts', 'Keyboard shortcuts', [
-    'hotkeys',
-    'keymap',
-    'bindings',
-    'shortcuts',
-    'cmd',
   ]),
   e('Usage & billing', 'Usage & billing', ['billing', 'usage', 'quota', 'invoice', 'plan', 'cost']),
   e('Snapshots', 'Snapshots', ['snapshot', 'checkpoint', 'restore']),

@@ -1337,8 +1337,7 @@ export default function PromptInput({
       target.closest('.cm-md-tableframe') !== null
     ) {
       // The draft's formatting shortcuts mean nothing in a cell, and letting
-      // them bubble would reach the app's own bindings (Cmd+B toggles the
-      // sidebar).
+      // them bubble would reach the app's own window-level bindings.
       if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'e'].includes(e.key.toLowerCase())) {
         e.preventDefault();
         e.stopPropagation();
@@ -1379,7 +1378,7 @@ export default function PromptInput({
     }
     // Draft formatting shortcuts. These belong to the draft while it is
     // focused, so they are consumed here instead of bubbling to the app's
-    // window-level shortcuts (Cmd+B toggles the sidebar elsewhere).
+    // window-level shortcuts, which deliberately leave Cmd+B alone.
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
       const formatKey = e.key.toLowerCase();
       if (formatKey === 'b' || formatKey === 'i' || formatKey === 'e') {

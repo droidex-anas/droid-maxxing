@@ -19,6 +19,7 @@ import { hasActiveSessionWork } from '../lib/sessions';
 import { applyTheme } from '../lib/theme';
 import { AppearanceSection } from './AppearanceSettings';
 import { DiagnosticsSettings } from './DiagnosticsSettings';
+import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { McpServersSettings } from './McpServersSettings';
 import { NotificationsSettings } from './NotificationsSettings';
 import { WorktreesSettings } from './WorktreesSettings';
@@ -869,6 +870,9 @@ export default function SettingsPanel() {
       break;
     case 'MCP servers':
       content = <McpServersSettings cwd={mcpCwd} />;
+      break;
+    case 'Keyboard shortcuts':
+      content = <KeyboardShortcutsSettings />;
       break;
     case 'Archived chats':
       content = <ArchivedChatsSettings />;

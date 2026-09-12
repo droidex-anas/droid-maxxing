@@ -30,6 +30,7 @@ import {
   loadPersistedUiState,
   loadReviewScope,
   loadSessionLastSeen,
+  loadShortcutBindings,
   loadWorkspaceCwds,
   saveAgentConfig,
   saveCompactionModel,
@@ -39,6 +40,7 @@ import {
   savePersistedUiState,
   saveReviewScope,
   saveSessionLastSeen,
+  saveShortcutBindings,
   saveWorkspaceCwds,
   sanitizeAgentConfig,
   type AgentConfig,
@@ -47,6 +49,7 @@ import {
   type LiveEnterBehavior,
   type MainView,
 } from './persistedUiPreferences';
+import type { ShortcutAction, ShortcutBindings } from '../lib/shortcuts';
 import {
   clearDesignMode,
   setDesignMode,
@@ -350,6 +353,8 @@ export interface AppState {
   liveEnterBehavior: LiveEnterBehavior;
   // Fidelity tier for images pasted or dropped into the composer.
   imagePasteQuality: ImagePasteQuality;
+  // Chord bound to each rebindable app action (see lib/shortcuts).
+  shortcutBindings: ShortcutBindings;
 
   // Per-session model/reasoning the user picked in the selector. These are
   // authoritative: a stale server summary (e.g. an in-flight resume) must not
@@ -610,6 +615,7 @@ type Action =
   | { type: 'SET_COMPACTION_TOKEN_LIMIT_FOR_MODEL'; modelId: string; limit?: number }
   | { type: 'SET_LIVE_ENTER_BEHAVIOR'; behavior: LiveEnterBehavior }
   | { type: 'SET_IMAGE_PASTE_QUALITY'; quality: ImagePasteQuality }
+  | { type: 'SET_SHORTCUT_BINDING'; shortcut: ShortcutAction; chord: string }
   | { type: 'SET_DEFAULT_AUTONOMY'; autonomy: Autonomy }
   | { type: 'SET_TOOL_ACTIVITY'; settings: ToolActivitySettings }
   | { type: 'SET_DRAFT_AUTONOMY'; autonomy: Autonomy }
@@ -720,6 +726,7 @@ export const initialState: AppState = {
   compactionSettingsRev: 0,
   liveEnterBehavior: loadLiveEnterBehavior(),
   imagePasteQuality: loadImagePasteQuality(),
+  shortcutBindings: loadShortcutBindings(),
   reviewOpenAppSessionId: null,
   reviewScope: loadReviewScope(),
   reviewFocusPath: null,
@@ -2079,6 +2086,14 @@ function baseReducer(state: AppState, action: Action): AppState {
     case 'SET_IMAGE_PASTE_QUALITY': {
       const quality = saveImagePasteQuality(action.quality);
       return { ...state, imagePasteQuality: quality };
+    }
+
+    case 'SET_SHORTCUT_BINDING': {
+      const bindings = saveShortcutBindings({
+        ...state.shortcutBindings,
+        [action.shortcut]: action.chord,
+      });
+      return { ...state, shortcutBindings: bindings };
     }
 
     case 'SET_DEFAULT_AUTONOMY': {

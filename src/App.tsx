@@ -42,6 +42,12 @@ import { UtilityPane } from './components/utility/UtilityPane';
 import { closeTerminalForTab } from './lib/terminal';
 import { utilityPanelForSession, type UtilityTool } from './lib/utilityPanel';
 import { isTerminalInputTarget, isTerminalTabShortcut } from './lib/keyboardShortcuts';
+import {
+  SHORTCUT_DEFINITIONS,
+  formatChord,
+  matchesChord,
+  type ShortcutAction,
+} from './lib/shortcuts';
 import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
@@ -136,6 +142,7 @@ export default function App() {
       selectedChild: current.selectedChild,
       sessionRestore: current.sessionRestore,
       settingsOpen: current.settingsOpen,
+      shortcutBindings: current.shortcutBindings,
       sidebarCollapsed: current.sidebarCollapsed,
       theme: current.theme,
       utilityPanels: current.utilityPanels,
@@ -481,7 +488,27 @@ export default function App() {
 
   // Keyboard shortcuts
   useEffect(() => {
+    const run: Record<ShortcutAction, () => void> = {
+      toggleSidebar: () => {
+        dispatch({ type: 'TOGGLE_SIDEBAR' });
+      },
+      toggleUtilityPane,
+      openCommandPalette: () => {
+        dispatch({ type: 'TOGGLE_COMMAND_PALETTE' });
+      },
+      openSettings: () => {
+        dispatch({ type: 'TOGGLE_SETTINGS' });
+      },
+    };
     const handler = (e: KeyboardEvent) => {
+      // A saved binding wins over the fixed chords below, so rebinding an
+      // action onto one of them takes effect instead of being swallowed.
+      for (const { action } of SHORTCUT_DEFINITIONS) {
+        if (!matchesChord(e, state.shortcutBindings[action])) continue;
+        e.preventDefault();
+        run[action]();
+        return;
+      }
       if (isTerminalTabShortcut(e)) {
         if (isTerminalInputTarget(e.target)) return;
         e.preventDefault();
@@ -490,39 +517,18 @@ export default function App() {
         return;
       }
       const meta = e.metaKey || e.ctrlKey;
-      if (!meta) return;
-      if (e.shiftKey) {
-        const key = e.key.toLowerCase();
-        if (key === 'b' || key === 'f' || key === 'r') {
-          e.preventDefault();
-          openUtilityTool(key === 'b' ? 'browser' : key === 'f' ? 'files' : 'review');
-          return;
-        }
-      }
-      switch (e.key.toLowerCase()) {
-        case 'k':
-          e.preventDefault();
-          dispatch({ type: 'TOGGLE_COMMAND_PALETTE' });
-          break;
-        case 'b':
-          e.preventDefault();
-          dispatch({ type: 'TOGGLE_SIDEBAR' });
-          break;
-        case '\\':
-          e.preventDefault();
-          toggleUtilityPane();
-          break;
-        case ',':
-          e.preventDefault();
-          dispatch({ type: 'TOGGLE_SETTINGS' });
-          break;
+      if (!meta || !e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'b' || key === 'f' || key === 'r') {
+        e.preventDefault();
+        openUtilityTool(key === 'b' ? 'browser' : key === 'f' ? 'files' : 'review');
       }
     };
     window.addEventListener('keydown', handler);
     return () => {
       window.removeEventListener('keydown', handler);
     };
-  }, [dispatch, openUtilityTool, toggleUtilityPane]);
+  }, [dispatch, openUtilityTool, state.shortcutBindings, toggleUtilityPane]);
 
   const setupBlocker =
     !showWizard &&
@@ -791,7 +797,7 @@ export default function App() {
             dispatch({ type: 'TOGGLE_SIDEBAR' });
           }}
           className="p-1.5 rounded-md text-droid-text-muted/70 hover:text-droid-text hover:bg-droid-elevated/60 transition-colors"
-          title="Toggle sidebar (Cmd+B)"
+          title={`Toggle sidebar (${formatChord(state.shortcutBindings.toggleSidebar)})`}
         >
           <PanelLeft className="w-4 h-4" />
         </button>
@@ -826,7 +832,7 @@ export default function App() {
               ref={utilityPaneToggleRef}
               onClick={toggleUtilityPane}
               className="rounded-md p-1.5 text-droid-text-muted/70 transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
-              title="Toggle utility pane (Cmd+\\)"
+              title={`Toggle utility pane (${formatChord(state.shortcutBindings.toggleUtilityPane)})`}
             >
               <PanelRight className="h-4 w-4" />
             </button>
