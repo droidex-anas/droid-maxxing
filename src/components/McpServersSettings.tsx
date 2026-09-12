@@ -57,6 +57,7 @@ export function McpServersSettings({ cwd }: { cwd?: string }) {
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState<string>();
   const activeRequest = useRef<string | undefined>(undefined);
+  const listedCwd = useRef(cwd);
 
   const start = useCallback((mutation: boolean, send: (requestId: string) => void) => {
     const requestId = nextRequestId();
@@ -93,9 +94,17 @@ export function McpServersSettings({ cwd }: { cwd?: string }) {
       setIsLoading(false);
       setIsMutating(false);
     });
+    // A new cwd means a new catalog; drop the old rows so they never read as
+    // the new folder's servers while the list is loading.
+    if (listedCwd.current !== cwd) {
+      listedCwd.current = cwd;
+      setServers([]);
+      setTools([]);
+      setSummary(EMPTY_SUMMARY);
+    }
     refresh();
     return unsubscribe;
-  }, [refresh]);
+  }, [cwd, refresh]);
 
   return (
     <McpServersSection
