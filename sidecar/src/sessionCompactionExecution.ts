@@ -161,7 +161,7 @@ export class SessionCompactionExecution {
       }
       await oldSession.close();
       if (!target.isCurrent()) return;
-      if (oldPid !== undefined) this.dependencies.agentProcesses.untrack(oldPid);
+      if (oldPid !== undefined) this.dependencies.agentProcesses.untrack(oldPid, appSessionId);
       liveSession.session = replacement;
       installed = true;
       if (replacementPid !== undefined)
@@ -177,7 +177,7 @@ export class SessionCompactionExecution {
         try {
           await replacement.close();
           if (replacementPid !== undefined)
-            this.dependencies.agentProcesses.untrack(replacementPid);
+            this.dependencies.agentProcesses.untrack(replacementPid, appSessionId);
         } catch (error) {
           // Leave the provisional root owned by the session's kill pass.
           this.dependencies.emitError({

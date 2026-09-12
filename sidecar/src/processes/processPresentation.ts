@@ -8,7 +8,7 @@ function isShellWrapper(command: string): boolean {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--' || !/^[+-]/.test(arg)) return false;
-    if (arg === '--command' || /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) return true;
+    if (/^--command(?:=|$)/.test(arg) || /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) return true;
     if (/^[+-][oO]$/.test(arg) || arg === '--rcfile' || arg === '--init-file') index += 1;
   }
   return false;

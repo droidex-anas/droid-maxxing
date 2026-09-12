@@ -68,7 +68,7 @@ export async function killProcessTree(
       discovery.remember([...targets.values()]);
     }
     const survivors = [...targets.values()].reverse();
-    if (survivors.length === 0 && (poll === 0 || !discovery)) return;
+    if (survivors.length === 0 && (terminated.size === 0 || !discovery)) return;
     if (graceExpired(poll)) {
       for (const row of survivors) signal(row, 'SIGKILL');
       return;

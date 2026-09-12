@@ -93,7 +93,8 @@ export class ChildProviderCleanup {
           throw new Error('Could not preserve child processes before retiring their provider.');
       }
       await entry.session.close();
-      if (entry.pid !== undefined) this.d.agentProcesses.untrack(entry.pid);
+      if (entry.pid !== undefined)
+        this.d.agentProcesses.untrack(entry.pid, entry.parent.parentAppSessionId);
       this.pending.delete(entry.session);
       return true;
     } catch (error) {

@@ -75,6 +75,23 @@ const rows: ProcessRecord[] = [
   { pid: 800, ppid: 700, startedAt: 0, command: 'node /w/node_modules/.bin/vite' },
 ];
 
+test('unobserved recycled providers and stale cleanup cannot take another session’s processes', async () => {
+  const h = harness(rows);
+  h.monitor.track('s1', 600);
+  h.advance(10_000);
+  h.setRows(rows.map((row) => ({ ...row, startedAt: 105_000 })));
+  assert.equal(await h.monitor.adoptDescendantsAsRoots('s1', 600), false);
+  await h.monitor.killSession('s1');
+  assert.deepEqual(h.killed, []);
+
+  h.monitor.track('s2', 600);
+  await h.monitor.scan();
+  h.monitor.untrack(600, 's1');
+  assert.equal(h.monitor.hasProcesses('s2'), true);
+  assert.equal(h.monitor.snapshotPids()[0]?.appSessionId, 's2');
+  h.monitor.dispose();
+});
+
 test('second-granular startedAt jitter does not re-emit an unchanged list', async () => {
   const h = harness(rows);
   h.monitor.track('s1', 600);
@@ -117,6 +134,13 @@ test('scan hides shell wrappers, emits once per change, and attaches ports', asy
   ]);
   await h.monitor.scan();
   assert.equal(h.emitted.length, 1);
+  const fishWrapper = '/bin/fish --command=npm run dev';
+  h.setRows(rows.map((row) => (row.pid === 700 ? { ...row, command: fishWrapper } : row)));
+  await h.monitor.scan();
+  assert.deepEqual(
+    h.monitor.processesFor('s1').map((row) => row.originCommand),
+    [fishWrapper],
+  );
 });
 
 test('processes younger than MIN_AGE_MS are not shown yet', async () => {
@@ -133,13 +157,18 @@ test('processes younger than MIN_AGE_MS are not shown yet', async () => {
 });
 
 test('a tracked root with no visible descendants still emits once', async () => {
-  const h = harness([{ pid: 600, ppid: 1, startedAt: 90_000, command: 'droid' }]);
+  const h = harness([{ pid: 600, ppid: 1, startedAt: 90_000, command: 'droid' }], new Map(), {
+    scheduleKillPoll: () => {
+      throw new Error('an idle provider must not wait for kill grace');
+    },
+  });
   h.monitor.track('s1', 600);
   await h.monitor.scan();
   assert.deepEqual(h.emitted, [['s1', []]]);
   // ...and does not repeat it every tick.
   await h.monitor.scan();
   assert.equal(h.emitted.length, 1);
+  await h.monitor.killSession('s1');
 });
 
 test('stop validates the pid against the session snapshot and tree-kills it', async () => {
@@ -391,7 +420,7 @@ test("untrack of a session's last root publishes an empty list and clears its sn
   assert.equal(h.emitted.length, 1);
   assert.equal(h.monitor.hasProcesses('s1'), true);
 
-  h.monitor.untrack(600);
+  h.monitor.untrack(600, 's1');
 
   assert.equal(h.monitor.hasProcesses('s1'), false);
   assert.deepEqual(h.monitor.processesFor('s1'), []);
@@ -521,7 +550,7 @@ test('untrack during the in-flight ports scan drops the stale snapshot instead o
 
   // The session's only root goes away while the ports fetch is still
   // pending — untrack() clears its state and emits the empty list now.
-  monitor.untrack(600);
+  monitor.untrack(600, 's1');
   assert.deepEqual(emitted.at(-1), ['s1', []]);
 
   resolvePorts(new Map([[800, [5173]]]));
@@ -599,7 +628,7 @@ test('a replaced root cannot inherit an in-flight process table', async () => {
   const h = harness(rows, new Map(), { listProcesses: () => table });
   h.monitor.track('s1', 600);
   const scan = h.monitor.scan();
-  h.monitor.untrack(600);
+  h.monitor.untrack(600, 's1');
   h.monitor.track('s2', 600);
   releaseTable(rows);
   await scan;
@@ -653,7 +682,7 @@ test('adopted roots survive the root that spawned them and still belong to the s
 
   // What compaction does: re-root the old provider's children, then drop it.
   await h.monitor.adoptDescendantsAsRoots('s1', 600);
-  h.monitor.untrack(600);
+  h.monitor.untrack(600, 's1');
   h.setRows(
     rows
       .filter((row) => row.pid !== 600)
@@ -750,7 +779,7 @@ test("pruning a session's last adopted root publishes an empty list", async () =
 
   monitor.track('s1', 600);
   await monitor.adoptDescendantsAsRoots('s1', 600);
-  monitor.untrack(600);
+  monitor.untrack(600, 's1');
   await monitor.scan();
   assert.equal(monitor.hasProcesses('s1'), true);
 
@@ -767,7 +796,7 @@ test('an adopted root whose pid is recycled is dropped, not re-attached', async 
   const h = harness(compactionRows);
   h.monitor.track('s1', 600);
   await h.monitor.adoptDescendantsAsRoots('s1', 600);
-  h.monitor.untrack(600);
+  h.monitor.untrack(600, 's1');
   await h.monitor.scan();
   assert.deepEqual(
     h.monitor.processesFor('s1').map((entry) => entry.pid),
@@ -958,7 +987,7 @@ test('the last root’s failed empty publication retries without restoring stale
   h.monitor.track('s1', 600);
   await h.monitor.scan();
   fail = true;
-  h.monitor.untrack(600);
+  h.monitor.untrack(600, 's1');
   assert.equal(h.monitor.hasProcesses('s1'), false);
   fail = false;
   await h.tick();

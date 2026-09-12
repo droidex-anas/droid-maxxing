@@ -25,7 +25,17 @@ const PORT_SCAN_EVERY = 3;
 interface TrackedRoot {
   appSessionId: string;
   kind: 'provider' | 'adopted' | 'provisional';
+  trackedAt: number;
   startedAt?: number;
+}
+
+function matchesRoot(root: TrackedRoot, row: ProcessRecord | undefined): boolean {
+  if (!row) return false;
+  // An unobserved provider must already have existed when it was registered.
+  // Allow the same second-granular ps rounding as subsequent identity checks.
+  return root.startedAt === undefined
+    ? row.startedAt - root.trackedAt < 2000
+    : sameProcess({ startedAt: root.startedAt }, row);
 }
 
 function dedupeByPid(rows: readonly ProcessRecord[]): ProcessRecord[] {
@@ -81,7 +91,7 @@ export class AgentProcessMonitor {
       if (previous.kind === 'provisional') previous.kind = kind;
       return;
     }
-    this.roots.set(rootPid, { appSessionId, kind });
+    this.roots.set(rootPid, { appSessionId, kind, trackedAt: this.d.now() });
     this.arm();
   }
 
@@ -107,26 +117,27 @@ export class AgentProcessMonitor {
     if (this.roots.get(rootPid) !== root || this.closing.has(appSessionId) || !isCurrent())
       return false;
     const parent = table.find((row) => row.pid === rootPid);
-    if (
-      !parent ||
-      (root.startedAt !== undefined && !sameProcess({ startedAt: root.startedAt }, parent))
-    )
-      return false;
+    if (!parent || !matchesRoot(root, parent)) return false;
     root.startedAt = parent.startedAt;
     // Direct children only, the walk from each of them is transitive, and a
     // grandchild tracked as well would be listed twice.
     for (const row of table) {
       if (row.ppid !== rootPid) continue;
-      this.roots.set(row.pid, { appSessionId, kind: 'adopted', startedAt: row.startedAt });
+      this.roots.set(row.pid, {
+        appSessionId,
+        kind: 'adopted',
+        trackedAt: this.d.now(),
+        startedAt: row.startedAt,
+      });
     }
     this.persistSnapshot();
     return true;
   }
 
-  untrack(rootPid: number): void {
-    const appSessionId = this.roots.get(rootPid)?.appSessionId;
+  untrack(rootPid: number, appSessionId: string): void {
+    if (this.roots.get(rootPid)?.appSessionId !== appSessionId) return;
     this.roots.delete(rootPid);
-    if (appSessionId !== undefined) this.dropIfRootless(appSessionId);
+    this.dropIfRootless(appSessionId);
     this.persistSnapshot();
     if (!this.hasWork()) this.disarm();
   }
@@ -206,11 +217,7 @@ export class AgentProcessMonitor {
           const byPid = new Map(table.map((row) => [row.pid, row]));
           const verified = roots.flatMap(([pid, root]) => {
             const row = byPid.get(pid);
-            if (
-              !row ||
-              (root.startedAt !== undefined && !sameProcess({ startedAt: root.startedAt }, row))
-            )
-              return [];
+            if (!row || !matchesRoot(root, row)) return [];
             root.startedAt ??= row.startedAt;
             return [{ row, root }];
           });
@@ -493,10 +500,7 @@ export class AgentProcessMonitor {
     for (const [pid, root] of observedRoots) {
       if (this.roots.get(pid) !== root) continue;
       const live = byPid.get(pid);
-      if (
-        live !== undefined &&
-        (root.startedAt === undefined || sameProcess({ startedAt: root.startedAt }, live))
-      ) {
+      if (live !== undefined && matchesRoot(root, live)) {
         root.startedAt ??= live.startedAt;
         continue;
       }

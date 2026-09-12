@@ -576,15 +576,33 @@ test('registration failure closes resources without indexing the failed session'
   );
 });
 
-test('post-registration publication failures unregister and close opened resources', async () => {
+test('post-registration failures retain cleanup ownership through a process outage', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const created = createHarness();
   queueCreate(created, 'failed-create-publication');
+  let discoveryFailed = true;
+  created.setProcessKiller(async () => {
+    if (discoveryFailed) throw new Error('process discovery unavailable');
+  });
   created.setChildCloser(async () => {
     created.calls.push({ target: 'cleanup', method: 'children.close', args: [] });
   });
   created.failNextEmit('session.created', new Error('create publication failed'));
 
   await created.lifecycle.create(createCommand());
+  const failedOpen = requireLive(created, 'failed-create-publication');
+  assert.equal(failedOpen.closeMode, 'discard-pending');
+  assert.equal(
+    created.calls.some((call) => call.method === 'session.close'),
+    false,
+  );
+  assert.equal(
+    created.calls.some((call) => call.method === 'mcp.close'),
+    false,
+  );
+  discoveryFailed = false;
+  t.mock.timers.tick(5000);
+  await failedOpen.closePromise;
 
   assert.deepEqual(
     created.calls
@@ -592,7 +610,7 @@ test('post-registration publication failures unregister and close opened resourc
       .filter((method) =>
         ['processes.killSession', 'children.close', 'session.close'].includes(method),
       ),
-    ['processes.killSession', 'children.close', 'session.close'],
+    ['processes.killSession', 'processes.killSession', 'children.close', 'session.close'],
   );
   assert.equal(created.registry.getLive('failed-create-publication'), undefined);
   assert.deepEqual(

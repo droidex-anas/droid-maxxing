@@ -32,10 +32,15 @@ export async function measureSidecarStartup(treeRoot: string): Promise<AbProbeMe
     ];
   }
   // Build outside the timed runs so the source protocol and launched artifact agree.
-  await promisify(execFile)(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {
-    cwd: resolve(treeRoot, 'sidecar'),
-    timeout: 120_000,
-  });
+  const windows = process.platform === 'win32';
+  const commandShell = process.env.ComSpec?.trim();
+  let buildCommand = windows ? 'cmd.exe' : 'npm';
+  if (windows && commandShell) buildCommand = commandShell;
+  await promisify(execFile)(
+    buildCommand,
+    windows ? ['/d', '/c', 'npm.cmd', 'run', 'build'] : ['run', 'build'],
+    { cwd: resolve(treeRoot, 'sidecar'), timeout: 120_000 },
+  );
   const requireFromTree = createRequire(entry);
   const wsPath = resolve(treeRoot, 'sidecar/node_modules/ws');
   const { WebSocket: WebSocketClass } = requireFromTree(wsPath) as {

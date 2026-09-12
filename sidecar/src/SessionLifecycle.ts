@@ -47,6 +47,8 @@ interface DeferredClose {
   resolve: () => void;
   reject: (error: unknown) => void;
   started: boolean;
+  retryFailedOpen?: boolean;
+  retryTimer?: ReturnType<typeof setTimeout>;
 }
 interface CloseOperation {
   deferred: DeferredClose;
@@ -428,7 +430,7 @@ export class SessionLifecycle {
     const liveSession = this.dependencies.registry.getLive(appSessionId);
     if (!liveSession) return;
     const operation = this.beginClose(liveSession, mode);
-    if (operation.created) await this.finishClose(liveSession);
+    if (operation.created || operation.deferred.retryTimer) await this.finishClose(liveSession);
     await operation.deferred.promise;
   }
 
@@ -459,18 +461,29 @@ export class SessionLifecycle {
   private async finishClose(liveSession: LiveSession): Promise<void> {
     const deferred = this.deferredCloses.get(liveSession);
     if (!deferred || deferred.started) return;
+    clearTimeout(deferred.retryTimer);
     deferred.started = true;
     try {
       await this.closeSessionResources(liveSession);
       deferred.resolve();
     } catch (error) {
       if (this.dependencies.registry.getLive(liveSession.summary.appSessionId) === liveSession) {
+        if (deferred.retryFailedOpen && !this.dependencies.isShutdownStarted()) {
+          if (!deferred.retryTimer)
+            console.warn(`Failed-open provider cleanup deferred: ${errMsg(error)}`);
+          deferred.started = false;
+          deferred.retryTimer = setTimeout(() => {
+            void this.finishClose(liveSession);
+          }, 5000);
+          deferred.retryTimer.unref();
+          return;
+        }
         liveSession.closeMode = undefined;
         liveSession.closePromise = undefined;
       }
       deferred.reject(error);
     } finally {
-      this.deferredCloses.delete(liveSession);
+      if (deferred.started) this.deferredCloses.delete(liveSession);
     }
   }
 
@@ -510,7 +523,8 @@ export class SessionLifecycle {
     }
     await run(() => liveSession.session.close());
     const processId = d.runtime.processIdOf(liveSession.session);
-    if (processId !== undefined) d.agentProcesses.untrack(processId);
+    if (processId !== undefined)
+      d.agentProcesses.untrack(processId, liveSession.summary.appSessionId);
     await run(() => d.closeBrowserSession(liveSession.summary.appSessionId));
     await run(() => {
       d.context.forgetSession(liveSession);
@@ -541,6 +555,10 @@ export class SessionLifecycle {
   }
 
   async closeAll(): Promise<void> {
+    if (this.dependencies.isShutdownStarted()) {
+      for (const liveSession of this.dependencies.registry.liveSessionsSnapshot())
+        clearTimeout(this.deferredCloses.get(liveSession)?.retryTimer);
+    }
     // One concurrent kill pass before the serialized closes. Each close kills
     // its own processes too (idempotent, and the only owner when a single
     // session closes), but paying the kill grace one session at a time would
@@ -563,7 +581,7 @@ export class SessionLifecycle {
         close: this.beginClose(liveSession, 'discard-pending'),
       }));
     for (const { liveSession, close } of scheduled) {
-      if (close.created) await this.finishClose(liveSession);
+      if (close.created || close.deferred.retryTimer) await this.finishClose(liveSession);
       try {
         await close.deferred.promise;
       } catch (error) {
@@ -649,6 +667,18 @@ export class SessionLifecycle {
     session: FactorySession | undefined,
     liveSession: LiveSession | undefined,
   ): Promise<void> {
+    if (
+      liveSession &&
+      this.dependencies.registry.getLive(liveSession.summary.appSessionId) === liveSession
+    ) {
+      const { deferred } = this.beginClose(liveSession, 'discard-pending');
+      deferred.retryFailedOpen = true;
+      void deferred.promise.catch((error: unknown) => {
+        console.warn(`Failed-open provider cleanup failed: ${errMsg(error)}`);
+      });
+      await this.finishClose(liveSession);
+      return;
+    }
     if (liveSession) {
       liveSession.closeMode = 'discard-pending';
       try {
@@ -669,7 +699,8 @@ export class SessionLifecycle {
     if (session) {
       const processId = this.dependencies.runtime.processIdOf(session);
       await runBestEffortAsync(() => session.close());
-      if (processId !== undefined) this.dependencies.agentProcesses.untrack(processId);
+      if (processId !== undefined && liveSession)
+        this.dependencies.agentProcesses.untrack(processId, liveSession.summary.appSessionId);
     }
     if (
       liveSession &&
