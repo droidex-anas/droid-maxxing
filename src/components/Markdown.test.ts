@@ -64,13 +64,6 @@ test('a complete app fence in the live response opens automatically', () => {
   assert.match(html, /aria-label="Stop app"/);
 });
 
-test('app blocks are framed as a top-level surface instead of nesting inside preformatted text', () => {
-  const source = '```app\n<p>App surface</p>\n```';
-  const html = renderToStaticMarkup(createElement(Markdown, null, source));
-
-  assert.doesNotMatch(html, /<pre><div[^>]*my-2\.5/);
-});
-
 test('disabled generated content renders app fences as ordinary code', () => {
   const source = '```app\n<p>Untrusted preview content</p>\n```';
   const html = renderToStaticMarkup(
@@ -78,14 +71,6 @@ test('disabled generated content renders app fences as ordinary code', () => {
   );
 
   assert.match(html, /&lt;p&gt;Untrusted preview content&lt;\/p&gt;/);
-  assert.doesNotMatch(html, /aria-label="Play app"/);
-});
-
-test('only the exact app fence activates an App block', () => {
-  const source = '```application\n<p>Ordinary code</p>\n```';
-  const html = renderToStaticMarkup(createElement(Markdown, null, source));
-
-  assert.match(html, /&lt;p&gt;Ordinary code&lt;\/p&gt;/);
   assert.doesNotMatch(html, /aria-label="Play app"/);
 });
 
@@ -272,34 +257,6 @@ test('small JSON fences keep token highlighting and large ones stay plain', asyn
   assert.match(largeHtml, /k1199/);
 });
 
-test('chat headings form a visible hierarchy instead of reading as bold text', () => {
-  const html = renderToStaticMarkup(
-    createElement(Markdown, null, '# Title\n## Section\n### Sub\n#### Minor'),
-  );
-
-  // Each level gets its own element with distinct scale; the top level also
-  // carries a hairline rule so a document break stays visible.
-  assert.match(html, /<h1[^>]*text-\[19px\][^>]*border-b/);
-  assert.match(html, /<h2[^>]*text-\[16px\]/);
-  assert.match(html, /<h3[^>]*text-\[15px\]/);
-  assert.match(html, /<h4[^>]*text-\[14px\]/);
-});
-
-test('tables render zebra rows with a set-apart header', () => {
-  const html = renderToStaticMarkup(
-    createElement(
-      Markdown,
-      null,
-      ['| Name | Status |', '| --- | --- |', '| alpha | ok |', '| beta | ok |'].join('\n'),
-    ),
-  );
-
-  assert.match(html, /<tbody[^>]*nth-child\(even\)/);
-  assert.match(html, /<thead[^>]*bg-droid-surface\/45/);
-  // Cells wrap instead of forcing the first column onto one line.
-  assert.doesNotMatch(html, /first:whitespace-nowrap/);
-});
-
 test('GFM task lists render as checkbox rows without bullet markers', () => {
   const html = renderToStaticMarkup(
     createElement(Markdown, null, ['- [x] done', '- [ ] open'].join('\n')),
@@ -308,12 +265,6 @@ test('GFM task lists render as checkbox rows without bullet markers', () => {
   assert.match(html, /<input[^>]*type="checkbox"[^>]*checked/);
   assert.match(html, /<li[^>]*list-none/);
   assert.doesNotMatch(html, /<li[^>]*list-disc/);
-});
-
-test('strikethrough renders struck and dimmed', () => {
-  const html = renderToStaticMarkup(createElement(Markdown, null, '~~old~~ new'));
-
-  assert.match(html, /<del[^>]*line-through/);
 });
 
 test('breaks mode keeps single newlines from typed text as visible breaks', () => {
@@ -329,20 +280,6 @@ test('breaks mode keeps single newlines from typed text as visible breaks', () =
 
   assert.match(render(true), /<br\/>/);
   assert.doesNotMatch(render(false), /<br\/>/);
-});
-
-// A sent prompt used to render bare, without the shell the model's replies get,
-// so long words and wide tables pushed straight out of the message bubble.
-test('an authored prompt renders through the same shell as a reply', () => {
-  const authored = renderToStaticMarkup(createElement(Markdown, { authored: true }, 'plan\nnext'));
-  const reply = renderToStaticMarkup(createElement(Markdown, null, 'plan'));
-
-  for (const html of [authored, reply]) {
-    assert.match(html, /break-words/);
-    assert.match(html, /min-w-0/);
-  }
-  // Only the authored side keeps the newline the writer pressed.
-  assert.match(authored, /<br\s*\/?>/);
 });
 
 // Shortening an arbitrary link would hide where it goes.

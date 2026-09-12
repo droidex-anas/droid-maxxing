@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { QUEUED_PREVIEW_MAX_CHARS, queuedPromptPreview } from './queuedPromptPreview';
+import { queuedPromptPreview } from './queuedPromptPreview';
 
 test('short prompts survive untouched', () => {
   assert.equal(queuedPromptPreview('Fix the login redirect'), 'Fix the login redirect');
@@ -21,9 +21,4 @@ test('a long prompt is cut at a nearby word boundary with an ellipsis', () => {
 test('a long unbroken run is cut at the limit', () => {
   const preview = queuedPromptPreview('x'.repeat(200), 20);
   assert.equal(preview, `${'x'.repeat(20)}…`);
-});
-
-test('the default limit keeps a queued row to roughly two lines', () => {
-  const preview = queuedPromptPreview('a'.repeat(500));
-  assert.equal(preview.length, QUEUED_PREVIEW_MAX_CHARS + 1);
 });

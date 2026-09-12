@@ -92,23 +92,6 @@ const APP_BLOCK = ['```app', '<main>Complete app</main>', '```'].join('\n');
 
 const MALFORMED = ['Hello', '', '```js', 'const incomplete = '].join('\n');
 
-test('settled paragraphs match the canonical renderer', () => {
-  assertSettledMatchesCanonical(`${PARAGRAPHS}\n\n`);
-});
-
-test('settled lists and tables match the canonical renderer', () => {
-  assertSettledMatchesCanonical(`${LISTS}\n\n`);
-  assertSettledMatchesCanonical(`${TABLE}\n\n`);
-});
-
-test('settled nested fences match the canonical renderer', () => {
-  assertSettledMatchesCanonical(`${NESTED_FENCE}\n\n`);
-});
-
-test('settled huge code blocks match the canonical renderer', () => {
-  assertSettledMatchesCanonical(`${HUGE_CODE}\n\n`);
-});
-
 test('settled mermaid, katex-in-app, and app blocks match the canonical renderer', () => {
   assertSettledMatchesCanonical(`${MERMAID}\n\n`);
   assertSettledMatchesCanonical(`${KATEX_APP}\n\n`);

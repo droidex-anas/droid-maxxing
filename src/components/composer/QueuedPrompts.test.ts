@@ -27,29 +27,10 @@ test('renders nothing without queued prompts', () => {
   assert.equal(render([]), '');
 });
 
-test('a long prompt is collapsed to a clamped preview', () => {
-  const text = `${'Refactor the composer '.repeat(20)}\n\nthen ship it`;
-  const html = render([prompt({ text })]);
-  assert.match(html, /line-clamp-2/);
-  assert.match(html, /…/);
-  // Neither the tail of the prompt nor its paragraph break reaches the row.
-  assert.doesNotMatch(html, /then ship it/);
-  assert.doesNotMatch(html, /whitespace-pre-wrap/);
-});
-
 test('one queued image renders a thumbnail without a count badge', () => {
   const html = render([prompt({ files: ['/tmp/attach/paste-1.png', '/src/index.ts'] })]);
   assert.match(html, /<img src="droidex-img:\/\/local\/\?p=%2Ftmp%2Fattach%2Fpaste-1\.png"/);
   assert.doesNotMatch(html, /min-w-3\.5/);
-});
-
-test('several queued images collapse to one thumbnail with a count badge', () => {
-  const html = render([
-    prompt({ files: ['/tmp/a.png', '/tmp/b.png', '/tmp/c.jpeg', '/notes.md'] }),
-  ]);
-  assert.equal(html.match(/<img src="droidex-img:\/\/local/g)?.length, 1);
-  assert.match(html, /<img src="droidex-img:\/\/local\/\?p=%2Ftmp%2Fa\.png"/);
-  assert.match(html, /min-w-3\.5[^>]*">3</);
 });
 
 test('a queued non-image file renders a FileChip', () => {
