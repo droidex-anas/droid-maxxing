@@ -84,7 +84,7 @@ export const liveMarkdownTheme = EditorView.theme({
   '.cm-md-tableframe table': {
     minWidth: '100%',
     borderCollapse: 'collapse',
-    fontSize: '12.5px',
+    fontSize: '13px',
   },
   '.cm-md-tableframe th, .cm-md-tableframe td': { outline: 'none' },
   '.cm-md-tableframe th:focus, .cm-md-tableframe td:focus': {

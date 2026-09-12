@@ -238,7 +238,7 @@ export function AutomationsView({
               <div className="flex items-center gap-2.5">
                 <h1 className="text-[28px] font-medium tracking-[-0.03em]">Automations</h1>
                 {statusSummary && (
-                  <span className="rounded-full border border-droid-border bg-droid-surface/60 px-2 py-1 text-[10.5px] text-droid-text-muted">
+                  <span className="rounded-full border border-droid-border bg-droid-surface/60 px-2 py-1 text-[11px] text-droid-text-muted">
                     {statusSummary}
                   </span>
                 )}
@@ -247,7 +247,7 @@ export function AutomationsView({
                 Schedule tasks and automations to run through DROIDEX on the model, workspace, and
                 timezone you choose.
               </p>
-              <div className="mt-2 flex items-center gap-1.5 text-[10.5px] text-droid-text-muted/75">
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-droid-text-muted/75">
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
                     snapshot.scheduler.ready ? 'bg-droid-accent/70' : 'bg-droid-text-muted/35'

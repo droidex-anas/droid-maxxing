@@ -216,7 +216,7 @@ export function PrDetail({
               onClick={() => {
                 setTab(item.id);
               }}
-              className={`rounded-md px-2.5 py-1 text-[12.5px] font-medium transition-colors ${
+              className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors ${
                 tab === item.id
                   ? 'bg-droid-surface text-droid-text shadow-sm'
                   : 'text-droid-text-muted hover:text-droid-text-secondary'
@@ -248,7 +248,7 @@ export function PrDetail({
             onClick={() => {
               if (headerPr) onOpenChat(headerPr);
             }}
-            className="flex items-center gap-1.5 rounded-lg border border-droid-border px-2.5 py-1.5 text-[12.5px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-lg border border-droid-border px-2.5 py-1.5 text-[13px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text disabled:opacity-40"
           >
             <Octicon name="comment-discussion" size={13} />
             Chat

@@ -244,7 +244,7 @@ export const SessionRow = memo(function SessionRow({
             </span>
           </span>
           {detail && (
-            <span className="mt-0.5 block truncate text-[11.5px] leading-4 text-droid-text-muted">
+            <span className="mt-0.5 block truncate text-[12px] leading-4 text-droid-text-muted">
               {detail}
             </span>
           )}
@@ -261,7 +261,7 @@ export const SessionRow = memo(function SessionRow({
           >
             <span className="flex justify-center">{pr && <PrStateIcon kind={pr} size={14} />}</span>
             <span
-              className={`text-right text-[11.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
+              className={`text-right text-[12px] tabular-nums group-hover:invisible group-focus-within:invisible ${
                 unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
               }`}
             >

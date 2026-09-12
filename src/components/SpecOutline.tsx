@@ -150,7 +150,7 @@ export function SpecOutline({
                 />
                 <span
                   className={`truncate ${
-                    h.level === 1 ? 'text-[12.5px]' : 'text-[12px]'
+                    h.level === 1 ? 'text-[13px]' : 'text-[12px]'
                   } ${isActive ? 'text-droid-text font-medium' : 'text-droid-text-secondary group-hover:text-droid-text'}`}
                 >
                   {highlight(h.text)}

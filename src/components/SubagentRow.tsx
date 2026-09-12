@@ -76,7 +76,7 @@ function PhasePill({
       data-testid="subagent-phase"
       data-phase={phase}
       data-stream-fidelity={fidelity}
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium ${PHASE_PILL[phase]}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${PHASE_PILL[phase]}`}
     >
       {childStreamPhaseLabel(phase, fidelity)}
     </span>
@@ -127,7 +127,7 @@ export const SubagentRow = memo(function SubagentRow({
               </span>
             ) : null}
           </span>
-          <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
+          <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text-secondary">
             {childStreamPhaseLabel(snapshot.phase, snapshot.fidelity)}
           </span>
           <PhasePill phase={snapshot.phase} fidelity={snapshot.fidelity} />

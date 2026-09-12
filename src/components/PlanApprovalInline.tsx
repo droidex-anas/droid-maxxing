@@ -118,7 +118,7 @@ export default function PlanApprovalInline() {
           <button
             type="button"
             onClick={openWiki}
-            className="flex shrink-0 items-center gap-0.5 rounded-full px-2 py-1 text-[11.5px] text-droid-text-secondary transition-colors hover:bg-droid-surface hover:text-droid-text"
+            className="flex shrink-0 items-center gap-0.5 rounded-full px-2 py-1 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-surface hover:text-droid-text"
           >
             {isSpec ? 'Read spec' : 'Read plan'}
             <ChevronRight className="h-3 w-3" />
@@ -146,7 +146,7 @@ export default function PlanApprovalInline() {
                 ? 'Add a comment to guide implementation (optional)…'
                 : 'Add a comment (optional)…'
             }
-            className="w-full resize-none rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-droid-text placeholder:text-droid-text-muted outline-none focus:border-droid-border-hover"
+            className="w-full resize-none rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[13px] leading-relaxed text-droid-text placeholder:text-droid-text-muted outline-none focus:border-droid-border-hover"
           />
         </div>
 

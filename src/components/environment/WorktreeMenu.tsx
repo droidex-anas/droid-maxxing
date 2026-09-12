@@ -207,7 +207,7 @@ export function WorktreeMenu({
                 style={{ color: 'var(--droid-accent)' }}
                 strokeWidth={3}
               />
-              <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text">
+              <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text">
                 {worktreeName(current)}
               </span>
               <span className="shrink-0 text-[10px] text-droid-text-muted">{current.head}</span>
@@ -232,7 +232,7 @@ export function WorktreeMenu({
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
               >
                 <WorktreeIcon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
+                <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text-secondary">
                   {worktreeName(w)}
                 </span>
                 <ExternalLink className="h-3.5 w-3.5 shrink-0 text-droid-text-muted/60" />
@@ -309,7 +309,7 @@ export function WorktreeMenu({
                 onClick={() => {
                   setPickingBase((v) => !v);
                 }}
-                className="flex w-full items-center gap-1.5 rounded-md bg-droid-bg/40 px-2 py-1 text-[11.5px] text-droid-text-secondary hover:bg-droid-bg/60"
+                className="flex w-full items-center gap-1.5 rounded-md bg-droid-bg/40 px-2 py-1 text-[12px] text-droid-text-secondary hover:bg-droid-bg/60"
               >
                 <span className="text-droid-text-muted">Base</span>
                 <span className="flex-1 truncate text-left text-droid-text">{base}</span>
@@ -326,7 +326,7 @@ export function WorktreeMenu({
                         setBase(option);
                         setPickingBase(false);
                       }}
-                      className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[11.5px] text-droid-text-secondary hover:bg-droid-elevated/60 hover:text-droid-text"
+                      className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12px] text-droid-text-secondary hover:bg-droid-elevated/60 hover:text-droid-text"
                     >
                       <span className="flex-1 truncate">{option}</span>
                       {option === base && (
@@ -362,7 +362,7 @@ export function WorktreeMenu({
           ) : (
             <button
               onClick={startCreating}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text transition-colors hover:bg-droid-elevated/60"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-droid-text transition-colors hover:bg-droid-elevated/60"
             >
               <Plus className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
               New worktree…

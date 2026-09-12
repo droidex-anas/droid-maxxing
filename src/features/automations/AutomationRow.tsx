@@ -81,7 +81,7 @@ export function AutomationRow({
       </span>
 
       <button type="button" onClick={onEdit} className="min-w-0 flex-1 text-left">
-        <div className="truncate text-[13.5px] font-medium text-droid-text">{automation.title}</div>
+        <div className="truncate text-[13px] font-medium text-droid-text">{automation.title}</div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-droid-text-muted">
           <span>{formatSchedule(automation.schedule, automation.timezone)}</span>
           <span aria-hidden>·</span>

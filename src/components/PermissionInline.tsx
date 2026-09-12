@@ -40,7 +40,7 @@ function cleanDetail(detail: string | undefined): string {
 
 function CommandDetail({ command }: { command: string }) {
   return (
-    <div className="max-h-32 overflow-y-auto rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed">
+    <div className="max-h-32 overflow-y-auto rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[13px] leading-relaxed">
       <span className="whitespace-pre-wrap break-words text-droid-text">{command}</span>
     </div>
   );
@@ -52,7 +52,7 @@ function FileDetail({ path }: { path: string }) {
   const dir = hasDir ? path.slice(0, slash + 1) : '';
   const name = hasDir ? path.slice(slash + 1) : path;
   return (
-    <div className="rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed">
+    <div className="rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[13px] leading-relaxed">
       <span className="break-all">
         {dir && <span className="text-droid-text-muted/60">{dir}</span>}
         <span className="text-droid-text">{name}</span>
@@ -67,7 +67,7 @@ function Detail({ kind, detail }: { kind: PermissionKind; detail: string }) {
     return <FileDetail path={detail} />;
   }
   return (
-    <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-droid-text-secondary">
+    <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[13px] leading-relaxed text-droid-text-secondary">
       {detail}
     </div>
   );
@@ -119,7 +119,7 @@ export default function PermissionInline() {
             </div>
           </div>
           {subtitle && (
-            <div className="mt-0.5 truncate pl-3.5 text-[11.5px] text-droid-text-muted">
+            <div className="mt-0.5 truncate pl-3.5 text-[12px] text-droid-text-muted">
               {subtitle}
             </div>
           )}

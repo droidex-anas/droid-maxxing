@@ -304,7 +304,7 @@ function McpServerCard({
                 </span>
               )}
             </span>
-            <span className="mt-0.5 block text-[10.5px] capitalize text-droid-text-muted">
+            <span className="mt-0.5 block text-[11px] capitalize text-droid-text-muted">
               {server.status}
               {server.toolCount !== undefined
                 ? ` · ${String(server.toolCount)} ${server.toolCount === 1 ? 'tool' : 'tools'}`
@@ -319,7 +319,7 @@ function McpServerCard({
             onClick={() => {
               onAuthenticate(server.name);
             }}
-            className="rounded-lg border border-droid-border bg-droid-elevated px-2.5 py-1.5 text-[10.5px] font-medium text-droid-text transition-all duration-150 hover:border-droid-border-hover active:scale-[0.97] disabled:opacity-40"
+            className="rounded-lg border border-droid-border bg-droid-elevated px-2.5 py-1.5 text-[11px] font-medium text-droid-text transition-all duration-150 hover:border-droid-border-hover active:scale-[0.97] disabled:opacity-40"
           >
             Authenticate
           </button>
@@ -360,7 +360,7 @@ function McpServerCard({
                 {tools.map((tool) => (
                   <div key={tool.name} className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate text-[11.5px] font-medium text-droid-text-secondary">
+                      <span className="truncate text-[12px] font-medium text-droid-text-secondary">
                         {tool.name}
                       </span>
                       {!tool.isEnabled && (
@@ -370,7 +370,7 @@ function McpServerCard({
                       )}
                     </div>
                     {tool.description && (
-                      <div className="mt-0.5 line-clamp-2 text-[10.5px] leading-4 text-droid-text-muted">
+                      <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-droid-text-muted">
                         {tool.description}
                       </div>
                     )}

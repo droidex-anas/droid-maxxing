@@ -19,7 +19,7 @@ export function UnreadFilterActions({
         <button
           type="button"
           onClick={onMarkAllRead}
-          className="rounded-md px-2 py-1.5 text-[10.5px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
+          className="rounded-md px-2 py-1.5 text-[11px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
         >
           Mark all as read
         </button>

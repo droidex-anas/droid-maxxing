@@ -98,7 +98,7 @@ export function AutomationEditor({
             <div className="text-[12px] font-medium text-droid-text-secondary">
               {editor.mode === 'create' ? 'New automation' : 'Edit automation'}
             </div>
-            <div className="mt-0.5 text-[10.5px] text-droid-text-muted">
+            <div className="mt-0.5 text-[11px] text-droid-text-muted">
               Schedule a task that runs as a DROIDEX chat
             </div>
           </div>

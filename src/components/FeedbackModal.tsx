@@ -314,7 +314,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                   ).map(([key, label]) => (
                     <label
                       key={key}
-                      className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-droid-text-secondary"
+                      className="flex cursor-pointer items-center gap-1.5 text-[12px] text-droid-text-secondary"
                     >
                       <input
                         type="checkbox"

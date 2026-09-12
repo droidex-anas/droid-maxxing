@@ -80,7 +80,7 @@ function CardButton({
       type="button"
       title={label}
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] transition-colors ${
+      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors ${
         danger
           ? 'text-droid-red hover:bg-droid-red/10'
           : 'text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text'

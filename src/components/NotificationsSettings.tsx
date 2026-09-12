@@ -131,7 +131,7 @@ export function NotificationsSettings({ highlightQuery = '' }: { highlightQuery?
             >
               <div className="min-w-0">
                 <div className="text-[13px] tracking-tight text-droid-text">{label}</div>
-                <div className="mt-0.5 text-[11.5px] leading-snug text-droid-text-muted">
+                <div className="mt-0.5 text-[12px] leading-snug text-droid-text-muted">
                   {description}
                 </div>
               </div>
@@ -159,7 +159,7 @@ export function NotificationsSettings({ highlightQuery = '' }: { highlightQuery?
             <div className="text-[13px] tracking-tight text-droid-text">
               {FINISH_NOTIFICATION_TEST_ACTION.label}
             </div>
-            <div className="mt-0.5 text-[11.5px] leading-snug text-droid-text-muted">
+            <div className="mt-0.5 text-[12px] leading-snug text-droid-text-muted">
               {FINISH_NOTIFICATION_TEST_ACTION.description}
             </div>
           </div>

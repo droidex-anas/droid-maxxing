@@ -68,10 +68,10 @@ export function WelcomeScreen({
             <span className="w-3 shrink-0 text-[13px] text-droid-accent opacity-0 transition-opacity group-hover:opacity-100">
               &gt;
             </span>
-            <span className="w-[64px] shrink-0 text-[12.5px] font-medium text-droid-text-secondary transition-colors group-hover:text-droid-accent">
+            <span className="w-[64px] shrink-0 text-[13px] font-medium text-droid-text-secondary transition-colors group-hover:text-droid-accent">
               {entry.label}
             </span>
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
+            <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text-muted transition-colors group-hover:text-droid-text-secondary">
               {entry.hint}
             </span>
           </button>

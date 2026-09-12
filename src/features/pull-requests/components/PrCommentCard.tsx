@@ -119,7 +119,7 @@ export function PrCommentCard({ comment }: { comment: PrComment }) {
             <span className="min-w-0 flex-1">
               <CommentByline comment={comment} />
               {!open && previewLine ? (
-                <span className="mt-0.5 block truncate text-[12.5px] text-droid-text-muted">
+                <span className="mt-0.5 block truncate text-[13px] text-droid-text-muted">
                   {previewLine}
                 </span>
               ) : null}

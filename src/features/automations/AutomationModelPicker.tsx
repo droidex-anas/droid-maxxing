@@ -120,8 +120,8 @@ export function AutomationModelPicker({
           <ModelIcon provider={providerOf(selectedModel)} size={17} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12.5px] font-medium text-droid-text">{label}</span>
-          <span className="block text-[10.5px] capitalize text-droid-text-muted">
+          <span className="block truncate text-[13px] font-medium text-droid-text">{label}</span>
+          <span className="block text-[11px] capitalize text-droid-text-muted">
             {modelId ? `${selectedReasoning} reasoning` : 'Select from your model catalog'}
           </span>
         </span>
@@ -168,7 +168,7 @@ export function AutomationModelPicker({
                 <span className="text-[10px] uppercase tracking-wider text-droid-text-muted">
                   Reasoning
                 </span>
-                <span className="text-[10.5px] font-medium capitalize" style={{ color: ACCENT }}>
+                <span className="text-[11px] font-medium capitalize" style={{ color: ACCENT }}>
                   {selectedReasoning}
                 </span>
               </div>
@@ -184,7 +184,7 @@ export function AutomationModelPicker({
                         onChange({ modelId: selectedModel.id, reasoningEffort: reasoning });
                       }}
                       disabled={!selectedModel}
-                      className={`relative rounded-lg px-2.5 py-1.5 text-[10.5px] capitalize outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-border-hover disabled:cursor-not-allowed disabled:opacity-40 ${
+                      className={`relative rounded-lg px-2.5 py-1.5 text-[11px] capitalize outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-border-hover disabled:cursor-not-allowed disabled:opacity-40 ${
                         selected ? 'text-droid-text' : 'text-droid-text-muted hover:text-droid-text'
                       }`}
                       style={
@@ -261,7 +261,7 @@ export function AutomationModelPicker({
           </div>
 
           <div className="flex items-center justify-between gap-3 border-t border-droid-border/70 px-4 py-3">
-            <span className="min-w-0 truncate text-[10.5px] text-droid-text-muted">
+            <span className="min-w-0 truncate text-[11px] text-droid-text-muted">
               {selectedModel
                 ? `${selectedModel.displayName} · ${selectedReasoning} reasoning`
                 : modelId
@@ -298,7 +298,7 @@ function CategoryButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-lg px-2.5 py-1 text-[10.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-border-hover ${
+      className={`rounded-lg px-2.5 py-1 text-[11px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-droid-border-hover ${
         active
           ? 'bg-droid-surface text-droid-text'
           : 'text-droid-text-muted hover:bg-droid-surface/60 hover:text-droid-text'

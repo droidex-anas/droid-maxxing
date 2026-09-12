@@ -50,7 +50,7 @@ export function NotesIntroCard({
             <span className="rounded bg-droid-accent/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-droid-accent">
               New
             </span>
-            <span className="text-[13.5px] font-semibold text-droid-text">Meet Notes</span>
+            <span className="text-[13px] font-semibold text-droid-text">Meet Notes</span>
           </div>
           <p className="mt-1 text-[12px] leading-snug text-droid-text-muted">
             Write reminders in the pad below while you work, then click a saved note to drop it into

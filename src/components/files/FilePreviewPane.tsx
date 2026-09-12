@@ -168,7 +168,7 @@ export function FilePreviewPane({ accessToken, relative, onClear }: FilePreviewP
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-droid-border px-2.5">
         <FileTypeIcon filename={fileName} className="h-3.5 w-3.5" />
         <span
-          className="min-w-0 flex-1 truncate text-[11.5px] text-droid-text-secondary"
+          className="min-w-0 flex-1 truncate text-[12px] text-droid-text-secondary"
           title={relative}
         >
           {relative || 'Preview'}
@@ -285,10 +285,10 @@ function FallbackNotice({
           {oversize ? 'File too large to preview inline' : 'No inline preview available'}
         </p>
         {reason && (
-          <p className="max-w-sm text-[11.5px] leading-relaxed text-droid-text-muted">{reason}</p>
+          <p className="max-w-sm text-[12px] leading-relaxed text-droid-text-muted">{reason}</p>
         )}
         {payload.totalSize > 0 && (
-          <p className="font-mono text-[10.5px] text-droid-text-muted">
+          <p className="font-mono text-[11px] text-droid-text-muted">
             {formatBytes(payload.totalSize)} · cap {formatBytes(payload.sizeCapBytes)}
           </p>
         )}
@@ -297,7 +297,7 @@ function FallbackNotice({
         <button
           type="button"
           onClick={onOpenExternal}
-          className="flex items-center gap-1.5 rounded-md border border-droid-border bg-droid-elevated px-3 py-1.5 text-[11.5px] text-droid-text transition-colors hover:border-droid-border-hover"
+          className="flex items-center gap-1.5 rounded-md border border-droid-border bg-droid-elevated px-3 py-1.5 text-[12px] text-droid-text transition-colors hover:border-droid-border-hover"
         >
           <ExternalLink className="h-3.5 w-3.5" />
           Open externally
@@ -305,7 +305,7 @@ function FallbackNotice({
         <button
           type="button"
           onClick={onReveal}
-          className="flex items-center gap-1.5 rounded-md border border-droid-border px-3 py-1.5 text-[11.5px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text"
+          className="flex items-center gap-1.5 rounded-md border border-droid-border px-3 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:text-droid-text"
         >
           <FolderSearch className="h-3.5 w-3.5" />
           Reveal
@@ -337,7 +337,7 @@ function TextPreview({ text, fileName }: { text: string; fileName: string }) {
   return (
     <div className="h-full overflow-auto">
       {truncated && (
-        <div className="sticky top-0 z-10 border-b border-droid-border bg-droid-surface/80 px-3 py-1.5 text-[10.5px] text-amber-300 backdrop-blur">
+        <div className="sticky top-0 z-10 border-b border-droid-border bg-droid-surface/80 px-3 py-1.5 text-[11px] text-amber-300 backdrop-blur">
           Showing first {formatBytes(visibleText.length)} of {formatBytes(text.length)} (truncated
           for performance).
         </div>
@@ -357,7 +357,7 @@ function SyntaxCodePreview({ code, fileName }: { code: string; fileName: string 
   const language = resolveFilePresentation(fileName).language;
   if (!language || code.length > HIGHLIGHT_CHAR_LIMIT) {
     return (
-      <pre className="px-4 py-3 font-mono text-[11.5px] leading-[1.6] text-droid-text-secondary [overflow-wrap:anywhere]">
+      <pre className="px-4 py-3 font-mono text-[12px] leading-[1.6] text-droid-text-secondary [overflow-wrap:anywhere]">
         <code className="whitespace-pre-wrap break-all">{code}</code>
       </pre>
     );
@@ -367,7 +367,7 @@ function SyntaxCodePreview({ code, fileName }: { code: string; fileName: string 
     <Highlight theme={CODE_THEME} code={code} language={language}>
       {({ tokens, getLineProps, getTokenProps, className, style }) => (
         <pre
-          className={`${className} min-w-0 px-2 py-3 font-mono text-[11.5px] leading-[1.6]`}
+          className={`${className} min-w-0 px-2 py-3 font-mono text-[12px] leading-[1.6]`}
           style={{ ...style, background: 'transparent' }}
         >
           {tokens.map((line, lineIndex) => {
@@ -409,7 +409,7 @@ function CsvPreview({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {truncated && (
-        <div className="shrink-0 border-b border-droid-border bg-droid-surface/80 px-3 py-1.5 text-[10.5px] text-amber-300">
+        <div className="shrink-0 border-b border-droid-border bg-droid-surface/80 px-3 py-1.5 text-[11px] text-amber-300">
           Showing first {formatBytes(text.length)} of {formatBytes(originalLength)} (truncated for
           performance).
         </div>
@@ -614,7 +614,7 @@ function PdfPreview({ data }: { data?: Uint8Array }) {
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
         <AlertTriangle className="h-5 w-5 text-amber-400" />
         <p className="text-[12px] text-droid-text-secondary">Failed to render PDF.</p>
-        <p className="max-w-sm text-[10.5px] text-droid-text-muted">{error}</p>
+        <p className="max-w-sm text-[11px] text-droid-text-muted">{error}</p>
       </div>
     );
   }
@@ -638,7 +638,7 @@ function PdfPreview({ data }: { data?: Uint8Array }) {
           >
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
-          <span className="font-mono text-[10.5px] text-droid-text-secondary">
+          <span className="font-mono text-[11px] text-droid-text-secondary">
             {page} / {numPages}
           </span>
           <button
@@ -715,7 +715,7 @@ function DocxPreview({ data }: { data?: Uint8Array }) {
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
         <AlertTriangle className="h-5 w-5 text-amber-400" />
         <p className="text-[12px] text-droid-text-secondary">Failed to render document.</p>
-        <p className="max-w-sm text-[10.5px] text-droid-text-muted">{error}</p>
+        <p className="max-w-sm text-[11px] text-droid-text-muted">{error}</p>
       </div>
     );
   }
@@ -805,7 +805,7 @@ function XlsxPreview({ data }: { data?: Uint8Array }) {
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
         <AlertTriangle className="h-5 w-5 text-amber-400" />
         <p className="text-[12px] text-droid-text-secondary">Failed to parse spreadsheet.</p>
-        <p className="max-w-sm text-[10.5px] text-droid-text-muted">{error}</p>
+        <p className="max-w-sm text-[11px] text-droid-text-muted">{error}</p>
       </div>
     );
   }
@@ -824,7 +824,7 @@ function XlsxPreview({ data }: { data?: Uint8Array }) {
               onClick={() => {
                 setActiveSheet(idx);
               }}
-              className={`shrink-0 rounded px-2 py-0.5 text-[10.5px] transition-colors ${
+              className={`shrink-0 rounded px-2 py-0.5 text-[11px] transition-colors ${
                 idx === activeSheet
                   ? 'bg-droid-accent/15 text-droid-text'
                   : 'text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text'

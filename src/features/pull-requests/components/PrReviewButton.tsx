@@ -55,7 +55,7 @@ export function PrReviewButton({
         onClick={() => {
           setOpen((value) => !value);
         }}
-        className="flex items-center gap-1.5 rounded-lg border border-droid-border px-2.5 py-1.5 text-[12.5px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text"
+        className="flex items-center gap-1.5 rounded-lg border border-droid-border px-2.5 py-1.5 text-[13px] font-medium text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text"
       >
         <Octicon name="check" size={13} />
         {requesting ? 'Requesting…' : 'Review'}
@@ -72,7 +72,7 @@ export function PrReviewButton({
               Review PR
             </span>
             {cubicInstalled ? (
-              <span className="rounded-full bg-droid-elevated px-1.5 py-0.5 text-[10.5px] text-droid-text-muted">
+              <span className="rounded-full bg-droid-elevated px-1.5 py-0.5 text-[11px] text-droid-text-muted">
                 Cubic connected
               </span>
             ) : null}
@@ -124,7 +124,7 @@ function MenuRow({
           <Octicon name="link-external" size={11} className="text-droid-text-muted" />
         ) : null}
       </span>
-      <span className="block text-[11.5px] text-droid-text-muted">{option.hint}</span>
+      <span className="block text-[12px] text-droid-text-muted">{option.hint}</span>
     </button>
   );
 }

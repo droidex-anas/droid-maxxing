@@ -393,7 +393,7 @@ function OptionButton({
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[12px] text-droid-text">{option.label}</span>
         {option.detail && option.detail !== option.label && (
-          <span className="mt-0.5 block truncate text-[10.5px] text-droid-text-muted">
+          <span className="mt-0.5 block truncate text-[11px] text-droid-text-muted">
             {option.detail}
           </span>
         )}

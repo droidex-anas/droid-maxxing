@@ -646,7 +646,7 @@ export default function ChatView({
             <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-droid-text-muted">
               Task
             </div>
-            <div className="text-[12.5px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
+            <div className="text-[13px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
               {selectedChildSession.prompt}
             </div>
           </div>
