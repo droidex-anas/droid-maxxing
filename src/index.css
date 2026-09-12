@@ -557,7 +557,9 @@
 
     /* Narrow panes wrap instead of scrolling, so the rows are viewport-width
        again and an intrinsic width would only defeat the wrapping. */
-    .review-diff-content {
+    /* Only content whose code wraps at this width gives up its intrinsic
+       width; inline hunks keep `white-space: pre` and stay scrollable. */
+    .review-diff-content:has(.review-diff-code) {
       width: auto;
     }
 

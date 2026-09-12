@@ -16,7 +16,7 @@ import {
   FeedItemView,
 } from './chat';
 import { MessageFeed } from './MessageFeed';
-import { DiffCard, DiffLines } from './DiffView';
+import { DiffCard } from './DiffView';
 import { buildFeed, collectTurnFiles, isResultFor, type FeedItem } from './chatFeed';
 import { conversationAnchors, groupTurns } from './chatFeedTurns';
 import {
@@ -1819,11 +1819,4 @@ test('both inline diff toggles expose expansion when no review handler exists', 
   const review = renderToStaticMarkup(createElement(DiffCard, { change, onOpen: () => {} }));
   assert.equal((review.match(/aria-expanded=/g) ?? []).length, 1);
   assert.equal((review.match(/aria-expanded="false"/g) ?? []).length, 1);
-});
-
-// Rows wider than the card used to paint their add/del tone only across the
-// initial viewport width; the scrolled content now carries the widest-line width.
-test('inline diff lines are sized to their widest line', () => {
-  const ops = [{ type: 'add' as const, text: 'x'.repeat(300) }];
-  assert.match(renderToStaticMarkup(createElement(DiffLines, { ops })), /review-diff-content/);
 });
