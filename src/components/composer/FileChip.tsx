@@ -40,12 +40,26 @@ export function FileChip({
 }) {
   const displayName = name !== undefined && name.length > 0 ? name : attachmentDisplayName(path);
   const info = fileKindInfo(displayName);
-  const Host = onOpen ? 'button' : 'span';
+  // A span with button semantics rather than a <button>, so the remove badge
+  // (itself a button) can still nest inside a chip that also opens.
   return (
-    <Host
-      {...(onOpen ? { type: 'button' as const, onClick: onOpen } : {})}
+    <span
+      {...(onOpen
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            onClick: onOpen,
+            onKeyDown: (event: React.KeyboardEvent) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              onOpen();
+            },
+          }
+        : {})}
       className={`group relative flex max-w-60 items-center gap-2.5 rounded-xl border border-droid-border bg-droid-bg/60 py-2 pl-2 pr-2.5 text-left ${
-        onOpen ? 'transition-colors hover:border-droid-border-hover' : ''
+        onOpen
+          ? 'transition-colors hover:border-droid-border-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover'
+          : ''
       }`}
       title={onOpen ? `Open ${displayName} in Review` : displayName}
     >
@@ -72,6 +86,6 @@ export function FileChip({
           <X className="h-2.5 w-2.5" strokeWidth={3} />
         </button>
       )}
-    </Host>
+    </span>
   );
 }
