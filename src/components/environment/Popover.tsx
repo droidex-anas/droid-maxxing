@@ -237,7 +237,7 @@ export function Popover({
     >
       <div
         style={{ zoom: pos.zoom, width, maxHeight: pos.maxHeight }}
-        className={`flex flex-col overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50 ${className}`}
+        className={`flex flex-col overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-droid ${className}`}
       >
         {children}
       </div>

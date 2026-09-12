@@ -144,7 +144,7 @@ export default function EditorOpenMenu({
       )}
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-droid">
           <MenuAction
             icon={<FolderOpen className="w-3.5 h-3.5" />}
             label="Open codebase"

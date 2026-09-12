@@ -531,13 +531,13 @@ export default function BrowserWorkspace({
             expanded={expanded}
           />
         ) : (
-          <div className="flex h-full items-center justify-center bg-[#070707] px-6 text-sm text-droid-text-muted">
+          <div className="flex h-full items-center justify-center bg-droid-bg px-6 text-sm text-droid-text-muted">
             {browserKey ? 'Preparing browser pane...' : 'Select or create a Droid session.'}
           </div>
         )}
 
         {browserKey && !browser && frameReady && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#070707] px-6 text-sm text-droid-text-muted">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-droid-bg px-6 text-sm text-droid-text-muted">
             Open a URL to start this chat&apos;s browser.
           </div>
         )}

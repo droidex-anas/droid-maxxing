@@ -166,7 +166,7 @@ function TokenLimitSelect({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-droid">
           <div className="max-h-72 overflow-y-auto space-y-0.5">
             <Row l="Factory default" sub="model-dependent" />
             {TOKEN_PRESETS.map((n) => (
@@ -300,7 +300,7 @@ function CompactionModelPicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-droid">
           <div className="mb-2 flex items-center gap-2 h-8 rounded-md bg-droid-bg/60 border border-droid-border px-2.5">
             <Search className="w-3.5 h-3.5 text-droid-text-muted" />
             <input
@@ -902,7 +902,7 @@ export default function SettingsPanel() {
                 setQuery(e.target.value);
               }}
               placeholder="Search settings…"
-              className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/80 focus:outline-none"
+              className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
             />
             {q ? (
               <button

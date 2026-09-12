@@ -190,7 +190,7 @@ export function SessionContextMenuPanel({
         e.preventDefault();
       }}
       style={{ position: 'fixed', left, top, width: SESSION_MENU_WIDTH }}
-      className="z-[991] rounded-xl border border-droid-border bg-droid-surface p-1 shadow-2xl shadow-black/50"
+      className="z-[991] rounded-xl border border-droid-border bg-droid-surface p-1 shadow-droid"
     >
       <button
         type="button"

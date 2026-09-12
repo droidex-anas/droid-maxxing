@@ -62,7 +62,7 @@ function ScopeSelector() {
         />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-60 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 top-full z-50 mt-1 w-60 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-droid">
           {REVIEW_SCOPE_OPTIONS.map((option) => (
             <button
               key={option.scope}

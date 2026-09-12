@@ -263,7 +263,7 @@ export function ColorPopover({
       // Portaled to <body>, so modal hosts (the theme editor's Tab trap)
       // recognize focus inside it via this attribute instead of containment.
       data-color-popover=""
-      className="fixed z-[70] p-3 rounded-xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/60"
+      className="fixed z-[70] p-3 rounded-xl border border-droid-border bg-droid-elevated shadow-droid"
       style={{ top: pos.top, left: pos.left }}
     >
       {children}

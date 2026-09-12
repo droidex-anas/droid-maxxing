@@ -262,7 +262,7 @@ function Field({
         onChange={(event) => {
           onChange(event.target.value);
         }}
-        className="mt-1.5 h-10 w-full rounded-xl border border-droid-border bg-droid-field px-3 text-[13px] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/70 focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
+        className="mt-1.5 h-10 w-full rounded-xl border border-droid-border bg-droid-field px-3 text-[13px] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
       />
     </label>
   );
@@ -291,7 +291,7 @@ function TextAreaField({
         }}
         rows={3}
         placeholder={placeholder}
-        className="mt-1.5 w-full resize-none rounded-xl border border-droid-border bg-droid-field px-3 py-2.5 text-[12.5px] leading-5 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/70 focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
+        className="mt-1.5 w-full resize-none rounded-xl border border-droid-border bg-droid-field px-3 py-2.5 text-[12.5px] leading-5 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
       />
     </label>
   );

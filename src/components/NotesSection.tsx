@@ -334,7 +334,7 @@ export function NotesPanel({
                           : 'Write a note to use later — Enter to save'
                       }
                       rows={3}
-                      className="w-full resize-none bg-transparent text-[12.5px] leading-snug text-droid-text placeholder:text-droid-text-muted/50 focus:outline-none"
+                      className="w-full resize-none bg-transparent text-[12.5px] leading-snug text-droid-text placeholder:text-droid-text-muted focus:outline-none"
                     />
                     {/* The pad saves on Enter with no other chrome, so the moment
                         text exists a plain save affordance and the key hints appear. */}
@@ -365,7 +365,7 @@ export function NotesPanel({
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}
                         transition={{ duration: 0.15, ease: EASE }}
-                        className="mt-1.5 overflow-hidden rounded-xl border border-droid-border bg-droid-elevated py-1 shadow-2xl shadow-black/40"
+                        className="mt-1.5 overflow-hidden rounded-xl border border-droid-border bg-droid-elevated py-1 shadow-droid"
                       >
                         {matchingTags.map((option, index) => (
                           <button

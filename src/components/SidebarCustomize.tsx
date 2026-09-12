@@ -103,7 +103,7 @@ function FlyoutRow<T extends string | number>({
         <div
           role="menu"
           aria-label={label}
-          className="absolute -top-1.5 left-full ml-1.5 w-[220px] rounded-xl border border-droid-border bg-droid-surface py-1.5 shadow-2xl shadow-black/50"
+          className="absolute -top-1.5 left-full ml-1.5 w-[220px] rounded-xl border border-droid-border bg-droid-surface py-1.5 shadow-droid"
         >
           {options.map((option) => {
             const selected = option.value === value;

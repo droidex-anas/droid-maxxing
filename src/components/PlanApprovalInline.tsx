@@ -146,7 +146,7 @@ export default function PlanApprovalInline() {
                 ? 'Add a comment to guide implementation (optional)…'
                 : 'Add a comment (optional)…'
             }
-            className="w-full resize-none rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-droid-text placeholder:text-droid-text-muted/60 outline-none focus:border-droid-border-hover"
+            className="w-full resize-none rounded-xl border border-droid-border/70 bg-droid-bg/50 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-droid-text placeholder:text-droid-text-muted outline-none focus:border-droid-border-hover"
           />
         </div>
 

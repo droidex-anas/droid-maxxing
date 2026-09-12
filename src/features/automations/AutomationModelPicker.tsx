@@ -214,7 +214,7 @@ export function AutomationModelPicker({
                     setQuery(event.target.value);
                   }}
                   placeholder="Search models"
-                  className="min-w-0 flex-1 bg-transparent text-[12px] text-droid-text outline-none placeholder:text-droid-text-muted/65"
+                  className="min-w-0 flex-1 bg-transparent text-[12px] text-droid-text outline-none placeholder:text-droid-text-muted"
                 />
               </label>
 

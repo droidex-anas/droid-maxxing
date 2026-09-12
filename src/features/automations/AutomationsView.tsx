@@ -289,7 +289,7 @@ export function AutomationsView({
                 setQuery(event.target.value);
               }}
               placeholder="Search automations"
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-droid-text outline-none placeholder:text-droid-text-muted/70"
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-droid-text outline-none placeholder:text-droid-text-muted"
             />
           </label>
 

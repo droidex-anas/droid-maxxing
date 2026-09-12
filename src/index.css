@@ -536,7 +536,7 @@
       min-width: 0;
       max-width: none;
       background: var(--droid-surface);
-      box-shadow: 18px 0 44px rgba(0, 0, 0, 0.34);
+      box-shadow: 18px 0 44px color-mix(in srgb, var(--droid-text) 22%, transparent);
     }
 
     .review-diff-scroll {

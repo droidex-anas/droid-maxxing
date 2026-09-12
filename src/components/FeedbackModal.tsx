@@ -280,7 +280,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                     }
                   }}
                   placeholder="What happened? What did you expect instead?"
-                  className="min-h-[168px] w-full resize-none rounded-xl border border-droid-border bg-droid-bg/45 px-4 py-3 text-[14px] leading-6 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/70 focus:border-droid-accent/70 disabled:opacity-60"
+                  className="min-h-[168px] w-full resize-none rounded-xl border border-droid-border bg-droid-bg/45 px-4 py-3 text-[14px] leading-6 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-accent/70 disabled:opacity-60"
                 />
               </label>
               <div className="mt-2 flex items-start justify-between gap-5">

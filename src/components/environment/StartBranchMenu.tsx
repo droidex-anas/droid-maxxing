@@ -209,7 +209,7 @@ export function StartBranchMenu({
                 setQuery(e.target.value);
               }}
               placeholder="Search branches"
-              className="w-full bg-transparent text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+              className="w-full bg-transparent text-[12px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
             />
             {fetching && (
               <Spinner className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin-slow text-droid-accent" />
@@ -300,7 +300,7 @@ export function StartBranchMenu({
                       if (e.key === 'Enter') void createNewBranch();
                     }}
                     placeholder="new-branch-name"
-                    className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+                    className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
                   />
                   <div className="px-0.5 text-[10.5px] text-droid-text-muted">
                     Branches off <span className="text-droid-text-secondary">{base}</span>

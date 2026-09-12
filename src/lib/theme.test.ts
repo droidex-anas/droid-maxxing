@@ -17,6 +17,7 @@ import {
   removeCustomTheme,
   resolveScheme,
   resolveVariant,
+  surfaceStep,
   uiFontStack,
   upsertCustomTheme,
   type ThemeColors,
@@ -174,6 +175,35 @@ describe('detectPresetId', () => {
       detectPresetId({ ...DEFAULT_THEME.dark, accent: '#ee6018' }, [EXAMPLE_CUSTOM]),
       CUSTOM_THEME_ID,
     );
+  });
+});
+
+describe('surfaceStep', () => {
+  it('lifts every raised rung clear of the canvas in both schemes', () => {
+    // Light presets put their surface above the canvas, so the rungs step
+    // darker. Measuring them from the surface used to land the first one back
+    // on the canvas, which hid popovers, menus and fields in light mode.
+    for (const preset of BUILT_IN_THEMES) {
+      for (const variant of [preset.light, preset.dark]) {
+        const elevated = surfaceStep(variant, 13);
+        const active = surfaceStep(variant, 26);
+        for (const [rung, name] of [
+          [elevated, 'elevated'],
+          [active, 'active'],
+        ] as const) {
+          for (const base of [variant.bg, variant.surface]) {
+            assert.ok(
+              contrastRatio(rung, base) >= 1.05,
+              `${preset.id} ${name} ${rung} should stay visible on ${base}`,
+            );
+          }
+        }
+        assert.ok(
+          contrastRatio(active, elevated) >= 1.05,
+          `${preset.id} active ${active} should stay visible on elevated ${elevated}`,
+        );
+      }
+    }
   });
 });
 

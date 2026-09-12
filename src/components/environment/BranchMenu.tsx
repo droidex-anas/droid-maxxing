@@ -154,7 +154,7 @@ export function BranchMenu({
               setQuery(e.target.value);
             }}
             placeholder="Search branches"
-            className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+            className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
           />
           {(busy || fetching) && (
             <Spinner className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin-slow text-droid-accent" />
@@ -259,7 +259,7 @@ export function BranchMenu({
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && void doCreate()}
                 placeholder="new-branch-name"
-                className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted/70 focus:outline-none"
+                className="w-full rounded-md bg-droid-bg/60 px-2 py-1 text-[12px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
               />
               <button
                 onClick={() => void doCreate()}

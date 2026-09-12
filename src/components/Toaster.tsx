@@ -48,7 +48,7 @@ export default function Toaster() {
             onMouseLeave={() => {
               resumeToast(t.id);
             }}
-            className="group pointer-events-auto relative min-w-[240px] max-w-[380px] overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/95 shadow-lg shadow-black/25 backdrop-blur-sm"
+            className="group pointer-events-auto relative min-w-[240px] max-w-[380px] overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/95 shadow-droid-sm backdrop-blur-sm"
           >
             <div className="flex items-center gap-2.5 px-3 py-2.5">
               <span

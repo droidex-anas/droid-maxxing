@@ -48,10 +48,12 @@ export function diffPaletteForTheme(isDark: boolean, style: DiffStyle): DiffPale
         hunkFg: '#0550ae',
       }
     : {
-        addFg: '#1a7f37',
+        // A step darker than GitHub's #1a7f37/#cf222e: diff counts also sit on
+        // the tinted light canvases, where those reach only 4.1-4.3:1.
+        addFg: '#177030',
         addBg: '#eaf7ee',
         addGutter: '#ccebd4',
-        delFg: '#cf222e',
+        delFg: '#c0202b',
         delBg: '#fff0f0',
         delGutter: '#ffd7d5',
         hunkBg: '#eaf5ff',
