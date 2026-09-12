@@ -6,10 +6,12 @@ import { bridge } from './lib/bridge';
 import {
   connect,
   listFactoryDefaults,
+  listModels,
   loadSessionHistory,
   sendNativeBrowserResult,
   openChild,
   newChildOpenRequestId,
+  updateCli,
 } from './lib/commands';
 import { isEmbedded } from './lib/embed';
 import { getApiKey, setAppIcon } from './lib/desktop';
@@ -35,7 +37,6 @@ import SetupBanner from './components/onboarding/SetupBanner';
 import { useMeasuredHeight } from './hooks/useMeasuredHeight';
 import { WINDOW_CONTROLS_INSET_PX } from './lib/windowChrome';
 import RuntimeStatusBanner from './components/RuntimeStatusBanner';
-import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
@@ -363,6 +364,9 @@ export default function App() {
       const [, key] = await Promise.all([bridge.start(), getApiKey()]);
       connect(key ?? '');
       listFactoryDefaults();
+      // The session panel and composer badge name the model from this catalog;
+      // without it a custom model shows as its raw id until the selector opens.
+      listModels();
     })();
   }, [embedded]);
 
