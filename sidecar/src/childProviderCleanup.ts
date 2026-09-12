@@ -81,15 +81,19 @@ export class ChildProviderCleanup {
 
   private async closeProvider(entry: PendingClose): Promise<boolean> {
     try {
-      if (entry.pid !== undefined && !entry.parent.closing) {
+      if (
+        entry.pid !== undefined &&
+        !entry.parent.closing &&
+        this.d.runtime.isProcessAlive(entry.session)
+      ) {
         const adopted = await this.d.agentProcesses.adoptDescendantsAsRoots(
           entry.parent.parentAppSessionId,
           entry.pid,
           () => !entry.parent.closing && !entry.parent.lease.closeMode,
         );
-        // Parent closure starts only after its process-kill pass finishes.
+        // Parent closure follows its kill pass; an exited provider cannot adopt.
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Parent closure can begin during the adoption await.
-        if (!adopted && !entry.parent.closing)
+        if (!adopted && !entry.parent.closing && this.d.runtime.isProcessAlive(entry.session))
           throw new Error('Could not preserve child processes before retiring their provider.');
       }
       await entry.session.close();

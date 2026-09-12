@@ -9,6 +9,7 @@ import {
 import { ChildSessions } from './ChildSessions.js';
 import type { ChildSessionsDependencies } from './ChildSessionsTypes.js';
 import type { ChildParentLease } from './ChildSessionState.js';
+import type { FactorySession } from './DroidRuntime.js';
 import type { PersistedChildSession } from './history.js';
 import type {
   AutoCompactionSettlement,
@@ -1974,6 +1975,39 @@ test('failed retirement keeps its capacity occupied until cleanup admits the nex
   assert.deepEqual(loadedProviders(), ['provider-first', 'provider-second']);
   assert.equal(h.owner.counts().live, 1);
   assert.equal(h.owner.counts().queued, 1);
+});
+
+test('an exited child provider releases queued capacity when adoption cannot succeed', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const first = childRecord('first', 'provider-first');
+  const second = childRecord('second', 'provider-second');
+  const h = createHarness([first, second], {
+    maxOpenSessions: 1,
+    adoptDescendants: () => Promise.resolve(false),
+  });
+  t.after(() => h.owner.shutdown());
+  h.runtime.processIds.set('provider-first', 811);
+  const provider = await h.open(first);
+  await h.open(second);
+  assert.equal(h.owner.counts().queued, 1);
+
+  // The exact process exited, but the runtime retains its historical PID.
+  const isProcessAlive = h.runtime.isProcessAlive.bind(h.runtime);
+  t.mock.method(
+    h.runtime,
+    'isProcessAlive',
+    (session: FactorySession) => session !== provider && isProcessAlive(session),
+  );
+  h.advanceClock(5_000);
+  t.mock.timers.tick(5_000);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === 'loadSession').map((call) => call.args[0]),
+    ['provider-first', 'provider-second'],
+  );
+  assert.equal(h.owner.counts().live, 1);
+  assert.equal(h.owner.counts().queued, 0);
 });
 
 test('shutdown drains deferred providers after their parent was removed', async (t) => {
