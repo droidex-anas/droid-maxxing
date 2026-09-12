@@ -78,17 +78,12 @@ export default function BrowserWorkspace({
   // so any full-screen overlay would otherwise be punched through by it. Detach
   // it while such an overlay is visible and re-attach once it closes. Overlays
   // with store state are read here; the ones that are just mounted components
-  // (the image viewers, the feedback modal) register themselves instead.
-  const pendingQuestion = requestedChatId ? state.pendingQuestions[requestedChatId] : undefined;
-  const pendingPermission = requestedChatId ? state.pendingPermissions[requestedChatId] : undefined;
+  // (the image viewers, the feedback modal, the spec wiki) register themselves
+  // instead. Questions and permissions are inline composer cards, not
+  // overlays, so they leave the view alone.
   const portalledOverlayOpen = useNativeSurfacesObscured();
   const obscured =
-    externalObscured ||
-    portalledOverlayOpen ||
-    state.settingsOpen ||
-    state.commandPaletteOpen ||
-    !!pendingQuestion ||
-    pendingPermission?.kind === 'spec';
+    externalObscured || portalledOverlayOpen || state.settingsOpen || state.commandPaletteOpen;
   const frameRef = useRef<HTMLDivElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const appOrigin = typeof window === 'undefined' ? undefined : window.location.origin;

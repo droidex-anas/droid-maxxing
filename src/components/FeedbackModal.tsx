@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   Bug,
@@ -141,7 +142,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
     }
   };
 
-  return (
+  const overlay = (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -360,4 +361,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
       </motion.div>
     </motion.div>
   );
+  // Portalled: the composer that opens it may sit inside a clipped pane. A
+  // server render has no body to portal into.
+  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body);
 }

@@ -58,6 +58,16 @@ export function useObscuresNativeSurfaces(): void {
   useLayoutEffect(() => addNativeSurfaceObscurer(), []);
 }
 
+/**
+ * The same registration as a child, for an overlay whose own component
+ * outlives its `open` flag (an AnimatePresence exit keeps painting it): mount
+ * this inside the animated element and it releases when that unmounts.
+ */
+export function NativeSurfaceObscurer(): null {
+  useObscuresNativeSurfaces();
+  return null;
+}
+
 /** True while any such overlay is mounted. */
 export function useNativeSurfacesObscured(): boolean {
   return useSyncExternalStore(subscribe, areNativeSurfacesObscured, areNativeSurfacesObscured);

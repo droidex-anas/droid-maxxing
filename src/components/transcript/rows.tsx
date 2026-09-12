@@ -135,8 +135,8 @@ function countToolCall(counts: ActivityCounts, e: TranscriptEvent): void {
   if (cat === 'read') {
     counts.file++;
     // A lone read is named only when it read a file; a listed directory is
-    // still "1 file", never "Explored src".
-    if (/\.[A-Za-z0-9]{1,8}$/.test(detail)) counts.readFile = detail;
+    // still "1 file", never "Explored src" or "Explored .github".
+    if (/(^|\/)[^/.][^/]*\.[A-Za-z0-9]{1,8}$/.test(detail)) counts.readFile = detail;
   } else if (cat === 'search') counts.search++;
   else if (cat === 'exec') counts.command++;
   else if (cat === 'web') counts.page++;

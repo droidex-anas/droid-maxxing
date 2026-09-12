@@ -27,6 +27,9 @@ export const CAT_LABEL: Record<ToolCat, string> = {
   other: 'Tool',
 };
 
+const READ_RE = /read|cat|view|open|list|ls/;
+const READ_HEADS = new Set(['read', 'cat', 'view', 'list', 'ls']);
+
 export function toolMeta(name?: string, args?: unknown): { cat: ToolCat; detail: string } {
   const { server, tool } = splitToolName(name ?? '');
   const n = tool.toLowerCase();
@@ -52,8 +55,9 @@ export function toolMeta(name?: string, args?: unknown): { cat: ToolCat; detail:
   else if (/^task/i.test(n)) cat = 'subagent';
   else if (n.includes('skill')) cat = 'skill';
   // The read fallback is broad ("open", "ls") and only safe for first-party
-  // tools; an MCP server's `browser_open` keeps its own name instead.
-  else if (!server && /read|cat|view|open|list|ls/.test(n)) cat = 'read';
+  // tools; an MCP server's tool is a read when its name leads with one
+  // (`read_file`, `list_directory`), so `browser_open` keeps its own name.
+  else if (server ? READ_HEADS.has(toolNameTokens(tool)[0] ?? '') : READ_RE.test(n)) cat = 'read';
 
   return { cat, detail: file ?? cmd ?? pattern ?? url ?? childSessionDetail ?? skill ?? '' };
 }

@@ -293,6 +293,9 @@ test('describeToolCall categorises a namespaced tool by its bare name and keeps 
   const open = describeToolCall('droidmaxx-browser___browser_open', { url: 'https://a.dev' });
   assert.equal(open.verb, 'Browser open');
   assert.equal(open.source, 'droidmaxx browser');
+  const read = describeToolCall('mcp__filesystem__read_file', { path: 'a.ts' });
+  assert.equal(read.verb, 'Read');
+  assert.equal(read.source, 'filesystem');
   const issue = describeToolCall('mcp__github__create_issue', { title: 'x' });
   assert.equal(issue.verb, 'Created');
   assert.equal(issue.source, 'github');
