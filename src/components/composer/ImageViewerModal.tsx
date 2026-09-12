@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Check, Crop, X } from 'lucide-react';
+import { useObscuresNativeSurfaces } from '../../hooks/useObscuresNativeSurfaces';
+import { IMAGE_VIEWER_TRANSITION, imageViewerContentMotion } from '../media/imageViewerMotion';
 import type { AttachedImage } from '../../hooks/useImageAttachments';
 import { displayedToNaturalRect, isFullImageRect, type CropRect } from '../../lib/images';
 import { toast } from '../../lib/toast';
@@ -40,6 +42,11 @@ function ImageViewerModalContent({
   const [saving, setSaving] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
+
+  // The browser pane's native view is painted above the DOM by the OS; hide it
+  // while this covers the window, or it shows straight through the image.
+  useObscuresNativeSurfaces();
 
   // Modal focus boundary: without it, keyboard and AT users keep reaching the
   // composer controls behind this full-screen overlay. Move focus inside on
@@ -129,15 +136,13 @@ function ImageViewerModalContent({
       onKeyDown={trapTab}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.12 }}
+      transition={IMAGE_VIEWER_TRANSITION}
       className="fixed inset-0 z-[1200] flex flex-col bg-black/70 backdrop-blur-sm"
       onClick={cropping ? undefined : onClose}
     >
       <div className="flex flex-1 items-center justify-center overflow-hidden p-8">
         <motion.div
-          initial={{ scale: 0.96, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+          {...imageViewerContentMotion(reduceMotion)}
           className="relative max-h-full"
           onClick={(e) => {
             e.stopPropagation();
@@ -160,7 +165,7 @@ function ImageViewerModalContent({
           e.stopPropagation();
         }}
       >
-        <span className="min-w-0 flex-1 truncate text-[11px] text-droid-text-muted">
+        <span className="min-w-0 flex-1 truncate text-[12px] text-droid-text-muted">
           {cropping ? 'Drag across the image to choose a crop' : image.path}
         </span>
         {cropping ? (

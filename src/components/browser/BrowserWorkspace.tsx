@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDesignModeOpen } from '../../hooks/designModeState';
+import { useNativeSurfacesObscured } from '../../hooks/useObscuresNativeSurfaces';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../../hooks/useStore';
 import { useSessionLive } from '../../hooks/useSessionLive';
 import {
@@ -75,11 +76,15 @@ export default function BrowserWorkspace({
   const nativeBrowser = isDesktop();
   // The native BrowserView is an OS-level layer painted above the React tree,
   // so any full-screen overlay would otherwise be punched through by it. Detach
-  // it while such an overlay is visible and re-attach once it closes.
+  // it while such an overlay is visible and re-attach once it closes. Overlays
+  // with store state are read here; the ones that are just mounted components
+  // (the image viewers, the feedback modal) register themselves instead.
   const pendingQuestion = requestedChatId ? state.pendingQuestions[requestedChatId] : undefined;
   const pendingPermission = requestedChatId ? state.pendingPermissions[requestedChatId] : undefined;
+  const portalledOverlayOpen = useNativeSurfacesObscured();
   const obscured =
     externalObscured ||
+    portalledOverlayOpen ||
     state.settingsOpen ||
     state.commandPaletteOpen ||
     !!pendingQuestion ||

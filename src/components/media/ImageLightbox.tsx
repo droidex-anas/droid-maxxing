@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { ImageOff, X } from 'lucide-react';
+import { useObscuresNativeSurfaces } from '../../hooks/useObscuresNativeSurfaces';
+import { IMAGE_VIEWER_TRANSITION, imageViewerContentMotion } from './imageViewerMotion';
 
 /**
  * Read-only full-view for a single image: click a transcript thumbnail to
@@ -30,6 +32,11 @@ function ImageLightboxContent({
   const dialogRef = useRef<HTMLDivElement>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = failedSrc === src;
+  const reduceMotion = useReducedMotion();
+
+  // The browser pane's native view is painted above the DOM by the OS; hide it
+  // while this covers the window, or it shows straight through the image.
+  useObscuresNativeSurfaces();
 
   useEffect(() => {
     const opener = document.activeElement;
@@ -94,7 +101,7 @@ function ImageLightboxContent({
       tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.12 }}
+      transition={IMAGE_VIEWER_TRANSITION}
       className="fixed inset-0 z-[1200] flex flex-col bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
@@ -107,7 +114,7 @@ function ImageLightboxContent({
             }}
           >
             <ImageOff className="h-8 w-8" />
-            <span className="max-w-full truncate font-mono text-[11px]">{label}</span>
+            <span className="max-w-full truncate text-[12px]">{label}</span>
             <span className="text-[12px]">Image is no longer available</span>
           </div>
         ) : (
@@ -115,9 +122,7 @@ function ImageLightboxContent({
             src={src}
             alt={label}
             draggable={false}
-            initial={{ scale: 0.96, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            {...imageViewerContentMotion(reduceMotion)}
             className="block max-h-[80vh] max-w-[90vw] select-none rounded-lg border border-droid-border object-contain"
             onClick={(e) => {
               e.stopPropagation();
@@ -136,9 +141,7 @@ function ImageLightboxContent({
           e.stopPropagation();
         }}
       >
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-droid-text-muted">
-          {label}
-        </span>
+        <span className="min-w-0 flex-1 truncate text-[12px] text-droid-text-muted">{label}</span>
         <button
           onClick={onClose}
           className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] text-droid-text-secondary transition-colors hover:bg-droid-elevated hover:text-droid-text"

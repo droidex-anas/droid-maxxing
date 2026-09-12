@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { Copy } from '@droidex/icons';
+import { useObscuresNativeSurfaces } from '../hooks/useObscuresNativeSurfaces';
 import type { FeedbackAttachments, FeedbackCategory, FeedbackReportRequest } from '../lib/desktop';
 import { submitFeedbackReport } from '../lib/feedbackReport';
 
@@ -51,6 +52,10 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
   const reportIdRef = useRef<HTMLInputElement>(null);
   const copyButtonRef = useRef<HTMLButtonElement>(null);
   const submittingRef = useRef(false);
+
+  // The browser pane's native view is painted above the DOM by the OS; hide it
+  // while this covers the window, or it shows straight through the dialog.
+  useObscuresNativeSurfaces();
 
   useEffect(() => {
     const opener = document.activeElement;
