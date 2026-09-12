@@ -54,6 +54,7 @@ import {
   type DesignModes,
 } from './designModeState';
 import type {
+  AgentProcess,
   Autonomy,
   FactoryDefaultSettings,
   ServerEvent,
@@ -116,6 +117,7 @@ import {
   activateUtilityTab,
   closeUtilityTab,
   openUtilityTool,
+  removeSessionPanel,
   removeUtilityTool,
   setUtilityPanelOpen,
   updateUtilityTab,
@@ -257,6 +259,9 @@ export interface AppState {
   // Scratch notes parked from the Context panel, per session. Persisted in
   // localStorage so reminders survive app restarts.
   sessionNotes: SessionNotesMap;
+  // Dev-server / background processes reported by the daemon per session.
+  // Runtime-only: not persisted.
+  agentProcesses: Record<string, AgentProcess[]>;
 
   // UI flags
   rightPanelOpen: boolean;
@@ -388,6 +393,8 @@ type Action =
     }
   | { type: 'SESSION_UPDATED'; session: SessionSummary }
   | { type: 'SESSION_CLOSED'; appSessionId: string }
+  | { type: 'SESSION_PROCESSES'; appSessionId: string; processes: AgentProcess[] }
+  | { type: 'SESSIONS_PROCESSES'; processes: Record<string, AgentProcess[]> }
   // App-level chat organization (rename/pin/archive/delete); see lib/chatMetadata.
   // A blank RENAME_CHAT title clears the override back to the generated title.
   | { type: 'LINK_CHATS_PR'; appSessionIds: readonly string[]; cwd: string; pr: ChatPullRequest }
@@ -684,6 +691,7 @@ export const initialState: AppState = {
   specWikiAppSessionId: null,
   promptQueue: {},
   sessionNotes: loadSessionNotes(),
+  agentProcesses: {},
   rightPanelOpen: persistedUiState.rightPanelOpen ?? true,
   utilityPanels: persistedUiState.utilityPanels ?? {},
   sidebarCollapsed: persistedUiState.sidebarCollapsed ?? false,
@@ -805,6 +813,7 @@ function baseReducer(state: AppState, action: Action): AppState {
         selectedChild: null,
         childAccess: {},
         childRuntime: {},
+        agentProcesses: {},
         contextStats: { ...next.contextStats, child: {} },
       };
     }
@@ -979,6 +988,20 @@ function baseReducer(state: AppState, action: Action): AppState {
       return releaseSessionTranscriptWindow(next, m.appSessionId, INACTIVE_TRANSCRIPT_POLICY);
     }
 
+    case 'SESSIONS_PROCESSES':
+      return { ...state, agentProcesses: action.processes };
+    case 'SESSION_PROCESSES': {
+      if (action.processes.length === 0 && !(action.appSessionId in state.agentProcesses))
+        return state;
+      const agentProcesses =
+        action.processes.length === 0
+          ? Object.fromEntries(
+              Object.entries(state.agentProcesses).filter(([id]) => id !== action.appSessionId),
+            )
+          : { ...state.agentProcesses, [action.appSessionId]: action.processes };
+      return { ...state, agentProcesses };
+    }
+
     case 'SESSION_CLOSED': {
       const childAccess = { ...state.childAccess };
       const childRuntime = { ...state.childRuntime };
@@ -999,6 +1022,9 @@ function baseReducer(state: AppState, action: Action): AppState {
         contextStats: { ...state.contextStats, child: childContext },
         pendingAutonomy: Object.fromEntries(
           Object.entries(state.pendingAutonomy).filter(([id]) => id !== action.appSessionId),
+        ),
+        agentProcesses: Object.fromEntries(
+          Object.entries(state.agentProcesses).filter(([id]) => id !== action.appSessionId),
         ),
         selectedChild:
           state.selectedChild?.parentAppSessionId === action.appSessionId
@@ -1038,7 +1064,9 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     case 'ARCHIVE_CHAT': {
       const chatMetadata = archiveChat(state.chatMetadata, action.appSessionId, Date.now());
-      return chatMetadata ? { ...state, chatMetadata } : state;
+      const utilityPanels = removeSessionPanel(state.utilityPanels, action.appSessionId);
+      if (!chatMetadata && utilityPanels === state.utilityPanels) return state;
+      return { ...state, chatMetadata: chatMetadata ?? state.chatMetadata, utilityPanels };
     }
 
     case 'RESTORE_CHAT': {
@@ -1047,8 +1075,12 @@ function baseReducer(state: AppState, action: Action): AppState {
     }
 
     case 'DELETE_CHAT': {
+      // SESSION_CLOSED does not prune panels because sidecar retires idle runtimes while
+      // chats and their PTYs remain live; only explicit deletion/archival cleans up panels.
       const chatMetadata = deleteChat(state.chatMetadata, action.appSessionId, Date.now());
-      return chatMetadata ? { ...state, chatMetadata } : state;
+      const utilityPanels = removeSessionPanel(state.utilityPanels, action.appSessionId);
+      if (!chatMetadata && utilityPanels === state.utilityPanels) return state;
+      return { ...state, chatMetadata: chatMetadata ?? state.chatMetadata, utilityPanels };
     }
 
     case 'SESSION_FEATURES': {
@@ -2144,6 +2176,10 @@ export function adaptEvent(ev: ServerEvent): Action | null {
       return { type: 'SESSION_UPDATED', session: ev.session };
     case 'session.closed':
       return { type: 'SESSION_CLOSED', appSessionId: ev.appSessionId };
+    case 'session.processes':
+      return { type: 'SESSION_PROCESSES', appSessionId: ev.appSessionId, processes: ev.processes };
+    case 'sessions.processes':
+      return { type: 'SESSIONS_PROCESSES', processes: ev.processes };
     case 'mission.features':
       return { type: 'SESSION_FEATURES', appSessionId: ev.appSessionId, features: ev.features };
     case 'mission.progress':

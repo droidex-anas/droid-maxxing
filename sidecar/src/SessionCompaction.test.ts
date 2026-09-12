@@ -56,6 +56,11 @@ function createHarness(): Harness {
       appendStatus: () => undefined,
     },
     runtime,
+    agentProcesses: {
+      track: () => undefined,
+      untrack: () => undefined,
+      adoptDescendantsAsRoots: () => Promise.resolve(true),
+    },
     makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
     makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
     emitError: () => undefined,

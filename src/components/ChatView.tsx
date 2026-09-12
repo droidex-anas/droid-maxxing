@@ -7,6 +7,8 @@ import type { SessionRestore } from '../hooks/storeChildSession';
 import { useSessionLive } from '../hooks/useSessionLive';
 import { AnimatePresence, motion } from 'framer-motion';
 import { MessageFeed } from './MessageFeed';
+import { LiveProcessesContext } from './transcript/liveProcessesContext';
+import type { AgentProcess } from '../types/bridge';
 import { WorkingIndicator, UserBubble, ChatSkeleton, TranscriptSkeleton } from './chat';
 import { readFile } from '../lib/desktop';
 import { interruptChild, loadChildHistory, loadSessionHistory } from '../lib/commands';
@@ -43,6 +45,8 @@ import { firstUserTranscriptEvent } from '../lib/transcriptIngestion';
 import { createTranscriptSpecPathProjector } from '../lib/transcriptSpecPath';
 import type { ConversationListHandle } from './ConversationList';
 import { TranscriptReachHost } from '../features/transcript-reach/TranscriptReachHost';
+
+const NO_LIVE_PROCESSES: readonly AgentProcess[] = [];
 
 // While a conversation restores we show an animated placeholder instead of a
 // "Restoring…" label, so switching chats feels like content loading in (the way
@@ -576,6 +580,12 @@ export default function ChatView({
     );
   }
 
+  // Provided once here so transcript leaf cards (CommandCard/CommandLine) can
+  // tell a backgrounded server is still alive without each one touching the store.
+  const liveProcesses =
+    useStoreSelector((current) =>
+      current.activeAppSessionId ? current.agentProcesses[current.activeAppSessionId] : undefined,
+    ) ?? NO_LIVE_PROCESSES;
   const messageFeedCwd = activeSession?.cwd;
   const messageFeedSubagentsDock = subagentsDock;
   let conversationContent: ReactNode;
@@ -595,35 +605,37 @@ export default function ChatView({
           />
         )}
         <EarlierHistoryControl hasMore={Boolean(olderCursor)} loading={loadingOlder} />
-        <MessageFeed
-          events={transcript}
-          items={feedItems}
-          updateKind={feedUpdateKind}
-          rebuiltFromItemIndex={rebuiltFromFeedItemIndex}
-          pending={live}
-          {...(messageFeedCwd !== undefined ? { cwd: messageFeedCwd } : {})}
-          onOpenDiff={openDiff}
-          onOpenReviewFile={openReviewFile}
-          onOpenChildSession={openChildSession}
-          childSessionActivity={childSessionActivity}
-          {...(messageFeedSubagentsDock !== undefined
-            ? { subagentsDock: messageFeedSubagentsDock }
-            : {})}
-          specContent={specContent}
-          density={toolActivity.density}
-          inlineDiffs={toolActivity.inlineDiffs}
-          {...(openSpecWiki !== undefined ? { onOpenSpecWiki: openSpecWiki } : {})}
-          {...(!viewingChildSession && createdWorktreePath !== undefined
-            ? { createdWorktreePath }
-            : {})}
-          onMountedRowsChange={setMountedFeedRows}
-          scrollElementRef={scrollRef}
-          viewportLayoutRef={viewportLayoutRef}
-          listRef={conversationListRef}
-          {...(restoredScrollOffset !== undefined
-            ? { initialScrollOffset: restoredScrollOffset }
-            : {})}
-        />
+        <LiveProcessesContext.Provider value={liveProcesses}>
+          <MessageFeed
+            events={transcript}
+            items={feedItems}
+            updateKind={feedUpdateKind}
+            rebuiltFromItemIndex={rebuiltFromFeedItemIndex}
+            pending={live}
+            {...(messageFeedCwd !== undefined ? { cwd: messageFeedCwd } : {})}
+            onOpenDiff={openDiff}
+            onOpenReviewFile={openReviewFile}
+            onOpenChildSession={openChildSession}
+            childSessionActivity={childSessionActivity}
+            {...(messageFeedSubagentsDock !== undefined
+              ? { subagentsDock: messageFeedSubagentsDock }
+              : {})}
+            specContent={specContent}
+            density={toolActivity.density}
+            inlineDiffs={toolActivity.inlineDiffs}
+            {...(openSpecWiki !== undefined ? { onOpenSpecWiki: openSpecWiki } : {})}
+            {...(!viewingChildSession && createdWorktreePath !== undefined
+              ? { createdWorktreePath }
+              : {})}
+            onMountedRowsChange={setMountedFeedRows}
+            scrollElementRef={scrollRef}
+            viewportLayoutRef={viewportLayoutRef}
+            listRef={conversationListRef}
+            {...(restoredScrollOffset !== undefined
+              ? { initialScrollOffset: restoredScrollOffset }
+              : {})}
+          />
+        </LiveProcessesContext.Provider>
       </motion.div>
     );
   } else if (activeSession && restore?.status === 'failed') {

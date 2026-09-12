@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { initialState, reducer } from './useStore';
+import type { AgentProcess } from '../types/bridge';
+
+function process(overrides: Partial<AgentProcess> = {}): AgentProcess {
+  return {
+    pid: 1,
+    name: 'vite',
+    command: 'vite',
+    startedAt: 0,
+    ports: [5173],
+    ...overrides,
+  };
+}
+
+test('session.processes replaces the list and session close clears it', () => {
+  const processes = [process()];
+  let state = reducer(initialState, {
+    type: 'SESSION_PROCESSES',
+    appSessionId: 's1',
+    processes,
+  });
+  assert.deepEqual(state.agentProcesses.s1, processes);
+
+  state = reducer(state, { type: 'SESSION_PROCESSES', appSessionId: 's1', processes: [] });
+  assert.equal('s1' in state.agentProcesses, false);
+
+  state = reducer(state, { type: 'SESSION_PROCESSES', appSessionId: 's1', processes });
+  state = reducer(state, { type: 'SESSION_CLOSED', appSessionId: 's1' });
+  assert.equal('s1' in state.agentProcesses, false);
+
+  // Dispatching empty list for absent key returns identical state (no re-render)
+  const nextState = reducer(state, {
+    type: 'SESSION_PROCESSES',
+    appSessionId: 's2',
+    processes: [],
+  });
+  assert.equal(nextState, state);
+});
+
+test('a connection error drops the sidecar-owned process lists', () => {
+  const connected = reducer(initialState, {
+    type: 'SESSION_PROCESSES',
+    appSessionId: 's1',
+    processes: [process()],
+  });
+
+  const state = reducer(connected, { type: 'SET_CONNECTION', status: 'error' });
+
+  assert.deepEqual(state.agentProcesses, {});
+});

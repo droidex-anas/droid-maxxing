@@ -152,6 +152,15 @@ export interface SessionSummary {
   updatedAt: number;
 }
 
+export interface AgentProcess {
+  pid: number;
+  name: string;
+  command: string;
+  originCommand?: string;
+  startedAt: number;
+  ports: number[];
+}
+
 export interface TranscriptEvent {
   id: string;
   appSessionId: string;
@@ -611,6 +620,7 @@ export type ClientCommand =
   | { type: 'session.rewindInfo'; appSessionId: string }
   | { type: 'session.rewind'; appSessionId: string; rewindId?: string }
   | { type: 'session.close'; appSessionId: string }
+  | { type: 'session.processes.stop'; appSessionId: string; pid: number }
   | {
       type: 'sessions.list';
       workspaceCwds?: string[];
@@ -797,6 +807,8 @@ export type ServerEvent =
   | { type: 'session.created'; clientRef: string; session: SessionSummary }
   | { type: 'session.updated'; session: SessionSummary }
   | { type: 'session.closed'; appSessionId: string }
+  | { type: 'session.processes'; appSessionId: string; processes: AgentProcess[] }
+  | { type: 'sessions.processes'; processes: Record<string, AgentProcess[]> }
   | {
       type: 'sessions.cwdReanchored';
       requestId: string;
@@ -900,7 +912,7 @@ export type ServerEvent =
   | { type: 'browser.closed'; appSessionId: string }
   | { type: 'browser.error'; appSessionId?: string; message: string };
 
-export const BRIDGE_PROTOCOL_VERSION = 3 as const;
+export const BRIDGE_PROTOCOL_VERSION = 4 as const;
 
 export interface SequencedServerEvent {
   seq: number;
@@ -931,6 +943,7 @@ export interface BridgeRuntimeSnapshot {
   runtime: { mode: 'cli_auth'; droidPath: string; apiKeyConfigured: boolean };
   sessions: SessionSummary[];
   children: ChildSessionSummary[];
+  processes: Record<string, AgentProcess[]>;
   persistence: PersistenceRecovery;
   interrupted: InterruptedSessionRecord[];
 }

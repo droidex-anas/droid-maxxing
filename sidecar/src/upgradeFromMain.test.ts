@@ -266,7 +266,7 @@ test('a missing live-runtime journal is an empty live set', () => {
   const dir = mkdtempSync(join(tmpdir(), 'droidex-upgrade-no-journal-'));
   try {
     const journal = new LiveRuntimeJournal(liveRuntimeJournalPath(dir));
-    assert.deepEqual(journal.read(), { sessions: [], children: [] });
+    assert.deepEqual(journal.read(), { sessions: [], children: [], processes: [] });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

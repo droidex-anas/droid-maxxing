@@ -45,6 +45,11 @@ import {
 import { HistoryPersistence } from './HistoryPersistence.js';
 import { serverEventForHistoryStatus } from './historyStatusEvents.js';
 import { LiveRuntimeJournal, liveRuntimeJournalPath } from './liveRuntimeJournal.js';
+import type { AgentProcessMonitor } from './processes/AgentProcessMonitor.js';
+import {
+  createAgentProcessMonitor,
+  type AgentProcessHost,
+} from './processes/createAgentProcessMonitor.js';
 import { SessionAdoption } from './sessionAdoption.js';
 import { buildRuntimeSnapshot } from './runtimeSnapshot.js';
 import { droidexUserDataDir } from './droidexPaths.js';
@@ -156,6 +161,7 @@ export interface SessionManagerDependencies {
   // delta coalescing and assert appended events synchronously; the merge
   // behavior itself is covered by SessionTimeline unit tests.
   streamingCoalesceMs?: number;
+  agentProcessHost?: AgentProcessHost;
   maxLiveRuntimes?: number;
   maxQueuedRuntimes?: number;
   childRuntimeIdleMs?: number;
@@ -225,6 +231,7 @@ export class SessionManager {
   private readonly lifecycle: SessionLifecycle;
   private readonly runtimeRetirement: SessionRuntimeRetirement;
   private readonly adoption: SessionAdoption;
+  private readonly agentProcesses: AgentProcessMonitor;
   private readonly sessionFiles: SessionFileServing;
   private readonly sessionBrowser: SessionBrowser;
   private readonly historyQueries: SessionHistoryQueries;
@@ -299,6 +306,19 @@ export class SessionManager {
       startWatcher = startSessionFileWatcher;
     }
     this.cachedModels = options.initialModels ? [...options.initialModels] : null;
+    this.agentProcesses = createAgentProcessMonitor({
+      ...options.dependencies?.agentProcessHost,
+      onSnapshotChanged: () => {
+        this.adoption.persistLiveSet();
+      },
+      emit: (appSessionId, processes) => {
+        try {
+          this.emit({ type: 'session.processes', appSessionId, processes });
+        } finally {
+          this.runtimeRetirement.arm();
+        }
+      },
+    });
     this.mcpSettings = new McpSettings(
       (cwd) => {
         const sessionCwd = cwd ?? tmpdir();
@@ -382,6 +402,7 @@ export class SessionManager {
       context: this.context,
       timeline: this.timeline,
       runtime: this.runtime,
+      agentProcesses: this.agentProcesses,
       makePermissionHandler: (ref) => this.interactions.makePermissionHandler(ref),
       makeAskUserHandler: (ref) => this.interactions.makeAskUserHandler(ref),
       emitError: (error) => {
@@ -419,6 +440,7 @@ export class SessionManager {
     });
     this.childSessions = new ChildSessions({
       runtime: this.runtime,
+      agentProcesses: this.agentProcesses,
       registry: this.registry,
       history: this.history,
       timeline: this.timeline,
@@ -477,6 +499,7 @@ export class SessionManager {
       compaction: this.compaction,
       isShutdownStarted: () => this.shutdownPromise !== undefined,
       childSessions: this.childSessions,
+      agentProcesses: this.agentProcesses,
       applyPendingSettingsToSummary: (summary) => this.applyPendingSettingsToSummary(summary),
       applyPendingSessionSettings: (appSessionId) => this.applyPendingSessionSettings(appSessionId),
       runPrimaryTurn: (liveSession, prompt) => this.runPrimaryTurn(liveSession, prompt),
@@ -513,6 +536,7 @@ export class SessionManager {
       hasUnsettledChildren: (id) => this.childSessions.hasUnsettledChildren(id),
       hasOpenBrowser: (id) => this.browsers.hasSession(id),
       hasPendingSettings: (id) => this.pendingAgentSettings.has(id),
+      hasAgentProcesses: (id) => this.agentProcesses.hasProcesses(id),
       retire: (id) => this.lifecycle.close(id, 'preserve-pending'),
       emitStatus: (id, text) => {
         this.timeline.appendStatus(id, text);
@@ -533,6 +557,8 @@ export class SessionManager {
           childSessionId: child.childSessionId,
           status: child.status,
         })),
+      recordedProcesses: () => this.agentProcesses.snapshotPids(),
+      reapProcesses: (entries) => this.agentProcesses.killRecorded(entries),
       persistSummaries: (summaries) => {
         this.history.syncSummaries(summaries);
         for (const session of summaries) this.emit({ type: 'session.updated', session });
@@ -585,6 +611,7 @@ export class SessionManager {
       runtime: this.runtime.status(),
       sessions: this.registry.liveSessionsSnapshot().map((live) => ({ ...live.summary })),
       children: this.childSessions.liveChildSummaries(),
+      processes: this.agentProcesses.snapshot(),
       persistence,
       interrupted: [...this.adoption.records()],
     });
@@ -593,6 +620,12 @@ export class SessionManager {
   // Runs on its own idle timer; exposed so callers can force the sweep.
   retireIdleSessionRuntimes(): Promise<void> {
     return this.runtimeRetirement.sweep();
+  }
+
+  // Runs on its own tick while a session is tracked; exposed so callers can
+  // force the scan.
+  scanAgentProcesses(): Promise<void> {
+    return this.agentProcesses.scan();
   }
 
   resourceCounts(): HotPathResourceCounts {
@@ -760,8 +793,14 @@ export class SessionManager {
       case 'session.close':
         await this.lifecycle.close(cmd.appSessionId);
         return;
+      case 'session.processes.stop':
+        await this.agentProcesses.stop(cmd.appSessionId, cmd.pid);
+        // Stopping the last process a session was holding can make it retirable.
+        this.runtimeRetirement.arm();
+        return;
       case 'sessions.list':
         await this.sessionFiles.list(cmd);
+        this.emit({ type: 'sessions.processes', processes: this.agentProcesses.snapshot() });
         return;
       case 'history.list':
         this.timeline.list();
@@ -1737,6 +1776,10 @@ export class SessionManager {
     await run(() => this.sessionFiles.close());
     await run(() => this.lifecycle.closeAll());
     await run(() => this.childSessions.shutdown());
+    // After closeAll: every session's close is what kills its processes.
+    await run(() => {
+      this.agentProcesses.dispose();
+    });
     await run(() => {
       this.missionControlPolicy.clear();
     });

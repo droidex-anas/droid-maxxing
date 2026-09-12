@@ -1,5 +1,6 @@
 import type {
   LiveChildIdentity,
+  LiveProcessIdentity,
   LiveRuntimeJournal,
   LiveSessionIdentity,
 } from './liveRuntimeJournal.js';
@@ -30,6 +31,10 @@ export interface SessionAdoptionDependencies {
   };
   lifecycle: Pick<SessionLifecycle, 'resume'>;
   liveChildren: () => readonly LiveChildIdentity[];
+  recordedProcesses: () => LiveProcessIdentity[];
+  // Kills whatever the previous run left running, matched by start time so a
+  // recycled pid is never signalled.
+  reapProcesses: (entries: readonly LiveProcessIdentity[]) => Promise<void>;
   persistSummaries: (summaries: SessionSummary[]) => void;
   emitStatus: (appSessionId: string, text: string) => void;
   sessionRuntimeIdleMs: number;
@@ -74,11 +79,15 @@ export class SessionAdoption {
     this.dependencies.journal.write({
       sessions,
       children: [...this.dependencies.liveChildren()],
+      processes: this.dependencies.recordedProcesses(),
     });
   }
 
   private async adoptOnce(): Promise<SessionAdoptionResult> {
     const identities = this.dependencies.journal.read();
+    // Before anything is resurrected: a session that comes back must not
+    // inherit a dev server from the run that died holding the port.
+    await this.dependencies.reapProcesses(identities.processes);
     for (const session of identities.sessions) {
       if (!this.shouldResurrect(session, identities.children)) continue;
       await this.adoptSession(session);

@@ -81,9 +81,29 @@ function runtimeSnapshot(value: unknown): BridgeRuntimeSnapshot | null {
   if (!isRecord(value) || !isRuntimeStatus(value.runtime)) return null;
   if (!Array.isArray(value.sessions) || !value.sessions.every(isSessionSummary)) return null;
   if (!Array.isArray(value.children) || !value.children.every(isChildSessionSummary)) return null;
+  if (!processSnapshot(value.processes)) return null;
   if (!persistenceRecovery(value.persistence)) return null;
   if (!Array.isArray(value.interrupted) || !value.interrupted.every(interruptedRecord)) return null;
   return value as unknown as BridgeRuntimeSnapshot;
+}
+function processSnapshot(value: unknown): boolean {
+  return isRecord(value) && Object.values(value).every(processList);
+}
+function processList(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (p: unknown) =>
+        isRecord(p) &&
+        positiveSafeInteger(p.pid) &&
+        typeof p.name === 'string' &&
+        typeof p.command === 'string' &&
+        (p.originCommand === undefined || typeof p.originCommand === 'string') &&
+        nonNegativeSafeInteger(p.startedAt) &&
+        Array.isArray(p.ports) &&
+        p.ports.every(positiveSafeInteger),
+    )
+  );
 }
 
 function persistenceRecovery(value: unknown): value is PersistenceRecovery {
@@ -138,6 +158,10 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case 'session.closed':
     case 'browser.closed':
       return typeof value.appSessionId === 'string';
+    case 'session.processes':
+      return typeof value.appSessionId === 'string' && processList(value.processes);
+    case 'sessions.processes':
+      return processSnapshot(value.processes);
     case 'sessions.cwdReanchored':
       return (
         typeof value.requestId === 'string' &&

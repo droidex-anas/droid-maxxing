@@ -53,6 +53,7 @@ test('failed provider adoption marks the session interrupted instead of running'
         },
       ],
       children: [],
+      processes: [],
     });
     const historical = summary('app-1');
     const persisted: SessionSummary[] = [];
@@ -68,6 +69,8 @@ test('failed provider adoption marks the session interrupted instead of running'
         resume: async () => false,
       },
       liveChildren: () => [],
+      recordedProcesses: () => [],
+      reapProcesses: () => Promise.resolve(),
       persistSummaries: (sessions) => {
         persisted.push(...sessions);
       },
@@ -104,6 +107,7 @@ test('a resumed in-flight session is paused with an interrupt reason', async () 
         },
       ],
       children: [],
+      processes: [],
     });
     const live = { summary: summary('app-2') };
     const persisted: SessionSummary[] = [];
@@ -118,6 +122,8 @@ test('a resumed in-flight session is paused with an interrupt reason', async () 
         resume: async () => true,
       },
       liveChildren: () => [],
+      recordedProcesses: () => [],
+      reapProcesses: () => Promise.resolve(),
       persistSummaries: (sessions) => {
         persisted.push(...sessions);
         live.summary = sessions[0] ?? live.summary;
@@ -150,6 +156,7 @@ test('running children are marked interrupted and written out of the live journa
           status: 'running',
         },
       ],
+      processes: [],
     });
     const liveChildren = [
       {
@@ -169,6 +176,8 @@ test('running children are marked interrupted and written out of the live journa
         resume: async () => false,
       },
       liveChildren: () => liveChildren,
+      recordedProcesses: () => [],
+      reapProcesses: () => Promise.resolve(),
       persistSummaries: () => undefined,
       emitStatus: () => undefined,
       sessionRuntimeIdleMs: SESSION_RUNTIME_IDLE_RETIREMENT_MS,
@@ -206,7 +215,7 @@ function bootAdoption(dir: string, options: BootCase = {}) {
     ...options.identity,
   };
   const journal = new LiveRuntimeJournal(liveRuntimeJournalPath(dir));
-  journal.write({ sessions: [identity], children: options.children ?? [] });
+  journal.write({ sessions: [identity], children: options.children ?? [], processes: [] });
   const resumed: string[] = [];
   const adoption = new SessionAdoption({
     journal,
@@ -222,6 +231,8 @@ function bootAdoption(dir: string, options: BootCase = {}) {
       },
     },
     liveChildren: () => [],
+    recordedProcesses: () => [],
+    reapProcesses: () => Promise.resolve(),
     persistSummaries: () => undefined,
     emitStatus: () => undefined,
     sessionRuntimeIdleMs: SESSION_RUNTIME_IDLE_RETIREMENT_MS,
@@ -307,6 +318,8 @@ test('the journal carries when each live session was last active', async () => {
       },
       lifecycle: { resume: async () => true },
       liveChildren: () => [],
+      recordedProcesses: () => [],
+      reapProcesses: () => Promise.resolve(),
       persistSummaries: () => undefined,
       emitStatus: () => undefined,
       sessionRuntimeIdleMs: SESSION_RUNTIME_IDLE_RETIREMENT_MS,

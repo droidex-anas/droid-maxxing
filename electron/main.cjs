@@ -666,6 +666,10 @@ function registerIpc() {
     terminalSubscriptions.unsubscribe(event.sender, id);
     terminalManager.kill(id);
   });
+  ipcMain.handle('terminal-has-children', (event, { id }) => {
+    assertMainRenderer(event);
+    return terminalManager.hasChildren(id);
+  });
   ipcMain.handle('terminal-list', (event, filter) => {
     assertMainRenderer(event);
     return terminalManager.list({ appSessionId: filter?.appSessionId });

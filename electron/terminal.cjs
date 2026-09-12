@@ -19,6 +19,7 @@
 
 const fsp = require('node:fs/promises');
 const crypto = require('node:crypto');
+const { execFile } = require('node:child_process');
 
 const MAX_TERMINALS_PER_SESSION = 4;
 const MAX_GLOBAL_TERMINALS = 8;
@@ -53,6 +54,25 @@ function defaultShell(platform, env) {
 function buildPtyEnv(platform, env) {
   void platform;
   return { ...(env || process.env), TERM, COLORTERM };
+}
+
+// pgrep -P lists direct children of the shell; exit 1 means none. Any other
+// failure (ENOENT, EPERM) is not an answer — reject so the caller can arm the
+// confirmation rather than close a busy shell outright.
+function defaultListChildPids(pid) {
+  if (process.platform === 'win32') return Promise.resolve([pid]);
+  return new Promise((resolve, reject) => {
+    execFile('pgrep', ['-P', String(pid)], (error, stdout) => {
+      if (error && error.code === 1) return resolve([]);
+      if (error) return reject(error);
+      resolve(
+        String(stdout)
+          .split('\n')
+          .map((line) => Number(line.trim()))
+          .filter((n) => Number.isInteger(n) && n > 0),
+      );
+    });
+  });
 }
 
 // Validate that a cwd is a non-empty path that exists and is a directory, and
@@ -106,6 +126,7 @@ function createTerminalManager(opts) {
   const cancelTimeout = config.clearTimeout || clearTimeout;
   const exitRetentionMs = config.exitRetentionMs ?? EXIT_RETENTION_MS;
   const defaultCwd = config.defaultCwd;
+  const listChildPids = config.listChildPids || defaultListChildPids;
   // Lazy-load node-pty only when the first PTY is spawned. require()ing this
   // module must never throw if node-pty has not been added to package.json.
   const loadPty =
@@ -451,6 +472,19 @@ function createTerminalManager(opts) {
     };
   }
 
+  // True while the shell has at least one child process, so closing it would
+  // stop something the user started. Exited or unknown terminals answer false.
+  async function hasChildren(id) {
+    const e = terminals.get(id);
+    if (!e || e.exited || !e.pty || typeof e.pty.pid !== 'number') return false;
+    const pid = e.pty.pid;
+    const children = await listChildPids(pid);
+    // Revalidate: the shell can exit (or be replaced) while `pgrep` runs, and
+    // a dead terminal must still answer false.
+    if (terminals.get(id) !== e || e.exited || e.pty?.pid !== pid) return false;
+    return children.length > 0;
+  }
+
   // Snapshot of all terminals (optionally filtered by appSessionId).
   function list(filter) {
     const out = [];
@@ -531,6 +565,7 @@ function createTerminalManager(opts) {
     onExit,
     kill,
     summary,
+    hasChildren,
     list,
     closeAll,
     limits,

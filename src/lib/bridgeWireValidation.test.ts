@@ -253,6 +253,108 @@ test('validates automation command results by outcome', () => {
   );
 });
 
+test('validates session.processes events and rejects malformed process entries', () => {
+  const process = {
+    pid: 123,
+    name: 'ripgrep',
+    command: 'rg foo',
+    originCommand: 'rg foo &',
+    startedAt: 1,
+    ports: [],
+  };
+  assert.ok(
+    serverWireMessage(
+      batch({ type: 'session.processes', appSessionId: 'app-1', processes: [process] }),
+    ),
+  );
+  assert.ok(
+    serverWireMessage(batch({ type: 'sessions.processes', processes: { 'app-1': [process] } })),
+  );
+  const malformed = { ...process, originCommand: 123 };
+  assert.equal(
+    serverWireMessage(
+      batch({ type: 'session.processes', appSessionId: 'app-1', processes: [malformed] }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(batch({ type: 'sessions.processes', processes: { 'app-1': [malformed] } })),
+    null,
+  );
+  assert.equal(
+    serverWireMessage({
+      type: 'bridge.snapshot',
+      generation: 'generation-1',
+      lastSeq: 1,
+      reason: 'replay_unavailable',
+      snapshot: {
+        runtime: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
+        sessions: [],
+        children: [],
+        processes: { 'app-1': [malformed] },
+        persistence: { durable: true, hadUnflushedWork: false },
+        interrupted: [],
+      },
+    }),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, pid: 'not-a-number' }],
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, ports: ['8080', null] }],
+      }),
+    ),
+    null,
+  );
+  // pid feeds session.processes.stop, so a non-integer or out-of-range number
+  // must not reach the reducer either.
+  for (const pid of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(
+      serverWireMessage(
+        batch({
+          type: 'session.processes',
+          appSessionId: 'app-1',
+          processes: [{ ...process, pid }],
+        }),
+      ),
+      null,
+      `pid ${String(pid)} must be rejected`,
+    );
+  }
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, startedAt: -1 }],
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    serverWireMessage(
+      batch({
+        type: 'session.processes',
+        appSessionId: 'app-1',
+        processes: [{ ...process, ports: [0] }],
+      }),
+    ),
+    null,
+  );
+});
+
 test('rejects object payloads that are actually arrays', () => {
   assert.equal(serverWireMessage(batch({ type: 'settings.defaults', defaults: [] })), null);
   assert.ok(serverWireMessage(batch({ type: 'settings.defaults', defaults: {} })));

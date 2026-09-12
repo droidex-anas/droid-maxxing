@@ -1,6 +1,24 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
+import { commandLineContains } from '../../lib/commandLineMatch';
+import { LiveProcessesContext } from './liveProcessesContext';
 import { stripAnsi } from '../../lib/tools';
 import { Caret, ErrorTag, Expand, linkify, RED, ToolPanel } from './primitives';
+
+// A backgrounded server keeps its card "running" after the turn ends as long
+// as a live agent process still carries the command the agent typed.
+function useCommandStillRunning(command: string): boolean {
+  const processes = useContext(LiveProcessesContext);
+  if (processes.length === 0) return false;
+  const needle = command.trim();
+  return (
+    needle.length > 3 &&
+    processes.some(
+      (p) =>
+        commandLineContains(p.command, needle) ||
+        (p.originCommand !== undefined && commandLineContains(p.originCommand, needle)),
+    )
+  );
+}
 
 /* ── Terminal-style command body: the command and its captured output, in the
    same bordered panel language as expanded diffs. No header chrome — the `$`
@@ -17,6 +35,7 @@ export function CommandCard({
   error?: boolean;
   running?: boolean;
 }) {
+  const alive = useCommandStillRunning(command);
   const out = output ? stripAnsi(output).trimEnd() : '';
   return (
     <ToolPanel
@@ -37,7 +56,9 @@ export function CommandCard({
           </span>
           <span className="whitespace-pre-wrap text-droid-text">{command}</span>
         </div>
-        {running && <span className="shimmer-text text-[12.5px] font-medium">Running</span>}
+        {(running || alive) && (
+          <span className="shimmer-text text-[12.5px] font-medium">Running</span>
+        )}
         {out && (
           <pre
             className="mt-2 pt-2 border-t border-droid-border/60 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] break-words text-droid-text-muted"
@@ -68,16 +89,25 @@ export function CommandLine({
   forceOpen?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const alive = useCommandStillRunning(command);
   const expanded = open || forceOpen;
-  if (running) {
-    return (
-      <div className="flex min-w-0 items-center gap-1.5">
+  const label = (
+    <>
+      {running || alive ? (
         <span className="shimmer-text shrink-0 text-[12.5px] font-medium">Running</span>
-        <span className="min-w-0 truncate font-mono text-[12px] text-droid-text-muted">
-          {command}
-        </span>
-      </div>
-    );
+      ) : (
+        <span className="shrink-0 text-droid-text-secondary">Ran</span>
+      )}
+      <span className="min-w-0 truncate font-mono text-[12px] text-droid-text-muted">
+        {command}
+      </span>
+    </>
+  );
+  // Only a still-running turn hides the expander: a finished call whose
+  // process is still alive already has captured output, and that output must
+  // stay reachable. It keeps the Running indicator in place of "Ran".
+  if (running) {
+    return <div className="flex min-w-0 items-center gap-1.5">{label}</div>;
   }
   return (
     <div>
@@ -89,10 +119,7 @@ export function CommandLine({
         aria-expanded={expanded}
       >
         <Caret open={expanded} />
-        <span className="shrink-0 text-droid-text-secondary">Ran</span>
-        <span className="min-w-0 truncate font-mono text-[12px] text-droid-text-muted">
-          {command}
-        </span>
+        {label}
         {error && <ErrorTag />}
       </button>
       <Expand open={expanded}>

@@ -61,6 +61,7 @@ import {
   type ChildRuntimeInstallHost,
 } from './childRuntimeOpen.js';
 import { RuntimeRetirementTimer } from './runtimeRetirementTimer.js';
+import { ChildProviderCleanup } from './childProviderCleanup.js';
 import { childTokenStream } from './childStreamFidelity.js';
 import { dequeueQueuedChild, prepareChildInterrupt } from './childTurnCancellation.js';
 
@@ -79,11 +80,17 @@ export class ChildSessions {
   >();
   private nextParentGeneration = 0;
   private shuttingDown = false;
+  private readonly providerCleanup: ChildProviderCleanup;
   private readonly retirementTimer = new RuntimeRetirementTimer(() => {
     void this.retireIdleRuntimes();
   });
 
-  constructor(private readonly d: ChildSessionsDependencies) {}
+  constructor(private readonly d: ChildSessionsDependencies) {
+    this.providerCleanup = new ChildProviderCleanup(d, (parentAppSessionId) => {
+      const parent = this.parents.get(parentAppSessionId);
+      if (parent) this.admitNextQueued(parent);
+    });
+  }
 
   attachParent(parentAppSessionId: string): void {
     const lease = this.d.registry.getLive(parentAppSessionId);
@@ -540,12 +547,21 @@ export class ChildSessions {
       if (key.startsWith(durabilityPrefix)) this.childrenAwaitingDurability.delete(key);
     }
     if (this.parents.get(parentAppSessionId) === parent) this.parents.delete(parentAppSessionId);
+    await this.providerCleanup.closeParent(parent);
   }
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.retirementTimer.cancel();
-    for (const parent of this.parents.values()) await this.closeParent(parent.parentAppSessionId);
+    const results = await Promise.allSettled(
+      [...this.parents.values()].map((parent) => this.closeParent(parent.parentAppSessionId)),
+    );
+    await this.providerCleanup.shutdown();
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed)
+      throw new Error('Could not close every child session during shutdown.', {
+        cause: failed.reason,
+      });
   }
 
   // Release the provider process behind every child that has been settled and
@@ -952,16 +968,28 @@ export class ChildSessions {
     requestId: string | null,
   ): Promise<boolean | 'queued'> {
     const limits = childRuntimeLimits(this.d);
-    const decision = decideChildRuntimeCapacity(parent, requested, limits);
-    if (decision.action === 'reserve' || decision.action === 'evict') {
-      parent.reservedOpenSlots.add(requested.identity.childSessionId);
-      if (decision.action === 'evict') await this.closeRuntime(parent, decision.victim, true);
-      return true;
-    }
-    if (decision.action === 'queue') {
-      enqueueChildRuntime(parent, requested, requestId);
-      this.publish(requested);
-      return 'queued';
+    while (this.isCurrentChild(parent, requested)) {
+      const decision = decideChildRuntimeCapacity(parent, requested, {
+        ...limits,
+        maxLive: limits.maxLive - this.providerCleanup.count(parent.parentAppSessionId),
+      });
+      if (decision.action === 'reserve') {
+        parent.reservedOpenSlots.add(requested.identity.childSessionId);
+        return true;
+      }
+      if (decision.action === 'evict') {
+        parent.reservedOpenSlots.add(requested.identity.childSessionId);
+        await this.closeRuntime(parent, decision.victim, true);
+        parent.reservedOpenSlots.delete(requested.identity.childSessionId);
+        if (!this.isCurrentChild(parent, requested)) return false;
+        continue;
+      }
+      if (decision.action === 'queue') {
+        enqueueChildRuntime(parent, requested, requestId);
+        this.publish(requested);
+        return 'queued';
+      }
+      break;
     }
     this.emitError(
       requested.identity,
@@ -975,7 +1003,10 @@ export class ChildSessions {
 
   private admitNextQueued(parent: ParentChildSessions): void {
     if (!this.isCurrentParent(parent) || parent.closing) return;
-    const next = takeNextQueuedChild(parent, childRuntimeLimits(this.d).maxLive);
+    const next = takeNextQueuedChild(
+      parent,
+      childRuntimeLimits(this.d).maxLive - this.providerCleanup.count(parent.parentAppSessionId),
+    );
     if (!next) return;
     this.publish(next.child);
     void this.openFor(
@@ -1014,14 +1045,10 @@ export class ChildSessions {
     const cleanupTarget = this.contextTarget(parent, child, runtime);
     void runCleanup(this.d.context.forgetChild.bind(this.d.context, child.identity));
     void runCleanup(this.d.context.stopPolling.bind(this.d.context, cleanupTarget));
-    const cleanupTasks = [
-      runtime.unsubscribe ?? ignoreError,
-      runtime.session.close.bind(runtime.session),
-    ];
-    const cleanup = (child.mutationTail ?? Promise.resolve())
+    const detached = (child.mutationTail ?? Promise.resolve())
       .catch(ignoreError)
-      .then(() => Promise.allSettled(cleanupTasks.map(runCleanup)))
-      .then(ignoreError);
+      .then(() => runCleanup(runtime.unsubscribe ?? ignoreError));
+    const cleanup = this.providerCleanup.release(parent, runtime.session, detached);
     child.mutationTail = cleanup;
     await cleanup;
     this.clearMutation(child, cleanup);

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Bridge } from './bridge';
+import { adaptEvent, initialState, reducer } from '../hooks/useStore';
 import type { ServerEvent, ServerEventBatch } from '../types/bridge';
 
 class FakeWebSocket {
@@ -34,6 +35,8 @@ class FakeWebSocket {
   }
 
   close(code?: number, reason?: string): void {
+    if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999))
+      throw new DOMException('Invalid WebSocket close code.', 'InvalidAccessError');
     this.closeArgs = [code, reason];
     this.readyState = 3;
     this.onclose?.();
@@ -166,7 +169,7 @@ test(
       await Promise.resolve();
       const second = required(FakeWebSocket.instances.at(-1));
       const url = new URL(second.url);
-      assert.equal(url.searchParams.get('bridgeProtocol'), '3');
+      assert.equal(url.searchParams.get('bridgeProtocol'), '4');
       assert.equal(url.searchParams.get('resumeGeneration'), 'generation-1');
       assert.equal(url.searchParams.get('resumeSeq'), '1');
     } finally {
@@ -240,6 +243,7 @@ test(
           runtime: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
           sessions: [],
           children: [],
+          processes: {},
           persistence: { durable: true, hadUnflushedWork: false },
           interrupted: [],
         },
@@ -247,7 +251,7 @@ test(
 
       assert.deepEqual(
         seen.map((event) => event.type),
-        ['connection', 'runtime.updated'],
+        ['connection', 'runtime.updated', 'sessions.processes'],
       );
 
       first.close();
@@ -293,6 +297,63 @@ test('late messages from a replaced socket are ignored', { concurrency: false },
   }
 });
 
+test('recovery snapshots replace process lists, including sessions that disappeared', async () => {
+  const runtime = installFakeRuntime();
+  try {
+    const bridge = new Bridge(
+      async () => ({ port: 43130, token: 'snapshot-token' }),
+      () => undefined,
+    );
+    let state = initialState;
+    bridge.subscribe((event) => {
+      const action = adaptEvent(event);
+      if (action) state = reducer(state, action);
+    });
+    await bridge.start();
+    const socket = required(FakeWebSocket.instances.at(-1));
+    socket.open();
+    const process = {
+      pid: 123,
+      name: 'vite',
+      command: 'node vite.js',
+      originCommand: 'npm run dev',
+      ports: [5173],
+      startedAt: 1,
+    };
+    socket.message(
+      batch('generation-1', 1, 1, [
+        { type: 'session.processes', appSessionId: 'closed-session', processes: [process] },
+      ]),
+    );
+    assert.deepEqual(state.agentProcesses, { 'closed-session': [process] });
+    const snapshot = {
+      type: 'bridge.snapshot',
+      generation: 'generation-1',
+      lastSeq: 42,
+      reason: 'replay_unavailable',
+      snapshot: {
+        runtime: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
+        sessions: [],
+        children: [],
+        processes: { 'live-session': [process] },
+        persistence: { durable: true, hadUnflushedWork: false },
+        interrupted: [],
+      },
+    };
+    socket.message(snapshot);
+    assert.deepEqual(state.agentProcesses, { 'live-session': [process] });
+    socket.message({
+      ...snapshot,
+      generation: 'generation-2',
+      reason: 'generation_changed',
+      snapshot: { ...snapshot.snapshot, processes: {} },
+    });
+    assert.deepEqual(state.agentProcesses, {});
+  } finally {
+    restoreFakeRuntime(runtime);
+  }
+});
+
 test(
   'duplicate replay batches are ignored and sequence gaps reconnect',
   { concurrency: false },
@@ -314,7 +375,7 @@ test(
       assert.deepEqual(seen, ['connection']);
 
       socket.message(batch('generation-1', 3, 3, [{ type: 'connection', status: 'connected' }]));
-      assert.deepEqual(socket.closeArgs, [1012, 'bridge event sequence gap']);
+      assert.deepEqual(socket.closeArgs, [4012, 'bridge event sequence gap']);
     } finally {
       restoreFakeRuntime(runtime);
     }
@@ -345,7 +406,7 @@ test(
         events: null,
       });
 
-      assert.deepEqual(first.closeArgs, [1002, 'malformed bridge message']);
+      assert.deepEqual(first.closeArgs, [4002, 'malformed bridge message']);
       assert.deepEqual(seen, [
         {
           type: 'error',
@@ -392,7 +453,7 @@ test(
         events: [{ seq: 1, event: { type: 'session.updated' } }],
       });
 
-      assert.deepEqual(socket.closeArgs, [1002, 'malformed bridge message']);
+      assert.deepEqual(socket.closeArgs, [4002, 'malformed bridge message']);
       assert.deepEqual(
         seen
           .filter(
@@ -470,6 +531,7 @@ test(
           runtime: { mode: 'cli_auth', droidPath: '/bin/droid', apiKeyConfigured: false },
           sessions: [],
           children: [],
+          processes: {},
           persistence: {
             durable: false,
             hadUnflushedWork: true,
@@ -483,7 +545,7 @@ test(
 
       assert.deepEqual(
         seen.map((event) => event.type),
-        ['connection', 'runtime.updated', 'error', 'connection'],
+        ['connection', 'runtime.updated', 'sessions.processes', 'error', 'connection'],
       );
       const unflushed = seen.find(
         (event): event is Extract<ServerEvent, { type: 'error' }> => event.type === 'error',

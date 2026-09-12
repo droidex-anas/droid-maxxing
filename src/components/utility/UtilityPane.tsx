@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { PanelRight } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
@@ -37,6 +37,7 @@ export function UtilityPane({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
+
   const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
   const openSingletons = new Set(panel.tabs.map((tab) => tab.tool));
   const availableTools = UTILITY_TOOL_OPTIONS.map((option) => option.tool).filter(
@@ -174,7 +175,7 @@ export function UtilityPane({
 
       <div role="tabpanel" className="min-h-0 flex-1 overflow-hidden">
         {activeTab ? (
-          renderTab(activeTab, { overlayOpen: menuOpen })
+          <Fragment key={activeTab.id}>{renderTab(activeTab, { overlayOpen: menuOpen })}</Fragment>
         ) : (
           <div className="flex h-full items-center justify-center px-3 pb-[8vh]">
             <div className="w-full max-w-xl">
