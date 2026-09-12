@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { shallowEqual, useStoreApi, useStoreDispatch, useStoreSelector } from './hooks/useStore';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PanelLeft, PanelRight } from '@droidex/icons';
@@ -33,7 +33,7 @@ import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
 import SetupBanner from './components/onboarding/SetupBanner';
 import { useMeasuredHeight } from './hooks/useMeasuredHeight';
-import { WINDOW_CONTROLS_INSET_PX, WINDOW_CONTROLS_LEAD_PX } from './lib/windowChrome';
+import { WINDOW_CONTROLS_INSET_PX } from './lib/windowChrome';
 import RuntimeStatusBanner from './components/RuntimeStatusBanner';
 import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
@@ -585,18 +585,9 @@ export default function App() {
 
         {/* Every view under `main` owns a drag row as its top row, so a view
             never shifts when the sidebar collapses. Collapsing only moves the
-            window controls and the floating sidebar toggle into that row, and
-            `--window-controls-lead` is the space a row leaves them. */}
-        <main
-          className="relative flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden bg-droid-bg"
-          style={
-            state.sidebarCollapsed
-              ? ({
-                  '--window-controls-lead': `${String(WINDOW_CONTROLS_LEAD_PX)}px`,
-                } as CSSProperties)
-              : undefined
-          }
-        >
+            window controls and the floating sidebar toggle into that row; the
+            chat header reads the collapsed state and leaves them room. */}
+        <main className="relative flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden bg-droid-bg">
           <div ref={contentRowRef} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <section
               aria-hidden={browserExpanded}

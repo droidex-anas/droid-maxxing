@@ -1,14 +1,7 @@
-import {
-  useRef,
-  useEffect,
-  useMemo,
-  useState,
-  useCallback,
-  type ReactNode,
-  type CSSProperties,
-} from 'react';
+import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import { WINDOW_CONTROLS_LEAD_PX } from '../lib/windowChrome';
 import { openReviewAt, type OpenReviewFileHandler } from '../lib/reviewFocus';
 import type { FileChange } from '../lib/diff';
 import type { SessionRestore } from '../hooks/storeChildSession';
@@ -146,15 +139,20 @@ function ChatHeader({
   title,
   live,
   sub,
+  leadPx,
 }: {
   title: string;
   live: boolean;
   sub?: { label: string; meta?: string; running: boolean; onBack: () => void; onStop?: () => void };
+  // Room left at the row's start for the window controls and the sidebar
+  // toggle while the sidebar is collapsed.
+  leadPx: number;
 }) {
   return (
     <div
       data-electron-drag-region
-      className="shrink-0 flex items-center gap-2 h-9 pr-4 pl-[var(--window-controls-lead,1rem)]"
+      className="shrink-0 flex items-center gap-2 h-9 pr-4"
+      style={{ paddingLeft: leadPx }}
     >
       <div className="flex min-w-0 items-center gap-1.5 rounded-xl bg-droid-elevated/60 pl-2 pr-3 py-1.5">
         <GripVertical className="w-3.5 h-3.5 shrink-0 text-droid-text-muted/40" />
@@ -217,6 +215,7 @@ export default function ChatView({
     [isObscured],
   );
   const state = useStoreSelector(selectChatViewState, equalChatState);
+  const sidebarCollapsed = useStoreSelector((current) => current.sidebarCollapsed);
   // Tool-activity settings are render-only feed props; select them apart from
   // the obscured-gated chat state so a settings change always applies live.
   const toolActivity = useStoreSelector((s) => s.toolActivity);
@@ -695,6 +694,7 @@ export default function ChatView({
         <ChatHeader
           title={chatDisplayTitle(activeSession, state.chatMetadata[activeSession.appSessionId])}
           live={live}
+          leadPx={sidebarCollapsed ? WINDOW_CONTROLS_LEAD_PX : 16}
           {...(chatHeaderSub !== undefined ? { sub: chatHeaderSub } : {})}
         />
       ) : (
@@ -702,10 +702,7 @@ export default function ChatView({
         // belongs to the window chrome.
         <div data-electron-drag-region className="h-9 shrink-0" />
       )}
-      <div
-        className="relative flex-1 min-h-0 min-w-0 flex flex-col"
-        style={{ '--transcript-inset-right': rightInset ? '312px' : '0px' } as CSSProperties}
-      >
+      <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
         <TranscriptReachHost
           items={feedItems}
           updateKind={feedUpdateKind}
@@ -724,6 +721,7 @@ export default function ChatView({
           {activeSession && !isTimelinePriming && timelineAnchors.length >= 2 && (
             <ConversationTimeline
               scrollRef={scrollRef}
+              insetRight={rightInset ? 312 : 0}
               anchors={timelineAnchors}
               onJumpToAnchor={(id) => {
                 conversationListRef.current?.scrollToRow(id);
