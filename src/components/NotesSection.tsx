@@ -334,7 +334,7 @@ export function NotesPanel({
                           : 'Write a note to use later — Enter to save'
                       }
                       rows={3}
-                      className="w-full resize-none bg-transparent text-[12.5px] leading-snug text-droid-text placeholder:text-droid-text-muted focus:outline-none"
+                      className="w-full resize-none bg-transparent text-[13px] leading-snug text-droid-text placeholder:text-droid-text-muted focus:outline-none"
                     />
                     {/* The pad saves on Enter with no other chrome, so the moment
                         text exists a plain save affordance and the key hints appear. */}
@@ -387,7 +387,7 @@ export function NotesPanel({
                             >
                               {option}
                             </span>
-                            <span className="text-[11.5px] text-droid-text-muted">
+                            <span className="text-[12px] text-droid-text-muted">
                               {NOTE_TAG_HINT[option]}
                             </span>
                           </button>
@@ -427,7 +427,7 @@ export function NotesPanel({
                               }`}
                             />
                             <span
-                              className={`line-clamp-2 min-w-0 flex-1 break-words pr-4 text-[12.5px] leading-snug transition-colors ${
+                              className={`line-clamp-2 min-w-0 flex-1 break-words pr-4 text-[13px] leading-snug transition-colors ${
                                 note.usedAt !== null
                                   ? 'text-droid-text-muted'
                                   : 'text-droid-text-secondary group-hover:text-droid-text'
@@ -459,7 +459,7 @@ export function NotesPanel({
                   </AnimatePresence>
 
                   {notes.length === 0 && (
-                    <div className="px-3 py-1.5 text-[11.5px] leading-snug text-droid-text-muted">
+                    <div className="px-3 py-1.5 text-[12px] leading-snug text-droid-text-muted">
                       No notes yet — write one above, Enter to save. Start it with @bug, @next,
                       @idea or @constraint to tag it.
                     </div>

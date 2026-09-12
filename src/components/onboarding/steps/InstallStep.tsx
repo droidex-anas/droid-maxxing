@@ -91,7 +91,7 @@ export function InstallStep({
                 disabled={!!installing}
                 className="w-full flex items-center justify-between px-4 py-3.5 text-left transition-colors hover:bg-droid-elevated/50"
               >
-                <span className="flex items-center gap-3 text-[13.5px] text-droid-text">
+                <span className="flex items-center gap-3 text-[13px] text-droid-text">
                   <span
                     className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
                       channel === c ? 'border-droid-accent' : 'border-droid-border-hover'

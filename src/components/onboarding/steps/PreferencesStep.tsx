@@ -74,7 +74,7 @@ export function PreferencesStep({
 
       <Panel className="mb-7">
         <div className="px-4 py-3.5">
-          <div className="text-[13.5px] text-droid-text mb-2.5">Default editor</div>
+          <div className="text-[13px] text-droid-text mb-2.5">Default editor</div>
           <div className="flex flex-wrap gap-2">
             {editorOptions.length === 0 && (
               <span className="text-[12px] text-droid-text-muted">No editors detected.</span>
@@ -86,7 +86,7 @@ export function PreferencesStep({
                 onClick={() => {
                   setEditor(o.id);
                 }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[12.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                   editor === o.id
                     ? 'border-droid-border-hover bg-droid-elevated text-droid-text'
                     : 'border-droid-border text-droid-text-secondary hover:border-droid-border-hover'

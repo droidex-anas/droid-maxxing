@@ -154,7 +154,7 @@ export function BranchMenu({
               setQuery(e.target.value);
             }}
             placeholder="Search branches"
-            className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
+            className="w-full bg-transparent text-[13px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
           />
           {(busy || fetching) && (
             <Spinner className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin-slow text-droid-accent" />
@@ -162,7 +162,7 @@ export function BranchMenu({
         </div>
 
         {dirtyRef && (
-          <div className="flex items-center gap-2 bg-droid-orange/10 px-2.5 py-2 text-[11.5px] text-droid-text">
+          <div className="flex items-center gap-2 bg-droid-orange/10 px-2.5 py-2 text-[12px] text-droid-text">
             <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-droid-orange" />
             <span className="flex-1">Uncommitted changes.</span>
             <button
@@ -194,7 +194,7 @@ export function BranchMenu({
                 className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
                 <GitBranchIcon size={14} className="shrink-0 text-droid-text-muted" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text">
+                <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text">
                   {b.name}
                 </span>
                 {ab && (
@@ -235,7 +235,7 @@ export function BranchMenu({
                 className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-droid-elevated/60"
               >
                 <GitBranchIcon size={14} className="shrink-0 text-droid-text-muted/70" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
+                <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text-secondary">
                   {b.name}
                 </span>
               </button>
@@ -275,7 +275,7 @@ export function BranchMenu({
               onClick={() => {
                 setCreating(true);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text transition-colors hover:bg-droid-elevated/60"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-droid-text transition-colors hover:bg-droid-elevated/60"
             >
               <Plus className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
               Create and checkout new branch…

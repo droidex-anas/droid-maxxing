@@ -62,7 +62,7 @@ export function TranscriptReachBar({
           }}
           placeholder="Find in conversation"
           aria-label="Find in conversation"
-          className="min-w-0 flex-1 bg-transparent text-[12.5px] text-droid-text placeholder-droid-text-muted focus:outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[13px] text-droid-text placeholder-droid-text-muted focus:outline-none"
         />
         <span
           data-testid="transcript-find-count"
