@@ -85,6 +85,12 @@ function editorIcon(editor) {
   if (!pending) {
     pending = readIcon(editor).catch(() => null);
     iconsByEditor.set(editor, pending);
+    // Only a real icon is worth keeping; a read that failed (Quick Look busy,
+    // bundle mid-update) is asked again next time instead of pinning the
+    // fallback glyph until restart.
+    pending.then((icon) => {
+      if (icon === null && iconsByEditor.get(editor) === pending) iconsByEditor.delete(editor);
+    });
   }
   return pending;
 }

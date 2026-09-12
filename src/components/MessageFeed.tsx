@@ -15,6 +15,7 @@ import { SpecRenderer } from './SpecRenderer';
 import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
 import { ProseFileLinks } from './transcript/ProseFileLink';
+import { useToolMarkCatalog } from './transcript/toolSourceMark';
 import {
   childSessionTargetFromEvent,
   findChildSessionForTarget,
@@ -262,6 +263,9 @@ export function MessageFeed({
   const lastIdx = items.length - 1;
   // Empty feeds are real (a fresh session), so the tail is genuinely optional.
   const last: FeedItem | undefined = items.length > 0 ? items[lastIdx] : undefined;
+  // Tool rows wear their MCP server's mark; the catalog follows this
+  // transcript's workspace.
+  useToolMarkCatalog(cwd);
   const showSpecCard = (specContent?.length ?? 0) > 0;
 
   // Compaction is in progress when the latest status line announces it and no

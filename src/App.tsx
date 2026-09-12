@@ -407,7 +407,8 @@ export default function App() {
 
   // The native browser is a separate Electron layer that floats above the DOM,
   // so close it while the full-screen wizard is up or it paints over the tour,
-  // and bring the pane back once the tour is done.
+  // and bring the pane back once the tour is done. The wizard also registers
+  // as an overlay, so the view stays hidden through its exit fade.
   const paneClosedForWizard = useRef(false);
   useEffect(() => {
     if (showWizard) {

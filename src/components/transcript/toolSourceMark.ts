@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 import { bridge } from '../../lib/bridge';
 import { listMcpServers } from '../../lib/commands';
@@ -20,7 +20,8 @@ import type { McpServerInfo } from '../../types/bridge';
 const hostsBySource = new Map<string, string>();
 const marks = new Map<string, LinkPresentation | null>();
 const listeners = new Set<() => void>();
-let catalogRequested = false;
+// The workspace whose catalog was last asked for; null until the first ask.
+let requestedCwd: string | undefined | null = null;
 
 // Rows see the readable form of `mcp__<server>__<tool>` that `humanizeToolName`
 // produces, so server names are matched in that form rather than raw.
@@ -53,15 +54,27 @@ export function recordMcpCatalog(servers: readonly McpServerInfo[]): void {
   for (const listener of listeners) listener();
 }
 
-function requestCatalog(): void {
-  if (catalogRequested) return;
-  catalogRequested = true;
-  // Every catalog counts, including the ones the MCP settings screen asks for,
-  // so a server added there earns its mark without a second round trip.
-  bridge.subscribe((event) => {
-    if (event.type === 'mcp.catalog') recordMcpCatalog(event.servers);
-  });
-  listMcpServers(`tool-marks-${Date.now().toString(36)}`);
+function requestCatalog(cwd?: string): void {
+  if (requestedCwd === null) {
+    // Every catalog counts, including the ones the MCP settings screen asks
+    // for, so a server added there earns its mark without a second round trip.
+    bridge.subscribe((event) => {
+      if (event.type === 'mcp.catalog') recordMcpCatalog(event.servers);
+    });
+  } else if (requestedCwd === cwd) return;
+  requestedCwd = cwd;
+  listMcpServers(`tool-marks-${Date.now().toString(36)}`, cwd);
+}
+
+/**
+ * Keep the catalog in step with the workspace a transcript belongs to: a
+ * project-scoped server is only listed for its own cwd, and the same name in
+ * another repo may point at another host.
+ */
+export function useToolMarkCatalog(cwd: string | undefined): void {
+  useEffect(() => {
+    requestCatalog(cwd);
+  }, [cwd]);
 }
 
 export function toolSourceMark(source: string | undefined): LinkPresentation | null {
@@ -87,9 +100,10 @@ function subscribe(listener: () => void): () => void {
 }
 
 // A row with no MCP source has no mark to wait for, and must not make the app
-// ask for a catalog it would never read.
+// ask for a catalog it would never read. A row outside any feed (a preview)
+// asks once, for the user-level catalog; feeds ask for their own workspace.
 function subscribeAndRequestCatalog(listener: () => void): () => void {
-  requestCatalog();
+  if (requestedCwd === null) requestCatalog();
   return subscribe(listener);
 }
 
