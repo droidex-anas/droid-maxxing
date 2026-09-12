@@ -191,20 +191,20 @@ export default function App() {
   const utilityPanel = utilityPanelForSession(state.utilityPanels, activeSession?.appSessionId);
   const activeUtilityTab =
     utilityPanel.tabs.find((tab) => tab.id === utilityPanel.activeTabId) ?? null;
-  const showUtilityPane = !embedded && !!activeSession && utilityPanel.open && !showWizard;
   // The pull request and Automations workspaces own the whole content area and
-  // the top-right corner of their own toolbar, so the session-scoped overlays
-  // (Context panel) and floating window buttons stay out of them instead of
-  // covering their header.
+  // the top-right corner of their own toolbar, so the session-scoped panes and
+  // overlays (utility pane, Context panel) and floating window buttons stay out
+  // of them instead of covering their header. The pane's open state survives
+  // the visit and it comes back with the chat.
   const fullContentRoute =
     !embedded && (state.mainView === 'pull-requests' || state.mainView === 'automations');
-  // An expanded browser covers the full content row, which would leave the pull
-  // request workspace hidden and non-interactive behind it. The expansion stays
-  // owned by the browser pane; this view simply does not take part in it.
+  const showUtilityPane =
+    !embedded && !!activeSession && utilityPanel.open && !showWizard && !fullContentRoute;
+  // An expanded browser covers the full content row; the utility pane already
+  // stays out of the full-content routes, so the expansion follows it.
   const browserExpanded =
     !!activeSession &&
     showUtilityPane &&
-    !fullContentRoute &&
     activeUtilityTab?.tool === 'browser' &&
     expandedBrowserAppSessionId === activeSession.appSessionId;
   const focused = isMissionControlView;
