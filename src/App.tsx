@@ -501,6 +501,14 @@ export default function App() {
       },
     };
     const handler = (e: KeyboardEvent) => {
+      // A saved binding wins over the fixed chords below, so rebinding an
+      // action onto one of them takes effect instead of being swallowed.
+      for (const { action } of SHORTCUT_DEFINITIONS) {
+        if (!matchesChord(e, state.shortcutBindings[action])) continue;
+        e.preventDefault();
+        run[action]();
+        return;
+      }
       if (isTerminalTabShortcut(e)) {
         if (isTerminalInputTarget(e.target)) return;
         e.preventDefault();
@@ -509,20 +517,11 @@ export default function App() {
         return;
       }
       const meta = e.metaKey || e.ctrlKey;
-      if (!meta) return;
-      if (e.shiftKey) {
-        const key = e.key.toLowerCase();
-        if (key === 'b' || key === 'f' || key === 'r') {
-          e.preventDefault();
-          openUtilityTool(key === 'b' ? 'browser' : key === 'f' ? 'files' : 'review');
-          return;
-        }
-      }
-      for (const { action } of SHORTCUT_DEFINITIONS) {
-        if (!matchesChord(e, state.shortcutBindings[action])) continue;
+      if (!meta || !e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'b' || key === 'f' || key === 'r') {
         e.preventDefault();
-        run[action]();
-        return;
+        openUtilityTool(key === 'b' ? 'browser' : key === 'f' ? 'files' : 'review');
       }
     };
     window.addEventListener('keydown', handler);
