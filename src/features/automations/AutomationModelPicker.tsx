@@ -214,7 +214,7 @@ export function AutomationModelPicker({
                     setQuery(event.target.value);
                   }}
                   placeholder="Search models"
-                  className="min-w-0 flex-1 bg-transparent text-[12px] text-droid-text outline-none placeholder:text-droid-text-muted"
+                  className="min-w-0 flex-1 bg-transparent text-[12px] text-droid-text outline-none placeholder:text-droid-text-muted/65"
                 />
               </label>
 
@@ -249,6 +249,10 @@ export function AutomationModelPicker({
                 reasoning={selectedReasoning}
                 query={query}
                 onSelectModel={selectModel}
+                onSelectReasoning={(reasoning) => {
+                  if (!selectedModel) return;
+                  onChange({ modelId: selectedModel.id, reasoningEffort: reasoning });
+                }}
                 disabled={false}
                 reasoningLocked={false}
                 showDefault={false}

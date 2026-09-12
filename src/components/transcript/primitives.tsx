@@ -122,7 +122,7 @@ export function CopyButton({ text }: { text: string }) {
       }}
       title="Copy"
       aria-label="Copy"
-      className="shrink-0 rounded-md p-1.5 text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
+      className="shrink-0 rounded-md p-1 text-droid-text-muted/60 transition-colors hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
     >
       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
     </button>
@@ -235,15 +235,15 @@ export function WorkingIndicator({
   );
 }
 
-/* ── Hover toolbar for a message. It floats over the message's free corner —
-   the bottom-right of a reply, the left of a prompt bubble — so it never moves
-   the text or changes the row's height, and fades in on hover or keyboard
-   focus. The host must carry `group/msg relative`. ── */
+/* ── Copy affordance for a message: below the text on the reply's left, below
+   the bubble on a prompt's right, floating in the row gap so the row never
+   changes height when a turn settles. Fades in on hover or keyboard focus; the
+   host carries `group/msg relative`. ── */
 export function MessageActions({ text, side }: { text: string; side: 'end' | 'start' }) {
-  const place = side === 'end' ? 'bottom-0 right-0 translate-y-1/2' : 'bottom-0 right-full mr-2';
+  const place = side === 'end' ? 'left-0 -ml-1' : 'right-0 -mr-1';
   return (
     <div
-      className={`pointer-events-none absolute ${place} flex items-center rounded-lg border border-droid-border bg-droid-surface p-0.5 shadow-sm opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100`}
+      className={`pointer-events-none absolute top-full mt-0.5 ${place} opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100`}
     >
       <CopyButton text={text} />
     </div>

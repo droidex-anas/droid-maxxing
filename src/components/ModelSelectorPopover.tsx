@@ -444,6 +444,7 @@ export default function ModelSelectorPopover({
             reasoning={effReasoning}
             query={query}
             onSelectModel={updateModel}
+            onSelectReasoning={updateReasoning}
             disabled={Boolean(childTarget && !childReady)}
             reasoningLocked={childMode}
           />
