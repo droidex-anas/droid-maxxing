@@ -63,7 +63,7 @@ export default function Toaster() {
                   dismissToast(t.id);
                 }}
                 aria-label="Dismiss"
-                className="-mr-1 shrink-0 rounded-md p-1 text-droid-text-muted opacity-0 transition-all hover:bg-droid-surface hover:text-droid-text group-hover:opacity-100"
+                className="-mr-1 shrink-0 rounded-md p-1 text-droid-text-muted opacity-0 transition-all hover:bg-droid-surface hover:text-droid-text focus-visible:opacity-100 group-hover:opacity-100"
                 title="Dismiss"
               >
                 <X className="h-3.5 w-3.5" />

@@ -157,7 +157,7 @@ export function SidebarWorkspaceList({
                   void onAddWorkspace();
                 }}
                 title="Add workspace"
-                className="p-0.5 rounded-md text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
+                className="p-1 rounded-md text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>

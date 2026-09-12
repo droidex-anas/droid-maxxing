@@ -35,7 +35,7 @@ export function AppUpdateButtonView({
       disabled={downloading}
       title={actionLabel}
       aria-label={actionLabel}
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-500 transition-colors hover:bg-droid-elevated disabled:opacity-60"
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-droid-accent transition-colors hover:bg-droid-elevated disabled:opacity-60"
     >
       {downloading ? (
         <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" />

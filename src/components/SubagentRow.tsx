@@ -26,7 +26,7 @@ const PHASE_PILL: Record<ChildStreamPhase, string> = {
   streaming: 'bg-droid-green/15 text-droid-green',
   awaiting_approval: 'bg-droid-orange/15 text-droid-orange',
   settled: 'border border-droid-border text-droid-text-muted',
-  failed: 'bg-red-500/15 text-red-400',
+  failed: 'bg-droid-red/15 text-droid-red',
   interrupted: 'bg-droid-orange/15 text-droid-orange',
 };
 

@@ -93,7 +93,7 @@ export function UtilityPane({
                   onClick={() => {
                     onActivateTab(tab.id);
                   }}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 focus:outline-none"
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-border-hover"
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{tab.label}</span>
@@ -102,7 +102,7 @@ export function UtilityPane({
                   <button
                     type="button"
                     aria-label={`Close ${tab.label}`}
-                    className="ml-0.5 rounded-md p-0.5 text-droid-text-muted opacity-50 transition hover:bg-droid-elevated hover:text-droid-text group-hover:opacity-100"
+                    className="ml-0.5 rounded-md p-1 text-droid-text-muted opacity-50 transition hover:bg-droid-elevated hover:text-droid-text group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
                       onCloseTab(tab);
