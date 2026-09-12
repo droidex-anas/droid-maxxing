@@ -29,7 +29,8 @@ import {
   useElapsed,
 } from './primitives';
 import { CommandCard, CommandLine, ToolCallCard } from './commandCard';
-import { GitHubMark } from './LinkBadge';
+import { LinkBadge } from './LinkBadge';
+import { useToolSourceMark } from './toolSourceMark';
 import { WebFetchCard, WebSearchCard } from './webCards';
 
 /* ── Thinking / Thought ── */
@@ -267,21 +268,17 @@ function ToolLine({
   const [open, setOpen] = useState(false);
   const expanded = open || forceOpen;
   const hasBody = out.length > 0;
-  // A GitHub MCP tool wears the octocat instead of spelling its source.
-  const githubSource = /github/i.test(call.source ?? '');
+  // An MCP tool wears its server's mark instead of spelling its source.
+  const mark = useToolSourceMark(call.source);
   const verb = (
-    <>
-      {githubSource && (
-        <span className="h-3.5 w-3.5 shrink-0 text-droid-text-secondary">
-          <GitHubMark />
-        </span>
-      )}
+    <span className="flex shrink-0 items-center">
+      {mark && <LinkBadge link={mark} />}
       {running ? (
-        <span className="shimmer-text shrink-0 font-medium">{call.liveVerb}</span>
+        <span className="shimmer-text font-medium">{call.liveVerb}</span>
       ) : (
-        <span className="shrink-0 text-droid-text-secondary">{call.verb}</span>
+        <span className="text-droid-text-secondary">{call.verb}</span>
       )}
-    </>
+    </span>
   );
   return (
     <div>
@@ -306,7 +303,7 @@ function ToolLine({
           </>
         )}
         <ToolTarget call={call} onOpenReviewFile={onOpenReviewFile} />
-        {call.source && !githubSource && (
+        {call.source && !mark && (
           <span className="shrink-0 text-droid-text-muted/60">· {call.source}</span>
         )}
         {error && <ErrorTag />}
