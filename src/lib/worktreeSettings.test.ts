@@ -15,6 +15,7 @@ function session(
 ): SessionSummary {
   return {
     appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

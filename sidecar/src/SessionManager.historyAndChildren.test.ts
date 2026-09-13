@@ -80,6 +80,7 @@ function summary(appSessionId: string, providerSessionId: string): SessionSummar
   return {
     appSessionId,
     providerSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

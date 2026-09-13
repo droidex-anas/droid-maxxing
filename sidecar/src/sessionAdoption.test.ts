@@ -20,6 +20,7 @@ function summary(appSessionId: string, phase: SessionSummary['phase'] = 'running
   return {
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

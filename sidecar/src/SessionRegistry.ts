@@ -12,11 +12,14 @@ export interface RegisteredSession {
   summary: SessionSummary;
 }
 
+// Fixed for the life of a session: its identities, and the provider binding
+// chosen when it was created. A summary patch can never reach them.
 type IdentityField =
   | 'appSessionId'
   | 'providerSessionId'
   | 'compactedFromProviderSessionIds'
-  | 'missionId';
+  | 'missionId'
+  | 'provider';
 
 export type SessionSummaryPatch = Omit<Partial<SessionSummary>, IdentityField>;
 
@@ -418,6 +421,7 @@ function withoutIdentityFields(patch: Partial<SessionSummary>): SessionSummaryPa
   delete safePatch.providerSessionId;
   delete safePatch.compactedFromProviderSessionIds;
   delete safePatch.missionId;
+  delete safePatch.provider;
   return safePatch;
 }
 

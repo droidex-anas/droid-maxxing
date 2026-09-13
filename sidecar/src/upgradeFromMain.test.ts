@@ -60,6 +60,7 @@ function summary(appSessionId: string, cwd: string) {
   return {
     appSessionId,
     providerSessionId: appSessionId,
+    provider: 'droid' as const,
     sessionPurpose: 'chat' as const,
     interactionMode: 'auto' as const,
     role: 'primary' as const,

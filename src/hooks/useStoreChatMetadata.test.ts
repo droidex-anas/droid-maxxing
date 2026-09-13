@@ -8,6 +8,7 @@ import type { SessionSummary } from '../types/bridge';
 function makeSession(appSessionId: string, updatedAt = 1): SessionSummary {
   return {
     appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

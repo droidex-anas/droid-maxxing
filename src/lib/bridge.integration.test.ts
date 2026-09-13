@@ -208,6 +208,7 @@ test('[R1] Renderer command round trip', { concurrency: false }, async () => {
     const session = {
       appSessionId: 'r1',
       providerSessionId: 'provider-r1',
+      provider: 'droid',
       sessionPurpose: 'chat',
       interactionMode: 'auto',
       role: 'primary',

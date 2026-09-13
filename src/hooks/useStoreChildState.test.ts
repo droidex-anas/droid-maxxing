@@ -9,6 +9,7 @@ function session(appSessionId: string): SessionSummary {
   return {
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
+    provider: 'droid',
     sessionPurpose: 'mission-control',
     interactionMode: 'agi',
     role: 'primary',

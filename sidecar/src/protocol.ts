@@ -3,6 +3,7 @@
 
 import type { AutomationBridgeCommand, AutomationBridgeEvent } from './automations/types.js';
 import type { McpClientCommand, McpServerEvent } from './mcpProtocol.js';
+import type { ProviderKind } from './providers/providerKind.js';
 export type {
   McpServerInfo,
   McpServerInput,
@@ -111,6 +112,8 @@ export interface SessionSummary {
   providerSessionId?: string;
   compactedFromProviderSessionIds?: string[];
   missionId?: string;
+  // Agent runtime this session is bound to, fixed at creation.
+  provider: ProviderKind;
   sessionPurpose: SessionPurpose;
   interactionMode: SessionInteractionMode;
   role: 'primary' | 'user';
@@ -579,6 +582,8 @@ export type ClientCommand =
       title: string;
       goal: string;
       sessionPurpose: SessionPurpose;
+      // Omitted means the default provider.
+      provider?: ProviderKind;
       interactionMode?: SessionInteractionMode;
       modelId?: string;
       reasoningEffort?: ReasoningEffort;

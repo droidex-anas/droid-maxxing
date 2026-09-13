@@ -283,6 +283,7 @@ function isSessionSummary(value: unknown): boolean {
     isRecord(value) &&
     hasStrings(value, [
       'appSessionId',
+      'provider',
       'sessionPurpose',
       'interactionMode',
       'role',

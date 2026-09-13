@@ -19,6 +19,7 @@ const session: SessionSummary = {
   title: 'Review sidebar',
   goal: '',
   cwd: '/workspace',
+  provider: 'droid',
   sessionPurpose: 'chat',
   interactionMode: 'auto',
   role: 'primary',

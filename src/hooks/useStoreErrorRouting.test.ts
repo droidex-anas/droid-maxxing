@@ -12,6 +12,7 @@ import type { SessionSummary } from '../types/bridge';
 const session: SessionSummary = {
   appSessionId: 'app-1',
   providerSessionId: 'provider-1',
+  provider: 'droid',
   sessionPurpose: 'chat',
   interactionMode: 'auto',
   role: 'primary',

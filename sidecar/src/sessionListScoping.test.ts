@@ -48,6 +48,7 @@ function appSummary(appSessionId: string, cwd: string, updatedAt: number): Proto
   return {
     appSessionId,
     providerSessionId: appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

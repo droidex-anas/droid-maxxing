@@ -81,6 +81,7 @@ test('summary defaults depend on purpose and spec mode, not AGI interaction alon
   const ordinary: SessionSummary = {
     appSessionId: 'chat-app',
     providerSessionId: 'chat-provider',
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',
@@ -115,6 +116,7 @@ test('cold resume preserves a persisted Mission Control proposal', () => {
     appSessionId: 'mission-app',
     providerSessionId: 'mission-provider',
     missionId: 'mission-id',
+    provider: 'droid',
     sessionPurpose: 'mission-control',
     interactionMode: 'agi',
     role: 'primary',
@@ -153,6 +155,7 @@ test('resume keeps the historical updatedAt so reading never reorders the sideba
   const historical: SessionSummary = {
     appSessionId: 'chat-app',
     providerSessionId: 'chat-provider',
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',
@@ -188,6 +191,7 @@ test('resume keeps an app-reanchored cwd instead of restoring stale provider met
   const historical: SessionSummary = {
     appSessionId: 'app-session',
     providerSessionId: 'provider-session',
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

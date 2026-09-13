@@ -11,6 +11,7 @@ import type {
   InstallChannel,
   McpServerInput,
   PermissionOutcome,
+  ProviderKind,
   ReasoningEffort,
   ResponseFormat,
   SessionInteractionMode,
@@ -37,6 +38,7 @@ export const createSession = (input: {
   title: string;
   goal: string;
   sessionPurpose: SessionPurpose;
+  provider?: ProviderKind;
   interactionMode?: SessionInteractionMode;
   modelId?: string;
   reasoningEffort?: ReasoningEffort;

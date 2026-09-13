@@ -17,6 +17,7 @@ import type {
 } from './protocol.js';
 import type { CompactionTokenLimitPatch } from './compaction.js';
 import { bridgeFeature } from './missionFeatures.js';
+import { DEFAULT_PROVIDER, type ProviderKind } from './providers/providerKind.js';
 import { stringValue } from './values.js';
 
 export interface SessionInitResult {
@@ -310,6 +311,7 @@ export function buildCreatedSessionSummary(input: {
     'workerModelId' | 'workerReasoningEffort' | 'validatorModelId' | 'validatorReasoningEffort'
   >;
   autonomy: Autonomy;
+  provider: ProviderKind;
   maxContextTokens?: number;
   compactionTokenLimit?: number;
   now: number;
@@ -320,6 +322,7 @@ export function buildCreatedSessionSummary(input: {
     appSessionId,
     providerSessionId: appSessionId,
     ...(command.sessionPurpose === 'mission-control' ? { missionId: appSessionId } : {}),
+    provider: input.provider,
     sessionPurpose: command.sessionPurpose,
     interactionMode: input.interactionMode,
     role: 'primary',
@@ -368,6 +371,7 @@ export function buildResumedSession(input: BuildResumedSessionInput): {
       appSessionId: input.appSessionId,
       providerSessionId: input.providerSessionId,
       compactedFromProviderSessionIds: input.historical?.compactedFromProviderSessionIds ?? [],
+      provider: input.historical?.provider ?? DEFAULT_PROVIDER,
       ...classification,
       ...resumedLocation(input),
       ...resumedModelSettings(input),

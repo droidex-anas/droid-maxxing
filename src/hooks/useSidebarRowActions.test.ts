@@ -10,6 +10,7 @@ test('row menus reject missing and hidden targets during render', () => {
     title: 'Chat',
     goal: '',
     cwd: '/worktree',
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

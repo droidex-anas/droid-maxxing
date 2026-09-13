@@ -65,6 +65,7 @@ function summary(appSessionId: string, tokensIn: number): SessionSummary {
   return {
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

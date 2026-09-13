@@ -90,6 +90,7 @@ function missionSummary(): SessionSummary {
     appSessionId: 'parent-app',
     providerSessionId: 'parent-provider',
     missionId: 'mission-1',
+    provider: 'droid',
     sessionPurpose: 'mission-control',
     interactionMode: 'agi',
     role: 'primary',

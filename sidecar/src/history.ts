@@ -36,6 +36,7 @@ import {
   type TranscriptWindowCursor,
 } from './sessionTranscript.js';
 import { decodeProviderSessionIdList } from './historyProviderIds.js';
+import { DEFAULT_PROVIDER } from './providers/providerKind.js';
 import { readSessionFileHead, readSessionStart } from './sessionFileHead.js';
 import { droidexHistoryDir } from './droidexPaths.js';
 
@@ -1184,6 +1185,7 @@ function loadMissionControlSession(dir: string): HistoricalSession & {
       appSessionId: providerSessionId,
       providerSessionId,
       missionId: state.missionId ?? dirId,
+      provider: DEFAULT_PROVIDER,
       sessionPurpose: 'mission-control',
       interactionMode: 'agi',
       role: 'primary',
@@ -1487,6 +1489,7 @@ function summarizeSessionFile(
       appSessionId: providerSessionId,
       providerSessionId,
       missionId: classification.missionId,
+      provider: DEFAULT_PROVIDER,
       sessionPurpose: classification.sessionPurpose,
       interactionMode: classification.interactionMode,
       role: classification.role,

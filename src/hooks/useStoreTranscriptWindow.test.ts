@@ -8,6 +8,7 @@ import { initialState, reducer, type AppState } from './useStore';
 function session(appSessionId: string, streaming = false): SessionSummary {
   return {
     appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

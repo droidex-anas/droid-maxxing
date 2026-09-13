@@ -7,6 +7,7 @@ import { equalVisibleChatState, selectChatViewState } from './chatViewState';
 function session(appSessionId: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

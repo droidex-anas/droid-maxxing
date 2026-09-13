@@ -20,6 +20,7 @@ function historicalSummary(
   return {
     appSessionId,
     providerSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

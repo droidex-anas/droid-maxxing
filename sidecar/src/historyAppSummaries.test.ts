@@ -39,6 +39,7 @@ function summary(appSessionId: string, cwd: string): SessionSummary {
   return {
     appSessionId,
     providerSessionId: appSessionId,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',

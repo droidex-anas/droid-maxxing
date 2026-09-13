@@ -105,6 +105,7 @@ function summary(appSessionId: string, overrides: Partial<SessionSummary> = {}):
   return {
     appSessionId,
     providerSessionId: `provider-${appSessionId}`,
+    provider: 'droid',
     sessionPurpose: 'chat',
     interactionMode: 'auto',
     role: 'primary',
