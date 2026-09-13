@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AskUserResult, RequestPermissionHandlerResult } from '@factory/droid-sdk';
-
-import type { ServerEvent, SessionSummary } from './protocol.js';
+import type { PermissionOutcome, ServerEvent, SessionSummary } from './protocol.js';
+import type { ProviderQuestionAnswers } from './providers/interactions.js';
 import { SessionCompaction } from './SessionCompaction.js';
 import type { LiveSession } from './SessionLifecycle.js';
 import type { SessionSummaryPatch } from './SessionRegistry.js';
@@ -142,8 +141,10 @@ function createHarness(options: { adoptSucceeds?: boolean; adopt?: () => Promise
       adoptDescendantsAsRoots: () =>
         options.adopt?.() ?? Promise.resolve(options.adoptSucceeds ?? true),
     },
-    makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
-    makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+    interactionsFor: () => ({
+      requestApproval: () => new Promise<PermissionOutcome>(() => undefined),
+      requestQuestion: () => new Promise<ProviderQuestionAnswers>(() => undefined),
+    }),
     emitError: (error) => {
       errors.push(error);
     },

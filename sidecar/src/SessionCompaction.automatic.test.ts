@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AskUserResult, RequestPermissionHandlerResult } from '@factory/droid-sdk';
-
+import type { PermissionOutcome } from './protocol.js';
+import type { ProviderQuestionAnswers } from './providers/interactions.js';
 import {
   SessionCompaction,
   type AutomaticCompactionTarget,
@@ -93,8 +93,10 @@ function createHarness(
       untrack: () => undefined,
       adoptDescendantsAsRoots: () => Promise.resolve(true),
     },
-    makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
-    makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+    interactionsFor: () => ({
+      requestApproval: () => new Promise<PermissionOutcome>(() => undefined),
+      requestQuestion: () => new Promise<ProviderQuestionAnswers>(() => undefined),
+    }),
     emitError: () => undefined,
     isShutdownStarted: () => false,
     getFactoryDefaults: () => Promise.resolve({}),

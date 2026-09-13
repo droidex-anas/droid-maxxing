@@ -36,7 +36,7 @@ export interface ChildSessionsDependencies {
     'append' | 'appendStatus' | 'loadChildHistory' | 'flushStreamingFor' | 'settleStreaming'
   >;
   eventFlow: Pick<SessionEventFlow, 'beginTurn' | 'applyNotification' | 'applyStreamEvent'>;
-  interactions: Pick<SessionInteractions, 'makePermissionHandler' | 'makeAskUserHandler'>;
+  interactions: Pick<SessionInteractions, 'interactionsFor'>;
   context: Pick<SessionContext, 'forgetChild' | 'refresh' | 'startPolling' | 'stopPolling'>;
   compaction: Pick<
     SessionCompaction,

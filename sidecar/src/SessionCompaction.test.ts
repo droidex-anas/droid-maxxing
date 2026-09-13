@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AskUserResult, RequestPermissionHandlerResult } from '@factory/droid-sdk';
-
-import type { FactoryDefaultSettings, SessionSummary } from './protocol.js';
+import type { FactoryDefaultSettings, PermissionOutcome, SessionSummary } from './protocol.js';
+import type { ProviderQuestionAnswers } from './providers/interactions.js';
 import {
   childCompactionModelId,
   SessionCompaction,
@@ -61,8 +60,10 @@ function createHarness(): Harness {
       untrack: () => undefined,
       adoptDescendantsAsRoots: () => Promise.resolve(true),
     },
-    makePermissionHandler: () => () => new Promise<RequestPermissionHandlerResult>(() => undefined),
-    makeAskUserHandler: () => () => new Promise<AskUserResult>(() => undefined),
+    interactionsFor: () => ({
+      requestApproval: () => new Promise<PermissionOutcome>(() => undefined),
+      requestQuestion: () => new Promise<ProviderQuestionAnswers>(() => undefined),
+    }),
     emitError: () => undefined,
     isShutdownStarted: () => false,
     getFactoryDefaults: () => readDefaults(),
