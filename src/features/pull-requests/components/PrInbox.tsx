@@ -94,7 +94,10 @@ function PrInboxRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-start justify-between gap-2">
-            <span className="min-w-0 truncate text-[13px] leading-snug font-medium text-droid-text">
+            <span
+              title={pr.title}
+              className="min-w-0 truncate text-[13px] leading-snug font-medium text-droid-text"
+            >
               {pr.title}
             </span>
             {time ? (
@@ -106,7 +109,7 @@ function PrInboxRow({
               </span>
             ) : null}
           </span>
-          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11.5px] text-droid-text-muted">
+          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-droid-text-muted">
             <GithubAvatar login={pr.author} size={16} />
             <span className="shrink-0 text-droid-text-secondary">{displayLogin(pr.author)}</span>
             <span className="shrink-0 tabular-nums">#{pr.number}</span>

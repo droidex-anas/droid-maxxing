@@ -2,6 +2,7 @@ import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import { shallowEqual, useStoreDispatch, useStoreSelector } from '../hooks/useStore';
 import type { ChildAccess, ChildRuntimeState } from '../hooks/storeChildSession';
 import { useRepoStatus } from '../hooks/useRepoStatus';
+import { useObscuresNativeSurfaces } from '../hooks/useObscuresNativeSurfaces';
 import { interruptVisibleSession, updateSessionSettings } from '../lib/commands';
 import { utilityPanelForSession } from '../lib/utilityPanel';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -189,7 +190,7 @@ function FeaturesColumn({
     <div className="flex-1 min-h-0 overflow-y-auto px-2.5 pb-4 pt-2 space-y-4">
       {milestones.map(([milestone, feats]) => (
         <div key={milestone}>
-          <span className="block px-2 mb-1 text-[10px] font-medium text-droid-text-muted/70 uppercase tracking-wider">
+          <span className="block px-2 mb-1 text-[11px] font-medium text-droid-text-muted/70 uppercase tracking-wider">
             {milestone}
           </span>
           <div className="space-y-px">
@@ -210,11 +211,11 @@ function FeaturesColumn({
                     className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full transition-opacity"
                     style={{ background: ACCENT, opacity: active ? 1 : running ? 0.45 : 0 }}
                   />
-                  <span className="tabular-nums text-[10px] text-droid-text-muted/70 w-4 shrink-0 text-right">
+                  <span className="tabular-nums text-[11px] text-droid-text-muted/70 w-4 shrink-0 text-right">
                     {numberOf.get(f.id)}
                   </span>
                   <span
-                    className={`min-w-0 flex-1 truncate ${big ? 'text-[12.5px]' : 'text-[12px]'} ${
+                    className={`min-w-0 flex-1 truncate ${big ? 'text-[13px]' : 'text-[12px]'} ${
                       completed
                         ? 'text-droid-text-muted'
                         : active
@@ -225,7 +226,7 @@ function FeaturesColumn({
                     {f.skillName || f.description}
                   </span>
                   {running && !paused ? (
-                    <span className="shimmer-text text-[9px] font-medium uppercase tracking-wide shrink-0">
+                    <span className="shimmer-text text-[11px] font-medium uppercase tracking-wide shrink-0">
                       working
                     </span>
                   ) : completed ? (
@@ -269,7 +270,7 @@ function EnvRow({
       className="w-full flex items-center gap-3 px-2 py-2 rounded-lg text-droid-text-secondary hover:text-droid-text hover:bg-droid-elevated/60 transition-colors"
     >
       <span className="text-droid-text-muted shrink-0">{icon}</span>
-      <span className="text-[13.5px] leading-none">{label}</span>
+      <span className="text-[13px] leading-none">{label}</span>
       {chevron && <ChevronDown className="w-3.5 h-3.5 ml-1 text-droid-text-muted/60" />}
     </button>
   );
@@ -388,7 +389,7 @@ function ContextColumn({
             {skills.map((s) => (
               <span
                 key={s}
-                className="px-1.5 py-0.5 rounded text-[10px] text-droid-text-muted bg-droid-elevated"
+                className="px-1.5 py-0.5 rounded text-[11px] text-droid-text-muted bg-droid-elevated"
               >
                 {s}
               </span>
@@ -521,10 +522,10 @@ function AgentRow({
             {title}
           </span>
           {working && (
-            <span className="shimmer-text text-[10px] leading-none font-medium">working</span>
+            <span className="shimmer-text text-[11px] leading-none font-medium">working</span>
           )}
         </span>
-        <span className="mt-1 block text-[10px] text-droid-text-muted truncate">{meta}</span>
+        <span className="mt-1 block text-[11px] text-droid-text-muted truncate">{meta}</span>
       </span>
     </button>
   );
@@ -550,7 +551,7 @@ function ProgressSection({
       <div className="flex items-center justify-between px-2 mb-1.5">
         <SectionLabel>Progress</SectionLabel>
         {progress.length > 0 && (
-          <span className="tabular-nums text-[10px] text-droid-text-muted">{progress.length}</span>
+          <span className="tabular-nums text-[11px] text-droid-text-muted">{progress.length}</span>
         )}
       </div>
       <div className="space-y-0.5">
@@ -567,7 +568,7 @@ function ProgressSection({
               entry.workerChildSessionId ? 'hover:bg-droid-elevated/35' : 'cursor-default'
             }`}
           >
-            <span className="tabular-nums text-[9.5px] text-droid-text-muted/70 shrink-0">
+            <span className="tabular-nums text-[11px] text-droid-text-muted/70 shrink-0">
               {formatTime(entry.timestamp)}
             </span>
             <span className="min-w-0 truncate text-[12px] text-droid-text-secondary">
@@ -583,7 +584,7 @@ function ProgressSection({
             onClick={() => {
               setShowAll(true);
             }}
-            className="w-full text-left px-2 py-1 text-[11.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+            className="w-full text-left px-2 py-1 text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
           >
             Show {hidden} more
           </button>
@@ -593,7 +594,7 @@ function ProgressSection({
             onClick={() => {
               setShowAll(false);
             }}
-            className="w-full text-left px-2 py-1 text-[11.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+            className="w-full text-left px-2 py-1 text-[12px] text-droid-text-muted hover:text-droid-text transition-colors"
           >
             Show less
           </button>
@@ -616,6 +617,8 @@ function ExpandModal({
   children: React.ReactNode;
   headerExtra?: React.ReactNode;
 }) {
+  // A full-window overlay: the native browser view would paint through it.
+  useObscuresNativeSurfaces();
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -629,7 +632,7 @@ function ExpandModal({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.97, opacity: 0, y: 8 }}
         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-3xl h-[82vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/60 overflow-hidden"
+        className="w-full max-w-3xl h-[82vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-droid overflow-hidden"
         onClick={(e) => {
           e.stopPropagation();
         }}
@@ -674,7 +677,7 @@ function PanelHeader({
         <span className="text-[11px] font-medium tracking-[0.09em] text-droid-text-secondary uppercase">
           {title}
         </span>
-        {count && <span className="tabular-nums text-[10px] text-droid-text-muted">{count}</span>}
+        {count && <span className="tabular-nums text-[11px] text-droid-text-muted">{count}</span>}
       </span>
       <div className="flex items-center gap-0.5">
         <button
@@ -832,7 +835,7 @@ function FeatureFocus({
 
         <div className="space-y-4 rounded-xl bg-droid-elevated/25 p-4 mb-6">
           {noSpec ? (
-            <div className="text-[12.5px] text-droid-text-muted">
+            <div className="text-[13px] text-droid-text-muted">
               No spec details provided for this feature.
             </div>
           ) : (
@@ -849,7 +852,7 @@ function FeatureFocus({
             <span className="text-[11px] font-medium uppercase tracking-wider text-droid-text-secondary">
               Worker actions
             </span>
-            <span className="tabular-nums text-[10px] text-droid-text-muted">{shown.length}</span>
+            <span className="tabular-nums text-[11px] text-droid-text-muted">{shown.length}</span>
           </div>
           {toolCalls.length > curated.length && (
             <button
@@ -867,7 +870,7 @@ function FeatureFocus({
             <ActionRow key={e.id} event={e} cwd={cwd} onOpenDiff={onOpenDiff} />
           ))}
           {shown.length === 0 && (
-            <div className="py-8 text-center text-[12.5px] text-droid-text-muted">
+            <div className="py-8 text-center text-[13px] text-droid-text-muted">
               No worker activity recorded yet.
             </div>
           )}
@@ -1049,6 +1052,10 @@ export default function MissionControl() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
+      {/* Mission Control starts with its own drag row instead of leading its
+          headers past the window controls: the rail below is a fixed-width
+          column, and the collapsed rail is narrower than that lead. */}
+      <div data-electron-drag-region className="h-9 shrink-0" />
       <div className="flex-1 flex min-h-0 min-w-0">
         {/* ─── Features rail ─── */}
         {railCollapsed ? (
@@ -1062,7 +1069,7 @@ export default function MissionControl() {
             >
               <PanelLeft className="w-4 h-4" />
             </button>
-            <span className="mt-3 text-[10px] font-medium tracking-[0.15em] text-droid-text-muted uppercase [writing-mode:vertical-rl]">
+            <span className="mt-3 text-[11px] font-medium tracking-[0.15em] text-droid-text-muted uppercase [writing-mode:vertical-rl]">
               Features
             </span>
           </div>
@@ -1097,7 +1104,7 @@ export default function MissionControl() {
             <div className="flex items-center gap-2 shrink-0">
               {visibleIsLive ? (
                 <>
-                  <span className="shimmer-text text-[11.5px] font-medium leading-none">
+                  <span className="shimmer-text text-[12px] font-medium leading-none">
                     {visibleAgentLabel} working
                   </span>
                   <button

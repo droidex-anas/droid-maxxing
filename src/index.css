@@ -318,37 +318,74 @@
   }
 
   .feed-row-enter {
-    animation: feed-row-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation: feed-row-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 
   /* Tool rows landing in a live group share the same entrance. */
   .tool-rows-live > * {
-    animation: feed-row-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation: feed-row-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 
-  /* A prompt the user just sent rises out of the composer beneath it and
-     settles into the transcript: slow, with real travel and a long expo ease,
-     so the send reads as a gesture rather than a row popping in. */
+  /* A prompt the user just sent rises a little out of the composer beneath it
+     and settles: short travel, expo ease, no scaling, so the send reads as a
+     gesture without the row visibly resizing. */
   @keyframes prompt-enter {
     from {
       opacity: 0;
-      transform: translateY(24px) scale(0.96);
+      transform: translateY(10px);
     }
     to {
       opacity: 1;
-      transform: translateY(0) scale(1);
+      transform: translateY(0);
     }
   }
 
   .prompt-enter {
-    transform-origin: bottom right;
-    animation: prompt-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation: prompt-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  /* The Working line fades in rather than popping, and lives in a fixed line
+     box so the row rhythm below the feed never jitters. */
+  @keyframes cue-enter {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .cue-enter {
+    animation: cue-enter 0.16s ease-out both;
+  }
+
+  /* Streaming caret: drawn at the end of the last line of the last block while
+     tokens flow, so it never wraps onto a line of its own. Blocks that have no
+     text line to end on (a code card, a table) get it after the block. */
+  .md-typing .md-shell > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after,
+  .md-typing .md-shell > :last-child:is(ul, ol) > li:last-child::after,
+  .md-typing .md-shell > blockquote:last-child > :last-child::after,
+  .md-typing
+    .md-shell:has(> :last-child:not(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote))::after {
+    content: '';
+    display: inline-block;
+    width: 2px;
+    height: 1.05em;
+    margin-left: 2px;
+    margin-bottom: -0.15em;
+    border-radius: 2px;
+    vertical-align: baseline;
+    background: var(--droid-accent);
+    animation: caret-blink 1s ease-in-out infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .feed-row-enter,
     .tool-rows-live > *,
-    .prompt-enter {
+    .prompt-enter,
+    .cue-enter,
+    .md-typing .md-shell::after,
+    .md-typing .md-shell *::after {
       animation: none;
     }
   }
@@ -371,7 +408,8 @@
     opacity: 0.45;
   }
 
-  .group:hover .droid-toast-ttl {
+  .group:hover .droid-toast-ttl,
+  .group:focus-within .droid-toast-ttl {
     animation-play-state: paused;
   }
 
@@ -446,6 +484,18 @@
     overflow: auto;
   }
 
+  /* Diff rows are blocks sized to the scroll container, so their add/del tone
+     and focused left border stop at the viewport edge while the
+     `white-space: pre` code keeps going. Giving the scrolled content an
+     intrinsic width — the widest line, never narrower than the viewport —
+     makes every row as wide as the scrollable area, so the tones cover the
+     whole scroll range and the gutters stay aligned. Wrapping modes opt out:
+     `max-content` would undo their soft wrapping. */
+  .review-diff-content {
+    width: max-content;
+    min-width: 100%;
+  }
+
   .review-diff-row,
   .review-split-cell {
     border-left: 2px solid transparent;
@@ -515,11 +565,19 @@
       min-width: 0;
       max-width: none;
       background: var(--droid-surface);
-      box-shadow: 18px 0 44px rgba(0, 0, 0, 0.34);
+      box-shadow: 18px 0 44px color-mix(in srgb, var(--droid-text) 22%, transparent);
     }
 
     .review-diff-scroll {
       overflow-x: hidden;
+    }
+
+    /* Narrow panes wrap instead of scrolling, so the rows are viewport-width
+       again and an intrinsic width would only defeat the wrapping. */
+    /* Only content whose code wraps at this width gives up its intrinsic
+       width; inline hunks keep `white-space: pre` and stay scrollable. */
+    .review-diff-content:has(.review-diff-code) {
+      width: auto;
     }
 
     .review-diff-code {
@@ -611,7 +669,7 @@
   }
 
   .droid-tool-panel {
-    @apply overflow-hidden rounded-xl border border-droid-border bg-droid-surface;
+    @apply overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/50;
 
     box-shadow: var(--droid-shadow-sm, 0 4px 16px rgba(0, 0, 0, 0.28));
   }

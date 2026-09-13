@@ -286,27 +286,32 @@ export default function ModelSelectorPopover({
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, y: 8, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 8, scale: 0.98 }}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
       transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-      className="absolute bottom-full left-0 mb-3 w-[380px] z-50"
+      className="absolute bottom-full left-0 mb-3 w-[min(420px,calc(100vw-2rem))] z-50"
     >
-      <div className="rounded-2xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/50 overflow-hidden">
+      <div className="rounded-2xl border border-droid-border bg-droid-elevated shadow-droid overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 pt-3 pb-2">
-          <span className="text-[11px] font-medium text-droid-text-secondary tracking-wide">
+        <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
+          <span className="shrink-0 text-[12px] font-medium text-droid-text-secondary">
             {childTarget ? childTarget.label : singleAgent ? 'Model' : 'Models'}
           </span>
-          <span className="text-[10px] text-droid-text-muted">
-            {childTarget
-              ? childTarget.readiness === 'ready'
+          {childTarget ? (
+            <span className="text-[11px] text-droid-text-muted truncate">
+              {childTarget.readiness === 'ready'
                 ? `${active.label} model`
-                : childSettingsReadinessLabel(childTarget.readiness)
-              : singleAgent
-                ? 'Used for this chat'
-                : active.hint}
-          </span>
+                : childSettingsReadinessLabel(childTarget.readiness)}
+            </span>
+          ) : (
+            <span
+              className="min-w-0 text-[13px] text-droid-text truncate"
+              title={singleAgent ? 'Used for this chat' : active.hint}
+            >
+              {selectedLabel}
+            </span>
+          )}
         </div>
 
         {/* Agent tabs */}
@@ -347,8 +352,8 @@ export default function ModelSelectorPopover({
                 onChange={(e) => {
                   setQuery(e.target.value);
                 }}
-                placeholder={`Search models · ${selectedLabel}`}
-                className="flex-1 bg-transparent text-[12px] text-droid-text placeholder-droid-text-muted/70 focus:outline-none"
+                placeholder="Search models"
+                className="flex-1 bg-transparent text-[12px] text-droid-text placeholder-droid-text-muted focus:outline-none"
               />
             </div>
 
@@ -378,11 +383,11 @@ export default function ModelSelectorPopover({
               <AnimatePresence>
                 {filterOpen && (
                   <motion.div
-                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
                     transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute right-0 top-full mt-1.5 w-44 z-50 rounded-xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/50 overflow-hidden p-1"
+                    className="absolute right-0 top-full mt-1.5 w-44 z-50 rounded-xl border border-droid-border bg-droid-elevated shadow-md overflow-hidden p-1"
                   >
                     {[
                       { value: 'all' as const, label: 'All models', count: source.length },
@@ -421,7 +426,7 @@ export default function ModelSelectorPopover({
                             )}
                           </span>
                           <span className="flex-1">{opt.label}</span>
-                          <span className="text-[10px] text-droid-text-muted">{opt.count}</span>
+                          <span className="text-[11px] text-droid-text-muted">{opt.count}</span>
                         </button>
                       );
                     })}

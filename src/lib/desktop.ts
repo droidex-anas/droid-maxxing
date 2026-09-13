@@ -211,6 +211,7 @@ interface DroidControlApi {
   readFile: (path: string) => Promise<string>;
   repoStatus: (dir: string) => Promise<RepoStatus | null>;
   listEditors: () => Promise<EditorId[]>;
+  editorIcon: (editor: EditorId) => Promise<string | null>;
   openProject: (dir: string, editor: EditorId, target: EditorTarget) => Promise<void>;
   gitEnvironment: (dir: string) => Promise<GitEnvironment>;
   gitBranches: (dir: string) => Promise<GitBranchList>;
@@ -664,5 +665,15 @@ export async function listEditors(): Promise<EditorId[]> {
     return await api.listEditors();
   } catch {
     return [];
+  }
+}
+
+export async function editorIcon(editor: EditorId): Promise<string | null> {
+  const api = desktopApi();
+  if (!api) return null;
+  try {
+    return await api.editorIcon(editor);
+  } catch {
+    return null;
   }
 }

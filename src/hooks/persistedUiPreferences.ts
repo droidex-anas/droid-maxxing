@@ -5,6 +5,12 @@ import { isReasoningEffort } from '../lib/reasoningEffort';
 import { DIFF_SCOPES, type DiffScope } from '../types/vcs';
 import type { ImagePasteQuality } from '../lib/images';
 import {
+  SHORTCUT_DEFINITIONS,
+  defaultShortcutBindings,
+  parseChord,
+  type ShortcutBindings,
+} from '../lib/shortcuts';
+import {
   persistUtilityPanels,
   sanitizeUtilityPanels,
   type UtilityPanelState,
@@ -85,6 +91,7 @@ const DIFF_VIEW_STORAGE_KEY = 'droid-diff-view';
 const REVIEW_SCOPE_STORAGE_KEY = 'droid-review-scope';
 const WORKSPACES_STORAGE_KEY = 'droid-workspaces';
 const SESSION_LAST_SEEN_STORAGE_KEY = 'droid-session-last-seen-v1';
+const SHORTCUTS_STORAGE_KEY = 'droid-shortcuts-v1';
 const UI_STATE_STORAGE_KEY = 'droid-ui-state-v2';
 
 export type MainView = 'session' | 'pull-requests' | 'automations';
@@ -296,6 +303,31 @@ export function savePersistedUiState(state: PersistedUiStateSource): void {
   } catch {
     /* ignore */
   }
+}
+
+export function loadShortcutBindings(): ShortcutBindings {
+  const bindings = defaultShortcutBindings();
+  try {
+    const raw = getLocalStorage()?.getItem(SHORTCUTS_STORAGE_KEY);
+    if (!raw) return bindings;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    for (const { action } of SHORTCUT_DEFINITIONS) {
+      const chord = parsed[action];
+      if (typeof chord === 'string' && parseChord(chord)) bindings[action] = chord;
+    }
+    return bindings;
+  } catch {
+    return bindings;
+  }
+}
+
+export function saveShortcutBindings(bindings: ShortcutBindings): ShortcutBindings {
+  try {
+    getLocalStorage()?.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(bindings));
+  } catch {
+    /* ignore */
+  }
+  return bindings;
 }
 
 export function loadSessionLastSeen(): Record<string, number> {

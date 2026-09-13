@@ -18,23 +18,26 @@ const ROW_TONE: Record<DiffOp['type'], string> = {
 
 export function DiffLines({ ops }: { ops: DiffOp[] }) {
   return (
-    <div className="overflow-x-auto font-mono text-[11.5px] leading-[1.65]">
-      {ops.map((o, i) => (
-        <div key={`${o.type}-${String(i)}`} className={`flex ${ROW_TONE[o.type]}`}>
-          <span
-            className="w-5 shrink-0 text-center select-none"
-            style={{
-              color:
-                o.type === 'add' ? ADD_FG : o.type === 'del' ? DEL_FG : 'var(--droid-text-muted)',
-            }}
-          >
-            {o.type === 'add' ? '+' : o.type === 'del' ? '−' : ''}
-          </span>
-          <span className="whitespace-pre flex-1 px-1 text-droid-text-secondary">
-            {o.text || ' '}
-          </span>
-        </div>
-      ))}
+    <div className="overflow-x-auto font-mono text-[12px] leading-[1.65]">
+      {/* Sized to the widest line so row tones cover the whole scroll range. */}
+      <div className="review-diff-content">
+        {ops.map((o, i) => (
+          <div key={`${o.type}-${String(i)}`} className={`flex ${ROW_TONE[o.type]}`}>
+            <span
+              className="w-5 shrink-0 text-center select-none"
+              style={{
+                color:
+                  o.type === 'add' ? ADD_FG : o.type === 'del' ? DEL_FG : 'var(--droid-text-muted)',
+              }}
+            >
+              {o.type === 'add' ? '+' : o.type === 'del' ? '−' : ''}
+            </span>
+            <span className="whitespace-pre flex-1 px-1 text-droid-text-secondary">
+              {o.text || ' '}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

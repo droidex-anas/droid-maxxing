@@ -123,7 +123,7 @@ export default function SidebarSearch({
               <span className="min-w-0 flex-1 truncate text-sm text-droid-text">
                 {entry.session.title}
               </span>
-              <span className="shrink-0 text-[10.5px] tabular-nums text-droid-text-muted">
+              <span className="shrink-0 text-[11px] tabular-nums text-droid-text-muted">
                 {formatRelativeTime(entry.session.updatedAt, now)}
               </span>
             </span>

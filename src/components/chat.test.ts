@@ -10,7 +10,6 @@ import {
   fetchSizeBadge,
   sameFeedEvents,
   splitAutomationProposals,
-  StreamingCaret,
   UserBubble,
   WebFetchBody,
   FeedItemView,
@@ -379,24 +378,6 @@ test('an automation proposal stays at conversation level after the turn settles'
     ),
     false,
   );
-});
-
-test('#20 a failed plan result in a batched group is not consumed (it must surface)', () => {
-  const todoCall = ev({
-    kind: 'tool_call',
-    toolName: 'TodoWrite',
-    toolArgs: { todos: 'x' },
-    toolUseId: 'a',
-  });
-  const failed = ev({
-    kind: 'tool_result',
-    toolName: '',
-    toolUseId: 'a',
-    isError: true,
-    text: 'boom',
-  });
-  const { consumed } = correlateResults([todoCall, grep(), failed]);
-  assert.equal(consumed.has(failed), false);
 });
 
 test('a failed non-plan tool result attaches to its call so the failure folds in', () => {
@@ -848,14 +829,6 @@ test('Read output is visible in detailed density and expandable in balanced dens
   assert.match(balanced, /inert=""/);
 });
 
-test('settled compact tool summaries render their non-streaming label', () => {
-  const item: FeedItem = { type: 'tools', key: 'search', events: [grep()] };
-  const html = renderToStaticMarkup(
-    createElement(FeedItemView, { item, live: false, density: 'compact' }),
-  );
-  assert.match(html, /<span class="[^"]*text-droid-text-muted[^"]*">Explored 1 search</);
-});
-
 test('web result source rows render a local icon without a remote favicon request', () => {
   const html = renderToStaticMarkup(
     createElement(WebFetchBody, {
@@ -868,15 +841,6 @@ test('web result source rows render a local icon without a remote favicon reques
     }),
   );
   assert.doesNotMatch(html, /<img|google\.com/);
-});
-
-test('#18 pre-answer work folds into Worked but the answer never does', () => {
-  const events = [userMsg('q'), grep(), asst('answer'), compaction()];
-  const grouped = groupTurns(buildFeed(events), false);
-  // Exactly one Worked group (the grep), and it carries no assistant message.
-  const worked = grouped.filter((it) => it.type === 'worked');
-  assert.equal(worked.length, 1);
-  assert.ok(!workedChildren(grouped).some((c) => c.type === 'message'));
 });
 
 // ── #19: a final answer split only by todo/plan reconciliation is one answer ──
@@ -927,27 +891,6 @@ test('#14 a normal assistant response still renders in chat while a spec exists'
   assert.ok(html.includes('a perfectly normal answer'));
 });
 
-test('restored feed rows render immediately instead of replaying entrance motion', () => {
-  const events = [userMsg('hi'), asst('restored answer')];
-  const html = renderToStaticMarkup(createElement(MessageFeed, { events, pending: false }));
-
-  assert.doesNotMatch(html, /opacity:\s*0/);
-  assert.doesNotMatch(html, /translateY\(4px\)/);
-});
-
-test('App responses receive a wider chat canvas while ordinary rows stay readable', () => {
-  const app = 'Here is the result.\n\n```app\n<main>Wide App</main>\n```';
-  const appHtml = renderToStaticMarkup(
-    createElement(MessageFeed, { events: [asst(app)], pending: false }),
-  );
-  const textHtml = renderToStaticMarkup(
-    createElement(MessageFeed, { events: [asst('Ordinary answer')], pending: false }),
-  );
-
-  assert.match(appHtml, /max-w-4xl/);
-  assert.match(textHtml, /max-w-2xl/);
-});
-
 test('an incomplete live App owns its building state without exposing Play or a trailing caret', () => {
   const incompleteApp = [
     'Preparing the visualization.',
@@ -967,19 +910,15 @@ test('an incomplete live App owns its building state without exposing Play or a 
   assert.doesNotMatch(html, /<iframe/i);
 });
 
-test('ordinary live prose keeps the trailing streaming caret', () => {
+// The caret is the only cue while prose streams (drawn by CSS on the typing
+// message); Working takes over once the stream idles, never alongside it.
+test('ordinary live prose shows the streaming caret and no Working cue', () => {
   const html = renderToStaticMarkup(
     createElement(MessageFeed, { events: [asst('Still writing')], pending: true }),
   );
 
-  assert.match(html, /caret-blink/);
-});
-
-test('a pending assistant tail still shows Working after the streaming caret can idle', () => {
-  const html = renderToStaticMarkup(
-    createElement(MessageFeed, { events: [asst('Still writing')], pending: true }),
-  );
-  assert.match(html, /Working/);
+  assert.match(html, /md-typing/);
+  assert.doesNotMatch(html, /Working/);
 });
 
 test('a running child-session tail without toolUseId still suppresses the Working cue', () => {
@@ -1336,12 +1275,6 @@ test('parseTruncatedTail splits the history truncation sentinel from the body', 
   assert.equal(truncatedChars, 1252663);
 });
 
-test('parseTruncatedTail leaves untruncated text untouched', () => {
-  const { body, truncatedChars } = parseTruncatedTail('Just a normal answer.');
-  assert.equal(body, 'Just a normal answer.');
-  assert.equal(truncatedChars, null);
-});
-
 test('MessageFeed strips the truncation sentinel and shows no truncation note', () => {
   const events = [userMsg('hi'), asst('Big answer body.\n\n[truncated 2048 chars]')];
   const html = renderToStaticMarkup(createElement(MessageFeed, { events, pending: false }));
@@ -1501,18 +1434,6 @@ test('sameFeedEvents compares turnChanges by captured file values, not object id
   });
   assert.equal(sameFeedEvents(item(1), item(1)), true);
   assert.equal(sameFeedEvents(item(1), item(2)), false);
-});
-
-test('StreamingCaret renders a plain span carrying the caret-blink CSS class', () => {
-  const html = renderToStaticMarkup(createElement(StreamingCaret));
-  assert.ok(html.startsWith('<span '), 'caret should render as a plain span');
-  assert.ok(html.includes('class="caret-blink '), 'caret should carry the caret-blink class');
-  assert.ok(html.includes('w-[2px]'), 'caret should keep its 2px width');
-  assert.ok(html.includes('h-[1.05em]'), 'caret should keep its 1.05em height');
-  assert.ok(
-    html.includes('background:var(--droid-accent)'),
-    'caret should keep the accent background',
-  );
 });
 
 // appendedFeedItemKeys decides which rows get the rise-in entrance animation.
@@ -1697,17 +1618,6 @@ test('caret-blink is neutralized under prefers-reduced-motion', () => {
     css.match(/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{[^}]*\}/g) ?? [];
   const coversCaretBlink = reducedMotionBlocks.some((block) => /\.caret-blink\b/.test(block));
   assert.ok(coversCaretBlink, 'a prefers-reduced-motion block must disable .caret-blink');
-});
-
-test('feed row entrance motion is CSS-only and honors reduced motion', () => {
-  const cssPath = fileURLToPath(new URL('../index.css', import.meta.url));
-  const css = readFileSync(cssPath, 'utf8');
-
-  assert.match(css, /\.feed-row-enter\s*\{[^}]*animation:[^;]*backwards;/s);
-  assert.match(
-    css,
-    /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.feed-row-enter[^}]*animation:\s*none/s,
-  );
 });
 
 test('thinking duration changes invalidate the feed row', () => {

@@ -157,7 +157,7 @@ export function ThemeEditor({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
@@ -167,7 +167,7 @@ export function ThemeEditor({
         role="dialog"
         aria-modal="true"
         aria-labelledby="theme-editor-title"
-        className="w-[560px] max-w-full rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/50"
+        className="w-[560px] max-w-full rounded-2xl border border-droid-border bg-droid-surface shadow-droid"
       >
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
           <h3 id="theme-editor-title" className="text-[14px] font-semibold text-droid-text">
@@ -251,7 +251,7 @@ export function ThemeEditor({
               }}
               placeholder="My theme"
               spellCheck={false}
-              className="h-8 w-full rounded-lg border border-droid-border bg-droid-bg/60 px-2.5 text-[12.5px] text-droid-text placeholder:text-droid-text-muted focus:border-droid-border-hover focus:outline-none"
+              className="h-8 w-full rounded-lg border border-droid-border bg-droid-bg/60 px-2.5 text-[13px] text-droid-text placeholder:text-droid-text-muted focus:border-droid-border-hover focus:outline-none"
             />
           </div>
 
@@ -271,7 +271,7 @@ export function ThemeEditor({
         </div>
 
         {error && (
-          <p role="alert" className="px-5 pb-2 text-[11.5px] text-droid-red">
+          <p role="alert" className="px-5 pb-2 text-[12px] text-droid-red">
             {error}
           </p>
         )}

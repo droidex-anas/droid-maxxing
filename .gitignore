@@ -22,3 +22,6 @@ vendor/sparkle/
 native/sparkle-updater/bin/
 native/sparkle-updater/build/
 sidecar/node_modules
+
+# Claude Code session handoffs (local, per checkout)
+.remember/

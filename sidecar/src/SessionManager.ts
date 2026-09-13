@@ -212,6 +212,10 @@ const ignoreError = (): undefined => undefined;
 
 const nextChildSessionId = () => `child-${randomUUID()}`;
 
+// MCP settings commands run in a throwaway session; without a workspace they
+// still need a directory to read user-level configuration from.
+const mcpSettingsCwd = (cwd?: string): string => cwd ?? tmpdir();
+
 export class SessionManager {
   private ready = false;
   private cachedModels: ModelInfo[] | null = null;
@@ -320,15 +324,14 @@ export class SessionManager {
       },
     });
     this.mcpSettings = new McpSettings(
-      (cwd) => {
-        const sessionCwd = cwd ?? tmpdir();
-        return this.runtime.createSession({
-          cwd: sessionCwd,
+      (cwd) =>
+        this.runtime.createSession({
+          cwd: mcpSettingsCwd(cwd),
           interactionMode: 'auto',
           autonomyLevel: 'low',
-          mcpServers: this.loadConfiguredMcpServers(sessionCwd),
-        });
-      },
+          mcpServers: this.loadConfiguredMcpServers(mcpSettingsCwd(cwd)),
+        }),
+      (cwd) => this.loadConfiguredMcpServers(mcpSettingsCwd(cwd)),
       this.mcpConfiguration,
       (event) => {
         this.emit(event);

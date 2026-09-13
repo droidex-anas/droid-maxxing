@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import { NativeSurfaceObscurer } from '../hooks/useObscuresNativeSurfaces';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, FileText } from 'lucide-react';
 import { SpecRenderer } from './SpecRenderer';
@@ -30,7 +31,9 @@ function useActiveHeading(scrollRef: React.RefObject<HTMLDivElement | null>, hea
       if (el) observer.observe(el);
     });
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+    };
   }, [scrollRef, headingIds]);
 
   return activeId;
@@ -79,23 +82,28 @@ export function SpecModal({
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6"
           onClick={onClose}
         >
+          {/* A full-window overlay: the native browser view would paint through
+              it, and it keeps painting through the exit fade. */}
+          <NativeSurfaceObscurer />
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ duration: 0.3, ease: EASE }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[1120px] h-[88vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-2xl shadow-black/60 overflow-hidden"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+            className="w-full max-w-[1120px] h-[88vh] flex flex-col rounded-2xl border border-droid-border bg-droid-surface shadow-droid overflow-hidden"
           >
             {/* Header */}
             <div className="shrink-0 flex items-center justify-between px-5 h-12 border-b border-droid-border">
               <div className="flex items-center gap-2.5 min-w-0">
                 <FileText className="w-4 h-4 shrink-0 text-droid-text-muted" />
                 <span className="text-[13px] font-medium text-droid-text truncate">
-                  {title || 'Specification'}
+                  {title?.length ? title : 'Specification'}
                 </span>
                 {outline.length > 0 && (
-                  <span className="text-[10px] font-mono text-droid-text-muted/70 ml-1">
+                  <span className="text-[11px] font-mono text-droid-text-muted/70 ml-1">
                     {outline.length} sections
                   </span>
                 )}

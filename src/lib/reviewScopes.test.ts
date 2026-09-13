@@ -38,6 +38,15 @@ test('matchReviewFocusPath matches absolute transcript paths under the repo', ()
   assert.equal(matchReviewFocusPath(files, 'C:\\repo\\src\\app.ts'), 'src/app.ts');
 });
 
+test('matchReviewFocusPath rejects absolute paths outside the session repo', () => {
+  const files = [{ path: 'src/app.ts' }];
+  assert.equal(matchReviewFocusPath(files, '/elsewhere/repo/src/app.ts', '/Users/dev/repo'), null);
+  assert.equal(
+    matchReviewFocusPath(files, '/Users/dev/repo/src/app.ts', '/Users/dev/repo/packages/web'),
+    'src/app.ts',
+  );
+});
+
 test('matchReviewFocusPath matches cwd-relative paths in a repo subdirectory', () => {
   // The session cwd is apps/web, so the transcript reports src/app.ts while
   // git reports the repo-root-relative path.

@@ -85,7 +85,7 @@ export default function ComposerMenu({
           className="absolute bottom-full left-0 right-0 z-50 mb-2 max-h-72 overflow-y-auto rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
         >
           {triggerKind === 'file' && (
-            <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/55">
+            <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/55">
               Files{filesLoading ? ' · Loading' : ''}
             </div>
           )}
@@ -104,7 +104,7 @@ export default function ComposerMenu({
             };
             const sectionHeader = section ? (
               <div
-                className={`px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/50 ${
+                className={`px-2.5 pb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-droid-text-muted/50 ${
                   i === 0 ? 'pt-1' : 'pt-2.5'
                 }`}
               >
@@ -129,7 +129,7 @@ export default function ComposerMenu({
                     <span className="shrink-0 text-[13px] font-medium text-droid-text">
                       {commandLabel(item.command.cmd)}
                     </span>
-                    <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/75">
+                    <span className="ml-auto min-w-0 truncate text-right text-[12px] text-droid-text-muted/75">
                       {item.command.desc}
                     </span>
                   </button>
@@ -155,16 +155,13 @@ export default function ComposerMenu({
                     <span className="shrink-0 text-[13px] font-medium text-droid-text">
                       {item.skill.name}
                     </span>
-                    <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/75">
+                    <span className="ml-auto min-w-0 truncate text-right text-[12px] text-droid-text-muted/75">
                       {[item.skill.description, LOCATION_LABEL[item.skill.location]]
                         .filter(Boolean)
                         .join(' · ')}
                     </span>
                     {added && (
-                      <span
-                        className="shrink-0 text-[10.5px] font-medium"
-                        style={{ color: ACCENT }}
-                      >
+                      <span className="shrink-0 text-[11px] font-medium" style={{ color: ACCENT }}>
                         Added
                       </span>
                     )}
@@ -185,10 +182,10 @@ export default function ComposerMenu({
                 onClick={runOnKeyboardClick}
                 className={base}
               >
-                <span className="shrink-0 text-[12.5px] font-medium text-droid-text">
+                <span className="shrink-0 text-[13px] font-medium text-droid-text">
                   {basename(item.path)}
                 </span>
-                <span className="ml-auto min-w-0 truncate text-right text-[11.5px] text-droid-text-muted/65">
+                <span className="ml-auto min-w-0 truncate text-right text-[12px] text-droid-text-muted/65">
                   {attachedFiles.includes(item.path) ? `Attached · ${item.path}` : item.path}
                 </span>
               </button>

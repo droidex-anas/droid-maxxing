@@ -4,6 +4,8 @@ import { PanelRight } from '@droidex/icons';
 import { HoverTooltip } from '../HoverTooltip';
 import { Popover } from '../environment/Popover';
 import type { UtilityPanelState, UtilityTab, UtilityTool } from '../../lib/utilityPanel';
+import { useStoreSelector } from '../../hooks/useStore';
+import { WINDOW_CONTROLS_LEAD_PX } from '../../lib/windowChrome';
 import { PaneResizeHandle } from './PaneResizeHandle';
 import { UtilityToolPicker } from './UtilityToolPicker';
 import { UTILITY_TOOL_OPTIONS, utilityToolOption } from './utilityToolOptions';
@@ -37,7 +39,10 @@ export function UtilityPane({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
-
+  // Expanded, the pane owns the window's top row; with the sidebar collapsed
+  // the traffic lights and the sidebar toggle sit there too.
+  const sidebarCollapsed = useStoreSelector((current) => current.sidebarCollapsed);
+  const leadPx = expanded && sidebarCollapsed ? WINDOW_CONTROLS_LEAD_PX : undefined;
   const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
   const openSingletons = new Set(panel.tabs.map((tab) => tab.tool));
   const availableTools = UTILITY_TOOL_OPTIONS.map((option) => option.tool).filter(
@@ -69,6 +74,7 @@ export function UtilityPane({
       <header
         data-electron-drag-region
         className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border pl-2 pr-1.5"
+        style={leadPx === undefined ? undefined : { paddingLeft: leadPx }}
       >
         <div
           role="tablist"
@@ -94,7 +100,7 @@ export function UtilityPane({
                   onClick={() => {
                     onActivateTab(tab.id);
                   }}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 focus:outline-none"
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{tab.label}</span>
@@ -103,7 +109,7 @@ export function UtilityPane({
                   <button
                     type="button"
                     aria-label={`Close ${tab.label}`}
-                    className="ml-0.5 rounded-md p-0.5 text-droid-text-muted opacity-50 transition hover:bg-droid-elevated hover:text-droid-text group-hover:opacity-100"
+                    className="ml-0.5 rounded-md p-1 text-droid-text-muted opacity-50 transition hover:bg-droid-elevated hover:text-droid-text group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
                       onCloseTab(tab);

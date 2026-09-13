@@ -353,7 +353,7 @@ export default function PromptInput({
         return;
     }
   };
-  const [sendHover, setSendHover] = useState(false);
+  const [sendHintOpen, setSendHintOpen] = useState(false);
   const [turnStarting, setTurnStarting] = useState(false);
   const editorRef = useRef<ComposerHandle>(null);
   // Flips once the lazy editor mounts, so a caret queued for it is applied.
@@ -580,12 +580,8 @@ export default function PromptInput({
     addMenuOpen,
     feedbackReport,
     draftEditing.menu,
-    isLive && sendHover,
+    isLive && sendHintOpen,
   ].some(Boolean);
-
-  useEffect(() => {
-    if (!isLive) setSendHover(false);
-  }, [isLive]);
 
   useEffect(() => {
     if (
@@ -1342,8 +1338,7 @@ export default function PromptInput({
       target.closest('.cm-md-tableframe') !== null
     ) {
       // The draft's formatting shortcuts mean nothing in a cell, and letting
-      // them bubble would reach the app's own bindings (Cmd+B toggles the
-      // sidebar).
+      // them bubble would reach the app's own window-level bindings.
       if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'e'].includes(e.key.toLowerCase())) {
         e.preventDefault();
         e.stopPropagation();
@@ -1384,7 +1379,7 @@ export default function PromptInput({
     }
     // Draft formatting shortcuts. These belong to the draft while it is
     // focused, so they are consumed here instead of bubbling to the app's
-    // window-level shortcuts (Cmd+B toggles the sidebar elsewhere).
+    // window-level shortcuts, which deliberately leave Cmd+B alone.
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
       const formatKey = e.key.toLowerCase();
       if (formatKey === 'b' || formatKey === 'i' || formatKey === 'e') {
@@ -1473,14 +1468,25 @@ export default function PromptInput({
     attachedFiles.length > 0 ||
     fileAttachments.files.length > 0 ||
     imageAttachments.images.length > 0;
+  // The hint's host unmounts while a turn starts or the draft is empty; clear
+  // the state with it so the hint never reopens without a hover or focus.
+  useEffect(() => {
+    if (!isLive || !hasContent || turnStarting) setSendHintOpen(false);
+  }, [isLive, hasContent, turnStarting]);
 
   return (
     <div
       className={`w-full min-w-0 shrink-0 ${compact ? 'px-3 pb-3 pt-2' : 'px-6 pb-5 pt-2'}`}
-      style={{ paddingRight: rightInset ? 312 : undefined, transition: 'padding-right 0.2s ease' }}
+      // The transcript keeps its own 24px padding inside the panel inset; the
+      // composer must too, or its centre drifts 12px off the transcript's.
+      style={{ paddingRight: rightInset ? 312 + 24 : undefined }}
     >
       <div
-        className={`relative mx-auto min-w-0 ${compact ? 'max-w-4xl' : 'max-w-3xl'}`}
+        // The composer is the transcript column (42rem) plus its own text inset
+        // on each side (1px border, 16px content padding, 6px editor line
+        // padding = 23px), so the text you type starts on the same edge as the
+        // messages above it.
+        className={`relative mx-auto min-w-0 ${compact ? 'max-w-4xl' : 'max-w-[calc(42rem+46px)]'}`}
         onDragOver={fileDrop.onDragOver}
         onDrop={fileDrop.onDrop}
       >
@@ -1502,14 +1508,14 @@ export default function PromptInput({
 
         {missionPreview ? (
           <div
-            className="absolute -top-5 left-1 flex items-center gap-1.5 text-[10px] font-medium tracking-wide"
+            className="absolute -top-5 left-1 flex items-center gap-1.5 text-[11px] font-medium tracking-wide"
             style={{ color: ACCENT }}
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: ACCENT }} />
             Mission preview
           </div>
         ) : isSpecMode ? (
-          <div className="absolute -top-5 left-1 text-[10px] font-medium text-droid-orange tracking-wide">
+          <div className="absolute -top-5 left-1 text-[11px] font-medium text-droid-orange tracking-wide">
             SPEC MODE
           </div>
         ) : null}
@@ -1758,12 +1764,6 @@ export default function PromptInput({
 
             <div className="flex-1 min-w-0" />
 
-            {queue.length > 0 ? (
-              <span className="rounded-md border border-droid-border bg-droid-elevated/70 px-1.5 py-0.5 tabular-nums text-[10px] text-droid-text-secondary">
-                {queue.length} queued
-              </span>
-            ) : null}
-
             {/* Autonomy: read-only for a targeted child, live control for an
                 open session, draft override before a session exists. */}
             {targetChild ? (
@@ -1831,23 +1831,31 @@ export default function PromptInput({
                 <Square className="w-3.5 h-3.5" fill="currentColor" strokeWidth={0} />
               </button>
             ) : isLive ? (
+              // Keyboard users reach the send button by tab, never by pointer, so
+              // focus opens the same hint that hover does.
               <div
                 className="relative shrink-0"
                 onMouseEnter={() => {
-                  setSendHover(true);
+                  setSendHintOpen(true);
                 }}
                 onMouseLeave={() => {
-                  setSendHover(false);
+                  setSendHintOpen(false);
+                }}
+                onFocus={() => {
+                  setSendHintOpen(true);
+                }}
+                onBlur={() => {
+                  setSendHintOpen(false);
                 }}
               >
                 <AnimatePresence>
-                  {sendHover && (
+                  {sendHintOpen && (
                     <motion.div
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 4 }}
                       transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
-                      className="absolute bottom-full right-0 mb-2 z-50 flex flex-col gap-0.5 rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-2xl shadow-black/40"
+                      className="absolute bottom-full right-0 mb-2 z-50 flex flex-col gap-0.5 rounded-xl border border-droid-border bg-droid-elevated p-1.5 shadow-droid"
                     >
                       {[
                         { label: enterSteers ? 'Steer' : 'Queue', keys: ['⏎'] },
@@ -1897,7 +1905,7 @@ export default function PromptInput({
                       ? idleSendTooltip
                       : 'Agent runtime is unavailable'
                 }
-                className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-25 disabled:cursor-not-allowed shrink-0"
+                className="p-2 rounded-full text-droid-bg transition-all enabled:hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                 style={{ background: ACCENT }}
               >
                 <ArrowUp className="w-3.5 h-3.5" />

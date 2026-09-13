@@ -16,7 +16,7 @@ const AutomationSessionBadge = lazy(async () => {
 });
 
 const HOVER_ACTION =
-  'absolute top-1/2 -translate-y-1/2 flex w-6 h-6 items-center justify-center rounded-md text-droid-text-muted opacity-0 pointer-events-none transition-opacity hover:bg-droid-elevated hover:text-droid-text group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none';
+  'absolute top-1/2 -translate-y-1/2 flex w-6 h-6 items-center justify-center rounded-md text-droid-text-muted opacity-0 pointer-events-none transition-opacity hover:bg-droid-elevated hover:text-droid-text group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60';
 
 // Left-edge dot: red when something broke, accent for unseen output, amber for
 // anything else waiting on the user.
@@ -244,7 +244,7 @@ export const SessionRow = memo(function SessionRow({
             </span>
           </span>
           {detail && (
-            <span className="mt-0.5 block truncate text-[11.5px] leading-4 text-droid-text-muted">
+            <span className="mt-0.5 block truncate text-[12px] leading-4 text-droid-text-muted">
               {detail}
             </span>
           )}
@@ -261,7 +261,7 @@ export const SessionRow = memo(function SessionRow({
           >
             <span className="flex justify-center">{pr && <PrStateIcon kind={pr} size={14} />}</span>
             <span
-              className={`text-right text-[11.5px] tabular-nums group-hover:invisible group-focus-within:invisible ${
+              className={`text-right text-[12px] tabular-nums group-hover:invisible group-focus-within:invisible ${
                 unread ? 'text-droid-text font-medium' : 'text-droid-text-muted'
               }`}
             >

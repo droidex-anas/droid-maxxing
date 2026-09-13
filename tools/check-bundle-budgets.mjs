@@ -19,11 +19,18 @@ import { join } from 'node:path';
 // current ~1_312_000 is deliberate: enough for ordinary work, small enough that
 // a genuinely large addition still has to be argued for here.
 //
+// Raised from 1_325_000 to 1_340_000 for the UI polish pass (#222): app key
+// bindings (~2KB), tool-call naming and MCP source marks (~2KB), file mentions
+// in prose and chips that open Review (~1.7KB), native-surface obscuring and
+// the measured banner stack (~0.6KB), plus small growth across the transcript
+// rows and primitives. Main was already within a few hundred bytes of the old
+// line; the new headroom is again ~10KB.
+//
 // initialCssBytes raised from 95_000 to 97_000 for the transcript polish: the
 // scroll-position edge fade on wide tables and code, hover-only scrollbars, and
 // the tightened typography and inline-code pill added ~0.9KB of CSS.
 const BUDGETS = {
-  initialRendererJsBytes: 1_325_000,
+  initialRendererJsBytes: 1_340_000,
   initialCssBytes: 97_000,
   largestLazyChunkBytes: 700_000,
   duplicatePackageMaxBytes: 120_000,

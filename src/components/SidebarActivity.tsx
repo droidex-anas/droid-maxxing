@@ -55,7 +55,7 @@ export function SidebarActivity({
                   setSettledOpen(!settledOpen);
                 }}
                 aria-expanded={open}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-1 text-left text-[11px] font-medium text-droid-text-muted hover:text-droid-text"
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[11px] font-medium text-droid-text-muted hover:text-droid-text"
               >
                 <ChevronRight
                   className={`h-3 w-3 transition-transform ${open ? 'rotate-90' : ''}`}
@@ -64,7 +64,9 @@ export function SidebarActivity({
                 {heading}
               </button>
             ) : (
-              <h3 className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium text-droid-text-muted">
+              <h3 className="flex items-center gap-2 px-2 py-1 text-[11px] font-medium text-droid-text-muted">
+                {/* Empty chevron slot so static labels line up with the collapsible one. */}
+                <span className="h-3 w-3 shrink-0" aria-hidden="true" />
                 {heading}
               </h3>
             )}

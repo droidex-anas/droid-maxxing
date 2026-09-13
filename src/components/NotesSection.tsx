@@ -260,7 +260,7 @@ export function NotesPanel({
                     {tag && (
                       <div className="mb-1 flex">
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
                         >
                           {tag}
                           <button
@@ -334,13 +334,13 @@ export function NotesPanel({
                           : 'Write a note to use later — Enter to save'
                       }
                       rows={3}
-                      className="w-full resize-none bg-transparent text-[12.5px] leading-snug text-droid-text placeholder:text-droid-text-muted/50 focus:outline-none"
+                      className="w-full resize-none bg-transparent text-[13px] leading-snug text-droid-text placeholder:text-droid-text-muted focus:outline-none"
                     />
                     {/* The pad saves on Enter with no other chrome, so the moment
                         text exists a plain save affordance and the key hints appear. */}
                     {draft.trim() !== '' && (
                       <div className="mt-1 flex items-center justify-end gap-2.5">
-                        <span className="text-[10px] text-droid-text-muted/60">
+                        <span className="text-[11px] text-droid-text-muted/60">
                           Enter to save · Shift+Enter for a new line
                         </span>
                         <button
@@ -365,7 +365,7 @@ export function NotesPanel({
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}
                         transition={{ duration: 0.15, ease: EASE }}
-                        className="mt-1.5 overflow-hidden rounded-xl border border-droid-border bg-droid-elevated py-1 shadow-2xl shadow-black/40"
+                        className="mt-1.5 overflow-hidden rounded-xl border border-droid-border bg-droid-elevated py-1 shadow-droid"
                       >
                         {matchingTags.map((option, index) => (
                           <button
@@ -383,11 +383,11 @@ export function NotesPanel({
                             }`}
                           >
                             <span
-                              className={`px-1.5 py-px text-[9.5px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[option]}`}
+                              className={`px-1.5 py-px text-[11px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[option]}`}
                             >
                               {option}
                             </span>
-                            <span className="text-[11.5px] text-droid-text-muted">
+                            <span className="text-[12px] text-droid-text-muted">
                               {NOTE_TAG_HINT[option]}
                             </span>
                           </button>
@@ -427,7 +427,7 @@ export function NotesPanel({
                               }`}
                             />
                             <span
-                              className={`line-clamp-2 min-w-0 flex-1 break-words pr-4 text-[12.5px] leading-snug transition-colors ${
+                              className={`line-clamp-2 min-w-0 flex-1 break-words pr-4 text-[13px] leading-snug transition-colors ${
                                 note.usedAt !== null
                                   ? 'text-droid-text-muted'
                                   : 'text-droid-text-secondary group-hover:text-droid-text'
@@ -435,7 +435,7 @@ export function NotesPanel({
                             >
                               {tag && (
                                 <span
-                                  className={`mr-1.5 px-1.5 py-px text-[9.5px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
+                                  className={`mr-1.5 px-1.5 py-px text-[11px] font-medium uppercase tracking-wide ${NOTE_TAG_CHIP[tag]}`}
                                 >
                                   {tag}
                                 </span>
@@ -449,7 +449,7 @@ export function NotesPanel({
                               onRemove(note.id);
                             }}
                             title="Delete note"
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-droid-text-muted opacity-0 transition-opacity hover:bg-droid-active hover:text-droid-text focus-visible:opacity-100 group-hover:opacity-100"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-droid-text-muted opacity-0 transition-opacity hover:bg-droid-active hover:text-droid-text focus-visible:opacity-100 group-hover:opacity-100"
                           >
                             <X className="h-3 w-3" />
                           </button>
@@ -459,7 +459,7 @@ export function NotesPanel({
                   </AnimatePresence>
 
                   {notes.length === 0 && (
-                    <div className="px-3 py-1.5 text-[11.5px] leading-snug text-droid-text-muted">
+                    <div className="px-3 py-1.5 text-[12px] leading-snug text-droid-text-muted">
                       No notes yet — write one above, Enter to save. Start it with @bug, @next,
                       @idea or @constraint to tag it.
                     </div>

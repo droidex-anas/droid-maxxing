@@ -9,7 +9,7 @@ import { AutomationEditor } from './AutomationEditor';
 import { AutomationRow } from './AutomationRow';
 import { automationModelSelectionIssue } from './modelSelection';
 import type { AutomationEditorRequest } from '../../hooks/useStore';
-import { AUTOMATION_SUGGESTIONS } from './suggestions';
+import { AUTOMATION_SUGGESTIONS, type AutomationSuggestion } from './suggestions';
 import {
   createAutomation,
   deleteAutomation,
@@ -27,7 +27,12 @@ import {
   resolveAutomationModelDefaults,
   validateAutomationDraft,
 } from './schedule';
-import type { Automation, AutomationDraft, AutomationEditorState } from './types';
+import type {
+  Automation,
+  AutomationDraft,
+  AutomationEditorState,
+  AutomationSnapshot,
+} from './types';
 
 interface AutomationsViewProps {
   workspaceScopes: readonly WorkspaceScope[];
@@ -150,6 +155,8 @@ export function AutomationsView({
     });
   }, [filter, query, snapshot.automations]);
 
+  const loadingSnapshot = isSnapshotLoading(snapshot);
+
   const createDraft = (patch?: Partial<AutomationDraft>) => {
     setEditor({
       mode: 'create',
@@ -230,166 +237,156 @@ export function AutomationsView({
       data-testid="automations-workspace"
       className="relative flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-droid-bg text-droid-text"
     >
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div data-electron-drag-region className="h-9" />
-        <div className="mx-auto w-full max-w-[980px] px-8 pb-16 pt-12">
-          <div className="flex items-start justify-between gap-6">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-[28px] font-medium tracking-[-0.03em]">Automations</h1>
-                {statusSummary && (
-                  <span className="rounded-full border border-droid-border bg-droid-surface/60 px-2 py-1 text-[10.5px] text-droid-text-muted">
-                    {statusSummary}
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 max-w-[660px] text-[14px] leading-5 text-droid-text-muted">
-                Schedule tasks and automations to run through DROIDEX on the model, workspace, and
-                timezone you choose.
-              </p>
-              <div className="mt-2 flex items-center gap-1.5 text-[10.5px] text-droid-text-muted/75">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    snapshot.scheduler.ready ? 'bg-droid-accent/70' : 'bg-droid-text-muted/35'
-                  }`}
-                />
-                <span>
-                  {schedulerStatus(snapshot.scheduler.nextWakeAt, snapshot.scheduler.ready)}
-                </span>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={onChatWithDroidex}
-                className="inline-flex items-center gap-2 rounded-xl border border-droid-border bg-droid-surface/50 px-3.5 py-2 text-[13px] font-medium text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:bg-droid-elevated hover:text-droid-text"
-              >
-                <MessageSquareText className="h-4 w-4" />
-                Chat with DROIDEX
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  createDraft();
-                }}
-                className="inline-flex items-center gap-2 rounded-xl bg-droid-text px-3.5 py-2 text-[13px] font-medium text-droid-bg transition-opacity hover:opacity-90"
-              >
-                <Plus className="h-4 w-4" />
-                Create automation
-              </button>
-            </div>
-          </div>
-
-          <label className="mt-8 flex h-10 items-center gap-2 rounded-xl border border-droid-border bg-droid-surface/40 px-3 text-droid-text-muted transition-colors focus-within:border-droid-border-hover focus-within:bg-droid-surface/55">
-            <Search className="h-4 w-4 shrink-0" />
-            <input
-              value={query}
-              aria-label="Search automations"
-              onChange={(event) => {
-                setQuery(event.target.value);
-              }}
-              placeholder="Search automations"
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-droid-text outline-none placeholder:text-droid-text-muted/70"
-            />
-          </label>
-
-          <div className="mt-5 flex items-center gap-1">
-            {(['all', 'active', 'paused'] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => {
-                  setFilter(value);
-                }}
-                className={`rounded-lg px-3 py-1.5 text-[12px] capitalize transition-colors ${
-                  filter === value
-                    ? 'bg-droid-elevated text-droid-text'
-                    : 'text-droid-text-muted hover:bg-droid-elevated/50 hover:text-droid-text'
-                }`}
-              >
-                {value}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4 overflow-hidden rounded-2xl border border-droid-border/80 bg-droid-surface/20">
-            {visible.map((automation, index) => (
-              <AutomationRow
-                key={automation.id}
-                automation={automation}
-                run={latestRuns.get(automation.id)}
-                model={models.find((candidate) => candidate.id === automation.modelId)}
-                modelIssue={automationModelSelectionIssue(
-                  models,
-                  automation.modelId,
-                  automation.reasoningEffort,
-                )}
-                now={now}
-                deleteArmed={pendingDeleteId === automation.id}
-                last={index === visible.length - 1}
-                onEdit={() => {
-                  editAutomation(automation);
-                }}
-                onToggle={() =>
-                  void setAutomationEnabled(automation.id, !automation.enabled).catch(showError)
-                }
-                onRun={() => {
-                  void runAutomationNow(automation.id)
-                    .then((runId) => {
-                      setFollowManualRunId(runId);
-                      toast.success('Starting automation…');
-                    })
-                    .catch((error: unknown) => {
-                      setFollowManualRunId(null);
-                      showError(error);
-                    });
-                }}
-                onOpenSession={onOpenSession}
-                onDelete={() => void deleteRow(automation)}
-              />
-            ))}
-          </div>
-
-          {visible.length === 0 && snapshot.automations.length > 0 && (
-            <div className="py-12 text-center text-[13px] text-droid-text-muted">
-              No automations match this view.
-            </div>
-          )}
-
-          {snapshot.scheduler.ready && snapshot.automations.length === 0 && (
-            <section className="mt-8">
-              <h2 className="text-[14px] font-medium text-droid-text-secondary">Suggestions</h2>
-              <div className="mt-2 overflow-hidden rounded-2xl border border-droid-border/75 bg-droid-surface/20">
-                {AUTOMATION_SUGGESTIONS.map((suggestion, index) => (
-                  <button
-                    key={suggestion.title}
-                    type="button"
-                    onClick={() => {
-                      createDraft(suggestion.draft);
-                    }}
-                    className={`group flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-droid-elevated/45 ${
-                      index === AUTOMATION_SUGGESTIONS.length - 1
-                        ? ''
-                        : 'border-b border-droid-border/60'
+      <main className="flex min-w-0 flex-1 flex-col">
+        {/* Outside the scroller, so the heading never slides under the window
+            controls that sit in this strip when the sidebar is collapsed. */}
+        <div data-electron-drag-region className="h-9 shrink-0" />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[980px] px-8 pb-16 pt-3">
+            <div className="flex items-start justify-between gap-6">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2.5">
+                  <h1 className="text-[22px] font-medium tracking-[-0.03em]">Automations</h1>
+                  {statusSummary && (
+                    <span className="rounded-full border border-droid-border bg-droid-surface/60 px-2 py-1 text-[11px] text-droid-text-muted">
+                      {statusSummary}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 max-w-[660px] text-[14px] leading-5 text-droid-text-muted">
+                  Schedule tasks and automations to run through DROIDEX on the model, workspace, and
+                  timezone you choose.
+                </p>
+                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-droid-text-muted/75">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      snapshot.scheduler.ready ? 'bg-droid-accent/70' : 'bg-droid-text-muted/35'
                     }`}
-                  >
-                    <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl border border-droid-border bg-droid-surface text-droid-text-muted transition-colors group-hover:text-droid-text">
-                      <Clock className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="text-[13px] font-medium text-droid-text">
-                        {suggestion.title}
-                      </span>
-                      <span className="mt-1 block text-[12px] leading-5 text-droid-text-muted">
-                        {suggestion.detail}
-                      </span>
-                    </span>
-                    <Plus className="mt-1 h-4 w-4 text-droid-text-muted/65 transition-colors group-hover:text-droid-text" />
-                  </button>
-                ))}
+                  />
+                  <span>
+                    {schedulerStatus(snapshot.scheduler.nextWakeAt, snapshot.scheduler.ready)}
+                  </span>
+                </div>
               </div>
-            </section>
-          )}
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onChatWithDroidex}
+                  className="inline-flex items-center gap-2 rounded-xl border border-droid-border bg-droid-surface/50 px-3.5 py-2 text-[13px] font-medium text-droid-text-secondary transition-colors hover:border-droid-border-hover hover:bg-droid-elevated hover:text-droid-text"
+                >
+                  <MessageSquareText className="h-4 w-4" />
+                  Chat with DROIDEX
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    createDraft();
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-droid-text px-3.5 py-2 text-[13px] font-medium text-droid-bg transition-opacity hover:opacity-90"
+                >
+                  <Plus className="h-4 w-4" />
+                  Create automation
+                </button>
+              </div>
+            </div>
+
+            {loadingSnapshot ? (
+              <div className="mt-8 flex items-center gap-2 text-[13px] text-droid-text-muted">
+                <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" />
+                Loading automations…
+              </div>
+            ) : (
+              <>
+                <label className="mt-8 flex h-10 items-center gap-2 rounded-xl border border-droid-border bg-droid-surface/40 px-3 text-droid-text-muted transition-colors focus-within:border-droid-border-hover focus-within:bg-droid-surface/55">
+                  <Search className="h-4 w-4 shrink-0" />
+                  <input
+                    value={query}
+                    aria-label="Search automations"
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                    }}
+                    placeholder="Search automations"
+                    className="min-w-0 flex-1 bg-transparent text-[13px] text-droid-text outline-none placeholder:text-droid-text-muted"
+                  />
+                </label>
+
+                <div className="mt-5 flex items-center gap-1">
+                  {(['all', 'active', 'paused'] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setFilter(value);
+                      }}
+                      className={`rounded-lg px-3 py-1.5 text-[12px] capitalize transition-colors ${
+                        filter === value
+                          ? 'bg-droid-elevated text-droid-text'
+                          : 'text-droid-text-muted hover:bg-droid-elevated/50 hover:text-droid-text'
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+
+                {visible.length > 0 && (
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-droid-border/80 bg-droid-surface/20">
+                    {visible.map((automation, index) => (
+                      <AutomationRow
+                        key={automation.id}
+                        automation={automation}
+                        run={latestRuns.get(automation.id)}
+                        model={models.find((candidate) => candidate.id === automation.modelId)}
+                        modelIssue={automationModelSelectionIssue(
+                          models,
+                          automation.modelId,
+                          automation.reasoningEffort,
+                        )}
+                        now={now}
+                        deleteArmed={pendingDeleteId === automation.id}
+                        last={index === visible.length - 1}
+                        onEdit={() => {
+                          editAutomation(automation);
+                        }}
+                        onToggle={() =>
+                          void setAutomationEnabled(automation.id, !automation.enabled).catch(
+                            showError,
+                          )
+                        }
+                        onRun={() => {
+                          void runAutomationNow(automation.id)
+                            .then((runId) => {
+                              setFollowManualRunId(runId);
+                              toast.success('Starting automation…');
+                            })
+                            .catch((error: unknown) => {
+                              setFollowManualRunId(null);
+                              showError(error);
+                            });
+                        }}
+                        onOpenSession={onOpenSession}
+                        onDelete={() => void deleteRow(automation)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {visible.length === 0 && snapshot.automations.length > 0 && (
+                  <div className="py-12 text-center text-[13px] text-droid-text-muted">
+                    No automations match this view.
+                  </div>
+                )}
+
+                {snapshot.automations.length === 0 && (
+                  <SuggestionList
+                    onPick={(draft) => {
+                      createDraft(draft);
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </div>
         </div>
       </main>
 
@@ -443,6 +440,45 @@ function editAutomationFromRequest(
       reasoningEffort: draft.reasoningEffort ?? defaults.reasoningEffort,
     },
   });
+}
+
+// The snapshot arrives over the bridge: until the scheduler reports ready and
+// has listed what it holds, there is nothing to search, filter, or suggest.
+function isSnapshotLoading(snapshot: AutomationSnapshot): boolean {
+  return !snapshot.scheduler.ready && snapshot.automations.length === 0;
+}
+
+function SuggestionList({ onPick }: { onPick: (draft: AutomationSuggestion['draft']) => void }) {
+  return (
+    <section className="mt-8">
+      <h2 className="text-[14px] font-medium text-droid-text-secondary">Suggestions</h2>
+      <div className="mt-2 overflow-hidden rounded-2xl border border-droid-border/75 bg-droid-surface/20">
+        {AUTOMATION_SUGGESTIONS.map((suggestion, index) => (
+          <button
+            key={suggestion.title}
+            type="button"
+            onClick={() => {
+              onPick(suggestion.draft);
+            }}
+            className={`group flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-droid-elevated/45 ${
+              index === AUTOMATION_SUGGESTIONS.length - 1 ? '' : 'border-b border-droid-border/60'
+            }`}
+          >
+            <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl border border-droid-border bg-droid-surface text-droid-text-muted transition-colors group-hover:text-droid-text">
+              <Clock className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="text-[13px] font-medium text-droid-text">{suggestion.title}</span>
+              <span className="mt-1 block text-[12px] leading-5 text-droid-text-muted">
+                {suggestion.detail}
+              </span>
+            </span>
+            <Plus className="mt-1 h-4 w-4 text-droid-text-muted/65 transition-colors group-hover:text-droid-text" />
+          </button>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function schedulerStatus(nextWakeAt: number | null, ready: boolean): string {

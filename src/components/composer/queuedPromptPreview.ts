@@ -4,7 +4,7 @@
 
 import { markdownToPlainText } from '../../lib/markdownText';
 
-export const QUEUED_PREVIEW_MAX_CHARS = 120;
+const QUEUED_PREVIEW_MAX_CHARS = 120;
 
 /**
  * One-line, length-capped preview of a queued prompt. The row shows the prose

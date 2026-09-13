@@ -62,7 +62,7 @@ function ScopeSelector() {
         />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-60 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 top-full z-50 mt-1 w-60 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-droid">
           {REVIEW_SCOPE_OPTIONS.map((option) => (
             <button
               key={option.scope}
@@ -74,7 +74,7 @@ function ScopeSelector() {
                 option.scope === reviewScope ? 'bg-droid-elevated/50' : ''
               }`}
             >
-              <span className="text-[12.5px] text-droid-text">{option.label}</span>
+              <span className="text-[13px] text-droid-text">{option.label}</span>
               <span className="text-[11px] text-droid-text-muted">{option.hint}</span>
             </button>
           ))}
@@ -160,7 +160,7 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
+      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] text-droid-text-secondary transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
     >
       <Icon className="h-3.5 w-3.5 shrink-0 text-droid-text-muted" />
       <span className="flex-1 truncate">{label}</span>
@@ -201,11 +201,11 @@ const FileRow = memo(function FileRow({
       }`}
     >
       <FileTypeIcon filename={file.path} className="h-3.5 w-3.5" />
-      <span className="min-w-0 flex-1 truncate text-[12.5px]">
+      <span className="min-w-0 flex-1 truncate text-[13px]">
         {dir && <span className="text-droid-text-muted/70">{dir}</span>}
         <span className="text-droid-text">{name}</span>
       </span>
-      <span className="shrink-0 font-mono text-[10.5px]">
+      <span className="shrink-0 font-mono text-[11px]">
         {file.additions > 0 && (
           <span style={{ color: 'var(--diff-add-fg)' }}>+{file.additions}</span>
         )}{' '}
@@ -290,7 +290,7 @@ function DetachedFocusPane({
             <DiffLines ops={focus.change.ops} />
           </div>
         ) : focus.content === null ? (
-          <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
+          <div className="flex h-full items-center justify-center gap-2 text-[13px] text-droid-text-muted">
             <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" /> Loading…
           </div>
         ) : (
@@ -833,7 +833,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
               }}
             />
           ) : review.files.length === 0 ? (
-            <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-droid-text-muted">
+            <div className="flex h-full items-center justify-center gap-2 text-[13px] text-droid-text-muted">
               {review.loadingList ? (
                 <>
                   <Spinner className="h-4 w-4 motion-safe:animate-spin-slow" /> Loading…
@@ -863,7 +863,7 @@ export function ReviewPanel({ cwd, onClose }: { cwd: string; onClose?: () => voi
                   onClick={() => {
                     setRenderLimit((cur) => cur + FILE_RENDER_CAP);
                   }}
-                  className="w-full px-3 py-2.5 text-left text-[12.5px] text-droid-accent transition-colors hover:bg-droid-elevated/40"
+                  className="w-full px-3 py-2.5 text-left text-[13px] text-droid-accent transition-colors hover:bg-droid-elevated/40"
                 >
                   Show {Math.min(FILE_RENDER_CAP, review.files.length - renderLimit)} more files…
                 </button>

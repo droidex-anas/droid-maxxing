@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { Check } from 'lucide-react';
 import type { TranscriptEvent } from '../../types/bridge';
 import {
-  CAT_LABEL,
+  describeToolCall,
   toolMeta,
   safeJson,
   stripAnsi,
@@ -10,7 +11,10 @@ import {
   isWebSearchTool,
   isWebFetchTool,
   toolArgString,
+  type ToolCallLabel,
+  type TodoStatus,
 } from '../../lib/tools';
+import type { OpenReviewFileHandler } from '../../lib/reviewFocus';
 import { classifyEvent } from '../../lib/transcript';
 import { compactPath } from '../../lib/pathDisplay';
 import { StreamingCaret } from '../StreamingCaret';
@@ -24,7 +28,9 @@ import {
   RED_TINT,
   useElapsed,
 } from './primitives';
-import { CommandCard, CommandLine } from './commandCard';
+import { CommandCard, CommandLine, ToolCallCard } from './commandCard';
+import { LinkBadge } from './LinkBadge';
+import { useToolSourceMark } from './toolSourceMark';
 import { WebFetchCard, WebSearchCard } from './webCards';
 
 /* ── Thinking / Thought ── */
@@ -67,7 +73,7 @@ export function ThinkingItem({
         )}
       </button>
       <Expand open={open}>
-        <div className="mt-2 pl-[18px] text-[12.5px] text-droid-text-muted/55 leading-[1.7] whitespace-pre-wrap break-words">
+        <div className="mt-2 pl-[18px] text-[13px] text-droid-text-muted/55 leading-[1.7] whitespace-pre-wrap break-words">
           {text}
           {active && <StreamingCaret />}
         </div>
@@ -80,6 +86,8 @@ export function ThinkingItem({
 
 interface ActivityCounts {
   editedPaths: Set<string>;
+  // The one file read when exactly one was, so the fold can name it.
+  readFile?: string;
   file: number;
   search: number;
   command: number;
@@ -121,11 +129,15 @@ function countToolCall(counts: ActivityCounts, e: TranscriptEvent): void {
     return;
   }
   counts.onlyPlan = false;
-  const { cat } = toolMeta(e.toolName, e.toolArgs);
+  const { cat, detail } = toolMeta(e.toolName, e.toolArgs);
   if (cat !== 'exec') counts.onlyExec = false;
   if (cat !== 'web') counts.onlyWeb = false;
-  if (cat === 'read') counts.file++;
-  else if (cat === 'search') counts.search++;
+  if (cat === 'read') {
+    counts.file++;
+    // A lone read is named only when it read a file; a directory listing
+    // (LS, list_directory) is still "1 file", never "Explored src".
+    if (!isListingTool(e.toolName)) counts.readFile = detail;
+  } else if (cat === 'search') counts.search++;
   else if (cat === 'exec') counts.command++;
   else if (cat === 'web') counts.page++;
   else if (cat === 'task') counts.task++;
@@ -133,12 +145,17 @@ function countToolCall(counts: ActivityCounts, e: TranscriptEvent): void {
   else counts.step++;
 }
 
+function isListingTool(name: string | undefined): boolean {
+  return /(^|[^a-z])(ls|list|dir)([^a-z]|$)/i.test(name ?? '');
+}
+
 function formatCounts(counts: ActivityCounts): string {
   const parts: string[] = [];
   const add = (n: number, s: string, p: string) => {
     if (n > 0) parts.push(`${String(n)} ${n === 1 ? s : p}`);
   };
-  add(counts.file, 'file', 'files');
+  if (counts.file === 1 && counts.readFile) parts.push(compactPath(counts.readFile));
+  else add(counts.file, 'file', 'files');
   add(counts.search, 'search', 'searches');
   add(counts.command, 'command', 'commands');
   add(counts.page, 'page', 'pages');
@@ -171,7 +188,7 @@ export function ErrorLine({ text }: { text: string }) {
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] leading-relaxed"
+        className="group flex w-full min-w-0 items-center gap-1.5 text-left text-[13px] leading-relaxed"
         aria-expanded={open}
       >
         <Caret open={open} />
@@ -181,7 +198,7 @@ export function ErrorLine({ text }: { text: string }) {
       <Expand open={open}>
         <div className="mt-1.5 pl-[18px]">
           <pre
-            className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
+            className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words"
             style={{ backgroundColor: RED_TINT, color: RED }}
           >
             {linkify(body)}
@@ -192,123 +209,168 @@ export function ErrorLine({ text }: { text: string }) {
   );
 }
 
+// The row's object: a path opens in Review when the transcript can, anything
+// else is plain text. Paths compact to their tail with the directory dimmed so
+// the file name carries the line.
+function ToolTarget({
+  call,
+  onOpenReviewFile,
+}: {
+  call: ToolCallLabel;
+  onOpenReviewFile?: OpenReviewFileHandler;
+}) {
+  if (call.objectKind === 'none') return null;
+  if (call.objectKind !== 'path') {
+    return <span className="min-w-0 truncate text-droid-text-muted">{call.object}</span>;
+  }
+  const shown = compactPath(call.object);
+  const slash = shown.lastIndexOf('/');
+  const dir = slash >= 0 ? shown.slice(0, slash + 1) : '';
+  const name = slash >= 0 ? shown.slice(slash + 1) : shown;
+  const parts = (
+    <>
+      {dir && <span className="text-droid-text-muted/50">{dir}</span>}
+      <span className="text-droid-text-muted transition-colors group-hover/path:text-droid-text">
+        {name}
+      </span>
+    </>
+  );
+  if (!onOpenReviewFile) return <span className="min-w-0 truncate">{parts}</span>;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenReviewFile(call.object);
+      }}
+      title={`Open ${call.object} in Review`}
+      className="group/path min-w-0 truncate text-left"
+    >
+      {parts}
+    </button>
+  );
+}
+
+// One tool call as a sentence: "Read src/app.tsx", "Searched src", or a
+// readable tool name. In flight the verb shimmers in its live form; a body
+// (captured output or the error) sits behind the caret.
 function ToolLine({
   event,
   output,
   error = false,
+  running = false,
   forceOpen = false,
+  onOpenReviewFile,
 }: {
   event: TranscriptEvent;
   output?: string;
   error?: boolean;
+  running?: boolean;
   forceOpen?: boolean;
+  onOpenReviewFile?: OpenReviewFileHandler;
 }) {
-  const { cat, detail } = toolMeta(event.toolName, event.toolArgs);
+  const call = describeToolCall(event.toolName, event.toolArgs);
   const out = output ? stripAnsi(output).trimEnd() : '';
-  const raw = detail || (event.toolName ?? '');
-  const slash = raw.lastIndexOf('/');
-  const looksLikePath = slash > 0 && !raw.includes(' ');
-  const shown = looksLikePath ? compactPath(raw) : raw;
-  const shownSlash = shown.lastIndexOf('/');
-  const dir = looksLikePath && shownSlash >= 0 ? shown.slice(0, shownSlash + 1) : '';
-  const name = looksLikePath && shownSlash >= 0 ? shown.slice(shownSlash + 1) : shown;
   const [open, setOpen] = useState(false);
-  const label = (
-    <>
-      <span className="text-droid-text-secondary shrink-0">{CAT_LABEL[cat]}</span>
-      {raw && (
-        <span className="text-[12px] min-w-0 truncate">
-          {dir && <span className="text-droid-text-muted/50">{dir}</span>}
-          <span className="text-droid-text-muted">{name}</span>
-        </span>
-      )}
-    </>
-  );
-  // A failed tool collapses to its header row with an "error" tag; expand to
-  // read the error output.
-  if (error) {
-    const expanded = open || forceOpen;
-    return (
-      <div>
-        <button
-          onClick={() => {
-            setOpen((o) => !o);
-          }}
-          className="group flex w-full items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0 text-left"
-          aria-expanded={expanded}
-        >
-          <Caret open={expanded} />
-          {label}
-          <ErrorTag />
-        </button>
-        {out && (
-          <Expand open={expanded}>
-            <div className="mt-1.5 pl-[18px]">
-              <pre
-                className="max-h-56 overflow-auto rounded-md px-2.5 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words"
-                style={{ backgroundColor: RED_TINT, color: RED }}
-              >
-                {out}
-              </pre>
-            </div>
-          </Expand>
-        )}
-      </div>
-    );
-  }
-  // Web and command tools have dedicated cards. Other tool outputs, including
-  // successful Read contents, stay available behind their disclosure.
-  const hasBody = out.length > 0;
-  if (!hasBody) {
-    return (
-      <div className="flex items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0">
-        {/* Caret-width spacer keeps the label flush with the expandable rows. */}
-        <span className="w-3 shrink-0" aria-hidden="true" />
-        {label}
-      </div>
-    );
-  }
   const expanded = open || forceOpen;
+  // Only a row with output can be collapsed again; detailed density still
+  // opens every call to its arguments, result or not.
+  const collapsible = out.length > 0;
+  const hasBody = collapsible || forceOpen;
+  // An MCP tool wears its server's mark instead of spelling its source.
+  const mark = useToolSourceMark(call.source);
+  const verb = (
+    <span className="flex shrink-0 items-center">
+      {mark && <LinkBadge link={mark} />}
+      {running ? (
+        <span className="shimmer-text font-medium">{call.liveVerb}</span>
+      ) : (
+        <span className="text-droid-text-secondary">{call.verb}</span>
+      )}
+    </span>
+  );
   return (
     <div>
-      <button
-        onClick={() => {
-          setOpen((o) => !o);
-        }}
-        className="group flex w-full items-center gap-1.5 text-[12.5px] leading-relaxed min-w-0 text-left"
-        aria-expanded={expanded}
-      >
-        <Caret open={expanded} />
-        {label}
-      </button>
-      <Expand open={expanded}>
-        <div className="mt-1.5 pl-[18px]">
-          <pre className="max-h-44 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words">
-            {linkify(out)}
-          </pre>
-        </div>
-      </Expand>
+      <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-relaxed">
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen((o) => !o);
+            }}
+            aria-expanded={expanded}
+            className="group flex shrink-0 items-center gap-1.5 text-left"
+          >
+            <Caret open={expanded} />
+            {verb}
+          </button>
+        ) : (
+          <>
+            {/* Caret-width spacer keeps the label flush with the expandable rows. */}
+            <span className="w-3 shrink-0" aria-hidden="true" />
+            {verb}
+          </>
+        )}
+        <ToolTarget call={call} onOpenReviewFile={onOpenReviewFile} />
+        {call.source && !mark && (
+          <span className="shrink-0 text-droid-text-muted/60">· {call.source}</span>
+        )}
+        {error && <ErrorTag />}
+      </div>
+      {hasBody && (
+        <Expand open={expanded}>
+          <div className="mt-1.5 pl-[18px]">
+            <ToolCallCard
+              heading={
+                <pre className="whitespace-pre-wrap break-words text-droid-text">
+                  {safeJson(event.toolArgs)}
+                </pre>
+              }
+              output={out}
+              error={error}
+            />
+          </div>
+        </Expand>
+      )}
     </div>
+  );
+}
+
+// Same ring language as the composer's plan strip: filled when done, a ring
+// otherwise, with the running step's ring in the text colour.
+function TodoMark({ status }: { status: TodoStatus }) {
+  if (status === 'completed') {
+    return (
+      <span className="mt-[5px] flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-droid-text-muted">
+        <Check className="h-2 w-2 text-droid-bg" strokeWidth={3} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`mt-[5px] h-3 w-3 shrink-0 rounded-full border-[1.5px] ${
+        status === 'in_progress' ? 'border-droid-text' : 'border-droid-text-muted/40'
+      }`}
+    />
   );
 }
 
 function TodoChecklist({ event }: { event: TranscriptEvent }) {
   const todos = parseTodos(event.toolArgs);
   if (todos.length === 0)
-    return <div className="text-[12.5px] text-droid-text-secondary">Updated plan</div>;
-  const mark = { completed: '✓', in_progress: '◐', pending: '○' } as const;
+    return <div className="text-[13px] text-droid-text-secondary">Updated plan</div>;
   return (
     <div className="space-y-1">
       {todos.map((t, i) => (
         <div
           key={i}
-          className={`flex items-start gap-2 text-[12.5px] leading-relaxed break-words ${
+          className={`flex items-start gap-2 text-[13px] leading-relaxed break-words ${
             t.status === 'completed'
               ? 'text-droid-text-muted line-through'
               : 'text-droid-text-secondary'
           }`}
         >
-          <span className="select-none text-droid-text-muted">{mark[t.status]}</span>
+          <TodoMark status={t.status} />
           <span>{t.text}</span>
         </div>
       ))}
@@ -369,6 +431,7 @@ export function renderToolEvents(
   events: TranscriptEvent[],
   live = false,
   detailed = false,
+  onOpenReviewFile?: OpenReviewFileHandler,
 ): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const { resultByCall, consumed } = correlateResults(events);
@@ -444,7 +507,9 @@ export function renderToolEvents(
             event={e}
             output={result?.text}
             error={isError}
+            running={running}
             forceOpen={detailed}
+            onOpenReviewFile={onOpenReviewFile}
           />,
         );
       }
@@ -464,7 +529,7 @@ export function renderToolEvents(
     nodes.push(
       <pre
         key={e.id}
-        className="max-h-48 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[11px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words"
+        className="max-h-48 overflow-auto rounded-md bg-droid-bg/50 px-2.5 py-2 text-[12px] leading-relaxed font-mono text-droid-text-muted/80 whitespace-pre-wrap break-words"
       >
         {linkify(body)}
       </pre>,

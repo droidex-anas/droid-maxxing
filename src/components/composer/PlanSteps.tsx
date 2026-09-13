@@ -163,7 +163,7 @@ export function PlanStepsPanel({
               active={!allDone}
               spinning={isRunning}
             />
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text">
+            <span className="min-w-0 flex-1 truncate text-[12px] text-droid-text">
               {current.text}
             </span>
             <ChevronDown

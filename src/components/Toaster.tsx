@@ -18,7 +18,8 @@ const DOT: Record<ToastVariant, string> = {
 
 // Minimal pro toast: uniform hairline border (no side accent bars), a small
 // status dot, a close button revealed on hover, and a 2px TTL hairline along
-// the bottom edge that drains as the toast ages. Hovering pauses the countdown.
+// the bottom edge that drains as the toast ages. Hovering or focusing pauses
+// the countdown.
 export default function Toaster() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -48,7 +49,13 @@ export default function Toaster() {
             onMouseLeave={() => {
               resumeToast(t.id);
             }}
-            className="group pointer-events-auto relative min-w-[240px] max-w-[380px] overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/95 shadow-lg shadow-black/25 backdrop-blur-sm"
+            onFocus={() => {
+              pauseToast(t.id);
+            }}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) resumeToast(t.id);
+            }}
+            className="group pointer-events-auto relative min-w-[240px] max-w-[380px] overflow-hidden rounded-xl border border-droid-border bg-droid-elevated/95 shadow-droid-sm backdrop-blur-sm"
           >
             <div className="flex items-center gap-2.5 px-3 py-2.5">
               <span
@@ -63,7 +70,7 @@ export default function Toaster() {
                   dismissToast(t.id);
                 }}
                 aria-label="Dismiss"
-                className="-mr-1 shrink-0 rounded-md p-1 text-droid-text-muted opacity-0 transition-all hover:bg-droid-surface hover:text-droid-text group-hover:opacity-100"
+                className="-mr-1 shrink-0 rounded-md p-1 text-droid-text-muted opacity-0 transition-all hover:bg-droid-surface hover:text-droid-text focus-visible:opacity-100 group-hover:opacity-100"
                 title="Dismiss"
               >
                 <X className="h-3.5 w-3.5" />

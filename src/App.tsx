@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { shallowEqual, useStoreApi, useStoreDispatch, useStoreSelector } from './hooks/useStore';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PanelLeft, PanelRight } from '@droidex/icons';
@@ -6,10 +6,12 @@ import { bridge } from './lib/bridge';
 import {
   connect,
   listFactoryDefaults,
+  listModels,
   loadSessionHistory,
   sendNativeBrowserResult,
   openChild,
   newChildOpenRequestId,
+  updateCli,
 } from './lib/commands';
 import { isEmbedded } from './lib/embed';
 import { getApiKey, setAppIcon, terminalHasChildren } from './lib/desktop';
@@ -32,14 +34,22 @@ import { useDocumentVisible } from './hooks/useDocumentVisible';
 import { applyTheme, findPreset, resolveVariant } from './lib/theme';
 import { useOnboarding, shouldShowOnboarding, hasSetupBlocker } from './hooks/useOnboarding';
 import SetupBanner from './components/onboarding/SetupBanner';
+import { useMeasuredHeight } from './hooks/useMeasuredHeight';
+import { addNativeSurfaceObscurer } from './hooks/useObscuresNativeSurfaces';
+import { WINDOW_CONTROLS_INSET_PX } from './lib/windowChrome';
 import RuntimeStatusBanner from './components/RuntimeStatusBanner';
-import { updateCli } from './lib/commands';
 import { checkForAppUpdateAutomatically, startAutomaticAppUpdateChecks } from './lib/appUpdate';
 import { toast } from './lib/toast';
 import { UtilityPane } from './components/utility/UtilityPane';
 import { peekTerminalInstance, releaseTerminalInstancesExcept } from './lib/terminalInstances';
 import { utilityPanelForSession, type UtilityTab, type UtilityTool } from './lib/utilityPanel';
 import { isTerminalInputTarget, isTerminalTabShortcut } from './lib/keyboardShortcuts';
+import {
+  SHORTCUT_DEFINITIONS,
+  formatChord,
+  matchesChord,
+  type ShortcutAction,
+} from './lib/shortcuts';
 import { useSessionWorkingDirectory } from './hooks/useSessionWorkingDirectory';
 import { useDiagnosticsContext } from './hooks/useDiagnosticsContext';
 import { useFinishNotifications } from './hooks/useFinishNotifications';
@@ -134,6 +144,7 @@ export default function App() {
       selectedChild: current.selectedChild,
       sessionRestore: current.sessionRestore,
       settingsOpen: current.settingsOpen,
+      shortcutBindings: current.shortcutBindings,
       sidebarCollapsed: current.sidebarCollapsed,
       theme: current.theme,
       utilityPanels: current.utilityPanels,
@@ -189,20 +200,20 @@ export default function App() {
   const utilityPanel = utilityPanelForSession(state.utilityPanels, activeSession?.appSessionId);
   const activeUtilityTab =
     utilityPanel.tabs.find((tab) => tab.id === utilityPanel.activeTabId) ?? null;
-  const showUtilityPane = !embedded && !!activeSession && utilityPanel.open && !showWizard;
   // The pull request and Automations workspaces own the whole content area and
-  // the top-right corner of their own toolbar, so the session-scoped overlays
-  // (Context panel) and floating window buttons stay out of them instead of
-  // covering their header.
+  // the top-right corner of their own toolbar, so the session-scoped panes and
+  // overlays (utility pane, Context panel) and floating window buttons stay out
+  // of them instead of covering their header. The pane's open state survives
+  // the visit and it comes back with the chat.
   const fullContentRoute =
     !embedded && (state.mainView === 'pull-requests' || state.mainView === 'automations');
-  // An expanded browser covers the full content row, which would leave the pull
-  // request workspace hidden and non-interactive behind it. The expansion stays
-  // owned by the browser pane; this view simply does not take part in it.
+  const showUtilityPane =
+    !embedded && !!activeSession && utilityPanel.open && !showWizard && !fullContentRoute;
+  // An expanded browser covers the full content row; the utility pane already
+  // stays out of the full-content routes, so the expansion follows it.
   const browserExpanded =
     !!activeSession &&
     showUtilityPane &&
-    !fullContentRoute &&
     activeUtilityTab?.tool === 'browser' &&
     expandedBrowserAppSessionId === activeSession.appSessionId;
   const focused = isMissionControlView;
@@ -406,6 +417,9 @@ export default function App() {
       const [, key] = await Promise.all([bridge.start(), getApiKey()]);
       connect(key ?? '');
       listFactoryDefaults();
+      // The session panel and composer badge name the model from this catalog;
+      // without it a custom model shows as its raw id until the selector opens.
+      listModels();
     })();
   }, [embedded]);
 
@@ -444,10 +458,29 @@ export default function App() {
   }, [onboard.lastResult]);
 
   // The native browser is a separate Electron layer that floats above the DOM,
-  // so close it while the full-screen wizard is up or it paints over the tour.
+  // so close it while the full-screen wizard is up or it paints over the tour,
+  // and bring the pane back once the tour is done. The wizard also registers
+  // as an overlay, so the view stays hidden through its exit fade.
+  const paneClosedForWizard = useRef(false);
   useEffect(() => {
-    if (showWizard && utilityPanel.open) dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: false });
+    if (showWizard) {
+      if (!utilityPanel.open) return;
+      paneClosedForWizard.current = true;
+      dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: false });
+    } else if (paneClosedForWizard.current) {
+      paneClosedForWizard.current = false;
+      dispatch({ type: 'SET_UTILITY_PANEL_OPEN', open: true });
+    }
   }, [showWizard, utilityPanel.open, dispatch]);
+
+  // The pane animates out of a full-content route for 180ms, and the native
+  // browser inside it would stay painted and clickable over the new route for
+  // that long. Treat the route as an overlay so the view hides at once: a
+  // layout effect, so it is gone in the commit that paints the new route.
+  useLayoutEffect(() => {
+    if (!fullContentRoute) return;
+    return addNativeSurfaceObscurer();
+  }, [fullContentRoute]);
 
   // "Run setup again" from Settings re-opens the tour.
   useEffect(() => {
@@ -531,7 +564,32 @@ export default function App() {
 
   // Keyboard shortcuts
   useEffect(() => {
+    const run: Record<ShortcutAction, () => void> = {
+      toggleSidebar: () => {
+        dispatch({ type: 'TOGGLE_SIDEBAR' });
+      },
+      toggleUtilityPane,
+      openCommandPalette: () => {
+        dispatch({ type: 'TOGGLE_COMMAND_PALETTE' });
+      },
+      openSettings: () => {
+        dispatch({ type: 'TOGGLE_SETTINGS' });
+      },
+    };
     const handler = (e: KeyboardEvent) => {
+      // A saved binding wins over the fixed chords below, so rebinding an
+      // action onto one of them takes effect instead of being swallowed.
+      for (const { action } of SHORTCUT_DEFINITIONS) {
+        if (!matchesChord(e, state.shortcutBindings[action])) continue;
+        // A shell owns its Ctrl chords (Ctrl+\ is SIGQUIT); Cmd chords never
+        // reach it, so on macOS they still toggle from inside the terminal.
+        if (isTerminalInputTarget(e.target) && !e.metaKey) return;
+        e.preventDefault();
+        // A held key auto-repeats and would toggle straight back.
+        if (e.repeat) return;
+        run[action]();
+        return;
+      }
       if (isTerminalTabShortcut(e)) {
         if (isTerminalInputTarget(e.target)) return;
         e.preventDefault();
@@ -540,39 +598,18 @@ export default function App() {
         return;
       }
       const meta = e.metaKey || e.ctrlKey;
-      if (!meta) return;
-      if (e.shiftKey) {
-        const key = e.key.toLowerCase();
-        if (key === 'b' || key === 'f' || key === 'r') {
-          e.preventDefault();
-          openUtilityTool(key === 'b' ? 'browser' : key === 'f' ? 'files' : 'review');
-          return;
-        }
-      }
-      switch (e.key.toLowerCase()) {
-        case 'k':
-          e.preventDefault();
-          dispatch({ type: 'TOGGLE_COMMAND_PALETTE' });
-          break;
-        case 'b':
-          e.preventDefault();
-          dispatch({ type: 'TOGGLE_SIDEBAR' });
-          break;
-        case '\\':
-          e.preventDefault();
-          toggleUtilityPane();
-          break;
-        case ',':
-          e.preventDefault();
-          dispatch({ type: 'TOGGLE_SETTINGS' });
-          break;
+      if (!meta || !e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'b' || key === 'f' || key === 'r') {
+        e.preventDefault();
+        openUtilityTool(key === 'b' ? 'browser' : key === 'f' ? 'files' : 'review');
       }
     };
     window.addEventListener('keydown', handler);
     return () => {
       window.removeEventListener('keydown', handler);
     };
-  }, [dispatch, openUtilityTool, toggleUtilityPane]);
+  }, [dispatch, openUtilityTool, state.shortcutBindings, toggleUtilityPane]);
 
   const setupBlocker =
     !showWizard &&
@@ -581,26 +618,32 @@ export default function App() {
     onboard.onboarding?.completed === true &&
     hasSetupBlocker(onboard.env);
   const showBanner = !bannerDismissed && setupBlocker;
+  // Banners stack above the title row; the floating window controls sit just
+  // below whatever is showing.
+  const bannerStackRef = useRef<HTMLDivElement>(null);
+  const bannerStackHeight = useMeasuredHeight(bannerStackRef);
 
   return (
     <div
       id="app-root"
       className="h-screen w-screen flex flex-col bg-droid-bg text-droid-text overflow-hidden relative"
     >
-      {showBanner && (
-        <SetupBanner
-          kind="blocker"
-          message="Finish setting up Droid to start running agents."
-          actionLabel="Finish setup"
-          onAction={() => {
-            setForceWizard(true);
-          }}
-          onDismiss={() => {
-            setBannerDismissed(true);
-          }}
-        />
-      )}
-      <RuntimeStatusBanner />
+      <div ref={bannerStackRef} className="shrink-0">
+        {showBanner && (
+          <SetupBanner
+            kind="blocker"
+            message="Finish setting up Droid to start running agents."
+            actionLabel="Finish setup"
+            onAction={() => {
+              setForceWizard(true);
+            }}
+            onDismiss={() => {
+              setBannerDismissed(true);
+            }}
+          />
+        )}
+        <RuntimeStatusBanner />
+      </div>
       <div className="flex-1 flex min-h-0 relative">
         {/* Sidebar with collapse animation */}
         <AnimatePresence initial={false}>
@@ -621,8 +664,11 @@ export default function App() {
           )}
         </AnimatePresence>
 
+        {/* Every view under `main` owns a drag row as its top row, so a view
+            never shifts when the sidebar collapses. Collapsing only moves the
+            window controls and the floating sidebar toggle into that row; the
+            chat header reads the collapsed state and leaves them room. */}
         <main className="relative flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden bg-droid-bg">
-          {state.sidebarCollapsed && <div data-electron-drag-region className="h-9 shrink-0" />}
           <div ref={contentRowRef} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <section
               aria-hidden={browserExpanded}
@@ -845,14 +891,15 @@ export default function App() {
           layout are unchanged. */}
       <div
         data-electron-drag-region
-        className="absolute top-0 left-[92px] h-9 z-40 flex items-center gap-1.5"
+        className="absolute h-9 z-40 flex items-center gap-1.5"
+        style={{ top: bannerStackHeight, left: WINDOW_CONTROLS_INSET_PX }}
       >
         <button
           onClick={() => {
             dispatch({ type: 'TOGGLE_SIDEBAR' });
           }}
           className="p-1.5 rounded-md text-droid-text-muted/70 hover:text-droid-text hover:bg-droid-elevated/60 transition-colors"
-          title="Toggle sidebar (Cmd+B)"
+          title={`Toggle sidebar (${formatChord(state.shortcutBindings.toggleSidebar)})`}
         >
           <PanelLeft className="w-4 h-4" />
         </button>
@@ -861,7 +908,8 @@ export default function App() {
       {!showUtilityPane && !fullContentRoute && (
         <div
           data-electron-drag-region
-          className="absolute top-0 right-0 h-9 z-40 flex items-center gap-1 pr-3"
+          className="absolute right-0 h-9 z-40 flex items-center gap-1 pr-3"
+          style={{ top: bannerStackHeight }}
         >
           {workingDirectory && (
             <EditorOpenMenu cwd={workingDirectory} hasRepo={!!repoStatus} variant="toolbar" />
@@ -886,7 +934,7 @@ export default function App() {
               ref={utilityPaneToggleRef}
               onClick={toggleUtilityPane}
               className="rounded-md p-1.5 text-droid-text-muted/70 transition-colors hover:bg-droid-elevated/60 hover:text-droid-text"
-              title="Toggle utility pane (Cmd+\\)"
+              title={`Toggle utility pane (${formatChord(state.shortcutBindings.toggleUtilityPane)})`}
             >
               <PanelRight className="h-4 w-4" />
             </button>

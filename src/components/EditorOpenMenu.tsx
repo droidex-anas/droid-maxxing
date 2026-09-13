@@ -131,7 +131,7 @@ export default function EditorOpenMenu({
         <button
           onClick={() => setOpen((v) => !v)}
           title={`Open with ${editorLabel(selected)}`}
-          className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] transition-colors ${
+          className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] transition-colors ${
             open
               ? 'text-droid-text bg-droid-elevated'
               : 'text-droid-text-muted hover:text-droid-text hover:bg-droid-elevated/60'
@@ -144,7 +144,7 @@ export default function EditorOpenMenu({
       )}
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-52 rounded-xl border border-droid-border bg-droid-surface p-1.5 shadow-droid">
           <MenuAction
             icon={<FolderOpen className="w-3.5 h-3.5" />}
             label="Open codebase"
@@ -160,7 +160,7 @@ export default function EditorOpenMenu({
           />
 
           <div className="my-1.5 h-px bg-droid-border/70" />
-          <div className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+          <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
             Default editor
           </div>
 
@@ -168,7 +168,7 @@ export default function EditorOpenMenu({
             <button
               key={option.id}
               onClick={() => chooseDefault(option.id)}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text-secondary hover:bg-droid-elevated/60 hover:text-droid-text transition-colors"
+              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] text-droid-text-secondary hover:bg-droid-elevated/60 hover:text-droid-text transition-colors"
             >
               <EditorIcon editor={option.id} size={15} />
               <span className="flex-1 truncate">{option.label}</span>
@@ -210,11 +210,11 @@ function MenuAction({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-droid-text transition-colors hover:bg-droid-elevated/60 disabled:cursor-not-allowed disabled:text-droid-text-muted/60 disabled:hover:bg-transparent"
+      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] text-droid-text transition-colors hover:bg-droid-elevated/60 disabled:cursor-not-allowed disabled:text-droid-text-muted/60 disabled:hover:bg-transparent"
     >
       <span className="shrink-0 text-droid-text-muted">{icon}</span>
       <span className="flex-1 truncate">{label}</span>
-      {hint && <span className="text-[10px] text-droid-text-muted">{hint}</span>}
+      {hint && <span className="text-[11px] text-droid-text-muted">{hint}</span>}
     </button>
   );
 }

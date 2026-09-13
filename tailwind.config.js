@@ -27,6 +27,13 @@ export default {
           red: v('--droid-red'),
         },
       },
+      // Floating surfaces take their cast from the theme (see applyTheme):
+      // near-black and deep on dark, soft with a contact shadow on light. A
+      // fixed `shadow-black/50` reads as a grey smudge on a paper canvas.
+      boxShadow: {
+        droid: 'var(--droid-shadow)',
+        'droid-sm': 'var(--droid-shadow-sm)',
+      },
       fontFamily: {
         sans: ['"SF Pro Display"', 'Inter', 'system-ui', 'sans-serif'],
         // Native mono stack first: the JetBrains Mono webfont is fetched from

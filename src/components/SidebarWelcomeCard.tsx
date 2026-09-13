@@ -32,7 +32,7 @@ export function SidebarWelcomeCard({
       transition={{ duration: 0.22, ease: EASE }}
       className="mb-2 overflow-hidden"
     >
-      <div className="relative overflow-hidden rounded-2xl border border-droid-border bg-droid-elevated shadow-[0_8px_28px_rgba(0,0,0,0.45)]">
+      <div className="relative overflow-hidden rounded-2xl border border-droid-border bg-droid-elevated shadow-droid">
         {/* Visual: nebula artwork melting into the card body — a multi-stop
             blend instead of a hard edge, slightly enriched so the color carries,
             with a soft top scrim keeping the dismiss button legible. */}
@@ -47,7 +47,7 @@ export function SidebarWelcomeCard({
         </div>
 
         <div className="relative -mt-6 px-3.5 pb-3">
-          <span className="text-[13.5px] font-semibold text-droid-text">Welcome to Droidex</span>
+          <span className="text-[13px] font-semibold text-droid-text">Welcome to Droidex</span>
           <p className="mt-1 text-[12px] leading-snug text-droid-text-muted">
             Chats, workspaces and missions live here. Start a chat and put Droid to work.
           </p>

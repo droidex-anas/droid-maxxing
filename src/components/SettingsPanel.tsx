@@ -19,6 +19,7 @@ import { hasActiveSessionWork } from '../lib/sessions';
 import { applyTheme } from '../lib/theme';
 import { AppearanceSection } from './AppearanceSettings';
 import { DiagnosticsSettings } from './DiagnosticsSettings';
+import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { McpServersSettings } from './McpServersSettings';
 import { NotificationsSettings } from './NotificationsSettings';
 import { WorktreesSettings } from './WorktreesSettings';
@@ -134,8 +135,8 @@ function TokenLimitSelect({
           active ? 'bg-droid-elevated' : 'hover:bg-droid-elevated/50'
         }`}
       >
-        <span className="flex-1 font-mono text-[12.5px] text-droid-text">{l}</span>
-        {sub && <span className="text-[10.5px] text-droid-text-muted">{sub}</span>}
+        <span className="flex-1 text-[13px] tabular-nums text-droid-text">{l}</span>
+        {sub && <span className="text-[11px] text-droid-text-muted">{sub}</span>}
         {active && (
           <Check
             className="w-3.5 h-3.5 shrink-0"
@@ -159,14 +160,14 @@ function TokenLimitSelect({
             : 'border-droid-border bg-droid-bg/60 text-droid-text hover:border-droid-border-hover'
         }`}
       >
-        <span className="truncate font-mono">{label}</span>
+        <span className="truncate tabular-nums">{label}</span>
         <ChevronDown
           className={`w-3.5 h-3.5 text-droid-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
         />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-droid">
           <div className="max-h-72 overflow-y-auto space-y-0.5">
             <Row l="Factory default" sub="model-dependent" />
             {TOKEN_PRESETS.map((n) => (
@@ -178,7 +179,7 @@ function TokenLimitSelect({
               />
             ))}
           </div>
-          <p className="mt-2 border-t border-droid-border px-1.5 pt-2 text-[10.5px] leading-[1.5] text-droid-text-muted">
+          <p className="mt-2 border-t border-droid-border px-1.5 pt-2 text-[11px] leading-[1.5] text-droid-text-muted">
             If a model&apos;s context window is lower than the selected value, the session starts
             with the lower effective limit.
           </p>
@@ -266,8 +267,8 @@ function CompactionModelPicker({
           />
         )}
         <div className="min-w-0 flex-1">
-          <div className="text-[12.5px] text-droid-text truncate">{l}</div>
-          {sub && <div className="text-[10.5px] text-droid-text-muted truncate">{sub}</div>}
+          <div className="text-[13px] text-droid-text truncate">{l}</div>
+          {sub && <div className="text-[11px] text-droid-text-muted truncate">{sub}</div>}
         </div>
         {active && (
           <Check
@@ -300,7 +301,7 @@ function CompactionModelPicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-xl border border-droid-border bg-droid-surface p-2 shadow-droid">
           <div className="mb-2 flex items-center gap-2 h-8 rounded-md bg-droid-bg/60 border border-droid-border px-2.5">
             <Search className="w-3.5 h-3.5 text-droid-text-muted" />
             <input
@@ -870,6 +871,9 @@ export default function SettingsPanel() {
     case 'MCP servers':
       content = <McpServersSettings cwd={mcpCwd} />;
       break;
+    case 'Keyboard shortcuts':
+      content = <KeyboardShortcutsSettings />;
+      break;
     case 'Archived chats':
       content = <ArchivedChatsSettings />;
       break;
@@ -902,7 +906,7 @@ export default function SettingsPanel() {
                 setQuery(e.target.value);
               }}
               placeholder="Search settings…"
-              className="w-full bg-transparent text-[12.5px] text-droid-text placeholder:text-droid-text-muted/80 focus:outline-none"
+              className="w-full bg-transparent text-[13px] text-droid-text placeholder:text-droid-text-muted focus:outline-none"
             />
             {q ? (
               <button
@@ -924,7 +928,7 @@ export default function SettingsPanel() {
             if (filtered.length === 0) return null;
             return (
               <div key={group}>
-                <div className="mb-1 px-2.5 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted/80">
+                <div className="mb-1 px-2.5 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted/80">
                   {group}
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -934,7 +938,7 @@ export default function SettingsPanel() {
                       onClick={() => {
                         setActive(label);
                       }}
-                      className={`flex h-8 w-full items-center rounded-xl px-2.5 text-left text-[12.5px] transition-colors ${
+                      className={`flex h-8 w-full items-center rounded-xl px-2.5 text-left text-[13px] transition-colors ${
                         active === label
                           ? 'bg-droid-active text-droid-text'
                           : 'text-droid-text-secondary hover:bg-droid-elevated/40 hover:text-droid-text'

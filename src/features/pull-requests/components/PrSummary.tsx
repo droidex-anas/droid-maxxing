@@ -28,13 +28,13 @@ function CheckRow({ check }: { check: PrCheck }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] text-droid-text">{check.name}</span>
         {check.workflow ? (
-          <span className="mt-0.5 block truncate text-[11.5px] text-droid-text-muted">
+          <span className="mt-0.5 block truncate text-[12px] text-droid-text-muted">
             {check.workflow}
           </span>
         ) : null}
       </span>
       {finished ? (
-        <span className="shrink-0 text-[11.5px] text-droid-text-muted">{finished}</span>
+        <span className="shrink-0 text-[12px] text-droid-text-muted">{finished}</span>
       ) : null}
       {check.link ? (
         <Octicon name="link-external" size={12} className="shrink-0 text-droid-text-muted" />
@@ -112,7 +112,7 @@ function MergeConflicts({ pr }: { pr: PullRequest }) {
         onClick={() => {
           void openExternal(pr.url);
         }}
-        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-droid-border px-2 py-1 text-[12.5px] text-droid-text-secondary transition-colors hover:bg-droid-active hover:text-droid-text"
+        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-droid-border px-2 py-1 text-[13px] text-droid-text-secondary transition-colors hover:bg-droid-active hover:text-droid-text"
       >
         <Octicon name="link-external" size={12} />
         View conflicts on GitHub

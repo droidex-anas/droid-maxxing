@@ -130,7 +130,7 @@ export function AddMcpServerDialog({
             <div>
               <h2
                 id="add-mcp-title"
-                className="text-[18px] font-semibold tracking-[-0.015em] text-droid-text"
+                className="text-[16px] font-semibold tracking-[-0.015em] text-droid-text"
               >
                 Add MCP server
               </h2>
@@ -161,7 +161,7 @@ export function AddMcpServerDialog({
                 onChange={setName}
                 placeholder="sentry"
               />
-              <label className="block text-[11.5px] font-medium text-droid-text-secondary">
+              <label className="block text-[12px] font-medium text-droid-text-secondary">
                 Type
                 <select
                   value={serverType}
@@ -204,7 +204,7 @@ export function AddMcpServerDialog({
             />
 
             {(error ?? serverError) && (
-              <div role="alert" className="mt-3 text-[11.5px] text-droid-orange">
+              <div role="alert" className="mt-3 text-[12px] text-droid-orange">
                 {error ?? serverError}
               </div>
             )}
@@ -253,7 +253,7 @@ function Field({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="block text-[11.5px] font-medium text-droid-text-secondary">
+    <label className="block text-[12px] font-medium text-droid-text-secondary">
       {label}
       <input
         ref={inputRef}
@@ -262,7 +262,7 @@ function Field({
         onChange={(event) => {
           onChange(event.target.value);
         }}
-        className="mt-1.5 h-10 w-full rounded-xl border border-droid-border bg-droid-field px-3 text-[13px] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/70 focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
+        className="mt-1.5 h-10 w-full rounded-xl border border-droid-border bg-droid-field px-3 text-[13px] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
       />
     </label>
   );
@@ -282,7 +282,7 @@ function TextAreaField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="mt-4 block text-[11.5px] font-medium text-droid-text-secondary">
+    <label className="mt-4 block text-[12px] font-medium text-droid-text-secondary">
       {label} <span className="font-normal text-droid-text-muted">· {hint}</span>
       <textarea
         value={value}
@@ -291,7 +291,7 @@ function TextAreaField({
         }}
         rows={3}
         placeholder={placeholder}
-        className="mt-1.5 w-full resize-none rounded-xl border border-droid-border bg-droid-field px-3 py-2.5 text-[12.5px] leading-5 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/70 focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
+        className="mt-1.5 w-full resize-none rounded-xl border border-droid-border bg-droid-field px-3 py-2.5 text-[13px] leading-5 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-border-hover focus-visible:ring-1 focus-visible:ring-droid-accent/30"
       />
     </label>
   );

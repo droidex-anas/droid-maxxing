@@ -53,7 +53,7 @@ export function BrowserToolbar({
   onToggleExpanded,
 }: BrowserToolbarProps) {
   return (
-    <header className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border bg-droid-bg px-1.5">
+    <header className="flex h-9 shrink-0 items-center gap-1 border-b border-droid-border bg-droid-bg px-2.5">
       <IconButton
         title="Back: return to the previous page (⌘[)"
         disabled={!canGoBack || loading}
@@ -82,7 +82,7 @@ export function BrowserToolbar({
           onChange={(event) => {
             onUrlInputChange(event.target.value);
           }}
-          className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-medium tracking-[-0.01em] text-droid-text outline-none placeholder:font-normal placeholder:text-droid-text-muted/70"
+          className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-medium tracking-[-0.01em] text-droid-text outline-none placeholder:font-normal placeholder:text-droid-text-muted"
           placeholder="Search or enter URL"
           aria-label="Browser address"
         />
@@ -90,7 +90,7 @@ export function BrowserToolbar({
           <button
             type="submit"
             aria-label="Open address"
-            className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent"
+            className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
           >
             <CornerDownLeft className="h-3.5 w-3.5" />
           </button>
@@ -172,7 +172,7 @@ function IconButton({
         aria-pressed={active}
         disabled={disabled}
         onClick={onClick}
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent disabled:cursor-not-allowed disabled:opacity-35 ${
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60 disabled:cursor-not-allowed disabled:opacity-35 ${
           active
             ? 'bg-droid-active text-droid-text'
             : 'text-droid-text-muted hover:bg-droid-elevated hover:text-droid-text'

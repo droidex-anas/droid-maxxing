@@ -124,7 +124,12 @@ const Chunk = memo(function Chunk({ rows, wrap }: { rows: Row[]; wrap: boolean }
     <div
       style={{
         contentVisibility: 'auto',
-        containIntrinsicSize: `auto ${Math.round(rows.length * EST_ROW_PX)}px`,
+        // Height only: the body is sized to its widest line
+        // (`review-diff-content`), which asks every chunk for its intrinsic
+        // width, and a skipped chunk would answer with this row-height
+        // estimate. Width stays `none`, so a skipped chunk claims no width
+        // and still stretches to the body like any auto-width block.
+        containIntrinsicHeight: `auto ${String(Math.round(rows.length * EST_ROW_PX))}px`,
       }}
     >
       {rows.map((row, i) => (
@@ -213,21 +218,27 @@ export function DiffBody({
   }
   useEffect(() => {
     if (mounted >= chunks.length) return;
-    const raf = requestAnimationFrame(() => setMounted((v) => v + CHUNKS_PER_FRAME));
-    return () => cancelAnimationFrame(raf);
+    const raf = requestAnimationFrame(() => {
+      setMounted((v) => v + CHUNKS_PER_FRAME);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+    };
   }, [mounted, chunks.length]);
 
   const pendingRows = Math.max(0, rows.length - mounted * CHUNK_ROWS);
 
   if (binary || parsed.binary) {
-    return <div className="p-4 text-[12.5px] text-droid-text-muted">Binary file not shown</div>;
+    return <div className="p-4 text-[13px] text-droid-text-muted">Binary file not shown</div>;
   }
   if (parsed.hunks.length === 0) {
-    return <div className="p-4 text-[12.5px] text-droid-text-muted">No textual changes</div>;
+    return <div className="p-4 text-[13px] text-droid-text-muted">No textual changes</div>;
   }
 
   return (
-    <div className="font-mono text-[12px] leading-[1.6]">
+    // Wrapped rows already fit the viewport; only the scrolling mode needs the
+    // widest-line width that keeps row backgrounds full-width.
+    <div className={`font-mono text-[12px] leading-[1.6] ${wrap ? '' : 'review-diff-content'}`}>
       {chunks.slice(0, mounted).map((chunk, ci) => (
         <Chunk key={ci} rows={chunk} wrap={wrap} />
       ))}
@@ -235,7 +246,7 @@ export function DiffBody({
           while the progressive mount catches up. */}
       {pendingRows > 0 && <div style={{ height: Math.round(pendingRows * EST_ROW_PX) }} />}
       {hiddenLines > 0 && (
-        <div className="px-3 py-2 text-[11.5px] text-droid-text-muted">
+        <div className="px-3 py-2 text-[12px] text-droid-text-muted">
           Diff truncated: {hiddenLines.toLocaleString()} more lines not shown
         </div>
       )}

@@ -26,7 +26,7 @@ const PHASE_PILL: Record<ChildStreamPhase, string> = {
   streaming: 'bg-droid-green/15 text-droid-green',
   awaiting_approval: 'bg-droid-orange/15 text-droid-orange',
   settled: 'border border-droid-border text-droid-text-muted',
-  failed: 'bg-red-500/15 text-red-400',
+  failed: 'bg-droid-red/15 text-droid-red',
   interrupted: 'bg-droid-orange/15 text-droid-orange',
 };
 
@@ -76,7 +76,7 @@ function PhasePill({
       data-testid="subagent-phase"
       data-phase={phase}
       data-stream-fidelity={fidelity}
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium ${PHASE_PILL[phase]}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${PHASE_PILL[phase]}`}
     >
       {childStreamPhaseLabel(phase, fidelity)}
     </span>
@@ -122,12 +122,12 @@ export const SubagentRow = memo(function SubagentRow({
               ) : null}
             </span>
             {child.reasoningEffort ? (
-              <span className="shrink-0 rounded-md bg-droid-accent/15 px-1.5 py-0.5 text-[10px] font-medium capitalize text-droid-accent">
+              <span className="shrink-0 rounded-md bg-droid-accent/15 px-1.5 py-0.5 text-[11px] font-medium capitalize text-droid-accent">
                 {child.reasoningEffort}
               </span>
             ) : null}
           </span>
-          <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text-secondary">
+          <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text-secondary">
             {childStreamPhaseLabel(snapshot.phase, snapshot.fidelity)}
           </span>
           <PhasePill phase={snapshot.phase} fidelity={snapshot.fidelity} />

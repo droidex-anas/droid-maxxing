@@ -103,7 +103,7 @@ function FlyoutRow<T extends string | number>({
         <div
           role="menu"
           aria-label={label}
-          className="absolute -top-1.5 left-full ml-1.5 w-[220px] rounded-xl border border-droid-border bg-droid-surface py-1.5 shadow-2xl shadow-black/50"
+          className="absolute -top-1.5 left-full ml-1.5 w-[220px] rounded-xl border border-droid-border bg-droid-surface py-1.5 shadow-droid"
         >
           {options.map((option) => {
             const selected = option.value === value;
@@ -181,7 +181,7 @@ export function SidebarCustomize({ preferences, unreadCount, onChange, onMarkAll
   };
 
   return (
-    <div className="mx-3 mb-1 flex items-center justify-between">
+    <div className="mx-4 mb-1 flex items-center justify-between">
       <span className="text-[11px] font-medium text-droid-text-muted">
         {VIEWS.find((view) => view.value === preferences.view)?.label}
       </span>

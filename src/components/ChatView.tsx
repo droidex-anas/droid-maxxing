@@ -1,6 +1,7 @@
 import { useRef, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
 import { GripVertical, ChevronRight, Square } from 'lucide-react';
 import { useStoreDispatch, useStoreSelector } from '../hooks/useStore';
+import { WINDOW_CONTROLS_LEAD_PX } from '../lib/windowChrome';
 import { openReviewAt, type OpenReviewFileHandler } from '../lib/reviewFocus';
 import type { FileChange } from '../lib/diff';
 import type { SessionRestore } from '../hooks/storeChildSession';
@@ -142,13 +143,21 @@ function ChatHeader({
   title,
   live,
   sub,
+  leadPx,
 }: {
   title: string;
   live: boolean;
   sub?: { label: string; meta?: string; running: boolean; onBack: () => void; onStop?: () => void };
+  // Room left at the row's start for the window controls and the sidebar
+  // toggle while the sidebar is collapsed.
+  leadPx: number;
 }) {
   return (
-    <div data-electron-drag-region className="shrink-0 flex items-center gap-2 h-9 pr-4 pl-4">
+    <div
+      data-electron-drag-region
+      className="shrink-0 flex items-center gap-2 h-9 pr-4"
+      style={{ paddingLeft: leadPx }}
+    >
       <div className="flex min-w-0 items-center gap-1.5 rounded-xl bg-droid-elevated/60 pl-2 pr-3 py-1.5">
         <GripVertical className="w-3.5 h-3.5 shrink-0 text-droid-text-muted/40" />
         {sub ? (
@@ -176,7 +185,7 @@ function ChatHeader({
               {sub.label}
             </span>
             {sub.meta && (
-              <span className="shrink-0 text-[10px] text-droid-text-muted/70">{sub.meta}</span>
+              <span className="shrink-0 text-[11px] text-droid-text-muted/70">{sub.meta}</span>
             )}
           </>
         )}
@@ -186,7 +195,7 @@ function ChatHeader({
           type="button"
           onClick={sub.onStop}
           title="Stop child session"
-          className="flex shrink-0 items-center gap-1 rounded-lg bg-droid-elevated/60 px-2.5 py-1.5 text-[11px] text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-droid-elevated/60 px-2.5 py-1.5 text-[11px] text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
         >
           <Square className="h-3 w-3" />
           Stop
@@ -210,6 +219,7 @@ export default function ChatView({
     [isObscured],
   );
   const state = useStoreSelector(selectChatViewState, equalChatState);
+  const sidebarCollapsed = useStoreSelector((current) => current.sidebarCollapsed);
   // Tool-activity settings are render-only feed props; select them apart from
   // the obscured-gated chat state so a settings change always applies live.
   const toolActivity = useStoreSelector((s) => s.toolActivity);
@@ -301,6 +311,9 @@ export default function ChatView({
     },
     [dispatch],
   );
+  // Review previews a file from the workspace; a folderless chat has nothing
+  // to open, so its paths and chips stay plain text.
+  const canOpenFiles = Boolean(activeSession?.cwd);
   const openDiff = useCallback(
     (change: FileChange) => {
       openReviewFile(change.path, change);
@@ -613,8 +626,8 @@ export default function ChatView({
             rebuiltFromItemIndex={rebuiltFromFeedItemIndex}
             pending={live}
             {...(messageFeedCwd !== undefined ? { cwd: messageFeedCwd } : {})}
-            onOpenDiff={openDiff}
-            onOpenReviewFile={openReviewFile}
+            onOpenDiff={canOpenFiles ? openDiff : undefined}
+            onOpenReviewFile={canOpenFiles ? openReviewFile : undefined}
             onOpenChildSession={openChildSession}
             childSessionActivity={childSessionActivity}
             {...(messageFeedSubagentsDock !== undefined
@@ -655,7 +668,7 @@ export default function ChatView({
             <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-droid-text-muted">
               Task
             </div>
-            <div className="text-[12.5px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
+            <div className="text-[13px] leading-relaxed text-droid-text-secondary whitespace-pre-wrap break-words">
               {selectedChildSession.prompt}
             </div>
           </div>
@@ -689,12 +702,17 @@ export default function ChatView({
 
   return (
     <div data-testid="chat-view" className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-      {activeSession && (
+      {activeSession ? (
         <ChatHeader
           title={chatDisplayTitle(activeSession, state.chatMetadata[activeSession.appSessionId])}
           live={live}
+          leadPx={sidebarCollapsed ? WINDOW_CONTROLS_LEAD_PX : 16}
           {...(chatHeaderSub !== undefined ? { sub: chatHeaderSub } : {})}
         />
+      ) : (
+        // The welcome screen has no header of its own, but the top row still
+        // belongs to the window chrome.
+        <div data-electron-drag-region className="h-9 shrink-0" />
       )}
       <div className="relative flex-1 min-h-0 min-w-0 flex flex-col">
         <TranscriptReachHost
@@ -727,7 +745,6 @@ export default function ChatView({
             className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden"
             style={{
               paddingRight: rightInset ? 312 : undefined,
-              transition: 'padding-right 0.2s ease',
               overflowAnchor: 'none',
             }}
           >

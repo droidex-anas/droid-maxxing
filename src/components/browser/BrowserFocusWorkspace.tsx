@@ -69,10 +69,10 @@ export function BrowserFocusWorkspace({
                   className="flex h-9 w-full items-center gap-2 px-3 text-[11px] font-medium text-droid-text-muted transition-colors hover:bg-droid-surface/40 hover:text-droid-text"
                 >
                   <span
-                    className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-400' : 'bg-droid-text-muted/40'}`}
+                    className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-droid-green' : 'bg-droid-text-muted/40'}`}
                   />
                   <span className="flex-1 text-left">Recent activity</span>
-                  <span className="text-[10px] font-normal tabular-nums text-droid-text-muted/60">
+                  <span className="text-[11px] font-normal tabular-nums text-droid-text-muted/60">
                     {live ? 'Working' : `${String(recent.length)} recent`}
                   </span>
                   {activityOpen ? (
@@ -93,19 +93,22 @@ export function BrowserFocusWorkspace({
                     >
                       <div className="border-t border-droid-border/70 px-2 py-1">
                         {recent.length > 0 ? (
-                          recent.map((event) => (
-                            <div
-                              key={event.id}
-                              className="flex h-7 min-w-0 items-center gap-2 rounded-lg px-2 text-[11px] hover:bg-droid-surface/35"
-                            >
-                              <span className="w-12 shrink-0 text-[10px] font-medium text-droid-text-muted/60">
-                                {activityAuthor(event)}
-                              </span>
-                              <span className="truncate text-droid-text-muted">
-                                {activityText(event)}
-                              </span>
-                            </div>
-                          ))
+                          recent.map((event) => {
+                            const text = activityText(event);
+                            return (
+                              <div
+                                key={event.id}
+                                className="flex h-7 min-w-0 items-center gap-2 rounded-lg px-2 text-[11px] hover:bg-droid-surface/35"
+                              >
+                                <span className="w-12 shrink-0 text-[11px] font-medium text-droid-text-muted/60">
+                                  {activityAuthor(event)}
+                                </span>
+                                <span title={text} className="truncate text-droid-text-muted">
+                                  {text}
+                                </span>
+                              </div>
+                            );
+                          })
                         ) : (
                           <div className="flex h-7 items-center px-2 text-[11px] text-droid-text-muted/60">
                             Activity will appear here while Droid works.

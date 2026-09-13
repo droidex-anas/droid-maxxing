@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   Bug,
@@ -11,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { Copy } from '@droidex/icons';
+import { useObscuresNativeSurfaces } from '../hooks/useObscuresNativeSurfaces';
 import type { FeedbackAttachments, FeedbackCategory, FeedbackReportRequest } from '../lib/desktop';
 import { submitFeedbackReport } from '../lib/feedbackReport';
 
@@ -51,6 +53,10 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
   const reportIdRef = useRef<HTMLInputElement>(null);
   const copyButtonRef = useRef<HTMLButtonElement>(null);
   const submittingRef = useRef(false);
+
+  // The browser pane's native view is painted above the DOM by the OS; hide it
+  // while this covers the window, or it shows straight through the dialog.
+  useObscuresNativeSurfaces();
 
   useEffect(() => {
     const opener = document.activeElement;
@@ -136,7 +142,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
     }
   };
 
-  return (
+  const overlay = (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -280,7 +286,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                     }
                   }}
                   placeholder="What happened? What did you expect instead?"
-                  className="min-h-[168px] w-full resize-none rounded-xl border border-droid-border bg-droid-bg/45 px-4 py-3 text-[14px] leading-6 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/70 focus:border-droid-accent/70 disabled:opacity-60"
+                  className="min-h-[168px] w-full resize-none rounded-xl border border-droid-border bg-droid-bg/45 px-4 py-3 text-[14px] leading-6 text-droid-text outline-none transition-colors placeholder:text-droid-text-muted focus:border-droid-accent/70 disabled:opacity-60"
                 />
               </label>
               <div className="mt-2 flex items-start justify-between gap-5">
@@ -290,7 +296,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                   files, browser content, keys, and credentials are not attached unless you opt in
                   to a screenshot below.
                 </p>
-                <span className="shrink-0 font-mono text-[10px] text-droid-text-muted">
+                <span className="shrink-0 font-mono text-[11px] text-droid-text-muted">
                   {description.length}/2000
                 </span>
               </div>
@@ -314,7 +320,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                   ).map(([key, label]) => (
                     <label
                       key={key}
-                      className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-droid-text-secondary"
+                      className="flex cursor-pointer items-center gap-1.5 text-[12px] text-droid-text-secondary"
                     >
                       <input
                         type="checkbox"
@@ -330,7 +336,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
                     </label>
                   ))}
                 </div>
-                <p className="mt-2 text-[10px] leading-[15px] text-droid-text-muted">
+                <p className="mt-2 text-[11px] leading-[15px] text-droid-text-muted">
                   Optional. Session log and app state contain anonymized operational facts only. The
                   screenshot captures the full app window, which may include chats, file paths, and
                   browser content. Uncheck all to exclude these optional attachments.
@@ -355,4 +361,7 @@ export function FeedbackModal({ initialReport, onClose }: FeedbackModalProps) {
       </motion.div>
     </motion.div>
   );
+  // Portalled: the composer that opens it may sit inside a clipped pane. A
+  // server render has no body to portal into.
+  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body);
 }

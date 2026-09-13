@@ -20,6 +20,9 @@ export const liveMarkdownTheme = EditorView.theme({
     padding: '12px 16px 10px calc(16px + var(--composer-indent, 0px))',
     caretColor: 'var(--droid-accent)',
   },
+  // CodeMirror ships a fixed #888 placeholder, which is unreadable on a light
+  // canvas; the muted token is derived to stay legible in either scheme.
+  '.cm-placeholder': { color: 'var(--droid-text-muted)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--droid-accent)', borderLeftWidth: '2px' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
     backgroundColor: textTint(14),
@@ -81,7 +84,7 @@ export const liveMarkdownTheme = EditorView.theme({
   '.cm-md-tableframe table': {
     minWidth: '100%',
     borderCollapse: 'collapse',
-    fontSize: '12.5px',
+    fontSize: '13px',
   },
   '.cm-md-tableframe th, .cm-md-tableframe td': { outline: 'none' },
   '.cm-md-tableframe th:focus, .cm-md-tableframe td:focus': {

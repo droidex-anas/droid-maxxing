@@ -19,7 +19,7 @@ export function UnreadFilterActions({
         <button
           type="button"
           onClick={onMarkAllRead}
-          className="rounded-md px-2 py-1.5 text-[10.5px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
+          className="rounded-md px-2 py-1.5 text-[11px] font-medium text-droid-text-muted transition-colors hover:bg-droid-elevated hover:text-droid-text"
         >
           Mark all as read
         </button>
@@ -36,7 +36,7 @@ export function UnreadFilterActions({
       >
         <Bell className="h-4 w-4" strokeWidth={1.75} />
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-droid-accent px-0.5 text-[8px] font-semibold tabular-nums text-droid-bg">
+          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-droid-accent px-0.5 text-[11px] font-semibold leading-none tabular-nums text-droid-bg">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}

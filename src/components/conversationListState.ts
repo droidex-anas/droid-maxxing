@@ -7,16 +7,16 @@ export const CONVERSATION_LIST_GAP_PX = 16;
 // Twice the designed row gap: larger holes are missing or still-estimated rows, not spacing.
 export const CONVERSATION_VISIBLE_HOLE_PX = CONVERSATION_LIST_GAP_PX * 2;
 export const CONVERSATION_LIST_PIN_THRESHOLD_PX = 80;
+// A width change arrives as a stream of resize entries: the context panel
+// animates the transcript's right inset for 200ms, and a window drag emits one
+// entry per frame. Rows are re-measured once the width has stopped moving.
+export const CONVERSATION_LIST_WIDTH_SETTLE_MS = 240;
 // Pre-measure guess so the first window exists before the scroller is observed; a wrong size only changes overscan until measure.
 export const CONVERSATION_LIST_INITIAL_RECT = { width: 720, height: 900 } as const;
 
 export interface ConversationRowLookup {
   byMountKey: ReadonlyMap<string, number>;
   byViewportId: ReadonlyMap<string, number>;
-}
-
-export function conversationRowMountKey(item: FeedItem): string {
-  return item.key;
 }
 
 export function conversationRowViewportId(item: FeedItem): string {

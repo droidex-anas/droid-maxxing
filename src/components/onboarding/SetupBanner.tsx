@@ -1,4 +1,5 @@
 import { AlertTriangle, ArrowUpCircle, X } from 'lucide-react';
+import { WINDOW_CONTROLS_INSET_PX } from '../../lib/windowChrome';
 
 export type SetupBannerKind = 'blocker' | 'update';
 
@@ -18,7 +19,10 @@ export default function SetupBanner({
   const Icon = kind === 'blocker' ? AlertTriangle : ArrowUpCircle;
   const accent = kind === 'blocker' ? 'text-droid-orange' : 'text-droid-accent';
   return (
-    <div className="shrink-0 flex items-center gap-2 px-4 h-9 border-b border-droid-border bg-droid-elevated/60 text-[12px]">
+    <div
+      className="shrink-0 flex items-center gap-2 pr-4 h-9 border-b border-droid-border bg-droid-elevated/60 text-[12px]"
+      style={{ paddingLeft: WINDOW_CONTROLS_INSET_PX }}
+    >
       <Icon className={`w-3.5 h-3.5 ${accent}`} />
       <span className="text-droid-text">{message}</span>
       <button

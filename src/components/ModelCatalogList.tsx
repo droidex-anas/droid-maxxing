@@ -138,12 +138,12 @@ function ModelCatalogList({
         })}
       </div>
       {!hasRealModels && (
-        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+        <div className="px-2 py-3 text-[11px] text-droid-text-muted text-center">
           Loading models…
         </div>
       )}
       {hasRealModels && models.length === 0 && (
-        <div className="px-2 py-3 text-[10px] text-droid-text-muted text-center">
+        <div className="px-2 py-3 text-[11px] text-droid-text-muted text-center">
           No matches for “{query}”
         </div>
       )}
@@ -205,6 +205,12 @@ const ModelRow = memo(function ModelRow({
       tabIndex={selected ? 0 : -1}
       aria-selected={selected}
       aria-disabled={disabled || undefined}
+      // A click must not focus the row: the popover steps effort from a window
+      // keydown, and the first arrow after a focusing click would otherwise
+      // draw the browser's focus ring on the row.
+      onMouseDown={(e) => {
+        e.preventDefault();
+      }}
       onClick={() => {
         if (!disabled) pick(id);
       }}
@@ -213,6 +219,7 @@ const ModelRow = memo(function ModelRow({
         e.preventDefault();
         if (!disabled) pick(id);
       }}
+      title={label}
       className={`relative flex items-center gap-2.5 h-9 px-2.5 rounded-lg select-none ${
         disabled
           ? 'cursor-not-allowed opacity-50'
@@ -227,7 +234,7 @@ const ModelRow = memo(function ModelRow({
         <ModelIcon provider={providerOf(model)} size={16} />
       </span>
       <span
-        className={`min-w-0 flex-1 text-[12.5px] truncate ${
+        className={`min-w-0 flex-1 text-[13px] truncate ${
           selected ? 'text-droid-text' : 'text-droid-text-secondary'
         }`}
       >
@@ -243,6 +250,7 @@ const ModelRow = memo(function ModelRow({
               type="button"
               tabIndex={-1}
               aria-label={`${label}: ${effort}`}
+              aria-pressed={effort === shown}
               disabled={disabled || reasoningLocked}
               onClick={(e) => {
                 e.stopPropagation();
@@ -254,7 +262,7 @@ const ModelRow = memo(function ModelRow({
                     ? 'bg-droid-accent'
                     : 'bg-droid-text-muted'
                   : selected
-                    ? 'bg-[#333]'
+                    ? 'bg-droid-active'
                     : 'bg-droid-active'
               } ${disabled || reasoningLocked ? 'cursor-not-allowed' : ''}`}
               style={{
@@ -268,7 +276,7 @@ const ModelRow = memo(function ModelRow({
       </span>
       {arrow(1)}
       <span
-        className={`w-[52px] shrink-0 text-[11.5px] capitalize truncate ${
+        className={`w-[52px] shrink-0 text-[12px] capitalize truncate ${
           selected ? 'text-droid-text' : 'text-droid-text-muted'
         }`}
       >

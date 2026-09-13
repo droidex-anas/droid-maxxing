@@ -263,7 +263,7 @@ export function ColorPopover({
       // Portaled to <body>, so modal hosts (the theme editor's Tab trap)
       // recognize focus inside it via this attribute instead of containment.
       data-color-popover=""
-      className="fixed z-[70] p-3 rounded-xl border border-droid-border bg-droid-elevated shadow-2xl shadow-black/60"
+      className="fixed z-[70] p-3 rounded-xl border border-droid-border bg-droid-elevated shadow-droid"
       style={{ top: pos.top, left: pos.left }}
     >
       {children}
@@ -302,7 +302,7 @@ export function ColorField({
     <div className="flex items-center justify-between gap-2">
       <div className="min-w-0">
         <div className="text-[12px] text-droid-text">{label}</div>
-        {description && <div className="text-[10.5px] text-droid-text-muted">{description}</div>}
+        {description && <div className="text-[11px] text-droid-text-muted">{description}</div>}
       </div>
       <div className="flex items-center gap-1.5">
         <button

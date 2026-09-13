@@ -171,7 +171,7 @@ function HeadingEl({ props }: { props: Record<string, unknown> }) {
     level === 'h1'
       ? 'text-[17px] font-semibold'
       : level === 'h3'
-        ? 'text-[13.5px] font-semibold text-droid-text-secondary'
+        ? 'text-[13px] font-semibold text-droid-text-secondary'
         : 'text-[15px] font-semibold';
   return <div className={`${cls} text-droid-text break-words`}>{text}</div>;
 }
@@ -249,7 +249,7 @@ function TableEl({ props }: { props: Record<string, unknown> }) {
         .map((key) => ({ header: key, key }));
   return (
     <div className="overflow-x-auto rounded-xl border border-droid-border w-full">
-      <table className="w-full border-collapse text-[12.5px]">
+      <table className="w-full border-collapse text-[13px]">
         <thead className="bg-droid-elevated/25">
           <tr>
             {cols.map((c, i) => (
@@ -412,7 +412,7 @@ function CalloutEl({ props, children }: { props: Record<string, unknown>; childr
       )}
       {content && (
         <div
-          className={`flex gap-2 text-[12.5px] leading-relaxed text-droid-text-secondary break-words ${title ? 'mt-1.5 pl-3.5' : ''}`}
+          className={`flex gap-2 text-[13px] leading-relaxed text-droid-text-secondary break-words ${title ? 'mt-1.5 pl-3.5' : ''}`}
         >
           {!title && (
             <span
@@ -535,7 +535,7 @@ function renderNode(
 function ErrorFallback({ raw }: { raw: string }) {
   return (
     <div className="rounded-xl border border-droid-border bg-droid-elevated/20 overflow-hidden my-2.5">
-      <div className="px-3.5 h-7 flex items-center text-[10px] font-medium tracking-widest uppercase text-droid-text-muted/60 border-b border-droid-border">
+      <div className="px-3.5 h-7 flex items-center text-[11px] font-medium tracking-widest uppercase text-droid-text-muted/60 border-b border-droid-border">
         Render spec (unparseable)
       </div>
       <pre className="overflow-x-auto p-3.5">

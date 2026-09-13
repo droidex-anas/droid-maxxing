@@ -62,7 +62,7 @@ function CodeCopyButton({ text }: { text: string }) {
           }, 1200);
         });
       }}
-      className="flex items-center gap-1 text-[10.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+      className="flex items-center gap-1 text-[11px] text-droid-text-muted hover:text-droid-text transition-colors"
       title="Copy"
     >
       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -173,7 +173,7 @@ function CardControls({
       {collapsible && (
         <button
           onClick={onToggleCollapse}
-          className="text-[10.5px] text-droid-text-muted hover:text-droid-text transition-colors"
+          className="text-[11px] text-droid-text-muted hover:text-droid-text transition-colors"
           title={collapsed ? 'Expand' : 'Collapse'}
         >
           {collapsed ? 'Expand' : 'Collapse'}
@@ -227,7 +227,7 @@ export function CodeCard({
       className={`rounded-xl border border-droid-border overflow-hidden bg-droid-elevated/40 ${specMode ? 'my-4' : 'my-2.5'}`}
     >
       <div className="flex items-center justify-between gap-2 h-7 px-3 bg-droid-surface/60 border-b border-droid-border">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-droid-text-muted truncate">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-droid-text-muted truncate">
           {languageLabel(className)}
         </span>
         <CardControls

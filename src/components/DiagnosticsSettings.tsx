@@ -48,7 +48,7 @@ export function DiagnosticsSettings() {
         </p>
       </div>
 
-      <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-droid-text-muted">
+      <div className="mb-3 text-[11px] font-medium uppercase tracking-wider text-droid-text-muted">
         Automatic diagnostics
       </div>
       <div className="rounded-xl border border-droid-border bg-droid-surface">

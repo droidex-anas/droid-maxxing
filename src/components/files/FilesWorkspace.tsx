@@ -138,7 +138,7 @@ export function FilesWorkspace({
       <section className="flex min-h-0 flex-col border-r border-droid-border bg-droid-surface/25">
         <header className="flex h-9 shrink-0 items-center gap-2 border-b border-droid-border px-2.5">
           <FileTypeIcon filename={root} isDirectory expanded className="h-3.5 w-3.5" />
-          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-droid-text-muted">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-droid-text-muted">
             {root}
           </span>
           <button
@@ -175,7 +175,7 @@ export function FilesWorkspace({
             />
           ))}
           {rootListing?.capped && (
-            <p className="px-3 py-2 text-[10.5px] text-amber-300">
+            <p className="px-3 py-2 text-[11px] text-amber-300">
               Showing {rootListing.entries.length} of {rootListing.totalSeen} entries.
             </p>
           )}
@@ -224,7 +224,7 @@ function FileTreeRow({
         aria-expanded={entry.kind === 'directory' ? expanded : undefined}
         onClick={onClick}
         title={entry.relative}
-        className={`file-tree-row flex h-7 w-full items-center gap-1.5 pr-2 text-left text-[11.5px] transition-colors ${
+        className={`file-tree-row flex h-7 w-full items-center gap-1.5 pr-2 text-left text-[12px] transition-colors ${
           selected
             ? 'bg-droid-active text-droid-text'
             : 'text-droid-text-secondary hover:bg-droid-elevated/70 hover:text-droid-text'
@@ -242,7 +242,7 @@ function FileTreeRow({
       </button>
       {error && (
         <p
-          className="truncate py-1 pr-2 text-[10px] text-red-300"
+          className="truncate py-1 pr-2 text-[11px] text-red-300"
           style={{ paddingLeft: `${String(26 + entry.depth * 14)}px` }}
           title={error}
         >

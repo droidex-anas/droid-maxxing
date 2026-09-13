@@ -52,7 +52,7 @@ function AppLoadingSurface({
       <VisualizeIcon className="h-10 w-10 shrink-0" />
       <span className="min-w-0 flex-1">
         <span className="shimmer-text block text-[13px] font-medium">{title}</span>
-        <span className="block text-[11.5px] text-droid-text-muted">{subtitle}</span>
+        <span className="block text-[12px] text-droid-text-muted">{subtitle}</span>
       </span>
       {trailing}
     </div>
@@ -337,7 +337,7 @@ export function AppBlock({
                   manualRevealPending.current = false;
                   dispatch('stop');
                 }}
-                className="flex h-6 items-center gap-1.5 rounded-md px-2 text-[10.5px] font-medium text-droid-text-muted opacity-45 transition-[color,background-color,opacity] hover:bg-droid-surface hover:text-droid-text-secondary hover:opacity-100 focus-visible:bg-droid-surface focus-visible:text-droid-text-secondary focus-visible:opacity-100 focus-visible:outline-none"
+                className="flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-droid-text-muted opacity-45 transition-[color,background-color,opacity] hover:bg-droid-surface hover:text-droid-text-secondary hover:opacity-100 focus-visible:bg-droid-surface focus-visible:text-droid-text-secondary focus-visible:opacity-100 focus-visible:outline-none"
               >
                 <Square className="h-2.5 w-2.5 fill-current" />
                 Stop
@@ -362,7 +362,7 @@ export function AppBlock({
             <VisualizeIcon className="h-10 w-10 shrink-0" />
             <span className="min-w-0 flex-1">
               <span className="block text-[13px] font-medium text-droid-text">Interactive App</span>
-              <span className="block text-[11.5px] text-droid-text-muted">
+              <span className="block text-[12px] text-droid-text-muted">
                 Runs locally in this chat
               </span>
             </span>

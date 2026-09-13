@@ -14,6 +14,8 @@ import type { TranscriptEvent } from '../types/bridge';
 import { SpecRenderer } from './SpecRenderer';
 import type { FileChange } from '../lib/diff';
 import type { OpenReviewFileHandler } from '../lib/reviewFocus';
+import { ProseFileLinks } from './transcript/ProseFileLink';
+import { useToolMarkCatalog } from './transcript/toolSourceMark';
 import {
   childSessionTargetFromEvent,
   findChildSessionForTarget,
@@ -22,6 +24,8 @@ import {
 } from '../lib/childSessions';
 import { DEFAULT_TOOL_ACTIVITY, type ToolActivityDensity } from '../lib/toolActivity';
 import type { ConversationViewportLayout } from '../hooks/conversationViewportAnchor';
+import { useStreamingActivity } from '../hooks/streamingText';
+import { hasAppBlock } from './appBlockRuntime';
 import { asChunkedSequence } from '../lib/chunkedSequence';
 import { ConversationList, type ConversationListHandle } from './ConversationList';
 import { shouldAnimateFeedRow } from './conversationListState';
@@ -37,7 +41,7 @@ import {
 } from './messageFeedState';
 import { buildFeed, isCompactingStatus, type FeedItem } from './chatFeed';
 import { groupTurns, tailTimestamp, trailingSubagentPoll } from './chatFeedTurns';
-import { FeedItemView, feedItemPropsEqual } from './chat';
+import { FeedItemView, feedItemPropsEqual, isSpecEcho } from './chat';
 import { WorkingIndicator } from './transcript/primitives';
 import type { SubagentsDockData } from './SubagentsDock';
 
@@ -259,6 +263,9 @@ export function MessageFeed({
   const lastIdx = items.length - 1;
   // Empty feeds are real (a fresh session), so the tail is genuinely optional.
   const last: FeedItem | undefined = items.length > 0 ? items[lastIdx] : undefined;
+  // Tool rows wear their MCP server's mark; the catalog follows this
+  // transcript's workspace.
+  useToolMarkCatalog(cwd);
   const showSpecCard = (specContent?.length ?? 0) > 0;
 
   // Compaction is in progress when the latest status line announces it and no
@@ -281,13 +288,17 @@ export function MessageFeed({
         findChildSessionForTarget(subagentsDock?.sessions ?? [], target)?.status;
       return status === 'running';
     });
-  // Working describes the pending turn, while the assistant caret describes
-  // token flow. Both intentionally appear during prose streaming; Working
-  // remains when the caret idles so a token gap never looks like completion.
-  // Thinking, status, and running-child tails already convey pending work.
+  // One live cue at a time. While the tail message streams, its caret is the
+  // cue; Working takes over the moment the stream idles so a token gap never
+  // reads as completion. Thinking, status, and running-child tails already
+  // convey pending work.
+  const tailIsReply = last?.type === 'message' && last.event.author !== 'user';
+  const tailText = tailIsReply ? (last.event.text ?? '') : '';
   const tailSelfIndicates =
     !!last &&
     (last.type === 'thinking' ||
+      // An App tail shows its own "Building interactive app" progress.
+      (tailIsReply && hasAppBlock(tailText)) ||
       last.type === 'status' ||
       (last.type === 'child_session' && lastChildSessionRunning) ||
       (last.type === 'child_sessions' && lastDockRunning));
@@ -297,9 +308,22 @@ export function MessageFeed({
     () => trailingSubagentPoll(events, dockEnabled),
     [events, dockEnabled],
   );
+  // Mirrors the tail message's own caret timing (same text, same idle window),
+  // so the hand-off from caret to Working is seamless.
+  // A tail that only echoes the pinned spec renders nothing, so it cannot
+  // carry the live cue either.
+  const tailTyping = useStreamingActivity(
+    tailText,
+    pending &&
+      tailIsReply &&
+      !subagentPoll &&
+      !hasAppBlock(tailText) &&
+      !isSpecEcho(tailText, specContent),
+  );
   // A dock tail whose children are still running already speaks for the wave
   // with its own pills, timers and total, so the poll cue would only repeat it.
-  const showWorking = pending && (subagentPoll ? !lastDockRunning : !tailSelfIndicates);
+  const showWorking =
+    pending && !tailTyping && (subagentPoll ? !lastDockRunning : !tailSelfIndicates);
   const workingLabel = subagentPoll
     ? 'Checking subagents'
     : last?.type === 'tools'
@@ -341,55 +365,59 @@ export function MessageFeed({
   const subagentPollActive = Boolean(subagentPoll);
 
   return (
-    <div className="space-y-4">
-      {showSpecCard && (
-        <div className="mx-auto min-w-0 max-w-2xl">
-          <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
-        </div>
-      )}
-
-      <ConversationList
-        items={items}
-        {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
-        {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
-        {...(listRef !== undefined ? { listRef } : {})}
-        {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
-        {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
-      >
-        {(item, index) => (
-          <>
-            <FeedRow
-              item={item}
-              itemView={FeedItemView}
-              areItemPropsEqual={feedItemPropsEqual}
-              animateOnMount={shouldAnimateFeedRow(item, animateKeys, enteredKeys)}
-              onEnter={recordEntrance}
-              live={pending && index === lastIdx && !subagentPollActive}
-              autoPlayAppBlocks={
-                item.type === 'message' &&
-                item.event.author !== 'user' &&
-                freshAppResponseTexts.has(item.event.text ?? '')
-              }
-              sessionLive={pending}
-              compacting={compacting && index === lastIdx}
-              {...optionalItemProps}
-              liveTiming={rowSharedProps.liveTiming}
-              isFinalResponse={isCopyableFinalResponse(item.key, finalResponseState, pending)}
-            />
-            {index === worktreeInsertAfter && createdWorktreePath ? (
-              <div className="mx-auto min-w-0 max-w-2xl">
-                <WorktreeCreatedCard path={createdWorktreePath} />
-              </div>
-            ) : null}
-          </>
+    // A reply's prose names files as it works; inside the transcript those
+    // mentions are live and open in Review, the same handler a tool row uses.
+    <ProseFileLinks onOpenReviewFile={stableOnOpenReviewFile}>
+      <div className="space-y-4">
+        {showSpecCard && (
+          <div className="mx-auto min-w-0 max-w-2xl">
+            <InlineSpecCard content={specContent ?? ''} onOpenWiki={onOpenSpecWiki} />
+          </div>
         )}
-      </ConversationList>
 
-      {showWorking && (
-        <div className="mx-auto min-w-0 max-w-2xl">
-          <WorkingIndicator label={workingLabel} startTs={workingStart} />
-        </div>
-      )}
-    </div>
+        <ConversationList
+          items={items}
+          {...(scrollElementRef !== undefined ? { scrollElementRef } : {})}
+          {...(viewportLayoutRef !== undefined ? { viewportLayoutRef } : {})}
+          {...(listRef !== undefined ? { listRef } : {})}
+          {...(initialScrollOffset !== undefined ? { initialScrollOffset } : {})}
+          {...(onMountedRowsChange !== undefined ? { onMountedRowsChange } : {})}
+        >
+          {(item, index) => (
+            <>
+              <FeedRow
+                item={item}
+                itemView={FeedItemView}
+                areItemPropsEqual={feedItemPropsEqual}
+                animateOnMount={shouldAnimateFeedRow(item, animateKeys, enteredKeys)}
+                onEnter={recordEntrance}
+                live={pending && index === lastIdx && !subagentPollActive}
+                autoPlayAppBlocks={
+                  item.type === 'message' &&
+                  item.event.author !== 'user' &&
+                  freshAppResponseTexts.has(item.event.text ?? '')
+                }
+                sessionLive={pending}
+                compacting={compacting && index === lastIdx}
+                {...optionalItemProps}
+                liveTiming={rowSharedProps.liveTiming}
+                isFinalResponse={isCopyableFinalResponse(item.key, finalResponseState, pending)}
+              />
+              {index === worktreeInsertAfter && createdWorktreePath ? (
+                <div className="mx-auto min-w-0 max-w-2xl">
+                  <WorktreeCreatedCard path={createdWorktreePath} />
+                </div>
+              ) : null}
+            </>
+          )}
+        </ConversationList>
+
+        {showWorking && (
+          <div className="mx-auto min-w-0 max-w-2xl">
+            <WorkingIndicator label={workingLabel} startTs={workingStart} />
+          </div>
+        )}
+      </div>
+    </ProseFileLinks>
   );
 }

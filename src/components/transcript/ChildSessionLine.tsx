@@ -63,7 +63,7 @@ export function ChildSessionLine({
           onClick={() => {
             setOpen((o) => !o);
           }}
-          className="flex items-center"
+          className="-m-0.5 flex items-center rounded p-0.5"
           aria-label="Toggle child session activity"
           aria-expanded={open}
         >
@@ -84,12 +84,12 @@ export function ChildSessionLine({
       <Expand open={open}>
         <div className="mt-2 pl-[18px]">
           {description && (
-            <div className="text-[12.5px] text-droid-text-muted/70 leading-relaxed break-words">
+            <div className="text-[13px] text-droid-text-muted/70 leading-relaxed break-words">
               {description}
             </div>
           )}
           {latest && (
-            <div className="mt-1.5 text-[12.5px] leading-relaxed break-words">
+            <div className="mt-1.5 text-[13px] leading-relaxed break-words">
               <span
                 className={
                   running ? 'shimmer-text font-medium' : 'text-droid-text-secondary font-medium'

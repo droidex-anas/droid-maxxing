@@ -26,7 +26,7 @@ const STATE_PILL = {
 function Badge({ badge }: { badge: PrBadge }) {
   return (
     <span
-      className={`rounded-full border border-droid-border px-2 py-0.5 text-[11.5px] font-medium ${
+      className={`rounded-full border border-droid-border px-2 py-0.5 text-[12px] font-medium ${
         PR_TONE_TEXT_CLASS[badge.tone]
       }`}
     >
@@ -38,7 +38,7 @@ function Badge({ badge }: { badge: PrBadge }) {
 function MetaRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt className="pt-0.5 text-[12.5px] text-droid-text-muted">{label}</dt>
+      <dt className="pt-0.5 text-[13px] text-droid-text-muted">{label}</dt>
       <dd className="min-w-0 text-[13px] text-droid-text-secondary">{children}</dd>
     </>
   );
@@ -111,7 +111,7 @@ export function PrHeader({
 
   return (
     <header>
-      <h1 className="text-[21px] leading-snug font-semibold text-droid-text">
+      <h1 className="text-[22px] leading-snug font-semibold text-droid-text">
         {pr ? (
           <>
             {pr.title}

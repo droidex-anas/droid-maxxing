@@ -21,8 +21,8 @@ const existingAppBindings: Array<{
 }> = [
   { ctrlKey: true, shiftKey: false, key: '`', name: 'terminal tab' },
   { ctrlKey: true, shiftKey: false, key: 'k', name: 'command palette' },
-  { ctrlKey: true, shiftKey: false, key: 'b', name: 'sidebar' },
-  { ctrlKey: true, shiftKey: false, key: '\\', name: 'utility pane' },
+  { ctrlKey: true, shiftKey: false, key: '\\', name: 'sidebar' },
+  { ctrlKey: true, shiftKey: false, key: 'j', name: 'utility pane' },
   { ctrlKey: true, shiftKey: false, key: ',', name: 'settings' },
   { ctrlKey: true, shiftKey: true, key: 'b', name: 'browser pane' },
   { ctrlKey: true, shiftKey: true, key: 'f', name: 'files pane' },

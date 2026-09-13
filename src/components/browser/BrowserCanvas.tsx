@@ -67,8 +67,8 @@ export function BrowserCanvas({
     <SmoothCanvas
       contentSize={contentSize}
       padding={32}
-      className="h-full w-full bg-[#070707]"
-      contentClassName="rounded-[6px] bg-[#0d0d0d] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_24px_80px_rgba(0,0,0,0.55)]"
+      className="h-full w-full bg-droid-bg"
+      contentClassName="rounded-[6px] bg-droid-surface shadow-droid ring-1 ring-droid-border-hover"
       onFitChange={(fit) => onScaleChange?.(fit.scale)}
       onContentPointerDown={(point, event) => {
         if (!browser) return;
@@ -146,7 +146,7 @@ export function BrowserCanvas({
       }}
     >
       {() => (
-        <div className="relative h-full w-full overflow-hidden rounded-[6px] bg-[#0b0b0b]">
+        <div className="relative h-full w-full overflow-hidden rounded-[6px] bg-droid-surface">
           {browser?.screenshotUrl ? (
             <img
               src={browser.screenshotUrl}
@@ -156,7 +156,7 @@ export function BrowserCanvas({
               className="h-full w-full select-none object-fill"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center bg-[#0b0b0b]">
+            <div className="flex h-full w-full items-center justify-center bg-droid-surface">
               <BrandMark size={30} className="text-droid-text-muted/30" />
             </div>
           )}

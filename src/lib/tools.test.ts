@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  describeToolCall,
   isWebSearchTool,
   isWebFetchTool,
   parseWebSearch,
   parseWebFetch,
   looksLikeHtml,
-  formatCharCount,
   webSourceName,
   toolArgString,
   toolArgStringArray,
@@ -47,13 +47,6 @@ const SAMPLE = `Web Search Results for: "electron auto update best practices 202
    The official Sentry SDK for Electron. Contribute to getsentry/sentry-electron development by creating an account on GitHub.
 Found 2 results`;
 
-test('isWebSearchTool matches WebSearch tool names only', () => {
-  assert.equal(isWebSearchTool('WebSearch'), true);
-  assert.equal(isWebSearchTool('web_search'), true);
-  assert.equal(isWebSearchTool('FetchUrl'), false);
-  assert.equal(isWebSearchTool(undefined), false);
-});
-
 test('isWebSearchTool covers engine names, MCP prefixes, and web queries', () => {
   assert.equal(isWebSearchTool('brave_web_search'), true);
   assert.equal(isWebSearchTool('brave-web-search'), true);
@@ -61,20 +54,12 @@ test('isWebSearchTool covers engine names, MCP prefixes, and web queries', () =>
   assert.equal(isWebSearchTool('google'), true);
   assert.equal(isWebSearchTool('web_query'), true);
   assert.equal(isWebSearchTool('websearch'), true);
+  assert.equal(isWebSearchTool('WebSearch'), true);
+  assert.equal(isWebSearchTool(undefined), false);
   // A plain local search stays false — no web/engine signal.
   assert.equal(isWebSearchTool('Search'), false);
   assert.equal(isWebSearchTool('Grep'), false);
   assert.equal(isWebSearchTool('search_files'), false);
-});
-
-test('isWebFetchTool matches fetch tools and excludes web search', () => {
-  assert.equal(isWebFetchTool('FetchUrl'), true);
-  assert.equal(isWebFetchTool('WebFetch'), true);
-  assert.equal(isWebFetchTool('browse_page'), true);
-  assert.equal(isWebFetchTool('WebSearch'), false);
-  assert.equal(isWebFetchTool('web_search'), false);
-  assert.equal(isWebFetchTool('Grep'), false);
-  assert.equal(isWebFetchTool(undefined), false);
 });
 
 test('isWebFetchTool covers separators, MCP prefixes, and url verbs', () => {
@@ -87,7 +72,11 @@ test('isWebFetchTool covers separators, MCP prefixes, and url verbs', () => {
   assert.equal(isWebFetchTool('http_request'), true);
   assert.equal(isWebFetchTool('mcp__fetch__fetch'), true);
   assert.equal(isWebFetchTool('server___FetchUrl'), true);
+  assert.equal(isWebFetchTool('WebFetch'), true);
   // No fetch/url signal → stays a generic tool line.
+  assert.equal(isWebFetchTool(undefined), false);
+  assert.equal(isWebFetchTool('WebSearch'), false);
+  assert.equal(isWebFetchTool('web_search'), false);
   assert.equal(isWebFetchTool('Read'), false);
   assert.equal(isWebFetchTool('TodoWrite'), false);
   assert.equal(isWebFetchTool('mcp__figma__get_design'), false);
@@ -223,12 +212,6 @@ test('parseWebFetch leaves an empty body when the page is only Title/URL metadat
   assert.equal(page.body, '');
 });
 
-test('formatCharCount uses compact k labels', () => {
-  assert.equal(formatCharCount(42), '42');
-  assert.equal(formatCharCount(1240), '1.2k');
-  assert.equal(formatCharCount(10_500), '11k');
-});
-
 test('webSourceName derives a capitalized registrable label', () => {
   assert.equal(webSourceName('https://www.theregister.com/2026/01/01/x'), 'Theregister');
   assert.equal(webSourceName('https://docs.sentry.io/platforms'), 'Sentry');
@@ -304,4 +287,16 @@ test('only a real spawn is labeled a child session', () => {
     assert.equal(CAT_LABEL[toolMeta(name, { task_id: 'abc' }).cat], 'Subagent');
     assert.ok(!isChildSessionTool(name, { task_id: 'abc' }));
   }
+});
+
+test('describeToolCall categorises a namespaced tool by its bare name and keeps its server', () => {
+  const open = describeToolCall('droidmaxx-browser___browser_open', { url: 'https://a.dev' });
+  assert.equal(open.verb, 'Browser open');
+  assert.equal(open.source, 'droidmaxx browser');
+  const read = describeToolCall('mcp__filesystem__read_file', { path: 'a.ts' });
+  assert.equal(read.verb, 'Read');
+  assert.equal(read.source, 'filesystem');
+  const issue = describeToolCall('mcp__github__create_issue', { title: 'x' });
+  assert.equal(issue.verb, 'Created');
+  assert.equal(issue.source, 'github');
 });

@@ -19,6 +19,7 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
+  CONVERSATION_LIST_WIDTH_SETTLE_MS,
   estimatedListEndOffset,
   findConversationRowIndex,
   isConversationAtLatest,
@@ -94,10 +95,10 @@ export function ConversationList({
 
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = shouldAdjustConversationRowOnSizeChange;
 
-  const cachedRowSize = (index: number) => {
-    const key = itemsRef.current[index]?.key ?? index;
-    return virtualizer.itemSizeCache.get(key);
-  };
+  const cachedRowSize = useCallback(
+    (index: number) => virtualizer.itemSizeCache.get(itemsRef.current[index]?.key ?? index),
+    [virtualizer],
+  );
 
   const setListNode = useCallback(
     (node: HTMLDivElement | null) => {
@@ -131,27 +132,34 @@ export function ConversationList({
     setScrollMargin((current) => (Math.abs(next - current) > 0.5 ? next : current));
   });
 
+  // A narrower or wider transcript reflows every row, but only the rows the
+  // virtualizer has mounted can be measured. Clearing the whole size cache
+  // would replace every other row's height with the estimate, so the list's
+  // total height — and with it the scrollbar and the reader's place in the
+  // transcript — would lurch by thousands of pixels on a sidebar toggle that
+  // did not change a single row's height. Re-measure the mounted rows instead,
+  // once the width has settled; the rest keep the height they were measured at
+  // until they scroll back into view and measure themselves.
   useLayoutEffect(() => {
     const list = listElRef.current;
     if (!list || typeof ResizeObserver === 'undefined') return;
     let lastWidth = list.clientWidth;
-    let frame = 0;
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? list.clientWidth;
       if (Math.abs(width - lastWidth) < 0.5) return;
       lastWidth = width;
-      if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        virtualizer.measure();
-      });
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        syncMeasureConversationList(list, virtualizer.resizeItem, cachedRowSize);
+      }, CONVERSATION_LIST_WIDTH_SETTLE_MS);
     });
     observer.observe(list);
     return () => {
       observer.disconnect();
-      if (frame) cancelAnimationFrame(frame);
+      clearTimeout(settle);
     };
-  }, [virtualizer]);
+  }, [cachedRowSize, virtualizer]);
 
   const rowContentOffset = useCallback(
     (rowId: string): number | undefined => {
@@ -208,6 +216,12 @@ export function ConversationList({
               key={virtualRow.key}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
+              // Rows are positioned siblings, so a later row paints over the
+              // one before it. A message's copy control floats in the row gap
+              // and would sit under the next row; the hovered row rises above,
+              // and stays raised for the control's 300ms hide delay so it
+              // fades instead of dropping behind the next row.
+              className="z-0 [transition:z-index_0s_300ms] hover:z-[1] hover:[transition-delay:0s] focus-within:z-[1] focus-within:[transition-delay:0s]"
               style={{
                 position: 'absolute',
                 top: 0,

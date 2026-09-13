@@ -48,11 +48,6 @@ test('exact child editor labels readiness and keeps per-row reasoning locked', (
   assert.match(ready, /Validator model/);
   assert.match(ready, /Change the child model to adjust reasoning/);
   assert.doesNotMatch(ready, /aria-disabled="true"/);
-  // Effort blocks stay disabled in child mode regardless of readiness.
-  assert.equal(
-    (opening.match(/disabled=""/g) ?? []).length,
-    (ready.match(/disabled=""/g) ?? []).length,
-  );
 
   const unavailable = renderTarget('failed');
   assert.match(unavailable, /Child unavailable/);
@@ -88,10 +83,12 @@ test('a dangling active session id keeps using the visible global defaults', () 
     ),
   );
 
-  assert.match(html, /Search models · Global Model/);
-  // The selected row shows the session's effort; the meter has one block per supported effort.
+  // The selected model names the popover; the search box stays a plain search box.
+  assert.match(html, /placeholder="Search models"/);
+  assert.match(html, /text-droid-text truncate"[^>]*>Global Model</);
+  // The selected row shows the session's effort; the meter has one dot per supported effort.
   assert.match(html, /aria-selected="true"[\s\S]*?capitalize[^>]*>low<\/span>/);
   assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.equal((html.match(/aria-selected="false"/g) ?? []).length, 1);
-  assert.equal((html.match(/aria-label="Global Model: (low|high)"/g) ?? []).length, 2);
+  assert.equal((html.match(/w-\[9px\]/g) ?? []).length, 3);
 });

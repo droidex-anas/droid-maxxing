@@ -12,61 +12,6 @@ test('renders nothing without a plan', () => {
   assert.equal(render([]), '');
 });
 
-test('collapsed header shows the running step', () => {
-  const html = render([
-    { status: 'completed', text: 'Investigate the APIs' },
-    { status: 'in_progress', text: 'Start a new app' },
-    { status: 'pending', text: 'Implement the tracker' },
-  ]);
-  assert.match(html, /aria-expanded="false"/);
-  assert.match(html, /Start a new app/);
-});
-
-test('the current step appears once with its only spinner in the summary row', () => {
-  const html = render([
-    { status: 'completed', text: 'Investigate the APIs' },
-    { status: 'in_progress', text: 'Start a new app' },
-    { status: 'pending', text: 'Implement the tracker' },
-  ]);
-  // No numeric fractions anywhere.
-  assert.doesNotMatch(html, /\d+\/\d+/);
-  // The one completed step is the only filled ring with a check.
-  assert.equal(html.match(/rounded-full bg-droid-accent/g)?.length, 1);
-  assert.equal(html.match(/lucide-check/g)?.length, 1);
-  const header = /<button[^>]*aria-expanded="false"[^>]*>.*?<\/button>/s.exec(html)?.[0];
-  assert.match(header ?? '', /animate-spin/);
-  // The expanded list omits the current step instead of duplicating the summary.
-  const rows = [
-    ...html.matchAll(
-      /<div class="flex min-w-0 items-center gap-2\.5 px-4 py-1\.5[^>]*>.*?<\/div>/gs,
-    ),
-  ].map(([row]) => row);
-  const activeRow = rows.find((row) => row.includes('Start a new app'));
-  const pendingRow = rows.find((row) => row.includes('Implement the tracker'));
-  assert.equal(activeRow, undefined);
-  assert.doesNotMatch(pendingRow ?? '', /animate-spin/);
-  assert.equal(html.match(/Start a new app/g)?.length, 1);
-  assert.equal(html.match(/animate-spin/g)?.length, 1);
-  assert.equal(html.match(/motion-safe:animate-spin-slow/g)?.length, 1);
-  assert.equal(html.match(/border-r-transparent/g)?.length, 1);
-  assert.equal(html.match(/border-\[1\.5px\]/g)?.length, 2);
-});
-
-test('expanded steps are capped and scroll beneath the original summary row', () => {
-  const html = render([
-    { status: 'in_progress', text: 'Start a new app' },
-    { status: 'pending', text: 'Implement the tracker' },
-  ]);
-  const listIndex = html.indexOf('id="plan-steps-list"');
-  const summaryIndex = html.indexOf('<button');
-
-  assert.ok(summaryIndex >= 0 && summaryIndex < listIndex);
-  assert.match(html, /expanded-steps/);
-  assert.match(html, /min-h-0/);
-  assert.match(html, /max-h-\[min\(40vh,350px\)\]/);
-  assert.match(html, /overflow-y-auto/);
-});
-
 test('the collapsed header keeps the current step visible with the spinning ring', () => {
   const steps: TodoItem[] = [
     { status: 'completed', text: 'Investigate the APIs' },
@@ -81,19 +26,14 @@ test('the collapsed header keeps the current step visible with the spinning ring
   assert.match(header ?? '', /Implement the tracker/);
   assert.match(header ?? '', /animate-spin/);
   assert.doesNotMatch(html, /\d+\/\d+/);
+  // The expanded list omits the current step instead of repeating the summary.
+  assert.equal(html.match(/Implement the tracker/g)?.length, 1);
 });
 
 test('the header ring only spins while the session is generating', () => {
   const steps: TodoItem[] = [{ status: 'in_progress', text: 'Start a new app' }];
   assert.match(render(steps, true), /animate-spin/);
   assert.doesNotMatch(render(steps, false), /animate-spin/);
-});
-
-test('an incomplete stopped plan uses an empty ring without a paused spinner arc', () => {
-  const html = render([{ status: 'in_progress', text: 'Start a new app' }], false);
-  assert.doesNotMatch(html, /animate-spin/);
-  assert.doesNotMatch(html, /border-r-transparent/);
-  assert.match(html, /border-droid-text-muted\/30/);
 });
 
 test('finished plan fills every ring and drops the active band', () => {

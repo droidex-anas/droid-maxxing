@@ -153,13 +153,13 @@ export function AutomationProposalCard({
     >
       <div className="px-4 pb-3 pt-3.5">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-droid-text-muted">
+          <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-droid-text-muted">
             DROIDEX automation
           </span>
           <StateIndicator state={state} />
         </div>
         {scheduledAutomationId && workingDraft ? (
-          <h3 className="mt-2 text-[15px] font-medium leading-6 tracking-[-0.01em] text-droid-text">
+          <h3 className="mt-2 text-[16px] font-medium leading-6 tracking-[-0.01em] text-droid-text">
             {workingDraft.title}
           </h3>
         ) : (
@@ -171,10 +171,10 @@ export function AutomationProposalCard({
             disabled={!workingDraft}
             placeholder={workingDraft ? 'Automation title' : 'Preparing automation'}
             aria-label="Automation title"
-            className="mt-2 w-full bg-transparent text-[15px] font-medium leading-6 tracking-[-0.01em] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted/50 disabled:cursor-default"
+            className="mt-2 w-full bg-transparent text-[16px] font-medium leading-6 tracking-[-0.01em] text-droid-text outline-none transition-colors placeholder:text-droid-text-muted disabled:cursor-default"
           />
         )}
-        <p className="mt-1 line-clamp-3 text-[12.5px] leading-5 text-droid-text-muted">
+        <p className="mt-1 line-clamp-3 text-[13px] leading-5 text-droid-text-muted">
           {workingDraft?.prompt ?? 'DROIDEX is resolving the schedule and run configuration.'}
         </p>
       </div>
@@ -318,8 +318,8 @@ export function AutomationProposalCard({
       {(toolError ?? displayModelIssue) && state.kind !== 'scheduled' && (
         <div className="border-t border-droid-border/70 px-4 py-2.5">
           <p
-            className={`text-[11.5px] leading-4 ${
-              toolError ? 'text-red-300/90' : 'text-amber-200/80'
+            className={`text-[12px] leading-4 ${
+              toolError ? 'text-droid-red' : 'text-droid-orange'
             }`}
           >
             {toolError ?? displayModelIssue}
@@ -328,7 +328,7 @@ export function AutomationProposalCard({
       )}
 
       <div className="flex min-h-12 items-center justify-between gap-3 border-t border-droid-border/70 bg-droid-bg/20 px-4 py-2.5">
-        <span className="text-[10.5px] leading-4 text-droid-text-muted">{helper}</span>
+        <span className="text-[11px] leading-4 text-droid-text-muted">{helper}</span>
         <div className="flex shrink-0 items-center gap-2">
           {scheduledAutomationId ? (
             <button
@@ -365,14 +365,14 @@ export function AutomationProposalCard({
 function StateIndicator({ state }: { state: ProposalCardState }) {
   const dot =
     state.kind === 'failed'
-      ? 'bg-red-400/80'
+      ? 'bg-droid-red'
       : state.kind === 'review'
-        ? 'bg-amber-300/70'
+        ? 'bg-droid-orange'
         : state.kind === 'preparing'
           ? 'bg-droid-text-muted motion-safe:animate-pulse'
           : 'bg-droid-text-secondary';
   return (
-    <span className="inline-flex items-center gap-1.5 text-[10.5px] font-medium text-droid-text-muted">
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-droid-text-muted">
       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
       {state.label}
     </span>

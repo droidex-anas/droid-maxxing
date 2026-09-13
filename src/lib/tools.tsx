@@ -27,8 +27,12 @@ export const CAT_LABEL: Record<ToolCat, string> = {
   other: 'Tool',
 };
 
+const READ_RE = /read|cat|view|open|list|ls/;
+const READ_HEADS = new Set(['read', 'cat', 'view', 'list', 'ls']);
+
 export function toolMeta(name?: string, args?: unknown): { cat: ToolCat; detail: string } {
-  const n = (name ?? '').toLowerCase();
+  const { server, tool } = splitToolName(name ?? '');
+  const n = tool.toLowerCase();
   const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
   const s = (k: string) => (typeof a[k] === 'string' ? a[k] : undefined);
   const file = s('file_path') ?? s('path') ?? s('filename') ?? s('target_file');
@@ -50,9 +54,75 @@ export function toolMeta(name?: string, args?: unknown): { cat: ToolCat; detail:
   else if (isChildSessionTool(name, args)) cat = 'task';
   else if (/^task/i.test(n)) cat = 'subagent';
   else if (n.includes('skill')) cat = 'skill';
-  else if (/read|cat|view|open|list|ls/.test(n)) cat = 'read';
+  // The read fallback is broad ("open", "ls") and only safe for first-party
+  // tools; an MCP server's tool is a read when its name leads with one
+  // (`read_file`, `list_directory`), so `browser_open` keeps its own name.
+  else if (server ? READ_HEADS.has(toolNameTokens(tool)[0] ?? '') : READ_RE.test(n)) cat = 'read';
 
   return { cat, detail: file ?? cmd ?? pattern ?? url ?? childSessionDetail ?? skill ?? '' };
+}
+
+export interface ToolCallLabel {
+  // "Read", "Ran", "Searched" — or the tool's own name, made readable, when
+  // it fits no category.
+  verb: string;
+  // The same action while the call is still in flight: "Reading", "Running".
+  liveVerb: string;
+  object: string;
+  objectKind: 'path' | 'command' | 'text' | 'none';
+  // The MCP server a tool came from, so "Navigate · claude browser" says
+  // where the capability lives without leaking the raw identifier.
+  source?: string;
+}
+
+const CAT_VERBS: Record<Exclude<ToolCat, 'other'>, [done: string, live: string]> = {
+  read: ['Read', 'Reading'],
+  create: ['Created', 'Creating'],
+  edit: ['Edited', 'Editing'],
+  exec: ['Ran', 'Running'],
+  search: ['Searched', 'Searching'],
+  web: ['Fetched', 'Fetching'],
+  skill: ['Skill', 'Skill'],
+  task: ['Child session', 'Child session'],
+  subagent: ['Subagent', 'Subagent'],
+};
+
+// `mcp__claude_browser__navigate` → "Navigate"; `preview_start` → "Preview
+// start"; `TodoWrite` → "Todo write".
+function humanizeToolName(tool: string): string {
+  const words = tool
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_\-.]+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function toolObjectKind(
+  detail: string,
+  args: Record<string, unknown>,
+): ToolCallLabel['objectKind'] {
+  const has = (keys: string[]) => keys.some((key) => typeof args[key] === 'string');
+  if (!detail) return 'none';
+  if (has(['file_path', 'path', 'filename', 'target_file'])) return 'path';
+  if (has(['command', 'cmd', 'script'])) return 'command';
+  return 'text';
+}
+
+export function describeToolCall(name?: string, args?: unknown): ToolCallLabel {
+  const { cat, detail } = toolMeta(name, args);
+  const a = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
+  const objectKind = toolObjectKind(detail, a);
+  const { server, tool } = splitToolName(name ?? '');
+  // Every namespaced tool names its server, categorised or not, so a GitHub
+  // server's create call can wear the octocat like its uncategorised siblings.
+  const source = server ? server.replace(/[_-]+/g, ' ') : undefined;
+  if (cat === 'other') {
+    const label = humanizeToolName(tool) || 'Tool';
+    return { verb: label, liveVerb: label, object: detail, objectKind, source };
+  }
+  const [verb, liveVerb] = CAT_VERBS[cat];
+  return { verb, liveVerb, object: detail, objectKind, source };
 }
 
 export type TodoStatus = 'completed' | 'in_progress' | 'pending';
@@ -167,13 +237,15 @@ export function parseTruncatedTail(text: string): { body: string; truncatedChars
 }
 
 // MCP-style tool names carry a server prefix (`server___tool`, `mcp__server__tool`).
-// Match on the bare tool name so a namespaced fetch/search still routes correctly.
-function bareToolName(name: string): string {
+// Categories and labels come from the bare tool, so a namespaced fetch still
+// routes as a fetch and `droidmaxx-browser___browser_open` is not a "read".
+function splitToolName(name: string): { server?: string; tool: string } {
   const tri = name.lastIndexOf('___');
-  if (tri >= 0 && tri + 3 < name.length) return name.slice(tri + 3);
-  const mcp = /^mcp__[^_]+__(.+)$/i.exec(name);
-  if (mcp) return mcp[1];
-  return name;
+  if (tri > 0 && tri + 3 < name.length)
+    return { server: name.slice(0, tri), tool: name.slice(tri + 3) };
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (mcp) return { server: mcp[1], tool: mcp[2] };
+  return { tool: name };
 }
 
 // Lowercase word tokens of a tool name: `_`/`-`/`.`/space separators and
@@ -181,7 +253,7 @@ function bareToolName(name: string): string {
 // keep "browser" distinct from "browse", so browser-automation tools never
 // match the fetch patterns.
 function toolNameTokens(name?: string): string[] {
-  const bare = bareToolName((name ?? '').trim());
+  const bare = splitToolName((name ?? '').trim()).tool;
   return bare
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .toLowerCase()
@@ -408,11 +480,15 @@ export function formatCharCount(n: number): string {
 
 // Human-friendly source label from a URL: the registrable name, capitalized
 // (e.g. https://www.theregister.com/… → "Theregister"). Falls back to the URL.
+// "bbc.co.uk" → "Bbc", "vitejs.dev" → "Vitejs": the label before a public
+// suffix, where a two-letter second level (co.uk, com.au) is part of the suffix.
 export function webSourceName(url: string): string {
   try {
     const host = new URL(url).hostname.replace(/^www\./, '');
     const parts = host.split('.');
-    const label = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+    const secondLevelSuffix =
+      parts.length >= 3 && /^(co|com|org|net|ac|gov|edu)$/.test(parts[parts.length - 2]);
+    const label = parts[Math.max(0, parts.length - (secondLevelSuffix ? 3 : 2))];
     return label.charAt(0).toUpperCase() + label.slice(1);
   } catch {
     return url;

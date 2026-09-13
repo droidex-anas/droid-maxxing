@@ -13,8 +13,6 @@ import {
   CONVERSATION_LIST_INITIAL_RECT,
   CONVERSATION_LIST_OVERSCAN,
   CONVERSATION_LIST_PIN_THRESHOLD_PX,
-  CONVERSATION_VISIBLE_HOLE_PX,
-  conversationRowMountKey,
   conversationRowViewportId,
   estimatedListEndOffset,
   estimatedListSize,
@@ -144,11 +142,6 @@ function pinFollowMeasuredEnd(engine: ReturnType<typeof createListEngine>) {
   engine.notifyOffset();
 }
 
-test('visible-hole threshold is twice the list gap, not an estimated row', () => {
-  assert.equal(CONVERSATION_VISIBLE_HOLE_PX, CONVERSATION_LIST_GAP_PX * 2);
-  assert.ok(CONVERSATION_VISIBLE_HOLE_PX < CONVERSATION_LIST_ESTIMATE_PX);
-});
-
 test('size-change compensation is off while the user is scrolling', () => {
   const aboveFold = { start: 0, size: 96, key: 'row-0' };
   const scrolling = {
@@ -203,6 +196,29 @@ test('sync measure skips resize when the cached size already matches', () => {
     () => 96,
   );
   assert.deepEqual(calls, [[3, 40]]);
+});
+
+test('a width change re-measures the mounted rows and keeps the rest', () => {
+  const { virtualizer } = createListEngine({ items: history(80), scrollTop: 2_000 });
+  virtualizer.getVirtualItems();
+  measureVariedRows(virtualizer, 80);
+  virtualizer.getVirtualItems();
+  const measuredTotal = virtualizer.getTotalSize();
+  assert.ok(measuredTotal > estimatedListSize(80));
+
+  // A sidebar toggle or context panel reflows every row, but only the mounted
+  // ones are in the DOM to measure; the rest must keep the height they have.
+  for (const index of virtualizer.getVirtualIndexes()) {
+    virtualizer.resizeItem(index, variedRowHeight(index));
+  }
+  virtualizer.getVirtualItems();
+  assert.equal(virtualizer.getTotalSize(), measuredTotal);
+
+  // Clearing the whole size cache instead throws away every unmounted row's
+  // height, collapsing the list back towards the estimate.
+  virtualizer.measure();
+  virtualizer.getVirtualItems();
+  assert.ok(virtualizer.getTotalSize() < measuredTotal);
 });
 
 test('row measure reads the index attribute and rounds layout height', () => {
@@ -494,13 +510,6 @@ test('a prompt sent moments ago animates once even when the projection rebuilt i
   assert.equal(shouldAnimateFeedRow(replayed, none, entered, now), false);
   entered.add('prompt');
   assert.equal(shouldAnimateFeedRow(sent, none, entered, now), false);
-});
-
-test('row mount identity follows FeedItem.key while viewport identity follows feedRowId', () => {
-  const item = messageItem('evt-9', 'user');
-  assert.equal(conversationRowMountKey(item), item.key);
-  assert.equal(conversationRowViewportId(item), feedRowId(item));
-  assert.equal(conversationRowViewportId(item), 'message:evt-9');
 });
 
 test('MessageFeed mounts a bounded window for a long synthetic history', () => {

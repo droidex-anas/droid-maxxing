@@ -370,8 +370,23 @@ export const LINK_COLORS = {
   light: '#1d4ed8',
 } as const;
 
+// One rung of the surface ramp, `amount` steps away from the canvas.
+//
+// Dark presets keep headroom above their surface, so each rung lightens it and
+// the ramp reads bg < surface < elevated < active. Light presets put the
+// surface ABOVE the canvas with nothing left above it, so their rungs step
+// darker — and they must be measured from the canvas, not the surface.
+// Stepping down from a light surface lands the first rung back on the canvas
+// (surface #faf8f4 - 13 = #edebe7 against bg #efede8), which is what made every
+// raised overlay — popovers, menus, fields, buttons — vanish in light mode.
+export function surfaceStep(theme: Pick<ThemeColors, 'bg' | 'surface'>, amount: number): string {
+  return colorLuminance(theme.bg) < 0.4
+    ? adjustColor(theme.surface, amount)
+    : adjustColor(theme.bg, -amount);
+}
+
 export function elevatedSurfaceColor(theme: Pick<ThemeColors, 'bg' | 'surface'>): string {
-  return adjustColor(theme.surface, colorLuminance(theme.bg) < 0.4 ? 13 : -13);
+  return surfaceStep(theme, 13);
 }
 
 // The light preset as it shipped before the readability pass. A saved theme
@@ -403,7 +418,7 @@ export const UI_FONTS: { id: string; label: string; stack: string }[] = [
   { id: 'mono', label: 'Mono', stack: `"JetBrains Mono", "Fira Code", ui-monospace, monospace` },
 ];
 
-export function uiFontStack(id: string): string {
+function uiFontStack(id: string): string {
   return UI_FONTS.find((f) => f.id === id)?.stack ?? SYSTEM_FONT_STACK;
 }
 
@@ -412,20 +427,15 @@ export function applyTheme(theme: ThemeSettings) {
   const root = document.documentElement;
   root.style.setProperty('--droid-bg', theme.bg);
   root.style.setProperty('--droid-surface', theme.surface);
-  // Build the elevation ramp in the correct direction for the theme. Dark themes
-  // get lighter as surfaces rise (bg < surface < elevated < active); light themes
-  // step progressively darker, since there is no headroom above a near-white base
-  // (e.g. surface #f3f3f3 over bg #fcfcfc). This keeps a real, visible tonal
-  // hierarchy in both modes instead of an inverted/flat ramp.
+  // Build the elevation ramp in the correct direction for the theme (see
+  // surfaceStep), so both modes get the same visible tonal hierarchy.
   const bgIsDark = colorLuminance(theme.bg) < 0.4;
-  const lift = (amount: number) => adjustColor(theme.surface, bgIsDark ? amount : -amount);
   root.style.setProperty('--droid-elevated', elevatedSurfaceColor(theme));
-  // Input fields inside cards: lifted like elevated on dark (reads as a raised
-  // pad), plain surface on light so fields stay crisp on the tinted card
-  // instead of stepping darker into a grey smudge.
-  root.style.setProperty('--droid-field', bgIsDark ? lift(13) : theme.surface);
+  // Input fields inside cards share the elevated rung: a raised pad on dark, a
+  // recessed well on light. Both read as a distinct field against the card.
+  root.style.setProperty('--droid-field', surfaceStep(theme, 13));
   // The most-raised neutral, for selected/active rows.
-  root.style.setProperty('--droid-active', lift(26));
+  root.style.setProperty('--droid-active', surfaceStep(theme, 26));
   // Soften resting borders by blending toward the background so panel/section
   // separators read as gentle hairlines rather than hard lines. Dark themes need
   // a stronger blend: at low luminance the same edge reads as a harsh outline, so
@@ -442,29 +452,40 @@ export function applyTheme(theme: ThemeSettings) {
   } else {
     // Light themes have no dark headroom below a near-black fg (darkening would
     // invert the hierarchy into pure black), so mute by blending toward the
-    // canvas: secondary ~4.4:1 on white, muted reserved for placeholders.
-    root.style.setProperty('--droid-text-secondary', mixHex(theme.fg, theme.bg, 0.42));
-    root.style.setProperty('--droid-text-muted', mixHex(theme.fg, theme.bg, 0.62));
+    // canvas. A fixed blend factor cannot do this: the same 0.42 that reads on
+    // the Default canvas collapses to 2.9:1 on a tinted one, so the ramp is
+    // derived from the contrast it must keep instead — AAA for secondary body
+    // text, AA for muted meta and placeholders.
+    root.style.setProperty('--droid-text-secondary', mixToContrast(theme.fg, theme.bg, 7));
+    root.style.setProperty('--droid-text-muted', mixToContrast(theme.fg, theme.bg, 4.5));
   }
   root.style.setProperty('--droid-accent', theme.accent);
   root.style.setProperty('--droid-skill', bgIsDark ? SKILL_COLORS.dark : SKILL_COLORS.light);
   root.style.setProperty('--droid-link', bgIsDark ? LINK_COLORS.dark : LINK_COLORS.light);
   // Floating-card shadow: strong and near-black on dark where it separates
   // surfaces, soft and diffuse on light so cards lift without looking dirty.
+  // Light themes pair the diffuse cast with a tight contact shadow, because a
+  // hairline border alone does not separate a near-white card from near-white
+  // paper.
   root.style.setProperty(
     '--droid-shadow',
-    bgIsDark ? '0 10px 40px rgba(0, 0, 0, 0.35)' : '0 10px 30px rgba(28, 25, 23, 0.1)',
+    bgIsDark
+      ? '0 10px 40px rgba(0, 0, 0, 0.35)'
+      : '0 1px 2px rgba(28, 25, 23, 0.08), 0 12px 30px rgba(28, 25, 23, 0.14)',
   );
   root.style.setProperty(
     '--droid-shadow-sm',
-    bgIsDark ? '0 4px 16px rgba(0, 0, 0, 0.28)' : '0 4px 14px rgba(28, 25, 23, 0.08)',
+    bgIsDark
+      ? '0 4px 16px rgba(0, 0, 0, 0.28)'
+      : '0 1px 2px rgba(28, 25, 23, 0.06), 0 6px 16px rgba(28, 25, 23, 0.1)',
   );
   // Semantic status colors are FIXED, never accent-derived, so success/warning
   // and diff add/remove always read as green/amber/red even when the accent is a
-  // neutral monochrome tone.
-  root.style.setProperty('--droid-green', '#4fae82');
-  root.style.setProperty('--droid-orange', '#d9913a');
-  root.style.setProperty('--droid-red', '#cf5d54');
+  // neutral monochrome tone. Each scheme gets the shade that passes AA for
+  // 11–13px status text on its own canvas.
+  root.style.setProperty('--droid-green', bgIsDark ? '#4fae82' : '#1f7a4d');
+  root.style.setProperty('--droid-orange', bgIsDark ? '#d9913a' : '#9a5a0f');
+  root.style.setProperty('--droid-red', bgIsDark ? '#cf5d54' : '#b3312a');
   root.setAttribute('data-diff-style', theme.diffStyle);
   const diffPalette = diffPaletteForTheme(bgIsDark, theme.diffStyle);
   root.style.setProperty('--diff-add-fg', diffPalette.addFg);
@@ -540,6 +561,21 @@ function mixHex(hex: string, target: string, t: number): string {
   const mix = (a: number, b: number) => Math.round(a * (1 - t) + b * t);
   const toHex = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
   return `#${toHex(mix(r1, r2))}${toHex(mix(g1, g2))}${toHex(mix(b1, b2))}`;
+}
+
+// Blend `hex` as far toward `target` as `ratio` contrast against `target`
+// allows. Contrast falls monotonically as the blend approaches the target, so a
+// bisection finds the quietest tone that still reads. Returns `hex` unchanged
+// when even the unblended color cannot reach the ratio.
+function mixToContrast(hex: string, target: string, ratio: number): string {
+  let readable = 0;
+  let faded = 1;
+  for (let i = 0; i < 12; i++) {
+    const middle = (readable + faded) / 2;
+    if (contrastRatio(mixHex(hex, target, middle), target) >= ratio) readable = middle;
+    else faded = middle;
+  }
+  return mixHex(hex, target, readable);
 }
 
 // sRGB channel -> linear-light value, for WCAG contrast checks.

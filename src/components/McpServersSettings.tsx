@@ -21,6 +21,7 @@ import {
 } from '../lib/commands';
 import type { McpServerInfo, McpServerInput, McpStatusSummary, McpToolInfo } from '../types/bridge';
 import { AddMcpServerDialog } from './McpServerForm';
+import { SectionTitle } from './settingsKit';
 import { Switch } from './Switch';
 
 let requestSequence = 0;
@@ -56,6 +57,7 @@ export function McpServersSettings({ cwd }: { cwd?: string }) {
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState<string>();
   const activeRequest = useRef<string | undefined>(undefined);
+  const listedCwd = useRef(cwd);
 
   const start = useCallback((mutation: boolean, send: (requestId: string) => void) => {
     const requestId = nextRequestId();
@@ -92,9 +94,17 @@ export function McpServersSettings({ cwd }: { cwd?: string }) {
       setIsLoading(false);
       setIsMutating(false);
     });
+    // A new cwd means a new catalog; drop the old rows so they never read as
+    // the new folder's servers while the list is loading.
+    if (listedCwd.current !== cwd) {
+      listedCwd.current = cwd;
+      setServers([]);
+      setTools([]);
+      setSummary(EMPTY_SUMMARY);
+    }
     refresh();
     return unsubscribe;
-  }, [refresh]);
+  }, [cwd, refresh]);
 
   return (
     <McpServersSection
@@ -168,7 +178,7 @@ export function McpServersSection(props: McpServersSectionProps) {
     );
   } else {
     serverList = (
-      <div className="divide-y divide-droid-border/80 overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-[0_10px_30px_rgba(0,0,0,0.08)]">
+      <div className="divide-y divide-droid-border/80 overflow-hidden rounded-xl border border-droid-border bg-droid-surface shadow-droid">
         {props.servers.map((server) => (
           <McpServerCard
             key={`${server.source}:${server.name}`}
@@ -186,14 +196,11 @@ export function McpServersSection(props: McpServersSectionProps) {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-droid-text">MCP servers</h1>
-          <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-droid-text-muted">
-            Shows Droid&apos;s effective server catalog and authentication state. User and project
-            servers are merged with DROIDEX browser tools when sessions start.
-          </p>
-        </div>
+      <div className="flex items-start justify-between gap-4">
+        <SectionTitle
+          title="MCP servers"
+          sub="Shows Droid's effective server catalog and authentication state. User and project servers are merged with DROIDEX browser tools when sessions start."
+        />
         <button
           type="button"
           onClick={props.onRefresh}
@@ -284,7 +291,7 @@ function McpServerCard({
             setExpanded((value) => !value);
           }}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left active:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/35"
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left active:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
         >
           <ChevronRight
             className={`h-3.5 w-3.5 shrink-0 text-droid-text-muted transition-transform duration-100 ${expanded ? 'rotate-90' : ''}`}
@@ -295,16 +302,16 @@ function McpServerCard({
               <span className="truncate text-[13px] font-medium text-droid-text">
                 {server.name}
               </span>
-              <span className="rounded-full border border-droid-border px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-droid-text-muted">
+              <span className="rounded-full border border-droid-border px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-droid-text-muted">
                 {sourceLabel(server.source)}
               </span>
               {server.serverType && (
-                <span className="text-[9.5px] uppercase text-droid-text-muted">
+                <span className="text-[11px] uppercase text-droid-text-muted">
                   {server.serverType}
                 </span>
               )}
             </span>
-            <span className="mt-0.5 block text-[10.5px] capitalize text-droid-text-muted">
+            <span className="mt-0.5 block text-[11px] capitalize text-droid-text-muted">
               {server.status}
               {server.toolCount !== undefined
                 ? ` · ${String(server.toolCount)} ${server.toolCount === 1 ? 'tool' : 'tools'}`
@@ -319,7 +326,7 @@ function McpServerCard({
             onClick={() => {
               onAuthenticate(server.name);
             }}
-            className="rounded-lg border border-droid-border bg-droid-elevated px-2.5 py-1.5 text-[10.5px] font-medium text-droid-text transition-all duration-150 hover:border-droid-border-hover active:scale-[0.97] disabled:opacity-40"
+            className="rounded-lg border border-droid-border bg-droid-elevated px-2.5 py-1.5 text-[11px] font-medium text-droid-text transition-all duration-150 hover:border-droid-border-hover active:scale-[0.97] disabled:opacity-40"
           >
             Authenticate
           </button>
@@ -353,24 +360,24 @@ function McpServerCard({
             <div className="py-1 text-[11px] text-droid-text-muted">No tools reported.</div>
           ) : (
             <>
-              <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.08em] text-droid-text-muted">
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-droid-text-muted">
                 Available tools
               </div>
               <div className="grid gap-x-6 gap-y-3 pb-1 sm:grid-cols-2">
                 {tools.map((tool) => (
                   <div key={tool.name} className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate text-[11.5px] font-medium text-droid-text-secondary">
+                      <span className="truncate text-[12px] font-medium text-droid-text-secondary">
                         {tool.name}
                       </span>
                       {!tool.isEnabled && (
-                        <span className="shrink-0 rounded-full bg-droid-elevated px-1.5 py-0.5 text-[9px] text-droid-text-muted">
+                        <span className="shrink-0 rounded-full bg-droid-elevated px-1.5 py-0.5 text-[11px] text-droid-text-muted">
                           Off
                         </span>
                       )}
                     </div>
                     {tool.description && (
-                      <div className="mt-0.5 line-clamp-2 text-[10.5px] leading-4 text-droid-text-muted">
+                      <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-droid-text-muted">
                         {tool.description}
                       </div>
                     )}
@@ -392,7 +399,7 @@ function canAuthenticate(server: McpServerInfo): boolean {
 }
 
 function StatusIcon({ status }: { status: McpServerInfo['status'] }) {
-  if (status === 'connected') return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+  if (status === 'connected') return <CheckCircle2 className="h-4 w-4 text-droid-green" />;
   if (status === 'connecting')
     return <Spinner className="h-4 w-4 motion-safe:animate-spin-slow text-droid-accent" />;
   if (status === 'failed') return <CircleAlert className="h-4 w-4 text-droid-orange" />;

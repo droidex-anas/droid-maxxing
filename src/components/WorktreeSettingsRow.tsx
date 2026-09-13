@@ -23,7 +23,7 @@ function ChatStatus({
 }) {
   const label = worktreeChatStatus(session, activeAppSessionId);
   return (
-    <span className="rounded bg-droid-elevated px-1.5 py-0.5 text-[10px] text-droid-text-muted">
+    <span className="rounded bg-droid-elevated px-1.5 py-0.5 text-[11px] text-droid-text-muted">
       {label}
     </span>
   );
@@ -46,7 +46,7 @@ function WorktreeAction({
     return (
       <span
         title="An open or working chat is using this worktree"
-        className="shrink-0 rounded-full bg-droid-elevated/70 px-2 py-0.5 text-[10px] text-droid-text-muted"
+        className="shrink-0 rounded-full bg-droid-elevated/70 px-2 py-0.5 text-[11px] text-droid-text-muted"
       >
         in use
       </span>
@@ -102,7 +102,7 @@ function WorktreeSummary({
           </span>
           {isMerged && <GitHubMergedIcon />}
           {pullRequest && (
-            <span className="rounded-full border border-droid-accent/15 bg-droid-accent/[0.07] px-1.5 py-0.5 text-[10px] text-droid-accent">
+            <span className="rounded-full border border-droid-accent/15 bg-droid-accent/[0.07] px-1.5 py-0.5 text-[11px] text-droid-accent">
               #{pullRequest.number}{' '}
               {pullRequest.isDraft ? 'draft' : pullRequest.state.toLowerCase()}
             </span>
@@ -143,7 +143,7 @@ function ConversationList({
           }}
           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all duration-150 hover:bg-droid-elevated/60 active:scale-[0.995] active:bg-droid-elevated/80"
         >
-          <span className="min-w-0 flex-1 truncate text-[11.5px] text-droid-text-secondary">
+          <span className="min-w-0 flex-1 truncate text-[12px] text-droid-text-secondary">
             {session.title}
           </span>
           <ChatStatus session={session} activeAppSessionId={activeAppSessionId} />

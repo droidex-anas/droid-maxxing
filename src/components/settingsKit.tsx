@@ -9,7 +9,7 @@ import { pushEscapeLayer } from './environment/usePopover';
 export function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-[15px] font-semibold text-droid-text">{title}</h2>
+      <h2 className="text-[16px] font-semibold text-droid-text">{title}</h2>
       {sub && <p className="text-[12px] text-droid-text-muted mt-0.5">{sub}</p>}
     </div>
   );
@@ -30,7 +30,7 @@ export function SettingRow({
   children,
 }: {
   label: string;
-  description?: string;
+  description?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -149,7 +149,7 @@ export function Dropdown({
 
       {open && (
         <div
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1.5 min-w-full rounded-xl border border-droid-border bg-droid-surface p-2 shadow-2xl shadow-black/50`}
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1.5 min-w-full rounded-xl border border-droid-border bg-droid-surface p-2 shadow-droid`}
         >
           <div
             className="max-h-72 overflow-y-auto space-y-0.5"
@@ -173,7 +173,7 @@ export function Dropdown({
                   }`}
                 >
                   {o.icon}
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-droid-text">
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-droid-text">
                     {o.label}
                   </span>
                   {active && (

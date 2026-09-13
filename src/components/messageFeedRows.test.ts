@@ -5,7 +5,6 @@ import type { ComponentType } from 'react';
 import type { FeedItemViewProps } from './chat';
 import type { FeedItem } from './chatFeed';
 import { areFeedRowPropsEqual } from './messageFeedRows';
-import { feedRowId } from '../hooks/conversationViewportAnchor';
 import type { TranscriptEvent } from '../types/bridge';
 
 function messageItem(id: string, author: 'user' | 'assistant'): FeedItem {
@@ -40,16 +39,6 @@ function rowProps(overrides: Partial<Parameters<typeof areFeedRowPropsEqual>[0]>
     ...overrides,
   };
 }
-
-test('row mount identity follows item.key across a sliding capped window', () => {
-  const kept = messageItem('item-5', 'assistant');
-  const before = [messageItem('item-4', 'user'), kept];
-  const after = [kept, messageItem('item-6', 'user')];
-
-  assert.equal(after[0]?.key, before[1]?.key);
-  assert.equal(feedRowId(after[0]!), feedRowId(before[1]!));
-  assert.notEqual(after[0]?.key, after[1]?.key);
-});
 
 test('a row re-renders when its live final-response flag changes', () => {
   const previous = rowProps({ isFinalResponse: true });

@@ -281,10 +281,10 @@ export function WorktreesSettings() {
     >
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-droid-text">
+          <h2 className="text-[16px] font-semibold tracking-[-0.015em] text-droid-text">
             Worktrees
           </h2>
-          <p className="mt-1 text-[12.5px] text-droid-text-muted">
+          <p className="mt-1 text-[13px] text-droid-text-muted">
             Manage worktrees and open their linked conversations.
           </p>
         </div>
@@ -338,7 +338,7 @@ export function WorktreesSettings() {
                     {repository.root}
                   </p>
                 </div>
-                <span className="shrink-0 pb-0.5 text-[10.5px] text-droid-text-muted">
+                <span className="shrink-0 pb-0.5 text-[11px] text-droid-text-muted">
                   {String(linkedWorktrees.length)}{' '}
                   {linkedWorktrees.length === 1 ? 'worktree' : 'worktrees'}
                 </span>

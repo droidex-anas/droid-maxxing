@@ -93,7 +93,7 @@ export function ToolPanel({
   );
 }
 
-export function CopyButton({ text }: { text: string }) {
+function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -121,18 +121,21 @@ export function CopyButton({ text }: { text: string }) {
         );
       }}
       title="Copy"
-      className="p-1 rounded-md text-droid-text-muted/60 hover:text-droid-text hover:bg-droid-elevated/60 transition-colors shrink-0"
+      aria-label="Copy"
+      // A 16px box fits the gap between rows, so it never overlaps the card
+      // below; the invisible ::after pad keeps the click target generous.
+      className="relative flex h-4 w-4 shrink-0 items-center justify-center rounded text-droid-text-muted transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-droid-elevated/60 hover:text-droid-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-droid-accent/60"
     >
-      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
     </button>
   );
 }
 
-// A small red "error" pill shown on the right of a failed tool's header row.
+// A small red "error" pill beside the label of a failed tool's header row.
 export function ErrorTag() {
   return (
     <span
-      className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+      className="shrink-0 rounded-md px-1.5 py-px text-[11px] font-medium"
       style={{
         backgroundColor: 'color-mix(in srgb, var(--droid-red) 15%, transparent)',
         color: RED,
@@ -213,7 +216,8 @@ export function TranscriptSkeleton() {
   );
 }
 
-/* ── Working indicator — minimal shimmer label, no icons/dots/bars ── */
+/* ── Working indicator — one shimmer label in a fixed line box, fading in so
+   the feed's rhythm never jumps when the cue appears ── */
 export function WorkingIndicator({
   label = 'Working',
   startTs,
@@ -224,10 +228,29 @@ export function WorkingIndicator({
   const elapsed = useElapsed(startTs, true);
   const suffix = startTs != null && elapsed >= 1000 ? ` ${formatDuration(elapsed)}` : '';
   return (
-    <span className="shimmer-text text-[13px] font-medium tracking-tight">
-      <span aria-live="polite">{label}</span>
-      <span aria-hidden="true">{suffix}…</span>
-    </span>
+    <div className="cue-enter flex h-5 items-center">
+      <span className="shimmer-text text-[13px] font-medium tracking-tight">
+        <span aria-live="polite">{label}</span>
+        <span aria-hidden="true">{suffix}…</span>
+      </span>
+    </div>
+  );
+}
+
+/* ── Copy affordance for a message: below the text on the reply's left, below
+   the bubble on a prompt's right, sitting in the 16px row gap so the row never
+   changes height when a turn settles and nothing below is covered. Fades in on
+   hover or keyboard focus; the host carries `group/msg relative`. ── */
+export function MessageActions({ text, side }: { text: string; side: 'end' | 'start' }) {
+  const place = side === 'end' ? 'left-0' : 'right-0';
+  // A short hold before hiding so the pointer can travel from the last line
+  // onto the button.
+  return (
+    <div
+      className={`pointer-events-none absolute top-full ${place} opacity-0 transition-opacity duration-150 delay-300 focus-within:pointer-events-auto focus-within:opacity-100 focus-within:delay-0 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100 group-hover/msg:delay-0`}
+    >
+      <CopyButton text={text} />
+    </div>
   );
 }
 

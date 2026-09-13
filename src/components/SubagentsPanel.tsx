@@ -91,14 +91,14 @@ export function SubagentPanelRow({
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span
-            className={`truncate text-[12.5px] font-medium ${
+            className={`truncate text-[13px] font-medium ${
               selected ? 'text-droid-text' : 'text-droid-text-secondary group-hover:text-droid-text'
             }`}
           >
             {label}
           </span>
           {child.modelId && (
-            <span className="truncate text-[10.5px] text-droid-text-muted">
+            <span className="truncate text-[11px] text-droid-text-muted">
               {displayedModel}
               {child.reasoningEffort ? ` · ${child.reasoningEffort}` : ''}
             </span>
@@ -159,7 +159,7 @@ export function SubagentsSection({
             />
           ))}
           {overflow > 0 && (
-            <span className="text-[10.5px] font-medium tabular-nums text-droid-text-muted">
+            <span className="text-[11px] font-medium tabular-nums text-droid-text-muted">
               +{overflow}
             </span>
           )}

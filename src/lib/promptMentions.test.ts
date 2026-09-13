@@ -30,6 +30,14 @@ test('splitTrailingMentions recovers a repo-root file that has no directory', ()
   });
 });
 
+test('splitTrailingMentions recovers a bare file name that contains spaces', () => {
+  const composed = composePrompt('summarise', [], ['Meeting Notes.pdf']);
+  assert.deepEqual(splitTrailingMentions(composed), {
+    text: 'summarise',
+    files: ['Meeting Notes.pdf'],
+  });
+});
+
 test('splitTrailingMentions leaves a trailing paragraph of @words that are not paths', () => {
   const text = 'thanks\n\n@anas @cubic';
   assert.deepEqual(splitTrailingMentions(text), { text, files: [] });

@@ -5,6 +5,7 @@ import { useHistoryHealth } from '../hooks/useHistoryHealth';
 import { useRuntimeHealth } from '../hooks/useRuntimeHealth';
 import { HISTORY_PERSISTENCE_DEGRADED_MESSAGE } from '../lib/historyStatusCopy';
 import { hasConnectedAgentTransport } from '../lib/runtimeHealth';
+import { WINDOW_CONTROLS_INSET_PX } from '../lib/windowChrome';
 
 export default function RuntimeStatusBanner() {
   const health = useRuntimeHealth();
@@ -58,7 +59,8 @@ function StatusBannerRow({
     <div
       role="status"
       data-testid={testId}
-      className="shrink-0 flex items-center gap-2 px-4 h-8 border-b border-droid-border bg-droid-elevated/60 text-[12px]"
+      className="shrink-0 flex items-center gap-2 pr-4 h-8 border-b border-droid-border bg-droid-elevated/60 text-[12px]"
+      style={{ paddingLeft: WINDOW_CONTROLS_INSET_PX }}
     >
       {createElement(icon, { className: `w-3.5 h-3.5 ${accent}` })}
       <span className="text-droid-text">{message}</span>

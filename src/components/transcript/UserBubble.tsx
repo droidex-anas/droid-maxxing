@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { Blocks, MousePointer2, PenLine } from 'lucide-react';
 import type { BrowserTranscriptReference, TranscriptEvent } from '../../types/bridge';
+import type { OpenReviewFileHandler } from '../../lib/reviewFocus';
 import { ImageAttachmentChip } from '../media/ImageAttachmentChip';
 import { FileChip } from '../composer/FileChip';
 import { isImagePath } from '../../lib/localImage';
@@ -8,7 +9,7 @@ import { promptDisplayParts } from '../../lib/composePrompt';
 import { userMessageAttachments } from '../../lib/promptMentions';
 import { VisualizeIcon } from '../icons/VisualizeIcon';
 import { Markdown } from '../Markdown';
-import { CopyButton } from './primitives';
+import { MessageActions } from './primitives';
 
 function BrowserReferenceChip({ reference }: { reference: BrowserTranscriptReference }) {
   const Icon = reference.kind === 'element' ? MousePointer2 : PenLine;
@@ -161,8 +162,10 @@ function ClampedPrompt({ source }: { source: string }) {
 
 export function UserBubble({
   event,
+  onOpenReviewFile,
 }: {
   event: Pick<TranscriptEvent, 'text' | 'skills' | 'files' | 'browserRefs' | 'steered'>;
+  onOpenReviewFile?: OpenReviewFileHandler;
 }) {
   const browserRefs = event.browserRefs ?? [];
   // A replayed message has no files metadata, only the composed text it was sent
@@ -174,7 +177,7 @@ export function UserBubble({
   return (
     <div className="group/msg flex flex-col items-end gap-1.5">
       {event.steered && (
-        <span className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-droid-text-muted">
+        <span className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-droid-text-muted">
           <svg
             className="h-3 w-3"
             viewBox="0 0 16 16"
@@ -198,29 +201,39 @@ export function UserBubble({
             isImagePath(f) ? (
               <ImageAttachmentChip key={f} path={f} />
             ) : (
-              <FileChip key={f} path={f} />
+              <FileChip
+                key={f}
+                path={f}
+                {...(onOpenReviewFile
+                  ? {
+                      onOpen: () => {
+                        onOpenReviewFile(f);
+                      },
+                    }
+                  : {})}
+              />
             ),
           )}
         </div>
       )}
       {hasPrompt && (
-        <div className="flex min-w-0 max-w-[80%] flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-[1.6] text-droid-text">
-          {display.visualize && <PromptChip icon={VisualizeIcon} label="Visualize" />}
-          {display.skills.map((skill) => (
-            <PromptChip key={skill} icon={Blocks} label={skill} title={`Skill: ${skill}`} />
-          ))}
-          {display.text ? (
-            <div className="w-full min-w-0">
-              <ClampedPrompt source={display.text} />
-            </div>
-          ) : null}
+        // The bubble's actions float in the free space to its left, so a prompt
+        // row is exactly its bubble: no reserved action row under it.
+        <div className="relative min-w-0 max-w-[80%]">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl rounded-br-sm bg-droid-elevated px-4 py-2.5 text-[14px] leading-[1.6] text-droid-text">
+            {display.visualize && <PromptChip icon={VisualizeIcon} label="Visualize" />}
+            {display.skills.map((skill) => (
+              <PromptChip key={skill} icon={Blocks} label={skill} title={`Skill: ${skill}`} />
+            ))}
+            {display.text ? (
+              <div className="w-full min-w-0">
+                <ClampedPrompt source={display.text} />
+              </div>
+            ) : null}
+          </div>
+          {message.text ? <MessageActions text={message.text} side="start" /> : null}
         </div>
       )}
-      {message.text ? (
-        <div className="-mr-1 opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
-          <CopyButton text={message.text} />
-        </div>
-      ) : null}
     </div>
   );
 }

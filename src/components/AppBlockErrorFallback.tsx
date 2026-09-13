@@ -14,7 +14,7 @@ export function AppBlockErrorFallback({ message }: { message: string }) {
         <p className="mt-1 text-[12px] leading-5 text-droid-text-secondary">
           Ask Droid to fix this visualization, then play the revised App.
         </p>
-        <p className="mt-2 truncate font-mono text-[10.5px] text-droid-text-muted" title={message}>
+        <p className="mt-2 truncate font-mono text-[11px] text-droid-text-muted" title={message}>
           {message}
         </p>
       </div>
