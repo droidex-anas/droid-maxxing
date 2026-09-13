@@ -1,3 +1,4 @@
+import { comparablePath } from './pathComparison';
 import type { DiffScope, DiffStatMode } from '../types/vcs';
 
 export interface ReviewScopeOption {
@@ -91,8 +92,8 @@ function absolutePathMatch(
 ): string | null {
   const match = longestSuffixMatch(files, absPath);
   if (!match || !cwd) return match;
-  const root = absPath.slice(0, absPath.length - match.length - 1);
-  const cwdNorm = canonicalizeAbsolutePath(cwd.replace(/\\/g, '/'));
+  const root = comparablePath(absPath.slice(0, absPath.length - match.length - 1));
+  const cwdNorm = comparablePath(cwd);
   return cwdNorm === root || cwdNorm.startsWith(`${root}/`) ? match : null;
 }
 

@@ -96,13 +96,19 @@ function idleSince(text: string): boolean {
 
 export function useStreamingActivity(text: string, active: boolean): boolean {
   const [typing, setTyping] = useState(() => active && !idleSince(text));
+  // A stream that starts while this instance watches is fresh flow even when
+  // its first text repeats an earlier turn's; only a mount around already
+  // idle text (a recycled row) defers to the shared record.
+  const wasActive = useRef(active);
 
   useEffect(() => {
-    if (!active || idleSince(text)) {
+    const fresh = active && !wasActive.current;
+    wasActive.current = active;
+    if (!active || (!fresh && idleSince(text))) {
       setTyping(false);
       return;
     }
-    if (lastSeen.text !== text) lastSeen = { text, at: Date.now() };
+    if (fresh || lastSeen.text !== text) lastSeen = { text, at: Date.now() };
     setTyping(true);
     const timer = setTimeout(() => {
       setTyping(false);

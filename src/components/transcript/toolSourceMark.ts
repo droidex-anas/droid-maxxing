@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useSyncExternalStore } from 'react';
 
 import { bridge } from '../../lib/bridge';
 import { listMcpServers } from '../../lib/commands';
@@ -22,6 +22,7 @@ const marks = new Map<string, LinkPresentation | null>();
 const listeners = new Set<() => void>();
 // The workspace whose catalog was last asked for; null until the first ask.
 let requestedCwd: string | undefined | null = null;
+let requestId = '';
 
 // Rows see the readable form of `mcp__<server>__<tool>` that `humanizeToolName`
 // produces, so server names are matched in that form rather than raw.
@@ -57,13 +58,17 @@ export function recordMcpCatalog(servers: readonly McpServerInfo[]): void {
 function requestCatalog(cwd?: string): void {
   if (requestedCwd === null) {
     // Every catalog counts, including the ones the MCP settings screen asks
-    // for, so a server added there earns its mark without a second round trip.
+    // for, so a server added there earns its mark without a second round
+    // trip; only an answer to an earlier request of ours is stale.
     bridge.subscribe((event) => {
-      if (event.type === 'mcp.catalog') recordMcpCatalog(event.servers);
+      if (event.type !== 'mcp.catalog') return;
+      if (event.requestId.startsWith('tool-marks-') && event.requestId !== requestId) return;
+      recordMcpCatalog(event.servers);
     });
   } else if (requestedCwd === cwd) return;
   requestedCwd = cwd;
-  listMcpServers(`tool-marks-${Date.now().toString(36)}`, cwd);
+  requestId = `tool-marks-${Date.now().toString(36)}`;
+  listMcpServers(requestId, cwd);
 }
 
 /**
@@ -72,7 +77,9 @@ function requestCatalog(cwd?: string): void {
  * another repo may point at another host.
  */
 export function useToolMarkCatalog(cwd: string | undefined): void {
-  useEffect(() => {
+  // A layout effect runs before the rows' passive subscriptions, so the
+  // workspace request is the one they find already made.
+  useLayoutEffect(() => {
     requestCatalog(cwd);
   }, [cwd]);
 }

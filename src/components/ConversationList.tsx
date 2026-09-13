@@ -218,8 +218,10 @@ export function ConversationList({
               ref={virtualizer.measureElement}
               // Rows are positioned siblings, so a later row paints over the
               // one before it. A message's copy control floats in the row gap
-              // and would sit under the next row; the hovered row rises above.
-              className="hover:z-[1] focus-within:z-[1]"
+              // and would sit under the next row; the hovered row rises above,
+              // and stays raised for the control's 300ms hide delay so it
+              // fades instead of dropping behind the next row.
+              className="z-0 [transition:z-index_0s_300ms] hover:z-[1] hover:[transition-delay:0s] focus-within:z-[1] focus-within:[transition-delay:0s]"
               style={{
                 position: 'absolute',
                 top: 0,

@@ -134,15 +134,19 @@ function countToolCall(counts: ActivityCounts, e: TranscriptEvent): void {
   if (cat !== 'web') counts.onlyWeb = false;
   if (cat === 'read') {
     counts.file++;
-    // A lone read is named only when it read a file; a listed directory is
-    // still "1 file", never "Explored src" or "Explored .github".
-    if (/(^|\/)[^/.][^/]*\.[A-Za-z0-9]{1,8}$/.test(detail)) counts.readFile = detail;
+    // A lone read is named only when it read a file; a directory listing
+    // (LS, list_directory) is still "1 file", never "Explored src".
+    if (!isListingTool(e.toolName)) counts.readFile = detail;
   } else if (cat === 'search') counts.search++;
   else if (cat === 'exec') counts.command++;
   else if (cat === 'web') counts.page++;
   else if (cat === 'task') counts.task++;
   else if (cat === 'skill') counts.step++;
   else counts.step++;
+}
+
+function isListingTool(name: string | undefined): boolean {
+  return /(^|[^a-z])(ls|list|dir)([^a-z]|$)/i.test(name ?? '');
 }
 
 function formatCounts(counts: ActivityCounts): string {
@@ -269,8 +273,10 @@ function ToolLine({
   const out = output ? stripAnsi(output).trimEnd() : '';
   const [open, setOpen] = useState(false);
   const expanded = open || forceOpen;
-  // Detailed density opens every call to its arguments, result or not.
-  const hasBody = out.length > 0 || forceOpen;
+  // Only a row with output can be collapsed again; detailed density still
+  // opens every call to its arguments, result or not.
+  const collapsible = out.length > 0;
+  const hasBody = collapsible || forceOpen;
   // An MCP tool wears its server's mark instead of spelling its source.
   const mark = useToolSourceMark(call.source);
   const verb = (
@@ -286,7 +292,7 @@ function ToolLine({
   return (
     <div>
       <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-relaxed">
-        {hasBody ? (
+        {collapsible ? (
           <button
             type="button"
             onClick={() => {
